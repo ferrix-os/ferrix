@@ -31,18 +31,18 @@ use super::speculation::{
 
 /// What the check found, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Processors that recorded what they applied.
-    pub(crate) processors: usize,
+    pub processors: usize,
     /// Of those, how many applied something other than the boot processor --
     /// the little cores of a big.LITTLE machine, which may need less.
-    pub(crate) differing: usize,
+    pub differing: usize,
     /// What the boot processor applied.
-    pub(crate) boot: Defences,
+    pub boot: Defences,
     /// Switch barriers issued so far.
-    pub(crate) barriers: u64,
+    pub barriers: u64,
     /// Whether this build carries the defences at all.
-    pub(crate) hardened: bool,
+    pub hardened: bool,
 }
 
 /// Check the defences. See the module.
@@ -51,7 +51,7 @@ pub(crate) struct Report {
 ///
 /// What did not hold.
 /// Verifies: `L.x86_64.28`, `L.x86_64.29`, `L.x86_64.31`
-pub(crate) fn check() -> Result<Report, &'static str> {
+pub fn check() -> Result<Report, &'static str> {
     check_clamp()?;
     let boot = applied_by(0).ok_or("the boot processor recorded no side-channel defences")?;
     let processors = crate::smp::count();

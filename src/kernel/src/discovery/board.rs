@@ -24,16 +24,16 @@ use crate::hooks::{Full, Hooks};
 /// A peripheral a board's support found in the device tree and made ready
 /// for a driver: what a [`BoardBinding`]'s `prepare` hands back.
 #[derive(Debug)]
-pub(crate) struct BoardDevice {
+pub struct BoardDevice {
     /// Its register ranges, `(phys, len)`, in the order its driver maps
     /// them. Each must become an aperture, or the device is left alone.
-    pub(crate) registers: Vec<(u64, u64)>,
+    pub registers: Vec<(u64, u64)>,
     /// Its interrupt, as the tree gives it.
-    pub(crate) interrupt: GicInterrupt,
+    pub interrupt: GicInterrupt,
     /// How it reaches memory.
-    pub(crate) dma: DmaShape,
+    pub dma: DmaShape,
     /// What preparing it did, for the boot log.
-    pub(crate) summary: String,
+    pub summary: String,
 }
 
 /// What preparing a board's peripheral for a driver is: find it in the
@@ -55,18 +55,18 @@ pub(crate) type Clock = fn(u64, bool) -> Result<u64, &'static str>;
 /// apertures and vector from what `prepare` says, under the same rules as
 /// every other node's.
 #[derive(Debug)]
-pub(crate) struct BoardBinding {
+pub struct BoardBinding {
     /// Which binding it is: `TREE_STM32_HDMI` and the rest.
-    pub(crate) binding: u16,
+    pub binding: u16,
     /// What the boot log's lines about it start with: `display`, `usb`.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// What is left alone when it cannot be handed over, in a sentence:
     /// "the board's USB host".
-    pub(crate) device: &'static str,
+    pub device: &'static str,
     /// Find it and make it ready.
-    pub(crate) prepare: Prepare,
+    pub prepare: Prepare,
     /// Its clock a driver may set, if it has one: `device_clock`.
-    pub(crate) clock: Option<Clock>,
+    pub clock: Option<Clock>,
 }
 
 /// Every registered [`BoardBinding`], in the order their nodes are published.
@@ -83,23 +83,19 @@ static BOARD: Hooks<BoardBinding, 8> = Hooks::new();
 /// # Errors
 ///
 /// [`Full`] when the list is.
-pub(crate) fn register_board(binding: &'static BoardBinding) -> Result<(), Full> {
+pub fn register_board(binding: &'static BoardBinding) -> Result<(), Full> {
     BOARD.register(binding)
 }
 
 /// How many board bindings are registered, for the boot's check that board
 /// support registered before enumeration.
-pub(crate) fn board_bindings() -> usize {
+pub fn board_bindings() -> usize {
     BOARD.len()
 }
 
 /// Ask for `node`'s clock at `hz`, setting it when `set` is: `None` when the
 /// node's binding has no clock a driver may ask for.
-pub(crate) fn board_clock(
-    node: &DeviceNode,
-    hz: u64,
-    set: bool,
-) -> Option<Result<u64, &'static str>> {
+pub fn board_clock(node: &DeviceNode, hz: u64, set: bool) -> Option<Result<u64, &'static str>> {
     let binding = node.tree_binding()?;
     let clock = BOARD
         .iter()
@@ -153,7 +149,7 @@ fn board_node(
 /// A node for every registered binding whose peripheral the tree has, in
 /// the order they registered.
 #[derive(Debug)]
-pub(crate) struct Boards {
+pub struct Boards {
     /// The tree, on a machine it describes.
     tree: Option<Fdt<'static>>,
     /// Whether `find` ran out of memory adding a node.
@@ -163,7 +159,7 @@ pub(crate) struct Boards {
 impl Boards {
     /// The finder for `view`'s machine: none to find without a device tree
     /// it is read by.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         let tree = match description::of(view) {
             Description::Tree(tree) => Some(tree),
             _ => None,

@@ -67,6 +67,7 @@ use ferrix_pci::walk::{Function, Walk};
 use ferrix_pci::window;
 use ferrix_pci::{Address, ConfigSpace, PciError};
 
+mod held_off_check;
 mod virtio;
 
 use crate::device::{self, ConfigFound, DeviceNode, Reserved, Seen};
@@ -471,7 +472,7 @@ impl From<ferrix_virtio::QueueError> for Failure {
 ///
 /// A failure halts the boot, as it did before there were finders: the walk
 /// is where a broken configuration space or DMA path shows first.
-pub(crate) struct Enumeration {
+pub struct Enumeration {
     /// The hosts still to walk.
     hosts: Vec<Host>,
     /// Their ECAM windows, which no aperture may overlap.
@@ -486,7 +487,7 @@ pub(crate) struct Enumeration {
 
 impl Enumeration {
     /// The hosts `view`'s machine describes, ready to walk.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         let (hosts, refused, source) = hosts(description::of(view));
         let ecam: Vec<(u64, u64)> = hosts
             .iter()
@@ -775,7 +776,7 @@ fn node_of(
 /// no line and its memory decoded, and in `MSI_PREFERRED`. Anything else
 /// keeps today's path, the table withheld and MSI-X offered. Before that,
 /// QEMU's `e1000e` with QEMU's subsystem gets stage 10's check of the path
-/// ([`held_off_check`]), under `ferrix.checks`.
+/// ([`held_off_check::held_off_check`]), under `ferrix.checks`.
 fn held_off(
     space: &mut Space,
     function: &Function,
@@ -801,7 +802,7 @@ fn held_off(
             msix_held_off: true,
             ..*seen
         };
-        held_off_check(space, function, &scratch, regions, msix, reserved);
+        held_off_check::held_off_check(space, function, &scratch, regions, msix, reserved);
     }
     pci_msix::msi_preferred(identity.vendor, identity.device)
         && hold_msix_off(space, function.address, msix)
@@ -843,56 +844,6 @@ fn table_ranges(regions: &[Region], msix: &MsiX) -> [(u64, u64); 2] {
         place(msix.table, msix.table_len()),
         place(msix.pending, msix.pending_len()),
     ]
-}
-
-/// Stage 10's check of the held-off path (`device::check::check_held_off`),
-/// on QEMU's `e1000e` only (`ferrix_pci::msix::held_off_check_case`, under
-/// `ferrix.checks`): its MSI-X held off through this walk's space, a
-/// scratch node built from `seen` as if the function were in
-/// `MSI_PREFERRED`, the check run on it, and the node dropped unpublished.
-///
-/// One function, one truth (the consultant's V2, choice (a)): every write
-/// is stage 10's, before any node is published; the command register, MSI
-/// control and MSI-X control are written back as found afterwards -- MSI
-/// off, MSI-X off, bus mastering and `INTx` as they were -- and the caller
-/// builds the published node from fresh reads. The scratch node's mapping
-/// of configuration space is never unmapped, as no node's is.
-fn held_off_check(
-    space: &mut Space,
-    function: &Function,
-    seen: &Seen<'_>,
-    regions: &[Region],
-    msix: Option<&(Capability, MsiX)>,
-    reserved: &Reserved,
-) {
-    let (Some((capability, table)), Some(msi)) = (msix, seen.msi) else {
-        return;
-    };
-    let address = function.address;
-    let command = space.read16(address, COMMAND);
-    let msix_control_at = capability.offset + pci_msix::CAPABILITY_CONTROL;
-    let msix_control = space.read16(address, msix_control_at);
-    let msi_control_at = msi.capability + ferrix_pci::msi::CONTROL;
-    let msi_control = space.read16(address, msi_control_at);
-    let outcome = if pci_msix::hold_off(space, address, capability.offset) {
-        let scratch = DeviceNode::pci(address, seen, regions, msix, true, reserved);
-        let outcome = device::check::check_held_off(&scratch, table_ranges(regions, table));
-        drop(scratch);
-        outcome
-    } else {
-        Err(device::Failure {
-            location: device::Location::Pci(address),
-            what: "QEMU's e1000e would not hold its MSI-X off",
-        })
-    };
-    space.write16(
-        address,
-        msi_control_at,
-        msi_control & !ferrix_pci::msi::CONTROL_ENABLE,
-    );
-    space.write16(address, msix_control_at, msix_control);
-    space.write16(address, COMMAND, command);
-    let _ = device::check::HELD_OFF.call_once(|| outcome);
 }
 
 /// What `function`'s configuration window starts from: its `bytes` of
@@ -1133,7 +1084,7 @@ fn decoding_after(
 /// or one that overlaps `others`, every other function's assigned memory BAR
 /// on the host. Firmware's stale assignment is not decoded over memory that
 /// is already something else's.
-pub(crate) fn decoding_refusal(
+pub fn decoding_refusal(
     own: &[(u64, u64)],
     others: &[(u64, u64)],
     reserved: &Reserved,

@@ -45,7 +45,7 @@ const RUN: &str = "run";
 /// Any value but the two is reported and ignored: running every check is the
 /// safe default, and a misspelt option should cost a slow boot rather than
 /// an unchecked one.
-pub(crate) fn init(view: &BootView<'_>) {
+pub fn init(view: &BootView<'_>) {
     if !crate::boot_checks::COMPILED_IN {
         println!(
             "  checks   compiled out (checks=off): stages 2 to 12 are brought up and not checked; \
@@ -90,6 +90,6 @@ pub(crate) fn init(view: &BootView<'_>) {
 /// is an ad-hoc build: no profile carries `checks=off`, and it ends with
 /// `FERRIX-BOOT-UNCHECKED`, as a skipped boot does. The flag is the core's
 /// (`crate::boot_checks`).
-pub(crate) fn run() -> bool {
+pub fn run() -> bool {
     crate::boot_checks::run()
 }

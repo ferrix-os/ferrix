@@ -50,13 +50,15 @@ const CHUNK: usize = 64 * 1024;
 
 /// What the check found.
 #[derive(Debug)]
-pub(crate) struct Report {
-    pub(crate) files: u32,
-    pub(crate) directories: u32,
+pub struct Report {
+    /// Files written and read back.
+    pub files: u32,
+    /// Directories made and read back.
+    pub directories: u32,
     /// Bytes of file data written and read back.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
     /// Why nothing was checked: no third disk on this machine.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// One file the check makes, and what it must hold afterwards.
@@ -302,7 +304,7 @@ fn verify(expected: &[Expected], report: &mut Report) -> Result<(), &'static str
 /// # Errors
 ///
 /// What did not match, as a sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let rdev = makedev(VIRTIO_BLK_MAJOR, DISK_INDEX * 16);
     let mut report = Report {
         files: 0,

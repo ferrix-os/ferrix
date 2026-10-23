@@ -88,13 +88,13 @@ pub(crate) struct Ring<const N: usize> {
 
 /// What one read took out.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Read {
+pub struct Read {
     /// Bytes copied to the front of the reader's buffer.
-    pub(crate) copied: usize,
+    pub copied: usize,
     /// Bytes between the cursor as it was given and the first byte copied
     /// that the ring no longer held: overwritten before this reader came for
     /// them.
-    pub(crate) lost: u64,
+    pub lost: u64,
 }
 
 impl<const N: usize> Ring<N> {
@@ -340,18 +340,18 @@ impl LineSlot {
 
 /// One line, as a reader finds it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Line {
+pub struct Line {
     /// Its number, Linux's record sequence number.
-    pub(crate) seq: u64,
+    pub seq: u64,
     /// Its first byte's place in the log.
-    pub(crate) start: u64,
+    pub start: u64,
     /// The place past its last byte: where the next line starts, or the
     /// log's end for the last. Its newline, if it has one, is inside.
-    pub(crate) end: u64,
+    pub end: u64,
     /// When it began, in microseconds of the counter.
-    pub(crate) usec: u64,
+    pub usec: u64,
     /// Its priority: facility shifted left three, and level.
-    pub(crate) priority: u8,
+    pub priority: u8,
 }
 
 impl<const M: usize> Lines<M> {
@@ -634,9 +634,7 @@ pub(crate) fn break_line() -> bool {
 ///
 /// A size that does not read as one, or no memory for it; the log stays as
 /// it was.
-pub(crate) fn size_from(
-    view: &ferrix_bootinfo::BootView<'_>,
-) -> Result<Option<usize>, &'static str> {
+pub fn size_from(view: &ferrix_bootinfo::BootView<'_>) -> Result<Option<usize>, &'static str> {
     let Some(asked) = view.option(LOG_BUF_LEN) else {
         return Ok(None);
     };
@@ -673,33 +671,33 @@ pub(crate) fn size_asked(asked: &str, current: usize) -> Result<Option<usize>, &
 
 /// How many bytes the kernel log holds: what `syslog(2)`'s `SIZE_BUFFER`
 /// answers.
-pub(crate) fn capacity() -> usize {
+pub fn capacity() -> usize {
     LOG.capacity()
 }
 
 /// Read the kernel log from `cursor`: see [`Ring::read`].
-pub(crate) fn read(cursor: &mut u64, out: &mut [u8]) -> Read {
+pub fn read(cursor: &mut u64, out: &mut [u8]) -> Read {
     LOG.read(cursor, out)
 }
 
 /// How many bytes the kernel log has ever recorded.
-pub(crate) fn written() -> u64 {
+pub fn written() -> u64 {
     LOG.written()
 }
 
 /// How many lines the kernel log has ever begun: the number the next takes.
-pub(crate) fn lines_begun() -> u64 {
+pub fn lines_begun() -> u64 {
     LOG_LINES.begun()
 }
 
 /// The first line of the kernel log still kept, bytes and all.
-pub(crate) fn first_line() -> u64 {
+pub fn first_line() -> u64 {
     LOG_LINES.first(LOG.oldest())
 }
 
 /// Line `seq` of the kernel log, whole; or, if it is gone, the first one
 /// kept after it. `None` when there is no whole line from `seq` on yet.
-pub(crate) fn line_from(seq: u64) -> Option<Line> {
+pub fn line_from(seq: u64) -> Option<Line> {
     let from = seq.max(LOG_LINES.first(LOG.oldest()));
     LOG_LINES.line(from, &LOG)
 }

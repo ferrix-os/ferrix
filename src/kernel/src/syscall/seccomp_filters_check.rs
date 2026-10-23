@@ -35,50 +35,50 @@ use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls a filtered thread made through the core's entry.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Answers `seccomp(2)` and `prctl` gave to what Chromium's probes ask.
-    pub(crate) probes: usize,
+    pub probes: usize,
     /// Children and threads that judged a call as their creator's chain did.
-    pub(crate) inherited: usize,
+    pub inherited: usize,
     /// Processes a filter ended with `SIGSYS` or `SIGKILL`.
-    pub(crate) killed: usize,
+    pub killed: usize,
     /// Filters in the longest chain made and released.
-    pub(crate) chain: usize,
+    pub chain: usize,
     /// What a call costs that chain, in nanoseconds: 6,554 runs of one step.
-    pub(crate) walk_many: u64,
+    pub walk_many: u64,
     /// What a call costs a chain of seven 4,096-instruction filters, the most
     /// steps there can be, in nanoseconds.
-    pub(crate) walk_long: u64,
+    pub walk_long: u64,
     /// What releasing the longest chain costs, in nanoseconds.
-    pub(crate) release: u64,
+    pub release: u64,
     /// What `TSYNC`'s test of one other thread costs against the longest
     /// chain, walked whole, in nanoseconds.
-    pub(crate) ancestor: u64,
+    pub ancestor: u64,
     /// What the whole `TSYNC` of the running-threads case took, in
     /// nanoseconds: both holds of the thread-list lock and the test between
     /// them, so an upper bound on each hold.
-    pub(crate) sync_nanos: u64,
+    pub sync_nanos: u64,
     /// How many threads the process had as that `TSYNC` began.
-    pub(crate) sync_threads: usize,
+    pub sync_threads: usize,
     /// Its longest hold of the thread-list lock, in nanoseconds.
-    pub(crate) sync_hold: u64,
+    pub sync_hold: u64,
     /// How many holds it made: two a round.
-    pub(crate) sync_holds: u64,
+    pub sync_holds: u64,
     /// Traps delivered as a signal with the call's information, read back, and
     /// a blocked and ignored one that ended its process.
     pub(crate) traps: usize,
     /// Threads that held the chain `TSYNC` gave, forty of them made while it
     /// ran.
-    pub(crate) synced: usize,
+    pub synced: usize,
     /// Cases of `TSYNC`'s all-or-nothing rule checked.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// Threads that changed their own seccomp state in one of a `TSYNC`'s two
     /// windows and kept what they did: two that it saw and gave up its round
     /// for, and the racers that had begun their call while it held the second
     /// open (none on one processor).
-    pub(crate) raced: usize,
+    pub raced: usize,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -253,7 +253,7 @@ fn judge_with(thread: &Thread, call: usize, args: [u64; 6]) -> Option<u32> {
 /// # Errors
 ///
 /// Which property failed.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let before = seccomp::filtered_threads();
     let mut report = Report::default();
     probes(&mut report)?;

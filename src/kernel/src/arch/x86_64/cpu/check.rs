@@ -76,7 +76,7 @@ fn nothing_counted_without_hwp() -> Result<(), &'static str> {
 /// # Errors
 ///
 /// A count that disagrees with the processors online.
-pub(crate) fn check_hwp_processors() -> Result<(), &'static str> {
+pub fn check_hwp_processors() -> Result<(), &'static str> {
     let online = crate::smp::count() as u64;
     let (asked, refused) = (hwp_processors(), hwp_refused());
     if !has_hwp() {

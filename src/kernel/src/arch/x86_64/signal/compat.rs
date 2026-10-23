@@ -344,6 +344,10 @@ fn sigcontext_of(
 /// Write the program's x87 and SSE state at `fpstate` as `_fpstate_32`: the
 /// `FXSAVE` image at its 112th byte, `magic` saying so, and the control and
 /// status words in the `fsave` environment's first two.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 fn write_fpstate(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     // SAFETY: (CONTEXT) on the running task's own way back to ring 3, so the processor
     // holds this program's x87 and SSE registers.

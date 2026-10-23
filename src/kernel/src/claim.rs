@@ -39,7 +39,7 @@ use crate::timer;
 /// must not depend on which uncertified subsystem happens to be serving it.
 /// `block_ring`, `render` and `display` each answer with this.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum StillServed {
+pub enum StillServed {
     /// A driver holds its end of the ring's control channel: it is alive
     /// and serving, and quiescing under it is refused.
     ByADriver,
@@ -54,13 +54,19 @@ const PATIENCE_NANOS: u64 = 5_000_000_000;
 
 /// Devices claimed through a core's control channels: each held by the
 /// core's end of the channel its driver was handed.
-pub(crate) struct Claims {
+#[derive(Debug)]
+pub struct Claims {
     held: SpinLock<Vec<(Arc<DeviceNode>, Arc<Endpoint>)>>,
     released: WaitQueue,
 }
 
 impl Claims {
-    pub(crate) const fn new() -> Self {
+    /// No claim held.
+    #[allow(
+        clippy::new_without_default,
+        reason = "a const constructor for a static; Default is not const"
+    )]
+    pub const fn new() -> Self {
         Self {
             held: SpinLock::new(Vec::new()),
             released: WaitQueue::new(),
@@ -70,7 +76,7 @@ impl Claims {
     /// Claim `node` for the channel whose core end is `control`; `false`
     /// when it is claimed already, or when there was no memory to record the
     /// claim -- which the caller answers as it does a device in use.
-    pub(crate) fn claim(&self, node: &Arc<DeviceNode>, control: &Arc<Endpoint>) -> bool {
+    pub fn claim(&self, node: &Arc<DeviceNode>, control: &Arc<Endpoint>) -> bool {
         self.claim_up_to(node, control, 1)
     }
 
@@ -95,7 +101,7 @@ impl Claims {
     /// many claims it holds. A core whose channel carries memory for a
     /// device's DMA must claim with a limit of one, or give each claim a
     /// domain of its own.
-    pub(crate) fn claim_up_to(
+    pub fn claim_up_to(
         &self,
         node: &Arc<DeviceNode>,
         control: &Arc<Endpoint>,
@@ -113,7 +119,7 @@ impl Claims {
     }
 
     /// Let `node` go, every claim of it, and wake a quiesce waiting for it.
-    pub(crate) fn release(&self, node: &Arc<DeviceNode>) {
+    pub fn release(&self, node: &Arc<DeviceNode>) {
         self.held
             .lock()
             .retain(|(claimed, _)| !Arc::ptr_eq(claimed, node));
@@ -122,7 +128,7 @@ impl Claims {
 
     /// Let go of the one claim of `node` made through `control`, leaving the
     /// node's others -- a USB host's other devices -- theirs.
-    pub(crate) fn release_one(&self, node: &Arc<DeviceNode>, control: &Arc<Endpoint>) {
+    pub fn release_one(&self, node: &Arc<DeviceNode>, control: &Arc<Endpoint>) {
         self.held.lock().retain(|(claimed, through)| {
             !(Arc::ptr_eq(claimed, node) && Arc::ptr_eq(through, control))
         });
@@ -153,7 +159,7 @@ impl Claims {
     /// # Errors
     ///
     /// [`StillServed`], as `block_ring::wait_until_unserved` answers.
-    pub(crate) fn wait_until_released(
+    pub fn wait_until_released(
         &self,
         node: &Arc<DeviceNode>,
         cancelled: &dyn Fn() -> bool,
@@ -168,7 +174,7 @@ impl Claims {
     /// # Errors
     ///
     /// As [`Claims::wait_until_released`].
-    pub(crate) fn wait_within(
+    pub fn wait_within(
         &self,
         node: &Arc<DeviceNode>,
         cancelled: &dyn Fn() -> bool,
@@ -194,13 +200,15 @@ impl Claims {
 
 /// The numbers a core's nodes are published under, from `first` upwards,
 /// each the lowest one nothing holds.
-pub(crate) struct Numbers {
+#[derive(Debug)]
+pub struct Numbers {
     first: u32,
     taken: SpinLock<Vec<u32>>,
 }
 
 impl Numbers {
-    pub(crate) const fn new(first: u32) -> Self {
+    /// Numbers from `first` up, none taken.
+    pub const fn new(first: u32) -> Self {
         Self {
             first,
             taken: SpinLock::new(Vec::new()),
@@ -209,7 +217,7 @@ impl Numbers {
 
     /// The lowest number nothing holds, now held; `None` when there was no
     /// memory to hold it.
-    pub(crate) fn take(&self) -> Option<u32> {
+    pub fn take(&self) -> Option<u32> {
         let mut taken = self.taken.lock();
         let mut number = self.first;
         while taken.contains(&number) {
@@ -220,7 +228,7 @@ impl Numbers {
     }
 
     /// Give `number` back, for the next node to be published under.
-    pub(crate) fn give_back(&self, number: u32) {
+    pub fn give_back(&self, number: u32) {
         self.taken.lock().retain(|&held| held != number);
     }
 }

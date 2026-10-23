@@ -283,7 +283,7 @@ pub(super) fn start() {
 /// transmit interrupt never arrived, and [`check`] found every task's write
 /// left in the ring. A machine whose serial line nobody reads is not stopped
 /// for it: its writers poll, as before the interrupt was installed.
-pub(crate) fn fall_back_to_polling() {
+pub fn fall_back_to_polling() {
     INTERRUPT_DRIVEN.store(false, Ordering::Relaxed);
     let mut port = PORT.lock();
     let wake = port.flush();
@@ -405,7 +405,7 @@ pub(crate) fn stalls() -> u64 {
 
 /// Why [`check`] failed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Failure {
+pub enum Failure {
     /// A task's write waited in the transmit ring while the port's transmit
     /// interrupt sent nothing for [`SILENT_NANOS`]: the interrupt never came,
     /// or stopped coming. The N150 box's COM1 does this; its writers may fall
@@ -427,7 +427,7 @@ pub(crate) enum Failure {
 impl Failure {
     /// Whether this is the machine's failure rather than this kernel's, one
     /// the boot goes on from by polling ([`fall_back_to_polling`]).
-    pub(crate) const fn falls_back(&self) -> bool {
+    pub const fn falls_back(&self) -> bool {
         matches!(self, Failure::Silent { .. } | Failure::NeverCame)
     }
 }
@@ -452,13 +452,14 @@ impl core::fmt::Display for Failure {
 }
 
 /// What [`check`] established.
-pub(crate) struct Checked {
+#[derive(Debug)]
+pub struct Checked {
     /// The bytes the check's line is on the wire.
-    pub(crate) line: usize,
+    pub line: usize,
     /// How many of them the transmit interrupt sent.
-    pub(crate) by_interrupt: u64,
+    pub by_interrupt: u64,
     /// How many the writer sent itself.
-    pub(crate) by_writer: u64,
+    pub by_writer: u64,
 }
 
 /// The line the check writes: longer than a [`BURST`], so that the port's
@@ -484,7 +485,7 @@ const CHECK_LINE: &[u8] = concat!(
 /// seconds later, the failures that are the machine's rather than this
 /// kernel's ([`Failure::falls_back`]), and [`Failure::Defect`] for every
 /// other.
-pub(crate) fn check() -> Result<Option<Checked>, Failure> {
+pub fn check() -> Result<Option<Checked>, Failure> {
     if !interrupt_driven() {
         return Ok(None);
     }

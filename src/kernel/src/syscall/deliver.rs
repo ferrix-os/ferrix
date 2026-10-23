@@ -119,7 +119,7 @@ fn fault_signal(signal: u32, code: i32, address: u64) -> crate::trap::FaultOutco
 ///
 /// Called once from `_start`, before the first user program -- which is a boot
 /// check, not init, so this cannot wait for `init::run`.
-pub(crate) fn install() {
+pub fn install() {
     crate::trap::set_return_path(&RETURN_PATH);
 }
 

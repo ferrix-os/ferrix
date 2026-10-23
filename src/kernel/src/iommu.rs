@@ -73,23 +73,22 @@ use crate::discovery::description::{self, Description};
 use crate::sync::SpinLock;
 use crate::{arch, mm, println};
 
-mod check;
-// Stage 10's check, raised above the core with the kernel split
-// (`docs/KERNEL-CRATES.md`): `check_iommu`, which main.rs runs.
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod domain_check;
-mod gate;
-pub(crate) mod remapping;
-mod smmuv3;
-mod vtd;
+// CHECKS-ONLY-METHODS: home: self
 
+pub mod check;
+pub mod gate;
+pub mod remapping;
+mod smmuv3;
+pub mod vtd;
+
+pub use remapping::{CHECK_VECTOR, console_vectors, route, stray_deliveries};
 pub(crate) use remapping::{
-    CHECK_VECTOR, LiveLine, close_check_window, console_vectors, function_isolated, nmis,
-    open_check_window, route, stray_deliveries,
+    LiveLine, close_check_window, function_isolated, nmis, open_check_window,
 };
 
-pub(crate) use check::{check_dma_faults, run as check_gate};
-pub(crate) use vtd::{Invalidations, invalidations};
+pub use check::check_dma_faults;
+pub use check::run as check_gate;
+pub use vtd::{Invalidations, invalidations};
 
 use gate::Gate;
 
@@ -317,7 +316,7 @@ fn claims(
 static BRIDGES: SpinLock<Vec<Bridge>> = SpinLock::new(Vec::new());
 
 /// Record a bridge PCI enumeration found (`discovery::pci`).
-pub(crate) fn learn_bridge(bridge: Bridge) {
+pub fn learn_bridge(bridge: Bridge) {
     // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
     BRIDGES.lock().push(bridge);
 }
@@ -475,7 +474,7 @@ fn translates(unit: &Unit) -> bool {
 /// this cannot follow, is reported and the boot goes on. `xtask test-boot`
 /// requires the placements on the machines it configures. Last, the pin
 /// budgets' ceiling is counted.
-pub(crate) fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
+pub fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     let (report, units, placements) = discover(view, nodes);
     remapping::note_bypassing(report.bypassing);
     println!(
@@ -585,21 +584,21 @@ const TRANSLATED_BITS: u32 = 39;
 
 /// A DMA fault a unit recorded.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Fault {
+pub struct Fault {
     /// The device's stream: its source ID on VT-d, its stream ID on an
     /// `SMMUv3`.
-    pub(crate) stream: u32,
+    pub stream: u32,
     /// The page it addressed.
-    pub(crate) page: u64,
+    pub page: u64,
     /// Whether the access was a write.
-    pub(crate) write: bool,
+    pub write: bool,
     /// What the unit recorded it as.
-    pub(crate) cause: Cause,
+    pub cause: Cause,
 }
 
 /// What a unit recorded a fault as.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Cause {
+pub enum Cause {
     /// A device's access refused at an address its domain does not map or
     /// does not allow: every VT-d fault record, and an `SMMUv3` translation,
     /// address size, access flag or permission fault. The only kind a check
@@ -657,7 +656,7 @@ fn interrupt_reason_name(reason: u8) -> &'static str {
 
 /// How a VT-d invalidation's wait descriptor completes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Wait {
+pub enum Wait {
     /// It writes its status word, which the kernel waits for: every
     /// invalidation but check R7's.
     Status,
@@ -671,7 +670,7 @@ pub(crate) enum Wait {
 impl Fault {
     /// A refused write by `stream` to `page`: what a check that provokes one
     /// requires its unit to record.
-    pub(crate) fn write_to(stream: u32, page: u64) -> Self {
+    pub fn write_to(stream: u32, page: u64) -> Self {
         Fault {
             stream,
             page,
@@ -719,7 +718,7 @@ impl core::fmt::Display for Fault {
 
 /// Why a domain refused to pin or unpin.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum DomainError {
+pub enum DomainError {
     /// There was nothing to pin.
     Empty,
     /// A frame's address does not fit in what the domain can address.
@@ -744,7 +743,7 @@ pub(crate) enum DomainError {
 /// pinned. That saves an I/O address allocator, at the cost of refusing frames
 /// above [`TRANSLATED_BITS`].
 #[derive(Debug)]
-pub(crate) struct Domain {
+pub struct Domain {
     /// This domain's number.
     id: u64,
     /// Pages pinned and not yet unpinned.
@@ -889,30 +888,52 @@ impl Translation {
 /// device may still reach them.
 #[derive(Debug)]
 #[must_use = "unpin it, or leak its frames with it"]
-pub(crate) struct Pinned {
+pub struct Pinned {
     /// The domain that took it.
-    domain: u64,
+    pub domain: u64,
     /// Each page's device address, in the order its frame was given.
-    addresses: Vec<u64>,
+    pub addresses: Vec<u64>,
 }
 
 impl Pinned {
     /// Each page's device address, in the order its frame was given. Not
     /// necessarily contiguous.
-    pub(crate) fn addresses(&self) -> &[u64] {
+    pub fn addresses(&self) -> &[u64] {
         &self.addresses
     }
 
     /// Never give the pin back: its pages stay reachable by the device for
     /// good, and whoever holds their frames must keep them too.
-    pub(crate) fn leak(self) {
+    pub fn leak(self) {
         let _ = core::mem::ManuallyDrop::new(self);
     }
 }
 
 impl Domain {
+    /// Detach the domain's translation, as the check of an RMRR identity
+    /// domain asks it to (`L.iommu.78`): `translation` is private to this
+    /// module, and the check is raised above the core (ledger 1795 S3.2a,
+    /// 1630 F1).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the unit's detach refuses.
+    #[doc(hidden)]
+    pub fn detach_translation(&self) -> Result<(), &'static str> {
+        self.translation.detach()
+    }
+
+    /// This domain's number, as a check of its device-table entry reads it
+    /// (`L.iommu.77`): `id` is private to this module, and the check is raised
+    /// above the core (ledger 1630 F1).
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
     /// A domain no unit translates.
-    pub(crate) fn untranslated() -> Self {
+    pub fn untranslated() -> Self {
         Domain::with(Translation::None)
     }
 
@@ -928,26 +949,26 @@ impl Domain {
 
     /// Its device's pin budget and counts, which only `object::pin` reads
     /// or changes, under its quarantine's lock.
-    pub(crate) fn pin_budget(&self) -> &crate::object::pin::PinBudget {
+    pub fn pin_budget(&self) -> &crate::object::pin::PinBudget {
         &self.budget
     }
 
     /// Whether a unit translates this domain's DMA, so a device can reach only
     /// what is pinned into it.
-    pub(crate) fn translated(&self) -> bool {
+    pub fn translated(&self) -> bool {
         !matches!(self.translation, Translation::None)
     }
 
     /// Where an access by the device to `address` lands, or `None` when the
     /// unit would fault it. An untranslated domain lands every access where it
     /// points.
-    pub(crate) fn resolve(&self, address: u64) -> Option<u64> {
+    pub fn resolve(&self, address: u64) -> Option<u64> {
         self.translation.resolve(address)
     }
 
     /// The stream the unit sees this domain's device as, if a unit translates
     /// the domain.
-    pub(crate) fn stream(&self) -> Option<u32> {
+    pub fn stream(&self) -> Option<u32> {
         self.translation.stream()
     }
 
@@ -956,7 +977,7 @@ impl Domain {
     ///
     /// A fault no check provoked is counted on the way, so that one taken and
     /// then passed over still fails the boot in [`audit_faults`].
-    pub(crate) fn take_fault(&self) -> Option<Fault> {
+    pub fn take_fault(&self) -> Option<Fault> {
         let fault = self.translation.take_fault()?;
         let _ = count_if_stray(fault);
         Some(fault)
@@ -965,7 +986,7 @@ impl Domain {
     /// Clear the unit's faults, and say that this domain's device is about to
     /// be made to write `page`, which the domain does not map, so the fault the
     /// unit records for it is known for the check's own and not counted stray.
-    pub(crate) fn provoke(&self, page: u64) {
+    pub fn provoke(&self, page: u64) {
         self.clear_faults();
         if let Some(stream) = self.stream() {
             record_provoked(stream, page);
@@ -994,7 +1015,7 @@ impl Domain {
     }
 
     /// Pages pinned and not yet unpinned.
-    pub(crate) fn pinned_pages(&self) -> u64 {
+    pub fn pinned_pages(&self) -> u64 {
         self.pinned.load(Ordering::Relaxed)
     }
 
@@ -1010,7 +1031,7 @@ impl Domain {
     /// [`DomainError::Tables`] and [`DomainError::Unit`]. Whatever was mapped
     /// before a failure is unmapped again, except after a unit that never
     /// finished, whose pages stay mapped for good.
-    pub(crate) fn pin(&self, frames: &[u64], flags: MapFlags) -> Result<Pinned, DomainError> {
+    pub fn pin(&self, frames: &[u64], flags: MapFlags) -> Result<Pinned, DomainError> {
         if frames.is_empty() {
             return Err(DomainError::Empty);
         }
@@ -1062,13 +1083,13 @@ impl Domain {
     /// [`DomainError::Foreign`], handing the pin back, when another domain took
     /// it; [`DomainError::Reserved`], handing it back with nothing unmapped,
     /// when it names a page an RMRR holds in the domain (`L.iommu.77`).
-    pub(crate) fn unpin(&self, pinned: Pinned) -> Result<(), (DomainError, Pinned)> {
+    pub fn unpin(&self, pinned: Pinned) -> Result<(), (DomainError, Pinned)> {
         self.unpin_waiting(pinned, Wait::Status)
     }
 
     /// Whether a VT-d unit translates this domain: where its invalidations
     /// go through a queue, and [`Wait::Unwritten`] means something.
-    pub(crate) fn queued(&self) -> bool {
+    pub fn queued(&self) -> bool {
         matches!(self.translation, Translation::VtD { .. })
     }
 
@@ -1184,12 +1205,14 @@ impl Drop for Domain {
 // Units the kernel programs
 // ---------------------------------------------------------------------------
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Every unit translation was turned on for, and the functions behind each.
 #[derive(Debug, Default)]
-struct Programmed {
+#[doc(hidden)]
+pub struct Programmed {
     /// VT-d units brought up: translating, or held to remapping only by an
     /// RMRR ([`vtd::Unit::translating`]).
-    vtd: Vec<vtd::Unit>,
+    pub vtd: Vec<vtd::Unit>,
     /// The functions the DMAR's single-hop endpoint scopes name, with their
     /// unit's index, or `None` for a unit left alone: a function a refused
     /// unit names is that unit's, never the catch-all's.
@@ -1235,7 +1258,7 @@ impl Programmed {
 /// node keeps its domain for its life, so a driver that restarts gets the
 /// same one, and nothing is attached again.
 #[derive(Debug)]
-pub(crate) struct IdentityDomain {
+pub struct IdentityDomain {
     /// The function the RMRRs name.
     function: Address,
     /// Its domain on the unit.
@@ -1252,7 +1275,7 @@ pub(crate) struct IdentityDomain {
 impl IdentityDomain {
     /// The record of `function`'s identity domain `attached`, holding
     /// `regions`.
-    pub(crate) fn new(function: Address, attached: vtd::Attached, regions: Vec<Identity>) -> Self {
+    pub fn new(function: Address, attached: vtd::Attached, regions: Vec<Identity>) -> Self {
         IdentityDomain {
             function,
             attached,
@@ -1263,7 +1286,7 @@ impl IdentityDomain {
     }
 
     /// The domain, on `unit`, unless one for it lives already.
-    pub(crate) fn claim(&'static self, unit: &'static vtd::Unit) -> Option<Domain> {
+    pub fn claim(&'static self, unit: &'static vtd::Unit) -> Option<Domain> {
         if self.claimed.swap(true, Ordering::AcqRel) {
             return None;
         }
@@ -1288,7 +1311,7 @@ impl IdentityDomain {
     }
 
     /// Whether a [`Domain`] for it lives.
-    pub(crate) fn claimed(&self) -> bool {
+    pub fn claimed(&self) -> bool {
         self.claimed.load(Ordering::Acquire)
     }
 
@@ -1300,7 +1323,7 @@ impl IdentityDomain {
 
 /// Every RMRR page range an identity domain holds, for the frame
 /// allocator's check (`L.iommu.75`).
-pub(crate) fn identity_regions() -> impl Iterator<Item = Identity> {
+pub fn identity_regions() -> impl Iterator<Item = Identity> {
     PROGRAMMED
         .get()
         .into_iter()
@@ -1426,7 +1449,7 @@ fn plan_rmrrs(
 ///
 /// [`rmrr::Refusal::AllocatorFrame`] for the first frame the allocator
 /// holds.
-pub(crate) fn frames_outside_allocator(region: Identity) -> Result<(), rmrr::Refusal> {
+pub fn frames_outside_allocator(region: Identity) -> Result<(), rmrr::Refusal> {
     for page in region.page_addresses() {
         match mm::frame_state(page / PAGE_SIZE) {
             None | Some(ferrix_frame::State::Reserved) => {}
@@ -1568,7 +1591,7 @@ const VTD_OFF_WHY: &str = "ferrix.vtd=off asked for every unit to be left alone"
 /// Whether the command line says `ferrix.vtd=off`
 /// (`ferrix_paging::vtd::unit::switched_off`), for [`bring_up`] and the
 /// audit record's configuration.
-pub(crate) fn vtd_off_asked(view: &BootView<'_>) -> bool {
+pub fn vtd_off_asked(view: &BootView<'_>) -> bool {
     // The literal, not `ferrix_paging::vtd::unit::OFF_OPTION`, which names
     // the same word: the build-flags gate reads each option by its literal.
     ferrix_paging::vtd::unit::switched_off(view.option("ferrix.vtd"))
@@ -1579,22 +1602,24 @@ fn vtd_switched_off() -> bool {
     VTD_OFF.load(Ordering::Acquire)
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// What [`bring_up`] turned on.
-static PROGRAMMED: Once<Programmed> = Once::new();
+#[doc(hidden)]
+pub static PROGRAMMED: Once<Programmed> = Once::new();
 
 /// What bringing the units up did.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct BringUp {
+pub struct BringUp {
     /// VT-d units now translating.
-    pub(crate) vtd: usize,
+    pub vtd: usize,
     /// VT-d units an RMRR holds to remapping only.
-    pub(crate) remapping_only: usize,
+    pub remapping_only: usize,
     /// `SMMUv3`s now translating.
-    pub(crate) smmu_v3: usize,
+    pub smmu_v3: usize,
     /// Units left alone.
-    pub(crate) refused: usize,
+    pub refused: usize,
     /// Why the last of them was.
-    pub(crate) why: Option<&'static str>,
+    pub why: Option<&'static str>,
 }
 
 /// Turn translation on for every VT-d unit the DMAR describes, before any
@@ -1603,7 +1628,7 @@ pub(crate) struct BringUp {
 ///
 /// A unit that cannot be brought up is left alone, and the functions behind it
 /// get untranslated domains. Only the first call does anything.
-pub(crate) fn bring_up(view: &BootView<'_>) -> BringUp {
+pub fn bring_up(view: &BootView<'_>) -> BringUp {
     let mut report = BringUp::default();
     VTD_OFF.store(vtd_off_asked(view), Ordering::Release);
     let mut programmed = Programmed::default();
@@ -1911,7 +1936,7 @@ fn endpoints<'a>(unit: &dmar::Drhd<'a>) -> impl Iterator<Item = Address> + 'a {
 /// (`ferrix_pci::topology::agrees`): never an untranslated one, whose first
 /// pin would say its DMA reaches all of memory while the unit confines it
 /// (`L.iommu.78`). Every other function gets `Some`.
-pub(crate) fn domain_for(function: Address) -> Option<Domain> {
+pub fn domain_for(function: Address) -> Option<Domain> {
     let Some(programmed) = PROGRAMMED.get() else {
         return Some(Domain::untranslated());
     };
@@ -1975,7 +2000,7 @@ fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
 /// How many VT-d units are translating, and how many of them read back a
 /// register-based invalidation pending: none ever should, since every
 /// invalidation goes through the queue (check R6).
-pub(crate) fn register_invalidations_pending() -> (usize, usize) {
+pub fn register_invalidations_pending() -> (usize, usize) {
     PROGRAMMED.get().map_or((0, 0), |programmed| {
         (
             programmed.vtd.len(),
@@ -2244,7 +2269,7 @@ pub(crate) fn audit_faults() -> FaultAudit {
 /// its checks (`ferrix.checks=skip`, as the N150 box boots), which nothing
 /// else would read: one line, never fatal, interrupt requests' faults
 /// included, so a boot on hardware shows what its units refused.
-pub(crate) fn report_unchecked_faults() {
+pub fn report_unchecked_faults() {
     let audit = audit_faults();
     println!(
         "  iommu    {} faults recorded in an unchecked boot, {} of them not a refused DMA \

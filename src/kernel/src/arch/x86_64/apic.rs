@@ -675,7 +675,7 @@ pub(crate) fn send_ipi_to(apic_id: u32) -> Result<(), &'static str> {
 ///
 /// For the boot check that an NMI taken in the kernel is survived. The
 /// interrupt may arrive before this returns -- `cli` does not hold it off.
-pub(crate) fn send_nmi_to_self() -> Result<(), &'static str> {
+pub fn send_nmi_to_self() -> Result<(), &'static str> {
     send(id(), ICR_NMI | ICR_ASSERT)
 }
 
@@ -683,7 +683,7 @@ pub(crate) fn send_nmi_to_self() -> Result<(), &'static str> {
 ///
 /// For the boot check that an NMI taken in a program is survived, whatever
 /// `GS` base the program holds (`paranoid::check`).
-pub(crate) fn send_nmi_to(apic_id: u32) -> Result<(), &'static str> {
+pub fn send_nmi_to(apic_id: u32) -> Result<(), &'static str> {
     send(apic_id, ICR_NMI | ICR_ASSERT)
 }
 

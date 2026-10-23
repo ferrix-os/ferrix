@@ -29,14 +29,21 @@
 //! program trading the processor each read their own; and two programs with
 //! null `DS` and `ES` see the skip taken. The same for `FS` and `GS` (3c).
 
+#![cfg(target_arch = "x86_64")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
+
+use ferrix_kernel_core::arch::x86_64 as core_x86_64;
+use ferrix_kernel_core::arch::x86_64::switch as core_switch;
+
 use alloc::sync::Arc;
 
 use ferrix_linux_abi::types::SIGUSR1;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Rights;
 
-use super::super::{cpu, gdt};
-use super::{FpuArea, UserState};
 use crate::console::println;
 use crate::object::Object;
 use crate::object::channel::Endpoint;
@@ -44,6 +51,8 @@ use crate::object::job::KILLED_STATUS;
 use crate::sched::Task;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::Origin;
+use core_switch::{FpuArea, UserState};
+use core_x86_64::{cpu, gdt};
 
 /// What the checks counted, for the boot line.
 #[derive(Debug, Default)]
@@ -638,9 +647,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             report.xinuse,
             Some((_, quiet)) if u64::try_from(quiet).is_ok_and(|bits| bits & cpu::XSTATE_X87 == 0)
         ) && x87_reported_initial_every_time()?;
-        let before = super::x87_resets();
+        let before = core_switch::x87_resets();
         run_vector_case(Wake::Message)?;
-        let after = super::x87_resets();
+        let after = core_switch::x87_resets();
         if fast && after.0 <= before.0 {
             return Err("a wake beside a program that used the x87 did not reset the x87");
         }
@@ -648,11 +657,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         for _ in 0..QUIET_TRIES {
             run_vector_case_beside(Wake::Message, false)?;
             report.reset += 1;
-            if super::x87_resets().1 > after.1 {
+            if core_switch::x87_resets().1 > after.1 {
                 break;
             }
         }
-        let last = super::x87_resets();
+        let last = core_switch::x87_resets();
         if fast && reports_initial && last.1 <= after.1 {
             return Err(
                 "a wake beside a program that left the x87 initial reset it: XINUSE was not read",
@@ -683,7 +692,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
 fn check_the_three_numbers() -> Result<(), &'static str> {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, FIRST, LAST, OBJECT_WAIT_ONE, PORT_WAIT};
 
-    use super::super::syscall::vectors_die_in;
+    use core_x86_64::syscall::vectors_die_in;
 
     let marked = (FIRST..=LAST)
         .chain(0..1024)
@@ -1190,7 +1199,7 @@ fn load(name: &[u8], code: &[u8]) -> Result<Arc<Process>, &'static str> {
     }
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -1356,19 +1365,19 @@ fn check_no_program_writes_a_base() -> Result<(usize, bool, usize), &'static str
     use ferrix_sync::IrqControl;
 
     let count = crate::smp::count();
-    let forbidden = super::super::BASE_WRITES_FORBIDDEN.load(core::sync::atomic::Ordering::Acquire);
+    let forbidden = core_x86_64::BASE_WRITES_FORBIDDEN.load(core::sync::atomic::Ordering::Acquire);
     if forbidden != count {
         return Err("CR4.FSGSBASE did not read clear at the bring-up of every processor");
     }
     let offered = cpu::has_fsgsbase();
     if offered {
-        let saved = <super::super::Irq as IrqControl>::disable();
+        let saved = <core_x86_64::Irq as IrqControl>::disable();
         // SAFETY: (PROBE) the processor has the bit, interrupts are masked,
         // and the next line clears it before they are opened.
         unsafe { cpu::permit_user_base_writes_for_check() };
         let was_set = cpu::read_cr4() & cpu::CR4_FSGSBASE != 0;
         let cleared = cpu::forbid_user_base_writes();
-        <super::super::Irq as IrqControl>::restore(saved);
+        <core_x86_64::Irq as IrqControl>::restore(saved);
         if !was_set || !cleared {
             return Err("CR4.FSGSBASE, set for the check, was not cleared again");
         }
@@ -1440,7 +1449,7 @@ fn read_twice(_argument: usize) {
     let taken = FAST_READER.lock().take();
     if let Some(handle) = taken {
         for _ in 0..2 {
-            let _ = super::super::syscall::check::drive_native_words(
+            let _ = core_x86_64::syscall::check::drive_native_words(
                 ferrix_native_abi::nr::CHANNEL_WRITE_READ,
                 [
                     u64::from(handle.0),
@@ -1870,9 +1879,9 @@ fn check_32_and_64_bit_programs_keep_their_selectors() -> Result<(), &'static st
 fn check_the_skip_is_taken() -> Result<u64, &'static str> {
     let first = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
     let second = selector_program(b'R', 0, SELECTOR_ROUNDS)?;
-    let before = super::selector_skips();
+    let before = core_switch::selector_skips();
     let [first, second] = run_selector_pair(&first, &second)?;
-    let after = super::selector_skips();
+    let after = core_switch::selector_skips();
     for status in [first, second] {
         selector_verdict(
             status,
@@ -2421,9 +2430,9 @@ fn check_i386_fs_gs_beside_a_64_bit_program() -> Result<(), &'static str> {
 fn check_the_fs_gs_skips_are_taken() -> Result<(u64, u64), &'static str> {
     let first = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
     let second = fs_gs_program(b'R', 0, SELECTOR_ROUNDS)?;
-    let before = super::fs_gs_skips();
+    let before = core_switch::fs_gs_skips();
     let [first, second] = run_fs_gs_pair(&first, &second)?;
-    let after = super::fs_gs_skips();
+    let after = core_switch::fs_gs_skips();
     for status in [first, second] {
         fs_gs_verdict(
             status,
@@ -2609,9 +2618,9 @@ const SPINNER: &[u8] = &[
 pub(crate) fn run_sysret_ss() -> Result<(), &'static str> {
     let sleeper = load(b"/sysret-ss", SYSRET_SS)?;
     let spinner = load(b"/spinner", SPINNER)?;
-    let before = super::ss_reloads();
+    let before = core_switch::ss_reloads();
     let [slept, spun] = run_fs_pair(&sleeper, &spinner)?;
-    let reloads = super::ss_reloads().wrapping_sub(before);
+    let reloads = core_switch::ss_reloads().wrapping_sub(before);
     match slept {
         Some(0) => {}
         Some(1) => return Err("32-bit code's push after a SYSRET did not read back"),
@@ -2809,7 +2818,7 @@ pub(crate) fn run_inherit() -> Result<(), &'static str> {
 
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         INHERIT,
     );
@@ -2889,7 +2898,7 @@ pub(crate) fn run_inherit() -> Result<(), &'static str> {
 /// # Errors
 ///
 /// The first case that read what it must not.
-pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+pub fn check_switch_state() -> Result<(), &'static str> {
     let report = run()?;
     if report.xsave {
         crate::console::println!(

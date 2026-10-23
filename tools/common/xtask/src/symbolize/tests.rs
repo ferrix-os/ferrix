@@ -37,14 +37,14 @@ fn generic_and_reference_escapes_are_decoded() {
 #[test]
 fn a_closure_keeps_its_braces() {
     let name = mangle(&[
-        "ferrix_kernel",
+        "ferrix_kernel_core",
         "smp",
         "run_everywhere",
         "$u7b$$u7b$closure$u7d$$u7d$",
     ]);
     assert_eq!(
         demangle(name.as_bytes()),
-        "ferrix_kernel::smp::run_everywhere::{{closure}}"
+        "ferrix_kernel_core::smp::run_everywhere::{{closure}}"
     );
 }
 
@@ -79,8 +79,9 @@ fn only_a_trace_line_yields_an_address() {
     assert_eq!(trace_address("FERRIX-PANIC trace 0x10"), None);
 }
 
-/// Symbols taken from a build of this kernel, with what a backtrace should
-/// call them.
+/// Symbols taken from a build of this kernel (the four crates of
+/// `docs/KERNEL-CRATES.md`, 2026-10-15), with what a backtrace should call
+/// them.
 const V0_NAMES: &[(&str, &str)] = &[
     (
         "_RNvCs9wFQrvczXsK_7___rustc17rust_begin_unwind",
@@ -91,23 +92,27 @@ const V0_NAMES: &[(&str, &str)] = &[
         "core::panicking::panic_fmt",
     ),
     (
-        "_RNvCs6nrM3796Swa_13ferrix_kernel12memory_check",
-        "ferrix_kernel::memory_check",
+        "_RNvCs6hdX3FSbJSK_13ferrix_kernel5kmain",
+        "ferrix_kernel::kmain",
     ),
     (
-        "_RINvNtCs6nrM3796Swa_13ferrix_kernel9backtrace4walkNCNvNtB4_5panic16report_backtrace0EB4_",
-        "ferrix_kernel::backtrace::walk",
+        "_RNvNtNtCs11Es365otsQ_18ferrix_kernel_core2mm5check12memory_check",
+        "ferrix_kernel_core::mm::check::memory_check",
     ),
     (
-        "_RINvMs1_CsbD4PAB096cX_11ferrix_heapNtB6_4Heap10deallocateNtNtCs6nrM3796Swa_13ferrix_kernel2mm11KernelPagesEBX_",
+        "_RINvNtCs11Es365otsQ_18ferrix_kernel_core9backtrace4walkNCNvNtB4_5panic16report_backtrace0EB4_",
+        "ferrix_kernel_core::backtrace::walk",
+    ),
+    (
+        "_RINvMs1_CsbCleW4jqUNW_11ferrix_heapNtB6_4Heap10deallocateNtNtCs11Es365otsQ_18ferrix_kernel_core2mm11KernelPagesEBX_",
         "ferrix_heap::Heap::deallocate",
     ),
     (
-        "_RINvMs5_CsjMdR1qZeGey_13ferrix_pagingINtB6_6MapperNtNtB6_6x86_646X86_64E9map_rangeNtNtCs6nrM3796Swa_13ferrix_kernel2mm13KernelPhysMemEB1m_",
+        "_RINvMs5_Cs5I2HcVrCRTN_13ferrix_pagingINtB6_6MapperNtNtB6_6x86_646X86_64E9map_rangeNtNtCs11Es365otsQ_18ferrix_kernel_core2mm13KernelPhysMemEB1m_",
         "ferrix_paging::Mapper::map_range",
     ),
     (
-        "_RINvNtCs8ROlWsJZPDz_4core3ptr9drop_glueNtNtCs6nrM3796Swa_13ferrix_kernel4vmap5ArenaEBF_",
+        "_RINvNtCs8ROlWsJZPDz_4core3ptr9drop_glueNtNtCs11Es365otsQ_18ferrix_kernel_core4vmap5ArenaEBF_",
         "core::ptr::drop_glue",
     ),
 ];

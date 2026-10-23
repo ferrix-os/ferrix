@@ -31,30 +31,30 @@ use crate::user::vmo::{Vmo, VmoError};
 
 /// What the checks measured, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Pages a reservation promised.
-    pub(crate) reserved: u64,
+    pub reserved: u64,
     /// Pages of it actually committed.
-    pub(crate) committed: usize,
+    pub committed: usize,
     /// Frames the whole check cost, once everything was dropped. Zero, or the
     /// check failed.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
     /// Pages faulted into an address space and read back.
-    pub(crate) faulted: u64,
+    pub faulted: u64,
     /// Pages the processor itself translated, through an address space
     /// installed on it.
-    pub(crate) walked: u64,
+    pub walked: u64,
     /// Pages a write actually copied, out of those a fork shared.
-    pub(crate) copied: u64,
+    pub copied: u64,
     /// Reads two tasks made of one virtual address in two different address
     /// spaces, each seeing its own.
-    pub(crate) swapped: u64,
+    pub swapped: u64,
 }
 
 /// Run them. `Err` names the first thing that was not true.
 ///
 /// Verifies: L.user.101
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     // Once before the window, for the reason `object::check::run` gives: the
     // heap keeps a page of each size class the first run touched, and the
     // held-page check is the first to touch some of them.

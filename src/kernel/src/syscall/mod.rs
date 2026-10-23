@@ -46,119 +46,9 @@
 //! the tree, not calls into them: `tools/common/check/check-item-boundary.py` counts
 //! them apart, as containment.
 
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod attributes;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod compat;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod credentials;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod deliver;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod epoll;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod eventfd;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod exec;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod family;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod fd;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod file;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod flock;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod fsctl;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod futex;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod image;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod init_calls_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod kill;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod launch;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod limits;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod linux;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod load;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod memfd;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod memory;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod namespace;
-pub(crate) mod native;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod native_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod nsproxy;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod path;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod pidns;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod pipe;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod poll;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod process;
-pub(crate) mod program;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod program_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod registry;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod seccomp;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod seccomp_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod seccomp_filters_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod sem;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod sem_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod shm;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod shm_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod signal;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod signalfd;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod sigpage;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod sockets;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod stat;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod system;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod thread;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod thread_area;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod time;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod timerfd;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod tty;
-pub(crate) mod uaccess;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod unmap_check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod userns;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod vdso;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod vdso_check;
+pub mod native;
+pub mod program;
+pub use ferrix_kernel_core::syscall::uaccess;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -172,7 +62,8 @@ use crate::sched;
 /// The shape of a system call and of its answer, which the core's trap path
 /// owns: re-exported so the personality's handlers and their checks name them
 /// where they always have.
-pub(crate) use crate::trap::{Abi, Outcome, SyscallArgs};
+pub(crate) use crate::trap::Abi;
+pub use crate::trap::{Outcome, SyscallArgs};
 
 /// Answer one system call, with `P` answering the Linux calls.
 ///
@@ -188,10 +79,7 @@ pub(crate) use crate::trap::{Abi, Outcome, SyscallArgs};
 /// registers `dispatch_with::<Linux>` as the core's entry, so the item's code
 /// names no module of the personality, and a Linux call pays the one indirect
 /// call the core's entry costs and no second one.
-pub(crate) fn dispatch_with<P: Personality>(
-    args: &SyscallArgs,
-    regs: Option<&arch::UserRegs>,
-) -> Outcome {
+pub fn dispatch_with<P: Personality>(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     // The native ABI first, by range, before any Linux table is asked: the
     // two ABIs never have to agree about a number, and `arch::decode_syscall`
     // never sees one of Ferrix's own. See `native`. Only from the native
@@ -216,7 +104,7 @@ pub(crate) fn dispatch_with<P: Personality>(
 /// Answer one system call as a program's is answered: through the entry the
 /// core holds (`crate::trap::system_call`), which is what the boot
 /// self-checks call so that they go the way a program's call goes.
-pub(crate) fn dispatch(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
+pub fn dispatch(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     crate::trap::system_call(args, regs)
 }
 
@@ -266,12 +154,12 @@ static UNANSWERED_LINES: AtomicU32 = AtomicU32::new(0);
 /// to 600 with `ENOSYS` on purpose. A bound rather than a switch, because a
 /// program that retries a refused call forever needs reporting once, not a
 /// log of it.
-pub(crate) fn report_unanswered(lines: u32) {
+pub fn report_unanswered(lines: u32) {
     UNANSWERED_LINES.store(lines, Ordering::Relaxed);
 }
 
 /// One `ENOSYS`, reported if [`report_unanswered`] left room for it.
-pub(crate) fn unanswered(call: Option<Syscall>, number: usize) {
+pub fn unanswered(call: Option<Syscall>, number: usize) {
     let room = UNANSWERED_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
         left.checked_sub(1)
     });
@@ -293,7 +181,7 @@ pub(crate) fn unanswered(call: Option<Syscall>, number: usize) {
 /// way in, the decoding of the number and its Spectre clamp, and hands the
 /// decoded call on through this trait, rather than naming the personality's
 /// modules (`docs/certification/FINDINGS.md`, F-09).
-pub(crate) trait Personality {
+pub trait Personality {
     /// Answer `call`, which the item decoded from `args`; `regs` as
     /// [`dispatch_with`] has them.
     fn answer(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome;

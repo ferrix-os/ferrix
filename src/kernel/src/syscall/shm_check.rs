@@ -24,17 +24,17 @@ use crate::syscall::shm::{self, cmd};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls answered as Linux answers them.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Of them, refusals with Linux's error.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// Segments a job made before the per-job bound (at the check's bound)
     /// refused one, while a sibling made one.
-    pub(crate) per_job: usize,
+    pub per_job: usize,
     /// Pages a job reserved before the per-job page bound (at the check's
     /// bound) refused one more segment, while a sibling made one.
-    pub(crate) per_job_pages: u64,
+    pub per_job_pages: u64,
 }
 
 /// The per-job bounds the check fills to, standing in for
@@ -167,7 +167,7 @@ fn expect<T: PartialEq + Copy + core::fmt::Debug>(
 /// Which property failed.
 ///
 /// Verifies: H.QUOTA.7
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let before = shm::segments_in_use();
     let mut report = Report::default();
     keys(&mut report)?;

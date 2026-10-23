@@ -30,7 +30,7 @@ use crate::signal_frame::{BadFrame, FrameBytes, FrameRequest, Restored, SIGINFO_
 use crate::user::space::AddressSpace;
 
 /// No red zone in the AAPCS.
-pub(crate) const SIGNAL_RED_ZONE: u64 = 0;
+pub const SIGNAL_RED_ZONE: u64 = 0;
 
 /// Bytes in `struct ucontext`.
 const UCONTEXT_BYTES: usize = 744;
@@ -88,7 +88,7 @@ const CPSR_RESTORABLE: u32 = 0xF800_0000 | CPSR_IT | 0x000F_0000 | CPSR_THUMB;
 /// A program's registers as the way back to USR mode will load them: the trap
 /// frame, and the banked stack pointer and link register.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct UserContext {
+pub struct UserContext {
     /// Everything the trap path saved.
     frame: TrapFrame,
     /// USR mode's stack pointer.
@@ -100,7 +100,7 @@ pub(crate) struct UserContext {
 impl UserContext {
     /// The registers a trap from USR mode saved, with the banked two read from
     /// the processor.
-    pub(crate) fn from_trap(frame: &TrapFrame) -> UserContext {
+    pub fn from_trap(frame: &TrapFrame) -> UserContext {
         let (sp, lr) = switch::user_banked();
         UserContext {
             frame: *frame,
@@ -117,7 +117,7 @@ impl UserContext {
     }
 
     /// The program's stack pointer.
-    pub(crate) fn stack_pointer(&self) -> u64 {
+    pub fn stack_pointer(&self) -> u64 {
         u64::from(self.sp)
     }
 
@@ -125,14 +125,14 @@ impl UserContext {
     /// a system call left there, which the restart logic inspects for a
     /// kernel-internal restart code. Sign-extended from 32 bits, so `-512`
     /// reads as `-512` and not as a large positive.
-    pub(crate) fn syscall_result(&self) -> isize {
+    pub fn syscall_result(&self) -> isize {
         self.frame.r[0] as i32 as isize
     }
 
     /// Overwrite the return register (`r0`) with `value`: how the restart
     /// logic turns a restart code into `EINTR` for a call that will not be
     /// restarted.
-    pub(crate) fn set_syscall_result(&mut self, value: isize) {
+    pub fn set_syscall_result(&mut self, value: isize) {
         self.frame.r[0] = value as u32;
     }
 
@@ -142,7 +142,7 @@ impl UserContext {
     /// argument and the result, so it is restored to `orig_arg0`. `r7`, the
     /// number, was never clobbered, so only a `restart_block` resume touches
     /// it -- to point the call at `restart_syscall`.
-    pub(crate) fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
+    pub fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
         let _ = orig_nr;
         self.frame.r[0] = orig_arg0 as u32;
         if restart_block {
@@ -230,7 +230,7 @@ fn write_retcode(frame: &mut FrameBytes, uc: usize, rt: bool) -> Result<(), BadF
 /// `sigframe` otherwise -- and point `context` at the handler, in Thumb state
 /// if its address says so: `r0` the signal, and for the first `r1` the
 /// `siginfo` and `r2` the `ucontext`; `lr` the restorer.
-pub(crate) fn setup_signal_frame(
+pub fn setup_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     request: &FrameRequest,
@@ -293,6 +293,10 @@ fn write_registers(
 
 /// Write the VFP record at `at`, if this core has a VFP; the zero word that
 /// ends the record list is already there either way.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 fn write_vfp(frame: &mut FrameBytes, at: usize) -> Result<(), BadFrame> {
     if cpu::user_fpu_doubles() == 0 {
         return Ok(());
@@ -318,7 +322,7 @@ fn write_vfp(frame: &mut FrameBytes, at: usize) -> Result<(), BadFrame> {
 /// has, and on a core with a VFP a record without its magic and size. The
 /// status register keeps only what [`CPSR_RESTORABLE`] allows and gets USR
 /// mode's, so a frame cannot hand a program a privileged mode.
-pub(crate) fn restore_signal_frame(
+pub fn restore_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     rt: bool,

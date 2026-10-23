@@ -136,7 +136,7 @@ pub(crate) fn restore_realtime_offset(offset: i64) {
 /// Start `CLOCK_REALTIME` at the time firmware's clock gave the loader, and
 /// return it in whole seconds; `None`, leaving the clock at the epoch, when
 /// firmware had no clock.
-pub(crate) fn set_boot_time(info: &ferrix_bootinfo::BootInfo) -> Option<u64> {
+pub fn set_boot_time(info: &ferrix_bootinfo::BootInfo) -> Option<u64> {
     if info.firmware_flags & ferrix_bootinfo::FIRMWARE_TIME == 0 {
         return None;
     }

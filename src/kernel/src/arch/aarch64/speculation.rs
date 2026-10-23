@@ -477,7 +477,7 @@ fn kind_of(logical: usize) -> Option<(u64, Defences)> {
 /// designed the core and which part it is, for `/proc/cpuinfo`. `None` for a
 /// processor that has not recorded, and in a kernel built without its
 /// side-channel defences, which records nothing.
-pub(crate) fn midr_of(logical: usize) -> Option<u32> {
+pub fn midr_of(logical: usize) -> Option<u32> {
     let seen = Seen::unpack(SEEN.get(logical)?.load(Ordering::Acquire))?;
     u32::try_from(seen.core.midr).ok()
 }

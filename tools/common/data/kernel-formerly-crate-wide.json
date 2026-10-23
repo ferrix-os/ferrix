@@ -1,0 +1,2203 @@
+{
+  "//": [
+    "Core and item declarations that were pub(crate) before the kernel split and are pub",
+    "since only because a check raised above their crate names them (ledger lines 1531 C1,",
+    "1795 S3.2b): load product code could name each before the split and can now, so none",
+    "is newly exposed; they are 1531 C1's debt, visible here rather than marked one by one.",
+    "Generated once from the split's visibility log (the S3 redo's raise-log.jsonl",
+    "of 2026-10-23, kept with the landing's evidence). kernel-interface.py --check fails on a pub declaration used above only by",
+    "checks that is neither CHECKS-ONLY nor listed, and on an entry that is no longer pub,",
+    "is used by a higher crate's product code now (a change to the interface), is used by",
+    "no check, or was narrower than pub(crate). The list may shrink and never grow."
+  ],
+  "entries": [
+    {
+      "item": "arch/aarch64/console.rs: transmit_buffer (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: TrapFrame (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_ARGUMENT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_BOOTSTRAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_COW_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_DETHREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_EXEC_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_EXITS_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_FAULT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_FORK_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_GETUID_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_HANDOFF_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_INTO_CGROUP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_KERNEL_TIME_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_MPROTECT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_NAMESPACE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_NATIVE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_OOM_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_RMAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_SHARED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_SIGNAL_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_SPIN_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_STEP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_STEP_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_STOPPED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_SYSLOG_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_TEST_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_TEST_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_THREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_VDSO_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: USER_XSTATE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: breakpoint (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: interrupts_enabled (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: ring3_reads_counter (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: syscall_rollback_value (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: take_console_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: wait_for_interrupt (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/mod.rs: wait_for_work (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/signal.rs: UserContext::from_trap (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/trap.rs: TrapFrame (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/trap.rs: TrapFrame::elr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/trap.rs: TrapFrame::esr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/trap.rs: TrapFrame::spsr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/aarch64/trap.rs: breakpoint (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/console.rs: transmit_buffer (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/cpu.rs: user_fpu_doubles (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: TrapFrame (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_ARGUMENT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_BOOTSTRAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_COW_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_DETHREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_EXEC_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_EXITS_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_FAULT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_FORK_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_GETUID_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_HANDOFF_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_INTO_CGROUP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_KERNEL_TIME_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_MPROTECT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_NAMESPACE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_NATIVE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_OOM_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_RMAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_SHARED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_SIGNAL_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_SPIN_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_STEP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_STEP_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_STOPPED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_SYSLOG_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_TEST_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_TEST_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_THREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_VDSO_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: USER_XSTATE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: breakpoint (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: interrupts_enabled (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: ring3_reads_counter (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: syscall_rollback_value (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: take_console_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: wait_for_interrupt (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/mod.rs: wait_for_work (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/signal.rs: UserContext::from_trap (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/trap.rs: TrapFrame (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/trap.rs: TrapFrame::cpsr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/trap.rs: TrapFrame::fsr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/trap.rs: TrapFrame::lr (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/armv7a/trap.rs: breakpoint (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: CheckHook (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: TrapFrame (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_ARGUMENT_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_BOOTSTRAP_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_COW_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_DETHREAD_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_EXEC_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_EXITS_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_FAULT_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_FORK_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_GETUID_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_HANDOFF_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_INTO_CGROUP_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_KERNEL_TIME_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_MPROTECT_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_NAMESPACE_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_NATIVE_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_OOM_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_RMAP_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_SHARED_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_SIGNAL_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_SPIN_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_STEP_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_STEP_STATUS (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_STOPPED_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_SYSLOG_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_TEST_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_TEST_STATUS (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_THREAD_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_VDSO_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: USER_XSTATE_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: arm_forget_hook (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: arm_leave_hook (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: barrier_decisions_on (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: breakpoint (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: check_boot_options (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: check_boot_options (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: check_hwp_processors (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: check_hwp_processors (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: check_speculation (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: console (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: disarm_forget_hook (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: disarm_leave_hook (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: forget_root (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: interrupts_enabled (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: last_domain_on (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: refill_wanted_in_domain (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: refills_in_domain_on (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: ring3_reads_counter (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: switch_barriers (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: switch_barriers_on (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: syscall_rollback_value (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: take_console_byte (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: user_combining (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: user_combining (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: wait_for_interrupt (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: wait_for_work (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: write_combining_processors (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/mod.rs: write_combining_processors (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: CheckHook (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: CheckHook::armed_by (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: arm_forget_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: arm_leave_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: barrier_decisions_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: disarm_forget_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: disarm_leave_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: forget_root (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: last_domain_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: refill_wanted_in_domain (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: refills_in_domain_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: switch_barriers (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation.rs: switch_barriers_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation_check.rs: Report::barriers (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation_check.rs: Report::boot (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation_check.rs: Report::differing (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation_check.rs: Report::hardened (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/speculation_check.rs: check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/apic.rs: send_nmi_to (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/apic.rs: send_nmi_to_self (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/clock.rs: counter_is_tsc (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/console.rs: transmit_buffer (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: CR0_NE (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: CR4_FSGSBASE (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: XSTATE_AVX (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: XSTATE_PKRU (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: XSTATE_X87 (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: XSTATE_X87_SSE (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: extended_state_components (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: forbid_user_base_writes (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: has_fsgsbase (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: permit_user_base_writes_for_check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: read_cr0 (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: read_cr4 (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: reset_components (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: write_breakpoint_address (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: write_dr7 (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu.rs: xinuse_readable (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/cpu/check.rs: check_hwp_processors (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/framebuffer.rs: user_combining (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/framebuffer.rs: window_flush (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/framebuffer.rs: window_lines (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/framebuffer.rs: window_pat (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/framebuffer/check.rs: check_framebuffer_window (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/gdt.rs: USER_DATA (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: BASE_WRITES_FORBIDDEN (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: TrapFrame (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_ARGUMENT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_BOOTSTRAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_COW_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_DETHREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_EXEC_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_EXITS_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_FAULT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_FORK_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_GETUID_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_HANDOFF_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_INTO_CGROUP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_KERNEL_TIME_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_MPROTECT_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_NAMESPACE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_NATIVE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_OOM_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_RMAP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_SHARED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_SIGNAL_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_SPIN_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_STEP_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_STEP_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_STOPPED_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_SYSLOG_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_TEST_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_TEST_STATUS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_THREAD_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_VDSO_PROGRAM (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: USER_XSTATE_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: breakpoint (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: check_boot_options (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: check_hwp_processors (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: interrupts_enabled (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: pat_at_entry (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: ring3_reads_counter (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: syscall_rollback_value (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: take_console_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: user_combining (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: wait_for_interrupt (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: wait_for_work (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/mod.rs: write_combining_processors (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/signal.rs: UserContext::from_trap (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/switch.rs: fs_gs_skips (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/switch.rs: selector_skips (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/switch.rs: ss_reloads (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/switch.rs: x87_resets (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/syscall.rs: program_gs_base (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/syscall/check.rs: run_decode (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/trap.rs: TrapFrame (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/trap.rs: breakpoint (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "arch/x86_64/vdso.rs: USER_VDSO_PROGRAM (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: DEVICE_LIMIT (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: DEVICE_LIMIT_SET (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: Event (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: NO_UID (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: read_through_now (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit.rs: saturated (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit/check.rs: Booted (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "audit/check.rs: booted (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "backtrace.rs: image_start (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "boot_checks.rs: COMPILED_IN (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "boot_checks.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "boot_checks.rs: skip (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "claim.rs: Claims::wait_within (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console.rs: recent (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/input.rs: arm_check_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/input.rs: check_byte_taken (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/input.rs: disarm_check_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/input.rs: take_check_byte (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/log_check.rs: Report::raced (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/log_check.rs: Report::read_racing (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/log_check.rs: Report::whole_processors (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/log_check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/output.rs: Checked::by_writer (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/output.rs: Failure (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/output.rs: Failure::falls_back (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/output.rs: check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "console/output.rs: fall_back_to_polling (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: Aperture::cacheable (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: Aperture::whole_pages (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: DeviceNode::bind_board (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: DeviceNode::vector_count (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: FORCED_INTEL_GPU (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: FORCED_UNTRANSLATED (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: Failure (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: Register (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device.rs: is_intel_gpu (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device/check.rs: HELD_OFF (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "device/check.rs: check_held_off (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "discovery/devmgr.rs: driver_ending (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "discovery/smbios_check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "early.rs: EarlyMemory::read_physical_byte (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "fallible.rs: inject (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "fallible.rs: inject_once (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "fallible.rs: stop_injecting (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "fastpath.rs: report (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "init.rs: AUDIT_RIGHTS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "init.rs: bootstrap_channel (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "init_check.rs: CheckReport::cases (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "init_check.rs: check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: CHECK_VECTOR (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Cause (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Domain::pin_budget (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Domain::pinned_pages (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Domain::untranslated (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Fault::cause (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: IdentityDomain (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Invalidations (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Pinned (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: Wait (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: check_gate (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: console_vectors (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: frames_outside_allocator (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: identity_regions (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: invalidations (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: register_invalidations_pending (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: route (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu.rs: stray_deliveries (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/gate.rs: waits_with_interrupts_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: CHECK_VECTOR (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: LiveLine::loop_back (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: any_remapping (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: console_vectors (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: live_line (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: route (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/remapping.rs: stray_deliveries (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Cleaning (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Cleaning::uncleaned (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Cleaning::units (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Invalidations (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Invalidations::completion_errors (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Invalidations::interrupt_entry (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Invalidations::iotlb (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Invalidations::units_failed (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Unit (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Unit::attach_identity (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Unit::remapping (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: Unit::translating (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: cleaning (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "iommu/vtd.rs: invalidations (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "irq.rs: IrqError (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: DEMAND_WINDOW (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: FrameWindow (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: MemoryError (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: bypass_heap_in_sections (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: claim_frame (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: direct_map_ram (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: frame_references (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: held_frames (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: print_frame_delta (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: refuse_reserve_fills (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: reserve_counts (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: share_frame (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: translate (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm.rs: translate_in (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/check.rs: hole_in_ram (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/check.rs: memory_check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/check.rs: past_ram (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/reserve.rs: bypass_heap_in_sections (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/reserve.rs: refuse_reserve_fills (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "mm/reserve.rs: reserve_counts (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/channel.rs: Endpoint::reader_waiting (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/channel/check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: Interrupt::coalesces (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: Interrupt::reads_masked (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: Interrupt::storms (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: STORM_BOUND (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: on_interrupt (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/interrupt.rs: take_delivery (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/io_mapping.rs: count_one_unprogrammed_for_check (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/job.rs: Job::is_killed (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/job.rs: Job::new_child (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/job.rs: Job::new_child_domain (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/mod.rs: HANDLE_LIMIT (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/mod.rs: IN_PLACE_DEPTH (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/mod.rs: abandoned (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/mod.rs: as_if_draining_elsewhere (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: Answer (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: fault (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: is_charge_refusal (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: kills (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/oom.rs: out_of_memory (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: Counts (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: Counts::quarantined (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: DEFAULT_PIN_BUDGET_PAGES (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: INTEL_GPU_CAP_PAGES (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: bounded (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: give_intel_gpu_budget (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: intel_gpu_budget (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/pin.rs: intel_gpu_budget_for (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/port.rs: PORT_CAPACITY (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/process.rs: Exit::for_check (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/process.rs: Process::move_to (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/process.rs: live (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: DEFAULT_WEIGHT (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: Quota (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: bandwidth_in_use (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: charge (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: check_pending_charge (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: contributed (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: effective (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: effective_with (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: live_slots (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: load (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "object/quota.rs: uncharge (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: CONSOLE_OUTPUT (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: INIT_CALLS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: INIT_INPUTS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: LOG_CONTROL (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: NETLINK (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: NET_RING (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: SERVICES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: SMBIOS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: SPECULATION_DEFENCES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE10_CHARDEV (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE10_DISPLAY_COPIES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE10_DISPLAY_MODES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE10_IOMMU (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE10_RING (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE11_MOUNT (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_CGROUPFS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_MOUNT_NAMESPACES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_NETWORK_NAMESPACES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_PID_NAMESPACES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_PROC_ACCESS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_SECCOMP (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_SECCOMP_FILTERS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_SMALL_NAMESPACES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_USER_DISPATCH (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE13_USER_NAMESPACES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE2_ALLOCATORS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE3_TRAPS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE5_TASK_VIEW (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE6_REVERSE_MAP (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE6_USER_MEMORY (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE7_SEMAPHORES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE7_SHARED_MEMORY (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE7_SYSCALLS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_BINDS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_EPOLL (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_EVENTFD (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_MADVISE (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_MEMFD (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_MOUNT_FLAGS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_PATH_CALLS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_PROGRAM_FILES (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_SIGNALFD (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE8_TIMERFD (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_ALLOCATION (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_KMEM (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_OBJECTS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_QUOTAS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: STAGE9_REFUSALS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "panic/catalog.rs: SYSFS (static)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/check.rs: before_start (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/direct.rs: uncount (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/inspect_check.rs: Report::matched (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/inspect_check.rs: Report::slide (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/inspect_check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: CpuReport::worst_overrun (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: REAPER_PATIENCE_NANOS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: ask_for_a_decision_here (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: bandwidth_walks (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: check_before_start (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: cpu_report (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: decision_pending_here (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: in_call_here (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: pending_group_here (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: preempt_disable (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: preempt_enable (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: preemption_held (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: reap (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: spawn_in_group (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: spawn_on (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: spawn_on_in (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: spawn_user (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: summary (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/mod.rs: wait_until_reaper_quiet (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/preempt.rs: preempt_disable (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/preempt.rs: preempt_enable (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::base_weight (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::cpus_run_on (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::entity_state (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::group_word (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::is_queued (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::preemptions (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/task.rs: Task::user_state (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: Count (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: Counted (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: NAMES (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: STAMPS (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: Stamp (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: Traced (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: Trip (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: arm (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: counted (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: disarm (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: done (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/trip.rs: issued (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/vtime.rs: counting (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/work.rs: HOOK_LAST_LOOK (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/work.rs: arm (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/work.rs: disarm (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/work.rs: set_auditing (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "sched/work/check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "smp.rs: ScopedShootdowns (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "smp.rs: scoped_shootdowns (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "smp.rs: shootdowns (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/mod.rs: Outcome (re-export)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/mod.rs: dispatch (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/mod.rs: report_unanswered (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: Parked (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: dispatch (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: faulted_rounds (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: image_bytes (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: park_for_reply (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: reply_words (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: sent_bytes (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "syscall/native.rs: words_of (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "timer.rs: after (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "timer.rs: after_from (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "timer.rs: every (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "timer.rs: stop (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "timer.rs: writes_here (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: MAX_ERRNO (const)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: SyscallFilter (type)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: ask (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: filter_system_call (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: register (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap.rs: user_interrupt_count (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "trap/check.rs: outcomes (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/cache.rs: Totals (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/check.rs: Report::swapped (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/check.rs: Report::walked (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/check.rs: run (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/memory_type.rs: claims (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/space.rs: AddressSpace::region_count (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/space.rs: AddressSpace::uninstall (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/space.rs: AddressSpace::with_page (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/space.rs: coherent_touches (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: ReclaimHook (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: ReclaimHook::armed_by (field)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: Vmo::mapper_count (method)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: arm_reclaim_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "user/vmo.rs: disarm_reclaim_hook (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: Stack (struct)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: VmapError (enum)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: allocate_stack (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: device_windows (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: free_stack (fn)",
+      "before": "pub(crate)"
+    },
+    {
+      "item": "vmap.rs: free_stacks (fn)",
+      "before": "pub(crate)"
+    }
+  ]
+}

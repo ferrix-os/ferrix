@@ -81,7 +81,7 @@ pub(crate) fn walk(start: u64, mut report: impl FnMut(u64)) -> usize {
 /// Where the running image begins: its link address, or wherever the loader
 /// moved it, since the code computes this as it computes every other address
 /// in the image.
-pub(crate) fn image_start() -> u64 {
+pub fn image_start() -> u64 {
     u64::try_from((&raw const __kernel_start).addr()).unwrap_or(u64::MAX)
 }
 

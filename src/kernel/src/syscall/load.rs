@@ -208,7 +208,7 @@ pub(crate) struct Loaded {
 
 /// Why an image could not be loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoadError {
+pub enum LoadError {
     /// `src/lib/platform/elf` refused it.
     Malformed(ElfError),
     /// Built for another architecture, or, for a dynamic linker, for another

@@ -27,7 +27,7 @@ use super::gate::{self, Gate};
 /// The first property that did not hold, as a sentence.
 ///
 /// Verifies: L.iommu.30, L.iommu.31
-pub(crate) fn run() -> Result<(), &'static str> {
+pub fn run() -> Result<(), &'static str> {
     // A deadline already past: one last look, and its answer.
     if gate::poll(|| false, 0) {
         return Err("a unit wait past its deadline said the unit had answered");
@@ -69,9 +69,11 @@ pub(crate) fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs; home: super
 /// VT-d units on which [`check_firmware_left_on`] left the queue on as
 /// firmware would and saw `open`'s path turn it off.
-pub(super) static FIRMWARE_QUEUES_STOPPED: core::sync::atomic::AtomicU64 =
+#[doc(hidden)]
+pub static FIRMWARE_QUEUES_STOPPED: core::sync::atomic::AtomicU64 =
     core::sync::atomic::AtomicU64::new(0);
 
 /// Stage 10, at bring-up, between a VT-d unit's `open` and its `enable`,
@@ -122,7 +124,7 @@ pub(crate) fn check_fault_events_masked(unit: &super::vtd::Unit) {
 /// Halts rather than returning, as every other stage's check does.
 ///
 /// Verifies: H.DMA.6
-pub(crate) fn check_dma_faults() -> u64 {
+pub fn check_dma_faults() -> u64 {
     let audit = super::audit_faults();
     println!(
         "  iommu    {} DMA faults recorded that no check provoked, {} of them unit events other \
@@ -220,6 +222,8 @@ pub(crate) fn require_masked_byte_served() {
     MASKED_BYTE_SERVED.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs; home: super
 /// Whether [`require_masked_byte_served`] found its byte read.
-pub(super) static MASKED_BYTE_SERVED: core::sync::atomic::AtomicBool =
+#[doc(hidden)]
+pub static MASKED_BYTE_SERVED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);

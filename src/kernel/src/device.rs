@@ -94,9 +94,23 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use ferrix_bootinfo::{BootView, MemKind, PAGE_SIZE};
 use ferrix_fdt::{GicInterrupt, Trigger as TreeTrigger};
 use ferrix_native_abi::types::{
-    APERTURE_BAR_64, APERTURE_NOT_BAR, APERTURE_PREFETCHABLE, APERTURE_WHOLE_PAGES, ApertureInfo,
-    DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceBlock, DeviceInfo, PCI_CLASS_XHCI,
-    TREE_FIRMWARE_FB, TREE_GS201_DWC3, TREE_STM32_USBH, TREE_X86_POWER, USB_INPUT_FUNCTIONS,
+    APERTURE_BAR_64,
+    APERTURE_NOT_BAR,
+    APERTURE_PREFETCHABLE,
+    APERTURE_WHOLE_PAGES,
+    ApertureInfo,
+    // CHECKS-ONLY-METHODS: home: self
+    DEVICE_NOT_PCI,
+    DEVICE_TREE_BLOCKS,
+    DEVICE_VIRTIO_PCI,
+    DeviceBlock,
+    DeviceInfo,
+    PCI_CLASS_XHCI,
+    TREE_FIRMWARE_FB,
+    TREE_GS201_DWC3,
+    TREE_STM32_USBH,
+    TREE_X86_POWER,
+    USB_INPUT_FUNCTIONS,
 };
 use ferrix_pci::Address;
 use ferrix_pci::ConfigSpace as _;
@@ -121,9 +135,7 @@ use crate::mmio::Mmio;
 use crate::sync::SpinLock;
 use crate::{arch, iommu, irq, vmap};
 
-pub(crate) mod check;
-#[cfg(ferrix_linux_abi = "on")]
-pub(crate) mod config_check;
+pub mod check;
 
 /// GIC interrupt identifiers below this are software-generated or private to
 /// one core, and neither is a device's line.
@@ -137,7 +149,7 @@ const FIRST_SHARED_INTERRUPT: u32 = 32;
 /// a neighbouring device's registers. [`Aperture::whole_pages`] says whether
 /// a page mapping of it is exact.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Aperture {
+pub struct Aperture {
     /// Physical address of the first byte.
     phys: u64,
     /// Bytes long; never zero, and never past the end of the address space.
@@ -173,23 +185,27 @@ enum Source {
 
 impl Aperture {
     /// Physical address of the first byte.
-    pub(crate) const fn phys(self) -> u64 {
+    pub const fn phys(self) -> u64 {
         self.phys
     }
 
     /// Length in bytes.
-    pub(crate) const fn len(self) -> u64 {
+    #[allow(
+        clippy::len_without_is_empty,
+        reason = "a count, never asked whether it is empty"
+    )]
+    pub const fn len(self) -> u64 {
         self.len
     }
 
     /// Whether the range may be mapped cacheable.
-    pub(crate) const fn cacheable(self) -> bool {
+    pub const fn cacheable(self) -> bool {
         self.cacheable
     }
 
     /// Whether the aperture starts on a page boundary and is a whole number
     /// of pages, so a page mapping covers it and nothing else.
-    pub(crate) const fn whole_pages(self) -> bool {
+    pub const fn whole_pages(self) -> bool {
         self.phys.is_multiple_of(PAGE_SIZE) && self.len.is_multiple_of(PAGE_SIZE)
     }
 
@@ -206,7 +222,7 @@ impl Aperture {
 
     /// The aperture as `device_aperture` writes it: the address and length
     /// whole, the BAR it came from and where in it, and its flags.
-    pub(crate) fn info(self) -> ApertureInfo {
+    pub fn info(self) -> ApertureInfo {
         let (bar, offset, wide) = match self.source {
             Source::Tree | Source::Framebuffer => (APERTURE_NOT_BAR, 0, false),
             Source::Bar { slot, offset, wide } => (slot, offset, wide),
@@ -285,7 +301,7 @@ enum Masking {
 ///
 /// Constructible only in this module.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Vector {
+pub struct Vector {
     /// The number `irq::register` takes: a GIC identifier on the Arm
     /// machines, a vector on x86-64.
     number: u32,
@@ -297,7 +313,7 @@ pub(crate) struct Vector {
 
 impl Vector {
     /// The number `irq::register` takes.
-    pub(crate) const fn number(self) -> u32 {
+    pub const fn number(self) -> u32 {
         self.number
     }
 
@@ -377,7 +393,7 @@ impl Vector {
 
 /// Where a device node came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Location {
+pub enum Location {
     /// A PCI function.
     Pci(Address),
     /// A `virtio,mmio` device tree node, by the address of its registers.
@@ -399,7 +415,7 @@ impl fmt::Display for Location {
 
 /// Physical memory no aperture may overlap, as `start..end` ranges.
 #[derive(Debug, Default)]
-pub(crate) struct Reserved {
+pub struct Reserved {
     /// The ranges, unsorted: there are a few dozen, and they are searched
     /// once per aperture at boot.
     ranges: Vec<(u64, u64)>,
@@ -421,7 +437,7 @@ impl Reserved {
     /// records are the controllers the kernel drives — the local and I/O
     /// APICs, the HPET, the GIC — and not the buses about to be walked, which
     /// `reads` names whole.
-    pub(crate) fn of(view: &BootView<'_>, reads: &[&[(u64, u64)]]) -> Self {
+    pub fn of(view: &BootView<'_>, reads: &[&[(u64, u64)]]) -> Self {
         let mut reserved = Reserved::default();
         let framebuffer = view.raw().framebuffer;
         if framebuffer.is_present() && framebuffer.size > 0 {
@@ -467,7 +483,7 @@ impl Reserved {
     }
 
     /// Whether `len` bytes at `start` overlap anything reserved.
-    pub(crate) fn overlaps(&self, start: u64, len: u64) -> bool {
+    pub fn overlaps(&self, start: u64, len: u64) -> bool {
         let end = start.saturating_add(len);
         self.ranges
             .iter()
@@ -539,6 +555,7 @@ const fn framebuffer_span(size: u64) -> u64 {
     size.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE)
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// A PCI function's MSI capability, for one that has no MSI-X table, and
 /// the one vector minted from it.
 ///
@@ -558,11 +575,12 @@ const fn framebuffer_span(size: u64) -> u64 {
 /// Every write goes through the node's configuration lock
 /// ([`DeviceNode::config_writes`]), which bus mastering's writes and a
 /// driver's take too.
-struct MsiFunction {
+#[doc(hidden)]
+pub struct MsiFunction {
     /// The function's requester ID, which its message writes carry.
     requester: u32,
     /// The capability, decoded.
-    msi: Msi,
+    pub msi: Msi,
     /// The vector minted, once one is.
     minted: IrqSpinLock<Option<u32>, arch::Irq>,
 }
@@ -611,6 +629,10 @@ impl MsiFunction {
     }
 
     /// Whether the command register reads back with `INTx` off.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn intx_off(node: &DeviceNode) -> Option<bool> {
         let config = node.mapped_config()?;
         Some(config.read16(COMMAND) & COMMAND_INTERRUPT_DISABLE != 0)
@@ -624,6 +646,10 @@ impl MsiFunction {
     /// whose message address a 32-bit capability cannot hold is refused
     /// before a vector is allocated, since an allocated vector is never
     /// given back.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn mint(&self, node: &DeviceNode) -> Result<Vector, &'static str> {
         let vector = |number| Vector {
             number,
@@ -678,23 +704,25 @@ impl MsiFunction {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// What the kernel has made a function's configuration space hold, and the
 /// refusals it has printed: everything under the node's configuration lock.
 ///
 /// [`DeviceNode::verify_config`] reads the registers back against the first
 /// five, so each is updated in the same hold as the write that makes it so.
 #[derive(Debug)]
-struct ConfigState {
+#[doc(hidden)]
+pub struct ConfigState {
     /// One bit per dword of the 4 KiB at which a driver's write has been
     /// refused and the refusal printed, so each is printed once. 1,024 bits,
     /// made with the node at stage 10.
     refused: [u64; 16],
     /// Whether memory decoding is on: as found, and on from the first time
     /// bus mastering is.
-    memory: bool,
+    pub memory: bool,
     /// Whether bus mastering is on: as found, then as `enable_dma` and
     /// `disable_dma` last wrote it.
-    bus_master: bool,
+    pub bus_master: bool,
     /// Whether `INTx` is off: as found, and on from an MSI mint.
     intx_off: bool,
     /// The MSI message programmed, address and data, once one is.
@@ -729,12 +757,14 @@ impl ConfigState {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// One function's configuration space, mapped, for reading only: what a
 /// driver's `device_config_read` and the checks read through. A read outside
 /// the function's space, or not aligned to its width, answers all ones, as
 /// hardware answers for a register that is not there.
-#[derive(Clone, Copy)]
-struct MappedConfig {
+#[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
+pub struct MappedConfig {
     /// The mapping.
     registers: Mmio,
     /// Bytes of it that are the function's: 4 KiB under ECAM, 256 under CAM.
@@ -764,7 +794,7 @@ impl MappedConfig {
     }
 
     /// The 16-bit register at `offset`.
-    fn read16(self, offset: u16) -> u16 {
+    pub fn read16(self, offset: u16) -> u16 {
         self.read(offset, 2) as u16
     }
 
@@ -784,17 +814,24 @@ impl MappedConfig {
 /// writes change. The lock is a leaf and masks interrupts: an MSI vector is
 /// masked from interrupt handlers. Nothing is mapped, allocated, waited for
 /// or locked while it is held (MEMORY-AND-TIMING §2.2h).
-struct ConfigWrites<'a> {
+#[allow(
+    missing_debug_implementations,
+    reason = "its fields hold a lock guard and a configuration window, neither Debug"
+)]
+// CHECKS-ONLY: device/config_check.rs
+#[doc(hidden)]
+pub struct ConfigWrites<'a> {
     /// The function's space.
     space: MappedConfig,
     /// The lock, and what it guards.
-    state: IrqSpinLockGuard<'a, ConfigState, arch::Irq>,
+    pub state: IrqSpinLockGuard<'a, ConfigState, arch::Irq>,
 }
 
 impl ConfigWrites<'_> {
     /// The function every access stands for, which the accessor ignores:
     /// the mapping is one function's.
-    const FUNCTION: Address = match Address::new(0, 0, 0, 0) {
+    #[doc(hidden)]
+    pub const FUNCTION: Address = match Address::new(0, 0, 0, 0) {
         Some(address) => address,
         None => panic!("function 0:0.0 is in range"),
     };
@@ -847,13 +884,15 @@ impl ferrix_pci::ConfigSpace for ConfigWrites<'_> {
 /// An MSI-X message: its address and data.
 type Message = (u64, u32);
 
+// CHECKS-ONLY: device/config_check.rs
 /// A PCI function's MSI-X table, and the vectors minted from it.
-struct MsixTable {
+#[doc(hidden)]
+pub struct MsixTable {
     /// The function's requester ID, which its message writes carry and a
     /// GICv3's ITS translates them by.
     requester: u32,
     /// Offset of the MSI-X capability in it.
-    capability: u16,
+    pub capability: u16,
     /// Physical address of the table's first entry.
     table_phys: u64,
     /// Entries in the table.
@@ -916,6 +955,10 @@ impl MsixTable {
     /// mask clear, through `node`'s mapping of its configuration space and
     /// under its configuration lock. Once per table; every entry stays masked
     /// until its holder unmasks it.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn open(&self, node: &DeviceNode) -> Result<Mmio, &'static str> {
         let len = u64::from(self.table_size) * MSIX_ENTRY_SIZE;
         let table = vmap::map_device(self.table_phys, len)
@@ -1002,28 +1045,28 @@ impl MsixTable {
 /// driver is told in START, so that it need not walk configuration space
 /// through `device_config_read` to find them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RegisterBlock {
+pub struct RegisterBlock {
     /// Physical address of the first page.
-    pub(crate) phys: u64,
+    pub phys: u64,
     /// The block's first byte, from `phys`.
-    pub(crate) offset: u32,
+    pub offset: u32,
     /// Bytes in the block.
-    pub(crate) length: u32,
+    pub length: u32,
 }
 
 /// A virtio PCI transport's blocks, from its vendor capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct VirtioBlocks {
+pub struct VirtioBlocks {
     /// Common configuration.
-    pub(crate) common: RegisterBlock,
+    pub common: RegisterBlock,
     /// The notification area.
-    pub(crate) notify: RegisterBlock,
+    pub notify: RegisterBlock,
     /// Interrupt status.
-    pub(crate) isr: RegisterBlock,
+    pub isr: RegisterBlock,
     /// Device-specific configuration, which some device types do not have.
-    pub(crate) device: Option<RegisterBlock>,
+    pub device: Option<RegisterBlock>,
     /// What a queue's notify offset is multiplied by.
-    pub(crate) notify_multiplier: u32,
+    pub notify_multiplier: u32,
 }
 
 impl VirtioBlocks {
@@ -1062,51 +1105,51 @@ impl VirtioBlocks {
 /// What enumeration read off a PCI function's configuration space and hands
 /// [`DeviceNode::pci`], beyond its BARs.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Seen<'a> {
+pub struct Seen<'a> {
     /// Physical address of the function's configuration space, if the host
     /// window placed it.
-    pub(crate) config_phys: Option<u64>,
+    pub config_phys: Option<u64>,
     /// Its header.
-    pub(crate) identity: &'a Identity,
+    pub identity: &'a Identity,
     /// Its virtio transport, if it has one.
-    pub(crate) transport: Option<&'a Transport>,
+    pub transport: Option<&'a Transport>,
     /// A type 0 header's subsystem vendor and subsystem, or zeros for a
     /// bridge, which has none.
-    pub(crate) subsystem: (u16, u16),
+    pub subsystem: (u16, u16),
     /// A bridge's secondary bus: the bus behind it, whose functions sysfs
     /// shows inside its directory.
-    pub(crate) secondary_bus: Option<u8>,
+    pub secondary_bus: Option<u8>,
     /// A virtio GPU's host-visible window, if it has one.
-    pub(crate) host_visible: Option<&'a SharedMemory>,
+    pub host_visible: Option<&'a SharedMemory>,
     /// The line its `INTx` pin drives, on a machine with no MSI controller:
     /// then its one vector, and its MSI-X table is not offered.
-    pub(crate) intx: Option<GicInterrupt>,
+    pub intx: Option<GicInterrupt>,
     /// Its MSI capability, decoded, if it has one.
-    pub(crate) msi: Option<Msi>,
+    pub msi: Option<Msi>,
     /// Whether enumeration held its MSI-X off -- Enable clear and Function
     /// Mask set, read back so -- because it is in
     /// `ferrix_pci::msix::MSI_PREFERRED` (or is stage 10's check case): its
     /// table and pending-bit pages are then granted as aperture and its MSI
     /// vector offered instead. Set only by `discovery::pci` before the node
     /// is built, never from anything a program supplies.
-    pub(crate) msix_held_off: bool,
+    pub msix_held_off: bool,
     /// What its configuration window starts from.
-    pub(crate) config: &'a ConfigFound,
+    pub config: &'a ConfigFound,
 }
 
 /// What enumeration hands [`DeviceNode::pci`] for a function's
 /// configuration window.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ConfigFound {
+pub struct ConfigFound {
     /// Bytes of configuration space the function has: 4 KiB under ECAM, 256
     /// under CAM.
-    pub(crate) bytes: u16,
+    pub bytes: u16,
     /// Its command register, read after enumeration was done with it: what
     /// [`DeviceNode::verify_config`] holds its bits against until the
     /// kernel writes them.
-    pub(crate) command: u16,
+    pub command: u16,
     /// The bytes its driver may write (`ferrix_pci::window`).
-    pub(crate) writable: Writable,
+    pub writable: Writable,
 }
 
 /// What enumeration read off a PCI function and kept, because whoever starts
@@ -1114,29 +1157,30 @@ pub(crate) struct ConfigFound {
 /// `device_config_read`, which needs `MANAGE`, and whoever starts it holds
 /// the device with less.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PciFunction {
+pub struct PciFunction {
     /// The vendor identifier.
-    pub(crate) vendor: u16,
+    pub vendor: u16,
     /// The device identifier.
-    pub(crate) device: u16,
+    pub device: u16,
     /// The class code: base class in bits 23:16, subclass in 15:8, the
     /// programming interface in 7:0.
-    pub(crate) class: u32,
+    pub class: u32,
     /// The revision identifier.
-    pub(crate) revision: u8,
+    pub revision: u8,
     /// Who built the board, and the board's own identifier: zeros for a
     /// bridge. sysfs shows both, and libdrm reads both to name a card.
-    pub(crate) subsystem_vendor: u16,
-    pub(crate) subsystem: u16,
+    pub subsystem_vendor: u16,
+    /// The board's own identifier, under `subsystem_vendor`.
+    pub subsystem: u16,
     /// For a bridge, the bus directly behind it.
-    pub(crate) secondary_bus: Option<u8>,
+    pub secondary_bus: Option<u8>,
     /// Physical address of the function's configuration space, if the host
     /// window placed it.
-    pub(crate) config_phys: Option<u64>,
+    pub config_phys: Option<u64>,
     /// Its virtio transport, if it has one.
-    pub(crate) virtio: Option<VirtioBlocks>,
+    pub virtio: Option<VirtioBlocks>,
     /// Entries in its MSI-X table; zero without one.
-    pub(crate) msix_table_size: u16,
+    pub msix_table_size: u16,
     /// A virtio GPU's host-visible window, placed: where blob resources are
     /// mapped for programs to reach (`docs/GPU.md` §6.1).
     pub(crate) host_visible: Option<Window>,
@@ -1145,11 +1189,11 @@ pub(crate) struct PciFunction {
 /// A window of device memory in physical addresses: whole pages, clear of
 /// memory the kernel keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Window {
+pub struct Window {
     /// Where its first page is.
-    pub(crate) phys: u64,
+    pub phys: u64,
     /// How many bytes, a whole number of pages.
-    pub(crate) len: u64,
+    pub len: u64,
 }
 
 impl Window {
@@ -1183,15 +1227,15 @@ impl Window {
 
 /// How a device reaches memory, where it is not how a virtio device does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct DmaShape {
+pub struct DmaShape {
     /// Whether a buffer the device reads must be one run of physical
     /// addresses: a scanout engine with one address register and nothing to
     /// translate through.
-    pub(crate) contiguous: bool,
+    pub contiguous: bool,
     /// Whether the device sees what the processors' caches hold. A device
     /// that does not reads memory, so whatever a program wrote for it has to
     /// be cleaned out of the caches first.
-    pub(crate) coherent: bool,
+    pub coherent: bool,
 }
 
 impl DmaShape {
@@ -1206,7 +1250,7 @@ impl DmaShape {
 /// A device a driver can be given, with exactly the apertures and vectors it
 /// has.
 #[derive(Debug)]
-pub(crate) struct DeviceNode {
+pub struct DeviceNode {
     /// Where it was found.
     location: Location,
     /// What its configuration space said, for a PCI function.
@@ -1300,20 +1344,73 @@ pub(crate) struct DeviceNode {
 /// The mode of the firmware's framebuffer, as `device_info` reports it for
 /// its node (`TREE_FIRMWARE_FB`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct FramebufferMode {
+pub struct FramebufferMode {
     /// Visible width in pixels.
-    pub(crate) width: u16,
+    pub width: u16,
     /// Visible height in pixels.
-    pub(crate) height: u16,
+    pub height: u16,
     /// Pixels from one line's start to the next.
-    pub(crate) stride: u32,
+    pub stride: u32,
     /// `FRAMEBUFFER_BGRX` or `FRAMEBUFFER_RGBX`.
-    pub(crate) layout: u16,
+    pub layout: u16,
+}
+
+// The fields of a `DeviceNode` stage 10's configuration-space check reads and
+// sets (`device/config_check.rs`, raised to the load crate by the kernel split):
+// private to everything else, reached by these accessors alone (ledger line
+// 1630, F1).
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's minted BARs, by slot.
+#[doc(hidden)]
+#[must_use]
+pub fn node_bars(node: &DeviceNode) -> &[Option<MintedBar>; 6] {
+    &node.bars
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's MSI capability, if it has one.
+#[doc(hidden)]
+#[must_use]
+pub fn node_msi(node: &DeviceNode) -> Option<&MsiFunction> {
+    node.msi.as_ref()
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's MSI-X table, if it has one.
+#[doc(hidden)]
+#[must_use]
+pub fn node_msix(node: &DeviceNode) -> Option<&MsixTable> {
+    node.msix.as_ref()
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Which bytes of the node's configuration space its driver may write.
+#[doc(hidden)]
+#[must_use]
+pub fn node_writable(node: &DeviceNode) -> &Writable {
+    &node.writable
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Whether the node's function may master the bus, as the kernel last set it.
+#[doc(hidden)]
+#[must_use]
+pub fn node_dma_on(node: &DeviceNode) -> &AtomicBool {
+    &node.dma_on
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Whether the node has refused its driver for breaking its rule.
+#[doc(hidden)]
+#[must_use]
+pub fn node_refused(node: &DeviceNode) -> &AtomicBool {
+    &node.refused
 }
 
 impl DeviceNode {
     /// A node with nothing in it yet.
-    pub(crate) const fn empty(location: Location) -> Self {
+    pub const fn empty(location: Location) -> Self {
         DeviceNode {
             location,
             pci: None,
@@ -1355,7 +1452,7 @@ impl DeviceNode {
     /// (`docs/DISPLAY.md` §2.4), a layout other than four bytes a pixel, a
     /// first pixel off a page boundary, a size that does not hold its lines,
     /// or an aperture [`Reserved`] withholds.
-    pub(crate) fn firmware_framebuffer(
+    pub fn firmware_framebuffer(
         framebuffer: &ferrix_bootinfo::Framebuffer,
         reserved: &Reserved,
     ) -> Result<Self, &'static str> {
@@ -1382,7 +1479,7 @@ impl DeviceNode {
     /// and an interrupt on it are refused (`L.device.53`); its one use is
     /// `power_control_create`. At `Location::Tree(0)`, which no other x86-64
     /// node has: the firmware framebuffer's is at its framebuffer.
-    pub(crate) fn power() -> Self {
+    pub fn power() -> Self {
         let mut node = DeviceNode::empty(Location::Tree(0));
         node.binding = TREE_X86_POWER;
         node
@@ -1431,7 +1528,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// Why not, as for [`DeviceNode::lend_framebuffer_here`], or `hold`'s.
-    pub(crate) fn lend_framebuffer_held(
+    pub fn lend_framebuffer_held(
         &mut self,
         framebuffer: &ferrix_bootinfo::Framebuffer,
         reserved: &Reserved,
@@ -1466,7 +1563,7 @@ impl DeviceNode {
     /// framebuffer, by the node's identity alone: the Intel GPU lent it
     /// (`L.device.48`; the consultant's K4 (3)). What the display core ORs
     /// into its rule beside the firmware framebuffer's own node.
-    pub(crate) fn may_copy_lent(&self) -> bool {
+    pub fn may_copy_lent(&self) -> bool {
         self.intel_gpu() && self.holds_lent_framebuffer()
     }
 }
@@ -1530,7 +1627,7 @@ impl DeviceNode {
     /// Whether anything behind the node reaches memory, so that pinning
     /// pages for it means anything: every device but the firmware
     /// framebuffer's node, which is memory itself, and whose driver copies.
-    pub(crate) const fn reaches_memory(&self) -> bool {
+    pub const fn reaches_memory(&self) -> bool {
         !(matches!(self.location, Location::Tree(_))
             && (self.binding == TREE_FIRMWARE_FB || self.binding == TREE_X86_POWER))
     }
@@ -1559,7 +1656,7 @@ impl DeviceNode {
     /// GPU executes what programs hand it (`docs/INTEL-GPU.md` §4.4 (a)).
     /// Every other node may. Every domain counts as untranslated while a
     /// boot check sets [`FORCED_UNTRANSLATED`].
-    pub(crate) fn may_have_client_nodes(&self) -> bool {
+    pub fn may_have_client_nodes(&self) -> bool {
         if !self.intel_gpu() {
             return true;
         }
@@ -1570,7 +1667,7 @@ impl DeviceNode {
     }
 
     /// The firmware framebuffer node's mode; `None` for any other node.
-    pub(crate) const fn framebuffer_mode(&self) -> Option<FramebufferMode> {
+    pub const fn framebuffer_mode(&self) -> Option<FramebufferMode> {
         self.mode
     }
 
@@ -1592,7 +1689,7 @@ impl DeviceNode {
     /// has no table: MSI-X stays disabled, so the device ignores it (PCIe
     /// 6.0 §7.7.2.2), and its pages are granted with the rest of the BAR.
     /// Its MSI capability's one vector is offered instead.
-    pub(crate) fn pci(
+    pub fn pci(
         address: Address,
         seen: &Seen<'_>,
         regions: &[Region],
@@ -1770,24 +1867,24 @@ impl DeviceNode {
 
     /// A virtio GPU's host-visible window, where the render core maps blob
     /// resources for programs, if the device has one.
-    pub(crate) fn host_visible(&self) -> Option<Window> {
+    pub fn host_visible(&self) -> Option<Window> {
         self.pci.as_ref().and_then(|function| function.host_visible)
     }
 
     /// Where the device was found.
-    pub(crate) const fn location(&self) -> Location {
+    pub const fn location(&self) -> Location {
         self.location
     }
 
     /// Its place in [`devices`]: what sysfs and `devmgr` call it by, since
     /// a device tree node has no PCI address to be told apart by.
-    pub(crate) const fn index(&self) -> usize {
+    pub const fn index(&self) -> usize {
         self.index
     }
 
     /// For a device tree node of a binding the kernel knows, which one
     /// (`TREE_STM32_HDMI` and the rest); zero otherwise.
-    pub(crate) const fn binding(&self) -> u16 {
+    pub const fn binding(&self) -> u16 {
         self.binding
     }
 
@@ -1800,7 +1897,7 @@ impl DeviceNode {
     /// ([`PCI_CLASS_XHCI`]). The class is the function's own claim, and all a
     /// function that lies about it gains is these claims on its own node,
     /// each of which still takes the node's `MANAGE` handle.
-    pub(crate) fn input_functions(&self) -> usize {
+    pub fn input_functions(&self) -> usize {
         match self.location {
             Location::Tree(_) if self.binding == TREE_STM32_USBH => USB_INPUT_FUNCTIONS,
             Location::Pci(_)
@@ -1821,12 +1918,12 @@ impl DeviceNode {
     /// controller, whose serial port streams the boot to the host. The log
     /// holds every program's console output, so this is a capability of the
     /// binding, not of whoever holds a device.
-    pub(crate) const fn reads_log(&self) -> bool {
+    pub const fn reads_log(&self) -> bool {
         matches!(self.location, Location::Tree(_)) && self.binding == TREE_GS201_DWC3
     }
 
     /// How the device reaches memory.
-    pub(crate) const fn dma_shape(&self) -> DmaShape {
+    pub const fn dma_shape(&self) -> DmaShape {
         self.dma
     }
 
@@ -1856,14 +1953,14 @@ impl DeviceNode {
 
     /// Make the node a board's peripheral: `binding` names it, and `dma` is
     /// the memory it may reach.
-    pub(crate) fn bind_board(&mut self, binding: u16, dma: DmaShape) {
+    pub fn bind_board(&mut self, binding: u16, dma: DmaShape) {
         self.binding = binding;
         self.dma = dma;
     }
 
     /// The binding of a device tree node the kernel knows, `None` for any
     /// other device.
-    pub(crate) const fn tree_binding(&self) -> Option<u16> {
+    pub const fn tree_binding(&self) -> Option<u16> {
         match self.location {
             Location::Tree(_) => Some(self.binding),
             _ => None,
@@ -1871,12 +1968,12 @@ impl DeviceNode {
     }
 
     /// What configuration space said, for a PCI function.
-    pub(crate) const fn pci_function(&self) -> Option<&PciFunction> {
+    pub const fn pci_function(&self) -> Option<&PciFunction> {
         self.pci.as_ref()
     }
 
     /// The device as `device_info` reports it.
-    pub(crate) fn describe(&self) -> DeviceInfo {
+    pub fn describe(&self) -> DeviceInfo {
         let block = |block: RegisterBlock| DeviceBlock {
             phys: block.phys,
             offset: block.offset,
@@ -1943,7 +2040,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// Configuration space that could not be mapped; bus mastering stays off.
-    pub(crate) fn enable_dma(&self) -> Result<(), &'static str> {
+    pub fn enable_dma(&self) -> Result<(), &'static str> {
         if self.dma_on.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -1957,7 +2054,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// Configuration space that could not be mapped; the device is still on.
-    pub(crate) fn disable_dma(&self) -> Result<(), &'static str> {
+    pub fn disable_dma(&self) -> Result<(), &'static str> {
         self.set_bus_master(false)?;
         self.dma_on.store(false, Ordering::Release);
         Ok(())
@@ -1965,6 +2062,10 @@ impl DeviceNode {
 
     /// Write the function's command register with bus mastering `on` or off,
     /// keeping memory decoding on either way, under the configuration lock.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn set_bus_master(&self, on: bool) -> Result<(), &'static str> {
         if self.config_phys().is_none() {
             return Ok(());
@@ -1991,7 +2092,7 @@ impl DeviceNode {
 
     /// Physical address of the function's configuration space, for a PCI
     /// function whose host window placed it.
-    fn config_phys(&self) -> Option<u64> {
+    pub fn config_phys(&self) -> Option<u64> {
         self.pci.as_ref().and_then(|function| function.config_phys)
     }
 
@@ -2015,7 +2116,8 @@ impl DeviceNode {
 
     /// The function's configuration space for reading, if it is mapped
     /// already. Maps nothing.
-    fn mapped_config(&self) -> Option<MappedConfig> {
+    #[doc(hidden)]
+    pub fn mapped_config(&self) -> Option<MappedConfig> {
         match self.config_map.get() {
             Some(&Ok(registers)) => Some(MappedConfig {
                 registers,
@@ -2027,7 +2129,8 @@ impl DeviceNode {
 
     /// The function's configuration space with the configuration lock held,
     /// mapping it first if nothing has: the only way to write it.
-    fn config_writes(&self) -> Result<ConfigWrites<'_>, &'static str> {
+    #[doc(hidden)]
+    pub fn config_writes(&self) -> Result<ConfigWrites<'_>, &'static str> {
         let space = self.config_mapping()?;
         Ok(ConfigWrites {
             space,
@@ -2037,6 +2140,10 @@ impl DeviceNode {
 
     /// [`DeviceNode::config_writes`] for a space that is mapped already, as
     /// an interrupt handler needs: maps nothing, and `None` if nothing has.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn config_writes_mapped(&self) -> Option<ConfigWrites<'_>> {
         let space = self.mapped_config()?;
         Some(ConfigWrites {
@@ -2046,19 +2153,19 @@ impl DeviceNode {
     }
 
     /// The device's aperture `index` as `device_aperture` writes it.
-    pub(crate) fn aperture_info(&self, index: usize) -> Option<ApertureInfo> {
+    pub fn aperture_info(&self, index: usize) -> Option<ApertureInfo> {
         self.apertures.get(index).map(|aperture| aperture.info())
     }
 
     /// Whether [`DeviceNode::verify_config`] has refused the node.
-    pub(crate) fn is_refused(&self) -> bool {
+    pub fn is_refused(&self) -> bool {
         self.refused.load(Ordering::Acquire)
     }
 
     /// Whether the node is not driven while the machine runs: it holds the
     /// firmware framebuffer lent to its own node, or it is the Intel
     /// integrated GPU and the command line did not say [`INTEL_GPU_OPTION`].
-    pub(crate) const fn yielded(&self) -> bool {
+    pub const fn yielded(&self) -> bool {
         self.yielded
     }
 
@@ -2073,7 +2180,7 @@ impl DeviceNode {
     /// offset not a multiple of it or not below 4096;
     /// [`ConfigRefusal::NotPci`] for a node with no configuration space;
     /// [`ConfigRefusal::Unmapped`] when it could not be mapped.
-    pub(crate) fn config_read(&self, offset: u64, width: u64) -> Result<u32, ConfigRefusal> {
+    pub fn config_read(&self, offset: u64, width: u64) -> Result<u32, ConfigRefusal> {
         let (offset, width) = config_access(offset, width)?;
         if self.config_phys().is_none() {
             return Err(ConfigRefusal::NotPci);
@@ -2093,12 +2200,11 @@ impl DeviceNode {
     ///
     /// As [`DeviceNode::config_read`], and [`ConfigRefusal::Denied`] for a
     /// byte the driver may not write.
-    pub(crate) fn config_write(
-        &self,
-        offset: u64,
-        width: u64,
-        value: u64,
-    ) -> Result<(), ConfigRefusal> {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
+    pub fn config_write(&self, offset: u64, width: u64, value: u64) -> Result<(), ConfigRefusal> {
         let (offset, width) = config_access(offset, width)?;
         // The function lent the framebuffer its screen scans out of takes no
         // configuration write at all while it holds it: no byte of a vendor
@@ -2147,7 +2253,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// The register that read back other than the kernel made it.
-    pub(crate) fn verify_config(&self) -> Result<(), Breach> {
+    pub fn verify_config(&self) -> Result<(), Breach> {
         let Some(breach) = self.breach() else {
             return Ok(());
         };
@@ -2166,6 +2272,10 @@ impl DeviceNode {
     /// Refuse the node and turn its bus mastering off, in one hold of the
     /// configuration lock: [`DeviceNode::set_bus_master`] tests the flag
     /// under the same lock, so no later `enable_dma` turns it on again.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
     fn refuse(&self) {
         match self.config_writes() {
             Ok(mut config) => {
@@ -2192,14 +2302,18 @@ impl DeviceNode {
     /// its firmware rewrote it, and then the frames a dead driver's pins kept
     /// go back (`object::pin::quarantine_release`), whose device can no
     /// longer reach them either way.
-    pub(crate) fn hello_accepted(&self) {
+    pub fn hello_accepted(&self) {
         let _ = self.verify_config();
         crate::object::pin::quarantine_release(self);
     }
 
     /// The first kernel-owned register that reads back other than the kernel
     /// made it, if any: [`DeviceNode::verify_config`]'s comparison.
-    fn breach(&self) -> Option<Breach> {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
+    pub fn breach(&self) -> Option<Breach> {
         let _placed = self.config_phys()?;
         let breach = {
             // Under the lock, so no kernel sequence is half written, and so
@@ -2233,13 +2347,13 @@ impl DeviceNode {
     }
 
     /// Every aperture the device has.
-    pub(crate) fn apertures(&self) -> &[Aperture] {
+    pub fn apertures(&self) -> &[Aperture] {
         &self.apertures
     }
 
     /// How many vectors the device can be asked for: a device tree node's
     /// interrupts, a PCI function's MSI-X entries, or its one `INTx` line.
-    pub(crate) fn vector_count(&self) -> usize {
+    pub fn vector_count(&self) -> usize {
         if self.msi.is_some() {
             return 1;
         }
@@ -2258,7 +2372,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn domain(&self) -> Result<Arc<iommu::Domain>, AllocError> {
+    pub fn domain(&self) -> Result<Arc<iommu::Domain>, AllocError> {
         // The firmware framebuffer's node reaches no memory, so it never
         // gets a domain to pin into: every path to one fails here, whatever
         // its caller checked first.
@@ -2286,12 +2400,12 @@ impl DeviceNode {
     }
 
     /// Set the isolated-interrupts mark. It is never cleared.
-    pub(crate) fn mark_isolated(&self) {
+    pub fn mark_isolated(&self) {
         self.isolated_mark.store(true, Ordering::Release);
     }
 
     /// Whether the isolated-interrupts mark is set.
-    pub(crate) fn isolated_marked(&self) -> bool {
+    pub fn isolated_marked(&self) -> bool {
         self.isolated_mark.load(Ordering::Acquire)
     }
 
@@ -2300,7 +2414,7 @@ impl DeviceNode {
     /// (`iommu::function_isolated`). Never a device tree or virtio-mmio
     /// node's, nor any on ARMv7-A, nor yet an AArch64 one behind a GICv3
     /// ITS.
-    pub(crate) fn interrupts_isolated(&self) -> bool {
+    pub fn interrupts_isolated(&self) -> bool {
         match self.location {
             Location::Pci(address) => iommu::function_isolated(address),
             Location::VirtioMmio(_) | Location::Tree(_) => false,
@@ -2310,19 +2424,19 @@ impl DeviceNode {
     /// Whether the node may be given vectors and pins: not while its
     /// isolated-interrupts mark is set and its interrupts are not isolated
     /// (`L.device.27`).
-    pub(crate) fn may_take_vectors_and_pins(&self) -> bool {
+    pub fn may_take_vectors_and_pins(&self) -> bool {
         !self.isolated_marked() || self.interrupts_isolated()
     }
 
     /// The device's IOMMU domain if one was ever made: [`DeviceNode::domain`]
     /// without making one, for a question about pins that may never have been.
-    pub(crate) fn domain_made(&self) -> Option<Arc<iommu::Domain>> {
+    pub fn domain_made(&self) -> Option<Arc<iommu::Domain>> {
         self.domain.lock().as_ref().map(Arc::clone)
     }
 
     /// `len` bytes at `phys`, if they lie inside one of the device's
     /// apertures. The only way to make an [`Aperture`] after enumeration.
-    pub(crate) fn aperture(&self, phys: u64, len: u64) -> Option<Aperture> {
+    pub fn aperture(&self, phys: u64, len: u64) -> Option<Aperture> {
         if len == 0 {
             return None;
         }
@@ -2340,7 +2454,7 @@ impl DeviceNode {
     /// given an `INTx` line has that as vector 0 instead. `None` if
     /// the table has no such entry, the node is not published yet, or the
     /// architecture has no vector left to give.
-    pub(crate) fn vector(&self, index: usize) -> Option<Vector> {
+    pub fn vector(&self, index: usize) -> Option<Vector> {
         if self.msix.is_none() && self.msi.is_none() {
             return self.vectors.get(index).copied();
         }
@@ -2392,21 +2506,23 @@ impl MsixTable {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// A memory BAR as enumeration found it assigned: what its register must
 /// read back.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct MintedBar {
+#[doc(hidden)]
+pub struct MintedBar {
     /// The address, both halves for a 64-bit BAR.
-    address: u64,
+    pub address: u64,
     /// Its size in bytes, as sizing read it.
     size: u64,
     /// Whether it is 64 bits wide, so the next slot is its upper half.
-    wide: bool,
+    pub wide: bool,
 }
 
 /// Why a configuration access was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ConfigRefusal {
+pub enum ConfigRefusal {
     /// A width other than 1, 2 or 4, or an offset not a multiple of it or
     /// not below 4096.
     Arguments,
@@ -2433,7 +2549,7 @@ fn config_access(offset: u64, width: u64) -> Result<(u16, u16), ConfigRefusal> {
 
 /// A kernel-owned register [`DeviceNode::verify_config`] can find rewritten.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Register {
+pub enum Register {
     /// The command register's decoding, bus mastering or `INTx` bits.
     Command,
     /// A memory BAR, by slot.
@@ -2469,9 +2585,9 @@ impl fmt::Display for Register {
 
 /// A kernel-owned register that read back other than the kernel made it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Breach {
+pub struct Breach {
     /// Which.
-    pub(crate) register: Register,
+    pub register: Register,
     /// What it read.
     pub(crate) read: u64,
     /// What the kernel made it.
@@ -2616,7 +2732,7 @@ fn trigger_of(trigger: Option<TreeTrigger>) -> Trigger {
 /// Whether GIC line `id` may become a PCI function's vector, recording it in
 /// `taken` if so: a shared peripheral interrupt no kernel handler and no
 /// other function holds, as a device tree node's lines are screened.
-pub(crate) fn claim_line(id: u32, taken: &mut BTreeSet<u32>) -> bool {
+pub fn claim_line(id: u32, taken: &mut BTreeSet<u32>) -> bool {
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     id >= FIRST_SHARED_INTERRUPT && !irq::is_registered(id) && taken.insert(id)
 }
@@ -2766,56 +2882,56 @@ fn widen_lone_partial_bars(
 static DEVICES: Once<Vec<Arc<DeviceNode>>> = Once::new();
 
 /// Every device node, or none before boot publishes them.
-pub(crate) fn devices() -> &'static [Arc<DeviceNode>] {
+pub fn devices() -> &'static [Arc<DeviceNode>] {
     DEVICES.get().map_or(&[], Vec::as_slice)
 }
 
 /// What publishing the nodes found.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Nodes published.
-    pub(crate) nodes: usize,
+    pub nodes: usize,
     /// Of those, device tree nodes.
-    pub(crate) tree: usize,
+    pub tree: usize,
     /// Apertures minted.
-    pub(crate) apertures: usize,
+    pub apertures: usize,
     /// Of those, apertures a page mapping cannot cover exactly.
-    pub(crate) partial_pages: usize,
+    pub partial_pages: usize,
     /// Apertures withheld because the kernel or another device has the
     /// memory.
-    pub(crate) withheld: usize,
+    pub withheld: usize,
     /// MSI-X table and pending-bit ranges withheld from apertures.
-    pub(crate) msix_withheld: usize,
+    pub msix_withheld: usize,
     /// Functions whose BARs were left out because memory decoding was off.
-    pub(crate) undecoded: usize,
+    pub undecoded: usize,
     /// Device tree vectors minted.
-    pub(crate) vectors: usize,
+    pub vectors: usize,
     /// Of those, edge-triggered.
-    pub(crate) edge: usize,
+    pub edge: usize,
     /// Firmware's interrupts not minted as vectors.
-    pub(crate) vectors_withheld: usize,
+    pub vectors_withheld: usize,
     /// PCI functions with an MSI-X table vectors can be minted from.
-    pub(crate) msix_tables: usize,
+    pub msix_tables: usize,
     /// MSI-X vectors the check minted: one, from the first such table, or
     /// none when the architecture has no vector to give.
-    pub(crate) msix_minted: usize,
+    pub msix_minted: usize,
     /// PCI functions offered an MSI message, having no MSI-X table.
-    pub(crate) msi_functions: usize,
+    pub msi_functions: usize,
     /// MSI vectors the check minted: one, from QEMU's `edu`, or none.
-    pub(crate) msi_minted: usize,
+    pub msi_minted: usize,
     /// MSI deliveries the check saw `edu` make, unmasked.
-    pub(crate) msi_delivered: usize,
+    pub msi_delivered: usize,
     /// Requests refused, each exactly as the rule requires.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
 }
 
 /// A device node that broke the rule its tokens exist to enforce.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Failure {
+pub struct Failure {
     /// The node.
-    pub(crate) location: Location,
+    pub location: Location,
     /// What it did.
-    pub(crate) what: &'static str,
+    pub what: &'static str,
 }
 
 impl fmt::Display for Failure {
@@ -2825,7 +2941,11 @@ impl fmt::Display for Failure {
 }
 
 /// What stopped [`publish`].
-pub(crate) enum Stopped<'f> {
+#[allow(
+    missing_debug_implementations,
+    reason = "a finder's reason is a &dyn Display"
+)]
+pub enum Stopped<'f> {
     /// A finder failed; nothing was published.
     Finder {
         /// Which: `pci`, `tree`, `board`.
@@ -2862,7 +2982,7 @@ fn yield_framebuffer_holder(nodes: &mut [DeviceNode]) {
 /// The command-line word that lets the Intel integrated GPU be driven
 /// (`docs/INTEL-GPU.md` §4.4 (b)): off unless said, and no profile a claim
 /// is made of permits it.
-pub(crate) const INTEL_GPU_OPTION: &str = "ferrix.intelgpu";
+pub const INTEL_GPU_OPTION: &str = "ferrix.intelgpu";
 
 /// Whether the command line said [`INTEL_GPU_OPTION`], as stage 10 read it
 /// before publishing.
@@ -2872,21 +2992,21 @@ static INTEL_GPU_ALLOWED: AtomicBool = AtomicBool::new(false);
 /// in [`devices`] plus one; 0 for none. Written by the chardev core's check
 /// alone, around the cases it runs, as `remapping::FORCED_UNISOLATED` is by
 /// the IOMMU's: QEMU has no Intel GPU to show the rules on.
-pub(crate) static FORCED_INTEL_GPU: AtomicUsize = AtomicUsize::new(0);
+pub static FORCED_INTEL_GPU: AtomicUsize = AtomicUsize::new(0);
 
 /// Set by the chardev core's check alone, around the cases it runs: every
 /// domain counts as untranslated for [`DeviceNode::may_have_client_nodes`].
 /// QEMU's machines translate every PCI function.
-pub(crate) static FORCED_UNTRANSLATED: AtomicBool = AtomicBool::new(false);
+pub static FORCED_UNTRANSLATED: AtomicBool = AtomicBool::new(false);
 
 /// Let the Intel integrated GPU be driven: stage 10 calls it before
 /// [`publish`] when the command line said [`INTEL_GPU_OPTION`].
-pub(crate) fn allow_intel_gpu() {
+pub fn allow_intel_gpu() {
     INTEL_GPU_ALLOWED.store(true, Ordering::Release);
 }
 
 /// Whether the command line said [`INTEL_GPU_OPTION`].
-pub(crate) fn intel_gpu_allowed() -> bool {
+pub fn intel_gpu_allowed() -> bool {
     INTEL_GPU_ALLOWED.load(Ordering::Acquire)
 }
 
@@ -2894,7 +3014,7 @@ pub(crate) fn intel_gpu_allowed() -> bool {
 /// sub-class and interface, as [`PciFunction::class`] holds them), is the
 /// Intel integrated GPU: Intel's, display class, at `00:02.0` on the first
 /// segment, where every Intel integrated GPU sits.
-pub(crate) const fn is_intel_gpu(address: Address, vendor: u16, class: u32) -> bool {
+pub const fn is_intel_gpu(address: Address, vendor: u16, class: u32) -> bool {
     vendor == 0x8086
         && class >> 16 == 0x03
         && address.segment() == 0
@@ -2907,7 +3027,7 @@ pub(crate) const fn is_intel_gpu(address: Address, vendor: u16, class: u32) -> b
 /// own: the Intel integrated GPU holding it, when `allowed`, which is whether
 /// the command line said [`INTEL_GPU_OPTION`] (`L.device.46`). `None` for any
 /// other machine, which lends it to a node of its own as before.
-pub(crate) fn lend_target(nodes: &[DeviceNode], allowed: bool) -> Option<usize> {
+pub fn lend_target(nodes: &[DeviceNode], allowed: bool) -> Option<usize> {
     if !allowed {
         return None;
     }
@@ -2945,9 +3065,10 @@ fn yield_intel_gpu(nodes: &mut [DeviceNode], allowed: bool) {
 /// mint, holds an aperture overlapping reserved memory, shares an aperture
 /// or vector with another node, or mints an MSI-X vector that does not
 /// behave as one.
-pub(crate) fn publish<'f>(
+pub fn publish<'f>(
     finders: &'f mut [&mut dyn Finder],
     reserved: &Reserved,
+    policy: &check::Policy,
 ) -> Result<Report, Stopped<'f>> {
     if PUBLISHING.swap(true, Ordering::AcqRel) {
         return Err(Stopped::Again);
@@ -3006,7 +3127,7 @@ pub(crate) fn publish<'f>(
     for node in &nodes {
         check::check_node(node, reserved, &mut report)?;
     }
-    check::check_together(&nodes, reserved)?;
+    check::check_together(&nodes, reserved, policy)?;
 
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());

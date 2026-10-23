@@ -17,7 +17,7 @@ static SKIPPED: AtomicBool = AtomicBool::new(false);
 
 /// Record that this boot skips the self-checks: `checks::init`, once, when
 /// it read `ferrix.checks=skip`.
-pub(crate) fn skip() {
+pub fn skip() {
     SKIPPED.store(true, Ordering::Relaxed);
 }
 
@@ -25,10 +25,10 @@ pub(crate) fn skip() {
 /// kernel built with the build flag `checks=off` (`docs/BUILD-FLAGS.md` §3,
 /// BF7), where [`run`] is the constant `false` and every check it gates, the
 /// core's included, is compiled out of the image.
-pub(crate) const COMPILED_IN: bool = !cfg!(ferrix_checks = "off");
+pub const COMPILED_IN: bool = !cfg!(ferrix_checks = "off");
 
 /// Whether the self-checks run on this boot: true unless [`skip`] was called,
 /// and never in a kernel built `checks=off` ([`COMPILED_IN`]).
-pub(crate) fn run() -> bool {
+pub fn run() -> bool {
     COMPILED_IN && !SKIPPED.load(Ordering::Relaxed)
 }

@@ -12,13 +12,6 @@
   "arguments": [
     {
       "file": "arch/speculation.rs",
-      "lines": "138",
-      "category": "absent-hardware",
-      "match": "Defences(self.0 | other.0)",
-      "why": "`with`'s only rows in the image are in `Plan::for_processor`'s arms for a speculation control the processor offers -- enhanced, automatic or always-on IBRS, STIBP, SSBD, IBPB. QEMU's TCG emulates none of them (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl`), and `x86_cpu` asks for them only under a hypervisor. The same arms run under KVM: gate 6 on the AMD reference host prints `speculation defences: ..., AutoIBRS, STIBP, SSBD, predictor barrier on switch, ...`. The unconditional defences are folded into a constant and carry no row."
-    },
-    {
-      "file": "arch/speculation.rs",
       "lines": "174",
       "category": "other-architecture",
       "match": "f.write_str(\"none\")?;",
@@ -33,9 +26,9 @@
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "694-695, 701-702, 714, 716-717",
+      "lines": "695, 701-702, 714, 716",
       "category": "absent-hardware",
-      "match": "fn calibrate_tsc_against_hpet(",
+      "match": "let window = hpet_hz * CALIBRATION_MILLIS / 1000;",
       "why": "The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
     },
     {
@@ -53,57 +46,43 @@
       "why": "As line 186, for `drain`: the second pass waits for the shift register, and QEMU's port reports the transmitter idle on the first read. The function's own comment says so: harmless under QEMU, whose port sends instantly."
     },
     {
-      "file": "arch/x86_64/console.rs",
-      "lines": "250, 255",
-      "category": "absent-hardware",
-      "match": "pub(crate) fn read_byte() -> Option<u8> {",
-      "why": "The prologue and epilogue of `read_byte`'s standalone copy, which runs only through the poll pointer `read_console_byte` hands `console::input::read_byte`: input stays polled when `console::input::init` finds no interrupt for the port, on an x86-64 machine whose MADT gives COM1's line no I/O APIC input. q35 routes COM1 through the I/O APIC, so input is interrupt-driven from before the first read, and the handler runs `read_byte` inlined into `take_console_byte`, which is reached."
-    },
-    {
       "file": "arch/x86_64/cpu.rs",
-      "lines": "1350, 1356",
+      "lines": "1351, 1357",
       "category": "defensive",
       "match": "let empty = [0_u8; 10];",
       "why": "The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1811, 1813",
+      "lines": "1807, 1809",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
-      "file": "arch/x86_64/mod.rs",
-      "lines": "1874",
-      "category": "failure-path",
-      "match": "cpu::hlt();",
-      "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
-    },
-    {
       "file": "arch/x86_64/paranoid.rs",
-      "lines": "135",
+      "lines": "142",
       "category": "failure-path",
       "match": "crate::trap::fatal(",
       "why": "An exception nested on its own interrupt stack, which the stack's occupancy count exists to catch and stop on (FX-9006): the entry clears DR7 so that a breakpoint on the handler's own path cannot nest, and the stage 3 check shows it does not."
     },
     {
       "file": "arch/x86_64/paranoid.rs",
-      "lines": "150",
+      "lines": "157",
       "category": "failure-path",
       "match": "MACHINE_CHECK => crate::trap::fatal(",
       "why": "A machine check, a hardware error the kernel stops on. QEMU raises one only when a host tool injects it (`mce` in the monitor), which no gate does, and a run that took one would be a failing run."
     },
     {
       "file": "arch/x86_64/paranoid.rs",
-      "lines": "151, 153",
+      "lines": "158, 160",
       "category": "failure-path",
       "match": "vector => crate::trap::fatal(",
       "why": "Any vector but #DB, NMI and #MC reaching the paranoid entry: only the double fault's gate also names an IST stack here, and a double fault stops the kernel."
     },
     {
       "file": "arch/x86_64/paranoid.rs",
-      "lines": "165",
+      "lines": "172",
       "category": "failure-path",
       "match": "crate::trap::fatal(",
       "why": "A #DB in the kernel that no armed hardware breakpoint raised -- a single step or a general detect, neither of which the kernel asks for -- which it stops on. The breakpoints the stage 3 check arms each set their DR6 bit."
@@ -124,9 +103,9 @@
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "327, 332, 1125, 1131, 1133, 1147",
+      "lines": "1125, 1131, 1133",
       "category": "absent-hardware",
-      "match": "plan.spec_ctrl |= SPEC_CTRL_STIBP;",
+      "match": "held &= read & plan.spec_ctrl == plan.spec_ctrl;",
       "why": "STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`."
     },
     {
@@ -138,14 +117,14 @@
     },
     {
       "file": "arch/x86_64/trap.rs",
-      "lines": "550, 574",
+      "lines": "547, 571",
       "category": "failure-path",
       "match": "pub(crate) const fn vector_name(vector: u64) -> &'static str {",
       "why": "`vector_name`'s standalone copy, called by `report_trap` and by the paranoid entry's fatal arms, both of which run only when the kernel is stopping. `classify` carries its own inlined copy, which the stage 3 fault check reaches with a program's `hlt`."
     },
     {
       "file": "arch/x86_64/trap.rs",
-      "lines": "673, 676-677, 692",
+      "lines": "670, 673-674, 689",
       "category": "failure-path",
       "match": "vector_name(frame.vector),",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it."
@@ -201,56 +180,56 @@
     },
     {
       "file": "console/input.rs",
-      "lines": "155",
+      "lines": "156",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "Console input left polled: an x86-64 machine whose MADT gives COM1's line no I/O APIC input, or an Arm machine whose device tree names the port's interrupt in a shape the parser does not follow. Every machine the suite boots names it."
     },
     {
       "file": "console/input.rs",
-      "lines": "316",
+      "lines": "317",
       "category": "failure-path",
       "match": "return Err(\"the input ring was checked after the port could ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "332",
+      "lines": "333",
       "category": "failure-path",
       "match": "return Err(\"the input ring said it was empty with bytes in i",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "335",
+      "lines": "336",
       "category": "failure-path",
       "match": "return Err(\"a wait for input did not return while input was ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "344",
+      "lines": "345",
       "category": "credited-elsewhere",
       "match": "if pop().is_some() {",
       "why": "Run on every boot by console::input::check, whose ring is empty by then: pop is inlined, and this line's only row is on the inlined pop's taking-a-byte path, which runs only when the ring gives back more than it holds -- the failure the next line reports."
     },
     {
       "file": "console/input.rs",
-      "lines": "345",
+      "lines": "346",
       "category": "failure-path",
       "match": "return Err(\"the input ring gave back more bytes than it has ",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "348",
+      "lines": "349",
       "category": "failure-path",
       "match": "return Err(\"the input ring said it held input after it was e",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "console/input.rs",
-      "lines": "352",
+      "lines": "353",
       "category": "failure-path",
       "match": "return Err(\"the input ring did not count the bytes it had no",
       "why": "A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
@@ -271,7 +250,7 @@
     },
     {
       "file": "console/output.rs",
-      "lines": "489",
+      "lines": "490",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one."
@@ -333,27 +312,6 @@
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
     },
     {
-      "file": "early.rs",
-      "lines": "183",
-      "category": "defensive",
-      "match": "return Err(EarlyError::KernelImage(phys));",
-      "why": "A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded."
-    },
-    {
-      "file": "hooks.rs",
-      "lines": "57",
-      "category": "credited-elsewhere",
-      "match": "let _ = slot.call_once(|| {",
-      "why": "Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill."
-    },
-    {
-      "file": "hooks.rs",
-      "lines": "59",
-      "category": "credited-elsewhere",
-      "match": "hook",
-      "why": "Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill."
-    },
-    {
       "file": "init.rs",
       "lines": "343",
       "category": "other-architecture",
@@ -383,483 +341,462 @@
     },
     {
       "file": "iommu.rs",
-      "lines": "168-169",
+      "lines": "167-168",
       "category": "other-architecture",
       "match": "for node in table.nodes() {",
       "why": "Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over."
     },
     {
       "file": "iommu.rs",
-      "lines": "175",
+      "lines": "174",
       "category": "other-architecture",
       "match": "for smmu in tree.smmu_v3s() {",
       "why": "Walks the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT, or a device tree, which the x86-64 loader never hands over."
     },
     {
       "file": "iommu.rs",
-      "lines": "328-330",
+      "lines": "327-329",
       "category": "other-architecture",
       "match": "let root = table.nodes().find(|node| {",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "332",
+      "lines": "331",
       "category": "other-architecture",
       "match": "let Some(root) = root else {",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "335",
+      "lines": "334",
       "category": "other-architecture",
       "match": "let Some((stream, reference)) = root.translate(u32::from(fun",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "338",
+      "lines": "337",
       "category": "other-architecture",
       "match": "match table.node_at(reference) {",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "340",
+      "lines": "339",
       "category": "other-architecture",
       "match": "Some(next) => match next.smmu_v3() {",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "342",
+      "lines": "341",
       "category": "other-architecture",
       "match": "None if next.kind == iort::NODE_SMMU_V1_V2 => Behind::Unreso",
       "why": "Places a function through the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "356",
+      "lines": "355",
       "category": "other-architecture",
       "match": "let hosts: Vec<EcamHost> = tree.ecam_hosts().collect();",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "359-360",
+      "lines": "358-359",
       "category": "other-architecture",
       "match": ".find(|host| host.segment == Some(function.segment()));",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "362",
+      "lines": "361",
       "category": "other-architecture",
       "match": "(None, [only]) if only.segment.is_none() => only,",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "365",
+      "lines": "364",
       "category": "other-architecture",
       "match": "let Some(map) = tree.ecam_iommu_map(host) else {",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "368",
+      "lines": "367",
       "category": "other-architecture",
       "match": "let Some((phandle, stream)) = map.translate(u32::from(functi",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "371",
+      "lines": "370",
       "category": "other-architecture",
       "match": "match tree.smmu_v3s().find(|smmu| smmu.phandle == Some(phand",
       "why": "Places a function through a device tree, which the x86-64 loader never hands over's iommu-map."
     },
     {
       "file": "iommu.rs",
-      "lines": "427-428",
+      "lines": "426-427",
       "category": "absent-hardware",
       "match": "Behind::Nothing => report.bypassing += 1,",
       "why": "A function the firmware puts behind no unit, or describes in a way this cannot follow: q35's DMAR puts every function behind its one VT-d unit."
     },
     {
       "file": "iommu.rs",
-      "lines": "446",
+      "lines": "445",
       "category": "other-architecture",
       "match": "for &function in &functions {",
       "why": "The branch for a device tree, which the x86-64 loader never hands over."
     },
     {
       "file": "iommu.rs",
-      "lines": "450",
+      "lines": "449",
       "category": "defensive",
       "match": "for &function in &functions {",
       "why": "A machine described by neither ACPI nor a device tree: the loader hands over one or the other on every architecture, and stage 1's hand-off check refuses a boot without either."
     },
     {
       "file": "iommu.rs",
-      "lines": "786",
+      "lines": "785",
       "category": "other-architecture",
       "match": "changing: Gate,",
       "why": "The SMMUv3 variant's fields, printed only for a domain an SMMUv3 translates, which no x86-64 machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "828",
+      "lines": "827",
       "category": "other-architecture",
       "match": "Translation::SmmuV3 { unit, attached, .. } => unit.flush(att",
       "why": "The SMMUv3 arm, for a domain an SMMUv3 translates, which no x86-64 machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "880",
+      "lines": "879",
       "category": "other-architecture",
       "match": "Translation::SmmuV3 { unit, attached, .. } => unit.detach(*a",
       "why": "The SMMUv3 arm, for a domain an SMMUv3 translates, which no x86-64 machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1031",
+      "lines": "1052",
       "category": "absent-hardware",
       "match": "return Err(DomainError::OutOfRange);",
       "why": "A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1097",
+      "lines": "1118",
       "category": "defensive",
       "match": "Err(why) => return Err((DomainError::Unit(why), pinned)),",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1110",
+      "lines": "1131",
       "category": "defensive",
       "match": "return Err((DomainError::Tables, pinned));",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1115",
-      "category": "defensive",
-      "match": "return Err((DomainError::Unit(why), pinned));",
-      "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "1118",
-      "category": "defensive",
-      "match": "}",
-      "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "1697",
+      "lines": "1722",
       "category": "defensive",
       "match": "report.refused += 1;",
       "why": "A VT-d unit that would not enable: its functions get untranslated domains. QEMU's unit always enables."
     },
     {
       "file": "iommu.rs",
-      "lines": "1845-1846",
+      "lines": "1870-1871",
       "category": "other-architecture",
       "match": "for node in table.nodes() {",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1849-1851",
+      "lines": "1874-1876",
       "category": "other-architecture",
       "match": "let opened = smmuv3::Unit::open(smmu.base_address, doorbell)",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1854",
+      "lines": "1879",
       "category": "other-architecture",
       "match": "offsets.push((node.offset, programmed.smmu.len()));",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1859",
+      "lines": "1884",
       "category": "other-architecture",
       "match": "report.smmu_v3 += 1;",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1862",
+      "lines": "1887",
       "category": "other-architecture",
       "match": "report.refused += 1;",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1867-1868",
+      "lines": "1892-1893",
       "category": "other-architecture",
       "match": "for node in table.nodes() {",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1871",
+      "lines": "1896",
       "category": "other-architecture",
       "match": "let Ok(segment) = u16::try_from(complex.segment) else {",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1876-1877",
+      "lines": "1901-1902",
       "category": "other-architecture",
       "match": "node.id_mappings()",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1879",
+      "lines": "1904",
       "category": "other-architecture",
       "match": "let &(_, unit) = offsets",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1881",
+      "lines": "1906",
       "category": "other-architecture",
       "match": ".find(|(offset, _)| *offset == mapping.output_reference)?;",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1883",
+      "lines": "1908",
       "category": "other-architecture",
       "match": "segment,",
       "why": "Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "1957-1958",
+      "lines": "1982-1983",
       "category": "other-architecture",
       "match": "} else if let Some((unit, stream)) = smmu_stream_for(program",
       "why": "The SMMUv3 branch, for the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "2066-2069",
+      "lines": "2091-2094",
       "category": "other-architecture",
       "match": "let requester = u32::from(function.requester_id());",
       "why": "The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "2073",
+      "lines": "2098",
       "category": "other-architecture",
       "match": "programmed.smmu.get(map.unit)?,",
       "why": "The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT."
     },
     {
       "file": "iommu.rs",
-      "lines": "2183",
+      "lines": "2208",
       "category": "defensive",
       "match": "if fault.cause != Cause::Access {",
       "why": "A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one."
     },
     {
       "file": "iommu.rs",
-      "lines": "2313",
+      "lines": "2338",
       "category": "defensive",
       "match": "audit.first = audit.first.or(Some(fault));",
       "why": "The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT)."
     },
     {
       "file": "iommu.rs",
-      "lines": "2315",
+      "lines": "2340",
       "category": "absent-hardware",
       "match": "audit.provoked += 1;",
       "why": "The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults."
     },
     {
       "file": "main.rs",
-      "lines": "280",
+      "lines": "257",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "413",
+      "lines": "390",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "551",
+      "lines": "528",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "564",
+      "lines": "541",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILESYSTEM` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "586",
+      "lines": "563",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PIPES_AND_FILESYSTEM_CALLS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "600",
+      "lines": "577",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILE_MAPPINGS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "624",
+      "lines": "601",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PSEUDO_FILESYSTEMS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "757",
+      "lines": "734",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::NET_CORE, \"net core self-che",
       "why": "The failure arm in `check_net`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `NET_CORE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "785",
+      "lines": "762",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_driver`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DRIVER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "826",
+      "lines": "803",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_devmgr`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DEVMGR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "860",
+      "lines": "837",
       "category": "absent-hardware",
       "match": "println!(\"  btrfs-pf not run: {}\", report.skipped.unwrap_or_",
       "why": "A power-fail boot without the third disk it churns: `test-powerfail` always attaches it, and no other gate asks for the power-fail mode."
     },
     {
       "file": "main.rs",
-      "lines": "872",
+      "lines": "849",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "887",
+      "lines": "864",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1124",
+      "lines": "1111",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `PROCESSOR_DISCOVERY` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1157",
+      "lines": "1144",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::STAGE4_SMP, \"stage 4 self-ch",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1212",
+      "lines": "1199",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1316",
+      "lines": "1303",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1434",
-      "category": "failure-path",
-      "match": "if let Err(problem) = random::check() {",
-      "why": "The failure arm in `report_clock_and_random`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `RANDOM_GENERATOR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
-    },
-    {
-      "file": "main.rs",
-      "lines": "1558",
+      "lines": "1545",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1665",
+      "lines": "1652",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1672",
+      "lines": "1659",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1697",
+      "lines": "1684",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1795",
+      "lines": "1782",
       "category": "absent-hardware",
       "match": "mebibytes(unreachable)",
       "why": "Reached only on a machine with RAM above the highest address the direct map covers; every QEMU machine the suite boots has less RAM than the direct map spans, so nothing is unreachable to report."
     },
     {
       "file": "main.rs",
-      "lines": "1819",
+      "lines": "1806",
       "category": "other-architecture",
       "match": "let model = fdt::open(view)",
       "why": "The device tree's model, printed only when the loader handed over a device tree. x86-64's loader hands over ACPI's RSDP and never a device tree, so no x86-64 run reaches it; the Arm boots do."
     },
     {
       "file": "main.rs",
-      "lines": "1821-1822",
+      "lines": "1808-1809",
       "category": "other-architecture",
       "match": ".and_then(|tree| tree.model())",
       "why": "The device tree's model, printed only when the loader handed over a device tree. x86-64's loader hands over ACPI's RSDP and never a device tree, so no x86-64 run reaches it; the Arm boots do."
     },
     {
       "file": "main.rs",
-      "lines": "1913",
+      "lines": "1900",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
@@ -873,30 +810,9 @@
     },
     {
       "file": "mm.rs",
-      "lines": "506",
-      "category": "credited-elsewhere",
-      "match": "count(Route::Allocated, blocks << ferrix_frame::MAX_ORDER);",
-      "why": "Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates."
-    },
-    {
-      "file": "mm.rs",
-      "lines": "634",
-      "category": "failure-path",
-      "match": "pub(crate) fn print_frame_delta(check: &str, leaked: i64) {",
-      "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
-    },
-    {
-      "file": "mm.rs",
       "lines": "640",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
-      "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
-    },
-    {
-      "file": "mm.rs",
-      "lines": "643",
-      "category": "failure-path",
-      "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
@@ -910,7 +826,7 @@
       "file": "mm.rs",
       "lines": "1882-1884",
       "category": "failure-path",
-      "match": "pub(crate) fn report(&self, check: &str) {",
+      "match": "fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
@@ -943,21 +859,14 @@
     },
     {
       "file": "object/pin.rs",
-      "lines": "673",
+      "lines": "692",
       "category": "defensive",
       "match": "};",
       "why": "`Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice."
     },
     {
       "file": "object/pin.rs",
-      "lines": "696",
-      "category": "absent-hardware",
-      "match": "if !KEPT.swap(true, Ordering::Relaxed) {",
-      "why": "A pin closed whose device may still reach its pages: one into an untranslated domain, or one its domain would not unpin. Every PCI function the measured machine pins for sits behind a translating unit (VT-d on x86-64's q35, the SMMUv3 on AArch64's `virt`), whose unpin succeeds, so the frames are freed; ARMv7-A, whose `virt` has no SMMU, reaches this line."
-    },
-    {
-      "file": "object/pin.rs",
-      "lines": "746-747, 752",
+      "lines": "765-766, 771",
       "category": "defensive",
       "match": "for &frame in spare.frames.iter().take(taken) {",
       "why": "A dead driver's pin whose frames could not all be shared into the quarantine: `mm::share_frame` fails only for a frame the allocator does not count as one order-0 allocation, and drivers pin only VMOs, whose frames are allocator order-0 frames. Were one not, the pin is kept for good, mapped and held, never freed -- which is what the branch does."
@@ -985,35 +894,35 @@
     },
     {
       "file": "object/port.rs",
-      "lines": "485",
+      "lines": "481",
       "category": "defensive",
       "match": "Err((observer, _)) => {",
       "why": "A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop."
     },
     {
       "file": "object/port.rs",
-      "lines": "487-488",
+      "lines": "483-484",
       "category": "defensive",
       "match": "list.listed.insert(index, observer);",
       "why": "A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop."
     },
     {
       "file": "object/process.rs",
-      "lines": "913",
+      "lines": "905",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "938",
+      "lines": "930",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1080",
+      "lines": "1072",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
@@ -1027,105 +936,105 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1393",
+      "lines": "1398",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1630",
+      "lines": "1635",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2601-2603",
+      "lines": "2606-2608",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2660",
+      "lines": "2665",
       "category": "defensive",
       "match": "queue.insert(previous);",
       "why": "A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3503-3504",
+      "lines": "3508-3509",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3508",
+      "lines": "3513",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3513-3514",
+      "lines": "3518-3519",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3517-3518",
+      "lines": "3522-3523",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3522",
+      "lines": "3527",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3525-3526",
+      "lines": "3530-3531",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3531",
+      "lines": "3536",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3535",
+      "lines": "3540",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3542",
+      "lines": "3547",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3547",
+      "lines": "3552",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3557",
+      "lines": "3562",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
@@ -1159,22 +1068,8 @@
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
     },
     {
-      "file": "sched/queue.rs",
-      "lines": "491",
-      "category": "defensive",
-      "match": "task.return_run_slot(refused.slot);",
-      "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
-    },
-    {
       "file": "sched/wait.rs",
-      "lines": "772",
-      "category": "credited-elsewhere",
-      "match": "core::hint::spin_loop();",
-      "why": "Run by stage 5's sched::check::before_start, which waits on a queue before the scheduler starts and requires the wait to last until its deadline. In that monomorph the ready closure is `|| false`, folded into the loop, and the spin carries no row of its own; the rows of this line are in the monomorphs whose waits all run with the scheduler up."
-    },
-    {
-      "file": "sched/wait.rs",
-      "lines": "1077",
+      "lines": "1079",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a sleeping lock taken where a task may not block. The condition runs on every sleeping-lock acquisition under another row."
@@ -1216,63 +1111,49 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "305",
+      "lines": "306",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "527-528",
+      "lines": "529-530",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1320-1321",
+      "lines": "1323-1324",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1998",
-      "category": "defensive",
-      "match": "}",
-      "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2064",
+      "lines": "2063",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2067",
+      "lines": "2066",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2077",
-      "category": "defensive",
-      "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
-      "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2083-2084",
+      "lines": "2082-2083",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2613",
+      "lines": "2612",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
@@ -1300,42 +1181,42 @@
     },
     {
       "file": "trap.rs",
-      "lines": "513",
+      "lines": "509",
       "category": "defensive",
       "match": "None => Outcome::Return(Errno::ENOSYS.as_return_value()),",
       "why": "A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector."
     },
     {
       "file": "trap.rs",
-      "lines": "642",
+      "lines": "640",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "660",
+      "lines": "658",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "697",
+      "lines": "695",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "775, 777, 780-783",
+      "lines": "773, 775, 778-781",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "797, 802, 812, 821-822, 824",
+      "lines": "795, 800, 810, 820, 822",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."
@@ -1356,49 +1237,49 @@
     },
     {
       "file": "user/space.rs",
-      "lines": "807",
+      "lines": "802",
       "category": "credited-elsewhere",
       "match": "let _ = inner.native.remove(&id);",
       "why": "Run whenever a mapping is abandoned part-way: the allocation sweep's `fork` scenario fails the file mapping's table insert after a native object is mapped, and `abandon_region` runs (its lines 637 and 641 are reached). The line's only statement row is on the removal of an entry the set holds, and `abandon_region` is only called for an id that never went into the native set -- a native mapping whose insert failed, or a file mapping -- so the search always ends empty-handed, under the inlined `BTreeSet::remove`'s rows."
     },
     {
       "file": "user/space.rs",
-      "lines": "1265",
+      "lines": "1260",
       "category": "defensive",
       "match": "};",
       "why": "A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2477",
+      "lines": "2472",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2481-2482",
+      "lines": "2476-2477",
       "category": "defensive",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2909",
+      "lines": "2904",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."
     },
     {
       "file": "user/space.rs",
-      "lines": "3114",
+      "lines": "3116",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."
     },
     {
       "file": "user/vmo.rs",
-      "lines": "2018",
+      "lines": "2000",
       "category": "defensive",
       "match": "return Err(VmoError::OutOfMemory);",
       "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."
@@ -1440,28 +1321,21 @@
     },
     {
       "file": "sched/preempt.rs",
-      "lines": "253-254",
-      "category": "failure-path",
-      "match": "let _ = unsafe { arch::this_cpu_add(crate::smp::PREEMPT_WORD_OFFSET, delta) };",
-      "why": "The release's add-back: a release found the count, or for a lock the locks held, already zero, so the word is put back before unmatched() stops the machine with SCHEDULE_WITH_PREEMPTION_HELD (FX-0503). A kernel that releases every lock on the processor that took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
-    },
-    {
-      "file": "sched/preempt.rs",
-      "lines": "426-427",
+      "lines": "427-428",
       "category": "failure-path",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
     },
     {
       "file": "sched/preempt.rs",
-      "lines": "475",
+      "lines": "476",
       "category": "failure-path",
       "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
       "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."
     },
     {
       "file": "discovery/smbios.rs",
-      "lines": "41, 46",
+      "lines": "41",
       "category": "failure-path",
       "match": "match self",
       "why": "`Refusal::text` runs only for the boot line of a table the kernel refused (main.rs: `smbios   refused: ...`). Every x86-64 machine the suite boots hands over a table the kernel accepts, 2.8 by default and 3.0 with smbios-entry-point-type=64 (DMI.md section 3.4; d1-boot-kvm-3, d1-boot-kvm-ep64-2), so a passing run never prints a refusal. The refusals themselves are driven by `discovery::smbios_check` by variant, without their words; the loader handing nothing is shown by control d1-ctl2-k1b (FIRED: `smbios   none handed over`). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B))."

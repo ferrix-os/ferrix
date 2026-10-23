@@ -1,6 +1,10 @@
 //! The framebuffer window's type from its first map, read back on every
 //! x86-64 boot that has one (`L.x86_64.176`, `L.x86_64.127`).
 
+#![cfg(target_arch = "x86_64")]
+
+use ferrix_kernel_core::arch::x86_64 as core_x86_64;
+
 use ferrix_bootinfo::PAGE_SIZE;
 
 /// The kernel's framebuffer window is write-combining from its first map,
@@ -19,12 +23,12 @@ use ferrix_bootinfo::PAGE_SIZE;
 /// Verifies: `L.x86_64.176`
 /// Verifies: `L.x86_64.127`
 /// Verifies: L.device.43
-pub(crate) fn check_framebuffer_window() -> Result<(), &'static str> {
+pub fn check_framebuffer_window() -> Result<(), &'static str> {
     let processors = crate::smp::count();
-    if super::super::write_combining_processors() != Some(processors) {
+    if core_x86_64::write_combining_processors() != Some(processors) {
         return Err("a processor's PAT was not programmed with its write-combining entry");
     }
-    if super::super::pat_at_entry() != processors.saturating_sub(1) {
+    if core_x86_64::pat_at_entry() != processors.saturating_sub(1) {
         return Err("a secondary arrived without the write-combining PAT");
     }
     let Some((window, mapped)) = crate::panic::screen::window() else {
@@ -35,7 +39,7 @@ pub(crate) fn check_framebuffer_window() -> Result<(), &'static str> {
         );
         return Ok(());
     };
-    if super::window_pat() != Some(ferrix_paging::X86_PAT) {
+    if core_x86_64::framebuffer::window_pat() != Some(ferrix_paging::X86_PAT) {
         return Err("the PAT in force when the framebuffer window was mapped was not X86_PAT");
     }
     let root = crate::mm::root_table();
@@ -63,12 +67,12 @@ pub(crate) fn check_framebuffer_window() -> Result<(), &'static str> {
     if passed {
         return Err("a device-mapped page passed the lend's read-back");
     }
-    let (lines, ticks) = super::window_flush();
-    if lines == 0 || lines != super::window_lines(window, mapped) {
+    let (lines, ticks) = core_x86_64::framebuffer::window_flush();
+    if lines == 0 || lines != core_x86_64::framebuffer::window_lines(window, mapped) {
         return Err("the framebuffer window was not flushed before its first store");
     }
-    let hz = super::super::clock::counter_hz();
-    let (took, unit) = if super::super::clock::counter_is_tsc() && hz != 0 {
+    let hz = core_x86_64::clock::counter_hz();
+    let (took, unit) = if core_x86_64::clock::counter_is_tsc() && hz != 0 {
         (
             u128::from(ticks).saturating_mul(1_000_000) / u128::from(hz),
             "us",

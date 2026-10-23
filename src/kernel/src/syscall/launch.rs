@@ -62,7 +62,7 @@ static PROCESSES: Processes = Processes {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for `process_give`'s handler.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     crate::init::register_launcher(&LAUNCHER);
     native::register_processes(&PROCESSES);
     native::serve(NativeCall::ProcessGive, process_give)

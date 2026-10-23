@@ -19,31 +19,31 @@ use crate::trap::{Abi, MAX_ERRNO, SyscallArgs, SyscallFilter, Verdict};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls driven through an entry.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Of them, calls an entry answers itself, before the dispatcher, that the
     /// filter answered instead.
-    pub(crate) early: usize,
+    pub early: usize,
     /// Entries whose architecture token was checked against `e_machine`.
-    pub(crate) tokens: usize,
+    pub tokens: usize,
     /// Native-range calls judged under the token of their own.
-    pub(crate) native: usize,
+    pub native: usize,
     /// What the hook alone costs a thread with no filter, in tenths of a
     /// nanosecond a call.
-    pub(crate) hook: u64,
+    pub hook: u64,
     /// What the dispatcher costs a call no table has, in tenths of a
     /// nanosecond, for the hook's cost to be read against.
-    pub(crate) dispatch: u64,
+    pub dispatch: u64,
     /// What such a call costs through the whole entry, hook included.
-    pub(crate) entry: u64,
+    pub entry: u64,
     /// Errno ranges the core was shown a filter answer, each bounded as it
     /// should be.
-    pub(crate) clamped: usize,
+    pub clamped: usize,
     /// What one interpreted instruction of a filter costs, in tenths of a
     /// nanosecond, from the longest program the verifier admits: the figure
     /// the bound of a call's filtering (32,768 steps) is read with.
-    pub(crate) step: u64,
+    pub step: u64,
 }
 
 /// `AUDIT_ARCH_LE`.
@@ -237,7 +237,7 @@ const REFUSED: isize = -1;
 /// or number or instruction pointer; an early answer given before the filter's;
 /// a filter's answer that did not come back; the native range judged as a Linux
 /// number or not judged at all.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     seccomp::arm_probe(rule);
     let checked = all();
     seccomp::disarm_probe();

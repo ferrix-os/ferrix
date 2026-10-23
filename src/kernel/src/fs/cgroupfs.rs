@@ -1331,42 +1331,42 @@ pub(crate) fn relative_names(job: &Job, root: &Job) -> Result<Vec<String>> {
 
 /// What [`check`] counted, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Cgroups made and removed.
-    pub(crate) made: u32,
+    pub made: u32,
     /// Writes and names refused as Linux refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Waits on `cgroup.events` that a release's wake ended.
-    pub(crate) woken: u32,
+    pub woken: u32,
     /// Moves judged by the delegation rules, allowed and refused.
-    pub(crate) moves: u32,
+    pub moves: u32,
     /// Whether a child started by `CLONE_INTO_CGROUP` found itself there.
-    pub(crate) cloned: bool,
+    pub cloned: bool,
     /// Native registrations for `EMPTY` fired by the populated flip.
-    pub(crate) emptied: u32,
+    pub emptied: u32,
     /// Writes to the controllers' files refused as Linux refuses them.
-    pub(crate) controlled: u32,
+    pub controlled: u32,
     /// Processes the scoped OOM kill ended at a `memory.max`.
-    pub(crate) oom_killed: u64,
+    pub oom_killed: u64,
     /// What a native process that uid 1000 made in its delegated cgroup
     /// exited with: the low byte of what `getuid` answered it
     /// (`docs/AUTH.md` §7, P0).
-    pub(crate) created_as: u32,
+    pub created_as: u32,
     /// A delegatee's attempts on its own cgroup's limits, natively and
     /// through the files, refused.
-    pub(crate) limits_refused: u32,
+    pub limits_refused: u32,
     /// Pages of files' caches that reclaim gave back, inside the cgroup
     /// asking and no other, and that read back as the source has them.
-    pub(crate) reclaimed: u64,
+    pub reclaimed: u64,
     /// Checks of `cgroup.freeze` passed: a program frozen, held through
     /// `SIGCONT`, thawed, killed frozen, and the nested and moved cases.
-    pub(crate) frozen: u32,
+    pub frozen: u32,
     /// Periods of a `cpu.max` in which a program was throttled: held to a
     /// fifth of a processor, in its cgroup and beneath one.
-    pub(crate) throttled: u64,
+    pub throttled: u64,
     /// Requests the `io` controller charged to the right cgroups, and
     /// the ones `io.max` spaced out.
-    pub(crate) disk_requests: u32,
+    pub disk_requests: u32,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1490,7 +1490,7 @@ impl Harness {
 /// # Errors
 ///
 /// The first thing that was not as Linux has it, by name.
-pub(crate) fn check() -> Checked<Report> {
+pub fn check() -> Checked<Report> {
     let ns = fs::namespace();
     let mut harness = Harness {
         ns,
