@@ -117,6 +117,34 @@ pub(crate) use armv7a::{
     timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt, user_base, user_hwcaps,
     user_platform, wait_for_interrupt, wait_for_work,
 };
+// What `/proc/cpuinfo` reads of the processor: `CPUID` and the vector state
+// programs may use on x86-64, each processor's `MIDR` on the Arm pair; the
+// other architectures' answer is none.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::speculation::midr_of;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::speculation::midr_of;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{cpuid, user_extended_state};
+
+/// No `CPUID` off x86-64.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn cpuid(_leaf: u32, _subleaf: u32) -> Option<[u32; 4]> {
+    None
+}
+
+/// No `XCR0` off x86-64.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn user_extended_state() -> u64 {
+    0
+}
+
+/// No `MIDR` on x86-64.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const fn midr_of(_logical: usize) -> Option<u32> {
+    None
+}
+
 // How many processors programmed the PAT with its write-combining entry:
 // x86-64's, which the Arm architectures do without, their write-combining
 // being a memory attribute every processor has.

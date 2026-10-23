@@ -90,49 +90,78 @@ pub(super) fn self_link_in(ns: Option<&Arc<PidNamespace>>) -> Result<Vec<u8>> {
     Ok(target)
 }
 
-/// `/proc/cpuinfo`: a block per online processor.
+/// `/proc/cpuinfo`: a block per online processor, as Linux writes it.
 ///
-/// Only what the kernel knows. Linux's x86-64 blocks carry the vendor, model
-/// and a line of feature flags from `CPUID`, and its Arm blocks the `MIDR`
-/// fields and `HWCAP` names; nothing here has read those, so nothing here
-/// claims them. What is left is the number of blocks — which is what a C
-/// library's `sysconf(_SC_NPROCESSORS_ONLN)` fallback counts — and each
-/// processor's hardware identifier under the name Linux gives it, and on
-/// x86-64 its `cpu MHz`, when the kernel has measured the TSC.
+/// The arranging is `ferrix_procfs::cpuinfo`'s; here is what it is given.
+/// On x86-64, `CPUID` on the reading processor, which it decodes as Linux
+/// does, and what the kernel enabled of what `CPUID` offers. On the Arm
+/// pair, each processor's `MIDR` and the `AT_HWCAP` words programs get.
+/// Both take each processor's number, and on x86-64 its APIC ID.
+/// On x86-64 every block is the reading processor's `CPUID`: on a hybrid
+/// part, whose E-cores answer some leaves differently from its P-cores,
+/// that differs from Linux, which reads each processor at its start.
+///
+/// `cpu MHz` and `bogomips` are the TSC's rate, which Steam's runtime reads
+/// when there is no cpufreq and stops without, and only when the kernel's
+/// counter is the TSC: then its rate was measured against the HPET. When
+/// the counter is the HPET, its rate says nothing about the processor's,
+/// and both lines are left out rather than wrong. On Arm, `BogoMIPS` is the
+/// generic timer's rate, as on Linux.
 pub(super) fn cpuinfo(_: &Kernel) -> Result<Vec<u8>> {
+    use ferrix_procfs::cpuinfo::{arm, x86};
     let mut out = Vec::new();
     let Some(topology) = smp::topology() else {
         return Ok(out);
     };
-    for cpu in topology.cpus().iter().filter(|cpu| cpu.is_online()) {
-        put(&mut out, format_args!("processor\t: {}\n", cpu.logical));
-        match arch::ARCH {
-            Arch::X86_64 => {
-                // Linux's `cpu MHz`, the TSC's rate, which Steam's runtime
-                // reads when there is no cpufreq and stops without. Only when
-                // the kernel's counter is the TSC: then its rate was measured
-                // against the HPET. When the counter is the HPET, its rate
-                // says nothing about the processor's, and the line is left
-                // out rather than wrong.
-                if arch::vdso_can_read_counter() {
-                    let khz = arch::counter_hz() / 1000;
-                    put(
-                        &mut out,
-                        format_args!("cpu MHz\t\t: {}.{:03}\n", khz / 1000, khz % 1000),
-                    );
-                }
-                put(
-                    &mut out,
-                    format_args!(
-                        "apicid\t\t: {id}\ninitial apicid\t: {id}\n",
-                        id = cpu.hardware_id
-                    ),
-                );
-            }
-            Arch::AArch64 => out.extend_from_slice(b"CPU architecture: 8\n"),
-            Arch::Armv7a => out.extend_from_slice(b"CPU architecture: 7\n"),
+    let online = topology.cpus().iter().filter(|cpu| cpu.is_online());
+    match arch::ARCH {
+        Arch::X86_64 => {
+            let processors: Vec<x86::Processor> = online
+                .map(|cpu| x86::Processor {
+                    number: cpu.logical,
+                    apic_id: u32::try_from(cpu.hardware_id).unwrap_or(u32::MAX),
+                })
+                .collect();
+            let enabled = x86::Enabled {
+                xcr0: arch::user_extended_state(),
+                // `AT_HWCAP2`'s `FSGSBASE`, set where user mode may use them.
+                fsgsbase: arch::user_hwcaps().1 & (1 << 1) != 0,
+                // `CR4.PKE` stays clear: no protection keys.
+                protection_keys: false,
+                // Four-level page tables only.
+                five_level_paging: false,
+            };
+            let cpuid = |leaf, subleaf| arch::cpuid(leaf, subleaf).unwrap_or_default();
+            let khz = arch::vdso_can_read_counter().then(|| arch::counter_hz() / 1000);
+            x86::render(
+                &mut out,
+                &x86::Identity::read(&cpuid, enabled),
+                &processors,
+                khz,
+            );
         }
-        out.push(b'\n');
+        Arch::AArch64 | Arch::Armv7a => {
+            let processors: Vec<arm::Processor> = online
+                .map(|cpu| arm::Processor {
+                    number: cpu.logical,
+                    midr: arch::midr_of(cpu.logical),
+                })
+                .collect();
+            let (hwcap, hwcap2) = arch::user_hwcaps();
+            let machine = if arch::ARCH == Arch::AArch64 {
+                arm::Machine::Aarch64 { hwcap, hwcap2 }
+            } else {
+                let platform = arch::user_platform(crate::trap::Abi::Native)
+                    .and_then(|name| core::str::from_utf8(name).ok())
+                    .unwrap_or("v7l");
+                arm::Machine::Armv7a {
+                    hwcap,
+                    hwcap2,
+                    platform,
+                }
+            };
+            arm::render(&mut out, machine, &processors, arch::counter_hz());
+        }
     }
     Ok(out)
 }

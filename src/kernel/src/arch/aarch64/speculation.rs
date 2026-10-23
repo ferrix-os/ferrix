@@ -473,6 +473,16 @@ fn kind_of(logical: usize) -> Option<(u64, Defences)> {
     Some((seen, applied_by(logical)?))
 }
 
+/// `MIDR_EL1` of processor `logical`, as it recorded it while starting: who
+/// designed the core and which part it is, for `/proc/cpuinfo`. `None` for a
+/// processor that has not recorded, and in a kernel built without its
+/// side-channel defences, which records nothing.
+pub(crate) fn midr_of(logical: usize) -> Option<u32> {
+    SEEN.get(logical)
+        .and_then(|slot| Seen::unpack(slot.load(Ordering::Acquire)))
+        .and_then(|seen| u32::try_from(seen.core.midr).ok())
+}
+
 /// Say what the machine is exposed to, once every processor has started and
 /// recorded: a line for each kind of core -- the same part, told the same by
 /// firmware, having applied the same -- with how many there are.

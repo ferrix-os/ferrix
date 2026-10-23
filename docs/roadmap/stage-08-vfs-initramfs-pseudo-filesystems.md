@@ -146,7 +146,14 @@ processor lines are each run queue's busy and idle time, read without charging
 anything, so a line never goes backwards between reads; all busy time is
 `user`, because the kernel keeps no split between a task's user and kernel
 time. `/proc/uptime`'s idle field is the same count. With it, `top`, `mpstat`,
-`iostat -c` and `nmeter` run. `/proc/sys` is a tree of the values the kernel
+`iostat -c` and `nmeter` run. `/proc/cpuinfo` writes Linux's
+fields (2026-10-23): on x86-64 the vendor, family and model, the brand
+string as `model name`, the cache size, the topology and a `flags` line in
+Linux's own names, which `tools/common/gen/gen-cpuinfo-names.py` copies from
+Linux v7.0, less what the kernel did not enable (AVX-512's state, `FSGSBASE`,
+protection keys); on the Arm pair `Features` from `AT_HWCAP` and each core's
+`MIDR` fields. What Linux reads from model specific registers (`microcode`,
+`bugs`, `rep_good`, ...) is left out. `/proc/sys` is a tree of the values the kernel
 already keeps — `kernel.ostype`, `osrelease`, `version`, `hostname`,
 `domainname` and `pid_max`, `fs.file-max` and `fs.nr_open` — in which the
 host and domain names write through to what `uname` reports, and every other
