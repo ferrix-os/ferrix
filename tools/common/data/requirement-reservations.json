@@ -171,6 +171,13 @@
       "branch": "powerctl",
       "date": "2026-10-22",
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
+    },
+    {
+      "ids": ["L.console.50-57"],
+      "owner": "etxtbsy-kmsg-dmesg",
+      "branch": "feature/etxtbsy-kmsg-dmesg",
+      "date": "2026-10-23",
+      "purpose": "The kernel log's lines (customer, 2026-10-23: dmesg times and /dev/kmsg): record notes where each line begins, after a newline or a change of priority, stamped and with its priority (50); a line is handed to a reader only whole (51); a reader behind is given the first line kept (52); a record a program writes begins its own line (53); a task's write is logged at a program's priority and a kernel line at the kernel's (54); log_buf_len= grows the log, bytes (55) and lines (56) kept across it, sized as Linux's memparse reads it (57)"
     }
   ]
 }
