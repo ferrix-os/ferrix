@@ -76,7 +76,11 @@ pub fn place(monitor: Rect, requests: &[Request]) -> (Vec<Placement>, Gaps) {
         // exclusive zones". It is placed on the whole monitor -- a
         // wallpaper goes under the bar, not below it -- and takes nothing
         // away from anybody.
-        let within = if request.exclusive_zone < 0 { monitor } else { usable };
+        let within = if request.exclusive_zone < 0 {
+            monitor
+        } else {
+            usable
+        };
         let placement = one(within, *request);
         usable = shrink(usable, placement.reserved);
         total = add(total, placement.reserved);
