@@ -800,3 +800,23 @@ with the device-core split and the core's Linux-shaped code behind the
 trait, about 20 to 30 points beyond §11's ~100 (some of it overlaps
 §11.3's trait rows and KERNEL-CRATES' S3/S4); the export step with its
 control and TOOLS.md entry about 3.
+
+### 11.9 The customer's decisions (2026-10-23)
+
+* **Level** (ledger 3208 (7)), the customer's words: "sc4 if it can be
+  reached with additional 30SP". The `linux-abi=off` kernel aims at `sc4`
+  (IEC 61508-3 SC 4, ISO 26262 ASIL D, EN 50716 SIL 4, DO-178C DAL A
+  objectives, IEC 62304 Class C, CC EAL6+) if the work beyond this
+  document's estimate (~100 points, §11.5, plus §11.8's 20 to 30) needs at
+  most about 30 more points; otherwise `present` without the dated
+  exception first. Which of the two holds is measured against MICROKERNEL's
+  M-milestones and the work already done on the build-profile branches
+  before any code.
+* **Before starting**: check what earlier work on the build profiles
+  (`m0-flags`, `bs-a-s*` (KERNEL-CRATES), `os7s/k1-flags-after-program`,
+  `microkernel-plan`) already did, and continue from there instead of
+  duplicating it.
+* **Condition 3220 (14)**: option (a) unless the customer says otherwise —
+  the crate is an ordinary dependency in the development tree, only the
+  export removes it, and the `off` image's symbols show it is not linked
+  (the bit-identity of (16) proves it again).
