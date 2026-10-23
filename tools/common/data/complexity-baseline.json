@@ -74,6 +74,11 @@
       "lines": 62,
       "recursive": false
     },
+    "main.rs::bring_up_processors": {
+      "complexity": 9,
+      "lines": 60,
+      "recursive": false
+    },
     "main.rs::check_filesystems": {
       "complexity": 13,
       "lines": 88,
@@ -81,7 +86,7 @@
     },
     "main.rs::kmain": {
       "complexity": 11,
-      "lines": 71,
+      "lines": 80,
       "recursive": false
     },
     "main.rs::start_scheduler": {
