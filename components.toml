@@ -37,7 +37,7 @@ commit = "7a6da637cf6f7b0ba30741f971c1d6a9d19828a8"
 [apps]
 path = "src/user/apps"
 repo = "https://github.com/ferrix-os/apps"
-commit = "14910e23ba9a9759cb431d3e680a50a4f3c6169c"
+commit = "451f4750bc204d3b7f30e12249eb4028df98527f"
 
 # tole, the UI framework (docs/UI-FRAMEWORK.md), beside the compositor's
 # workspace, whose `text` and `toolkit` crates it reaches by path. The apps
@@ -45,4 +45,4 @@ commit = "14910e23ba9a9759cb431d3e680a50a4f3c6169c"
 [tole]
 path = "src/user/system/linux/tole"
 repo = "https://github.com/ferrix-os/tole"
-commit = "2dccb2b4dc5d5efb2b29dcb919c4009a72fadd45"
+commit = "c787285d6151eac2e06dec22f46227449c7d74a2"

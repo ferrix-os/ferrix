@@ -1080,4 +1080,10 @@ more.
   private keys, with .ssh among its places. Two screenshots (dark,
   light) of a home made at run time with its clock fixed -- no file
   shaped like a private key is kept in the tree. 90 host tests.
+* **shelf** (2026-10-24), the file manager after the customer's "File
+  Explorer v2" design, the second app on tole (ferrix-os/apps `shelf/`):
+  tabs, two panes, folder sizes, archives read in place, tags, Quick
+  access, filter chips, bulk rename and the freedesktop.org trash, every
+  change asked first. tole gained `Ui::modifiers` (Shift and Control at a
+  click, for multi-select) and `files::local_offset`/`civil_date`.
 * Next: U9, the new Settings (the customer's design), its plan first.
