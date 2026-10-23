@@ -1453,6 +1453,24 @@ The Linux front (§5; `front.rs`), made while lode is still root:
   once with the trusted fields; `/dev/log` is the link; with lode stopped,
   `logger` returns at once.
 
+### Step 4, as built
+
+Box tests stream to nazuna (§10.1; the N150's needs 2 and 10).
+
+* `cargo xtask box-log --host <DEST> [-- <lode options>] [--until-match
+  TEXT] [--out FILE]` runs `lode -f -o json` on the machine over ssh,
+  writes every record to `~/.local/share/ferrix/logs/box/<UTC>-<host>.jsonl`
+  (its first line naming the host, this tree's commit and the time, so the
+  evidence can be cited) and a line of each to the terminal, and keeps the
+  last record's cursor. A dropped connection -- the machine rebooting --
+  is made again every 2 s and goes on `--after-cursor` the last record
+  kept, across the reboot; the store's sequence numbers make a repeat
+  impossible. `--until-match` ends it at the first record whose message
+  holds the text; xtask's `--timeout` bounds the whole follow.
+* Not yet: lode's own store-and-forward to a collector (§10.2's
+  journal-upload, RFC 5424 and JSON outputs) and receiving (§10.3); ssh is
+  the transport and its authentication the access control.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

@@ -74,6 +74,7 @@ mod args;
 mod audio;
 mod auth;
 mod badapple;
+mod box_log;
 mod btrfs_check;
 mod btrfs_disk;
 mod btrfs_pressure;
@@ -531,6 +532,7 @@ const TASKS: &[&[Task]] = &[
     audio::TASKS,
     auth::TASKS,
     badapple::TASKS,
+    box_log::TASKS,
     btrfs_check::TASKS,
     btrfs_pressure::TASKS,
     builds::TASKS,
