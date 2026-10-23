@@ -13,7 +13,8 @@ missing, the order, the points) and its "where it stands".
 ## Where it stands, 2026-10-23
 
 Branch `hyprix-gnome`, not landed. Design written; part 1 (floating mode)
-being built. Kernel lines for all four parts: **0** (each part's section
+being built: 1a (the floating layout) and 1b (snapping, maximize, drag to
+an edge with a tile preview) built and host-tested. Kernel lines for all four parts: **0** (each part's section
 says why).
 
 ## 1. Floating mode
@@ -205,9 +206,12 @@ monitors (`State::add_monitor`, `remove_monitor`).
   `MODE_LIST`, when a display comes or goes. virtio-gpu does already
   (`VIRTIO_GPU_EVENT_DISPLAY`). NVIDIA's `nvrm` must turn NVKMS's
   dpy-change events into the same messages (3 points, needs the 3060).
-  Intel shows only the plane firmware lit and reads no hotplug yet (a row,
-  not in this plan). The kernel needs nothing: the messages and the event
+  Intel: §3.4. The kernel needs nothing: the messages and the event
   exist.
+* **No monitor at all for a while.** Unplugging the only monitor leaves
+  hyprix with none; it keeps a headless stand-in output (as Hyprland's
+  fallback monitor) so windows and workspaces stay put, and gives them back
+  to the monitor that comes next.
 
 ### 3.3 Order and points
 
@@ -218,9 +222,83 @@ monitors (`State::add_monitor`, `remove_monitor`).
 | 3c | wlr-output-management apply | 5 |
 | 3d | saved layout per monitor set | 3 |
 | 3e | NVIDIA hotplug in `nvrm` (hardware) | 3 |
-| | **Part 3** | **22** |
+| 3f | Intel hotplug on the lit port, §3.4 | 3 |
+| 3g | Intel EDID over GMBUS (mode list and description from the monitor) | 3 |
+| | **Part 3** | **28** |
 
 Kernel lines: 0.
+
+### 3.4 Intel hotplug (the customer, 2026-10-23: "add Intel hot plug as well")
+
+**Today.** The Intel driver (`src/user/system/native/drivers/gpu/intel`,
+`display.rs`) serves `card0` as a copying card on the plane the firmware
+lit: HELLO names one scanout, its connector named from pipe A's
+`TRANS_DDI_FUNC_CTL_A` (HDMI, DVI, DisplayPort/eDP), its mode list the
+plane's mode plus scaled sizes (`docs/DISPLAY.md` §9.4,
+`docs/INTEL-GPU.md` §4.3). It reads no hotplug state and no EDID, and it
+never programs the display engine (`display/` of i915 is left out,
+INTEL-GPU.md §3.6).
+
+**What 3f adds, in the driver alone.** The driver watches the lit port's
+hotplug live state as i915 does for Alder Lake-N's pins
+(`display/intel_hotplug_irq.c`: the PCH's `SDEISR` live-state bit of the
+DDI the transcoder drives, armed through `SHOTPLUG_CTL_DDI`; the north
+display's `DE_PORT`/TC live state if the port is a Type-C one). It reads it
+at a bounded rate -- every 500 ms, the way i915 falls back to polling
+(`intel_hpd_poll`) -- and also on the display interrupt if the MSI ever
+arrives (it has not on this box, INTEL-GPU.md §3.4), with a 100 ms
+debounce. On a change it sends what virtio-gpu sends: `MODES` with scanout
+0's `enabled` off for an unplug, and on a plug `MODES` enabled and a fresh
+`MODE_LIST`. The display core turns either into `EVENT_FERRIX_CONNECTORS`
+and `GETCONNECTOR`'s connected/disconnected, and hyprix's 3a does the rest.
+While unplugged the driver keeps the plane and its GGTT entries as they
+are and drops copies; on replug it checks that pipe A and the DDI are still
+enabled (`PIPECONF_A`, `TRANS_DDI_FUNC_CTL_A`) before it says connected.
+An HDMI sink plugged back into a lit port is shown again with no
+programming; a DisplayPort sink needs link training again, which this
+driver does not do, so a DP replug is reported connected only if the link
+status registers say the link is up, and otherwise stays disconnected with
+a line saying why.
+
+**3g, the monitor's own EDID.** Read over GMBUS (`display/intel_gmbus.c`,
+the DDC pin pair of the lit port) on start and after each plug: the mode
+list is then the EDID's modes that fit the running timing's scaled set,
+the description the monitor's own name, and hyprix's per-monitor saved
+layout (3d) can tell two monitors apart.
+
+**Kernel lines: 0.** The driver already maps the MMIO BAR, takes its MSI as
+a port packet and polls on a deadline; `MODES` and `MODE_LIST` exist. If a
+step finds it needs anything new in the kernel it stops and comes back with
+a figure.
+
+**Where it lives after the keeper/worker split** (INTEL-GPU.md §12.3, being
+built now): in the **keeper**. `card0` and the MSI are the keeper's, and
+the worker drives the GT only; hotplug is display state, read from display
+registers the keeper maps, so it never depends on a worker being alive.
+Until the split lands it is in `display.rs`, beside the code that names the
+connector; the split moves it with `card0`.
+
+**Not in 3f: a monitor on a port the firmware did not light.** Lighting a
+second output means programming the display engine -- power wells, a DPLL,
+the DDI, a transcoder and pipe, a plane, HDMI or DP link training -- the
+i915 `display/` subset left out so far: about 21 points, a row of its
+own, and the step that gives the N150 two monitors at once.
+
+**The box test (the customer runs it).** On the N150 with one monitor on
+the HDMI port the firmware lights, `--everything` desktop running:
+
+1. Unplug the HDMI cable, wait 5 s. Look for `intel: card0: HDMI-A-1
+   disconnected` on the serial/console log, `monitorremoved>>HDMI-A-1` on
+   hyprix's event socket (`socat - UNIX:$XDG_RUNTIME_DIR/hypr/*/.socket2.sock`
+   over ssh), and `hyprctl monitors` listing only the headless stand-in.
+2. Plug it back in, wait 5 s. Look for `intel: card0: HDMI-A-1 connected`
+   with its mode list, `monitoradded>>HDMI-A-1`, and the desktop back on
+   the screen with every window where it was.
+3. Repeat quickly (unplug and replug within a second) three times: one
+   disconnect and one connect each, no line flood, no stuck black screen.
+4. If the box has a second output, plug a monitor into it: 3f says nothing
+   about it (the line `intel: card0: a sink on DDI <x>, not lit: no
+   modeset yet` is the expected answer).
 
 ## 4. Driver crashes as notifications
 
@@ -299,12 +377,12 @@ nothing in parts 1 to 3.
 |---|---|---|
 | 1 Floating mode | 18 | 0 |
 | 2 Theme | 13 | 0 |
-| 3 Multi-monitor | 22 | 0 |
+| 3 Multi-monitor | 28 | 0 |
 | 4 Notifications | 18 | 0 |
-| **All** | **71** | **0** |
+| **All** | **77** | **0** |
 
 Order: 1a, 1b, 2b (the theme makes the result visible), 1d, 2a, 2c, 3b,
-3a, 3c, 3d, 1c, 4a to 4d, 3e on the 3060 when the box is free.
+3a, 3f, 3g, 3c, 3d, 1c, 4a to 4d, 3e on the 3060 when the box is free.
 
 **Certification.** No part touches a file in the `core` or `item` ring:
 the compositor, its clients, `devmgr` and the drivers are outside the item.
