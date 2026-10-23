@@ -347,6 +347,27 @@ const APPLETS_ON_X86_64: &[(usize, &[&str])] = &[
             "ran once closed",
         ],
     ),
+    (
+        26,
+        &[
+            "dmesg row: from kmsg",
+            "kmsg: record format",
+            "dmesg: stamped",
+            "dmesg -x: user notice",
+            "dmesg -r: raw",
+            "dmesg -k: kernel only",
+            "dmesg -l: level",
+            "dmesg -T: wall clock",
+            "dmesg -S: through syslog",
+            "busybox dmesg: stamped",
+            "dmesg row: followed",
+            "dmesg -w: followed",
+            "dmesg -C: cleared",
+            "dmesg: drops said",
+            "busybox dmesg: drops said",
+            "dmesg: the flood's last line kept",
+        ],
+    ),
 ];
 
 /// A log of the applets alone, numbered after the criterion's commands, each

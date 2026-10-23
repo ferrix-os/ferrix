@@ -934,6 +934,7 @@ const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("auth", "src/user/system/linux/auth"),
     ("pkg", "src/user/system/linux/pkg"),
     ("dhcp", "src/user/system/linux/dhcp"),
+    ("dmesg", "src/user/system/linux/dmesg"),
     ("installer", "src/user/system/linux/installer"),
 ];
 

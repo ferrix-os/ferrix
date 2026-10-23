@@ -165,6 +165,8 @@ pub(super) fn desktop(
     // The DHCP client, which `--net`'s `exec-once` and the N150 box's
     // script run (`crate::dhcp`).
     carried.ports.extend(crate::dhcp::carried(arch)?);
+    // `dmesg`, in busybox's place (`crate::dmesg`).
+    carried.ports.extend(crate::dmesg::carried(arch)?);
     // The user's dotfiles and the fonts they name, from beside a real
     // `hyprland.conf`: `crate::dotfiles` says which and where.
     if let Some(path) = &args.config
