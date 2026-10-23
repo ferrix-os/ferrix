@@ -37,7 +37,7 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
+use core::fmt;
 use core::ptr;
 
 use ferrix_blkring::control::VMO_RIGHTS;
@@ -195,14 +195,12 @@ impl Driver for Sdmmc {
         let port = port::create(Kernel).map_err(|_| Step::Events)?;
         let host = Controller::take_over(Regs(device), Monotonic { port }, kernel_hz).map_err(
             |error| {
-                say(format_args!(
-                    "sdmmc    the controller was not taken over: {error:?}"
-                ));
+                ferrix_rt::err!("sdmmc    the controller was not taken over: {error:?}");
                 Step::Device
             },
         )?;
         let mut card = Card::init(host).map_err(|(_, error)| {
-            say(format_args!("sdmmc    no card came up: {error:?}"));
+            ferrix_rt::err!("sdmmc    no card came up: {error:?}");
             Step::Device
         })?;
         let identity = *card.identity();
@@ -227,7 +225,7 @@ impl Driver for Sdmmc {
             DATA_BYTES as u64,
         )
         .map_err(|_| Step::Hello)?;
-        say(format_args!(
+        ferrix_rt::info!(
             "sdmmc    card {:#06x}: {} blocks ({} MiB), {}, {} kHz, {}",
             identity.rca,
             identity.blocks,
@@ -243,7 +241,7 @@ impl Driver for Sdmmc {
             } else {
                 "writable in its ferrix- partitions only"
             }
-        ));
+        );
         Ok(Sdmmc {
             card,
             region: Region {
@@ -271,7 +269,7 @@ fn writable(card: &mut Card<Regs, Monotonic>, blocks: u64) -> Writable {
     let mut table = match table {
         Ok(table) => table,
         Err(why) => {
-            say(format_args!("sdmmc    the card is read-only: {why}"));
+            ferrix_rt::warn!("sdmmc    the card is read-only: {why}");
             return Writable::NONE;
         }
     };
@@ -279,9 +277,7 @@ fn writable(card: &mut Card<Regs, Monotonic>, blocks: u64) -> Writable {
         match read(card, table.entries_at() + index) {
             Ok(block) => table.feed(&block),
             Err(_) => {
-                say(format_args!(
-                    "sdmmc    the card is read-only: its table could not be read"
-                ));
+                ferrix_rt::warn!("sdmmc    the card is read-only: its table could not be read");
                 return Writable::NONE;
             }
         }
@@ -289,16 +285,12 @@ fn writable(card: &mut Card<Regs, Monotonic>, blocks: u64) -> Writable {
     match table.finish() {
         Ok(writable) => {
             for &(first, last) in writable.ranges() {
-                say(format_args!(
-                    "sdmmc    blocks {first} to {last} are writable"
-                ));
+                ferrix_rt::info!("sdmmc    blocks {first} to {last} are writable");
             }
             writable
         }
         Err(why) => {
-            say(format_args!(
-                "sdmmc    the card is read-only: its table was refused, {why:?}"
-            ));
+            ferrix_rt::warn!("sdmmc    the card is read-only: its table was refused, {why:?}");
             Writable::NONE
         }
     }
@@ -309,10 +301,12 @@ impl Sdmmc {
     fn failed(&mut self, request: &Request, error: ferrix_stm32_sdmmc::host::Error) {
         self.errors = self.errors.saturating_add(1);
         if self.errors <= SAID_ERRORS {
-            say(format_args!(
+            ferrix_rt::err!(
                 "sdmmc    {:?} of {} blocks at {} failed: {error:?}",
-                request.op, request.count, request.sector
-            ));
+                request.op,
+                request.count,
+                request.sector
+            );
         }
     }
 }
@@ -396,48 +390,5 @@ impl block::Device for Sdmmc {
         // is idle and nothing was abandoned; and the controller was given
         // no memory to write.
         Ok(self.card.host().registers().0.stopped())
-    }
-}
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-/// A line, cut at its buffer's end.
-struct Line {
-    bytes: [u8; 160],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Line {
-        Line {
-            bytes: [0; 160],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or_default()
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            let Some(slot) = self.bytes.get_mut(self.len) else {
-                return Err(fmt::Error);
-            };
-            *slot = byte;
-            self.len += 1;
-        }
-        Ok(())
     }
 }

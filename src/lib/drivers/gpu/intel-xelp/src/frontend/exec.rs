@@ -20,6 +20,7 @@
 //! `EXEC_OBJECT_PINNED` is refused (i915 would choose its address).
 
 use ferrix_linux_abi::errno::Errno;
+use ferrix_linux_abi::kmsg::Level;
 
 use super::backend::Engine;
 use super::drm::{Call, Outcome, put, unserved};
@@ -642,7 +643,7 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
             Ok(()) => fence::track_kernel_fence(state, fence_cookie, done)?,
             Err(errno) => {
                 if state.say_once(63) {
-                    host.say(format_args!(
+                    host.say(Level::Warning, format_args!(
                         "intel: a shared object's dmabuf slot could not be set (errno {}): implicit sync with other programs is lost for this request",
                         errno.0
                     ));

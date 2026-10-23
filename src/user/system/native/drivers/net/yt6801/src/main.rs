@@ -43,7 +43,6 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write as _;
 use core::ptr;
 use core::sync::atomic::{Ordering, fence};
 
@@ -156,17 +155,6 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(()) => 0,
         Err(step) => step as i32,
-    }
-}
-
-/// A line on standard error, which a native process has open on the
-/// console.
-struct Say;
-
-impl core::fmt::Write for Say {
-    fn write_str(&mut self, text: &str) -> core::fmt::Result {
-        let _ = ferrix_rt::linux::write(2, text.as_bytes());
-        Ok(())
     }
 }
 
@@ -748,17 +736,18 @@ fn bring_up(device: &Device<Kernel>, mut bar: Bar, location: u32) -> Result<Adap
     let glue = bar.covers(0x1000, 0x1600);
     let mac = if glue {
         let prepared = ferrix_yt6801::prepare(&mut bar, &mut clock, seed);
-        let _ = writeln!(
-            Say,
+        ferrix_rt::info!(
             "yt6801   address {:02x?} from {:?} (eFuse {:?}, firmware {:02x?})",
-            prepared.mac, prepared.source, prepared.efuse, prepared.firmware
+            prepared.mac,
+            prepared.source,
+            prepared.efuse,
+            prepared.firmware
         );
         prepared.mac
     } else {
         // The glue's page is withheld: no chip reset, no PHY release, no
         // eFuse. What firmware left in the core, else a made-up address.
-        let _ = writeln!(
-            Say,
+        ferrix_rt::warn!(
             "yt6801   the glue's page is not mapped (BAR 0 0x1000-0x1fff withheld): the core \
              alone, its reset may not finish"
         );
@@ -797,10 +786,10 @@ fn bring_up(device: &Device<Kernel>, mut bar: Bar, location: u32) -> Result<Adap
     let card = match Driver::init(parts, options) {
         Ok(card) => card,
         Err(failed) => {
-            let _ = writeln!(
-                Say,
+            ferrix_rt::err!(
                 "yt6801   the core did not come up: {} (reset after: {})",
-                failed.error, failed.reset
+                failed.error,
+                failed.reset
             );
             // A core not seen reset may still write its memory: the
             // kernel's pin quarantine keeps the frames until the next
@@ -809,10 +798,12 @@ fn bring_up(device: &Device<Kernel>, mut bar: Bar, location: u32) -> Result<Adap
         }
     };
     let info = *card.info();
-    let _ = writeln!(
-        Say,
+    ferrix_rt::info!(
         "yt6801   core {:#x} feature1 {:#x} dma {} bits phy {:#010x}",
-        info.version, info.feature1, info.address_bits, info.phy_id
+        info.version,
+        info.feature1,
+        info.address_bits,
+        info.phy_id
     );
     let mut card = card;
     if glue {
@@ -964,21 +955,20 @@ fn poll_link(
     match adapter.card.poll_link() {
         Ok(Some(link)) => {
             let up = matches!(link, Link::Up { .. });
-            let _ = writeln!(Say, "yt6801   link {link:?}");
+            ferrix_rt::info!("yt6801   link {link:?}");
             say_link(control, up);
             Ok(())
         }
         Ok(None) => Ok(()),
         Err(ferrix_dwmac::Error::MdioTimeout) => {
             *misses += 1;
-            let _ = writeln!(
-                Say,
+            ferrix_rt::warn!(
                 "yt6801   the PHY did not answer a link poll ({misses} so far); asking again"
             );
             Ok(())
         }
         Err(error) => {
-            let _ = writeln!(Say, "yt6801   the link poll failed: {error}");
+            ferrix_rt::err!("yt6801   the link poll failed: {error}");
             Err(Step::Serve)
         }
     }
@@ -1022,7 +1012,7 @@ fn serve(
         let turn = serve
             .turn(&mut ring.ring, &mut ring.data, &mut ring.side, adapter)
             .map_err(|fault| {
-                let _ = writeln!(Say, "yt6801   the serve loop stopped: {fault} ({fault:?})");
+                ferrix_rt::err!("yt6801   the serve loop stopped: {fault} ({fault:?})");
                 Step::Serve
             })?;
         stats.turn(&turn, polled);
@@ -1042,8 +1032,7 @@ fn serve(
             if misses >= MISSES_TO_POLL {
                 interrupted = false;
                 unreliable = true;
-                let _ = writeln!(
-                    Say,
+                ferrix_rt::notice!(
                     "yt6801   frames no interrupt announced: polling every 1 to 8 ms from now on"
                 );
             }
@@ -1067,7 +1056,7 @@ fn serve(
         let wait = serve
             .before_sleep(&mut ring.ring, &mut ring.side)
             .map_err(|fault| {
-                let _ = writeln!(Say, "yt6801   the ring refused a sleep: {fault}");
+                ferrix_rt::err!("yt6801   the ring refused a sleep: {fault}");
                 Step::Serve
             })?;
         if wait != Wait::Sleep {
@@ -1093,7 +1082,7 @@ fn serve(
                 stats.interrupts += 1;
                 if !interrupted && !unreliable {
                     interrupted = true;
-                    let _ = writeln!(Say, "yt6801   first interrupt: polling every 250 ms now");
+                    ferrix_rt::info!("yt6801   first interrupt: polling every 250 ms now");
                 }
                 // The drain in the next turn takes what it raised; every
                 // vector is re-armed, whichever rang.
@@ -1204,8 +1193,7 @@ impl Stats {
         if self.interrupts + self.received + self.sent > 0 {
             let per_second = |count: u64| count.saturating_mul(1_000_000_000) / elapsed;
             let per_interrupt_tenths = self.received.saturating_mul(10) / self.interrupts.max(1);
-            let _ = writeln!(
-                Say,
+            ferrix_rt::debug!(
                 "yt6801   {} ms: {} interrupts ({}/s), {} frames in ({}/s), {} out, {}.{} in per \
                  interrupt; {} of {} looks found frames; latch cleared {} times; out of \
                  receive descriptors {} times, {} dropped with no slot, {} bad; {}",
@@ -1255,8 +1243,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     if info.vendor_id != VENDOR || info.device_id != DEVICE {
         return Err(Step::Identity);
     }
-    let _ = writeln!(
-        Say,
+    ferrix_rt::info!(
         "yt6801   {:#010x} {:04x}:{:04x} apertures {} vectors {} msix_table_size {}",
         info.location,
         info.vendor_id,
@@ -1267,17 +1254,18 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     );
     for index in 0..info.apertures as usize {
         if let Ok(aperture) = device.aperture(index) {
-            let _ = writeln!(
-                Say,
+            ferrix_rt::info!(
                 "yt6801   aperture {index}: bar {} offset {:#x} len {:#x}",
-                aperture.bar, aperture.offset, aperture.len
+                aperture.bar,
+                aperture.offset,
+                aperture.len
             );
         }
     }
     say_link_power(&device);
     let bar = Bar::map(&device, info.apertures)?;
     if !bar.covers(GMAC_OFFSET, GMAC_OFFSET + 0x1200) {
-        let _ = writeln!(Say, "yt6801   the core's registers are not mapped");
+        ferrix_rt::err!("yt6801   the core's registers are not mapped");
         return Err(Step::Registers);
     }
     let port = port::create(Kernel).map_err(|_| Step::Ring)?;
@@ -1325,8 +1313,7 @@ fn say_link_power(device: &Device<Kernel>) {
     let control = msi.and_then(|cap| read(cap + 0x02, 2));
     match link {
         Some(link) => {
-            let _ = writeln!(
-                Say,
+            ferrix_rt::info!(
                 "yt6801   link control {link:#06x}: ASPM L0s {} L1 {}; MSI control {}",
                 if link & 0b01 != 0 { "on" } else { "off" },
                 if link & 0b10 != 0 { "on" } else { "off" },
@@ -1334,7 +1321,7 @@ fn say_link_power(device: &Device<Kernel>) {
             );
         }
         None => {
-            let _ = writeln!(Say, "yt6801   link control unreadable");
+            ferrix_rt::warn!("yt6801   link control unreadable");
         }
     }
 }

@@ -255,14 +255,17 @@ customer, 2026-10-23). A record nobody gave a level is never shown as info:
 * The store keeps a level on every record, 0 to 7 or `unspecified` (8 in
   the entry's priority byte), and `FERRIX_PRIORITY_SOURCE` says where it
   came from: `stated` (the writer said it: `PRIORITY=`, a `<PRI>` or `<N>`
-  prefix, a `tracing` line's `WARN`, lode's own records), `kernel` (a level
-  other than info the kernel was handed with the line, a `/dev/kmsg`
-  write's `<3>`), `derived` (read from the line's words, `failed` or
+  prefix, a `tracing` line's `WARN`, lode's own records, and a program's
+  `/dev/kmsg` write that named its level: one of a facility no console
+  line has, as the ring-3 drivers' and devmgr's `LOG_DAEMON` records
+  (`ferrix_rt::log`), or `LOG_USER` at another level than info), `kernel`
+  (a level other than info on the kernel's own facility), `derived` (read from the line's words, `failed` or
   `refused`, with the words in `FERRIX_PRIORITY_WORD`), or `unspecified`.
   A sender's own `FERRIX_PRIORITY_SOURCE` or `FERRIX_LEVEL` is dropped.
 * Info that arrives with no word from the writer says nothing and is
   stored as unspecified: the kernel's own lines and programs' console
-  output all come at info, as does every unit's stdout stream unless its
+  output all come at info (a `/dev/kmsg` write of `<6>` at `LOG_USER`
+  cannot be told from them, and is not), as does every unit's stdout stream unless its
   header says another level; `lode cat` without `-p` sends none, and `-p
   info` puts `<6>` on each line. A syslog datagram without `<PRI>` and a
   native datagram without `PRIORITY` are unspecified too.
@@ -311,7 +314,12 @@ before seq S" at warning, `N` from the sequence gap. A kernel record's
 priority and facility are `/dev/kmsg`'s; a line with facility `user` (a
 program's console output) gets `_TRANSPORT=driver-fallback` when it
 matches a driver's name prefix (`intelgpu: ...`), with `SYSLOG_IDENTIFIER`
-from the prefix, and `kernel` otherwise. `lode` reads the ring as fast as
+from the prefix, and `kernel` otherwise. Since 2026-10-24 the ring-3
+drivers and `devmgr` write each line as a `/dev/kmsg` record of its own,
+`<N>` at `LOG_DAEMON` with the level the line's writer gave it
+(`ferrix_rt::log`: `err!`, `warn!`, `notice!`, `info!`, `debug!`), and
+`lode` stores that level as stated (§4.1); the text and the identifier
+from its prefix (`intel:`, `devmgr`) are as before. `lode` reads the ring as fast as
 it fills, so once it runs nothing the ring overwrites is lost: the
 `freqlog` problem ends there, even before drivers move to their channel.
 `log_buf_len=` (the kmsg branch) sizes the ring for the part of the boot
@@ -1610,6 +1618,24 @@ wrong, fixed in one landing before step 6:
   with its last line, a glued name read, and a line with no level shown as
   unspecified in json, human and verbose, left out by `-p err`, brought in
   by `-p err,unspecified`, and counted by `lode levels`.
+
+### Drivers' levels, as built (2026-10-24)
+
+The customer's: the Intel driver's lines reached lode as unspecified.
+Every ring-3 driver and devmgr now says each line at a level it chose
+(`ferrix_rt::log`: `err!`, `warn!`, `notice!`, `info!`, `debug!`, or
+`log::line(level, ...)`; intel-xelp's `Host::say` and the keeper's take a
+`Level`): refusals a program takes for a lost device at error, other
+refusals and work-arounds at warning, steps at info, `freqlog`, uapi
+traces and register dumps at debug, a panic at critical. Each line is a
+`/dev/kmsg` record `<N>` at `LOG_DAEMON`, which the console prints as
+before and lode stores as stated (`ingest::written_with_level`); a
+program that cannot open `/dev/kmsg` keeps to standard error. No kernel
+line changed. `test-compositor --boot direct-scanout` prints `lode levels
+-b` and requires `intel`, `intel-fake`, `devmgr`, `efifb` and `ahci` with
+no unspecified or derived record: on the commit before, 21 of their 21
+records were unspecified, after it none. Step 7's native channel per
+driver (§17) is still to come; this is its fallback made exact.
 
 ### Store-and-forward, as built (§10.2's first part)
 

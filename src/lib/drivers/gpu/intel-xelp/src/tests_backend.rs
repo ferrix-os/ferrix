@@ -522,7 +522,7 @@ impl crate::frontend::Host<Vec<u64>> for Program {
         false
     }
 
-    fn say(&mut self, _line: core::fmt::Arguments<'_>) {}
+    fn say(&mut self, _level: ferrix_linux_abi::kmsg::Level, _line: core::fmt::Arguments<'_>) {}
 }
 
 /// The front end over the real back end, on the model: a program opens the

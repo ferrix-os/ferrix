@@ -60,6 +60,7 @@
 
 use core::fmt::{self, Write as _};
 use core::ptr;
+use ferrix_rt::log::Level;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_intel_xelp::device_info::{self, DeviceInfo as Platform, engine};
@@ -145,7 +146,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(never) => match never {},
         Err(step) => {
-            say(format_args!("intel: stopped at {step:?}"));
+            ferrix_rt::err!("intel: stopped at {step:?}");
             step as i32
         }
     }
@@ -155,16 +156,14 @@ fn main(bootstrap: Bootstrap) -> i32 {
 // The console
 // ---------------------------------------------------------------------------
 
-/// A line on standard error, which a native process has open on the
-/// console.
-pub(crate) fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    line.end();
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
+/// A line of the driver's log at `level`: a record of its own on
+/// `/dev/kmsg`, which lode stores with the level as stated
+/// (`ferrix_rt::log`).
+pub(crate) fn say(level: Level, arguments: fmt::Arguments<'_>) {
+    ferrix_rt::log::line(level, arguments);
 }
 
-/// One console line.
+/// One line, formatted before it is said.
 struct Line {
     bytes: [u8; 256],
     len: usize,
@@ -180,20 +179,6 @@ impl Default for Line {
 }
 
 impl Line {
-    /// End the line with a newline, overwriting the last byte of a
-    /// truncated one so it still ends the line.
-    fn end(&mut self) {
-        if self.len >= self.bytes.len() {
-            self.len = self.bytes.len();
-            if let Some(last) = self.bytes.last_mut() {
-                *last = b'\n';
-            }
-        } else if let Some(slot) = self.bytes.get_mut(self.len) {
-            *slot = b'\n';
-            self.len += 1;
-        }
-    }
-
     fn as_bytes(&self) -> &[u8] {
         self.bytes.get(..self.len).unwrap_or(&[])
     }
@@ -256,9 +241,7 @@ impl Bar0 {
         }
         let address = self.base + offset as usize;
         if self.trace {
-            say(format_args!(
-                "intel: about to write GGTT entry {index:#x} <- {pte:#018x}"
-            ));
+            ferrix_rt::debug!("intel: about to write GGTT entry {index:#x} <- {pte:#018x}");
         }
         // SAFETY: inside BAR 0's GGTT half, which the kernel mapped for this
         // process and `self` keeps, eight-byte aligned; device memory.
@@ -286,7 +269,7 @@ impl Mmio for Bar0 {
             return 0;
         };
         if self.trace {
-            say(format_args!("intel: about to read {offset:#x}"));
+            ferrix_rt::debug!("intel: about to read {offset:#x}");
         }
         // SAFETY: inside BAR 0's register half, mapped for this process and
         // kept by `self`, aligned.
@@ -301,9 +284,7 @@ impl Mmio for Bar0 {
             return;
         };
         if self.trace {
-            say(format_args!(
-                "intel: about to write {offset:#x} <- {value:#010x}"
-            ));
+            ferrix_rt::debug!("intel: about to write {offset:#x} <- {value:#010x}");
         }
         // SAFETY: as for `read32`, and the mapping is writable.
         unsafe { device_write(address as *mut u32, value) }
@@ -389,22 +370,31 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     let device = started(boot)?;
     let info = device.info().map_err(|_| Step::Identity)?;
     let Some(platform) = device_info::lookup(info.vendor_id, info.device_id) else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: {:04x}:{:04x} is not a device this driver drives",
-            info.vendor_id, info.device_id
-        ));
+            info.vendor_id,
+            info.device_id
+        );
         return Err(Step::Identity);
     };
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: {:#010x} {:04x}:{:04x} class {:06x}, ADL-N (adl_p_info, subplatform N), apertures {} vectors {}",
-        info.location, info.vendor_id, info.device_id, info.class, info.apertures, info.vectors
-    ));
+        info.location,
+        info.vendor_id,
+        info.device_id,
+        info.class,
+        info.apertures,
+        info.vectors
+    );
     for index in 0..info.apertures as usize {
         if let Ok(aperture) = device.aperture(index) {
-            say(format_args!(
+            ferrix_rt::info!(
                 "intel: aperture {index}: bar {} at {:#x}, {:#x} bytes, flags {:#x}",
-                aperture.bar, aperture.phys, aperture.len, aperture.flags
-            ));
+                aperture.bar,
+                aperture.phys,
+                aperture.len,
+                aperture.flags
+            );
         }
     }
     let steps = Steps::from_command_line();
@@ -421,9 +411,9 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             // plane is lit is not known yet at most steps, and after a
             // restart the death's quiesce already turned bus mastering off,
             // so the line says neither. Staying sends no HELLO either way.
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: stopped at {step:?}; the driver stays and sends no HELLO, so devmgr does not quiesce 00:02.0 under any plane the firmware lit"
-            ));
+            );
         }
     };
     let done = match m1(&device, info.apertures, &platform, &steps, &mut time) {
@@ -434,9 +424,9 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         }
     };
     if done.locked {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: the WOPCM is locked: no M2 and no render node; the driver now waits and touches nothing"
-        ));
+        );
         return stay(&time);
     }
     match serve_gpu(&device, info.location, info.device_id, done, &steps) {
@@ -463,7 +453,7 @@ fn say_inherited(inherited: &[Option<ferrix_intel_xelp::backend::Inherited>]) {
                 engine::VCS2 => "vcs2",
                 _ => "vecs0",
             };
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: {name} was a previous driver's (status page {:#x}); reset alone before bring-up: {}",
                 found.hws_pga,
                 match found.report {
@@ -471,7 +461,7 @@ fn say_inherited(inherited: &[Option<ferrix_intel_xelp::backend::Inherited>]) {
                     Some(_) => "NOT reset",
                     None => "no reset domain here, never this driver's",
                 }
-            ));
+            );
         }
     }
 }
@@ -487,18 +477,18 @@ fn take_forcewake(bar: &mut Bar0, time: &mut Time, platform: &Platform) -> Resul
     // stays set stops the driver before it touches the GT or sends a HELLO.
     match uncore::fw_domains_sanitize(bar, time, &domains) {
         Ok(0) => {}
-        Ok(held) => say(format_args!(
+        Ok(held) => ferrix_rt::warn!(
             "intel: forcewake {held:#x} was held by a previous driver; released (requests cleared, acks clear)"
-        )),
+        ),
         Err(error) => {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: forcewake a previous holder left could not be released: {error:?}"
-            ));
+            );
             return Err(Step::Forcewake);
         }
     }
     if let Err(error) = uncore::fw_domains_get(bar, time, &domains, wanted) {
-        say(format_args!("intel: forcewake failed: {error:?}"));
+        ferrix_rt::err!("intel: forcewake failed: {error:?}");
         return Err(Step::Forcewake);
     }
     Ok(())
@@ -548,16 +538,16 @@ fn serve_gpu(
     let others = match uncore::fw_domains_get(&mut bar, &mut time, &all, rest) {
         Ok(()) => true,
         Err(error) => {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: forcewake of the media domains failed ({error:?}); render and GT only"
-            ));
+            );
             false
         }
     };
     if steps.selftest {
         match m2::run(&mut bar, device, &mut time, firmware, steps) {
             Err(Step::Stopped) => return Err(Step::Stopped),
-            Err(step) => say(format_args!("intel: M2 stopped at {step:?}")),
+            Err(step) => ferrix_rt::err!("intel: M2 stopped at {step:?}"),
             Ok(()) => {}
         }
     }
@@ -595,25 +585,25 @@ fn serve_gpu(
     )
     .map_err(|error| {
         if error == ferrix_intel_xelp::backend::Error::Inherited {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: an engine a dead driver left running could not be reset: no render node and no card, and the driver exits so the kernel keeps the dead driver's pins"
-            ));
+            );
             return Step::Inherited;
         }
-        say(format_args!(
+        ferrix_rt::err!(
             "intel: the back end did not come up: {error:?}"
-        ));
+        );
         Step::Backend
     })?;
     say_inherited(backend.inherited());
     let facts = *backend.facts();
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: back end up in {} ms: GGTT window {start:#x}, {} engines, {} EUs, {} MiB of system memory",
         time.now_us().saturating_sub(started) / 1_000,
         facts.engines.len(),
         facts.sseu.eu_total,
         facts.system_memory_bytes >> 20
-    ));
+    );
     power(&mut backend, steps);
     if others {
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
@@ -622,9 +612,9 @@ fn serve_gpu(
     let mut frontend = Frontend::new(backend);
     frontend.set_trace(steps.uapitrace);
     if steps.uapitrace {
-        say(format_args!(
+        ferrix_rt::notice!(
             "intel: uapitrace: held waits, their answers, failed ioctls, and a wait unanswered for 2 s (ferrix.intelgpu.uapitrace)"
-        ));
+        );
     }
     serve_nodes(device, location, firmware.plane, &port, &mut frontend)
 }
@@ -640,16 +630,14 @@ fn bind_interrupt(
         Ok(interrupt) => match interrupt.bind(port, serve::KEY_INTERRUPT) {
             Ok(()) => Some(interrupt),
             Err(error) => {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "intel: the interrupt could not be bound ({error:?}); polling only"
-                ));
+                );
                 None
             }
         },
         Err(error) => {
-            say(format_args!(
-                "intel: no interrupt ({error:?}); polling only"
-            ));
+            ferrix_rt::warn!("intel: no interrupt ({error:?}); polling only");
             None
         }
     }
@@ -703,7 +691,7 @@ fn m1(
         format_args!("map BAR 0, 16 MiB uncached (the kernel's io_mapping; no device access)"),
     )?;
     let Some(aperture) = bar0(device, apertures) else {
-        say(format_args!("intel: no whole 16 MiB BAR 0 to map"));
+        ferrix_rt::err!("intel: no whole 16 MiB BAR 0 to map");
         return Err(Step::Registers);
     };
     let mapping = device
@@ -712,9 +700,9 @@ fn m1(
             len: GTTMMADR_BYTES,
         })
         .map_err(|error| {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: BAR 0 refused ({error:?}): the kernel lends 00:02.0 only under ferrix.intelgpu without ferrix.efifb"
-            ));
+            );
             Step::Registers
         })?;
     let base = mapping.map(None).map_err(|_| Step::Registers)?;
@@ -739,31 +727,31 @@ fn m1(
     )?;
     let started = time.now_us();
     take_forcewake(&mut bar, time, platform)?;
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: forcewake render and GT acknowledged in {} us",
         time.now_us().saturating_sub(started)
-    ));
+    );
 
     steps.before(
         At::Wopcm,
         format_args!("read GUC_WOPCM_SIZE 0xc050, DMA_GUC_WOPCM_OFFSET 0xc340 (GT domain)"),
     )?;
     let locked = uc::uc_is_wopcm_locked(&mut bar);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: WOPCM {}",
         if locked {
             "locked: GuC ran since the last reset; execlists need an FLR first (i915's __uc_check_hw)"
         } else {
             "unlocked: execlists may start"
         }
-    ));
+    );
 
     let (subslice_mask, engine_mask) = say_gt(&mut bar, platform, steps)?;
     let (scanned, last_present, total, plane) = say_plane_and_ggtt(&mut bar, device, time, steps)?;
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: M1: the device answers ({} ms)",
         time.now_us().saturating_sub(run_started) / 1_000
-    ));
+    );
 
     Ok(M1Done {
         bar,
@@ -786,12 +774,12 @@ fn say_config(device: &Device<Kernel>) {
         .map_or(0, |value| value as u16);
     let bsm = device.config_read(gtt::INTEL_BSM, 4).unwrap_or(0);
     let gms = (gmch >> gtt::BDW_GMCH_GMS_SHIFT) & gtt::BDW_GMCH_GMS_MASK;
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: GMCH_CTRL {gmch:#06x}: GGTT {} MiB of entries for {} GiB; stolen base {:#x}, GMS {gms:#x}",
         gtt::gen8_get_total_gtt_size(gmch) >> 20,
         gtt::ggtt_total(gmch) >> 30,
         bsm & gtt::INTEL_BSM_MASK,
-    ));
+    );
 }
 
 /// The GT's identity, under forcewake: the dual-subslices and the engines
@@ -805,20 +793,24 @@ fn say_gt(bar: &mut Bar0, platform: &Platform, steps: &Steps) -> Result<(u8, u32
     )?;
     let fuses = sseu::Fuses::read(bar);
     let info = sseu::gen12_sseu_info_init(fuses);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: slices {:#x} (enable {:#x}), dual-subslices {:#x}, EUs {:#06x} per DSS, {} EUs",
-        info.slice_mask, info.slice_enable, info.subslice_mask, info.eu_mask, info.eu_total
-    ));
+        info.slice_mask,
+        info.slice_enable,
+        info.subslice_mask,
+        info.eu_mask,
+        info.eu_total
+    );
     let media = bar.read32(GEN11_GT_VEBOX_VDBOX_DISABLE.offset());
     let mask = device_info::engine_mask_apply_media_fuses(platform.platform_engine_mask, media);
     let mut line = Line::default();
     for e in ENGINES.iter().filter(|e| mask & engine::bit(e.id) != 0) {
         let _ = write!(line, " {}", e.name);
     }
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: engines (media fuse {media:#010x}):{}",
         core::str::from_utf8(line.as_bytes()).unwrap_or("?")
-    ));
+    );
     steps.before(
         At::Clock,
         format_args!(
@@ -834,12 +826,12 @@ fn say_gt(bar: &mut Bar0, platform: &Platform, steps: &Steps) -> Result<(u8, u32
         bar.read32(rps::GEN6_RP_STATE_CAP.offset()),
         bar.read32(rps::GEN10_FREQ_INFO_REC.offset()),
     );
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: CS timestamp {cs} Hz; RP0 {} MHz, RP1 {} MHz, RPn {} MHz",
         rps::intel_gpu_freq(caps.rp0_freq),
         rps::intel_gpu_freq(caps.rp1_freq),
         rps::intel_gpu_freq(caps.min_freq)
-    ));
+    );
     Ok((info.subslice_mask, mask))
 }
 
@@ -881,17 +873,14 @@ fn say_plane_and_ggtt(
         let (width, height) = lit.dimensions();
         let first = u64::from(lit.ggtt_offset()) / gtt::GTT_PAGE_SIZE;
         let pte = bar.ggtt_entry(first).unwrap_or(0);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: pipe A plane 1 lit, {width}x{height}, stride {:#x}, at GGTT {:#x}: entry {pte:#018x} (page {:#x})",
             lit.stride,
             lit.ggtt_offset(),
             gtt::gen8_ggtt_pte_decode(pte).unwrap_or(0),
-        ));
+        );
     } else {
-        say(format_args!(
-            "intel: pipe A plane 1 not lit (ctl {:#010x})",
-            lit.ctl
-        ));
+        ferrix_rt::info!("intel: pipe A plane 1 not lit (ctl {:#010x})", lit.ctl);
     }
     steps.before(
         At::GgttWalk,
@@ -921,21 +910,21 @@ fn say_plane_and_ggtt(
             break;
         }
     }
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: GGTT {entries} entries, {scanned} read in {} us to {why}: {present} present (first {:#x}, last {last_present:#x}); none written",
         time.now_us().saturating_sub(started),
         first_present.unwrap_or(0)
-    ));
+    );
     // What drives the lit picture to its socket, read only while pipe A
     // is lit (its power well on), to name the connector as Linux would.
     let output = lit.enabled().then(|| plane::read_output(bar));
     if let Some(output) = output {
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: pipe A out through TRANS_DDI_FUNC_CTL_A {:#010x}, PP_STATUS {:#010x}: DRM connector type {}",
             output.ddi_func_ctl,
             output.pp_status,
             output.drm_connector()
-        ));
+        );
     }
     let screen = lit.enabled().then(|| {
         let (width, height) = lit.dimensions();
@@ -980,27 +969,27 @@ fn serving_power(
     all: uncore::FwDomains,
 ) {
     if steps.fwhold {
-        say(format_args!(
+        ferrix_rt::notice!(
             "intel: forcewake: render and GT held for the driver's life (ferrix.intelgpu.fwhold), so the GT never enters RC6"
-        ));
+        );
     } else {
         backend.platform().forcewake_per_access(
             all,
             uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT,
             ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
         );
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: forcewake per access from here, each domain released 1 ms after its last use, so the GT can enter RC6"
-        ));
+        );
     }
     if steps.freqtest {
         freqtest(backend, steps);
     }
     if steps.freqlog {
         backend.set_freqlog(true, ferrix_rt::linux::monotonic_nanos().unwrap_or(0));
-        say(format_args!(
+        ferrix_rt::notice!(
             "intel: freqlog: one line a second while serving (ferrix.intelgpu.freqlog)"
-        ));
+        );
     }
 }
 
@@ -1016,7 +1005,7 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
 ) {
     use ferrix_intel_xelp::rps::intel_gpu_freq;
     let rps = backend.power_up(steps.freq_mhz, true);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: RPS on: RP0 {} MHz, RP1 {} MHz, RPn {} MHz; request {} MHz{}; RC6 enabled",
         intel_gpu_freq(rps.caps.rp0_freq),
         intel_gpu_freq(rps.caps.rp1_freq),
@@ -1027,15 +1016,23 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
         } else {
             " (RP1, then i915's up/down policy)"
         }
-    ));
+    );
     if steps.freqtest {
         ring_table(backend, "before");
     }
     let (refused, first) = backend.update_ring_freq();
-    say(format_args!(
-        "intel: the ring frequency table written (intel_llc_enable): {refused} rows refused{}",
-        Refusal(first)
-    ));
+    let level = if refused == 0 {
+        Level::Info
+    } else {
+        Level::Warning
+    };
+    say(
+        level,
+        format_args!(
+            "intel: the ring frequency table written (intel_llc_enable): {refused} rows refused{}",
+            Refusal(first)
+        ),
+    );
     if steps.freqtest {
         ring_table(backend, "after");
     }
@@ -1048,10 +1045,10 @@ fn ring_table<P: ferrix_intel_xelp::backend::Platform>(
 ) {
     let mut rows = [ferrix_intel_xelp::pcode::RingRow::default(); 32];
     let n = backend.ring_freq_table(&mut rows);
-    say(format_args!(
+    ferrix_rt::debug!(
         "intel: freqtest ring table {when}: {}",
         RingRows(rows.get(..n).unwrap_or_default())
-    ));
+    );
 }
 
 /// The ring table's rows as `GT MHz:ring MHz/IA MHz`.
@@ -1135,7 +1132,7 @@ fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
         return;
     };
     let limits = backend.limits();
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: freqtest limits: RP_STATE_CAP {:#010x}, RP_STATE_LIMITS {:#010x}, PL1 {}.{:03} W {} (RAPL_LIMIT {:#010x}), TDP {}.{:03} W, package {} C; RPNSWREQ {:#010x}, RP_INTERRUPT_LIMITS {:#010x}, RP_CONTROL {:#010x}",
         limits.state_cap,
         limits.state_limits,
@@ -1149,7 +1146,7 @@ fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
         limits.swreq,
         limits.interrupt_limits,
         limits.rp_control,
-    ));
+    );
     let mut probe = Probe::new(backend, idle);
     let phases = [
         ("RP1", Some(rps.caps.rp1_freq)),
@@ -1163,14 +1160,14 @@ fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
                 pin.is_some(),
             )
             .unwrap_or(0);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: freqtest {name}: asked {asked} MHz{}",
             if pin.is_some() {
                 ", pinned"
             } else {
                 ", on the policy"
             }
-        ));
+        );
         if pin.is_some() {
             probe.samples(backend, name, "idle", 3, 100);
         }
@@ -1178,12 +1175,12 @@ fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
             Ok(load) => {
                 probe.samples(backend, name, "busy", 5, 100);
                 if !backend.load_end(load, 100_000) {
-                    say(format_args!(
+                    ferrix_rt::warn!(
                         "intel: freqtest {name}: the load did not end; the hang watch resets it"
-                    ));
+                    );
                 }
             }
-            Err(error) => say(format_args!("intel: freqtest {name}: no load ({error:?})")),
+            Err(error) => ferrix_rt::warn!("intel: freqtest {name}: no load ({error:?})"),
         }
     }
     probe.samples(backend, "policy", "idle", 5, 100);
@@ -1191,14 +1188,14 @@ fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
         Some(mhz) => backend.set_frequency_mhz(mhz, true).unwrap_or(0),
         None => backend.rps().map_or(0, |rps| intel_gpu_freq(rps.last)),
     };
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: freqtest done; the request is {back} MHz{}",
         if steps.freq_mhz.is_some() {
             ", pinned again"
         } else {
             ", on the policy"
         }
-    ));
+    );
 }
 
 /// The checkpoint's sampler: the back end serviced as the serving loop
@@ -1262,7 +1259,7 @@ impl Probe {
                 .saturating_mul(100)
                 .checked_div(elapsed)
                 .unwrap_or(0);
-            say(format_args!(
+            ferrix_rt::debug!(
                 "intel: freqtest {name} {phase}: asked {} MHz{}, sample {n}: CAGF {} MHz, RPSTAT1 {:#010x}, limits {:#010x} {}, RCS0 busy {share} %, PM up {}/{}, RC6 {}.{} %, package {}.{:03} W",
                 sample.requested_mhz,
                 if rps.is_some_and(|rps| !rps.active) {
@@ -1280,7 +1277,7 @@ impl Probe {
                 rc6 % 10,
                 milliwatts / 1000,
                 milliwatts % 1000,
-            ));
+            );
             self.last = sample;
             self.at = now;
             self.busy = busy;
@@ -1314,9 +1311,7 @@ where
     let mut host = match serve::publish(device, location) {
         Ok(host) => host,
         Err(stopped) => {
-            say(format_args!(
-                "intel: no render node ({stopped:?}); card0 alone is served"
-            ));
+            ferrix_rt::warn!("intel: no render node ({stopped:?}); card0 alone is served");
             loop {
                 match port.wait(Deadline::Never) {
                     Ok(packet) => on_display(packet.key, port),
@@ -1328,7 +1323,7 @@ where
     match serve::serve(&mut host, port, frontend, &mut on_display) {
         Ok(never) => match never {},
         Err(stopped) => {
-            say(format_args!("intel: serving stopped: {stopped:?}"));
+            ferrix_rt::err!("intel: serving stopped: {stopped:?}");
             Err(Step::Serve)
         }
     }

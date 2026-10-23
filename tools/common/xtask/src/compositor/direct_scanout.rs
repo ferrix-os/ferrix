@@ -36,12 +36,29 @@ const EXPECTED: [(&str, &str); 1] = [(
     "src/user/system/linux/compositor/render/tests/data/fullscreen-checkerboard.xrle",
 )];
 
-/// The configuration: one client on the Intel node, fullscreen.
+/// The configuration: one client on the Intel node, fullscreen, and lode's
+/// level table once the drivers have spoken ([`LEVELS`]).
 const CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor`.
 windowrule = fullscreen, match:class ^(rocks.magical.pattern)$
 exec-once = /bin/pattern checkerboard scanout --dmabuf --busy
+exec-once = /bin/busybox sh -c '/bin/busybox sleep 5; /bin/lode levels -b | /bin/busybox sed \"s/^/lode-level\"\"s: /\"; echo lode-level\"\"s: table ends'
 ";
+
+/// What each line of `lode levels -b` is said after, in [`CONFIG`]'s boot.
+/// The command spells it `lode-level""s` so that hyprix's line naming the
+/// command it started is never taken for the table.
+const LEVELS: &str = "lode-levels: ";
+
+/// The line after the table.
+const LEVELS_END: &str = "lode-levels: table ends";
+
+/// The sources -- `SYSLOG_IDENTIFIER`s -- of the ring-3 drivers and devmgr
+/// that this boot runs, each of whose lines must reach lode with the level
+/// its writer gave it (`ferrix_rt::log`): none unspecified, none derived
+/// from its words. `intel` is the fake's front end and `intel-fake` its
+/// facts; `efifb` the copying card's, `ahci` the machine's SATA controller's.
+const DRIVERS: [&str; 5] = ["intel", "intel-fake", "devmgr", "efifb", "ahci"];
 
 /// The configuration of the second boot: the same client floating at the
 /// screen's size and place, as an X game is on the N150 (yserver passes no
@@ -114,6 +131,51 @@ pub(super) fn test_direct_scanout_floating(
     )
 }
 
+/// Judge the level table [`CONFIG`] has the guest say: every source in
+/// [`DRIVERS`] there, with no record unspecified or derived. `Ok` with the
+/// table's lines, for the log.
+fn judge_levels(said: &[String]) -> std::result::Result<Vec<String>, String> {
+    let table: Vec<String> = said
+        .iter()
+        .filter_map(|line| {
+            let at = line.find(LEVELS)?;
+            Some(line.get(at + LEVELS.len()..)?.trim_end().to_owned())
+        })
+        .filter(|row| row != "table ends")
+        .collect();
+    for source in DRIVERS {
+        let Some(row) = table
+            .iter()
+            .find(|row| row.split_whitespace().next() == Some(source))
+        else {
+            return Err(format!(
+                "lode's level table has no row for {source}: its lines never reached lode"
+            ));
+        };
+        let counts: Vec<u64> = row
+            .split_whitespace()
+            .skip(1)
+            .filter_map(|count| count.parse().ok())
+            .collect();
+        match counts.as_slice() {
+            [_, 0, 0] => {}
+            [records, unspecified, derived] => {
+                return Err(format!(
+                    "{source}: {unspecified} of {records} records reached lode with no level, \
+                     {derived} with one read from their words: a driver's lines carry the level \
+                     it gave them (ferrix_rt::log)"
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "lode's level table's row for {source} reads `{row}`"
+                ));
+            }
+        }
+    }
+    Ok(table)
+}
+
 fn run(arch: Arch, programs: &Programs, args: &Args, config: &str, how: &str) -> Result<()> {
     if arch != Arch::X86_64 {
         println!("  {arch}: the firmware framebuffer is lent on x86-64 alone; skipped");
@@ -123,19 +185,37 @@ fn run(arch: Arch, programs: &Programs, args: &Args, config: &str, how: &str) ->
     let mut args = args.clone();
     args.firmware_screen = true;
     args.intel_gpu_standin = true;
+    // The level table's shell, sleep and sed: this machine's busybox.
+    let carried = if config == CONFIG {
+        let busybox = crate::busybox::installed_program(arch).ok_or_else(|| {
+            Error::new(format!(
+                "{arch}: no busybox for the level table's shell: `cargo xtask busybox` builds one"
+            ))
+        })?;
+        Carried {
+            busybox: Some(busybox),
+            ..Carried::none()
+        }
+    } else {
+        Carried::none()
+    };
     let (screens, said) = boot_and_dump_carrying(
         arch,
         programs,
         config,
-        (Carried::none(), Some(OPTION)),
+        (carried, Some(OPTION)),
         &Wanted {
             states: &EXPECTED,
             others: &[],
             moving: None,
             pointer: None,
             // A second of frames, for their times: hyprix's once-a-second
-            // lines.
-            awaiting: &[FRAMES_LINE],
+            // lines; and in the fullscreen boot lode's level table.
+            awaiting: if config == CONFIG {
+                &[FRAMES_LINE, LEVELS_END]
+            } else {
+                &[FRAMES_LINE]
+            },
         },
         &[],
         &args,
@@ -162,10 +242,54 @@ fn run(arch: Arch, programs: &Programs, args: &Args, config: &str, how: &str) ->
             )));
         }
     }
+    if config == CONFIG {
+        let table = judge_levels(&said).map_err(|why| Error::new(format!("{arch}: {why}")))?;
+        for row in &table {
+            println!("  {arch}: lode levels: {row}");
+        }
+        println!(
+            "  {arch}: every line of {} reached lode with its writer's level",
+            DRIVERS.join(", ")
+        );
+    }
     println!(
         "  {arch}: a client's own buffer, {how}, shown directly on a copying card, every one \
          of {} pixels the client's",
         screen.width * screen.height
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::judge_levels;
+
+    fn said(rows: &[&str]) -> Vec<String> {
+        rows.iter()
+            .map(|row| format!("[   12.5] hyprix: lode-levels: {row}"))
+            .collect()
+    }
+
+    #[test]
+    fn the_drivers_rows_must_have_no_unspecified_and_no_derived() {
+        let good = [
+            "SOURCE                    RECORDS  UNSPECIFIED  DERIVED",
+            "kernel                        900          880       20",
+            "intel                          12            0        0",
+            "intel-fake                      1            0        0",
+            "devmgr                         20            0        0",
+            "efifb                           5            0        0",
+            "ahci                            6            0        0",
+            "table ends",
+        ];
+        assert_eq!(judge_levels(&said(&good)).map(|table| table.len()), Ok(7));
+        let mut unspecified = good;
+        unspecified[2] = "intel                          12            3        0";
+        assert!(judge_levels(&said(&unspecified)).is_err_and(|why| why.contains("3 of 12")));
+        let mut derived = good;
+        derived[4] = "devmgr                         20            0        2";
+        assert!(judge_levels(&said(&derived)).is_err());
+        let missing = &good[..5];
+        assert!(judge_levels(&said(missing)).is_err_and(|why| why.contains("efifb")));
+    }
 }

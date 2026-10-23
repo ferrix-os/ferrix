@@ -27,7 +27,6 @@ use ferrix_rt::native::pin::{DeviceAddress, Pin, PinAccess, device_address};
 use ferrix_rt::native::vmo::{self, Vmo};
 
 use super::regs::Regs;
-use crate::say;
 
 /// Pages pinned at a time: one GGTT page of entries.
 const CHUNK: usize = 512;
@@ -63,9 +62,7 @@ impl Surface {
             .filter_map(|index| device.aperture(index).ok())
             .find(|aperture| aperture.bar == 0 && aperture.offset == 0);
         let Some(bar0) = bar0 else {
-            say(format_args!(
-                "intel: card0: no second surface: BAR 0 is not lent"
-            ));
+            ferrix_rt::warn!("intel: card0: no second surface: BAR 0 is not lent");
             return None;
         };
         // The entries below the driver's window: 64 Ki of them, 512 KiB.
@@ -76,16 +73,16 @@ impl Surface {
                 len: below * 8,
             })
             .inspect_err(|error| {
-                say(format_args!(
+                ferrix_rt::err!(
                     "intel: card0: no second surface: the GGTT's entries refused ({error:?})"
-                ));
+                );
             })
             .ok()?;
         let table = entries.map(None).ok()?;
         let placed = place(table, below, regs)?;
         let at = placed.placed.at;
         let planes = placed.planes;
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: the second surface at GGTT {at:#x}..{:#x}, {} ({planes} planes scanned out elsewhere)",
             at + SURFACE_BYTES,
             if placed.placed.reclaimed {
@@ -93,7 +90,7 @@ impl Surface {
             } else {
                 "in entries the firmware left free"
             }
-        ));
+        );
         let len = usize::try_from(SURFACE_BYTES).ok()?;
         let pages = len.div_ceil(GTT_PAGE_SIZE as usize);
         let first = at / GTT_PAGE_SIZE;
@@ -109,9 +106,9 @@ impl Surface {
             let pin = device
                 .pin(&memory, start * 4096, count * 4096, PinAccess::ReadWrite)
                 .inspect_err(|error| {
-                    say(format_args!(
+                    ferrix_rt::err!(
                         "intel: card0: no second surface: {count} pages not pinned ({error:?})"
-                    ));
+                    );
                 })
                 .ok()?;
             let got = pin.addresses(&mut addresses).ok()?;
@@ -140,9 +137,9 @@ impl Surface {
             unsafe { ptr::write_volatile((base + word * 8) as *mut u64, 0) };
         }
         crate::arch::flush_range(base, len);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: a second surface, {len:#x} bytes at GGTT {ggtt:#x} ({pages} pages pinned)"
-        ));
+        );
         Some(Self {
             _vmo: memory,
             _pins: pins,
@@ -170,10 +167,10 @@ fn place(table: usize, below: u64, regs: &mut Regs) -> Option<Placement> {
         busy.get(..planes).unwrap_or_default(),
         light::SURFACE_GGTT_LIMIT,
     ) else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: card0: no second surface: no {SURFACE_BYTES:#x} bytes below GGTT {:#x} that no plane scans out",
             light::SURFACE_GGTT_LIMIT
-        ));
+        );
         return None;
     };
     Some(Placement { placed, planes })

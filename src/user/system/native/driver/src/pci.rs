@@ -70,7 +70,7 @@ impl<F: Function> Bind for Device<F> {
     ) -> Result<Self, Step> {
         let info = handle.info().map_err(|_| Step::Identity)?;
         if info.location != start.location || !F::matches(&info) {
-            say(b"pci      a driver was started on a function that is not its kind\n");
+            ferrix_rt::err!("pci      a driver was started on a function that is not its kind");
             return Err(Step::Identity);
         }
         let vector = handle.interrupt(0).and_then(|interrupt| {
@@ -78,7 +78,9 @@ impl<F: Function> Bind for Device<F> {
             Ok(interrupt)
         });
         let Ok(interrupt) = vector else {
-            say(b"pci      the function's first MSI-X or MSI vector could not be claimed\n");
+            ferrix_rt::err!(
+                "pci      the function's first MSI-X or MSI vector could not be claimed"
+            );
             return Err(Step::Events);
         };
         Ok(Device {
@@ -130,13 +132,13 @@ impl<F: Function> Device<F> {
                 },
             );
             if mapped.is_err() {
-                say(b"pci      the kernel would not map the function's BAR\n");
+                ferrix_rt::err!("pci      the kernel would not map the function's BAR");
             }
             return mapped;
         }
-        say(
-            b"pci      the function's BAR is not published: its memory decoding is off, \
-              or the kernel withheld it\n",
+        ferrix_rt::err!(
+            "pci      the function's BAR is not published: its memory decoding is off, \
+              or the kernel withheld it"
         );
         Err(Step::Registers)
     }
@@ -173,10 +175,4 @@ impl<F: Function> Device<F> {
     pub fn stopped(&self) -> Stopped {
         Stopped(())
     }
-}
-
-/// A line on standard error, which a native process has open on the
-/// console: why a driver stopped before it could say anything itself.
-fn say(line: &[u8]) {
-    let _ = ferrix_rt::linux::write(2, line);
 }

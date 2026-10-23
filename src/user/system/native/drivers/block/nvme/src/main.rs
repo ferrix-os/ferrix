@@ -195,25 +195,25 @@ impl Driver for Nvme {
         let info = *device.info();
         let quirks = quirks::for_device(info.vendor_id, info.device_id);
         if quirks.contains(Quirks::BROKEN_MSI) && !device.msix() {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "nvme     {} has no MSI-X and its MSI is known broken: not driven",
                 Place(info.location)
-            ));
+            );
             return Err(Step::Events);
         }
         let registers = device.map_bar(0)?;
         // The admin queue's doorbells are the least the BAR must hold.
         if registers.len() < (regs::cq_doorbell(0, 4) + 4) as usize {
-            say(format_args!(
+            ferrix_rt::err!(
                 "nvme     {} BAR 0 is {} bytes where it starts: too small for a controller",
                 Place(info.location),
                 registers.len()
-            ));
+            );
             return Err(Step::Registers);
         }
         // Said before the controller is touched, so a boot that stops in
         // the reset or the enable still says how far it came.
-        say(format_args!(
+        ferrix_rt::info!(
             "nvme     {} {:04x}:{:04x} found: BAR 0 maps {} bytes, interrupt by {}, quirks {:#x}",
             Place(info.location),
             info.vendor_id,
@@ -221,13 +221,13 @@ impl Driver for Nvme {
             registers.len(),
             if device.msix() { "MSI-X" } else { "MSI" },
             quirks.0
-        ));
+        );
         let pinned = |pages: usize| {
             device.dma(pages).inspect_err(|_| {
-                say(format_args!(
+                ferrix_rt::err!(
                     "nvme     {} {pages} pages could not be pinned for the controller",
                     Place(info.location)
-                ));
+                );
             })
         };
         let queues = pinned(queue_pages_needed(IO_QUEUES))?;
@@ -266,10 +266,10 @@ impl Driver for Nvme {
             Err(Step::Registers)
         } else {
             logic.bring_up().map_err(|error| {
-                say(format_args!(
+                ferrix_rt::err!(
                     "nvme     {} did not come up: {error:?}",
                     Place(info.location)
-                ));
+                );
                 Step::Device
             })
         };
@@ -300,11 +300,11 @@ impl Driver for Nvme {
 /// A controller that did not come up: say why, free its memory if it was
 /// seen disabled, and name the step.
 fn refused(device: &Device, failed: Failed<Made>) -> Step {
-    say(format_args!(
+    ferrix_rt::err!(
         "nvme     {} did not come up: {:?}",
         Place(device.info().location),
         failed.error
-    ));
+    );
     if failed.disabled {
         let stopped = device.stopped();
         free(failed.parts, &stopped);
@@ -458,12 +458,12 @@ impl Disk for Nvme {
             if done.outcome != Outcome::Ok {
                 self.errors = self.errors.saturating_add(1);
                 if self.errors <= SAID_ERRORS {
-                    say(format_args!(
+                    ferrix_rt::err!(
                         "nvme     request {} failed: {:?}, last status {:#05x}, {before} failed so far",
                         done.id,
                         done.outcome,
                         self.logic.stats().last_error.0
-                    ));
+                    );
                 }
             }
         }
@@ -490,9 +490,7 @@ impl Disk for Nvme {
                 Ok(())
             }
             Err(fatal) => {
-                say(format_args!(
-                    "nvme     the controller is given up: {fatal:?}"
-                ));
+                ferrix_rt::err!("nvme     the controller is given up: {fatal:?}");
                 Err(match fatal {
                     Fatal::Gone | Fatal::Dead => DeviceError::Broken,
                     Fatal::ResetLimit | Fatal::Reset(_) => DeviceError::NeedsReset,
@@ -531,9 +529,7 @@ fn release(
     abandoned: &mut dyn FnMut(u64),
 ) -> Result<Stopped, Stuck> {
     let Shutdown::Released(released) = shutdown else {
-        say(format_args!(
-            "nvme     the controller would not disable: its memory stays pinned"
-        ));
+        ferrix_rt::err!("nvme     the controller would not disable: its memory stays pinned");
         return Err(Stuck);
     };
     let mut held = 0_u32;
@@ -552,36 +548,36 @@ fn release(
 
 /// What a shutdown did, on the console.
 fn said_down(released: &Released<Made>, held: u32) {
-    say(format_args!(
+    ferrix_rt::info!(
         "nvme     shut down: {}, {held} requests abandoned",
         if released.clean {
             "the controller said its shutdown is complete"
         } else {
             "the controller did not confirm the shutdown notification"
         }
-    ));
+    );
 }
 
 /// What the watch did, on the console.
 fn said_event(event: Event) {
     match event {
-        Event::MissedInterrupt => say(format_args!(
+        Event::MissedInterrupt => ferrix_rt::warn!(
             "nvme     completions waited 100 ms with no interrupt: taken by the watch"
-        )),
-        Event::Aborted(count) => say(format_args!(
-            "nvme     {count} commands timed out: abort sent"
-        )),
+        ),
+        Event::Aborted(count) => {
+            ferrix_rt::warn!("nvme     {count} commands timed out: abort sent");
+        }
         Event::Reset {
             cause,
             requeued,
             failed,
-        } => say(format_args!(
+        } => ferrix_rt::warn!(
             "nvme     controller reset ({}): {requeued} requests sent again, {failed} failed",
             match cause {
                 Cause::ControllerFatal => "it reported a fatal status",
                 Cause::Timeout => "a command did not come back after its abort",
             }
-        )),
+        ),
     }
 }
 
@@ -616,7 +612,7 @@ fn said_up(info: &DeviceInfo, logic: &Logic, wish: Option<&Wish>) {
             wish.preferred_pages / 256
         ),
     };
-    say(format_args!(
+    ferrix_rt::info!(
         "nvme     {} {:04x}:{:04x} {} fw {} NVMe {major}.{minor}: namespace {} of {} blocks of {} \
          ({mebibytes} MiB){}, {} queue of {}, {} blocks a request, write cache {}, {}, quirks {:#x}",
         Place(info.location),
@@ -638,11 +634,11 @@ fn said_up(info: &DeviceInfo, logic: &Logic, wish: Option<&Wish>) {
         if logic.write_cache() { "on" } else { "absent" },
         memory.as_str(),
         logic.quirks().0,
-    ));
+    );
     // The fields that decided it, as the controller reported them: what a
     // person compares with `nvme id-ctrl` and `nvme show-regs`.
     let capabilities = logic.capabilities();
-    say(format_args!(
+    ferrix_rt::debug!(
         "nvme     {} said: CAP {:#018x} (ready within {} ms, {} entries a queue, doorbells {} \
          bytes apart), MDTS {}, VWC {}, APSTA {}, ACL {}, NPSS {}, RTD3E {} us, HMPRE {} HMMIN {} \
          HMMINDS {} HMMAXD {}, SQES {:#04x} CQES {:#04x}, NN {}",
@@ -664,7 +660,7 @@ fn said_up(info: &DeviceInfo, logic: &Logic, wish: Option<&Wish>) {
         controller.sq_entry_sizes,
         controller.cq_entry_sizes,
         controller.namespaces,
-    ));
+    );
 }
 
 /// A PCI address, as Linux prints one.
@@ -705,15 +701,6 @@ impl fmt::Display for Text<'_> {
         }
         Ok(())
     }
-}
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
 }
 
 /// A line, cut at its buffer's end.

@@ -9,6 +9,7 @@
 //! `GET_CAP`, `SET_CLIENT_NAME`), and opening and releasing a file.
 
 use ferrix_linux_abi::errno::Errno;
+use ferrix_linux_abi::kmsg::Level;
 
 use super::fence::{self, Hold};
 use super::objects::{Context, File, Tables};
@@ -295,10 +296,10 @@ impl<B: Backend> Frontend<B> {
     /// the program's own call; answered unless held once more.
     pub(super) fn run_again<H: Host<B::Memory>>(&mut self, host: &mut H, wait: &fence::Wait) {
         if self.state.trace {
-            host.say(format_args!(
-                "intel: trace: held request {} runs again",
-                wait.request
-            ));
+            host.say(
+                Level::Debug,
+                format_args!("intel: trace: held request {} runs again", wait.request),
+            );
         }
         let answer = self.dispatch(host, wait.request, wait.file, wait.cmd, wait.arg);
         if let Answer::Now(status) = answer {
@@ -371,7 +372,7 @@ impl<B: Backend> Frontend<B> {
                 match held {
                     Ok(()) => {
                         if self.state.trace {
-                            host.say(format_args!(
+                            host.say(Level::Debug, format_args!(
                                 "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} held",
                                 ioc_nr(cmd)
                             ));
@@ -390,10 +391,13 @@ impl<B: Backend> Frontend<B> {
         // A failure only: every success would flood the console at a
         // frame's worth of ioctls, and a poll's ETIME is no failure.
         if self.state.trace && status != 0 && status != -i32::from(super::ETIME.0) {
-            host.say(format_args!(
-                "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} -> {status}",
-                ioc_nr(cmd)
-            ));
+            host.say(
+                Level::Debug,
+                format_args!(
+                    "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} -> {status}",
+                    ioc_nr(cmd)
+                ),
+            );
         }
         if out_size > 0
             && let Some(source) = kdata.get(..out_size)
@@ -614,10 +618,13 @@ pub fn unserved_as<B: Backend, H: Host<B::Memory>>(
         .get(usize::from(call.file))
         .map_or(0, |file| file.pid);
     if frontend.state.say_once(u32::from(ioc_nr(call.cmd))) {
-        host.say(format_args!(
-            "intel: unserved {what}: cmd {:#010x} from pid {pid}, answered errno {}",
-            call.cmd, errno.0
-        ));
+        host.say(
+            Level::Warning,
+            format_args!(
+                "intel: unserved {what}: cmd {:#010x} from pid {pid}, answered errno {}",
+                call.cmd, errno.0
+            ),
+        );
     }
     errno
 }
@@ -667,10 +674,13 @@ fn say_refused<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H, cmd: u32, sta
     }
     let quiet = core::mem::take(&mut state.refusals.quiet);
     let why = if state.why.is_empty() { "-" } else { state.why };
-    host.say(format_args!(
-        "intel: uapi refused {name} {} {why} ({quiet} not said before it)",
-        errno_name(-status)
-    ));
+    host.say(
+        Level::Err,
+        format_args!(
+            "intel: uapi refused {name} {} {why} ({quiet} not said before it)",
+            errno_name(-status)
+        ),
+    );
 }
 
 /// An errno's name, for the refusal line.

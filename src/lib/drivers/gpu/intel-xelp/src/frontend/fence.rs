@@ -10,6 +10,7 @@
 //! context as `context_mark_guilty` does.
 
 use ferrix_linux_abi::errno::Errno;
+use ferrix_linux_abi::kmsg::Level;
 
 use super::backend::{Completion, ContextParams, SubmitError};
 use super::drm::{Call, KDATA};
@@ -642,10 +643,13 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
             status = -(Errno::EFAULT.0 as i32);
         }
         if state.trace {
-            host.say(format_args!(
-                "intel: trace: held request {} answered {status}",
-                wait.request
-            ));
+            host.say(
+                Level::Debug,
+                format_args!(
+                    "intel: trace: held request {} answered {status}",
+                    wait.request
+                ),
+            );
         }
         host.reply(wait.request, status);
     }
@@ -656,7 +660,7 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
 /// eight), the one a hung program's call is stuck behind.
 fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u64) {
     let requests = &state.requests;
-    host.say(format_args!(
+    host.say(Level::Warning, format_args!(
         "intel: trace: held request {} unanswered for {} ms (file {}); requests next {} retired {}",
         wait.request,
         now.saturating_sub(wait.since) / 1_000_000,
@@ -666,16 +670,20 @@ fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u
     ));
     match &wait.kind {
         WaitKind::Object { object, .. } => {
-            host.say(format_args!(
-                "intel: trace:   GEM_WAIT on object slot {object}"
-            ));
+            host.say(
+                Level::Debug,
+                format_args!("intel: trace:   GEM_WAIT on object slot {object}"),
+            );
         }
         WaitKind::Retry { fence } => {
-            host.say(format_args!(
-                "intel: trace:   ioctl {:#x} to run again after fence {fence:?} status {:?}",
-                wait.cmd,
-                requests.status(*fence)
-            ));
+            host.say(
+                Level::Debug,
+                format_args!(
+                    "intel: trace:   ioctl {:#x} to run again after fence {fence:?} status {:?}",
+                    wait.cmd,
+                    requests.status(*fence)
+                ),
+            );
         }
         WaitKind::Syncobjs(sync) => {
             let name = if sync.timeline {
@@ -694,7 +702,7 @@ fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u
                         sync.fence.query(false, requests),
                     )
                 });
-                host.say(format_args!(
+                host.say(Level::Debug, format_args!(
                     "intel: trace:   {name} flags {:#x} entry {index}: syncobj slot {slot} point {point}: fence {fence:?} status {status:?}; timeline head {head} reached {reached}",
                     sync.flags
                 ));
@@ -710,7 +718,10 @@ fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u
             continue;
         }
         if said == 8 {
-            host.say(format_args!("intel: trace:   (more requests not done)"));
+            host.say(
+                Level::Debug,
+                format_args!("intel: trace:   (more requests not done)"),
+            );
             break;
         }
         said += 1;
@@ -718,9 +729,12 @@ fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u
             .deps
             .get(..usize::from(request.dep_count))
             .unwrap_or(&[]);
-        host.say(format_args!(
-            "intel: trace:   request {id} {:?} context {} engine {:?}: deps {deps:?}",
-            request.state, request.context, request.engine
-        ));
+        host.say(
+            Level::Debug,
+            format_args!(
+                "intel: trace:   request {id} {:?} context {} engine {:?}: deps {deps:?}",
+                request.state, request.context, request.engine
+            ),
+        );
     }
 }

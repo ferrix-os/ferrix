@@ -243,21 +243,21 @@ impl Driver for Sata {
         let registers = device.map_bar(ABAR)?;
         // Said before the controller is touched, so a boot that stops in
         // the reset still says how far it came.
-        say(format_args!(
+        ferrix_rt::info!(
             "ahci     {} {:04x}:{:04x} found: BAR 5 maps {} bytes, interrupt by {}",
             Place(info.location),
             info.vendor_id,
             info.device_id,
             registers.len(),
             if device.msix() { "MSI-X" } else { "MSI" },
-        ));
+        );
         said_registers(&info, &registers);
         let pinned = |pages: usize| {
             device.dma(pages).inspect_err(|_| {
-                say(format_args!(
+                ferrix_rt::err!(
                     "ahci     {} {pages} pages could not be pinned for the controller",
                     Place(info.location)
-                ));
+                );
             })
         };
         let control = pinned(CONTROL_PAGES)?;
@@ -295,17 +295,17 @@ impl Driver for Sata {
             // nothing to serve, and every port it tried was stopped
             // (`ferrix-ahci`'s `NoDrive`).
             Err(ferrix_ahci::Error::NoDrive) => {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "ahci     {} has no ATA disk: nothing to serve",
                     Place(info.location)
-                ));
+                );
                 return Err(Step::Idle);
             }
             Err(error) => {
-                say(format_args!(
+                ferrix_rt::err!(
                     "ahci     {} did not come up: {error:?}",
                     Place(info.location)
-                ));
+                );
                 // The logic is gone with its memory's handle, which stays
                 // pinned: the controller is not proven stopped.
                 return Err(Step::Device);
@@ -324,10 +324,10 @@ impl Driver for Sata {
         let geometry = match geometry {
             Ok(geometry) if sector.is_power_of_two() && sector >= 512 => geometry,
             _ => {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "ahci     {} sectors of {sector} bytes: not served",
                     Place(info.location)
-                ));
+                );
                 let (_, _, control) = logic.shutdown();
                 let stopped = device.stopped();
                 control.0.free(&stopped);
@@ -414,10 +414,11 @@ impl Sata {
             Err(error) => {
                 self.errors = self.errors.saturating_add(1);
                 if self.errors <= SAID_ERRORS {
-                    say(format_args!(
+                    ferrix_rt::err!(
                         "ahci     request {} ({:?} of {count} sectors at {lba}) failed: {error:?}",
-                        request.id, request.op
-                    ));
+                        request.id,
+                        request.op
+                    );
                 }
                 Status::IoError
             }
@@ -655,7 +656,7 @@ impl block::Device for Sata {
         // Nothing the ring asked for is held between requests: nothing is
         // abandoned. A window being read ahead is waited for first.
         let (_, _, control) = logic.shutdown();
-        say(format_args!("ahci     shut down: the port stopped"));
+        ferrix_rt::info!("ahci     shut down: the port stopped");
         let stopped = device.stopped();
         control.0.free(&stopped);
         data.free(&stopped);
@@ -681,7 +682,7 @@ fn said_registers(info: &DeviceInfo, registers: &mmio::Block) {
         }
     };
     let implemented = read(0x0C);
-    say(format_args!(
+    ferrix_rt::debug!(
         "ahci     {} CAP {:08x} GHC {:08x} PI {implemented:08x} VS {:08x} CAP2 {:08x} BOHC {:08x}",
         Place(info.location),
         read(0x00),
@@ -689,10 +690,10 @@ fn said_registers(info: &DeviceInfo, registers: &mmio::Block) {
         read(0x10),
         read(0x24),
         read(0x28),
-    ));
+    );
     for index in (0..32_u32).filter(|index| implemented & (1 << index) != 0) {
         let at = 0x100 + 0x80 * index;
-        say(format_args!(
+        ferrix_rt::debug!(
             "ahci     port {index}: SSTS {:08x} SCTL {:08x} TFD {:08x} SIG {:08x} CMD {:08x} SERR {:08x}",
             read(at + 0x28),
             read(at + 0x2C),
@@ -700,7 +701,7 @@ fn said_registers(info: &DeviceInfo, registers: &mmio::Block) {
             read(at + 0x24),
             read(at + 0x18),
             read(at + 0x30),
-        ));
+        );
     }
 }
 
@@ -711,7 +712,7 @@ fn said_up(info: &DeviceInfo, logic: &Logic) {
         .sectors
         .saturating_mul(u64::from(identity.sector_size))
         >> 20;
-    say(format_args!(
+    ferrix_rt::info!(
         "ahci     {} {:04x}:{:04x} port {}: {} serial {}: {} sectors of {} ({mebibytes} MiB)",
         Place(info.location),
         info.vendor_id,
@@ -721,7 +722,7 @@ fn said_up(info: &DeviceInfo, logic: &Logic) {
         Text(&identity.serial),
         identity.sectors,
         identity.sector_size,
-    ));
+    );
 }
 
 /// A PCI address, as Linux prints one.
@@ -764,49 +765,6 @@ impl fmt::Display for Text<'_> {
                 '.'
             };
             f.write_char(shown)?;
-        }
-        Ok(())
-    }
-}
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-/// A line, cut at its buffer's end.
-struct Line {
-    bytes: [u8; 400],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Line {
-        Line {
-            bytes: [0; 400],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or_default()
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            let Some(slot) = self.bytes.get_mut(self.len) else {
-                return Err(fmt::Error);
-            };
-            *slot = byte;
-            self.len += 1;
         }
         Ok(())
     }

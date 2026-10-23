@@ -26,6 +26,7 @@
 use core::fmt;
 
 use ferrix_linux_abi::errno::Errno;
+pub use ferrix_linux_abi::kmsg::Level;
 
 use super::wire::{Call, Event};
 use crate::frontend::limits;
@@ -103,8 +104,8 @@ pub trait KeeperLink {
     /// Monotonic now.
     fn now_ns(&mut self) -> u64;
 
-    /// A line on the console.
-    fn say(&mut self, line: fmt::Arguments<'_>);
+    /// A line of the driver's log at `level`.
+    fn say(&mut self, level: Level, line: fmt::Arguments<'_>);
 
     /// The keeper gave up ([`GiveUp`]); the program exits after this.
     fn gave_up(&mut self, why: GiveUp);
@@ -506,7 +507,7 @@ impl<'j, L: KeeperLink> RemoteBackend<'j, L> {
         }
         self.restarts += 1;
         let generation = self.generation;
-        self.link.say(format_args!(
+        self.link.say(Level::Warning, format_args!(
             "intel: the GT's worker {generation} is replaced ({death:?}); worker restart {} of {MAX_RESTARTS}",
             self.restarts
         ));
@@ -573,7 +574,7 @@ impl<'j, L: KeeperLink> RemoteBackend<'j, L> {
             return;
         }
         let stall = now.saturating_sub(self.started_at);
-        self.link.say(format_args!(
+        self.link.say(Level::Notice, format_args!(
             "intel: the GT's worker {} is up, {} ms after its start; replayed {} VMs, {} bindings, {} contexts, {} requests",
             self.generation,
             stall / 1_000_000,
@@ -672,7 +673,7 @@ impl<'j, L: KeeperLink> RemoteBackend<'j, L> {
             }
             Event::Refused { kind, id, errno } => {
                 if self.live() {
-                    self.link.say(format_args!(
+                    self.link.say(Level::Warning, format_args!(
                         "intel: the GT's worker {} refused call {kind} ({id:#x}) with errno {errno}",
                         self.generation
                     ));

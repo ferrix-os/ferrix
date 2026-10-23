@@ -10,6 +10,7 @@
 
 use core::cell::OnceCell;
 use core::fmt;
+use ferrix_rt::log::Level;
 
 use ferrix_intel_xelp::remote::wire::{
     BATCH_HANDLES, BATCH_RECORDS, Batch, Call, Event, RECORD_BYTES, records,
@@ -95,9 +96,7 @@ fn deliver(bytes: &[u8], sink: &mut dyn FnMut(Event)) -> bool {
         match Event::decode(record) {
             Ok(event) => sink(event),
             Err(error) => {
-                say(format_args!(
-                    "intel: the GT's worker sent a record nobody wrote ({error:?})"
-                ));
+                ferrix_rt::warn!("intel: the GT's worker sent a record nobody wrote ({error:?})");
                 return false;
             }
         }
@@ -175,10 +174,10 @@ impl<'a> Link<'a> {
         let until = self.now_ns().saturating_add(EMPTY_NS);
         let emptied = old.job.wait_one(Signals::EMPTY, Deadline::At(until));
         if emptied.is_err() {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: a dead worker's job did not empty in {} s; no worker is started beside it",
                 EMPTY_NS / 1_000_000_000
-            ));
+            );
             return false;
         }
         true
@@ -392,14 +391,14 @@ impl KeeperLink for Link<'_> {
         ferrix_rt::linux::monotonic_nanos().unwrap_or(0)
     }
 
-    fn say(&mut self, line: fmt::Arguments<'_>) {
-        say(line);
+    fn say(&mut self, level: Level, line: fmt::Arguments<'_>) {
+        say(level, line);
     }
 
     fn gave_up(&mut self, why: GiveUp) {
-        say(format_args!(
+        ferrix_rt::err!(
             "intel: the keeper gives up on its workers ({why:?}): it exits, and every program's device is lost as when the driver dies (docs/INTEL-GPU.md §11)"
-        ));
+        );
         let _ = self.end_worker();
         ferrix_rt::exit(crate::Step::Worker as i32);
     }

@@ -9,6 +9,8 @@
 //!   architecture's instruction;
 //! * [`exit`], and a panic handler that exits with [`PANIC_STATUS`];
 //! * [`entry!`], which names a program's `main`;
+//! * [`log`], a program's lines with their levels, and [`err!`], [`warn!`],
+//!   [`notice!`], [`info!`] and [`debug!`] to say them;
 //! * `linker/native.ld`, the layout the kernel's ELF loader accepts.
 //!
 //! The calls themselves — typed, owned handles and decoded errors — are
@@ -49,6 +51,7 @@
 
 mod arch;
 pub mod linux;
+pub mod log;
 
 pub use ferrix_native as native;
 use ferrix_native::channel::Channel;
@@ -133,7 +136,7 @@ macro_rules! entry {
 ///
 /// The one panic handler, and the only one there can be: a `no_std` program
 /// must define exactly one. It says where it panicked and why on standard
-/// error, which a driver has open on the console, as one line -- on a machine
+/// error or `/dev/kmsg` at critical ([`log`]), as one line -- on a machine
 /// whose screen is its only output that line is the whole diagnosis -- and the
 /// status is what a parent waiting on the process can see. The workspace
 /// lints deny every way of reaching it in production code, so a panic here is
@@ -150,8 +153,12 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
         let _ = write!(line, " at {}:{}", location.file(), location.line());
     }
     let _ = write!(line, ": {}", info.message());
-    let _ = line.write_str("\n");
-    let _ = linux::write(2, line.bytes.get(..line.len).unwrap_or(&[]));
+    let bytes = line.bytes.get(..line.len).unwrap_or(&[]);
+    // A cut in the middle of a character keeps what came before it.
+    let text = core::str::from_utf8(bytes).unwrap_or_else(|error| {
+        core::str::from_utf8(bytes.get(..error.valid_up_to()).unwrap_or(&[])).unwrap_or("panic")
+    });
+    log::line(log::Level::Crit, format_args!("{text}"));
     exit(PANIC_STATUS)
 }
 

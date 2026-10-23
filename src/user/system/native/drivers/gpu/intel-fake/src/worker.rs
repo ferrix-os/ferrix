@@ -15,8 +15,6 @@
 
 mod fake;
 
-use core::fmt::{self, Write as _};
-
 use ferrix_intel_xelp::remote::Worker;
 use ferrix_intel_xelp::remote::wire::{
     BATCH_HANDLES, BATCH_RECORDS, Batch, Call, Event, RECORD_BYTES, records,
@@ -59,32 +57,6 @@ enum Step {
     Keeper = 6,
 }
 
-/// A line on standard error.
-fn say(arguments: fmt::Arguments<'_>) {
-    struct Line {
-        bytes: [u8; 256],
-        len: usize,
-    }
-    impl fmt::Write for Line {
-        fn write_str(&mut self, text: &str) -> fmt::Result {
-            for &byte in text.as_bytes() {
-                if let Some(slot) = self.bytes.get_mut(self.len) {
-                    *slot = byte;
-                    self.len += 1;
-                }
-            }
-            Ok(())
-        }
-    }
-    let mut line = Line {
-        bytes: [0; 256],
-        len: 0,
-    };
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.bytes.get(..line.len).unwrap_or_default());
-}
-
 fn main(bootstrap: Bootstrap) -> i32 {
     let Some(keeper) = bootstrap else {
         return Step::Hello as i32;
@@ -93,7 +65,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
         Ok(never) => match never {},
         Err(Step::Keeper) => park(),
         Err(step) => {
-            say(format_args!("intel-fake: the worker stopped at {step:?}"));
+            ferrix_rt::err!("intel-fake: the worker stopped at {step:?}");
             step as i32
         }
     }
@@ -172,13 +144,13 @@ fn run(keeper: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         return Err(Step::Hello);
     };
     let facts = fake::facts(device_id, revision, system_memory_bytes);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel-fake: worker {generation}: {location:#010x} 8086:{device_id:04x} rev {revision}: facts {} EUs, DSS {:#x}, CS {} Hz; {}",
         facts.sseu.eu_total,
         facts.sseu.subslice_mask,
         facts.cs_timestamp_hz,
         fake::MARKER
-    ));
+    );
     let mut worker = Worker::new(fake::Fake::<Lent>::new(facts, |_| Err(Errno::ENOMEM)));
     let mut out = Out {
         keeper,

@@ -17,7 +17,6 @@ use ferrix_intel_xelp::display::modeset::{Mode, SKL_DSSM, reference_khz};
 use ferrix_intel_xelp::io::Mmio;
 
 use super::regs::Regs;
-use crate::say;
 
 /// The kernel command line's words: the plan printed, or taken.
 const DRY: &[u8] = b"ferrix.intelgpu.modeset=dry";
@@ -65,10 +64,10 @@ pub(crate) fn dry(regs: &mut Regs, port: Port) {
         return;
     };
     if let Err(why) = light::preflight(regs, &light) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: {tag}: port {} would not be lit: {why:?}",
             port.name()
-        ));
+        );
         return;
     }
     let mut taken = 0_u32;
@@ -77,7 +76,7 @@ pub(crate) fn dry(regs: &mut Regs, port: Port) {
         show(tag, step, None);
         true
     });
-    say(format_args!("intel: {tag}: {taken} steps, none taken"));
+    ferrix_rt::info!("intel: {tag}: {taken} steps, none taken");
 }
 
 /// Light `port` on pipe B showing the surface at GGTT `surface`
@@ -87,10 +86,10 @@ pub(crate) fn light_port(regs: &mut Regs, port: Port, surface: u32) -> Option<Mo
     let tag = "modeset";
     let light = plan(regs, tag, port, surface)?;
     if let Err(why) = light::preflight(regs, &light) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: {tag}: port {} is not lit: {why:?} (nothing written)",
             port.name()
-        ));
+        );
         return None;
     }
     let mut clock = super::hotplug::Monotonic;
@@ -102,17 +101,15 @@ pub(crate) fn light_port(regs: &mut Regs, port: Port, surface: u32) -> Option<Mo
         result.is_ok()
     });
     if all {
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: modeset: port {} lit, {}x{} on pipe B ({taken} steps)",
             port.name(),
             light.mode.h[0],
             light.mode.v[0]
-        ));
+        );
         Some(light.mode)
     } else {
-        say(format_args!(
-            "intel: modeset: stopped at step {taken}; what was done stays as it is"
-        ));
+        ferrix_rt::err!("intel: modeset: stopped at step {taken}; what was done stays as it is");
         None
     }
 }
@@ -150,35 +147,35 @@ fn show(tag: &str, step: Step, result: Option<Result<u32, u32>>) {
             offset,
             value,
             name,
-        } => say(format_args!(
+        } => ferrix_rt::debug!(
             "intel: {tag}: {name:<24} {offset:#08x} <- {value:#010x}{after} (reads {read:#010x})"
-        )),
+        ),
         Step::Rmw {
             offset,
             clear,
             set,
             name,
-        } => say(format_args!(
+        } => ferrix_rt::debug!(
             "intel: {tag}: {name:<24} {offset:#08x} &~{clear:#010x} |{set:#010x}{after} (reads {read:#010x})"
-        )),
+        ),
         Step::Copy {
             from,
             to,
             clear,
             set,
             name,
-        } => say(format_args!(
+        } => ferrix_rt::debug!(
             "intel: {tag}: {name:<24} {to:#08x} <- ({from:#08x} &~{clear:#010x} |{set:#010x}){after} (wrote {read:#010x})"
-        )),
+        ),
         Step::Wait {
             offset,
             mask,
             value,
             timeout_us,
             name,
-        } => say(format_args!(
+        } => ferrix_rt::debug!(
             "intel: {tag}: wait {name:<19} {offset:#08x} & {mask:#010x} == {value:#010x} within {timeout_us} us{after} (reads {read:#010x})"
-        )),
+        ),
     }
 }
 
@@ -193,23 +190,21 @@ fn plan(regs: &mut Regs, tag: &str, port: Port, surface: u32) -> Option<Light> {
         .is_some_and(|bit| regs.read32(SDEISR) & bit != 0);
     let dssm = regs.read32(SKL_DSSM);
     let Some(nssc) = reference_khz(dssm) else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: {tag}: SKL_DSSM {dssm:#010x} names no reference clock; nothing done"
-        ));
+        );
         return None;
     };
     if !live {
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: {tag}: port {} has no sink (SDEISR); nothing done",
             port.name()
-        ));
+        );
         return None;
     }
     let (mode, hdmi) = sink_mode(regs, tag, port);
     let Some(pll) = light::free_pll(regs) else {
-        say(format_args!(
-            "intel: {tag}: both combo PLLs are in use; nothing done"
-        ));
+        ferrix_rt::warn!("intel: {tag}: both combo PLLs are in use; nothing done");
         return None;
     };
     let light = Light {
@@ -223,7 +218,7 @@ fn plan(regs: &mut Regs, tag: &str, port: Port, surface: u32) -> Option<Light> {
         stride: light::SURFACE_PITCH / 64,
         surface_size: light::SURFACE_SIZE,
     };
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: {tag}: {}x{} at {} kHz, h {:?} v {:?}, sync {}{}, PLL {pll}, reference {nssc} kHz, surface {:#x} ({}x{}, stride {} x 64)",
         mode.h[0],
         mode.v[0],
@@ -236,7 +231,7 @@ fn plan(regs: &mut Regs, tag: &str, port: Port, surface: u32) -> Option<Light> {
         light.surface_size.0,
         light.surface_size.1,
         light.stride,
-    ));
+    );
     Some(light)
 }
 
@@ -266,12 +261,12 @@ fn sink_mode(regs: &mut Regs, tag: &str, port: Port) -> (Mode, bool) {
                         .find(|listed| listed.timing.clock_khz <= MAX_CLOCK_KHZ)
                 })
                 .map(|listed| listed.timing);
-            say(format_args!(
+            ferrix_rt::info!(
                 "intel: {tag}: port {}'s EDID, {length} bytes, {} modes, {}",
                 port.name(),
                 list.len(),
                 if light::is_hdmi(bytes) { "HDMI" } else { "DVI" }
-            ));
+            );
             (
                 chosen.map_or(Mode::CEA_1080P60, |timing| Mode {
                     clock_khz: timing.clock_khz,
@@ -294,10 +289,10 @@ fn sink_mode(regs: &mut Regs, tag: &str, port: Port) -> (Mode, bool) {
             )
         }
         Err(why) => {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: {tag}: no EDID on port {} ({why:?}); CEA 1920x1080@60 as DVI",
                 port.name()
-            ));
+            );
             (Mode::CEA_1080P60, false)
         }
     }

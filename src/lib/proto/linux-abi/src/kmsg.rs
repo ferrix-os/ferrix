@@ -20,6 +20,43 @@
 /// `LOG_USER`, the facility a program's record is given when it names none.
 pub const LOG_USER: u8 = 1;
 
+/// `LOG_DAEMON`, the facility a system service's record names: what Ferrix's
+/// ring-3 drivers and `devmgr` write theirs at. A program's console output is
+/// always `LOG_USER` at info, so a record of any other facility is one whose
+/// writer stated its level (`docs/LOGGING.md` §4.1).
+pub const LOG_DAEMON: u8 = 3;
+
+/// A record's level, syslog's eight (`<sys/syslog.h>`).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(u8)]
+pub enum Level {
+    /// The system is unusable.
+    Emerg = 0,
+    /// Action must be taken at once.
+    Alert = 1,
+    /// A critical condition: a program ending on a panic.
+    Crit = 2,
+    /// An error: something failed and what it was for did not happen.
+    Err = 3,
+    /// A warning: something was refused, lost or worked around.
+    Warning = 4,
+    /// A normal but significant condition.
+    Notice = 5,
+    /// Information: a step done, a device found.
+    Info = 6,
+    /// Detail for whoever is debugging: per-frame or per-call figures.
+    Debug = 7,
+}
+
+impl Level {
+    /// The `<N>` priority a `/dev/kmsg` write names this level with at
+    /// `facility`.
+    #[must_use]
+    pub const fn priority(self, facility: u8) -> u8 {
+        (facility << 3) | self as u8
+    }
+}
+
 /// `default_message_loglevel`, the level of a record that names none:
 /// `CONFIG_MESSAGE_LOGLEVEL_DEFAULT`, 4 (`KERN_WARNING`).
 pub const DEFAULT_LEVEL: u8 = 4;

@@ -152,18 +152,8 @@ fn main(bootstrap: Bootstrap) -> i32 {
 /// but that gate's second build, this says nothing and compiles to nothing.
 fn say_version() {
     if let Some(version) = option_env!("FERRIX_DRIVER_VERSION") {
-        // One write, so the shell redrawing its prompt cannot split the line.
-        let mut line = [0_u8; 64];
-        let mut len = 0;
-        let bytes = b"gpu: version "
-            .iter()
-            .chain(version.as_bytes())
-            .chain(b"\n");
-        for (slot, &byte) in line.iter_mut().zip(bytes) {
-            *slot = byte;
-            len += 1;
-        }
-        let _ = ferrix_rt::linux::write(2, line.get(..len).unwrap_or_default());
+        // One record, so the shell redrawing its prompt cannot split the line.
+        ferrix_rt::info!("gpu: version {version}");
         // The version that never serves: the update gate's driver that
         // neither publishes nor exits, so devmgr's deadline is what ends it.
         if version == "silent" {

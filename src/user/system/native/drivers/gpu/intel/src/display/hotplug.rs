@@ -25,7 +25,6 @@ use ferrix_intel_xelp::plane::{
 };
 
 use super::regs::Regs;
-use crate::say;
 
 /// A combo port's hot-plug state, and the pipe that shows it.
 pub(crate) struct Watch {
@@ -45,9 +44,9 @@ impl Watch {
     pub(crate) fn start(regs: &mut Regs) -> Option<Self> {
         let function = regs.read32(TRANS_DDI_FUNC_CTL_A);
         let Some(port) = Port::of_ddi_func_ctl(function) else {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: card0: no hotplug: TRANS_DDI_FUNC_CTL_A {function:#010x} names no port"
-            ));
+            );
             return None;
         };
         Self::on(regs, port, 0)
@@ -60,33 +59,33 @@ impl Watch {
     /// a Type-C port.
     pub(crate) fn on(regs: &mut Regs, port: Port, pipe: u32) -> Option<Self> {
         let Some(bit) = port.live_bit() else {
-            say(format_args!(
+            ferrix_rt::notice!(
                 "intel: card0: no hotplug: port {} is Type-C, whose live state is not read yet",
                 port.name()
-            ));
+            );
             return None;
         };
         let control = regs.read32(SHOTPLUG_CTL_DDI);
         let enable = port.detect_enable();
         if control & enable == 0 {
             regs.write32(SHOTPLUG_CTL_DDI, control | enable);
-            say(format_args!(
+            ferrix_rt::info!(
                 "intel: card0: hotplug detection on port {} enabled (SHOTPLUG_CTL_DDI {control:#010x} -> {:#010x})",
                 port.name(),
                 regs.read32(SHOTPLUG_CTL_DDI)
-            ));
+            );
         }
         let function = regs.read32(TRANS_DDI_FUNC_CTL_A + pipe * 0x1000);
         let mode = (function >> TRANS_DDI_MODE_SELECT_SHIFT) & 0x7;
         let display_port = function & TRANS_DDI_FUNC_ENABLE != 0
             && (mode == TRANS_DDI_MODE_DP_SST || mode == TRANS_DDI_MODE_DP_MST);
         let live = regs.read32(SDEISR) & bit != 0;
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: watching port {} for hotplug (SDEISR bit {}), {} now",
             port.name(),
             bit.trailing_zeros(),
             if live { "connected" } else { "disconnected" }
-        ));
+        );
         Some(Self {
             port,
             pipe,
@@ -112,17 +111,17 @@ impl Watch {
         let pin = gmbus::pin_of(self.port);
         match gmbus::read_edid(regs, &mut Monotonic, pin, &mut out) {
             Ok(length) => {
-                say(format_args!(
+                ferrix_rt::info!(
                     "intel: card0: port {}'s monitor's EDID read over GMBUS pin {pin}: {length} bytes",
                     self.port.name()
-                ));
+                );
                 Some((out, length))
             }
             Err(why) => {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "intel: card0: no EDID from port {} over GMBUS pin {pin}: {why:?}",
                     self.port.name()
-                ));
+                );
                 None
             }
         }
@@ -142,7 +141,7 @@ impl Watch {
         let Some(connected) = changed else {
             return (None, now_ms + next);
         };
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: port {} {}",
             self.port.name(),
             if connected {
@@ -150,7 +149,7 @@ impl Watch {
             } else {
                 "disconnected"
             }
-        ));
+        );
         (Some(connected), now_ms + next)
     }
 
@@ -162,7 +161,7 @@ impl Watch {
         let transcoder = regs.read32(TRANSCONF_A + at) & TRANSCONF_ENABLE != 0;
         let function = regs.read32(TRANS_DDI_FUNC_CTL_A + at) & TRANS_DDI_FUNC_ENABLE != 0;
         if self.display_port || !transcoder || !function {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: card0: port {} has a sink again, but {}",
                 self.port.name(),
                 if self.display_port {
@@ -170,7 +169,7 @@ impl Watch {
                 } else {
                     "its transcoder does not run"
                 }
-            ));
+            );
             return false;
         }
         true

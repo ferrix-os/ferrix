@@ -122,7 +122,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(()) => 0,
         Err(step) => {
-            say(format_args!("usbdev: stopped at {step:?}"));
+            ferrix_rt::err!("usbdev: stopped at {step:?}");
             step as i32
         }
     }
@@ -131,15 +131,6 @@ fn main(bootstrap: Bootstrap) -> i32 {
 // ---------------------------------------------------------------------------
 // The console
 // ---------------------------------------------------------------------------
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
 
 /// A line, formatted into a fixed buffer and cut at its end.
 struct Line {
@@ -237,7 +228,7 @@ fn defer_write(offset: u32, value: u32) {
             );
             DEFERRED_LEN.store(at + 1, Ordering::Relaxed);
         }
-        _ => say(format_args!("usbdev: write {offset:#06x} = {value:#010x}")),
+        _ => ferrix_rt::debug!("usbdev: write {offset:#06x} = {value:#010x}"),
     }
 }
 
@@ -248,9 +239,7 @@ fn say_deferred() {
         let packed = write.load(Ordering::Relaxed);
         let (offset, value) = (packed >> 32, packed & 0xFFFF_FFFF);
         let ms = when.load(Ordering::Relaxed) / 1_000_000;
-        say(format_args!(
-            "usbdev: write {offset:#06x} = {value:#010x} (at {ms} ms)"
-        ));
+        ferrix_rt::debug!("usbdev: write {offset:#06x} = {value:#010x} (at {ms} ms)");
     }
 }
 
@@ -274,7 +263,7 @@ impl Registers for Window {
         // offset inside it and aligned, read volatile.
         let value = unsafe { ptr::read_volatile(self.address(offset) as *const u32) };
         if !self.wrote {
-            say(format_args!("usbdev: read  {offset:#06x} = {value:#010x}"));
+            ferrix_rt::debug!("usbdev: read  {offset:#06x} = {value:#010x}");
         }
         value
     }
@@ -287,7 +276,7 @@ impl Registers for Window {
             !was
         });
         if !RUNNING.load(Ordering::Relaxed) {
-            say(format_args!("usbdev: write {offset:#06x} = {value:#010x}"));
+            ferrix_rt::debug!("usbdev: write {offset:#06x} = {value:#010x}");
         } else if first {
             defer_write(offset, value);
         }
@@ -482,7 +471,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     // the next header (run adbusb3's pull broke on it). The serial port keeps
     // them: its host reads what comes, and an empty packet ends a transfer.
     usb.set_zero_length_packets(ferrix_dwc3::usb_device::acm::ADB_IN, false);
-    say(format_args!("usbdev: DWC3 running, waiting for a host"));
+    ferrix_rt::info!("usbdev: DWC3 running, waiting for a host");
     let log = open_log(&device, &port);
     let mut driver = Driver {
         usb,
@@ -511,9 +500,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
 /// Say why the controller would not start, and keep its memory if it may
 /// still be writing it.
 fn refused(error: UsbError, parts: Parts<Window, Area, Time>) -> Step {
-    say(format_args!(
-        "usbdev: the controller would not start: {error:?}"
-    ));
+    ferrix_rt::err!("usbdev: the controller would not start: {error:?}");
     match error {
         // Nothing was written: the controller is as it was.
         UsbError::Memory | UsbError::NotDwc3(_) | UsbError::Refused { .. } => {
@@ -535,7 +522,7 @@ fn open_log(device: &Device<Kernel>, port: &Port<Kernel>) -> Option<Channel<Kern
     let log = match device.log_control() {
         Ok(log) => log,
         Err(error) => {
-            say(format_args!("usbdev: no kernel log to send: {error:?}"));
+            ferrix_rt::warn!("usbdev: no kernel log to send: {error:?}");
             return None;
         }
     };
@@ -586,7 +573,7 @@ impl Driver {
                     match serviced {
                         Ok(notice) => self.act(notice)?,
                         Err(error) => {
-                            say(format_args!("usbdev: {error:?}"));
+                            ferrix_rt::err!("usbdev: {error:?}");
                             return Err(Step::Faulted);
                         }
                     }
@@ -605,20 +592,20 @@ impl Driver {
     /// Act on what an interrupt found.
     fn act(&mut self, notice: ferrix_dwc3::Notice) -> Result<(), Step> {
         if let Some(speed) = notice.connected {
-            say(format_args!("usbdev: connected at {speed:?} speed"));
+            ferrix_rt::info!("usbdev: connected at {speed:?} speed");
         }
         if notice.configuration {
-            say(format_args!(
+            ferrix_rt::info!(
                 "usbdev: {}",
                 if self.serial.is_configured() {
                     "configured: the host sees a serial port"
                 } else {
                     "unconfigured"
                 }
-            ));
+            );
         }
         if notice.disconnected {
-            say(format_args!("usbdev: the host went away"));
+            ferrix_rt::info!("usbdev: the host went away");
         }
         if notice.reset || notice.disconnected {
             self.adb.reset();
@@ -640,10 +627,10 @@ impl Driver {
                 .read(DATA_OUT, &mut bytes)
                 .map_err(|_| Step::Faulted)?;
             if self.typed(bytes.get(..count).unwrap_or_default()) {
-                say(format_args!("usbdev: the host asked for a restart"));
+                ferrix_rt::notice!("usbdev: the host asked for a restart");
                 // Returns only if the kernel refused: the port stays up.
                 if let Err(error) = ferrix_rt::linux::reboot_restart() {
-                    say(format_args!("usbdev: the restart was refused: {error:?}"));
+                    ferrix_rt::err!("usbdev: the restart was refused: {error:?}");
                 }
             }
         }
@@ -774,9 +761,7 @@ impl Driver {
     /// Stop reading the log, saying why; the port stays up.
     fn lose_log(&mut self, why: &str) {
         if self.log.take().is_some() {
-            say(format_args!(
-                "usbdev: {why}; the port carries no more of the log"
-            ));
+            ferrix_rt::warn!("usbdev: {why}; the port carries no more of the log");
         }
         self.reading = false;
     }

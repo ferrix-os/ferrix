@@ -70,7 +70,6 @@ use ferrix_intel_xelp::display::light;
 use ferrix_intel_xelp::io::Mmio;
 
 use crate::m2::ScreenPlane;
-use crate::say;
 
 mod hotplug;
 mod modeset;
@@ -226,20 +225,18 @@ impl Display {
         port: &Port<Kernel>,
     ) -> Option<Display> {
         let Some(plane) = plane else {
-            say(format_args!("intel: no card0: pipe A's plane is not lit"));
+            ferrix_rt::info!("intel: no card0: pipe A's plane is not lit");
             return None;
         };
         let (window, first, phys) = map_screen(device, apertures, plane)?;
         let control = device
             .display_control()
             .inspect_err(|error| {
-                say(format_args!(
-                    "intel: no card0: no display control ({error:?})"
-                ));
+                ferrix_rt::err!("intel: no card0: no display control ({error:?})");
             })
             .ok()?;
         let mut regs = regs::Regs::map(device, apertures)
-            .inspect_err(|why| say(format_args!("intel: card0: no hotplug: {why}")))
+            .inspect_err(|why| ferrix_rt::warn!("intel: card0: no hotplug: {why}"))
             .ok();
         // `ferrix.intelgpu.modeset=dry` prints the steps for the second port;
         // `=on` gives the card a second scanout (`docs/DESKTOP.md` §3.5).
@@ -263,19 +260,17 @@ impl Display {
         if let Err(why) = introduce(
             &control, port, location, scanouts, modes, connectors, running,
         ) {
-            say(format_args!("intel: no card0: {why}"));
+            ferrix_rt::warn!("intel: no card0: {why}");
             return None;
         }
         if control
             .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
             .is_err()
         {
-            say(format_args!(
-                "intel: no card0: the display control could not be waited on"
-            ));
+            ferrix_rt::err!("intel: no card0: the display control could not be waited on");
             return None;
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0 published: copies frames into the lit {}x{} plane at {phys:#x} ({} bytes a line, write-combining){}",
             first.width,
             first.height,
@@ -285,7 +280,7 @@ impl Display {
             } else {
                 ""
             }
-        ));
+        );
         let mut card = Display {
             _window: window,
             surface: None,
@@ -314,7 +309,7 @@ impl Display {
             card.written = second.written;
         }
         if let Err(why) = card.announce() {
-            say(format_args!("intel: no card0: {why}"));
+            ferrix_rt::warn!("intel: no card0: {why}");
             return None;
         }
         if card.watches.iter().any(Option::is_some) {
@@ -395,9 +390,7 @@ fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
         Some(PortOf::Combo(0)) => Some(PortOf::Combo(1)),
         Some(PortOf::Combo(1)) => Some(PortOf::Combo(0)),
         _ => {
-            say(format_args!(
-                "intel: card0: no second port: pipe A drives no combo port"
-            ));
+            ferrix_rt::info!("intel: card0: no second port: pipe A drives no combo port");
             None
         }
     }
@@ -424,12 +417,12 @@ fn prepare_second(
     let surface = surface::Surface::make(written, device, apertures, regs);
     let mut size = None;
     if let (Some(running), Some(surface)) = (cloned, surface.as_ref()) {
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: the firmware runs pipe B on port {} at {}x{}: it gets a surface of its own",
             running.port.name(),
             running.size.0,
             running.size.1
-        ));
+        );
         if modeset::repoint(regs, 1, surface.ggtt, running.size) {
             size = Some(running.size);
         }
@@ -468,10 +461,10 @@ fn map_screen(
     plane: ScreenPlane,
 ) -> Option<(IoMapping<Kernel>, Output, u64)> {
     if !plane.linear_xrgb8888() {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the lit plane is not linear XRGB8888 (PLANE_CTL {:#010x})",
             plane.ctl
-        ));
+        );
         return None;
     }
     let find = |bar: u8| {
@@ -480,21 +473,21 @@ fn map_screen(
             .find(|aperture| aperture.bar == bar)
     };
     let Some(window) = find(APERTURE_NOT_BAR) else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: no lent framebuffer (K4 lends it under ferrix.efifb with ferrix.intelgpu)"
-        ));
+        );
         return None;
     };
     // The window must be the pixels the plane scans: BAR 2 (the GGTT's
     // aperture) at the plane's GGTT offset.
     let gmadr = find(2);
     if gmadr.is_some_and(|bar2| bar2.phys + u64::from(plane.ggtt) != window.phys) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the lent window at {:#x} is not the plane's surface (BAR 2 {:#x} + GGTT {:#x})",
             window.phys,
             gmadr.map_or(0, |b| b.phys),
             plane.ggtt
-        ));
+        );
         return None;
     }
     let (width, height) = (plane.width as usize, plane.height as usize);
@@ -509,9 +502,9 @@ fn map_screen(
         || pitch * height > len
         || !len.is_multiple_of(PAGE)
     {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the plane {width}x{height} (pitch {pitch}) does not fit the lent window ({len:#x} bytes)"
-        ));
+        );
         return None;
     }
     let mapping = device
@@ -520,17 +513,15 @@ fn map_screen(
             len: window.len,
         })
         .inspect_err(|error| {
-            say(format_args!(
-                "intel: no card0: the lent window refused ({error:?})"
-            ));
+            ferrix_rt::err!("intel: no card0: the lent window refused ({error:?})");
         })
         .ok()?;
     let base = mapping
         .map_combining(None)
         .inspect_err(|error| {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: no card0: the window's write-combining mapping refused ({error:?})"
-            ));
+            );
         })
         .ok()?;
     Some((
@@ -583,7 +574,7 @@ impl Display {
             if let Some(connected) = change
                 && let Err(why) = self.changed(scanout, connected)
             {
-                say(format_args!("intel: card0 stopped: {why}"));
+                ferrix_rt::err!("intel: card0 stopped: {why}");
                 return false;
             }
         }
@@ -653,13 +644,11 @@ impl Display {
                 .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
                 .is_ok(),
             Ok(false) => {
-                say(format_args!(
-                    "intel: card0: the display core closed its end"
-                ));
+                ferrix_rt::warn!("intel: card0: the display core closed its end");
                 false
             }
             Err(why) => {
-                say(format_args!("intel: card0 stopped: {why}"));
+                ferrix_rt::err!("intel: card0 stopped: {why}");
                 false
             }
         }
@@ -758,7 +747,7 @@ impl Display {
                 }
                 output.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
                 clear(output);
-                say(format_args!(
+                ferrix_rt::info!(
                     "intel: card0: scanout {scanout} mode {}x{}{}",
                     size.0,
                     size.1,
@@ -767,7 +756,7 @@ impl Display {
                     } else {
                         ""
                     }
-                ));
+                );
                 Ok(())
             }
             _ => Err("a message a copying card without a cursor takes no part in"),
@@ -795,9 +784,7 @@ impl Display {
             copy(output, &source, changed);
             self.flushes += 1;
             if self.flushes == 1 {
-                say(format_args!(
-                    "intel: card0: the first frame is on the screen"
-                ));
+                ferrix_rt::info!("intel: card0: the first frame is on the screen");
             }
         }
     }
@@ -997,7 +984,7 @@ fn send_edid(
         .write(Message::Edid(edid).encode().as_bytes())
         .is_err()
     {
-        say(format_args!("intel: card0: the EDID could not be written"));
+        ferrix_rt::err!("intel: card0: the EDID could not be written");
     }
 }
 
@@ -1016,10 +1003,10 @@ fn send_list(
             .write(page.encode().as_bytes())
             .map_err(|_| "the mode list could not be written")?;
     }
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: card0: scanout {scanout}: {} modes listed, the smaller ones shown scaled",
         list.len()
-    ));
+    );
     Ok(())
 }
 

@@ -31,7 +31,6 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
 use core::ptr;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES, Start};
@@ -104,7 +103,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(never) => match never {},
         Err(step) => {
-            say(format_args!("gc400: stopped at {step:?}"));
+            ferrix_rt::err!("gc400: stopped at {step:?}");
             step as i32
         }
     }
@@ -113,48 +112,6 @@ fn main(bootstrap: Bootstrap) -> i32 {
 // ---------------------------------------------------------------------------
 // The console
 // ---------------------------------------------------------------------------
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-/// A line long enough for the identity, which is fifteen hex words.
-struct Line {
-    bytes: [u8; 320],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Self {
-        Line {
-            bytes: [0; 320],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or(&[])
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            if let Some(slot) = self.bytes.get_mut(self.len) {
-                *slot = byte;
-                self.len += 1;
-            }
-        }
-        Ok(())
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Registers, memory, time
@@ -331,10 +288,10 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
 
     // Who it is, before anything is written.
     let identity = Identity::read(&registers);
-    say(format_args!("gc400: {identity}"));
+    ferrix_rt::info!("gc400: {identity}");
     let features = identity.features();
     let addressing = Addressing::of(&features);
-    say(format_args!(
+    ferrix_rt::info!(
         "gc400: {}, {} pipe, memory controller {}, addressing {addressing}",
         if identity.known().is_some() {
             "features from etnaviv's database for this core"
@@ -343,30 +300,30 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         },
         if features.pipe_3d() { "3D" } else { "no 3D" },
         if features.mc20() { "2.0" } else { "1.0" },
-    ));
+    );
 
     let attempts = match bringup::reset(&mut registers, &mut clock, &identity) {
         Ok(attempts) => attempts,
         Err(failed) => {
-            say(format_args!("gc400: the core did not reset {failed}"));
+            ferrix_rt::err!("gc400: the core did not reset {failed}");
             return Err(Step::Reset);
         }
     };
     bringup::init(&mut registers);
     addressing.program(&mut registers);
     let stale = registers.read32(hi::INTR_ACKNOWLEDGE);
-    say(format_args!(
+    ferrix_rt::info!(
         "gc400: reset in {attempts} attempt(s), clock control {:#010x}, idle {:#010x}, stale interrupts {stale:#010x}",
         registers.read32(hi::CLOCK_CONTROL),
         registers.read32(hi::IDLE_STATE),
-    ));
+    );
 
     let page = Page::new(&device)?;
     let physical = page.physical;
     let Some(gpu) = addressing.gpu_address(physical) else {
-        say(format_args!(
+        ferrix_rt::err!(
             "gc400: the command page at {physical:#x} is outside what {addressing} reaches"
-        ));
+        );
         return Err(Step::Addressing);
     };
     let ring = Ring::new(page, gpu, WAIT_CYCLES).map_err(|_| Step::Memory)?;
@@ -396,11 +353,11 @@ impl Running {
         bringup::start_front_end(&mut self.registers, address, prefetch);
         self.clock.sleep_nanos(MILLISECOND);
         let debug = self.registers.read32(fe::DMA_DEBUG_STATE);
-        say(format_args!(
+        ferrix_rt::info!(
             "gc400: command page at {physical:#x} (GPU {gpu:#010x}); front end started there, now at {:#010x} ({})",
             self.registers.read32(fe::DMA_ADDRESS),
             fe::command_state(debug),
-        ));
+        );
 
         for (index, &event) in EVENTS.iter().enumerate() {
             // The first block selects the 3D pipe, whose pixel engine raises
@@ -412,7 +369,7 @@ impl Running {
             };
             let queued = self.clock.now_nanos();
             if self.ring.queue_event(before, event).is_err() {
-                say(format_args!("gc400: no room in the ring for event {event}"));
+                ferrix_rt::warn!("gc400: no room in the ring for event {event}");
                 return;
             }
             if !self.await_event(event, queued) {
@@ -425,20 +382,18 @@ impl Running {
         while self.registers.read32(hi::IDLE_STATE) & hi::IDLE_STATE_FE == 0 {
             if self.clock.now_nanos() >= until {
                 let stuck = Stuck::read(&self.registers);
-                say(format_args!(
-                    "gc400: the front end did not reach its END: {stuck}"
-                ));
+                ferrix_rt::err!("gc400: the front end did not reach its END: {stuck}");
                 return;
             }
             self.clock.sleep_nanos(MILLISECOND);
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "gc400: front end ended at {:#010x}, idle {:#010x}: command buffer ran, events {} and {} by interrupt",
             self.registers.read32(fe::DMA_ADDRESS),
             self.registers.read32(hi::IDLE_STATE),
             EVENTS[0],
             EVENTS[1],
-        ));
+        );
     }
 
     /// Wait for `event`'s interrupt, queued at `queued`: whether it came.
@@ -456,14 +411,14 @@ impl Running {
                     let pending = self.registers.read32(hi::INTR_ACKNOWLEDGE);
                     let _ = self.interrupt.ack();
                     let micros = self.clock.now_nanos().saturating_sub(queued) / 1_000;
-                    say(format_args!(
+                    ferrix_rt::debug!(
                         "gc400: event {event}: interrupt with {pending:#010x} after {micros} us"
-                    ));
+                    );
                     let faults =
                         hi::INTR_ACKNOWLEDGE_AXI_BUS_ERROR | hi::INTR_ACKNOWLEDGE_MMU_EXCEPTION;
                     if pending & faults != 0 {
                         let stuck = Stuck::read(&self.registers);
-                        say(format_args!("gc400: the core faulted: {stuck}"));
+                        ferrix_rt::err!("gc400: the core faulted: {stuck}");
                         return false;
                     }
                     if pending & bit != 0 {
@@ -473,14 +428,14 @@ impl Running {
                 Ok(_) => {}
                 Err(Error::TimedOut) => {
                     let stuck = Stuck::read(&self.registers);
-                    say(format_args!(
+                    ferrix_rt::err!(
                         "gc400: event {event} did not arrive in {} ms: {stuck}",
                         EVENT_PATIENCE / MILLISECOND
-                    ));
+                    );
                     return false;
                 }
                 Err(_) => {
-                    say(format_args!("gc400: the wait for event {event} failed"));
+                    ferrix_rt::err!("gc400: the wait for event {event} failed");
                     return false;
                 }
             }
@@ -494,9 +449,7 @@ impl Running {
                 Ok(packet) if packet.kind == PACKET_INTERRUPT && packet.key == KEY_INTERRUPT => {
                     let pending = self.registers.read32(hi::INTR_ACKNOWLEDGE);
                     let _ = self.interrupt.ack();
-                    say(format_args!(
-                        "gc400: an interrupt nothing waited for: {pending:#010x}"
-                    ));
+                    ferrix_rt::warn!("gc400: an interrupt nothing waited for: {pending:#010x}");
                 }
                 Ok(_) => {}
                 Err(_) => return Err(Step::Events),
