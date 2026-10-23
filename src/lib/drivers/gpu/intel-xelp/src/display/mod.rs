@@ -6,3 +6,4 @@
 
 pub mod gmbus;
 pub mod hotplug;
+pub mod modeset;

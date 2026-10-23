@@ -231,7 +231,7 @@ impl fmt::Display for Show {
 }
 
 /// `/proc/cmdline` into `line`: its length, or `None`, said.
-fn read_cmdline(line: &mut [u8]) -> Option<usize> {
+pub(crate) fn read_cmdline(line: &mut [u8]) -> Option<usize> {
     read_file(b"/proc/cmdline\0", line).map_err(unreadable).ok()
 }
 

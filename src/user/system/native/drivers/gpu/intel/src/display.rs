@@ -59,6 +59,7 @@ use crate::m2::ScreenPlane;
 use crate::say;
 
 mod hotplug;
+mod modeset;
 mod regs;
 
 /// The port key the display control's signals arrive under, beside
@@ -166,7 +167,14 @@ impl Display {
             "intel: card0 published: copies frames into the lit {width}x{height} plane at {phys:#x} ({pitch} bytes a line, write-combining)"
         ));
         let mut hotplug = match regs::Regs::map(device, apertures) {
-            Ok(regs) => hotplug::Watch::start(regs),
+            Ok(mut regs) => {
+                // `ferrix.intelgpu.modeset=dry`: the plan for the second
+                // port, printed and not written (`docs/DESKTOP.md` §3.5).
+                if modeset::asked() {
+                    modeset::print_plan(&mut regs);
+                }
+                hotplug::Watch::start(regs)
+            }
             Err(why) => {
                 say(format_args!("intel: card0: no hotplug: {why}"));
                 None

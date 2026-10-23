@@ -156,7 +156,7 @@ impl Watch {
 
 /// `CLOCK_MONOTONIC` in microseconds, and a busy wait on it: what a GMBUS
 /// transfer polls by.
-struct Monotonic;
+pub(crate) struct Monotonic;
 
 impl Clock for Monotonic {
     fn now_us(&mut self) -> u64 {
