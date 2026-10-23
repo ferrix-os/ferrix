@@ -28,6 +28,10 @@ pub(crate) struct Slot {
     pub(crate) format: u32,
     /// Committed and not yet released.
     pub(crate) busy: bool,
+    /// What frames committed from other slots changed since this one
+    /// was last drawn: `None` when it holds nothing worth keeping (a new
+    /// slot), so a damaged draw must copy all of it.
+    pub(crate) owed: Option<Vec<(u32, u32, u32, u32)>>,
 }
 
 /// `wl_shm`'s `ARGB8888`: B, G, R and premultiplied alpha in memory.
@@ -45,6 +49,35 @@ pub(crate) fn swizzle_into(rgba: &[u8], argb: &mut [u8]) {
             *tg = *g;
             *tr = *r;
             *ta = *a;
+        }
+    }
+}
+
+/// The rectangles `rects` (`x`, `y`, `width`, `height`) of `rgba`, a
+/// frame `width` pixels wide in tiny-skia's order, swizzled into the same
+/// places of `argb`, a buffer of that size; what falls outside is cut.
+pub(crate) fn swizzle_rects(
+    rgba: &[u8],
+    argb: &mut [u8],
+    width: u32,
+    height: u32,
+    rects: &[(u32, u32, u32, u32)],
+) {
+    let stride = width as usize * 4;
+    for &(x, y, w, h) in rects {
+        let (left, right) = (
+            x.min(width) as usize,
+            x.saturating_add(w).min(width) as usize,
+        );
+        let (top, bottom) = (
+            y.min(height) as usize,
+            y.saturating_add(h).min(height) as usize,
+        );
+        for row in top..bottom {
+            let span = row * stride + left * 4..row * stride + right * 4;
+            if let (Some(from), Some(to)) = (rgba.get(span.clone()), argb.get_mut(span)) {
+                swizzle_into(from, to);
+            }
         }
     }
 }

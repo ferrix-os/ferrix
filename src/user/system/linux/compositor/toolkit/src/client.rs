@@ -1093,6 +1093,75 @@ impl Client {
         self.commit_slot(surface, at, (pixel_width, pixel_height), scale, &[])
     }
 
+    /// Hand the compositor a frame the program keeps itself -- `rgba`,
+    /// `pixel_width` × `pixel_height` premultiplied pixels in tiny-skia's
+    /// order -- of which only `damage` (`x`, `y`, `width`, `height` in
+    /// buffer pixels; empty for all of it) changed since the frame it
+    /// handed before, at buffer scale `scale`.
+    ///
+    /// Only those rectangles are copied into the free `wl_shm` buffer and
+    /// damaged, plus whatever frames committed since that buffer was last
+    /// drawn changed (EGL's buffer-age rule); a buffer new to the surface
+    /// is copied whole. A caret's blink is then a few hundred bytes, not
+    /// the window. Nothing is drawn before the first
+    /// [`Event::Configure`], and `rgba` must be the whole frame.
+    ///
+    /// # Errors
+    ///
+    /// Shared memory that cannot be made.
+    pub fn draw_damaged(
+        &mut self,
+        surface: SurfaceId,
+        rgba: &[u8],
+        (pixel_width, pixel_height): (u32, u32),
+        scale: u32,
+        damage: &[(u32, u32, u32, u32)],
+    ) -> Result<bool, Error> {
+        if self
+            .surfaces
+            .get(&surface)
+            .is_none_or(|state| state.configured.is_none())
+        {
+            return Ok(false);
+        }
+        let Some(len) = buffer::length(pixel_width, pixel_height) else {
+            return Ok(false);
+        };
+        if rgba.len() != len {
+            return Ok(false);
+        }
+        let at = self.free_slot(surface, pixel_width, pixel_height, len, buffer::ARGB8888)?;
+        let Some(slot) = self
+            .surfaces
+            .get_mut(&surface)
+            .and_then(|state| state.slots.get_mut(at))
+        else {
+            return Ok(false);
+        };
+        let whole = [(0, 0, pixel_width, pixel_height)];
+        let mut rects: Vec<(u32, u32, u32, u32)> = match &slot.owed {
+            Some(owed) if !damage.is_empty() => owed.clone(),
+            _ => whole.to_vec(),
+        };
+        if !damage.is_empty() && slot.owed.is_some() {
+            rects.extend_from_slice(damage);
+        }
+        buffer::swizzle_rects(
+            rgba,
+            slot.shared.bytes_mut(),
+            pixel_width,
+            pixel_height,
+            &rects,
+        );
+        self.commit_slot(
+            surface,
+            at,
+            (pixel_width, pixel_height),
+            scale.max(1),
+            damage,
+        )
+    }
+
     /// Hand the compositor a frame of a size of the program's own, as
     /// [`Client::draw_sized`] does, written by `fill` straight into the
     /// `wl_shm` buffer: rows of `width` pixels, each four bytes in memory
@@ -1163,7 +1232,21 @@ impl Client {
             return Ok(false);
         };
         slot.busy = true;
+        slot.owed = Some(Vec::new());
         let buffer = slot.buffer;
+        // Every other slot now lags this frame by its damage: a damaged
+        // draw into one of them copies that too ([`Client::draw_damaged`]).
+        for (index, other) in state.slots.iter_mut().enumerate() {
+            if index != at
+                && let Some(owed) = &mut other.owed
+            {
+                if damage.is_empty() {
+                    other.owed = None;
+                } else {
+                    owed.extend_from_slice(damage);
+                }
+            }
+        }
         let object = state.surface;
         let resend_scale = state.sent_scale != scale;
         state.sent_scale = scale;
@@ -2105,6 +2188,7 @@ impl Client {
             height,
             format,
             busy: false,
+            owed: None,
         });
         Ok(state.slots.len().saturating_sub(1))
     }
