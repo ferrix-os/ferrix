@@ -883,7 +883,18 @@ more.
   the scale and paces draws by frame callbacks; checked by hand under a
   headless hyprix. The demos' binary is 2.6 MB stripped: the order of
   the viewer's, as §4.11 wanted.
-* Next: U3c, focus, keys and the Tab order; then U4, the views and
-  layouts the lode viewer's table needs. The window gets a
-  `test-compositor` row with the viewer's port (U8), where it first runs
-  on Ferrix.
+* **U3c built** (2026-10-23): focus, keys and the Tab order, as Qt
+  Quick has them. One item at a time holds `focus` within its scope (a
+  `FocusScope` or a root); keys go to the item with `activeFocus` and
+  bubble up: `Keys.on<Key>Pressed` takes its key, `Keys.onPressed` only
+  by `event.accepted = true`, then `KeyNavigation`; a Tab or Shift+Tab
+  nobody took walks the `activeFocusOnTab` items in tree order. The
+  window hands its keys over and gives back those nobody took. Two
+  departures: `focus:` is given as a constant (a handler moves it, or
+  `forceActiveFocus()`), not bound; and keys are named as xkb names them
+  (`event.key == "Return"`), not by Qt's `Key_` enum, since the toolkit
+  hands keysym names over. `enabled` became every item's and is
+  inherited. A `focus` demo. 42 host tests.
+* Next: U4, the views and layouts the lode viewer's table needs. The
+  window gets a `test-compositor` row with the viewer's port (U8), where
+  it first runs on Ferrix.
