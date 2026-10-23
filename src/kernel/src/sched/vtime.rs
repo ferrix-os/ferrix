@@ -111,7 +111,7 @@ pub(crate) fn init() {
 
 /// Whether kernel time is counted on this boot.
 #[inline]
-pub(crate) fn counting() -> bool {
+pub fn counting() -> bool {
     COUNTING.load(Ordering::Relaxed)
 }
 
@@ -200,7 +200,7 @@ pub(crate) fn trap_entered(from_user: bool) {
 /// span to here counts as user time, with no reading. With interrupts
 /// masked, after the last thing on the way out that could open them.
 #[inline]
-pub(crate) fn leaving() {
+pub fn leaving() {
     let Some(slot) = slot() else {
         return;
     };

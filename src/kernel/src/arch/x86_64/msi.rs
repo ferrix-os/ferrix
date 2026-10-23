@@ -46,7 +46,7 @@ static TAKEN: AtomicU64 = AtomicU64::new(0);
 /// Every vector already taken, a local APIC identifier too wide for a
 /// message's eight-bit destination, a function refused a route
 /// (`iommu::route`), or an entry the unit would not take.
-pub(crate) fn msi_allocate(device: u32) -> Result<Msi, &'static str> {
+pub fn msi_allocate(device: u32) -> Result<Msi, &'static str> {
     let apic_id = apic::id();
     let destination =
         u8::try_from(apic_id).map_err(|_| "this local APIC's identifier is too wide for MSI")?;

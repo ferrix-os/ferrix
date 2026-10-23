@@ -232,7 +232,7 @@ pub(crate) fn transmit_interrupt(on: bool) {
 
 /// What the port sends from, for the boot line that says how the console
 /// sends: on an STM32 it is firmware's choice whether the FIFO is on.
-pub(crate) fn transmit_buffer() -> &'static str {
+pub fn transmit_buffer() -> &'static str {
     match port() {
         Some(Port::Pl011) => "a PL011's FIFO",
         Some(Port::Stm32) if stm32_usart::has_fifo() => "an STM32 USART's FIFO",

@@ -91,23 +91,23 @@ const TORN_PAGES: u64 = 160;
 
 /// What the check did, for the boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Native calls made with allocations failing.
-    pub(crate) calls: u32,
+    pub calls: u32,
     /// Of those, answered `NO_MEMORY`.
-    pub(crate) refused: u32,
+    pub refused: u32,
     /// Allocations the injection failed.
-    pub(crate) injected: u64,
+    pub injected: u64,
     /// Allocations served from a reserve while the heap refused.
-    pub(crate) drawn: u64,
+    pub drawn: u64,
     /// Pages a decommit gave back with every allocation failing.
-    pub(crate) torn_down: usize,
+    pub torn_down: usize,
 }
 
 /// Run both parts.
 ///
 /// Verifies: L.object.7, H.MEM.11
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let drawn = check_a_section_completes_on_the_reserve()?;
     let drawn = drawn.saturating_add(check_a_library_insert_runs_in_a_section()?);
     let mut report = check_the_native_calls_survive()?;
@@ -678,7 +678,7 @@ fn send(
 /// before it to after, which the object is outside.
 ///
 /// Verifies: L.object.8
-pub(crate) fn give_up() -> Result<u64, &'static str> {
+pub fn give_up() -> Result<u64, &'static str> {
     // `dispose` closes an end at once and defers only what its messages
     // carry, so down the chain every other end is deferred: the outermost
     // closed, then a deferred one dropped in place and the one it carries

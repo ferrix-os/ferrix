@@ -5,7 +5,7 @@
 //! Verification, not the entry: a file of its own so that the manifest counts
 //! it as the test it is (`tools/common/data/certification-item.json`,
 //! `test_file_patterns`). The system call window's check runs a real program
-//! -- [`super::super::USER_TEST_PROGRAM`], built into an ELF and loaded by
+//! -- [`core_x86_64::USER_TEST_PROGRAM`], built into an ELF and loaded by
 //! the Linux personality's loader -- because only a program's own `syscall`
 //! reaches the trampoline with its stack and `GS`. That is a fixture reached
 //! from the load ring, which a verification file may do and the core's
@@ -15,16 +15,21 @@
 //! A child of the entry's module, so it reads the entry's counters without
 //! the entry exporting them.
 
+#![cfg(target_arch = "x86_64")]
+
+use ferrix_kernel_core::arch::x86_64 as core_x86_64;
+use ferrix_kernel_core::arch::x86_64::paranoid as core_paranoid;
+
 use core::hint::spin_loop;
 use core::sync::atomic::Ordering;
 
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 use ferrix_sync::IrqControl;
 
-use super::super::cpu;
-use super::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
 use crate::console::println;
 use crate::sync::SpinLock;
+use core_paranoid::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
+use core_x86_64::cpu;
 
 /// The instruction the nesting check breaks on first.
 #[inline(never)]
@@ -175,8 +180,8 @@ fn check_nmi() -> Result<u64, &'static str> {
     let before = NMIS.load(Ordering::Relaxed);
     let foreign = FOREIGN_GS.load(Ordering::Relaxed);
 
-    let saved = <super::super::Irq as IrqControl>::disable();
-    let sent = super::super::apic::send_nmi_to_self();
+    let saved = <core_x86_64::Irq as IrqControl>::disable();
+    let sent = core_x86_64::apic::send_nmi_to_self();
     let deadline = crate::timer::now_nanos().saturating_add(NMI_PATIENCE_NANOS);
     while sent.is_ok()
         && NMIS.load(Ordering::Relaxed) == before
@@ -184,7 +189,7 @@ fn check_nmi() -> Result<u64, &'static str> {
     {
         spin_loop();
     }
-    <super::super::Irq as IrqControl>::restore(saved);
+    <core_x86_64::Irq as IrqControl>::restore(saved);
 
     sent?;
     let taken = NMIS.load(Ordering::Relaxed).wrapping_sub(before);
@@ -202,7 +207,7 @@ fn check_nmi() -> Result<u64, &'static str> {
 ///
 /// Instruction breakpoints on the stub's first instruction -- `swapgs`, with
 /// the program's `GS` and stack -- and on its `sysretq`, after the `swapgs`
-/// back, while [`super::super::USER_TEST_PROGRAM`] writes a line and exits. Debug
+/// back, while [`core_x86_64::USER_TEST_PROGRAM`] writes a line and exits. Debug
 /// registers are per processor, so the program and the task that arms them
 /// are pinned to one. Returns the hits at each, and the program's status.
 /// Verifies: `L.x86_64.25`, `L.x86_64.52`, `L.x86_64.87`
@@ -253,7 +258,7 @@ fn check_system_call_window(high_gs: bool) -> Result<(u64, u64, i32), &'static s
     let expected = if high_gs {
         HIGH_GS_STATUS
     } else {
-        super::super::USER_TEST_STATUS
+        core_x86_64::USER_TEST_STATUS
     };
     if status != expected {
         return Err("the program with breakpoints in its system calls exited wrongly");
@@ -274,12 +279,12 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
 
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         if WINDOW_HIGH_GS.load(Ordering::Acquire) {
             HIGH_GS_PROGRAM
         } else {
-            super::super::USER_TEST_PROGRAM
+            core_x86_64::USER_TEST_PROGRAM
         },
     );
     let program = Executable {
@@ -301,7 +306,7 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
     // stack. Taken from `syscall`, whose declaration is the symbol's only one:
     // a second, of another type, is renamed `.1` by the release profile's link
     // and left undefined.
-    let entry = super::super::syscall::stub_address();
+    let entry = core_x86_64::syscall::stub_address();
     let sysret = (&raw const ferrix_syscall_sysret) as u64;
     // SAFETY: (PROBE) an instruction of the trampoline, not in the paranoid entry nor
     // on an IST stack, which is what a `#DB` there needs; unarmed until DR7.
@@ -324,7 +329,7 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
     // and a handler that skipped the swap would find the kernel's GS anyway:
     // the breakpoints above would prove nothing.
     // SAFETY: (CONTEXT) a kernel task, with the kernel's GS, outside the trampoline.
-    let program_gs = unsafe { super::super::syscall::program_gs_base() };
+    let program_gs = unsafe { core_x86_64::syscall::program_gs_base() };
     if is_cpu_record(program_gs) {
         return Err("a program ran with a per-CPU record as its GS base");
     }
@@ -354,7 +359,7 @@ fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
     };
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         SPIN_PROGRAM,
     );
@@ -383,7 +388,7 @@ fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
         && crate::timer::now_nanos() < deadline
     {
         crate::sched::sleep_for(1_000_000);
-        sent = super::super::apic::send_nmi_to(other.hardware_id as u32);
+        sent = core_x86_64::apic::send_nmi_to(other.hardware_id as u32);
     }
     let taken = USER_NMIS.load(Ordering::Relaxed).wrapping_sub(before);
     // Let it go, whatever happened: its word, once its page is mapped.
@@ -436,7 +441,7 @@ fn check_breakpoints_do_not_nest() -> Result<u64, &'static str> {
 
     // Masked, so that arming, both breakpoints and disarming happen on one
     // processor.
-    let saved = <super::super::Irq as IrqControl>::disable();
+    let saved = <core_x86_64::Irq as IrqControl>::disable();
     // SAFETY: (PROBE) a kernel function outside the paranoid entry and the IST stacks;
     // unarmed until DR7, and disarmed below before interrupts open again.
     unsafe { cpu::write_breakpoint_address(0, breakpoint_target as fn() -> u64 as usize as u64) };
@@ -448,7 +453,7 @@ fn check_breakpoints_do_not_nest() -> Result<u64, &'static str> {
     debug_hook();
     // SAFETY: (PROBE) disarming.
     unsafe { cpu::write_dr7(0) };
-    <super::super::Irq as IrqControl>::restore(saved);
+    <core_x86_64::Irq as IrqControl>::restore(saved);
 
     if hits(0).wrapping_sub(targets) != 1 {
         return Err("an instruction breakpoint in the kernel did not fire exactly once");
@@ -461,75 +466,4 @@ fn check_breakpoints_do_not_nest() -> Result<u64, &'static str> {
         return Err("the #DB handler did not run once per breakpoint");
     }
     Ok(runs)
-}
-
-/// Processors that looked at their own `CR4.MCE` for
-/// [`check_machine_check_enabled`].
-static MCE_LOOKED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-/// Of those, the ones that offer the exception and read the bit clear.
-static MCE_CLEAR: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-/// Of those, the ones whose `CPUID` offers no machine-check exception.
-static MCE_ABSENT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-/// One processor's share: its own `CR4`, read on it.
-fn look_at_machine_check(_me: &'static crate::smp::PerCpu) {
-    if !cpu::has_machine_check() {
-        let _ = MCE_ABSENT.fetch_add(1, Ordering::Relaxed);
-    } else if !cpu::machine_check_enabled() {
-        let _ = MCE_CLEAR.fetch_add(1, Ordering::Relaxed);
-    }
-    let _ = MCE_LOOKED.fetch_add(1, Ordering::Relaxed);
-}
-
-/// Every processor takes a machine check as the exception, not as a
-/// shutdown (F-73): after every processor is online, each reads its own
-/// `CR4` and finds `MCE` set, and every bring-up was counted setting it.
-/// A processor whose `CPUID` offers no machine-check exception has no bit
-/// to set, and fails the check too: the fail-stop on a hardware error
-/// rests on the exception, so a machine or hypervisor that hides it is
-/// refused rather than run without it.
-///
-/// The firmware's `CR4` says nothing here: a secondary starts from the boot
-/// processor's with the bit taken out, so a bring-up that did not set its
-/// own reads clear whatever firmware did.
-///
-/// # Errors
-///
-/// A processor that did not look, one that offers no machine-check
-/// exception, one that reads the bit clear, or a bring-up count short of
-/// the processors.
-///
-/// Verifies: `L.x86_64.175`
-pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
-    for count in [&MCE_LOOKED, &MCE_CLEAR, &MCE_ABSENT] {
-        count.store(0, Ordering::Relaxed);
-    }
-    crate::smp::run_everywhere(look_at_machine_check)?;
-    let processors = crate::smp::count();
-    let looked = MCE_LOOKED.load(Ordering::Relaxed);
-    if looked != processors {
-        return Err("a processor did not report whether it takes a machine check");
-    }
-    if MCE_ABSENT.load(Ordering::Relaxed) != 0 {
-        return Err(
-            "a processor's CPUID offers no machine-check exception: a hardware error there would \
-             not stop the machine",
-        );
-    }
-    if MCE_CLEAR.load(Ordering::Relaxed) != 0 {
-        return Err(
-            "a processor reads CR4.MCE clear: a machine check there would shut it down unreported",
-        );
-    }
-    let enabled = super::super::MACHINE_CHECK_ENABLED.load(Ordering::Acquire);
-    if enabled != processors {
-        return Err("a processor's bring-up did not set CR4.MCE");
-    }
-    println!(
-        "  mce      CR4.MCE set at the bring-up of {enabled} of {processors} processors and read \
-         set on each in stage 4; a machine check stops the machine as FX-9005"
-    );
-    Ok(())
 }

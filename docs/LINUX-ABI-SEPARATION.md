@@ -973,6 +973,15 @@ counts as verified in it (3208 (8)). Stage 1's memory self-checks
 `stages_check` is cut whole; row 13 re-homes them first (3257 C1). Nothing
 yet keeps the `off` image linking: `check` lints without a link (C2).
 
+**Since the kernel split** (`docs/KERNEL-CRATES.md` §5.1, 2026-10-23):
+x86-64's stage 4 checks of the x87 controls and the machine check
+(`L.x86_64.178`, `.175`) moved into the core's
+`arch/x86_64/cpu/stage4_check.rs`, so they now run in `off` too and their
+`cfg`s on `smp/check.rs`, the wrappers and `arch/mod.rs` are gone: the first
+of row 13's re-homings. The `off` allow stands in each of the four crates'
+roots, as each is now compiled with the flag, and the module declarations'
+`cfg`s moved with them into the roots.
+
 **Review.** Ledger line 3257: OK IF (1) to (7); (1) taken as option (ii),
 (3) and (7) written here and in `BUILD-FLAGS.md`.
 

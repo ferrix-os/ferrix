@@ -18,7 +18,7 @@ use ferrix_sync::Once;
 
 /// Why the loader's copy was refused, or that there was none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Refusal {
+pub enum Refusal {
     /// The loader handed over no copy.
     None,
     /// The copy's length is not an entry point and a table of at most
@@ -37,7 +37,7 @@ pub(crate) enum Refusal {
 
 impl Refusal {
     /// Its words, for the boot line.
-    pub(crate) const fn text(self) -> &'static str {
+    pub const fn text(self) -> &'static str {
         match self {
             Refusal::None => "none handed over",
             Refusal::Length => "the copy's length is impossible",
@@ -107,7 +107,7 @@ pub(crate) fn decode(copy: &[u8]) -> Result<Smbios<'_>, Refusal> {
 static KEPT: Once<Result<Smbios<'static>, Refusal>> = Once::new();
 
 /// Accept or refuse the loader's copy, once; later calls answer the same.
-pub(crate) fn open(view: &BootView<'_>) -> Result<Smbios<'static>, Refusal> {
+pub fn open(view: &BootView<'_>) -> Result<Smbios<'static>, Refusal> {
     *KEPT.call_once(|| {
         let info = view.raw();
         let direct = Direct {
@@ -131,7 +131,7 @@ pub(crate) fn open(view: &BootView<'_>) -> Result<Smbios<'static>, Refusal> {
 }
 
 /// The tables, if [`open`] accepted them.
-pub(crate) fn tables() -> Option<Smbios<'static>> {
+pub fn tables() -> Option<Smbios<'static>> {
     KEPT.get().copied().and_then(Result::ok)
 }
 
@@ -140,7 +140,7 @@ pub(crate) fn tables() -> Option<Smbios<'static>> {
 /// reach the console and, netbooted, a server. `-` for a field the table
 /// does not have.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Shown<'a>(pub(crate) Option<Value<'a>>);
+pub struct Shown<'a>(pub Option<Value<'a>>);
 
 impl core::fmt::Display for Shown<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

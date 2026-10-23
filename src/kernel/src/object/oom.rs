@@ -51,7 +51,7 @@ use crate::user::vmo::VmoError;
 
 /// What a fault the scoped OOM kill answered does next.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Answer {
+pub enum Answer {
     /// Fault again: memory was given back, or is being.
     Retry,
     /// The faulting process was chosen, or is already ending: let it go.
@@ -79,13 +79,13 @@ static CHOOSING: AtomicBool = AtomicBool::new(false);
 static KILLS: AtomicU64 = AtomicU64::new(0);
 
 /// How many processes the scoped OOM kill has ended since boot.
-pub(crate) fn kills() -> u64 {
+pub fn kills() -> u64 {
     KILLS.load(Ordering::Relaxed)
 }
 
 /// Whether a fault failed the way a refused charge fails it: no frame for
 /// the page, its copy, or a table.
-pub(crate) fn is_charge_refusal(error: &SpaceError) -> bool {
+pub fn is_charge_refusal(error: &SpaceError) -> bool {
     matches!(
         error,
         SpaceError::OutOfMemory | SpaceError::Backing(VmoError::OutOfMemory)
@@ -129,7 +129,7 @@ pub(crate) fn user_fault(
 ///
 /// As [`AddressSpace::fault`], and the refusal itself when the running
 /// process was the victim or nothing could be killed.
-pub(crate) fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
+pub fn fault(space: &AddressSpace, address: u64, access: Access) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
     loop {
         match space.fault(address, access) {
@@ -156,7 +156,7 @@ pub(crate) fn fault(space: &AddressSpace, address: u64, access: Access) -> Resul
 /// `memory.events`' `high` counts in the job whose mark it was and above, and
 /// wakes whatever polls their `memory.events`. Holds no lock, and must be
 /// called with none held, as every fault is.
-pub(crate) fn throttle() {
+pub fn throttle() {
     let Some((over, excess)) = quota::over_high(crate::sched::running_group()) else {
         return;
     };
@@ -177,7 +177,7 @@ pub(crate) fn throttle() {
 
 /// A fault in `space` by the running task failed for want of memory: find
 /// the job whose limit is full, and kill in it. See the module.
-pub(crate) fn out_of_memory(space: &AddressSpace) -> Answer {
+pub fn out_of_memory(space: &AddressSpace) -> Answer {
     let group = crate::sched::running_group();
     let Some(full) = quota::at_limit(group, Resource::Memory, PAGE_SIZE) else {
         // No limit full: the machine out of frames. Its clean cache is room.

@@ -880,12 +880,12 @@ pub(crate) fn counter_now() -> u64 {
 
 /// Whether the counter is the TSC, which a program can read for itself with
 /// `rdtsc`: what the vDSO asks before it answers without the kernel.
-pub(crate) fn counter_is_tsc() -> bool {
+pub fn counter_is_tsc() -> bool {
     HPET.load(Ordering::Relaxed) == 0 && COUNTER_HZ.load(Ordering::Relaxed) != 0
 }
 
 /// How fast it counts, or zero before [`init`].
-pub(crate) fn counter_hz() -> u64 {
+pub fn counter_hz() -> u64 {
     COUNTER_HZ.load(Ordering::Relaxed)
 }
 

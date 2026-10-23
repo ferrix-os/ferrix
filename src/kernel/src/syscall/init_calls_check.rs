@@ -95,21 +95,21 @@ const NOTHING_STATUS: i32 = -(Errno::EBADF.0 as i32) & 0xFF;
 
 /// What the check did, for the boot log.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls refused as the ABI says.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Bootstrap handles given and taken.
-    pub(crate) taken: u32,
+    pub taken: u32,
     /// Whether a program took its bootstrap after an `execve`; `false` on an
     /// architecture with no program to run.
-    pub(crate) from_a_program: bool,
+    pub from_a_program: bool,
     /// The version of the hello read from init's bootstrap channel.
-    pub(crate) hello: u32,
+    pub hello: u32,
     /// Ends read back through process handles.
-    pub(crate) statuses: u32,
+    pub statuses: u32,
     /// How long, in milliseconds, an `epoll_wait` on a port's descriptor
     /// took to be woken by a packet queued 50 ms into it.
-    pub(crate) woken_after_ms: u64,
+    pub woken_after_ms: u64,
 }
 
 /// Run every check.
@@ -117,7 +117,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first property that did not hold, as a sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report {
         hello: check_the_kernel_greets_init()?,
         ..Report::default()

@@ -26,11 +26,11 @@ use crate::device::{self, DeviceNode, Location};
 
 /// What the check established, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Nodes whose drivers may not copy, refused.
-    pub(crate) refused: usize,
+    pub refused: usize,
     /// Nodes whose drivers may, allowed.
-    pub(crate) allowed: usize,
+    pub allowed: usize,
 }
 
 /// Run the check.
@@ -38,7 +38,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// What was not true.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     // FATAL-ALLOC: boot only: one made-up node, once, for the check.
     let other = Arc::new(DeviceNode::empty(Location::Tree(0x1000)));
@@ -102,11 +102,11 @@ fn check_shared() -> Result<(), &'static str> {
 
 /// What the mode-list check established, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct ModesReport {
+pub struct ModesReport {
     /// `SETCRTC` requests matched or refused as the rule says.
-    pub(crate) matched: usize,
+    pub matched: usize,
     /// Pages taken, and lying pages refused.
-    pub(crate) pages: usize,
+    pub pages: usize,
 }
 
 /// Stage 10's check of the mode-list rules (`docs/DISPLAY.md` §9.3; the
@@ -118,7 +118,7 @@ pub(crate) struct ModesReport {
 /// # Errors
 ///
 /// What was not true.
-pub(crate) fn modes() -> Result<ModesReport, &'static str> {
+pub fn modes() -> Result<ModesReport, &'static str> {
     use ferrix_displayctl::listed::listed_match;
     use ferrix_displayctl::message::{Listed, Timing};
 

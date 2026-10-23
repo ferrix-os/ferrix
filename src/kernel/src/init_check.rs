@@ -13,11 +13,11 @@ type Case<'a> = (&'a [InputEntry], &'a [u8], &'a [u8], &'a [u8], u32);
 
 /// What [`check`] found.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CheckReport {
+pub struct CheckReport {
     /// Sets of entries judged.
-    pub(crate) cases: u32,
+    pub cases: u32,
     /// Entries refused across them, each as the case expected.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
 }
 
 /// An entry for [`check`].
@@ -52,7 +52,7 @@ fn judged(entries: &[InputEntry]) -> (Inputs, u32) {
 /// here is counted, not said.
 ///
 /// Verifies: L.init.2, L.init.3, H.BOOT.15
-pub(crate) fn check() -> Result<CheckReport, &'static str> {
+pub fn check() -> Result<CheckReport, &'static str> {
     const DIRS: [InputEntry; 2] = [
         made_up(b".ferrix", false, true, 2, b""),
         made_up(b".ferrix/init", false, true, 2, b""),

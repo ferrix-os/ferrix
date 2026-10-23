@@ -369,7 +369,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 | Item | Owner | Stage |
 |---|---|---|
-| **Open (2026-10-23, sealed-job; seen 2026-10-21 too).** `test-container --arch all`'s AArch64 boot ended `container: FAILED memory.stat could not be read (Out of memory (os error 12))` on `mk7-container-3` (2f421e3ac, 2026-10-21), `sealed-container` (c664460af) and `sealed2-container` (0e624debf), each with the x86-64 half passing; `sealed3-container-aarch64` (1fb935294) PASSED on rerun. On main d1e9e9c79 `main-container-aarch64` ended differently (the shell's exit not printed within 120 s). Logs in `~/.local/share/ferrix/logs/queue/` under those tags. A read of `memory.stat` refused for memory under the container's own `memory.max`, not yet reproduced on purpose | unowned | 13 |
+| **Open (2026-10-23, sealed-job; seen 2026-10-21 too).** `test-container --arch all`'s AArch64 boot ended `container: FAILED memory.stat could not be read (Out of memory (os error 12))` on `mk7-container-3` (2f421e3ac, 2026-10-21), `sealed-container` (c664460af) and `sealed2-container` (0e624debf), each with the x86-64 half passing; `sealed3-container-aarch64` (1fb935294) PASSED on rerun. On main d1e9e9c79 `main-container-aarch64` ended differently (the shell's exit not printed within 120 s). Logs in `~/.local/share/ferrix/logs/queue/` under those tags. A read of `memory.stat` refused for memory under the container's own `memory.max`, not yet reproduced on purpose. Seen three times more on `feature/kernel-split-s3`, 5841bfa44 (`s3r-container`, `s3r-container2`) and 3903f1822 (`s3s-container`), 2026-10-23, the same AArch64 line, the x86-64 half passing; logs kept in `~/.local/share/ferrix/logs/s3r-flakes/`. | unowned | 13 |
 | **Done 2026-10-16 (fl-x), same fix as the fl-010 row:** fuzzel's host test `exec::tests::an_application_in_game_mode_is_started_with_the_mark` flaked with the step cache on; fixed in the apps component (commit `30fa8a2ffe43`: child writes `out.part` and renames it); this tree's pin follows. [more](backlog/flakes.md#fl-006) | flake owner | tools |
 | **Open (2026-10-15, mm-pcache).** `cargo xtask check` in gate slot 1 hit a rustc/clippy internal compiler error compiling `xtask` (`dep_graph/graph.rs:1269`); same tree passed in slot 2. Suspect a poisoned incremental cache; clear that slot's `incremental/` or use `CARGO_INCREMENTAL=0`. [more](backlog/flakes.md#fl-007) | flake owner | tools |
 | **Open (2026-10-15, rig-fu2).** `test-frames` failed at host load about 40: one injected stall counted as 15 missed refreshes, 3 expected; rerun passed. fl-x found the guest renderer starved, no harness race; nothing changed. [more](backlog/flakes.md#fl-008) | unassigned | 24 |
@@ -428,7 +428,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | An x86-64 TCG boot hung before stage 3 with no panic (`input` line, then nothing for 120 s), seen 2026-09-26 to 09-28 in three gates (`test-shell`, `test-auth`); reruns passed. The hang is in stage 3's checks or just before. [more](backlog/flakes.md#fl-058) | open | 3 |
 | `test-compositor` under TCG at load 16-40 took input seconds late (2026-09-27/28): `--boot lock` saw a bind in the locked session, `--boot animation` kept one picture or a frame over 11 s. Judge the lock bind by `started /bin/lswt`; time slides from the first changed picture. [more](backlog/flakes.md#fl-059) | open | 18 |
 | AArch64's PCI self-check line flips between boots of one kernel: "seen **after**" vs "seen **before**" the fault, a race in the out-of-domain probe (`discovery/pci/virtio.rs`). Print the order only when stable, or compare it separately. [more](backlog/flakes.md#fl-060) | open | 10 |
-| Host tests of the compositor (waybar `against_hyprix`, the toolkit's) fail `cargo xtask check` under load, passing on rerun, many sightings 2026-09-30 to 10-12, even at low load; hyprix `two_clients` made event-driven 2026-10-23 (0 of 100 starved runs failed). Diagnosing needs the step cache off and `FERRIX_SIDE_JOBS=1` (ledger 1461, 1684). [more](backlog/flakes.md#fl-061) | open | 18 |
+| Host tests of the compositor (waybar `against_hyprix`, the toolkit's) fail `cargo xtask check` under load, passing on rerun, many sightings 2026-09-30 to 10-12, even at low load; hyprix `two_clients` made event-driven 2026-10-23 (0 of 100 starved runs failed). Diagnosing needs the step cache off and `FERRIX_SIDE_JOBS=1` (ledger 1461, 1684). [more](backlog/flakes.md#fl-061) Seen 2026-10-23 on `s3r-check` (5841bfa44): `a_floating_workspace_floats_and_cascades_new_windows` and `a_window_that_is_not_shared_is_a_black_box_in_a_screenshot`, passing on rerun (`s3r-check2`). | open | 18 |
 | A wake goes missing on AArch64 with a GICv3 (`FERRIX_ARM_MACHINE=gic-version=3`): in 8 of 9 TCG boots a relay's next party stayed queued until a 30 s deadline. Start at a kick's SGI: `KICK_PENDING` left up, and the `isb` after `ICC_SGI1R_EL1`. [more](backlog/flakes.md#fl-062) | open | 5 |
 | An AArch64 `test-boot` of unmodified main eeaa35cd timed out under load (41 to 51) on nazuna on 2026-10-01, while `os-35/ipc-ring` was measuring its baseline; not rerun. Kept: `~/.local/share/ferrix/logs/os35-ring/base-eeaa35cd-aarch64-timeout-serial.log`. Read the serial log's last lines for the stage it stopped in | open | 10 |
 | `test-net --arch x86_64 --init <musl busybox>` stopped twice (2026-09-30) with a program that never exited (`git`, `wget -q`) while the host disk was at 98-100%; quiet runs passed. Look at what a networking program waits on when the host is slow. [more](backlog/flakes.md#fl-063) | open | 13 |
@@ -440,7 +440,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
-178 items: performance, hardening, certification follow-ups the
+181 items: performance, hardening, certification follow-ups the
 consultant asked to ride with a later landing, and compatibility gaps that
 block nothing now. They are in [backlog/p2.md](backlog/p2.md). Read it
 when you take P2 work, or before touching an area to see what is owed there
@@ -555,6 +555,13 @@ taken.
 
 ## Waiting on the customer
 
+* **F-76, the core's and the item's unclassified libraries** (2026-10-23,
+  filed with the kernel split, `docs/KERNEL-CRATES.md` §5.1; ledger 1585 Q1):
+  the core links 21 first-party libraries and the item 16 that no ring
+  classifies, 25 in all (`unclassified_deps` in
+  `tools/common/data/certification-item.json`): classify each into a ring
+  with its evidence, allowlist it as infrastructure with a reason, or
+  re-scope the item. The customer's, through the product owner.
 * **Settings' game mode**: (`docs/SETTINGS.md` §8) open questions: game scope beside the session's; one-way barrier towards `nvrm` for all or named jobs; speculation domain by admission or birth; who grants (`wheel` or root); whether the certified item takes it; the game path's question 4. [more](backlog/waiting.md#wc-001)
 * **The game path, stage 24**: (`docs/GAME-PATH.md` §10) which Linux to judge against; opening stage 14 early; speculation domains for yserver, hyprix, `nvrm`; VRR; latency hardware; native render process; session defaults; a bare-metal run before any figure leaves the tree. [more](backlog/waiting.md#wc-002)
 * **Developing Ferrix on Ferrix**: (2026-10-11) the six decisions of `docs/DEV-ON-FERRIX.md` §9: editor, trying a kernel from inside, secrets before the PC, second root, live driver updates, refetching the toolchain volume. [more](backlog/waiting.md#wc-003)

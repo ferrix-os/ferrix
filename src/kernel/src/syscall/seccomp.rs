@@ -33,7 +33,7 @@
 //! a filter that makes it believe it had dropped privileges.
 
 pub(crate) mod user_dispatch;
-pub(crate) mod user_dispatch_check;
+pub mod user_dispatch_check;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -390,7 +390,7 @@ pub(crate) fn any_filtered() -> bool {
 /// How many threads hold seccomp state now: see [`FILTERED_THREADS`]. For the
 /// boot check, which requires it back where it was once its filtered threads
 /// have gone.
-pub(crate) fn filtered_threads() -> usize {
+pub fn filtered_threads() -> usize {
     FILTERED_THREADS.load(Ordering::Acquire)
 }
 
@@ -401,7 +401,7 @@ pub(crate) fn filtered_threads() -> usize {
 /// loads (the count of filtered threads and the boot check's probe word); a
 /// thread with none, while another holds one, costs the running task, its
 /// thread and one more load; the rest is for a thread that has one. The chain is walked with interrupts open and under no lock.
-pub(crate) fn check(args: &SyscallArgs) -> Verdict {
+pub fn check(args: &SyscallArgs) -> Verdict {
     if PROBE_TASK.load(Ordering::Relaxed) != 0 {
         let verdict = probed(args);
         if verdict != Verdict::Continue {
@@ -461,7 +461,7 @@ fn dispatch_first(thread: &Thread, args: &SyscallArgs) -> Option<Verdict> {
 /// which orders the call before the sync, as a call in flight is
 /// ([`FILTERED_THREADS`]).
 /// With interrupts masked; takes no lock and no reference.
-pub(crate) fn quiet() -> bool {
+pub fn quiet() -> bool {
     if PROBE_TASK.load(Ordering::Acquire) != 0 {
         return false;
     }

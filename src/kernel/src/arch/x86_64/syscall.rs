@@ -42,7 +42,7 @@ use crate::trap::{Abi, Outcome};
 use super::cpu;
 use super::gdt;
 
-pub(super) mod check;
+pub mod check;
 
 /// `IA32_EFER`. Bit 0 enables `SYSCALL`/`SYSRET`.
 const IA32_EFER: u32 = 0xC000_0080;
@@ -129,7 +129,7 @@ const _: () = assert!(
 /// other half of this type's definition.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub(crate) struct SyscallFrame {
+pub struct SyscallFrame {
     /// Callee-saved, and the ABI's sixth argument register is not among them.
     pub(crate) r15: u64,
     /// Callee-saved.
@@ -425,6 +425,7 @@ fn cstar_stub_address() -> u64 {
     ferrix_syscall32_stub as *const () as usize as u64
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs; home: super
 /// Where the `LSTAR` entry point is: what `IA32_LSTAR` holds, and what the
 /// system call window check puts a breakpoint on.
 ///
@@ -436,7 +437,8 @@ fn cstar_stub_address() -> u64 {
 ///
 /// Which of the two entries: the one that runs the branch-history loop where
 /// `super::speculation` planned it (BHI), the other everywhere else.
-pub(super) fn stub_address() -> u64 {
+#[doc(hidden)]
+pub fn stub_address() -> u64 {
     if super::speculation::clears_branch_history() {
         ferrix_syscall_stub_bhb as *const () as usize as u64
     } else {
@@ -489,7 +491,7 @@ unsafe extern "C" {
 /// compatibility mode with every register, `RCX` and `R11` included
 /// (`docs/I386.md` I2b).
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum UserRegs {
+pub enum UserRegs {
     /// Saved by `SYSCALL`'s trampoline.
     Syscall(SyscallFrame),
     /// Saved by the trap stub: a system call through `int $0x80`.
@@ -498,7 +500,7 @@ pub(crate) enum UserRegs {
 
 impl UserRegs {
     /// The same registers, as a child sees them: the call returned zero.
-    pub(crate) const fn for_child(&self) -> UserRegs {
+    pub const fn for_child(&self) -> UserRegs {
         match *self {
             UserRegs::Syscall(mut frame) => {
                 frame.rax = 0;
@@ -514,7 +516,7 @@ impl UserRegs {
     /// Start on `stack` instead, as `clone` with a stack argument asks. The
     /// stack pointer is in the frame on this architecture, so `state` is
     /// untouched.
-    pub(crate) const fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
+    pub const fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
         let _ = state;
         match self {
             UserRegs::Syscall(frame) => frame.user_rsp = stack,
@@ -523,7 +525,7 @@ impl UserRegs {
     }
 
     /// The stack pointer the program made the call with.
-    pub(crate) const fn stack_pointer(&self) -> u64 {
+    pub const fn stack_pointer(&self) -> u64 {
         match self {
             UserRegs::Syscall(frame) => frame.user_rsp,
             UserRegs::Trap(frame) => frame.rsp,
@@ -539,7 +541,7 @@ impl UserRegs {
 /// (CONTEXT) Must be called by a user task with its address space installed and its
 /// user state loaded, and `regs` must be a frame a system call from that
 /// address space saved.
-pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
+pub unsafe fn resume_user(regs: &UserRegs) -> ! {
     match regs {
         // SAFETY: (CONTEXT) the caller's guarantee is the assembly's contract; the frame
         // is read before anything is pushed below it.
@@ -738,12 +740,14 @@ fn write_outcome(frame: &mut SyscallFrame, outcome: Outcome) {
     }
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs; home: super
 /// Whether `number` is one of the three native calls declared to destroy the
 /// caller's vector registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (3a). By
 /// number, on this entry alone: no Linux number, and nothing through
 /// `int $0x80`.
-pub(super) const fn vectors_die_in(number: usize) -> bool {
+#[doc(hidden)]
+pub const fn vectors_die_in(number: usize) -> bool {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
     matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)
 }
@@ -989,7 +993,7 @@ fn arch_prctl(code: u64, value: u64) -> Option<isize> {
 ///
 /// `None` for a `code` that is neither, which is every code on an
 /// architecture with no such bases.
-pub(crate) fn user_base(code: u64) -> Option<u64> {
+pub fn user_base(code: u64) -> Option<u64> {
     let of_gs = match code {
         ARCH_GET_FS => false,
         ARCH_GET_GS => true,
@@ -1080,7 +1084,7 @@ pub(crate) unsafe fn init() {
 /// (CONTEXT) Must be called from the kernel with its own `GS` installed -- anywhere but
 /// the trampoline's ring-0 stretches before and after `swapgs`, which run with
 /// interrupts masked and cannot call this.
-pub(crate) unsafe fn program_gs_base() -> u64 {
+pub unsafe fn program_gs_base() -> u64 {
     // SAFETY: (CONTEXT) reading the shadow MSR has no side effects.
     unsafe { cpu::read_msr(IA32_KERNEL_GS_BASE) }
 }

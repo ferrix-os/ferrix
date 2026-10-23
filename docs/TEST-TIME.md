@@ -1446,6 +1446,27 @@ The certification consultant's design review of D2 and D3: OK IF (1)-(9),
 ledger line 1684; the amendments after the code reviews, lines 1715 and
 1722.
 
+### The split: four crates (S3, redone 2026-10-23, `kernel-split-s3`)
+
+The kernel as four crates along the rings (`docs/KERNEL-CRATES.md` §5.1):
+an edit recompiles its crate and those above it. Measured against `main`
+3a4a45e88, each in a worktree and target directory of its own, turn about
+per edit: a one-line `black_box` in a load file (`syscall/eventfd.rs`), an
+item file (`random.rs`) and a core file (`smp.rs`), each measured build
+followed by an unmeasured one after the edit is undone. Host load 1 to 3
+(clippy's second round; its first ran at 10 to 22). User CPU seconds:
+
+| After an edit in | Kernel build (x86-64 dev), main | the split | `cargo clippy` of the kernel (x86-64), main | the split |
+|---|---|---|---|---|
+| a load file | 2.3-2.4 | **1.6** | 5.6-6.2 | **4.0-4.3** |
+| an item file | 2.6-3.4 | **1.5** | 5.6-6.0 | **4.2-4.6** |
+| a core file | 2.0-3.0 | 2.2-4.5 | 5.7-6.0 | 5.7-5.8 |
+
+An edit in the load or the item costs about a third less CPU to build and a
+quarter less to lint; one in the core costs what it did, since every crate
+above it rebuilds. The gates' release builds link the four crates with fat
+LTO and gain nothing.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

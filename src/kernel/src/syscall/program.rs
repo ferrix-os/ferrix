@@ -39,7 +39,7 @@ const HEADERS_MOST: u64 = 64 * 1024;
 
 /// An open program file.
 #[derive(Debug)]
-pub(crate) struct ProgramFile {
+pub struct ProgramFile {
     /// The file, open for reading. Kept by every mapping made of it, as
     /// Linux's `vm_file` keeps it, and what `/proc/<pid>/maps` names them by.
     file: Arc<OpenFile>,
@@ -61,7 +61,7 @@ impl ProgramFile {
     ///
     /// `ENOEXEC` for an ELF file whose program header table ends past
     /// [`HEADERS_MOST`]; `ENOMEM`; and whatever reading refuses.
-    pub(crate) fn open(file: Arc<OpenFile>) -> Result<ProgramFile, Errno> {
+    pub fn open(file: Arc<OpenFile>) -> Result<ProgramFile, Errno> {
         let len = file.io().metadata().size;
         let mut head = zeroed(len.min(HEAD_BYTES))?;
         let got = read_at(&file, 0, &mut head)?;
@@ -99,23 +99,27 @@ impl ProgramFile {
 
     /// The file's first bytes: at least a page, or the whole of a shorter
     /// file, and all of an ELF file's program headers.
-    pub(crate) fn head(&self) -> &[u8] {
+    pub fn head(&self) -> &[u8] {
         &self.head
     }
 
     /// The file's length when it was opened.
-    pub(crate) fn len(&self) -> u64 {
+    #[allow(
+        clippy::len_without_is_empty,
+        reason = "a count, never asked whether it is empty"
+    )]
+    pub fn len(&self) -> u64 {
         self.len
     }
 
     /// The open file.
-    pub(crate) fn file(&self) -> &Arc<OpenFile> {
+    pub fn file(&self) -> &Arc<OpenFile> {
         &self.file
     }
 
     /// The object a mapping of the file maps, and the byte of it that is the
     /// file's first; `None` if the file has none, and must be copied.
-    pub(crate) fn object(&self) -> Option<(&Arc<Vmo>, u64)> {
+    pub fn object(&self) -> Option<(&Arc<Vmo>, u64)> {
         self.object.as_ref().map(|(vmo, offset)| (vmo, *offset))
     }
 
@@ -125,7 +129,7 @@ impl ProgramFile {
     ///
     /// `EIO` for a file that ends before `buf` is full -- it was cut after the
     /// headers said where its segments are -- and whatever reading refuses.
-    pub(crate) fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), Errno> {
+    pub fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> Result<(), Errno> {
         if read_at(&self.file, offset, buf)? == buf.len() {
             Ok(())
         } else {
@@ -165,6 +169,6 @@ const COPY_CHUNK: u64 = 64 * 1024;
 /// # Errors
 ///
 /// `ENOMEM`.
-pub(crate) fn copy_buffer() -> Result<Vec<u8>, Errno> {
+pub fn copy_buffer() -> Result<Vec<u8>, Errno> {
     zeroed(COPY_CHUNK)
 }

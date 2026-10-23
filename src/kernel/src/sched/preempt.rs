@@ -207,7 +207,7 @@ pub(super) fn start_counting() {
 
 /// Whether the count is kept yet. `Relaxed`: the flag orders nothing, and
 /// the words it guards have been zero since the records were made.
-pub(crate) fn counting() -> bool {
+pub fn counting() -> bool {
     COUNTING.load(Ordering::Relaxed)
 }
 
@@ -267,7 +267,8 @@ const fn covers(word: u64, delta: u64) -> bool {
 
 /// The kernel's half of `ferrix_sync::PreemptControl`: this processor's
 /// count.
-pub(crate) struct Preempt;
+#[derive(Debug)]
+pub struct Preempt;
 
 // SAFETY: (SHARED) `disable` raises this processor's count and `preempt_on_irq_exit`
 // switches nothing while it is raised; `enable` lowers it and makes the
@@ -325,7 +326,7 @@ fn install_library_hooks() {
 /// Keep the running context on this processor until the matching
 /// [`preempt_enable`].
 #[track_caller]
-pub(crate) fn preempt_disable() {
+pub fn preempt_disable() {
     let _ = raise(ONE, Location::caller());
 }
 
@@ -341,7 +342,7 @@ pub(crate) fn preempt_disable() {
 /// is now unpreemptible for good. It used to be floored at zero and
 /// forgotten, which turned one lost increment into FX-0503 on an innocent
 /// task some time later.
-pub(crate) fn preempt_enable() {
+pub fn preempt_enable() {
     enable_from(false);
 }
 

@@ -16,6 +16,11 @@
 //! undefined instruction and a `brk` a program executes itself had never
 //! been taken from EL0.
 
+#![cfg(target_arch = "aarch64")]
+
+use ferrix_kernel_core::arch::aarch64 as core_aarch64;
+use ferrix_kernel_core::arch::aarch64::trap as core_trap;
+
 use ferrix_linux_abi::types::{SIGBUS, SIGILL, SIGTRAP};
 
 use crate::console::println;
@@ -138,7 +143,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_aarch64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -156,7 +161,7 @@ fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
 /// Interrupts are as the caller had them: a real entry starts with them masked
 /// and leaves them so, this wrapper does both for a task that runs with them
 /// open. `None` for a mode of entry this architecture does not have.
-pub(crate) fn drive_system_call(
+pub fn drive_system_call(
     abi: crate::trap::Abi,
     number: usize,
     args: [u64; 6],
@@ -167,11 +172,11 @@ pub(crate) fn drive_system_call(
     if abi != crate::trap::Abi::Native {
         return None;
     }
-    let mut frame = super::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         x: [0; 31],
         sp: 0x7fff_e000,
         elr: ip,
-        spsr: super::USER_SPSR,
+        spsr: core_trap::USER_SPSR,
         // An `svc` from AArch64, class 0b010101, from a lower exception level.
         esr: 0b01_0101 << 26,
         far: 0,
@@ -180,9 +185,9 @@ pub(crate) fn drive_system_call(
     };
     frame.x[..6].copy_from_slice(&args);
     frame.x[8] = number as u64;
-    let saved = <super::super::Irq as IrqControl>::disable();
-    let done = super::system_call(&mut frame);
-    <super::super::Irq as IrqControl>::restore(saved);
+    let saved = <core_aarch64::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_aarch64::Irq as IrqControl>::restore(saved);
     done.ok()?;
     Some(frame.x[0] as i64 as isize)
 }
@@ -195,14 +200,14 @@ pub(crate) fn drive_system_call(
 /// For the `channel_write_read` check (`object::write_read_check`), run on a
 /// thread of a check's process, as [`drive_system_call`] is run. An entry
 /// that refuses the frame answers `ENOSYS` with the registers as sent.
-pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
+pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 
-    let mut frame = super::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         x: [0; 31],
         sp: 0x7fff_e000,
         elr: 0x40_1000,
-        spsr: super::USER_SPSR,
+        spsr: core_trap::USER_SPSR,
         // An `svc` from AArch64, class 0b010101, from a lower exception level.
         esr: 0b01_0101 << 26,
         far: 0,
@@ -211,9 +216,9 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
     };
     frame.x[..6].copy_from_slice(&args);
     frame.x[8] = number as u64;
-    let saved = <super::super::Irq as IrqControl>::disable();
-    let done = super::system_call(&mut frame);
-    <super::super::Irq as IrqControl>::restore(saved);
+    let saved = <core_aarch64::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_aarch64::Irq as IrqControl>::restore(saved);
     let value = if done.is_ok() {
         frame.x[0] as i64 as isize
     } else {
@@ -235,10 +240,10 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
 /// # Errors
 ///
 /// A program that did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
+pub fn check_exception_entry() -> Result<(), &'static str> {
     crate::console::println!(
         "  entry    every exception on {} enters on a stack a program cannot set",
-        super::super::NAME
+        core_aarch64::NAME
     );
     run()
 }

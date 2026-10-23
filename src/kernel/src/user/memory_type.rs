@@ -80,7 +80,7 @@ use crate::sync::SpinLock;
 
 /// How a processor maps a page of device memory.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum MemoryType {
+pub enum MemoryType {
     /// Device memory, uncacheable: an aperture of registers, or a window the
     /// device did not say may be cached.
     Device,
@@ -93,7 +93,7 @@ pub(crate) enum MemoryType {
 impl MemoryType {
     /// The type a device region with these attributes is mapped with: what
     /// `AddressSpace::fault_device` puts in the page table.
-    pub(crate) const fn of(cached: bool, combining: bool) -> MemoryType {
+    pub const fn of(cached: bool, combining: bool) -> MemoryType {
         if cached {
             MemoryType::Cached
         } else if combining {
@@ -106,7 +106,7 @@ impl MemoryType {
 
 /// Why a hold was not given.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Refused {
+pub enum Refused {
     /// A page of the range is mapped with another type now.
     OtherType,
     /// There was no memory to record it.
@@ -141,7 +141,7 @@ static CLAIMS: SpinLock<Vec<Claim>> = SpinLock::new(Vec::new());
 /// A mapping's share in its range's [`Claim`]: given back when the last
 /// region holding it goes.
 #[derive(Debug)]
-pub(crate) struct Hold {
+pub struct Hold {
     start: u64,
     end: u64,
     kind: MemoryType,
@@ -172,7 +172,7 @@ fn release(start: u64, end: u64, kind: MemoryType) {
 
 /// How many claims are recorded: what stage 9's check compares across
 /// mappings of one range (L.user.109).
-pub(crate) fn claims() -> usize {
+pub fn claims() -> usize {
     CLAIMS.lock().len()
 }
 
@@ -185,7 +185,7 @@ pub(crate) fn claims() -> usize {
 ///
 /// [`Refused::OtherType`] when a live hold of another type overlaps the
 /// range, and [`Refused::NoMemory`].
-pub(crate) fn hold(physical: u64, len: u64, kind: MemoryType) -> Result<Arc<Hold>, Refused> {
+pub fn hold(physical: u64, len: u64, kind: MemoryType) -> Result<Arc<Hold>, Refused> {
     let end = physical.checked_add(len).ok_or(Refused::OtherType)?;
     let mut claims = CLAIMS.lock();
     let other = claims

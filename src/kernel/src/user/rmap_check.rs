@@ -103,23 +103,23 @@ const PATIENCE_NANOS: u64 = 60_000_000_000;
 
 /// What the check measured, for the boot log.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Frames taken away from two processes and claimed back poisoned.
-    pub(crate) taken: u32,
+    pub taken: u32,
     /// The processor the kernel took them on, and the child's.
-    pub(crate) processors: (usize, usize),
+    pub processors: (usize, usize),
     /// Scoped shootdowns across the measured run.
-    pub(crate) scoped: ScopedShootdowns,
+    pub scoped: ScopedShootdowns,
     /// Whole-TLB shootdowns across the measured run.
-    pub(crate) global: u64,
+    pub global: u64,
     /// Frames the measured run did not give back.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// Run it: once to warm the heap up, then settled, counted and measured.
 /// `None` on a machine with one processor, or an architecture with no
 /// program for it.
-pub(crate) fn run() -> Result<Option<Report>, &'static str> {
+pub fn run() -> Result<Option<Report>, &'static str> {
     let online = smp::topology().map_or(1, smp::Topology::online);
     if arch::USER_RMAP_PROGRAM.is_empty() || online < 2 {
         return Ok(None);

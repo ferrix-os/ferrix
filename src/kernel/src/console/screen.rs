@@ -235,7 +235,7 @@ impl Board {
 /// shows nothing at all of a hang before the console is on the screen. The
 /// lines printed before this -- the very first one on -- are drawn from what
 /// the console kept. A second call does nothing.
-pub(crate) fn start(view: &BootView<'_>) {
+pub fn start(view: &BootView<'_>) {
     if !view.flag(FLAG) || STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -275,7 +275,7 @@ pub(crate) fn start(view: &BootView<'_>) {
 /// from when no text is legible or none was drawn: each stripe is a bar the
 /// width of the screen in its own colour, with its number at the left. The
 /// rows are fixed by the caller (`kmain`); a row past [`STRIPES`] is dropped.
-pub(crate) fn milestone(row: usize) {
+pub fn milestone(row: usize) {
     if !ENABLED.load(Ordering::Acquire) || row >= STRIPES {
         return;
     }
@@ -316,7 +316,7 @@ pub(crate) fn drawing() -> bool {
 /// and for a display driver taking the screen. The wait is bounded: a draw
 /// that never finishes is one this processor was part way through when it
 /// panicked, and it will not be resumed.
-pub(crate) fn stop() {
+pub fn stop() {
     if !ENABLED.swap(false, Ordering::AcqRel) {
         return;
     }

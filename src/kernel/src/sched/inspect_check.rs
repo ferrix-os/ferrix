@@ -27,13 +27,13 @@ use crate::{arch, backtrace, mm, vmap};
 
 /// What the boot line says.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Frames the view walked of the blocked task.
-    pub(crate) frames: usize,
+    pub frames: usize,
     /// Of them, the ones the task recorded itself.
-    pub(crate) matched: usize,
+    pub matched: usize,
     /// The image's slide this boot.
-    pub(crate) slide: u64,
+    pub slide: u64,
 }
 
 /// The chain the held task recorded, innermost first, as it ran.
@@ -81,7 +81,7 @@ fn record_and_hold() {
 /// # Errors
 ///
 /// The case's sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let report = chain_is_the_tasks_own()?;
     a_freed_stack_reads_as_nothing()?;
     a_device_window_reads_as_nothing()?;

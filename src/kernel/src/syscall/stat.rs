@@ -55,9 +55,20 @@ use crate::trap::Abi;
 /// The encoding half of [`arch::StatLayout`], whose variants are declared in
 /// the architecture facade because choosing one is an architecture's business
 /// and laying out the bytes is this module's.
-impl StatLayout {
+///
+/// A trait rather than an inherent `impl` since the kernel split: the enum is
+/// the core's and this module the load's, and a crate may add inherent
+/// methods only to its own types (`docs/KERNEL-CRATES.md`).
+pub(crate) trait StatEncoding {
     /// How many bytes a record in this layout is.
-    pub(crate) const fn size(self) -> usize {
+    fn size(self) -> usize;
+
+    /// `stat` as this layout's bytes.
+    fn encode(self, stat: &Stat) -> Vec<u8>;
+}
+
+impl StatEncoding for StatLayout {
+    fn size(self) -> usize {
         match self {
             StatLayout::Legacy => size_of::<types::x86_64::Stat>(),
             StatLayout::Generic => size_of::<types::aarch64::Stat>(),
@@ -65,8 +76,7 @@ impl StatLayout {
         }
     }
 
-    /// `stat` as this layout's bytes.
-    pub(crate) fn encode(self, stat: &Stat) -> Vec<u8> {
+    fn encode(self, stat: &Stat) -> Vec<u8> {
         match self {
             StatLayout::Legacy => legacy(stat),
             StatLayout::Generic => generic(stat),

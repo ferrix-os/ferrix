@@ -82,45 +82,46 @@ const REFUSAL: Event = Event::new(Class::Refused, 2);
 
 /// What bring-up says it recorded, for the check of the kernel's store.
 #[derive(Debug)]
-pub(crate) struct Expected {
+pub struct Expected {
     /// `ferrix.checks`: 1 when the checks run.
-    pub(crate) checks: u32,
+    pub checks: u32,
     /// `ferrix.devmgr`: 1 when pid 1 starts `devmgr`.
-    pub(crate) devmgr: u32,
+    pub devmgr: u32,
     /// The build's mitigations: 1 when hardened.
-    pub(crate) mitigations: u32,
+    pub mitigations: u32,
     /// The loader's KASLR state word.
-    pub(crate) kaslr: u32,
+    pub kaslr: u32,
     /// 1 when the log is mirrored to the region kept across a reset.
-    pub(crate) pstore: u32,
+    pub pstore: u32,
     /// `ferrix.efifb`: 1 when the firmware framebuffer was asked to be lent.
-    pub(crate) efifb: u32,
+    pub efifb: u32,
     /// The build flags, packed (`crate::build_flags::audit_words`).
-    pub(crate) build: u32,
+    pub build: u32,
     /// `ferrix.vtd`: 1 when the VT-d units are driven, 0 for
     /// `ferrix.vtd=off`.
-    pub(crate) vtd: u32,
+    pub vtd: u32,
 }
 
 /// What the check established, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Records the small ring kept after being written past its length.
-    pub(crate) kept: usize,
+    pub kept: usize,
     /// Records a reader of the start was told it lost.
-    pub(crate) lost: u64,
+    pub lost: u64,
     /// Jobs whose budget the check followed up the tree.
-    pub(crate) budgets: usize,
+    pub budgets: usize,
     /// Refusals of the flooding unit kept, from its three jobs together.
-    pub(crate) flood_kept: usize,
+    pub flood_kept: usize,
     /// Refusals of the flooding unit counted in its *suppressed n*.
-    pub(crate) suppressed: u32,
+    pub suppressed: u32,
     /// Configuration records found in the kernel's store.
-    pub(crate) configs: usize,
+    pub configs: usize,
     /// What one record costs, in nanoseconds on the kernel's counter: a
     /// grant kept, and a refusal past its budget's limit, counted.
-    pub(crate) grant_nanos: u64,
-    pub(crate) refusal_nanos: u64,
+    pub grant_nanos: u64,
+    /// What a refusal past its budget's limit costs to count, in nanoseconds.
+    pub refusal_nanos: u64,
 }
 
 /// The jobs the budget and fairness checks refuse from.
@@ -214,7 +215,7 @@ fn read<const H: usize, const R: usize>(
 /// # Errors
 ///
 /// The first property that did not hold.
-pub(crate) fn run(expected: &Expected) -> Result<Report, &'static str> {
+pub fn run(expected: &Expected) -> Result<Report, &'static str> {
     let (kept, lost) = start_and_wrap()?;
     pinned()?;
     routing()?;
@@ -665,13 +666,13 @@ const PROVOKED: [(Event, Decider, &str); 12] = [
 
 /// What the boot was, for the end-of-boot check.
 #[derive(Debug)]
-pub(crate) struct Booted {
+pub struct Booted {
     /// How many DMA faults were read from a unit, the out-of-domain probe's
     /// among them, each owing a record. Not whether a unit translates: the
     /// probe runs only after the entropy request it rides on completes, and
     /// a boot that skipped that request, as a loaded host's late interrupt
     /// makes one, faulted nothing (FX-0309).
-    pub(crate) dma_faults_read: u64,
+    pub dma_faults_read: u64,
 }
 
 /// The end-of-boot check: see the module's header. Answers how many events
@@ -683,7 +684,7 @@ pub(crate) struct Booted {
 ///
 /// The first event the record lacks, or has with the wrong outcome or
 /// subject.
-pub(crate) fn booted(boot: &Booted) -> Result<usize, &'static str> {
+pub fn booted(boot: &Booted) -> Result<usize, &'static str> {
     let mut high = vec![Record::EMPTY; super::HIGH_RECORDS];
     let mut refusals = vec![Record::EMPTY; super::REFUSAL_RECORDS];
     let read_high = super::read(Which::High, 0, &mut high);

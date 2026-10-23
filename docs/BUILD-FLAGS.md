@@ -66,8 +66,12 @@ These come from `MICROKERNEL.md` §12 and the consultant's conditions on it
    profile's expected set and ties the shipped image's hash to the run it
    compared. That keeps xtask's resolver at T2 / TQL-5, under four further
    rules (BF3): (a) the gate takes the expected set from the profile file,
-   never from xtask's output; (b) **flags are read only in the kernel
-   crate**, and a check fails if any crate under `src/lib` names a `ferrix_`
+   never from xtask's output; (b) **flags are read only in the kernel's
+   crates** -- since the kernel split (`docs/KERNEL-CRATES.md`) the four
+   `kernel_crates` of `certification-item.json`, each compiled with the
+   flags by their one build script, `src/kernel/build.rs`, and the binary
+   requiring the four crates' flag words equal at compile time (ledger line
+   3282, (K1), (K4)) -- and a check fails if any crate under `src/lib` names a `ferrix_`
    cfg (a crate built without the cfg would silently take the other branch,
    which `--check-cfg` cannot see), with a planted use as its negative
    control; (c) a build whose `--set` differs from its profile is refused by
@@ -355,7 +359,7 @@ builds:
 7. The profile rule in `check-item-boundary.py`, with
    `certification-item.json` gaining the levels, the flags' levels and the
    components' levels, and `present` as today's reference configuration.
-8. The checks of §2 and §3: no `ferrix_` cfg outside the kernel crate, no
+8. The checks of §2 and §3: no `ferrix_` cfg outside the kernel's crates, no
    undeclared boot option read, a `--set` build refused, each with its
    negative control.
 9. `xtask check` building `present` and `desktop` on three architectures.
@@ -493,3 +497,13 @@ Design on branch `microkernel-plan`, 2026-10-13.
   checks that run a Linux program are re-homed, and any allow not
   predicated on `ferrix_linux_abi="off"`, or any widening of it, is a new
   review.
+* **The kernel split (2026-10-23, branch `kernel-split-s3`)**: the flags now
+  reach four crates, the binary and the core, item and load libraries, so
+  rule 6 b reads "the kernel's crates" (ledger line 3282, (K3)). All four
+  build with the one build script `src/kernel/build.rs` (a library names it
+  as `build = "../build.rs"`; it refuses any other package and links only
+  the binary), which `check-item-boundary.py` holds (K1); the core's
+  `build_flag_word!` names every declared value, `check-build-flags.py`
+  holds it to the flag file, each crate expands it into a word of its own,
+  and the binary const-asserts the four words equal (K4).
+

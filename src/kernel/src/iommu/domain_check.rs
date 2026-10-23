@@ -10,6 +10,11 @@
 //! crates; `check.rs` keeps what a bring-up calls and what needs nothing
 //! above the core.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
+
 use alloc::sync::Arc;
 
 use ferrix_bootinfo::PAGE_SIZE;
@@ -28,7 +33,7 @@ use super::{Domain, DomainError};
 /// unless the boot was told to skip its checks.
 ///
 /// Halts rather than returning, as every other stage's check does.
-pub(crate) fn check_iommu() {
+pub fn check_iommu() {
     if !crate::boot_checks::run() {
         return;
     }
@@ -699,7 +704,7 @@ static CHECKED_RMRR: ferrix_sync::Once<ferrix_paging::vtd::rmrr::Identity> =
 /// Verifies: L.iommu.76
 /// Verifies: L.iommu.77
 /// Verifies: L.iommu.78
-pub(crate) fn check_rmrr_identity(memory: &[ferrix_bootinfo::MemRegion]) {
+pub fn check_rmrr_identity(memory: &[ferrix_bootinfo::MemRegion]) {
     if !crate::boot_checks::run() {
         return;
     }
@@ -864,7 +869,7 @@ fn rmrr_unpin_refused(
     region: ferrix_paging::vtd::rmrr::Identity,
 ) -> Result<(), &'static str> {
     let forged = super::Pinned {
-        domain: domain.id,
+        domain: domain.id(),
         // FATAL-ALLOC: boot only: one address, for the check's forged pin.
         addresses: alloc::vec![region.base],
     };
@@ -890,7 +895,7 @@ fn rmrr_never_detached(
     domain: Domain,
     region: ferrix_paging::vtd::rmrr::Identity,
 ) -> Result<(), &'static str> {
-    if domain.translation.detach().is_ok() {
+    if domain.detach_translation().is_ok() {
         return Err("an RMRR identity domain was detached");
     }
     drop(domain);
@@ -909,7 +914,7 @@ fn rmrr_never_detached(
 /// its checks.
 ///
 /// Verifies: L.iommu.75
-pub(crate) fn check_rmrr_frames() {
+pub fn check_rmrr_frames() {
     if !crate::boot_checks::run() {
         return;
     }

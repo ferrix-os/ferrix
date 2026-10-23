@@ -48,7 +48,7 @@ static RESETTING_ON: AtomicU64 = AtomicU64::new(0);
 ///
 /// Verifies nothing by itself; `cargo xtask test-postmortem`'s reset case
 /// and its default case judge it.
-pub(crate) fn read_option(view: &BootView<'_>) {
+pub fn read_option(view: &BootView<'_>) {
     match view.option(OPTION) {
         None => {}
         Some(RESET) => {

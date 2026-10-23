@@ -317,7 +317,7 @@ pub(crate) fn interrupt_pending() -> bool {
 
 /// What the port sends from, for the boot line that says how the console
 /// sends.
-pub(crate) fn transmit_buffer() -> &'static str {
+pub fn transmit_buffer() -> &'static str {
     if is_ramoops() {
         "a ramoops record"
     } else if is_ns16550() {

@@ -208,7 +208,7 @@ const AD_HOC: bool = cfg!(ferrix_profile = "none");
 
 /// Print the `build` line: `profile=`, `level=`, then each flag, and for an
 /// ad-hoc build `no claim`.
-pub(crate) fn report() {
+pub fn report() {
     println!(
         "  build    {Words}{}",
         if AD_HOC { " ; no claim" } else { "" }
@@ -235,7 +235,7 @@ impl core::fmt::Display for Words {
 /// order from bit 0; in the second the profile's place in bits 0 to 3 and
 /// the level's in bits 4 to 7. `docs/certification/AUDIT.md` §1 gives the
 /// lists a reader decodes them with.
-pub(crate) fn audit_words() -> (u32, u32) {
+pub fn audit_words() -> (u32, u32) {
     let place = |index: usize| FLAGS.get(index).map_or(0, |flag| chosen(flag.values).1);
     let mut flags = 0_u32;
     for index in 2..FLAGS.len() {

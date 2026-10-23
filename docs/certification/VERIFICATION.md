@@ -171,6 +171,57 @@ check's read past a mapped file's end:
 | **Certified item** | **6,902 / 7,664 — 90.1%** | **6,824 / 7,587 — 89.9%** | **6,251 / 7,400 — 84.5%** |
 | `load` (not claimed) | 9,598 / 13,745 — 69.8% | 9,377 / 13,718 — 68.4% | 9,463 / 13,775 — 68.7% |
 
+**x86-64 re-measured on 2026-10-23, on the kernel split** (branch
+`feature/kernel-split-s3`, the redo of `bs-a-s3b`, `docs/KERNEL-CRATES.md`
+§5.1; ledger 1477 (9), 1777 (S3.4), 3282 (K9)): the `coverage` profile,
+whose crate-local ThinLTO does not inline across the kernel's four crates.
+`core` 8,934 / 10,396 -- 85.9%; `item` 2,214 / 2,684 -- 82.5%; **certified
+item 11,148 / 13,080 -- 85.2%**, below the 89.0% `coverage-floor.json`
+recorded; `load` 14,512 / 19,724 -- 73.6%. The denominator is the coverage
+profile's line table of today's item, a third larger than the debug
+profile's of 2026-09-27 the evidence held until now. Against that evidence,
+202 requirement statuses on x86-64 moved to *reached* (120 from *not built*,
+75 from *not reached*, 7 from a gate or host test alone) and none away from
+it; 18 arguments whose statements are reached now, or are no statement in
+this profile, were dropped and four trimmed to the lines still unreached
+(`~/ferrix-logs/kernel-split-s3/argued-changes.txt` on nazuna). Decision
+coverage over the same traces: the item's other branches taken both ways
+4,889 of 14,881 (32.9%).
+
+*The run, and what the union holds.* The suite ran at host loads of 1 to
+26. `test-shell` (its `/etc/k8-write` check, which sleeps past the periodic
+commit, did not say so in time) and `test-net` (six programs past the
+gate's 120 s) failed under the plugin with the host busy; each was run again
+alone under the plugin into the same directory and passed, and the union
+holds those reruns' traces with every other gate's from the suite run -- 32
+traces, the empty ones of `test-powerfail`'s cuts left out. So condition B3
+of ledger line 1517, that a measurement's suite pass on the build it
+measures, is met gate by gate. `boot-legacy` and `boot-single` passed in this
+run.
+
+*The floor* (`coverage-floor.json`) is 84.0 for x86-64 from this
+measurement, by the file's own rule (the figure less one point, rounded
+down to a half; ledger line 1777, S3.4). The figure moved by the build and
+the item's growth, not by what the suite reaches: of the 29,345 statements
+of the 2026-09-27 measurement's boot kernel (e5f3110f) that it reached,
+mapped line by line to this tree, 28 are unreached now, and none in code the
+split changed beyond visibility. Each is given its cause in
+`~/ferrix-logs/kernel-split-s3/floor-proof.txt` on nazuna (by
+`floor_proof.py` beside it): 4 are the entry and exit rows of a function the
+split made `pub` in its library crate, whose callers there inline it while
+the out-of-line copy kept for the crates above runs for nobody (its body's
+rows are reached); 18 are rows the four crates' code generation attributes
+to another line -- a `fatal!` arm's line that carried its `match`'s compare,
+a closure or argument line that carried its call -- with what the boot runs
+unchanged; 6 are paths a boot takes by timing or by machine: the reset's
+8042 wait, a refused interrupt's give-back, a writer's wake and a program's
+page fault.
+
+*AArch64 and ARMv7-A* are not re-measured: their `coverage-<arch>.json`,
+residuals and arguments describe the single-crate kernel measured on
+2026-09-27 at 9e196852, carried since, and their floors stay until they are
+measured on the split (`docs/BACKLOG.md`, which owes it to this landing).
+
 The Arm pair's figures are a little below their previous measurement (90.2%
 and 84.8%) although the suite reached more: in between, init's start of
 `devmgr` (L12, `docs/INIT.md` §7.3) added statements to `devmgr.rs` that only
@@ -284,6 +335,27 @@ optimisation cuts the item's statement count by a third — 6,828 to 4,462 —
 because inlining and merging leave fewer distinct `is_stmt` rows to reach. The
 proportion reached moves 3.6 points. So a submission has to say which profile
 it measured, and this one measures both, which is what F-11 asked for.
+
+**The release profile over the whole suite, 2026-10-23** (the kernel split's
+redo, branch `feature/kernel-split-s3`, `docs/KERNEL-CRATES.md` §5.1; ledger
+1477 (9), 3377 (6)): `cargo xtask coverage --arch x86_64 --release`, the
+suite of §3.1 on the release kernel, fat LTO over the kernel's four crates,
+into `build/coverage-release`; `coverage-x86_64-release.json` holds it (it
+held the one boot above until then). `core` 5,946 / 7,013 -- 84.8%, `item`
+1,412 / 1,806 -- 78.2%, **certified item 7,358 / 8,819 -- 83.4%**; `load`
+10,818 / 14,628 -- 74.0%. 32 traces, the empty ones of `test-powerfail`'s
+cuts left out. Ten gates of the run (`test-shell`, whose `/etc/k8-write`
+did not say it slept past the commit in time, and nine that could not
+start because the xtask binary they run was rebuilt under them) were run
+again alone under the plugin into the same directory, each passing, and
+the union holds those traces with the others'. The certified item's figure
+is below the 84.0 of `coverage-floor.json`, which is the debug evidence's
+less a point and is the only floor the release run is held to; the release
+profile has no evidence of its own before this to compare it with but the
+one boot (75.2%), and the first whole-suite release run, on `bs-a-s3b`
+(2026-10-15, never landed: 86.7% of 7,569), measured a smaller item. Which
+statements the release build does not reach and why is not yet argued
+(`docs/backlog/p2.md`).
 
 **The debug build's debug information.** Every debug figure in this
 document and in `coverage-<arch>.json` was measured on a kernel built with

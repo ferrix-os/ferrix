@@ -181,42 +181,42 @@ const ROUNDS: usize = 3;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls and HELLOs refused with exactly the answer they had to get.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Requests answered, by the driver or with `ENODEV`.
-    pub(crate) answered: u32,
+    pub answered: u32,
     /// Requests taken in and abandoned across the F-63 rounds.
-    pub(crate) abandoned: u32,
+    pub abandoned: u32,
     /// The requests the queue held once answered ones filled it (F-63).
-    pub(crate) most_queued: usize,
+    pub most_queued: usize,
     /// dmabuf installs and resolves refused as specified (B10).
-    pub(crate) dmabuf_refusals: u32,
+    pub dmabuf_refusals: u32,
     /// name-only dmabuf calls and mappings refused as specified (N6).
-    pub(crate) name_refusals: u32,
+    pub name_refusals: u32,
     /// `sync_file` installs, signals and resolves refused as specified (S9).
-    pub(crate) sync_refusals: u32,
+    pub sync_refusals: u32,
     /// How long after its driver's death a program blocked in `poll` on a
     /// fence woke, in milliseconds (S9; at most [`DEATH_WAKE_MS`]).
-    pub(crate) fence_death_wake_ms: u64,
+    pub fence_death_wake_ms: u64,
     /// The render node a render-only HELLO published, if the function's
     /// domain translates; `None` where it was refused `Untranslated`.
-    pub(crate) render_only: Option<u32>,
+    pub render_only: Option<u32>,
     /// HELLOs refused `Untranslated` (`L.object.192`).
-    pub(crate) untranslated: u32,
+    pub untranslated: u32,
     /// Requests answered out of the order they were made (C1).
-    pub(crate) out_of_order: u32,
+    pub out_of_order: u32,
     /// dmabuf fence-slot calls, exports and imports checked (K5).
-    pub(crate) slot_checks: u32,
+    pub slot_checks: u32,
     /// Write-combining VMO answers checked (K6); whether this machine makes
     /// one at all.
-    pub(crate) combining_checks: u32,
+    pub combining_checks: u32,
     /// Whether a VMO was made write-combining here (x86-64 only).
-    pub(crate) combining: bool,
+    pub combining: bool,
     /// Why the cases needing a second driver were not checked.
-    pub(crate) one_device: bool,
+    pub one_device: bool,
     /// Why nothing was checked.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// What a helper task is to do, and what it found.
@@ -240,7 +240,7 @@ static OUTCOME: SpinLock<Option<Result<usize, Errno>>> = SpinLock::new(None);
 /// # Errors
 ///
 /// What was not true.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let nodes: Vec<Arc<DeviceNode>> = device::devices()
         .iter()
         // Not the function holding a lent firmware framebuffer, which
@@ -2069,7 +2069,7 @@ fn file_info(program: &Side, fd: i32, report: &mut Report) -> Result<(), &'stati
 
 /// The longest a program blocked in `poll` on a fence may take to wake
 /// after the fence's driver dies (S9).
-pub(crate) const DEATH_WAKE_MS: u64 = 1000;
+pub const DEATH_WAKE_MS: u64 = 1000;
 
 /// The rest of S9 (647's code review, B4): install for an abandoned
 /// request and for a request id this control does not have, refused;

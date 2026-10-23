@@ -85,12 +85,12 @@ const DISK_INDEX: u32 = 2;
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls answered as Linux answers them, and the refusals among them.
-    pub(crate) counts: Counts,
+    pub counts: Counts,
     /// Whether the detach was shown to commit a btrfs inside the subtree;
     /// not, on a machine without the stage 12 disk.
-    pub(crate) committed: bool,
+    pub committed: bool,
 }
 
 /// `path` with its NUL, staged on a fresh page.
@@ -291,7 +291,7 @@ fn under(name: &[u8]) -> Vec<u8> {
 /// # Errors
 ///
 /// What did not hold, as a sentence.
-pub(crate) fn run(disk: bool) -> Result<Report, &'static str> {
+pub fn run(disk: bool) -> Result<Report, &'static str> {
     let first =
         process::new_for_check().map_err(|_| "could not make a process for the namespace check")?;
     let mut page = page_for(&first)?;

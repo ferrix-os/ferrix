@@ -31,29 +31,29 @@ use crate::fs::{self, devfs};
 
 /// What [`run`] counted, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Names looked up.
-    pub(crate) names: u32,
+    pub names: u32,
     /// Directories listed.
-    pub(crate) directories: u32,
+    pub directories: u32,
     /// Links read and followed.
-    pub(crate) links: u32,
+    pub links: u32,
     /// Device nodes found where their bus shows them.
-    pub(crate) devices: u32,
+    pub devices: u32,
     /// Devices whose `driver` link and driver directory say what `devmgr`
     /// said.
-    pub(crate) bound: u32,
+    pub bound: u32,
     /// Disks whose files matched the disk.
-    pub(crate) disks: u32,
+    pub disks: u32,
     /// Interfaces listed in `class/net`.
-    pub(crate) interfaces: u32,
+    pub interfaces: u32,
     /// Processors in `devices/system/cpu`.
-    pub(crate) cpus: u32,
+    pub cpus: u32,
     /// Changes refused as kernfs refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Firmware identity and table files whose mode, owner and bytes matched
     /// the kernel's SMBIOS parse, and which refused what Linux refuses.
-    pub(crate) dmi: u32,
+    pub dmi: u32,
 }
 
 /// Where the check mounts its sysfs.
@@ -167,7 +167,7 @@ impl Harness {
 /// # Errors
 ///
 /// The first thing that was not as it should be, by name.
-pub(crate) fn run() -> Checked<Report> {
+pub fn run() -> Checked<Report> {
     let ns = fs::namespace();
     let ctx = ns.context();
     match ns.mkdir(&ctx, None, CHECK_AT, 0o755) {

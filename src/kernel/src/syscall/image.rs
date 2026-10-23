@@ -53,7 +53,7 @@ pub(crate) const INTERP_PATH: &[u8] = b"/ld-check\0";
 
 /// How the image should be built, for the checks that want a broken one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Shape {
+pub enum Shape {
     /// Valid: read-execute text, read-write data with a `.bss` tail.
     Good,
     /// `ET_DYN` with no interpreter: a static PIE, placed at the loader's
@@ -83,7 +83,7 @@ pub(crate) fn build(class: Class, machine: u16, shape: Shape) -> Vec<u8> {
 /// The payload is what makes the image a *program* rather than a shape: the
 /// loader checks use an empty one, and the check that actually enters ring 3
 /// passes the architecture's own machine code.
-pub(crate) fn build_with(class: Class, machine: u16, shape: Shape, code: &[u8]) -> Vec<u8> {
+pub fn build_with(class: Class, machine: u16, shape: Shape, code: &[u8]) -> Vec<u8> {
     let machine = match shape {
         // 0x3E is x86-64 and 0xB7 is AArch64; whichever this is not.
         Shape::ForeignMachine if machine == 0x003E => 0x00B7,

@@ -47,7 +47,7 @@ static BINDING: BoardBinding = BoardBinding {
 /// # Errors
 ///
 /// [`Full`] when the registry's list of board bindings is.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     board::register_board(&BINDING)
 }
 

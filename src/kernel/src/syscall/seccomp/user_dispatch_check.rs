@@ -41,22 +41,22 @@ use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// What the check saw, for the `dispatch` boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// `prctl` rows answered as Linux answers them.
-    pub(crate) rows: usize,
+    pub rows: usize,
     /// Calls a dispatching thread made through the entry and judged.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Processes a dispatch ended.
-    pub(crate) ended: usize,
+    pub ended: usize,
     /// What a call from inside the range costs, in nanoseconds.
-    pub(crate) in_range: u64,
+    pub in_range: u64,
     /// What a call that reads an ALLOW selector costs, in nanoseconds.
-    pub(crate) selector: u64,
+    pub selector: u64,
     /// What a dispatched call costs, signal raised and taken, in nanoseconds.
-    pub(crate) dispatch: u64,
+    pub dispatch: u64,
     /// Whether the architecture offers it: `false` on the Arm pair, where
     /// every mode was refused.
-    pub(crate) built: bool,
+    pub built: bool,
 }
 
 /// The range the dispatching thread names: calls from `[START, START + LEN)`
@@ -94,7 +94,7 @@ const TIMED: usize = 64;
 /// # Errors
 ///
 /// Which property failed.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report {
         built: user_dispatch::BUILT,
         ..Report::default()

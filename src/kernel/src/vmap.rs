@@ -64,13 +64,13 @@ use crate::mm;
 // succeeds, over the top of the console.
 
 /// Where early boot maps a framebuffer, when firmware left one.
-pub(crate) const FRAMEBUFFER_WINDOW: u64 = KERNEL_VMAP_BASE + KERNEL_VMAP_RESERVED / 16;
+pub const FRAMEBUFFER_WINDOW: u64 = KERNEL_VMAP_BASE + KERNEL_VMAP_RESERVED / 16;
 
 /// How much the framebuffer window holds: up to where the demand window starts.
-pub(crate) const FRAMEBUFFER_WINDOW_SIZE: u64 = DEMAND_WINDOW - FRAMEBUFFER_WINDOW;
+pub const FRAMEBUFFER_WINDOW_SIZE: u64 = DEMAND_WINDOW - FRAMEBUFFER_WINDOW;
 
 /// Where stage 3's on-demand window begins.
-pub(crate) const DEMAND_WINDOW: u64 = KERNEL_VMAP_BASE + KERNEL_VMAP_RESERVED / 8;
+pub const DEMAND_WINDOW: u64 = KERNEL_VMAP_BASE + KERNEL_VMAP_RESERVED / 8;
 
 /// Where the arena starts.
 pub(crate) const ARENA_BASE: u64 = KERNEL_VMAP_BASE + KERNEL_VMAP_RESERVED;
@@ -89,7 +89,7 @@ const GUARD_BYTES: u64 = GUARD_PAGES * PAGE_SIZE;
 
 /// Why an allocation could not be made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum VmapError {
+pub enum VmapError {
     /// [`init`] has not run, so there is no arena yet.
     NotReady,
     /// A zero, unaligned or absurd length.
@@ -186,7 +186,7 @@ static ARENA: IrqSpinLock<Option<Arena>, crate::arch::Irq> = IrqSpinLock::new(No
 ///
 /// Only if the window constants above are inconsistent, or `top` leaves the
 /// arena empty, which is a bug rather than a condition a machine can produce.
-pub(crate) fn init(top: u64) -> Result<(), VmapError> {
+pub fn init(top: u64) -> Result<(), VmapError> {
     let top = top.min(ARENA_END);
     let space = AddressSpace::new(ARENA_BASE, top).map_err(|_| VmapError::BadLength(top))?;
     *ARENA.lock() = Some(Arena {
@@ -222,7 +222,7 @@ impl Mapping {
 /// however much memory was free. A buffer here is limited by free frames and
 /// by the arena instead.
 #[derive(Debug)]
-pub(crate) struct Buffer {
+pub struct Buffer {
     /// The pages, or `None` for an empty buffer, which needs none.
     mapping: Option<Mapping>,
     /// Bytes in use, at most the mapping's length.
@@ -235,7 +235,7 @@ impl Buffer {
     /// # Errors
     ///
     /// [`allocate`]'s, when the frames or the addresses for it are not there.
-    pub(crate) fn zeroed(len: usize) -> Result<Buffer, VmapError> {
+    pub fn zeroed(len: usize) -> Result<Buffer, VmapError> {
         if len == 0 {
             return Ok(Buffer { mapping: None, len });
         }
@@ -248,7 +248,7 @@ impl Buffer {
     }
 
     /// Keep only the first `len` bytes. The pages stay until the drop.
-    pub(crate) fn truncate(&mut self, len: usize) {
+    pub fn truncate(&mut self, len: usize) {
         self.len = self.len.min(len);
     }
 }
@@ -471,7 +471,7 @@ pub(crate) fn free(base: u64) -> Result<(), VmapError> {
 /// touches the kernel's own image, whose text and read-only data have no
 /// writable mapping anywhere (`mm::check::check_sealed_image`) and which holds no
 /// device's registers; and whatever [`reserve`] or the mapper refuses.
-pub(crate) fn map_device(phys: u64, len: u64) -> Result<u64, VmapError> {
+pub fn map_device(phys: u64, len: u64) -> Result<u64, VmapError> {
     let offset = phys % PAGE_SIZE;
     let base = phys - offset;
     let span = len
@@ -572,7 +572,7 @@ pub(crate) fn check_failed_device_map(phys: u64) -> Result<(), &'static str> {
 ///
 /// Takes the address `map_device` returned, page offset included, so a caller
 /// does not have to remember how its register block was aligned.
-pub(crate) fn unmap_device(at: u64) -> Result<(), VmapError> {
+pub fn unmap_device(at: u64) -> Result<(), VmapError> {
     free(at - at % PAGE_SIZE)
 }
 
@@ -581,7 +581,7 @@ pub(crate) fn unmap_device(at: u64) -> Result<(), VmapError> {
 /// What stage 10 withholds from device apertures: the registers of every
 /// controller the kernel drives through here — the local and I/O APICs, the
 /// HPET, the GIC — are ones no driver may be given.
-pub(crate) fn device_windows() -> Vec<(u64, u64)> {
+pub fn device_windows() -> Vec<(u64, u64)> {
     let locked = ARENA.lock();
     locked.as_ref().map_or_else(Vec::new, |arena| {
         arena
@@ -598,15 +598,15 @@ pub(crate) fn device_windows() -> Vec<(u64, u64)> {
 
 /// What the arena has handed out, for the boot report.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Usage {
+pub struct Usage {
     /// Live allocations.
-    pub(crate) allocations: usize,
+    pub allocations: usize,
     /// Address space they cover, guards included.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
 }
 
 /// What the arena has handed out.
-pub(crate) fn usage() -> Usage {
+pub fn usage() -> Usage {
     let locked = ARENA.lock();
     locked.as_ref().map_or(Usage::default(), |arena| Usage {
         allocations: arena.live.len(),
@@ -664,13 +664,13 @@ pub(crate) const STACK_PAGES: u64 = 4;
 
 /// A kernel stack, guard-paged at both ends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Stack {
+pub struct Stack {
     /// Lowest usable address. The page below it is unmapped, and that is what
     /// an overflow hits.
-    pub(crate) base: u64,
+    pub base: u64,
     /// Initial stack pointer: one past the highest usable byte, because both
     /// architectures push downwards from it.
-    pub(crate) top: u64,
+    pub top: u64,
 }
 
 impl Stack {
@@ -681,7 +681,7 @@ impl Stack {
 }
 
 /// Allocate a guard-paged kernel stack.
-pub(crate) fn allocate_stack() -> Result<Stack, VmapError> {
+pub fn allocate_stack() -> Result<Stack, VmapError> {
     let mapping = allocate(STACK_PAGES, MapFlags::KERNEL_DATA)?;
     Ok(Stack {
         base: mapping.base,
@@ -696,7 +696,7 @@ pub(crate) fn allocate_stack() -> Result<Stack, VmapError> {
 /// (KMEM) No CPU may be running on it. Nothing in the type system says so, and
 /// freeing the stack under a running task unmaps the memory holding its own
 /// return address.
-pub(crate) unsafe fn free_stack(stack: Stack) -> Result<(), VmapError> {
+pub unsafe fn free_stack(stack: Stack) -> Result<(), VmapError> {
     free(stack.base)
 }
 
@@ -708,7 +708,7 @@ pub(crate) unsafe fn free_stack(stack: Stack) -> Result<(), VmapError> {
 /// # Safety
 ///
 /// (KMEM) As [`free_stack`], for every one of them.
-pub(crate) unsafe fn free_stacks(stacks: &[Stack]) -> Result<(), VmapError> {
+pub unsafe fn free_stacks(stacks: &[Stack]) -> Result<(), VmapError> {
     // Out of the live set first, all of them, so the addresses stay reserved
     // until the unmapping below has finished: see `claim`.
     let (Ok(mut ranges), Ok(mut spans)) = (

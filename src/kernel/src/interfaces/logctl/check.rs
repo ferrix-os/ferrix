@@ -34,14 +34,14 @@ const PATIENCE_NANOS: u64 = 2_000_000_000;
 
 /// What the check established, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Bytes the two DATA carried.
-    pub(crate) carried: usize,
+    pub carried: usize,
     /// What the first said the log had lost before it.
-    pub(crate) lost: u64,
+    pub lost: u64,
     /// How long the last claim took to end once its channel closed, in
     /// milliseconds: the task notices within one look.
-    pub(crate) released_ms: u64,
+    pub released_ms: u64,
 }
 
 /// Run the check.
@@ -49,7 +49,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first property that did not hold, as a sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     if super::claimed() {
         return Err("the log was claimed before the log core's check ran");
     }

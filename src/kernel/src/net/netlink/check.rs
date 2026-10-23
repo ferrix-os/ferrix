@@ -39,17 +39,17 @@ use super::{NetlinkSocket, Protocol, of};
 
 /// What the check saw.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Why it did not run, if it did not.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
     /// How many links the dump answered with.
-    pub(crate) links: usize,
+    pub links: usize,
     /// How many addresses the dump answered with, before one was added.
-    pub(crate) addresses: usize,
+    pub addresses: usize,
     /// How many routes the table held, before one was added.
-    pub(crate) routes: usize,
+    pub routes: usize,
     /// How many requests were refused exactly as specified.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
 }
 
 /// The address the check adds and takes away again.
@@ -73,7 +73,7 @@ const REPLY: usize = 4096;
 /// # Errors
 ///
 /// A string naming what did not hold, which the caller turns into a panic.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let mut netlink = Netlink::open()?;
 

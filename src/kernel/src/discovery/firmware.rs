@@ -60,10 +60,10 @@ static KERNEL_TYPE: Once<Arc<Hold>> = Once::new();
 
 /// The type the kernel maps the framebuffer with once it is lent, where the
 /// node is minted: write-combining (`docs/DISPLAY.md` §8).
-pub(crate) const KERNEL_MAPPING: MemoryType = MemoryType::Combining;
+pub const KERNEL_MAPPING: MemoryType = MemoryType::Combining;
 
 /// Whether the command line said [`OPTION`].
-pub(crate) fn asked(view: &BootView<'_>) -> bool {
+pub fn asked(view: &BootView<'_>) -> bool {
     view.flag(OPTION)
 }
 
@@ -78,7 +78,7 @@ struct Lent {
 
 /// The finder: the framebuffer, when [`OPTION`] asked for it.
 #[derive(Debug)]
-pub(crate) struct FirmwareFramebuffer {
+pub struct FirmwareFramebuffer {
     /// The loader's framebuffer, when the option is on.
     framebuffer: Option<Framebuffer>,
     /// What became of it, for the boot line: the size lent and the type the
@@ -90,7 +90,7 @@ pub(crate) struct FirmwareFramebuffer {
 
 impl FirmwareFramebuffer {
     /// The finder for `view`'s machine.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         ASKED.store(asked(view), Ordering::Release);
         FirmwareFramebuffer {
             framebuffer: asked(view).then(|| view.raw().framebuffer),
@@ -190,13 +190,13 @@ pub(crate) fn window_combining(virt: u64, len: u64) -> bool {
 }
 
 /// Whether a node may exist at all: the option was given, on x86-64.
-pub(crate) fn may_lend() -> bool {
+pub fn may_lend() -> bool {
     ASKED.load(Ordering::Acquire) && crate::arch::LENDS_FRAMEBUFFER
 }
 
 /// Whether a mapping of `len` bytes at `phys` as `kind` would be refused by
 /// the kernel's hold on the lent framebuffer: what stage 10's check asks.
-pub(crate) fn refuses(phys: u64, len: u64, kind: MemoryType) -> bool {
+pub fn refuses(phys: u64, len: u64, kind: MemoryType) -> bool {
     KERNEL_TYPE.get().is_some() && memory_type::hold(phys, len, kind).is_err()
 }
 

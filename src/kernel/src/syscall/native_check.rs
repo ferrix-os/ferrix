@@ -70,13 +70,13 @@ const AUDIT_ASKED: u64 = 16;
 
 /// What the checks did, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls refused with the status the ABI names.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Handles opened to fill a table.
-    pub(crate) filled: usize,
+    pub filled: usize,
     /// Endpoints a refused send would have made its check walk.
-    pub(crate) walked: usize,
+    pub walked: usize,
 }
 
 /// Run every check.
@@ -84,7 +84,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first property that did not hold, as a sentence.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let side = Side::new()?;
     let outcome = checks(&side, &mut report);

@@ -41,3 +41,36 @@ doc-valid-idents = [
     "PhysAddr", "VirtAddr", "BootInfo", "FerrixOS",
     "..",
 ]
+
+# Checks-only methods (docs/KERNEL-CRATES.md section 3 (4)(b); ledger lines
+# 1531 D6, 1630): made `pub` only for a check raised above their crate, and
+# not to be called by product code. Written by
+# tools/common/gen/kernel-interface.py, which also checks this block; a raised
+# check allows the lint for its whole file, the defining module per function
+# with a reason. `allow-invalid`: each path names one architecture's type or
+# a kernel crate other programs do not link.
+# BEGIN kernel-interface.py
+disallowed-methods = [
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::fp", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::is_unsaved", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::mark_unsaved", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::set_fp", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::uses_vfp", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::UserState::vfp_moves", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_restore", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_save", reason = "checks-only, defined in arch/armv7a/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::avx", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::avx_mut", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::fxsave", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::fxsave_mut", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::is_unsaved", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::keep_vector_controls", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::set_xstate_bv", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::arch::x86_64::switch::UserState::xstate_bv", reason = "checks-only, defined in arch/x86_64/switch.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::device::DeviceNode::config_writes", reason = "checks-only, defined in device.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::device::DeviceNode::mapped_config", reason = "checks-only, defined in device.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::iommu::Domain::detach_translation", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::iommu::Domain::id", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::object::pin::Pin::with_budget", reason = "checks-only, defined in object/pin.rs", allow-invalid = true },
+]
+# END kernel-interface.py

@@ -91,8 +91,8 @@ use crate::hooks::Full;
 use crate::object::process::Host;
 use crate::syscall::native;
 
-pub(crate) mod check;
-pub(crate) mod driver_check;
+pub mod check;
+pub mod driver_check;
 pub(crate) mod hop_check;
 pub(crate) mod reread_check;
 pub(crate) mod tree_check;
@@ -486,7 +486,7 @@ static SERVER: native::Server = native::Server {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for either registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::BlockRingCreate, control_create)?;
     native::register_server(&SERVER)
 }

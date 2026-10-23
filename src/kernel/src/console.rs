@@ -39,12 +39,12 @@
 //! memory are sent with [`println_unlogged!`] instead and are not recorded:
 //! [`write_unlogged`] lists them.
 
-pub(crate) mod input;
-pub(crate) mod log;
-pub(crate) mod log_check;
-pub(crate) mod output;
-pub(crate) mod pstore;
-pub(crate) mod screen;
+pub mod input;
+pub mod log;
+pub mod log_check;
+pub mod output;
+pub mod pstore;
+pub mod screen;
 
 use core::fmt::{self, Write};
 use core::hint::spin_loop;
@@ -98,7 +98,7 @@ static RECENT_WRITTEN: AtomicUsize = AtomicUsize::new(0);
 ///
 /// (DEVICE) The caller must have configured the port `arch::console::write_byte` writes
 /// to, including any mapping it needs.
-pub(crate) unsafe fn mark_ready() {
+pub unsafe fn mark_ready() {
     READY.store(true, Ordering::Release);
 }
 
@@ -229,7 +229,7 @@ fn remember(byte: u8) {
 /// Copy the most recent console output into `out`, oldest byte first, and
 /// return how many bytes were copied: at most `out.len()`, and never more
 /// than the ring has kept.
-pub(crate) fn recent(out: &mut [u8]) -> usize {
+pub fn recent(out: &mut [u8]) -> usize {
     let written = RECENT_WRITTEN.load(Ordering::Relaxed);
     let count = written.min(RECENT_BYTES).min(out.len());
     let start = written.saturating_sub(count);
@@ -293,7 +293,7 @@ impl Kind {
 ///
 /// Queued with interrupts on and polled with them masked, as [`output`]
 /// explains, and never waiting for room: the idle task prints too.
-pub(crate) fn write(arguments: fmt::Arguments<'_>) {
+pub fn write(arguments: fmt::Arguments<'_>) {
     write_as(arguments, Kind::Line);
 }
 
@@ -322,7 +322,7 @@ pub(crate) fn write(arguments: fmt::Arguments<'_>) {
 /// device-side or the program's own. A panic's message is logged as written,
 /// whatever it holds: by the time it is, every other processor is stopping
 /// and no reader will run again.
-pub(crate) fn write_unlogged(arguments: fmt::Arguments<'_>) {
+pub fn write_unlogged(arguments: fmt::Arguments<'_>) {
     write_as(arguments, Kind::Unlogged);
 }
 
@@ -446,13 +446,13 @@ pub(crate) fn announce_power_off_failed() {
 /// translation every program's output would climb the screen in a staircase.
 /// When stage 15 brings ttys, this moves there and this function stops
 /// translating.
-pub(crate) fn write_bytes(bytes: &[u8]) {
+pub fn write_bytes(bytes: &[u8]) {
     emit(bytes, true);
 }
 
 /// Write raw bytes to the console exactly as they are: a terminal whose
 /// program turned `ONLCR` or `OPOST` off. See `crate::fs::terminal`.
-pub(crate) fn write_raw(bytes: &[u8]) {
+pub fn write_raw(bytes: &[u8]) {
     emit(bytes, false);
 }
 
@@ -464,7 +464,7 @@ pub(crate) fn write_raw(bytes: &[u8]) {
 /// Written as a kernel line is, never waiting for room, under the port's lock
 /// from its first byte to its newline, so no other writer's bytes land inside
 /// it.
-pub(crate) fn write_record(priority: u8, line: &[u8]) {
+pub fn write_record(priority: u8, line: &[u8]) {
     if !READY.load(Ordering::Acquire) {
         return;
     }
@@ -518,6 +518,7 @@ fn emit(bytes: &[u8], crlf: bool) {
 }
 
 /// Print to the kernel console, with a newline.
+#[macro_export]
 macro_rules! println {
     () => { $crate::console::write(format_args!("\n")) };
     ($($argument:tt)*) => {
@@ -525,14 +526,15 @@ macro_rules! println {
     };
 }
 
-pub(crate) use println;
+pub use crate::println;
 
 /// Print to the kernel console, with a newline, and keep the line out of the
 /// kernel log: see [`write_unlogged`] for which lines, and why.
+#[macro_export]
 macro_rules! println_unlogged {
     ($($argument:tt)*) => {
         $crate::console::write_unlogged(format_args!("{}\n", format_args!($($argument)*)))
     };
 }
 
-pub(crate) use println_unlogged;
+pub use crate::println_unlogged;

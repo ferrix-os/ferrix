@@ -81,15 +81,15 @@ use ferrix_sync::IrqControl;
 use super::Task;
 use crate::arch;
 
-pub(crate) mod check;
+pub mod check;
 
 /// The process is ending, or another thread's `execve` is replacing the
 /// program.
-pub(crate) const END: u32 = 1 << 0;
+pub const END: u32 = 1 << 0;
 /// The process is stopped.
-pub(crate) const STOP: u32 = 1 << 1;
+pub const STOP: u32 = 1 << 1;
 /// A signal to take, a saved mask to put back, or a call to restart.
-pub(crate) const SIGNAL: u32 = 1 << 2;
+pub const SIGNAL: u32 = 1 << 2;
 /// Reserved: a tracer's exit stop. Nothing posts it until `ptrace` exists.
 pub(crate) const TRACE: u32 = 1 << 3;
 /// Reserved: the process is filtered (§9.7's T2 flag). Nothing posts it until
@@ -107,7 +107,7 @@ const CLEARED_AS_FOUND: u32 = STOP | SIGNAL;
 
 /// Post `bits` to `task`, then wake it and interrupt its processor: the one
 /// way a waker posts, so that the bits are set before the task can run.
-pub(crate) fn notify(task: &Arc<Task>, bits: u32) {
+pub fn notify(task: &Arc<Task>, bits: u32) {
     post(task, bits);
     wake_posted(task);
 }
@@ -133,26 +133,26 @@ pub(crate) fn wake_posted(task: &Arc<Task>) {
 /// Post `bits` to `task` without waking it: for a task that will look anyway
 /// (one the poster wakes some other way, or a thread a process-directed
 /// signal is posted to but not given to).
-pub(crate) fn post(task: &Task, bits: u32) {
+pub fn post(task: &Task, bits: u32) {
     let _ = task.work().fetch_or(bits, Ordering::Release);
 }
 
 /// Post `bits` to the running task, which needs no wake: it is on its way
 /// back to user mode, where it looks.
-pub(crate) fn post_own(bits: u32) {
+pub fn post_own(bits: u32) {
     let _ = with_running(|task| post(task, bits));
 }
 
 /// Whether the running task has [`END`] posted: what a native wait asks in
 /// place of the personality's `must_leave` (2e), which the core and the
 /// personality post it for. False where nothing runs.
-pub(crate) fn own_end() -> bool {
+pub fn own_end() -> bool {
     with_running(has_end).unwrap_or(false)
 }
 
 /// Whether `task` has [`END`] posted: for a start that re-checks after it
 /// lists its task, so as not to post twice.
-pub(crate) fn has_end(task: &Task) -> bool {
+pub fn has_end(task: &Task) -> bool {
     task.work().load(Ordering::Acquire) & END != 0
 }
 
@@ -216,7 +216,8 @@ static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 /// A poster between its write (C) and its post (D). Made before the write,
 /// dropped after the post; counted only while the self-checks run.
 #[must_use = "a posting counts until it is dropped, after the post"]
-pub(crate) struct Posting(bool);
+#[derive(Debug)]
+pub struct Posting(bool);
 
 /// Whether the self-checks run on this boot, as the composition root says
 /// before any program runs ([`set_auditing`]): what turns [`audit`] on, and
@@ -226,7 +227,7 @@ static AUDITING: AtomicBool = AtomicBool::new(false);
 
 /// Turn the check that the bits are complete on or off: `checks::init`,
 /// once, as it reads `ferrix.checks` and before the first program.
-pub(crate) fn set_auditing(on: bool) {
+pub fn set_auditing(on: bool) {
     AUDITING.store(on, Ordering::Release);
 }
 
@@ -236,7 +237,7 @@ pub(crate) fn auditing() -> bool {
 }
 
 /// Begin a posting: see [`Posting`].
-pub(crate) fn posting() -> Posting {
+pub fn posting() -> Posting {
     let counted = auditing();
     if counted {
         let _ = IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
@@ -308,7 +309,7 @@ pub(crate) const HOOK_WAKE_ROW: usize = 0;
 /// Step 4's case 14, as [`HOOK`] records it: the fast path posts `END` to
 /// its caller just before its last look (`docs/OPAQUE-KERNEL.md` §9.7, T13's
 /// window, condition 11).
-pub(crate) const HOOK_LAST_LOOK: usize = 1;
+pub const HOOK_LAST_LOOK: usize = 1;
 
 /// The fast path's hook, called just before T13's last look: with case 14's
 /// check armed and `caller` its target, post `END` to it, as a kill landing
@@ -328,7 +329,7 @@ pub(crate) fn fast_path_hook(caller: &Task) {
 /// that arms it while another still holds it would overwrite that one, and
 /// the next disarm would hide a hook left armed from the boot's check after
 /// stage 9: that stops the machine here instead (FX-0908).
-pub(crate) fn arm(check: usize, target: &Task) {
+pub fn arm(check: usize, target: &Task) {
     if let Some(holder) = hook_armed_by() {
         crate::panic::fatal!(
             crate::panic::catalog::CHECK_HOOK_LEFT_ARMED,
@@ -341,7 +342,7 @@ pub(crate) fn arm(check: usize, target: &Task) {
 }
 
 /// Disarm the hook.
-pub(crate) fn disarm() {
+pub fn disarm() {
     HOOK.store(0, Ordering::Release);
     HOOK_TARGET.store(0, Ordering::Release);
 }
@@ -354,7 +355,7 @@ fn armed_by() -> Option<usize> {
 /// The name of the check that left the hook armed, if one did: for the boot
 /// check after stage 9 (`main.rs`'s `require_hooks_disarmed`, FX-0908),
 /// which stops the machine before the marker and init if one did.
-pub(crate) fn hook_armed_by() -> Option<&'static str> {
+pub fn hook_armed_by() -> Option<&'static str> {
     armed_by().map(|check| HOOKED_BY.get(check).copied().unwrap_or("an unknown check"))
 }
 
@@ -367,7 +368,7 @@ impl super::PreparedTask {
     /// (`object::process::Process::list_task`) before it is launched, so that
     /// an end recorded from then on reaches it. Here rather than beside the
     /// type, with the word it serves.
-    pub(crate) const fn task(&self) -> &Arc<Task> {
+    pub const fn task(&self) -> &Arc<Task> {
         &self.task
     }
 }
