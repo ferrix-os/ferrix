@@ -908,7 +908,16 @@ more.
   event, which poll the models' trackers. The compiler knows lists and
   indexing, `Layout.*`, `Qt.Align*` and `|`, and writes a `Repeater`'s
   child as a delegate factory. A `form` demo. 48 host tests.
-* Next: U4b, `Flickable`, `ListView` with virtualization and recycling,
-  `DelegateChooser` and a 100,000-row demo. The window gets a
+* **U4b built** (2026-10-23): `Flickable` (a content item that scrolls,
+  the wheel to the innermost one that can move) and `ListView`, making
+  delegates only for the rows in view and recycling them by kind
+  through `DelegateChooser`; a test scrolls a million-row list and
+  counts at most seven delegates. Row heights are the model's
+  `row_height` when it says, else measured, kept in a Fenwick tree so the
+  row at an offset and a correction each take `log n`. A `journal` demo:
+  100,000 rows from a Rust model, scrolled to row 50,000. `TableView`
+  is not built: the viewer's table is a `ListView` of rows (§3.6), and
+  it waits for a consumer that needs cells. 55 host tests.
+* Next: U5, states, transitions and animations. The window gets a
   `test-compositor` row with the viewer's port (U8), where it first runs
   on Ferrix.
