@@ -1,0 +1,81 @@
+name: Flow
+
+# The lane and the certification verdict of every pull request
+# (docs/REPO-FLOW.md). Both are statuses the rulesets on main and develop
+# require: `flow/lane` and `certification/verdict`.
+#
+# pull_request_target, so the job has a token that can post statuses even on a
+# fork's pull request. That event runs THIS file as the base branch has it,
+# never the pull request's copy, and so it must never build, install or run
+# anything from the pull request: the checkout below is the base branch, the
+# pull request's commits are fetched as git objects only, and the two scripts
+# that read them (the base branch's) treat them as text. Do not add a step that
+# checks out the head, runs cargo, or sources a file from it. CI proper runs
+# in ci.yml under pull_request, with a read-only token and no secrets.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+    branches: [main, develop]
+
+permissions:
+  contents: write        # auto-merge
+  pull-requests: write   # auto-merge, labels, the flags comment
+  statuses: write        # flow/lane, certification/verdict
+  issues: write          # labels live on the issue
+
+concurrency:
+  group: flow-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  flow:
+    name: Lane and certification verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the base branch (never the pull request)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the pull request's commits as data
+        env:
+          NUM: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/$NUM/head:refs/remotes/pr/head"
+
+      - name: Lane
+        id: lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/common/release/flow-lane.py
+
+      - name: Certification verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LANE: ${{ steps.lane.outputs.lane }}
+          VERDICT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 tools/common/release/cert-verdict.py "$BASE..$HEAD" --lane "$LANE" --post "$HEAD"
+
+      - name: Supply-chain flags
+        # Every outside pull request gets the list as a comment, refreshed on
+        # each push; an owner's only when something is flagged.
+        if: github.event.action != 'labeled' && github.event.action != 'unlabeled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LANE: ${{ steps.lane.outputs.lane }}
+          NUM: ${{ github.event.pull_request.number }}
+        run: |
+          python3 tools/common/check/check-supply-chain.py "$BASE..$HEAD" --markdown > "$RUNNER_TEMP/flags.md"
+          cat "$RUNNER_TEMP/flags.md"
+          if [ "$LANE" = outside ] || ! grep -q 'none\.$' "$RUNNER_TEMP/flags.md"; then
+            { echo "<!-- supply-chain-flags -->"; echo "For commit $HEAD."; echo; cat "$RUNNER_TEMP/flags.md"; } > "$RUNNER_TEMP/body.md"
+            gh pr comment "$NUM" --repo "$GITHUB_REPOSITORY" --edit-last --body-file "$RUNNER_TEMP/body.md" 2>/dev/null \
+              || gh pr comment "$NUM" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          fi

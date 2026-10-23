@@ -23,6 +23,24 @@ useful as a patch.
    also pass `cargo xtask test-boot --arch all`.
 4. A commit message is a subject and a body that argues why, not what.
 
+## Sending a pull request
+
+1. Fork the repository and branch from `develop`, naming the branch for what
+   it is: `feature/<what>`, `bugfix/<what>`, `docs/<what>` or `chore/<what>`.
+2. Open the pull request against `develop`. Fill in the template.
+3. CI runs once a maintainer has approved running workflows for it. GitHub
+   asks that of every outside pull request, because CI runs your code.
+4. Every outside pull request gets three reviews before it can merge: the
+   certification consultant's, a security review of the diff, and the
+   owner's approval. Changes to CI, build scripts, `Cargo.toml` and
+   `Cargo.lock`, fetched downloads and pins get the closest reading. New
+   binary files, vendored archives or minified code will be asked to go.
+5. A maintainer merges it by hand. Outside pull requests never merge
+   themselves.
+
+[docs/REPO-FLOW.md](docs/REPO-FLOW.md) describes the whole flow: branch names,
+the two lanes, and how `develop` reaches `main`.
+
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) is the map of the tree, and
 [the roadmap](docs/roadmap/README.md) says what each stage still needs.
 
@@ -30,4 +48,4 @@ useful as a patch.
 
 Most code is written in Claude sessions. The project owner chooses what to
 build and reviews the results. Contributions from other people go through the
-same checks.
+same checks, and through the reviews above, which the owner's own changes skip.

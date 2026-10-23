@@ -197,7 +197,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | Path | What |
 |---|---|
 | `tools/common/xtask/` | The host build driver (`cargo xtask …`); `src/netboot.rs` is the network boot of a bare-metal machine (`docs/NETBOOT.md`); `src/n150.rs` writes the N150 box's whole disk and boots it under QEMU (`docs/N150.md`). |
-| `tools/common/check/` | The quality gates `cargo xtask check` and CI run: layering, assembly budget, unsafe and panic audits, the certification item boundary, complexity, commit authors. `rustlex.py` is their shared Rust lexer. |
+| `tools/common/check/` | The quality gates `cargo xtask check` and CI run: layering, assembly budget, unsafe and panic audits, the certification item boundary, complexity, commit authors; `check-supply-chain.py` lists what a reviewer of an outside pull request reads twice (`docs/REPO-FLOW.md`). `rustlex.py` is their shared Rust lexer. |
 | `tools/common/gen/` | Generators and their `--check` modes: brand images and release notes, the architecture document (with its `sysml/` reader), the panic catalogue, fonts, Wayland protocol tables, XKB tables, SOUP, coverage justification, fuzz corpus seeds; `record-demo.py` records and cuts the demo video, and `install-shots.py` labels the install guide's captures (`docs/brand/screenshots/CAPTIONS.md`). |
 | `tools/common/fetch/` | Fetch pinned downloads: the rustc sysroot, busybox, Chrome, Bad Apple!!, Steam's volumes, NVIDIA's driver, iPXE for the netboot stick (`docs/NETBOOT.md`), the shell trees a release image carries (`fetch-shell-trees.sh`). |
 | `tools/common/debug/` | Post-mortem tools run on the host after a failed boot: `ferrix-postmortem.sh` reads a Ferrix disk read-only and prints the loader's and the kernel's logs, the A/B record and `/var/log` (`docs/POSTMORTEM.md`). |
@@ -207,7 +207,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `tools/common/steam/` | What `cargo xtask run-steam`, `test-steam-window` and `test-steam-store` carry into the guest: the scripts that start and watch Steam, its stand-ins, and in `workarounds/` the C shims for kernel gaps, each headed with its gap and the owner of the real fix (`docs/STEAM.md`). |
 | `tools/common/n150/` | The N150 box (`docs/N150.md`): `esp-files.sh` builds the box's ESP files from a commit; `intel-checkpoint.sh` runs Mesa's anv and iris on the running box and keeps their output (`docs/INTEL-GPU.md` §10); `card/` holds the bring-up's boot-card and live-session scripts (§13.1), machine-specific and headed so. |
 | `tools/common/data/` | The allow-lists, baselines and registers the checks read; `release-licences.toml`, the licences a release may ship and what each file of its image is. |
-| `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`), and what a release carries (`docs/LICENSES.md`): `package-desktop.py` packs `cargo xtask release-image`'s x86-64 desktop with `desktop/`'s run scripts and README into the zip the release workflow attaches; `licences.py` writes an image's licence inventory and refuses what it cannot name; `package-sources.py` packs the corresponding sources; `pinned.py` reads the build scripts' pinned downloads and `cpio.py` an initramfs, for both. |
+| `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`, and `github-flow-setup.sh` for the develop/main rulesets of `docs/REPO-FLOW.md`); the flow's two status writers, `flow-lane.py` (a pull request's lane) and `cert-verdict.py` (the certification verdict); and what a release carries (`docs/LICENSES.md`): `package-desktop.py` packs `cargo xtask release-image`'s x86-64 desktop with `desktop/`'s run scripts and README into the zip the release workflow attaches; `licences.py` writes an image's licence inventory and refuses what it cannot name; `package-sources.py` packs the corresponding sources; `pinned.py` reads the build scripts' pinned downloads and `cpio.py` an initramfs, for both. |
 | `tools/vendor/google/pixel7/` | The Pixel 7 launcher app (`android/`), its host helper and the desktop monitor (`monitor/`). Its own repository, ferrix-os/pixel7, checked out here at its pin (`components.toml`). |
 
 ## `docs/`
@@ -217,6 +217,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `docs/*.md` | Design documents, one per subsystem, `GUIDE.md`, the technical guide, and `INSTALL.md`, the pictured guide to trying Ferrix from a release (its pictures in `docs/brand/screenshots/install/`). |
 | `docs/roadmap/`, `docs/sysml/`, `docs/certification/`, `docs/generated/` | The roadmap, the SysML model, the certification evidence, and what is generated from them. |
 | `docs/vendor/<vendor>/<device>/` | Notes on one board or phone. |
+| `docs/repo-flow/` | The branch maps `docs/REPO-FLOW.md`'s clean-ups write, one TSV per sweep. |
 | `docs/brand/`, `docs/marketing/` | The brand kit and the press copy. |
 | `docs/website/` | The public website at https://ferrix-os.github.io/. Its own repository, ferrix-os/ferrix-os.github.io, which deploys it, checked out here at its pin (`components.toml`). |
 
