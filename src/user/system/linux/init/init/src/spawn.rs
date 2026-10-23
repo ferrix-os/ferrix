@@ -176,6 +176,15 @@ pub(crate) struct Prepared {
     sandbox: Option<Plan>,
 }
 
+impl Prepared {
+    /// The uid and gid the process runs as.
+    pub(crate) fn ids(&self) -> (u32, u32) {
+        self.user
+            .as_ref()
+            .map_or((0, 0), |(uid, gid, _)| (*uid, *gid))
+    }
+}
+
 /// Why a spawn could not be worked out.
 #[derive(Debug)]
 pub(crate) struct Unprepared {
@@ -197,11 +206,13 @@ fn c_string(text: &str) -> Result<CString, Unprepared> {
 }
 
 /// Work out everything the child needs from `spec`, with `terminal` the
-/// `TERM` a service on a terminal gets unless it sets its own.
+/// `TERM` a service on a terminal gets unless it sets its own, and
+/// `invocation` the unit's run, given as `INVOCATION_ID` (§10).
 pub(crate) fn prepare(
     spec: &SpawnSpec,
     terminal: &str,
     passed: &Passed,
+    invocation: Option<&str>,
 ) -> Result<Prepared, Unprepared> {
     // First, so a key the kernel cannot do refuses the unit before anything
     // else is looked at.
@@ -224,6 +235,10 @@ pub(crate) fn prepare(
     }
     if spec.tty.is_some() {
         let _ = environment.insert("TERM".to_owned(), terminal.to_owned());
+    }
+    // systemd's: 32 hex digits, new each time the unit starts.
+    if let Some(invocation) = invocation {
+        let _ = environment.insert("INVOCATION_ID".to_owned(), invocation.to_owned());
     }
     let notify = match spec.service_type {
         ServiceType::Notify => {
@@ -295,7 +310,12 @@ pub(crate) fn prepare(
     };
     let stdin_is_tty = matches!(stdin, Stream::Tty);
     let stdout = output(&spec.stdout, stdin_is_tty, None)?;
-    let stderr = output(&spec.stderr, stdin_is_tty, Some(1))?;
+    let mut stderr = output(&spec.stderr, stdin_is_tty, Some(1))?;
+    // Standard error that inherits a log gets a pipe of its own, so each
+    // line is known to be one stream's or the other's (`_STREAM`).
+    if matches!((&stdout, &stderr), (Stream::Log, Stream::Same(1))) {
+        stderr = Stream::Log;
+    }
 
     let directory = match &spec.working_directory {
         Some(directory) => {
@@ -562,7 +582,9 @@ fn lookup_group(group: &str) -> Result<u32, Unprepared> {
 pub(crate) struct Started {
     pub(crate) pid: u32,
     pub(crate) report: OwnedFd,
-    pub(crate) log: Option<OwnedFd>,
+    /// The read end of each log pipe: standard output's (1), standard
+    /// error's (2).
+    pub(crate) logs: Vec<(RawFd, OwnedFd)>,
     /// The read end of a `Type=notify` service's readiness pipe.
     pub(crate) notify: Option<OwnedFd>,
     /// For a child waiting for its bootstrap channel: the pipe to write
@@ -585,17 +607,15 @@ pub(crate) fn start(
         .map(|(fd, _)| sys::duplicate_high(*fd))
         .collect::<io::Result<Vec<OwnedFd>>>()?;
     let connection = passed.connection.map(sys::duplicate_high).transpose()?;
-    let log = if prepared
-        .streams
-        .iter()
-        .any(|stream| matches!(stream, Stream::Log))
-    {
-        let (read, write) = sys::pipe()?;
-        sys::nonblocking(read.as_raw_fd())?;
-        Some((read, write))
-    } else {
-        None
-    };
+    // A pipe for each stream that goes to the log: init reads them apart.
+    let mut log: [Option<(OwnedFd, OwnedFd)>; 3] = [None, None, None];
+    for (slot, stream) in log.iter_mut().zip(&prepared.streams) {
+        if matches!(stream, Stream::Log) {
+            let (read, write) = sys::pipe()?;
+            sys::nonblocking(read.as_raw_fd())?;
+            *slot = Some((read, write));
+        }
+    }
     let go = if prepared.waits_for_bootstrap {
         Some(sys::pipe()?)
     } else {
@@ -614,7 +634,9 @@ pub(crate) fn start(
     let mut envp = pointers(&prepared.envp);
     let pipes = Pipes {
         report: write_end.as_raw_fd(),
-        log: log.as_ref().map(|(_, write)| write.as_raw_fd()),
+        log: log
+            .each_ref()
+            .map(|pair| pair.as_ref().map(|(_, write)| write.as_raw_fd())),
         notify: notify.as_ref().map(|(_, write)| write.as_raw_fd()),
         sockets: sockets.iter().map(AsRawFd::as_raw_fd).collect(),
         connection: connection.as_ref().map(AsRawFd::as_raw_fd),
@@ -629,10 +651,15 @@ pub(crate) fn start(
             Ok(Started {
                 pid,
                 report,
-                log: log.map(|(read, write)| {
-                    drop(write);
-                    read
-                }),
+                logs: (0..)
+                    .zip(log)
+                    .filter_map(|(fd, pair)| {
+                        pair.map(|(read, write)| {
+                            drop(write);
+                            (fd, read)
+                        })
+                    })
+                    .collect(),
                 notify: notify.map(|(read, write)| {
                     drop(write);
                     read
@@ -688,7 +715,8 @@ fn pointers(strings: &[CString]) -> Vec<*const c_char> {
 #[derive(Debug)]
 struct Pipes {
     report: RawFd,
-    log: Option<RawFd>,
+    /// The write end of each stream's log pipe, by the stream's number.
+    log: [Option<RawFd>; 3],
     notify: Option<RawFd>,
     sockets: Vec<RawFd>,
     connection: Option<RawFd>,
@@ -755,7 +783,11 @@ fn child(
                 None => fail(step, io::Error::from_raw_os_error(libc::ENOTTY)),
             },
             Stream::Same(fd) => *fd,
-            Stream::Log => match log {
+            Stream::Log => match log
+                .get(usize::try_from(target).unwrap_or(0))
+                .copied()
+                .flatten()
+            {
                 Some(fd) => fd,
                 None => fail(step, io::Error::from_raw_os_error(libc::EBADF)),
             },

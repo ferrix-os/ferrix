@@ -27,12 +27,17 @@
 //! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
 //! * [`upload`]: store-and-forward to a collector.
+//! * [`units`]: units' output as init hands it over, paired with its
+//!   console copy.
+//! * [`access`]: whose segments a record goes to, and how a user is handed
+//!   theirs.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+pub mod access;
 pub mod compress;
 pub mod console;
 pub mod crc;
@@ -49,6 +54,7 @@ pub mod segment;
 pub mod session;
 pub mod summary;
 pub mod time;
+pub mod units;
 pub mod upload;
 
 #[cfg(test)]

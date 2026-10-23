@@ -382,15 +382,20 @@ pub(crate) fn chmod(path: &[u8], mode: usize) -> Result<(), Errno> {
     .map(|_| ())
 }
 
+/// `SOCK_SEQPACKET`: a connection that keeps each write a message.
+pub(crate) const SOCK_SEQPACKET: usize = 5;
+
 /// A listening stream socket at `path`, made afresh, non-blocking.
 pub(crate) fn listen_at(path: &[u8]) -> Result<usize, Errno> {
+    listen_kind(path, ferrix_rt::linux::SOCK_STREAM)
+}
+
+/// A listening socket of `kind` (`SOCK_STREAM`, [`SOCK_SEQPACKET`]) at
+/// `path`, made afresh, non-blocking.
+pub(crate) fn listen_kind(path: &[u8], kind: usize) -> Result<usize, Errno> {
     use ferrix_rt::linux as rt;
     let _ = unlinkat(AT_FDCWD, path);
-    let fd = rt::socket(
-        rt::AF_UNIX,
-        rt::SOCK_STREAM | rt::SOCK_NONBLOCK | O_CLOEXEC,
-        0,
-    )?;
+    let fd = rt::socket(rt::AF_UNIX, kind | rt::SOCK_NONBLOCK | O_CLOEXEC, 0)?;
     let Some((address, length)) = rt::sockaddr_un(path) else {
         close(fd);
         return Err(Errno(22));
@@ -549,6 +554,11 @@ pub(crate) struct Received {
 /// Receive one datagram into `buf` without waiting, with its credentials
 /// and at most one passed descriptor (any more are closed).
 pub(crate) fn receive(fd: usize, buf: &mut [u8]) -> Option<Received> {
+    receive_flags(fd, buf, 0x40)
+}
+
+/// [`receive`] with `recvmsg`'s `flags`, `MSG_CMSG_CLOEXEC` added.
+fn receive_flags(fd: usize, buf: &mut [u8], flags: usize) -> Option<Received> {
     let word = size_of::<usize>();
     let mut control = [0_usize; 16];
     let iov = [buf.as_mut_ptr() as usize, buf.len()];
@@ -564,7 +574,6 @@ pub(crate) fn receive(fd: usize, buf: &mut [u8]) -> Option<Received> {
         control.len() * word,
         0,
     ];
-    const MSG_DONTWAIT: usize = 0x40;
     const MSG_CMSG_CLOEXEC: usize = 0x4000_0000;
     // SAFETY: `header` is a `struct msghdr` laid out in words, whose iovec
     // and control buffer live for the call; the kernel writes the lengths
@@ -575,7 +584,7 @@ pub(crate) fn receive(fd: usize, buf: &mut [u8]) -> Option<Received> {
             [
                 fd,
                 header.as_mut_ptr() as usize,
-                MSG_DONTWAIT | MSG_CMSG_CLOEXEC,
+                flags | MSG_CMSG_CLOEXEC,
                 0,
                 0,
                 0,
@@ -629,6 +638,74 @@ pub(crate) fn receive(fd: usize, buf: &mut [u8]) -> Option<Received> {
         at += size.next_multiple_of(word);
     }
     Some(received)
+}
+
+/// Send `data` on the connected `fd` with `passed`, if any, beside it
+/// (`SCM_RIGHTS`), without waiting.
+pub(crate) fn send_with(fd: usize, data: &[u8], passed: Option<usize>) -> Result<usize, Errno> {
+    let word = size_of::<usize>();
+    // One `struct cmsghdr` (a word of length, two ints) and one int, padded
+    // to a word: the space CMSG_SPACE(sizeof(int)) gives.
+    let mut control = [0_usize; 4];
+    let mut used = 0;
+    if let Some(passed) = passed {
+        let length = word + 8 + 4;
+        let mut bytes = [0_u8; 4 * 8];
+        let mut put = |at: usize, value: &[u8]| {
+            if let Some(slot) = bytes.get_mut(at..at + value.len()) {
+                slot.copy_from_slice(value);
+            }
+        };
+        put(0, &length.to_ne_bytes());
+        put(word, &(SOL_SOCKET as i32).to_ne_bytes());
+        put(word + 4, &SCM_RIGHTS.to_ne_bytes());
+        put(word + 8, &i32::try_from(passed).unwrap_or(-1).to_ne_bytes());
+        for (index, slot) in control.iter_mut().enumerate() {
+            let mut chunk = [0_u8; size_of::<usize>()];
+            if let Some(from) = bytes.get(index * word..(index + 1) * word) {
+                chunk.copy_from_slice(from);
+            }
+            *slot = usize::from_ne_bytes(chunk);
+        }
+        used = length.next_multiple_of(word);
+    }
+    let iov = [data.as_ptr() as usize, data.len()];
+    let header = [
+        0,
+        0,
+        iov.as_ptr() as usize,
+        1,
+        if used > 0 {
+            control.as_ptr() as usize
+        } else {
+            0
+        },
+        used,
+        0,
+    ];
+    const MSG_DONTWAIT: usize = 0x40;
+    const MSG_NOSIGNAL: usize = 0x4000;
+    // SAFETY: `header` is a `struct msghdr` laid out in words, whose iovec
+    // and control buffer live for the call and are only read.
+    unsafe {
+        call(
+            numbers::SENDMSG,
+            [
+                fd,
+                header.as_ptr() as usize,
+                MSG_DONTWAIT | MSG_NOSIGNAL,
+                0,
+                0,
+                0,
+            ],
+        )
+    }
+}
+
+/// Receive one message into `buf`, waiting for it, with at most one passed
+/// descriptor (any more are closed).
+pub(crate) fn receive_waiting(fd: usize, buf: &mut [u8]) -> Option<Received> {
+    receive_flags(fd, buf, 0)
 }
 
 /// The pid, uid and gid at the other end of a connected socket.

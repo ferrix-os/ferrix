@@ -39,7 +39,9 @@ lode levels [-b ...] [filters]       records with no level, and with a guessed o
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
       --list-boots       the boots the store holds
   -k, --dmesg            the kernel's own records
-  -u, --unit UNIT        a unit's records (globs; 'name' is name.service)
+  -u, --unit UNIT        a unit's records (globs; 'name' is name.service);
+                         UNIT@last its current or last run, @-1 the one before, @ID one run
+  -I, --invocation=last|-N|ID   which run of the -u unit
   -t, --identifier ID    a program's records;  -T ID leaves one out
   -s, --session ID       a session's records
   -p, --priority P[..Q]  at most P (a level's name or number), or P to Q; never a
@@ -101,6 +103,40 @@ struct Options {
     kernel_gaps: bool,
     /// `lode levels`: the level table instead of the records.
     levels: bool,
+    /// `-u UNIT@WHICH`, `--invocation WHICH`: a run of a unit, as written.
+    invocation: Option<(String, String)>,
+    /// The last `-u` given, for `--invocation`.
+    last_unit: Option<String>,
+}
+
+impl Options {
+    /// A copy of the options, for a read narrowed further.
+    fn clone_selection(&self) -> Options {
+        Options {
+            boot: self.boot.clone(),
+            list_boots: self.list_boots,
+            expr: self.expr.clone(),
+            matches: self.matches.clone(),
+            grep: self.grep.clone(),
+            since: self.since.clone(),
+            until: self.until.clone(),
+            since_mark: self.since_mark.clone(),
+            until_mark: self.until_mark.clone(),
+            around: self.around.clone(),
+            lines: self.lines,
+            reverse: self.reverse,
+            follow: self.follow,
+            output: self.output,
+            after: self.after,
+            show_cursor: self.show_cursor,
+            directory: self.directory.clone(),
+            utc: self.utc,
+            kernel_gaps: self.kernel_gaps,
+            levels: self.levels,
+            invocation: None,
+            last_unit: self.last_unit.clone(),
+        }
+    }
 }
 
 /// Run the reader; the exit status.
@@ -285,10 +321,27 @@ fn selection(
                 Expr::Test(Test::field("_TRANSPORT", Op::Eq, b"kernel")),
             );
         }
-        "-u" | "--unit" => add(
-            &mut options.expr,
-            unit_expr(&value(flag, inline, words, "a unit")?),
-        ),
+        "-u" | "--unit" => {
+            let given = value(flag, inline, words, "a unit")?;
+            let (unit, which) = split_invocation(&given);
+            if let Some(which) = which {
+                options.invocation = Some((String::from(unit), String::from(which)));
+            }
+            options.last_unit = Some(String::from(unit));
+            add(&mut options.expr, unit_expr(unit));
+        }
+        "-I" | "--invocation" => {
+            let which = match (flag, inline) {
+                ("-I", _) => String::from("0"),
+                (_, Some(which)) => String::from(which),
+                _ => value(flag, None, words, "an invocation")?,
+            };
+            let unit = options
+                .last_unit
+                .clone()
+                .ok_or_else(|| alloc::format!("{flag} needs -u UNIT before it"))?;
+            options.invocation = Some((unit, which));
+        }
         "-t" | "--identifier" => {
             let id = value(flag, inline, words, "an identifier")?;
             add(
@@ -401,6 +454,93 @@ fn add(expr: &mut Option<Expr>, more: Expr) {
     });
 }
 
+/// `UNIT@WHICH` as the unit and the run: `last`, an offset (`-1`, `0`,
+/// `2`) or an invocation id. Any other `@` is the unit's own
+/// (`getty@tty1.service`).
+fn split_invocation(given: &str) -> (&str, Option<&str>) {
+    match given.rsplit_once('@') {
+        Some((unit, which)) if !unit.is_empty() && is_invocation_word(which) => (unit, Some(which)),
+        _ => (given, None),
+    }
+}
+
+/// Whether `word` names a run: `last`, an offset, or an id.
+fn is_invocation_word(word: &str) -> bool {
+    let digits = word.trim_start_matches(['-', '+']);
+    word == "last"
+        || (!digits.is_empty()
+            && digits.len() < 10
+            && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        || (word.len() == 32 && segment::parse_id(word).is_some())
+}
+
+/// The invocation id `which` names among `unit`'s runs, from the records
+/// of `segments`: `last` or `0` the newest, `-N` the Nth before it, `N` the
+/// Nth from the oldest kept, or an id given whole.
+fn resolve_invocation(segments: &[Known], unit: &str, which: &str) -> Result<String, String> {
+    if which.len() == 32 && segment::parse_id(which).is_some() {
+        return Ok(which.to_ascii_lowercase());
+    }
+    let offset: i64 = if which == "last" {
+        0
+    } else {
+        which
+            .parse()
+            .map_err(|_| alloc::format!("{which}: not a run of a unit"))?
+    };
+    let expr = unit_expr(unit);
+    let options = Options {
+        expr: Some(expr.clone()),
+        ..Options::default()
+    };
+    let chosen = candidates(segments, None, &options, (None, None));
+    // Each run's id once, in the order of its first record.
+    let mut runs: Vec<(u64, Vec<u8>)> = Vec::new();
+    for each in chosen {
+        for record in records_of(each) {
+            if !expr.matches(&record) {
+                continue;
+            }
+            let Some(id) = record.get("_SYSTEMD_INVOCATION_ID") else {
+                continue;
+            };
+            match runs.iter_mut().find(|(_, seen)| seen.as_slice() == id) {
+                Some((first, _)) => *first = (*first).min(record.seqnum),
+                None => runs.push((record.seqnum, Vec::from(id))),
+            }
+        }
+    }
+    runs.sort_by_key(|(first, _)| *first);
+    let count = i64::try_from(runs.len()).unwrap_or(0);
+    let index = if offset > 0 {
+        offset - 1
+    } else {
+        count - 1 + offset
+    };
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| runs.get(index))
+        .map(|(_, id)| String::from_utf8_lossy(id).into_owned())
+        .ok_or_else(|| {
+            alloc::format!("{unit}: no run {which} in the log ({count} with an invocation id kept)")
+        })
+}
+
+/// The options with a `-u UNIT@WHICH` run turned into its invocation id,
+/// when one was asked for.
+fn narrowed(options: &Options, segments: &[Known]) -> Result<Option<Options>, String> {
+    let Some((unit, which)) = &options.invocation else {
+        return Ok(None);
+    };
+    let id = resolve_invocation(segments, unit, which)?;
+    let mut resolved = options.clone_selection();
+    add(
+        &mut resolved.expr,
+        Expr::Test(Test::field("invocation", Op::Eq, id.as_bytes())),
+    );
+    Ok(Some(resolved))
+}
+
 /// `-u UNIT`: the unit, and `UNIT.service` for a name with no type.
 fn unit_expr(unit: &str) -> Expr {
     let exact = Expr::Test(Test::field("unit", Op::Eq, unit.as_bytes()));
@@ -420,8 +560,18 @@ fn duration(text: &str) -> Option<u64> {
     Some(micros)
 }
 
+/// Where a read finds its segments: store directories it opens itself, or
+/// for a user who cannot, the user's own, which lode hands over
+/// (`ferrix_lode_core::access`).
+pub(crate) struct Source {
+    /// The directories.
+    pub(crate) dirs: Vec<Dir>,
+    /// Whether to ask lode instead.
+    pub(crate) passed: bool,
+}
+
 /// The store directories a read looks in.
-fn directories(options: &Options) -> Result<Vec<Dir>, String> {
+fn directories(options: &Options) -> Result<Source, String> {
     let paths: Vec<&[u8]> = match &options.directory {
         Some(path) => alloc::vec![path.as_slice()],
         None => alloc::vec![store::PERSISTENT, store::VOLATILE],
@@ -436,15 +586,22 @@ fn directories(options: &Options) -> Result<Vec<Dir>, String> {
         }
     }
     if dirs.is_empty() {
-        return Err(match refused {
-            Some(path) => alloc::format!(
+        return match refused {
+            // Not root, not adm: the user's own records, through lode.
+            Some(_) if options.directory.is_none() => Ok(Source { dirs, passed: true }),
+            Some(path) => Err(alloc::format!(
                 "{}: permission denied (root and members of adm read the log)",
                 String::from_utf8_lossy(path)
-            ),
-            None => String::from("no log here: neither /var/log/journal nor /run/log/journal"),
-        });
+            )),
+            None => Err(String::from(
+                "no log here: neither /var/log/journal nor /run/log/journal",
+            )),
+        };
     }
-    Ok(dirs)
+    Ok(Source {
+        dirs,
+        passed: false,
+    })
 }
 
 /// A segment with its header, and its summary when it has one.
@@ -468,8 +625,19 @@ impl Known {
 }
 
 /// Every segment with a readable header, oldest first.
-pub(crate) fn known(dirs: &[Dir]) -> Vec<Known> {
-    store::all_segments(dirs)
+pub(crate) fn known(source: &Source) -> Vec<Known> {
+    let segments = if source.passed {
+        match store::passed_segments() {
+            Ok(segments) => segments,
+            Err(why) => {
+                complain(&alloc::format!("lode: {why}"));
+                Vec::new()
+            }
+        }
+    } else {
+        store::all_segments(&source.dirs)
+    };
+    segments
         .into_iter()
         .filter_map(|segment| {
             let header = store::header(&segment)?;
@@ -481,6 +649,18 @@ pub(crate) fn known(dirs: &[Dir]) -> Vec<Known> {
             })
         })
         .collect()
+}
+
+/// Close the files lode handed over for `segments`, if it did.
+fn release(segments: &[Known]) {
+    for each in segments {
+        if let Some((fd, summary)) = each.segment.passed {
+            sys::close(fd);
+            if let Some(summary) = summary {
+                sys::close(summary);
+            }
+        }
+    }
 }
 
 /// The segments a read may find a match in: `boot`'s, and of those the
@@ -720,14 +900,22 @@ fn show(options: &Options) -> i32 {
         Ok(window) => window,
         Err(why) => return usage(&why),
     };
-    let dirs = match directories(options) {
-        Ok(dirs) => dirs,
+    let source = match directories(options) {
+        Ok(source) => source,
         Err(why) => {
             complain(&alloc::format!("lode: {why}"));
             return 1;
         }
     };
-    let segments = known(&dirs);
+    let segments = known(&source);
+    let resolved = match narrowed(options, &segments) {
+        Ok(resolved) => resolved,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            return 1;
+        }
+    };
+    let options = resolved.as_ref().unwrap_or(options);
     let boot = match &options.boot {
         Some(word) => match chosen_boot(word, &boots(&segments)) {
             Ok(boot) => Some(boot),
@@ -793,8 +981,9 @@ fn show(options: &Options) -> i32 {
         buffer.extend_from_slice(alloc::format!("-- cursor: {}\n", cursor::of(record)).as_bytes());
     }
     out(&buffer);
+    release(&segments);
     if options.follow {
-        follow(options, &dirs, boot, &zone, output, &mut last);
+        follow(options, &source, boot, &zone, output, &mut last);
     }
     0
 }
@@ -812,7 +1001,7 @@ fn flush_if_full(buffer: &mut Vec<u8>) {
 /// look stopped.
 fn follow(
     options: &Options,
-    dirs: &[Dir],
+    source: &Source,
     boot: Option<[u8; 16]>,
     zone: &Zone,
     output: Output,
@@ -820,7 +1009,7 @@ fn follow(
 ) {
     let mut places: Vec<(String, usize)> = Vec::new();
     loop {
-        let segments = known(dirs);
+        let segments = known(source);
         let mut fresh: Vec<Record> = Vec::new();
         let mut seen: Vec<(&str, usize)> = Vec::new();
         for each in segments.iter().rev() {
@@ -867,7 +1056,9 @@ fn follow(
             }
         }
         out(&buffer);
-        sys::sleep_ms(250);
+        release(&segments);
+        // A user's look asks lode for every file: less often.
+        sys::sleep_ms(if source.passed { 1000 } else { 250 });
     }
 }
 
@@ -878,14 +1069,14 @@ fn list_boots(options: &Options) -> i32 {
     } else {
         zone::reader()
     };
-    let dirs = match directories(options) {
-        Ok(dirs) => dirs,
+    let source = match directories(options) {
+        Ok(source) => source,
         Err(why) => {
             complain(&alloc::format!("lode: {why}"));
             return 1;
         }
     };
-    let segments = known(&dirs);
+    let segments = known(&source);
     let order = boots(&segments);
     let count = i64::try_from(order.len()).unwrap_or(0);
     let mut buffer = Vec::from(
@@ -972,14 +1163,14 @@ fn mark(words: &[String]) -> i32 {
 /// `lode verify`: every segment's good length, and with `--kernel` the
 /// chosen boot's kernel sequence, with any gap no record says (status 1).
 fn verify(options: &Options) -> i32 {
-    let dirs = match directories(options) {
-        Ok(dirs) => dirs,
+    let source = match directories(options) {
+        Ok(source) => source,
         Err(why) => {
             complain(&alloc::format!("lode: {why}"));
             return 1;
         }
     };
-    let segments = known(&dirs);
+    let segments = known(&source);
     let mut buffer = Vec::new();
     let mut status = 0;
     for each in &segments {
@@ -1079,6 +1270,10 @@ fn delete(options: &Options) -> i32 {
     if options.expr.is_none() && options.matches.is_empty() && options.grep.is_none() {
         return usage("delete needs --where, a match or -g: it never removes everything");
     }
+    if sys::getuid() != 0 {
+        complain("lode: delete is root's");
+        return 1;
+    }
     if let Err(why) = ask_rotation() {
         complain(&alloc::format!("lode: {why}"));
         return 1;
@@ -1088,14 +1283,14 @@ fn delete(options: &Options) -> i32 {
         Ok(window) => window,
         Err(why) => return usage(&why),
     };
-    let dirs = match directories(options) {
-        Ok(dirs) => dirs,
+    let source = match directories(options) {
+        Ok(source) => source,
         Err(why) => {
             complain(&alloc::format!("lode: {why}"));
             return 1;
         }
     };
-    let segments = known(&dirs);
+    let segments = known(&source);
     let boot = options
         .boot
         .as_ref()
@@ -1128,7 +1323,7 @@ fn delete(options: &Options) -> i32 {
             continue;
         }
         // A compressed segment stays compressed.
-        let rest = if store::is_compressed(each.segment.dir, &each.segment.name) {
+        let rest = if store::segment_compressed(&each.segment) {
             ferrix_lode_core::compress::compress(rest.clone()).unwrap_or(rest)
         } else {
             rest
@@ -1162,7 +1357,7 @@ fn delete(options: &Options) -> i32 {
 /// Put `bytes` in place of `segment`: a new file beside it, synced, then
 /// renamed over it, so a crash leaves the old one or the new one whole.
 fn replace(segment: &Segment, bytes: &[u8]) -> Result<(), String> {
-    let temporary = alloc::format!(".{}.new", segment.name);
+    let temporary = ferrix_lode_core::access::temporary(&segment.name, ".new");
     let _ = sys::unlinkat(segment.dir, temporary.as_bytes());
     let fd = sys::openat(
         segment.dir,
@@ -1214,10 +1409,15 @@ fn announce(words: &[String]) -> i32 {
     }
 }
 
-/// Connect to a socket at `path`, blocking: the descriptor.
+/// Connect to a stream socket at `path`, blocking: the descriptor.
 fn connect(path: &[u8]) -> Result<usize, sys::Errno> {
+    connect_kind(path, ferrix_rt::linux::SOCK_STREAM)
+}
+
+/// Connect to a socket of `kind` at `path`, blocking: the descriptor.
+pub(crate) fn connect_kind(path: &[u8], kind: usize) -> Result<usize, sys::Errno> {
     use ferrix_rt::linux as rt;
-    let fd = rt::socket(rt::AF_UNIX, rt::SOCK_STREAM, 0)?;
+    let fd = rt::socket(rt::AF_UNIX, kind | sys::O_CLOEXEC, 0)?;
     let Some((address, length)) = rt::sockaddr_un(path) else {
         sys::close(fd);
         return Err(sys::Errno(22));
@@ -1551,7 +1751,10 @@ fn bench(words: &[String]) -> i32 {
         }
     }
     write(first, &bytes);
-    let dirs = [Dir { fd: dir.fd }];
+    let dirs = Source {
+        dirs: alloc::vec![Dir { fd: dir.fd }],
+        passed: false,
+    };
     let options = Options {
         expr: Some(unit_expr("unit0.service")),
         ..Options::default()

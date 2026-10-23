@@ -28,6 +28,7 @@ use ferrix_lode_core::record::Record;
 use ferrix_lode_core::retention::{self, Class, DAY_US, Kept};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::time::Zone;
+use ferrix_lode_core::{access, units};
 use ferrix_native_abi::directory::{MAX_MESSAGE, Message};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
@@ -35,8 +36,10 @@ use ferrix_rt::native::{Deadline, Object, Signals};
 
 use crate::capture::Capture;
 use crate::front::Front;
+use crate::handout::Handout;
 use crate::seat::Seat;
 use crate::store::{self, Dir};
+use crate::units::Units;
 use crate::{sys, zone};
 
 /// The user lode runs as once it has opened what needs root.
@@ -90,6 +93,20 @@ struct Writer {
     dirty: bool,
 }
 
+/// A segment being written, and whose: a class's, the system's or a
+/// user's (`ferrix_lode_core::access`).
+struct Slot {
+    /// The class, by its index.
+    class: usize,
+    /// The user whose segments these are; `None` for the system's.
+    owner: Option<u32>,
+    /// The writer.
+    writer: Writer,
+}
+
+/// A writer's class, by index, and owner.
+type Key = (usize, Option<u32>);
+
 /// The store: its directories, classes and writers.
 struct Store {
     /// The persistent directory, if `/var` could be written.
@@ -98,8 +115,8 @@ struct Store {
     volatile: usize,
     /// The retention classes.
     classes: Vec<Class>,
-    /// A writer per class, made when the class first has a record.
-    writers: Vec<Option<Writer>>,
+    /// A writer per class and owner, made when it first has a record.
+    writers: Vec<Slot>,
     /// The next record's sequence number.
     next: u64,
     /// The header every new segment gets, but its first sequence number.
@@ -142,6 +159,8 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let (boot_id, restarted) = boot_id();
     let seat = Seat::open();
     let front = Front::open();
+    let units = Units::open();
+    let handout = Handout::open();
     let journal = if persistent.is_some() {
         store::PERSISTENT
     } else {
@@ -156,7 +175,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut store = Store {
         persistent: persistent.map(|dir| dir.fd),
         volatile: volatile.fd,
-        writers: classes.iter().map(|_| None).collect(),
+        writers: Vec::new(),
         classes,
         next: 1,
         header: new_header(boot_id),
@@ -206,6 +225,8 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         front,
         capture,
         zone,
+        units,
+        handout,
     };
     service.serve(channel, restarted)
 }
@@ -228,6 +249,10 @@ struct Service {
     capture: Capture,
     /// The local zone, for the offsets records carry.
     zone: Zone,
+    /// init's socket: units' output with who wrote it.
+    units: Units,
+    /// Users' own segments, handed over.
+    handout: Handout,
 }
 
 /// The rules and the retention classes, with a record for each file that
@@ -284,7 +309,20 @@ impl Service {
             // The seat's owner first: a session it announced is open before
             // the lines its programs wrote after the announcement are read.
             self.seat.serve(now, &mut batch);
-            let rotate = self.read_kmsg(now, &mut first_start, &mut batch);
+            // init's lines before the kernel log, so a console copy finds
+            // the trusted line it copies waiting.
+            let mut trusted = Vec::new();
+            self.units.serve(now, &mut trusted);
+            self.admit_all(trusted, now, &mut batch);
+            let (rotate, drained) = self.read_kmsg(now, &mut first_start, &mut batch);
+            // A trusted line is stored without its copy only once the
+            // kernel log has been read to its end: a copy still waiting
+            // behind a flood is not a copy lost.
+            if drained {
+                let mut expired = Vec::new();
+                self.units.pairing.expire(now.monotonic_us, &mut expired);
+                self.admit_all(expired, now, &mut batch);
+            }
             let mut heard = Vec::new();
             self.front.serve(now, &mut heard);
             for mut record in heard {
@@ -335,9 +373,14 @@ impl Service {
                 self.store.sync_if(true, now.monotonic_us);
                 return Ok(());
             }
-            if idle && !compressing {
+            let mut stores = alloc::vec![self.store.volatile];
+            stores.extend(self.store.persistent);
+            self.handout.serve(now.monotonic_us, &stores);
+            if idle && !compressing && !self.handout.busy() {
                 let mut fds = alloc::vec![self.kmsg];
                 fds.extend(self.seat.fds());
+                fds.extend(self.units.fds());
+                fds.extend(self.handout.fds());
                 fds.extend(self.front.fds());
                 fds.extend(self.capture.fds());
                 sys::wait_any(&fds, WAIT_MS);
@@ -345,14 +388,54 @@ impl Service {
         }
     }
 
+    /// Stamp and admit records that did not come from the kernel log.
+    fn admit_all(&mut self, records: Vec<Record>, now: Now, batch: &mut Vec<Record>) {
+        for mut record in records {
+            self.seat.stamp(&mut record);
+            self.limiter.admit(record, now.monotonic_us, batch);
+        }
+    }
+
+    /// A unit's line init wrote to the console: the trusted line init
+    /// handed over for it, with the copy's kernel sequence number, or the
+    /// copy itself when init handed none over. init writes the socket
+    /// before the console, so a copy whose line has not been read yet finds
+    /// it on the socket now.
+    fn pair(&mut self, copy: Record, now: Now, batch: &mut Vec<Record>) -> Record {
+        let copy = match self.units.pairing.console(copy) {
+            Ok(paired) => return paired,
+            Err(copy) => copy,
+        };
+        let mut more = Vec::new();
+        self.units.serve(now, &mut more);
+        self.admit_all(more, now, batch);
+        match self.units.pairing.console(copy) {
+            Ok(paired) => paired,
+            Err(copy) => {
+                self.units.pairing.stored_alone(&copy, now.monotonic_us);
+                copy
+            }
+        }
+    }
+
     /// Read what the kernel log has, up to 512 records, into `batch`.
-    /// Answers whether one of them asked for a rotation.
-    fn read_kmsg(&mut self, now: Now, first_start: &mut bool, batch: &mut Vec<Record>) -> bool {
+    /// Answers whether one of them asked for a rotation, and whether the
+    /// log was read to its end.
+    fn read_kmsg(
+        &mut self,
+        now: Now,
+        first_start: &mut bool,
+        batch: &mut Vec<Record>,
+    ) -> (bool, bool) {
         let mut buf = alloc::vec![0_u8; 8192];
         let mut rotate = false;
+        let mut drained = false;
         for _ in 0..512 {
             match sys::read(self.kmsg, &mut buf) {
-                Ok(0) => break,
+                Ok(0) => {
+                    drained = true;
+                    break;
+                }
                 Ok(got) => {
                     let Some(kernel) = kmsg::parse(buf.get(..got).unwrap_or_default()) else {
                         continue;
@@ -373,6 +456,12 @@ impl Service {
                     *first_start = false;
                     rotate |= record.get("SYSLOG_IDENTIFIER") == Some(ROTATE)
                         && record.get("_TRANSPORT") == Some(b"console");
+                    if units::is_unit_copy(&record) {
+                        let mut paired = self.pair(record, now, batch);
+                        self.seat.stamp(&mut paired);
+                        self.limiter.admit(paired, now.monotonic_us, batch);
+                        continue;
+                    }
                     self.seat.stamp(&mut record);
                     if record.get("_TRANSPORT") == Some(b"kernel")
                         && record.get("CRASH_PID").is_some()
@@ -387,10 +476,13 @@ impl Service {
                 Err(error)
                     if error.0 == sys::EPIPE || error.0 == sys::EINVAL || error.0 == sys::EINTR => {
                 }
-                Err(_) => break,
+                Err(_) => {
+                    drained = true;
+                    break;
+                }
             }
         }
-        rotate
+        (rotate, drained)
     }
 }
 
@@ -536,6 +628,8 @@ impl Store {
     fn take_up(&mut self, said: &mut Vec<Record>) -> KernelSequence {
         let segments = self.segments();
         let mut sequence = KernelSequence::default();
+        // Newest per class and owner: `class_of_name` of a user's path is
+        // `user-<uid>/<class>`.
         let mut newest: Vec<&store::Segment> = Vec::new();
         for each in segments.iter().rev() {
             let class = segment::class_of_name(&each.name).unwrap_or_default();
@@ -562,7 +656,8 @@ impl Store {
                 self.next = self.next.max(found.record.seqnum + 1);
             }
             self.next = self.next.max(scanned.header.first_seqnum);
-            let class = segment::class_of_name(&each.name).unwrap_or_default();
+            let class = segment::class_of_name(access::base_name(&each.name)).unwrap_or_default();
+            let owner = access::owner_of_path(&each.name);
             if scanned.header.boot_id == self.header.boot_id
                 && !sealed
                 && let Some(index) = self.classes.iter().position(|known| known.name == class)
@@ -572,14 +667,17 @@ impl Store {
                     sys::O_WRONLY | sys::O_APPEND | sys::O_CLOEXEC,
                     0,
                 )
-                && let Some(slot) = self.writers.get_mut(index)
             {
-                *slot = Some(Writer {
-                    fd,
-                    name: each.name.clone(),
-                    size: scanned.good,
-                    created_us: scanned.header.created_us,
-                    dirty: false,
+                self.writers.push(Slot {
+                    class: index,
+                    owner,
+                    writer: Writer {
+                        fd,
+                        name: each.name.clone(),
+                        size: scanned.good,
+                        created_us: scanned.header.created_us,
+                        dirty: false,
+                    },
                 });
             }
         }
@@ -658,7 +756,8 @@ impl Store {
         if records.is_empty() {
             return Ok(seqnums);
         }
-        let mut bytes: Vec<(u64, Vec<u8>)> = self.classes.iter().map(|_| (0, Vec::new())).collect();
+        // Bytes per class and owner, in the order first seen.
+        let mut bytes: Vec<(Key, u64, Vec<u8>)> = Vec::new();
         for mut record in records {
             // Every stored record says where its level came from.
             record.stamp_level_source();
@@ -666,46 +765,54 @@ impl Store {
             seqnums.push(self.next);
             record.utc_offset_s = zone.offset_at(record.realtime_us);
             self.next += 1;
-            let class = retention::assign(&self.classes, &record);
-            if let Some((first, out)) = bytes.get_mut(class) {
-                if out.is_empty() {
-                    *first = record.seqnum;
+            let key = (
+                retention::assign(&self.classes, &record),
+                access::owner(&record),
+            );
+            match bytes.iter_mut().find(|(each, _, _)| *each == key) {
+                Some((_, _, out)) => segment::encode_record(&record, out),
+                None => {
+                    let mut out = Vec::new();
+                    segment::encode_record(&record, &mut out);
+                    bytes.push((key, record.seqnum, out));
                 }
-                segment::encode_record(&record, out);
             }
         }
-        for (index, (first, out)) in bytes.iter().enumerate() {
-            if out.is_empty() {
-                continue;
-            }
-            self.ready(index, *first)?;
-            let Some(Some(writer)) = self.writers.get_mut(index) else {
+        for (key, first, out) in &bytes {
+            let at = self.ready(*key, *first)?;
+            let Some(slot) = self.writers.get_mut(at) else {
                 return Err(());
             };
-            sys::write_all(writer.fd, out).map_err(|_| ())?;
-            writer.size += out.len();
-            writer.dirty = true;
+            sys::write_all(slot.writer.fd, out).map_err(|_| ())?;
+            slot.writer.size += out.len();
+            slot.writer.dirty = true;
         }
         Ok(seqnums)
     }
 
-    /// Make sure class `index` has a segment with room, begun at `first`
-    /// if a new one is needed; a full or day-old one is sealed first.
-    fn ready(&mut self, index: usize, first: u64) -> Result<(), ()> {
+    /// The writer of class and owner `key`, if there is one.
+    fn slot_of(&self, key: Key) -> Option<usize> {
+        self.writers
+            .iter()
+            .position(|slot| (slot.class, slot.owner) == key)
+    }
+
+    /// Make sure class and owner `key` has a segment with room, begun at
+    /// `first` if a new one is needed; a full or day-old one is sealed
+    /// first. Answers its writer's place.
+    fn ready(&mut self, key: Key, first: u64) -> Result<usize, ()> {
         let now = sys::clock_us(sys::CLOCK_REALTIME);
-        let stale = self
-            .writers
-            .get(index)
-            .and_then(Option::as_ref)
-            .is_some_and(|writer| {
-                writer.size >= SEGMENT_MAX || now.saturating_sub(writer.created_us) >= DAY_US
+        if let Some(at) = self.slot_of(key) {
+            let stale = self.writers.get(at).is_some_and(|slot| {
+                slot.writer.size >= SEGMENT_MAX
+                    || now.saturating_sub(slot.writer.created_us) >= DAY_US
             });
-        if stale {
-            self.seal(index);
+            if !stale {
+                return Ok(at);
+            }
+            self.seal(at);
         }
-        if self.writers.get(index).is_some_and(Option::is_some) {
-            return Ok(());
-        }
+        let (index, owner) = key;
         let class = self
             .classes
             .get(index)
@@ -715,7 +822,17 @@ impl Store {
         let mut header = self.header.clone();
         header.first_seqnum = first;
         header.created_us = now;
-        let name = segment::file_name(&class, &header.boot_id, first);
+        let file = segment::file_name(&class, &header.boot_id, first);
+        let name = match owner {
+            Some(uid) => {
+                // lode's, group adm (the store's set-group-id bit), 2750:
+                // the user reads theirs through lode (`access`).
+                let user = access::user_dir(uid);
+                let _ = sys::mkdirat(dir, user.as_bytes(), 0o2750);
+                alloc::format!("{user}/{file}")
+            }
+            None => file,
+        };
         let fd = sys::openat(
             dir,
             name.as_bytes(),
@@ -726,31 +843,33 @@ impl Store {
         let bytes = header.encode();
         sys::ftruncate(fd, 0).map_err(|_| ())?;
         sys::write_all(fd, &bytes).map_err(|_| ())?;
-        if let Some(slot) = self.writers.get_mut(index) {
-            *slot = Some(Writer {
+        self.writers.push(Slot {
+            class: index,
+            owner,
+            writer: Writer {
                 fd,
                 name,
                 size: bytes.len(),
                 created_us: now,
                 dirty: true,
-            });
-        }
+            },
+        });
         self.vacuum();
-        Ok(())
+        Ok(self.writers.len() - 1)
     }
 
-    /// Seal class `index`'s segment: synced and closed, the next record
-    /// begins another.
-    fn seal(&mut self, index: usize) {
-        let dir = self.dir_of(index);
-        if let Some(slot) = self.writers.get_mut(index)
-            && let Some(writer) = slot.take()
-        {
-            let _ = sys::fdatasync(writer.fd);
-            sys::close(writer.fd);
-            store::write_summary(dir, &writer.name);
-            self.to_compress.push((dir, writer.name));
+    /// Seal the segment of writer `at`: synced and closed, the next record
+    /// of its class and owner begins another.
+    fn seal(&mut self, at: usize) {
+        if at >= self.writers.len() {
+            return;
         }
+        let slot = self.writers.remove(at);
+        let dir = self.dir_of(slot.class);
+        let _ = sys::fdatasync(slot.writer.fd);
+        sys::close(slot.writer.fd);
+        store::write_summary(dir, &slot.writer.name);
+        self.to_compress.push((dir, slot.writer.name));
     }
 
     /// Queue every sealed segment not yet compressed -- sealed by an older
@@ -759,8 +878,7 @@ impl Store {
         let active: Vec<String> = self
             .writers
             .iter()
-            .flatten()
-            .map(|writer| writer.name.clone())
+            .map(|slot| slot.writer.name.clone())
             .collect();
         for each in self.segments() {
             if !active.contains(&each.name) && !store::is_compressed(each.dir, &each.name) {
@@ -807,8 +925,7 @@ impl Store {
         let active: Vec<&str> = self
             .writers
             .iter()
-            .flatten()
-            .map(|writer| writer.name.as_str())
+            .map(|slot| slot.writer.name.as_str())
             .collect();
         let mut done = 0;
         for each in self.segments().iter().rev() {
@@ -827,11 +944,16 @@ impl Store {
     /// rotate`), so a segment `lode delete` may rewrite is never the one
     /// being written.
     fn rotate_all(&mut self) {
-        for index in 0..self.writers.len() {
-            if self.writers.get(index).is_some_and(Option::is_some) {
-                self.seal(index);
-                let _ = self.ready(index, self.next);
+        let keys: Vec<Key> = self
+            .writers
+            .iter()
+            .map(|slot| (slot.class, slot.owner))
+            .collect();
+        for key in keys {
+            if let Some(at) = self.slot_of(key) {
+                self.seal(at);
             }
+            let _ = self.ready(key, self.next);
         }
     }
 
@@ -841,23 +963,24 @@ impl Store {
         if !urgent && now.saturating_sub(self.synced_at) < SYNC_US {
             return;
         }
-        for writer in self.writers.iter_mut().flatten() {
-            if writer.dirty {
-                let _ = sys::fdatasync(writer.fd);
-                writer.dirty = false;
+        for slot in &mut self.writers {
+            if slot.writer.dirty {
+                let _ = sys::fdatasync(slot.writer.fd);
+                slot.writer.dirty = false;
             }
         }
         self.synced_at = now;
     }
 
-    /// Remove what the classes and the stores' limits no longer keep.
+    /// Remove what the classes and the stores' limits no longer keep: the
+    /// system's segments in each directory against its limit, and each
+    /// user's against a quarter of it.
     fn vacuum(&self) {
         let now = sys::clock_us(sys::CLOCK_REALTIME);
         let active: Vec<&str> = self
             .writers
             .iter()
-            .flatten()
-            .map(|writer| writer.name.as_str())
+            .map(|slot| slot.writer.name.as_str())
             .collect();
         let mut dirs = alloc::vec![(self.volatile, RUNTIME_MAX)];
         if let Some(fd) = self.persistent {
@@ -865,19 +988,32 @@ impl Store {
         }
         for (dir, limit) in dirs {
             let segments = store::all_segments(&[Dir { fd: dir }]);
-            let kept: Vec<Kept> = segments
+            let mut owners: Vec<Option<u32>> = segments
                 .iter()
-                .map(|each| Kept {
-                    class: String::from(segment::class_of_name(&each.name).unwrap_or_default()),
-                    name: each.name.clone(),
-                    created_us: store::header(each).map_or(0, |header| header.created_us),
-                    size: store::size(each),
-                    active: active.contains(&each.name.as_str()),
-                })
+                .map(|each| access::owner_of_path(&each.name))
                 .collect();
-            for name in retention::vacuum(&self.classes, &kept, now, limit) {
-                let _ = sys::unlinkat(dir, name.as_bytes());
-                let _ = sys::unlinkat(dir, alloc::format!("{name}.sum").as_bytes());
+            owners.sort_unstable();
+            owners.dedup();
+            for owner in owners {
+                let kept: Vec<Kept> = segments
+                    .iter()
+                    .filter(|each| access::owner_of_path(&each.name) == owner)
+                    .map(|each| Kept {
+                        class: String::from(
+                            segment::class_of_name(access::base_name(&each.name))
+                                .unwrap_or_default(),
+                        ),
+                        name: each.name.clone(),
+                        created_us: store::header(each).map_or(0, |header| header.created_us),
+                        size: store::size(each),
+                        active: active.contains(&each.name.as_str()),
+                    })
+                    .collect();
+                let limit = if owner.is_some() { limit / 4 } else { limit };
+                for name in retention::vacuum(&self.classes, &kept, now, limit) {
+                    let _ = sys::unlinkat(dir, name.as_bytes());
+                    let _ = sys::unlinkat(dir, alloc::format!("{name}.sum").as_bytes());
+                }
             }
         }
     }
@@ -892,6 +1028,7 @@ fn finish_compressing(job: Sealing) {
         dir: job.dir,
         name: job.name.clone(),
         first: 0,
+        passed: None,
     };
     if store::size(&segment) != job.size {
         return;
@@ -900,7 +1037,7 @@ fn finish_compressing(job: Sealing) {
     if packed.len() as u64 >= job.size {
         return;
     }
-    let fresh = alloc::format!(".{}.z.new", job.name);
+    let fresh = access::temporary(&job.name, ".z.new");
     let Ok(fd) = sys::openat(
         job.dir,
         fresh.as_bytes(),

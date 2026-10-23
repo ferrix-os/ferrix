@@ -1684,3 +1684,193 @@ mod receiving {
         let _ = String::new();
     }
 }
+
+fn unit_line(text: &str, stream: crate::units::Stream) -> crate::units::UnitLine {
+    crate::units::UnitLine {
+        unit: String::from("web.service"),
+        invocation: Some([0x5a; 16]),
+        pid: 812,
+        uid: 1000,
+        gid: 1000,
+        stream,
+        monotonic_us: 4_000_000,
+        text: Vec::from(text.as_bytes()),
+    }
+}
+
+#[test]
+fn a_unit_line_crosses_inits_socket_whole() {
+    use crate::units::{self, Stream};
+    let line = unit_line("listening on :80 \u{1b}[1mnow\u{1b}[0m", Stream::Err);
+    let mut bytes = Vec::new();
+    units::encode(&line, &mut bytes);
+    assert_eq!(
+        bytes,
+        b"L web.service 5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a 812 1000 1000 err 4000000 listening on :80 \x1b[1mnow\x1b[0m\n"
+    );
+    let read = units::decode(bytes.strip_suffix(b"\n").unwrap()).unwrap();
+    assert_eq!(read, line);
+    let no_run = units::decode(b"L x.service - 1 0 0 out 5 a b").unwrap();
+    assert_eq!(no_run.invocation, None);
+    assert_eq!(no_run.text, b"a b");
+    for bad in [
+        &b"L x.service - 1 0 0 sideways 5 text"[..],
+        b"L x.service 12 1 0 0 out 5 text",
+        b"L  - 1 0 0 out 5 text",
+        b"X x.service - 1 0 0 out 5 text",
+        b"L x.service - one 0 0 out 5 text",
+    ] {
+        assert_eq!(units::decode(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn a_unit_line_is_a_trusted_record() {
+    use crate::units::{self, Stream};
+    let now = Now {
+        realtime_us: 1_700_000_010_000_000,
+        monotonic_us: 10_000_000,
+    };
+    let record = units::record(&unit_line("port 2 failed to start", Stream::Err), now);
+    assert_eq!(record.get("_SYSTEMD_UNIT"), Some(&b"web.service"[..]));
+    assert_eq!(record.get("UNIT"), Some(&b"web.service"[..]));
+    assert_eq!(record.get("SYSLOG_IDENTIFIER"), Some(&b"web"[..]));
+    assert_eq!(record.get("_STREAM"), Some(&b"stderr"[..]));
+    assert_eq!(record.get("_TRANSPORT"), Some(&b"stdout"[..]));
+    assert_eq!(record.get("_PID"), Some(&b"812"[..]));
+    assert_eq!(record.get("_UID"), Some(&b"1000"[..]));
+    assert_eq!(
+        record.get("_SYSTEMD_INVOCATION_ID"),
+        Some(&b"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"[..])
+    );
+    assert_eq!(record.get("_KERNEL_SEQNUM"), None);
+    assert_eq!(record.message(), b"port 2 failed to start");
+    // The level its words say, as the console copy's would be.
+    assert_eq!(record.priority, 3);
+    assert_eq!(crate::access::owner(&record), Some(1000));
+}
+
+#[test]
+fn a_console_copy_pairs_with_its_trusted_line() {
+    use crate::units::{self, Pairing, Stream};
+    let now = Now {
+        realtime_us: 1_700_000_010_000_000,
+        monotonic_us: 10_000_000,
+    };
+    let line = unit_line("hello", Stream::Out);
+    let copy_of = |line: &units::UnitLine, seq: u64| {
+        let kernel = kmsg::KernelRecord {
+            facility: 1,
+            level: 6,
+            seq,
+            usec: 9_000_000,
+            text: units::console_text(line),
+        };
+        ingest::from_kernel(&kernel, now)
+    };
+    let copy = copy_of(&line, 77);
+    assert!(units::is_unit_copy(&copy));
+    let mut pairing = Pairing::default();
+    let mut out = Vec::new();
+    // No trusted line: the copy comes back, to be stored alone.
+    let copy = pairing.console(copy).unwrap_err();
+    pairing.trusted(units::record(&line, now), 10_000_000, &mut out);
+    assert!(out.is_empty());
+    let paired = pairing.console(copy).unwrap();
+    assert_eq!(paired.get("_KERNEL_SEQNUM"), Some(&b"77"[..]));
+    assert_eq!(paired.get("_SYSTEMD_UNIT"), Some(&b"web.service"[..]));
+    assert_eq!(paired.monotonic_us, 9_000_000);
+    assert!(!pairing.is_waiting());
+    // Another unit's copy, or another pid's, is not this line's.
+    pairing.trusted(units::record(&line, now), 10_000_000, &mut out);
+    let mut other = line.clone();
+    other.pid = 813;
+    assert!(pairing.console(copy_of(&other, 78)).is_err());
+    // A trusted line whose copy never comes is stored alone, in time.
+    pairing.expire(10_000_000 + units::PAIR_US - 1, &mut out);
+    assert!(out.is_empty());
+    pairing.expire(10_000_000 + units::PAIR_US, &mut out);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].get("_KERNEL_SEQNUM"), None);
+    // A copy stored alone first: the trusted line after it is not stored
+    // again.
+    let alone = copy_of(&line, 79);
+    pairing.stored_alone(&alone, 20_000_000);
+    out.clear();
+    pairing.trusted(units::record(&line, now), 20_000_100, &mut out);
+    assert!(out.is_empty());
+    assert!(!pairing.is_waiting());
+    assert_eq!(pairing.late, 1);
+}
+
+#[test]
+fn records_go_to_their_owners_segments() {
+    use crate::access::{self, Packet};
+    let mut record = record(1, "x");
+    assert_eq!(access::owner(&record), None);
+    record.push("_UID", b"0");
+    assert_eq!(access::owner(&record), None);
+    let mut person = Record::new(6, 0, 0);
+    person.push("_UID", b"1000");
+    assert_eq!(access::owner(&person), Some(1000));
+    let mut nobody = Record::new(6, 0, 0);
+    nobody.push("_UID", b"65534");
+    assert_eq!(access::owner(&nobody), None);
+    // A sender's own `_UID` is never taken: only lode writes `_` fields.
+    let mut forged = Record::new(6, 0, 0);
+    forged.push_untrusted("_UID", b"1000");
+    assert_eq!(access::owner(&forged), None);
+    assert_eq!(access::user_dir(1000), "user-1000");
+    assert_eq!(access::user_of_dir("user-1000"), Some(1000));
+    assert_eq!(access::user_of_dir("user-"), None);
+    assert_eq!(access::user_of_dir("user-10x"), None);
+    let path = "user-1000/system@ab-0000000000000001.fxj";
+    assert_eq!(access::owner_of_path(path), Some(1000));
+    assert_eq!(access::owner_of_path("system@ab-1.fxj"), None);
+    assert_eq!(access::base_name(path), "system@ab-0000000000000001.fxj");
+    assert_eq!(
+        segment::class_of_name(access::base_name(path)),
+        Some("system")
+    );
+    assert_eq!(
+        access::temporary(path, ".sum.new"),
+        "user-1000/.system@ab-0000000000000001.fxj.sum.new"
+    );
+    assert_eq!(access::temporary("a.fxj", ".new"), ".a.fxj.new");
+    let file = Packet::File(String::from(path));
+    assert_eq!(Packet::decode(&file.encode()), Some(file));
+    assert_eq!(Packet::decode(b"END 3\n"), Some(Packet::End(3)));
+    for bad in [
+        &b"F ../etc/shadow\n"[..],
+        b"F user-1000//x\n",
+        b"F \n",
+        b"F x",
+        b"END x\n",
+    ] {
+        assert_eq!(Packet::decode(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn a_summary_keeps_invocations_and_older_readers_ignore_them() {
+    use crate::summary::Summary;
+    let mut one = record(1, "a");
+    one.push(
+        "_SYSTEMD_INVOCATION_ID",
+        b"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    );
+    let summary = Summary::decode(&Summary::of(&[one]).encode()).unwrap();
+    let wanted = filter::parse("invocation = \"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\"").unwrap();
+    let other = filter::parse("invocation = \"00000000000000000000000000000000\"").unwrap();
+    assert!(summary.may_match(&wanted));
+    assert!(!summary.may_match(&other));
+    // A field number past what a reader knows is ignored, not misread.
+    let mut values = summary.values.clone().unwrap();
+    values.push((200, Vec::from(&b"future"[..]), 1));
+    let later = Summary {
+        values: Some(values),
+        ..summary
+    };
+    let read = Summary::decode(&later.encode()).unwrap();
+    assert!(read.may_match(&wanted));
+}

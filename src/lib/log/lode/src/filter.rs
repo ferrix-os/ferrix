@@ -207,6 +207,9 @@ fn selector(name: &str) -> Selector {
         "rule" => &["RULE"],
         "session" => &["SESSION_ID"],
         "driver" => &["_FERRIX_DRIVER"],
+        "invocation" => &["_SYSTEMD_INVOCATION_ID"],
+        "stream" => &["_STREAM"],
+        "uid" => &["_UID"],
         other => {
             return Selector::Fields(alloc::vec![String::from(other)]);
         }

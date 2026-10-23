@@ -20,11 +20,13 @@ mod arch;
 mod capture;
 mod cli;
 mod front;
+mod handout;
 mod heap;
 mod seat;
 mod serve;
 mod store;
 mod sys;
+mod units;
 mod upload;
 mod zone;
 

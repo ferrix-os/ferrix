@@ -1041,11 +1041,19 @@ svc scope …            svc set-property unit Key=value [--persistent]
 svc top                (cgroup usage per unit, from the controller files)
 ```
 
-There is no journal. A service's standard output and error default to `log`:
-a pipe init reads, prefixes each line with the unit's name, writes to the
-console, and keeps in a ring of the last 256 lines per unit for
-`svc log unit`. A journal, if one is ever wanted, is a service that takes
-`Uses=ferrix.log`, and nothing here needs to be written differently for it.
+A service's standard output and error default to `log`: a pipe init
+reads -- one for standard output and one for standard error -- prefixes
+each line with the unit's name, writes to the console, and keeps in a ring
+of the last 256 lines per unit. Since 2026-10-23 each line also goes to the
+log manager, lode, on its root-only `/run/lode/units`, with the unit, its
+run, the process, its ids and the stream (`docs/LOGGING.md` §4.2, §18
+"Users' own records and units' runs"); nothing waits for lode, and the
+console copy is how a line reaches the log while lode is not there. Each
+start of a unit -- each time its cgroup is made -- draws a run id, which its
+processes get as `INVOCATION_ID` and `svc status` shows. `svc status` ends
+with the run's last ten lines and `svc log unit` shows the current or last
+run, both from lode (`lode -u UNIT@last`), falling back to init's ring when
+lode keeps nothing the caller may read.
 
 ## 11. What the kernel needs, besides stage 13
 

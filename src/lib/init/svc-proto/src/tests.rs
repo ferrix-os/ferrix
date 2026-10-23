@@ -63,6 +63,7 @@ fn answers() -> Vec<Answer> {
                 result: Some(s("success")),
                 status: Some(s("serving")),
                 cgroup: Some(s("system.slice/a.service")),
+                invocation: Some(s("5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a")),
             },
         ]),
         Answer::Lines(vec![s("one"), s("")]),

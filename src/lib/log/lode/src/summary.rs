@@ -5,7 +5,8 @@
 //! the segment's sequence and time range, its record count, its priority
 //! range, and every value it holds of the fields queries name most --
 //! `SYSLOG_IDENTIFIER`, `UNIT`, `_SYSTEMD_UNIT`, `_TRANSPORT`,
-//! `SESSION_ID`, `_FERRIX_DRIVER` -- with a count each. A reader skips a
+//! `SESSION_ID`, `_FERRIX_DRIVER`, `_SYSTEMD_INVOCATION_ID` -- with a count
+//! each. A reader skips a
 //! segment whose summary says the query cannot match ([`Summary::may_match`]),
 //! and lists boots and top talkers from summaries alone. A segment with no
 //! summary (the one being written, one sealed by an older lode) is read.
@@ -28,13 +29,16 @@ use crate::record::Record;
 const MAGIC: &[u8; 8] = b"FXJSUM01";
 
 /// The fields a summary keeps the values of, by their number in the file.
-pub const FIELDS: [&str; 6] = [
+/// New fields go at the end: a reader that knows fewer ignores the values
+/// of the ones it does not know.
+pub const FIELDS: [&str; 7] = [
     "SYSLOG_IDENTIFIER",
     "UNIT",
     "_SYSTEMD_UNIT",
     "_TRANSPORT",
     "SESSION_ID",
     "_FERRIX_DRIVER",
+    "_SYSTEMD_INVOCATION_ID",
 ];
 
 /// At most this many values are kept; a segment with more is summarised

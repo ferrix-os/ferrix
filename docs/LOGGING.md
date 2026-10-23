@@ -291,7 +291,7 @@ with no kernel change:
 
 | Path | Identity, and from whom | Race? |
 |---|---|---|
-| A unit's standard output and error | init, which made the pipe for that unit's spawn: unit, invocation, main pid, stream | none: a dying service's last lines are its unit's, whatever the process |
+| A unit's standard output and error | init, which made the pipes for that unit's spawn: unit, invocation, main pid, stream, ids (as built: each line on the root-only `/run/lode/units`, §18) | none: a dying service's last lines are its unit's, whatever the process |
 | A native channel (`ferrix.log`) | init, when it routes the OPEN (`CONNECT` names the client unit, `docs/INIT.md` §6); `devmgr` for a driver's channel | none |
 | A stdout stream (`lode cat`, hyprix's programs) | `SO_PEERCRED` at `connect`, resolved through `/proc` at `accept`, while the writer is necessarily alive, and kept for the stream's life | none after accept |
 | `/dev/log`, the journal socket | `SCM_CREDENTIALS`, stamped by the kernel at send time (pid, uid, gid); unit, comm and exe from `/proc` at receive, with a per-pid cache of the last resolution kept 10 s after the pid's last record | uid and pid: none. Unit, comm, exe: only for a sender that exits before its *first* datagram is read |
@@ -1019,7 +1019,10 @@ with `ferrix.intelgpu.trace` off).
 The directory is `lode:lode 2755`; system segments `lode:adm 0640`; a user's
 directory `user-<uid>/` is `lode:<uid> 0750` and its segments
 `lode:<uid's primary group> 0640`, which with Ferrix's user private groups
-(`ferrix:x:1000:`) is that user alone. Only `lode` writes. USER-WISHES
+(`ferrix:x:1000:`) is that user alone. Only `lode` writes. (As built, a
+user's directory and segments are `lode:adm`, like the system's, and the
+user is handed theirs by lode: one group per file cannot be both the
+user's and `adm`'s, §18 "Users' own records and units' runs".) USER-WISHES
 (theme 14) warns against "file permissions over a shared file"; here no
 file is shared between readers of different rights: a record is in
 exactly one owner's segments. `wheel` is not a reader by membership; a
@@ -1150,7 +1153,11 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 records, and store-and-forward to a collector (§10.2's first part);
 compression of sealed segments, and the write-budget row (§8.3) as
 below, and the customer's order after them: TLS forwarding and
-`lode-receive` on a Linux host (§10.2, §10.3), for the viewer on nazuna.
+`lode-receive` on a Linux host (§10.2, §10.3), for the viewer on nazuna;
+then the first of the three steps the customer approved after §20's audit:
+units' own streams with their runs, and users' own records (§18 "Users'
+own records and units' runs"). Next: the journalctl compatibility pack,
+then `lode top` and alerts.
 The viewer is a separate agent's, a Rust desktop app built from the
 customer's design. Follow-up rows: the uploader as a native service in a
 sealed job (today a plain Linux service, §18); a machine id written at
@@ -1819,6 +1826,73 @@ std program against musl as dhcp is, with two programs:
   `host-ferrix/`); RFC 5424 and OTLP; certificate revocation (a paired
   machine is unpaired by removing its `.pki/clients/NAME.pem`).
 
+### Users' own records and units' runs, as built (2026-10-23)
+
+The first of the three steps the customer approved after §20's audit
+(§20.1 gaps 6 and 10, themes 12 and 14).
+
+* **Units' streams, attributed by init** (§4.2). init makes a pipe for a
+  unit's standard output and another for its standard error (an error that
+  inherits a log gets its own), and hands lode every line on
+  `/run/lode/units` -- made by lode as root, 0600, any peer but root
+  refused -- with the unit, its run, the process, its uid and gid and the
+  stream (`ferrix-lode-core` `units`). lode stores it with
+  `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID` and
+  `_GID`, `_TRANSPORT=stdout`, and the identifier and level its words say,
+  as before. Nothing waits for lode: init's connection is non-blocking,
+  what lode is slow to take is not sent, and a lode that is gone is looked
+  for again once a second.
+* **The console copy is paired, not stored twice.** init still writes every
+  line to the console, after the socket: gates read units' lines there, and
+  it is how a line reaches the log while lode is not running. lode pairs a
+  copy it reads in the kernel log with the trusted line it was handed (same
+  unit, pid and message): the trusted record takes the copy's
+  `_KERNEL_SEQNUM`, so `verify --kernel` still finds no gap, and the copy is
+  not stored. A copy with no trusted line -- lode was down, or init's
+  socket full -- is stored as before, with `UNIT` read from its text. A
+  trusted line waits for its copy until the kernel log has been read to its
+  end and 2 s have passed. Standard error is not raised to warning (§5
+  said it would be): most of Ferrix's services write their ordinary lines
+  there, so a stream says where a line went, not how bad it is.
+* **Runs** (§9.2). init draws 32 hex digits each time a unit's cgroup is
+  made -- each start -- gives them to its processes as `INVOCATION_ID`,
+  and says them in `svc status` (`Invocation:`). Summaries keep
+  `_SYSTEMD_INVOCATION_ID`'s values, so a run's records skip every other
+  segment; a reader that knows fewer summary fields ignores the new one.
+  `lode -u UNIT@last` is the current or last run, `@-1` the one before,
+  `@N` the Nth kept, `@ID` one run; `--invocation` and `-I` as journalctl's.
+  `svc status UNIT` ends with the run's last ten lines and `svc log UNIT` is
+  the run (`lode -u UNIT@last -n 50`), each falling back to init's ring
+  when lode keeps nothing the caller may read.
+* **A user's own records** (§12.1, `access`). A record whose trusted
+  `_UID` is 1000 or more (never `nobody`) goes to `user-<uid>/` beside the
+  system's segments, a series per retention class, vacuumed against a
+  quarter of the store's limit. Every file stays `lode:adm 0640`, so root,
+  `adm` and the uploader read them as before (`lode-upload` reads the users'
+  directories too). A user who cannot open the store is handed theirs:
+  `lode` connects to `/run/lode/read` (`SOCK_SEQPACKET`, 0666), and lode,
+  having read the caller's uid with `SO_PEERCRED`, passes each of that
+  user's segments and summaries open for reading (`SCM_RIGHTS`), then
+  `END`. The reader reads them itself; lode opens and never reads for
+  anyone. Unix permissions name one group a file, and a user's segments
+  must be `adm`'s too: that is why the design's `lode:<uid>` modes were not
+  used.
+* `test-log` on all three architectures: a unit's standard error stored
+  once, under its unit, `_STREAM=stderr`, with its console copy's kernel
+  sequence number; a oneshot started twice told apart by `-u twice@last`,
+  `@-1`, its invocation id, `svc log` and `svc status`; a unit running as
+  uid 1000 reads its two lines with their stream and none of lode's own
+  records, which are the system's; root finds `user-1000/` and reads them.
+* **The viewer**: `lode-viewer` already looks in `user-<uid>/` as root or
+  `adm`; a person who is neither needs it to ask `/run/lode/read` as `lode`
+  does (`ferrix_lode_core::access` has the packets) -- a change in the
+  viewer, told to its agent. The store's format did not change.
+* Not yet: `_EXE`; init writing units' lines to the console only at or
+  above `MaxLevelConsole=` once lode takes them (§13.2), which waits for the
+  gates that read units' lines from the console to read them from lode.
+* Kernel lines: 0. init, `svc`, lode and `lode-upload` are ring-3
+  programs outside the item.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
@@ -1844,20 +1918,20 @@ architectures.
 | 3 | A real filter language | built | `--where` with and/or/not, globs, `~`; rules, retention, capture and upload use it (`filter.rs`, host tests) | 1: `~` is a substring, not a regular expression |
 | 4 | Noise controlled at ingest, never silent | partly | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `test-log` held/folded rows | 2: `lode top` (§7.4) |
 | 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row) | 1: journalctl's `--vacuum-size/-time/-files` and `--disk-usage` as commands |
-| 6 | Every entry attributed; stdout vs stderr | partly | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' output arrives through init's console as `UNIT` (untrusted) | 4: init hands lode each unit's own stream (`_SYSTEMD_UNIT`, `_STREAM`, `_SYSTEMD_INVOCATION_ID` trusted), `_EXE`, a dying process's last lines (§4.2) |
+| 6 | Every entry attributed; stdout vs stderr | built | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' lines handed over by init with `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID`, `_GID` (§18 "Users' own records and units' runs"; `test-log` "stream" row) | 0.5: `_EXE` |
 | 7 | Output usable without flags | partly | `-o human` with year, zone and level letter (`?` for none), never truncated; 11 journald formats | 2: `--format` templates; colour on a terminal; a pager |
 | 8 | A crash costs at most the unsynced tail | built | per-entry CRC and torn-tail cut, restart without loss (`test-log`: SIGKILL mid-flood, `verify --kernel` "unsaid gaps: none"), sealed segments immutable | 1: a full or failing disk degrading to RAM (§11.4) is untested |
 | 9 | Store-and-forward, syslog in and out | partly | `lode-upload` with cursor, back-off, TLS; `lode-receive` (`test-log-remote`); `/dev/log` in | 3: RFC 5424 out over TCP/TLS, OTLP out; 2: `lode-receive` on Ferrix and a merged view (§10.3, §10.4) |
-| 10 | The right slice by default | partly | `-b`, `--list-boots`, persistent by default, `-u` globs, `-s` sessions, marks | 3: `-u UNIT@last` (invocation ids), per-user segments so a user reads their own logs (§12) |
+| 10 | The right slice by default | built | `-b`, `--list-boots`, persistent by default, `-u` globs, `-u UNIT@last`/`@-1`, `-s` sessions, marks, users' own segments (`test-log` "runs" and "user" rows) | 0 |
 
 ### 20.2 The themes after the top ten (USER-WISHES.md)
 
 | Theme | Status | Evidence | Left |
 |---|---|---|---:|
 | 11 Previous boots, persistent by default | built | `/var/log/journal` when writable, `-b -1`, `--list-boots` | 0 |
-| 12 This run of a service | missing | no invocation ids in records | (in 10) |
+| 12 This run of a service | built | `INVOCATION_ID` from init, `-u UNIT@last`, `svc status`/`svc log` show the run (`test-log` "runs" row) | 0 |
 | 13 Full-text search | partly | `-g` (glob, any case when lower case), `--around`, marks | 1: regular expressions, `--case-sensitive` |
-| 14 Unprivileged access | missing | root and `adm` only (`cli.rs`, "permission denied") | 3: per-user segments and directories (§12.1) |
+| 14 Unprivileged access | built | users' segments in `user-<uid>/`, handed to their user by lode (`/run/lode/read`; `test-log` "user" row) | 0; the viewer asking for them is the viewer agent's |
 | 15 Rate limiting that surprises | built | every hold is said (`N_SUPPRESSED`, `N_DROPPED`, `REPEATED`); the kernel's lines never held | 0 |
 | 16 Early boot and kernel messages | built | `/dev/kmsg` read from its first record, `_KERNEL_SEQNUM`, `verify --kernel` | 0 |
 | 17 Structured logging from programs | partly | native protocol, `lode cat --journal`; tracing lines read for crate and level | 1: JSON lines on stdout turned into fields (§5) |
@@ -1891,14 +1965,14 @@ architectures.
 | 8.7 | Configuration: `WriteIntervalMs=`, `SyncIntervalSec=`, `SegmentMaxSize=` | missing | fixed in `serve.rs` | 1 |
 | 9.1-9.4 | The reader and its defaults | partly | §20.4 | see §20.4 |
 | 9.5 | `dmesg` | built | `dmesg` reads `/dev/kmsg` (`src/user/system/linux/dmesg`) | 0 |
-| 9.6 | `svc log`, `svc status` through lode | missing | `svc` does not read the log (`src/user/system/linux/init/svc`) | 2 |
+| 9.6 | `svc log`, `svc status` through lode | built | `svc log` is `lode -u UNIT@last`, `svc status` ends with the run's last lines, init's ring when lode cannot answer (`test-log` "runs" row) | 0 |
 | 9.7 | Benchmark | partly | `lode bench` at 200,000 records | 1 |
 | 10.1 | `box-log` | built | `cargo xtask box-log` | 0 |
 | 10.2 | Continuous forwarding | partly | export and JSON over HTTP(S), TLS 1.3, client certificates (`test-log-remote`) | 3: RFC 5424, OTLP |
 | 10.3 | Receiving | partly | `lode-receive` on Linux | 2: on Ferrix, RFC 3164/5424 in |
 | 10.4 | A merged view | missing | `-m` accepted and ignored | 2 |
 | 11 | Isolation, restart without loss, start order | built | `test-log` | 0 |
-| 12.1 | Who may read what | partly | root and `adm` | 3 (theme 14) |
+| 12.1 | Who may read what | built | root and `adm` everything, a user their own (theme 14) | 0 |
 | 12.2 | Sessions and authd | built | `_SESSION_ID`, `-s`, `/run/lode/seat` (`test-log`, `test-compositor`) | 0 |
 | 12.3 | Privacy | partly | `_CMDLINE` off | 1 (theme 23) |
 | 13.1 | Ad-hoc logs moved onto lode | missing | `/var/log/audit`, files of programs | 2 |
@@ -1930,7 +2004,7 @@ architectures.
 | journald.conf `Storage=`, `SystemMaxUse=`, `MaxRetentionSec=`, `Compress=` | partly | `retention.conf` classes say the same differently; compression always on | 0.5: read journald.conf's keys |
 | `RateLimitIntervalSec=`, `RateLimitBurst=` | partly | the limiter's bursts and rules (`limit`), not these keys | 0.5 |
 | `MaxLevelStore=`, `MaxLevelConsole=`, `ForwardToSyslog/KMsg/Console/Wall=` | missing | `level` rules do the first | 1 |
-| `SplitMode=uid` | missing | per-user segments (theme 14) | (in 14) |
+| `SplitMode=uid` | built, always on | users' own segments (theme 14) | 0 |
 | `sd_journal_print`, `/dev/log`, stdout streams, `systemd-cat` | built | `test-log` front row; `lode cat` | 0 |
 | `sd-journal` / libsystemd reading the files | missing, by design | §8.6: the format is lode's; `-o export` is the bridge | 0 |
 | `systemd-journal-upload` / `-remote` interoperability | partly | `lode-upload` posts the same export; a real journal-remote is not tested (none on nazuna) | 1 |

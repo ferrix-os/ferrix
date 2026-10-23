@@ -92,6 +92,43 @@ drop where id = dropme
 limit 100000/30s where transport = console
 ";
 
+/// A unit that runs as the user `ferrix` (uid 1000): its lines go to that
+/// user's segments, and as that user it reads them through lode's
+/// `/run/lode/read` -- and nothing of the system's.
+const USER_UNIT: &str = "\
+# test-log's user (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Write as a user, and read one's own records back
+
+[Service]
+Type=oneshot
+User=ferrix
+ExecStart=/bin/busybox sh /lib/lode-user.sh
+";
+
+/// What [`USER_UNIT`] runs.
+const USER_SCRIPT: &str = r#"bb=/bin/busybox
+echo "user line on stdout"
+echo "user line on stderr" >&2
+$bb sleep 2
+own=$(/bin/lode -b -o json -g "user line on" | $bb grep -c '"_UID":"1000"')
+system=$(/bin/lode -b -t lode -o cat | $bb wc -l)
+err=$(/bin/lode -b -o json -g "user line on stderr" | $bb grep -c '"_STREAM":"stderr"')
+echo "lode-user: own $own system $system stderr $err"
+"#;
+
+/// A oneshot started twice: two runs of one unit, each with its own
+/// `INVOCATION_ID`, which `-u UNIT@last`, `@-1` and `svc status` tell apart.
+const TWICE_UNIT: &str = "\
+# test-log's two runs (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Say which run this is
+
+[Service]
+Type=oneshot
+ExecStart=/bin/busybox sh -c \"echo run $INVOCATION_ID\"
+";
+
 /// The marker the flood's unit ends with.
 const DONE: &str = "lode-test: done";
 
@@ -161,6 +198,24 @@ echo "from a stream" | /bin/lode cat -t streamy -p warning || say "FAIL lode cat
 echo "from the journal socket" | /bin/lode cat --journal -t nativey -p err || say "FAIL lode cat --journal"
 $bb sleep 1
 say "devlog: $($bb readlink /dev/log)"
+# Units' own streams (step 1 of 2026-10-23's order): init hands lode each
+# line with its unit, run, stream and ids; the console's copy is paired, not
+# stored twice.
+echo "to stderr once" >&2
+$bb sleep 1
+say "stream: $(/bin/lode -b -u lode-test -g 'to stderr once' -o json | $bb grep '"_STREAM":"stderr"' | $bb grep -c '"_SYSTEMD_UNIT":"lode-test.service"') $(/bin/lode -b -g 'to stderr once' -o cat | $bb wc -l) $(/bin/lode -b -g 'to stderr once' -o json | $bb grep -c '"_KERNEL_SEQNUM"')"
+# Runs: a oneshot twice, its current run and the one before.
+/bin/svc start twice.service > /dev/null 2>&1
+/bin/svc start twice.service > /dev/null 2>&1
+$bb sleep 1
+inv=$(/bin/svc status twice.service | $bb sed -n 's/^ *Invocation: //p')
+say "runs: $(/bin/lode -b -u twice -o cat | $bb grep -c '^run ') $(/bin/lode -u twice@last -o cat | $bb grep -c "^run $inv\$") $(/bin/lode -u twice@-1 -o cat | $bb grep '^run ' | $bb grep -vc "$inv") $(/bin/lode -u twice@last -o json | $bb grep -c "\"_SYSTEMD_INVOCATION_ID\":\"$inv\"") $(/bin/svc log twice.service | $bb grep -c '^.*run ') $(/bin/svc status twice.service | $bb grep -c "run $inv")"
+# A user's own records (§12.1): written to user-1000/, read by that user
+# through lode, and by root beside everything else.
+/bin/svc start lode-user.service > /dev/null 2>&1
+$bb sleep 1
+say "user: $(/bin/lode -b -u lode-user -g 'lode-user: own' -o cat | $bb sed 's/^lode-user: //')"
+say "users: $($bb ls /var/log/journal | $bb grep -c '^user-1000$') $(/bin/lode -b -o json -g 'user line on' | $bb grep -c '"_UID":"1000"')"
 say "front: $(/bin/lode -b -t sysloggy -o json | $bb grep -c '"_TRANSPORT":"syslog"') $(/bin/lode -b -t streamy -p warning -o json | $bb grep -c '"_TRANSPORT":"stdout"') $(/bin/lode -b -t nativey -p err -o json | $bb grep -c '"_TRANSPORT":"journal"') $(/bin/lode -b -t sysloggy -o json | $bb grep -c '"_PID":"[0-9]') $(/bin/lode -b -t sysloggy -o json | $bb grep '"_SYSTEMD_UNIT"' | $bb grep -vc '"_SYSTEMD_UNIT":"lode-test.service"')"
 # Sessions (step 2a): what a seat's owner tells lode, kept across lode's restart.
 /bin/lode session begin 7 seat=seat0 uid=0 pid=$$ scope=session-7.scope unit=lode-test.service token=00112233445566778899aabbccddeeff || say "FAIL lode session begin"
@@ -239,6 +294,28 @@ say "no lode: $([ $said -eq 124 ] && echo hung || echo returned)"
 say done
 "#;
 
+/// The units, scripts and accounts the flood's unit uses beside itself.
+fn test_units() -> Vec<File> {
+    let mut files = Vec::new();
+    for (path, text) in [
+        ("etc/ferrix/units/lode-user.service", USER_UNIT),
+        ("etc/ferrix/units/twice.service", TWICE_UNIT),
+        ("lib/lode-user.sh", USER_SCRIPT),
+        (
+            "etc/passwd",
+            "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/:/bin/sh\n",
+        ),
+        ("etc/group", "root:x:0:\nferrix:x:1000:\n"),
+    ] {
+        files.push(File {
+            path: path.to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(text.as_bytes().to_vec()),
+        });
+    }
+    files
+}
+
 /// `cargo xtask test-log`.
 fn test_log(args: &Args) -> Result<()> {
     for arch in args.arches()? {
@@ -294,6 +371,7 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         mode: 0o755,
         content: Content::Bytes(TEST_SCRIPT.as_bytes().to_vec()),
     });
+    files.extend(test_units());
     files.push(File {
         path: "etc/ferrix/units/lode-test.service".to_owned(),
         mode: 0o644,
@@ -374,6 +452,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         _ => return Err("no sealed segment was compressed".into()),
     }
     held(lines)?;
+    attributed(lines)?;
     forwarded(lines)?;
     fast(lines)
 }
@@ -428,6 +507,41 @@ fn fast(lines: &[String]) -> std::result::Result<(), String> {
     }
     if said(lines, "lode-test: newest:") != Some("3") {
         return Err("`-u lode-test -n 3` did not give 3 lines".into());
+    }
+    Ok(())
+}
+
+/// Step 1 of the customer's order of 2026-10-23: units' streams with
+/// who wrote them, runs told apart, a user's own records.
+fn attributed(lines: &[String]) -> std::result::Result<(), String> {
+    for (what, want, why) in [
+        (
+            "lode-test: stream:",
+            "1 1 1",
+            "a unit's standard error did not come in once, under its unit with _STREAM, paired \
+             with its console copy",
+        ),
+        (
+            "lode-test: runs:",
+            "2 1 1 1 1 1",
+            "two runs of a oneshot were not told apart by -u UNIT@last, @-1, its invocation id, \
+             svc log and svc status",
+        ),
+        (
+            "lode-test: user:",
+            "own 2 system 0 stderr 1",
+            "a user did not read their own two records, with their stream, and none of the system's",
+        ),
+        (
+            "lode-test: users:",
+            "1 2",
+            "a user's records were not in user-1000/, or root could not read them",
+        ),
+    ] {
+        let got = said(lines, what).unwrap_or_default();
+        if got != want {
+            return Err(format!("{why}: `{what} {got}`, wanted `{want}`"));
+        }
     }
     Ok(())
 }
@@ -567,6 +681,10 @@ lode-test: deleted: 0 1
 lode-test: session: 2 0 1
 lode-test: capture: 1 1 1 qoif provide-stub: refused
 lode-test: front: 1 1 1 1 0
+lode-test: stream: 1 1 1
+lode-test: runs: 2 1 1 1 1 1
+lode-test: user: own 2 system 0 stderr 1
+lode-test: users: 1 2
 lode-test: devlog: /run/systemd/journal/dev-log
 lode-test: no lode: returned
 lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes

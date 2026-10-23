@@ -78,7 +78,8 @@ fn summary_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Every segment in `dirs`, by first sequence number.
+/// Every segment in `dirs`, and in each user's directory in them
+/// (`user-<uid>/`, `ferrix_lode_core::access`), by first sequence number.
 #[must_use]
 pub fn segments(dirs: &[PathBuf]) -> Vec<Segment> {
     let mut out = Vec::new();
@@ -90,19 +91,45 @@ pub fn segments(dirs: &[PathBuf]) -> Vec<Segment> {
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
             };
-            if !segment::is_segment_name(&name) {
+            if ferrix_lode_core::access::user_of_dir(&name).is_some() {
+                found_in(&entry.path(), Some(&name), &mut out);
                 continue;
             }
-            let first = segment::seqnum_of_name(&name).unwrap_or(0);
-            out.push(Segment {
-                path: entry.path(),
-                name,
-                first,
-            });
+            push_segment(entry.path(), name, &mut out);
         }
     }
     out.sort_by_key(|segment| segment.first);
     out
+}
+
+/// The segments of the user's directory `dir`, named `user/<file>`.
+fn found_in(dir: &Path, user: Option<&str>, out: &mut Vec<Segment>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if segment::is_segment_name(&name) {
+            let shown = user.map_or_else(|| name.clone(), |user| format!("{user}/{name}"));
+            let first = segment::seqnum_of_name(&name).unwrap_or(0);
+            out.push(Segment {
+                path: entry.path(),
+                name: shown,
+                first,
+            });
+        }
+    }
+}
+
+/// `path`, named `name`, if it is a segment.
+fn push_segment(path: PathBuf, name: String, out: &mut Vec<Segment>) {
+    if !segment::is_segment_name(&name) {
+        return;
+    }
+    let first = segment::seqnum_of_name(&name).unwrap_or(0);
+    out.push(Segment { path, name, first });
 }
 
 /// A store being written by the receiver: one segment open at a time,
