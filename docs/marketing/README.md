@@ -1,20 +1,26 @@
 # Ferrix press and brand kit
 
-Ferrix is an experimental Rust operating system. Its own kernel runs tested
-Linux programs without changing the binaries, while disk, network, graphics
-and input drivers run as restartable processes.
+Ferrix is an experimental Rust operating system written by a fleet of Claude
+Code sessions, with a person, the customer, deciding what they build. Its own
+kernel runs tested Linux programs without changing the binaries, while disk,
+network, graphics, input and power drivers run as restartable processes.
 
 ## Copy you can use
 
-**Short:** Ferrix runs Linux apps without Linux. It has its own Rust kernel and
-drivers that run outside the kernel.
+**Short:** Claude Code agents write Ferrix, an operating system that runs
+Linux apps without Linux. It has its own Rust kernel and drivers that run
+outside the kernel.
 
-**Longer:** Ferrix is an experimental operating system written in Rust. You can
-boot its Wayland desktop in QEMU and run unmodified Linux programs such as
-Chrome, `git`, `curl` and `rustc`. Its disk, network, graphics and input
-drivers run as separate processes that can restart after a crash. Ferrix is a
-research project; authentication and parts of process isolation are still in
-progress.
+**Longer:** Ferrix is an experimental operating system written in Rust by a
+fleet of Claude Code sessions: a product owner session, worker agents, a
+certification consultant and quality roles, with a person, the customer,
+deciding scope and priorities. You can boot its Wayland desktop in QEMU and
+run unmodified Linux programs such as Chrome, `git`, `curl` and `rustc`; on an
+Intel N150 mini PC it runs a Windows game from Steam through Proton. Its
+disk, network, graphics, input and power drivers run as separate processes
+that can restart after a crash. Ferrix is experimental and not ready for
+everyday use; certification of its kernel core is an aim, reviewed
+internally, and nothing is certified.
 
 The [README](../../README.md) has boot commands. The [technical guide](../GUIDE.md)
 shows how to reproduce the compiler and image-build tests. Check the
@@ -62,9 +68,10 @@ Write as if you are showing someone the system at your desk. Say what runs,
 how to try it and what still fails. Give a command, screenshot or source link
 for a technical claim. Avoid grand claims about changing computing or
 “redefining” operating systems. “Linux apps without Linux” is a short hook,
-not a promise that every Linux program works. Mention the Claude-led build
-process when explaining the project, after explaining what Ferrix does.
+not a promise that every Linux program works. Lead with the Claude-led build
+process: say early that Claude Code sessions write Ferrix and the customer
+decides. Never call Ferrix a hobby OS.
 
-For a press mention, link to the [website](https://ferrix-os.github.io/)
+For a press mention, link to the [website](https://ferrix-os.org/)
 and [source repository](https://github.com/ferrix-os/ferrix). Ferrix is MIT
 licensed; see [LICENSE](../../LICENSE) for the terms.

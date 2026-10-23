@@ -1,5 +1,16 @@
 # Ferrix screenshots
 
+## The N150 hero, 2026-10-23
+
+<!-- TODO(hero-n150): hero-n150.png is being taken. Fill in: the commit the
+     box booted, the machine (Intel N150 mini PC), the capture method, the
+     wallpaper (neutral), the game's resolution and what is on screen. The
+     README and the website use it as their first picture. -->
+
+**hero-n150.png** (1920x1080): Ferrix's desktop on the Intel N150 mini PC,
+with Arknights: Endfield running in a window, drawn by Ferrix's own Intel
+GPU driver. Not taken yet.
+
 ## The install guide, 2026-10-19
 
 The pictures in `install/` are [INSTALL.md](../../INSTALL.md)'s. Six of them come

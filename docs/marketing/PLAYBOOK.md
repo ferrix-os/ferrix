@@ -1,6 +1,6 @@
 # Ferrix discovery plan
 
-Updated 2026-09-27. Ferrix is experimental software. Lead with what a visitor
+Updated 2026-10-23. Ferrix is experimental software. Lead with what a visitor
 can see and try, then explain how it was built.
 
 The reusable logo, colours and short descriptions are in the
@@ -17,14 +17,15 @@ processes that can restart after a crash.
 
 Say *tested Linux programs*, rather than implying all Linux software works.
 Say *builds and boots its own x86-64 image*, rather than claiming complete
-self-hosting. The AI-agent development process belongs in the project's story
-and documentation; it is not the product headline.
+self-hosting. Lead with the AI story (the customer, 2026-10-23): say plainly
+and early that a fleet of Claude Code sessions writes Ferrix and the customer
+decides what they build. Never call Ferrix a hobby OS.
 
 ## What is already in place
 
 - The website has a descriptive title and summary, canonical URL, social
   preview tags, structured data and an XML sitemap. GitHub Pages serves it at
-  <https://ferrix-os.github.io/>.
+  <https://ferrix-os.org/>.
 - The repository has a homepage, description, focused topics, README,
   contribution guide, issue forms and Discussions. The live description and
   topics were refreshed on 2026-09-27; `tools/common/release/github-setup.sh`
@@ -72,7 +73,7 @@ recommends clear titles, useful content, crawlable pages and descriptive
 links. It says there is no way to guarantee a first-place ranking. The
 [sitemap guide](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
 calls for absolute canonical URLs; it does not promise indexing. The website
-already has a sitemap at <https://ferrix-os.github.io/sitemap.xml>.
+already has a sitemap at <https://ferrix-os.org/sitemap.xml>.
 
 After deployment, add the GitHub Pages URL to Google Search Console and Bing
 Webmaster Tools, verify ownership and submit the sitemap. The owner must do

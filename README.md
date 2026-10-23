@@ -7,21 +7,157 @@
 
 # Ferrix
 
-**Linux apps without Linux.**
+**An operating system written by a fleet of Claude Code sessions.**
 
-Boot Ferrix in QEMU and you can open its Wayland desktop, browse with Chrome,
-or run `git`, `curl` and `rustc`. Those are ordinary Linux binaries running on
-Ferrix's own Rust kernel. Disk, network, graphics and input drivers run as
-separate processes that Ferrix can restart if they crash.
+Since 2026-09-11, Claude Code sessions have written Ferrix: its Rust kernel,
+its drivers, its compositor, its shell and its tests. A person, the
+customer, decides what is built, in what order, and what is good enough.
+The sessions plan the work, write the code, review each other's changes and
+land them once their tests pass. [How the fleet works](#how-the-fleet-works)
+says who does what.
 
-Ferrix is still experimental. Logins, `su` and the lock screen check
-passwords, but parts of authentication and of process isolation are
-unfinished, so it is not ready to be your everyday OS.
+**Linux apps without Linux.** Ferrix runs tested, unchanged Linux programs
+on its own kernel: Chrome, `git`, `curl`, `rustc`, Valve's Steam client and,
+through Proton, a Windows game. Disk, network, graphics, input and power
+drivers run as separate processes that Ferrix can restart when they crash.
 
-[Try it without building](#try-it-without-building) · [Boot Ferrix](#boot-ferrix) · [See what works](#what-works) ·
-[Read the technical guide](docs/GUIDE.md) · [Visit the website](https://ferrix-os.github.io/)
+Ferrix is experimental. Logins, `su` and the lock screen check passwords,
+but it is not ready to be your everyday operating system, and most of its
+tests run in QEMU.
 
-![Ferrix's Wayland desktop with Chrome, btop and a terminal](docs/brand/screenshots/desktop-hero.png)
+[See what works](#what-works) · [Try it without building](#try-it-without-building) ·
+[Boot Ferrix](#boot-ferrix) · [Read the technical guide](docs/GUIDE.md) ·
+[Visit the website](https://ferrix-os.org/)
+
+<!-- TODO(hero-n150): the hero is a real capture of the N150's desktop with
+     Endfield windowed, still being taken. Put it at
+     docs/brand/screenshots/hero-n150.png (1920x1080 PNG, under 1.5 MB, a
+     neutral wallpaper), describe it in docs/brand/screenshots/CAPTIONS.md,
+     and check the alt text and caption below against what it shows. -->
+![Ferrix's desktop on an Intel N150 mini PC, with Arknights: Endfield in a window](docs/brand/screenshots/hero-n150.png)
+
+*Ferrix on an Intel N150 mini PC, with Arknights: Endfield running in a
+window through Ferrix's own Intel GPU driver.*
+
+## Where it stands, 2026-10-23
+
+| | |
+|---|---|
+| Commits on `main` | 3,479 in six weeks (first commit 2026-09-11) |
+| Rust in this repository | about 965,000 lines, about 48,000 of them generated tables (components in their own repositories not counted) |
+| Architectures | x86-64, AArch64 and ARMv7-A, booted on every landing that changes the image |
+| Hardware | an Intel N150 mini PC, a Pixel 7 and an STM32MP157D-DK1 board |
+
+Counted with `git rev-list --count main` and the lines of every tracked `.rs`
+file at `main` 628202493.
+
+### This week: a Windows game on a mini PC
+
+Arknights: Endfield runs on an Intel N150 mini PC under Ferrix, started from
+Steam through Proton and drawn by Mesa's Vulkan driver over Ferrix's own
+Intel GPU driver ([docs/INTEL-GPU.md](docs/INTEL-GPU.md)). That driver is not
+in the kernel: it is an ordinary process, written by following Linux's i915
+file by file. On 2026-10-23 the game ran at about 21.5 frames a second
+standing and 19.7 walking, at 1280x800. It is not smooth yet: one frame in
+a hundred takes 60 to 95 ms, and finding where those come from is the work
+under way.
+
+On the same machine the GPU driver was killed with `kill -9` while the
+system ran. Ferrix started it again, its back end was up in 12 ms, and
+Vulkan found the GPU again afterwards
+([docs/INTEL-GPU.md](docs/INTEL-GPU.md) §11). Under QEMU the driver can also
+run as two processes, a keeper that holds what programs hold and a worker
+that drives the GPU, so that a worker can die and be replaced while a
+Vulkan program goes on (§12, step 1 of its plan).
+
+## What works
+
+- **Linux programs, unchanged:** Chrome, `rustc`, `git`, `curl`, Valve's
+  `steamcmd` and Steam client, and other tested binaries, 32-bit x86 programs
+  included. Wine and Proton run Windows programs, among them Endfield's
+  launcher and the game. Claude Code runs a full session on Ferrix's desktop
+  ([docs/CLAUDE-CODE.md](docs/CLAUDE-CODE.md)). Ferrix implements the Linux
+  system calls these programs need, and has its own C library, ferrousli.
+- **A desktop:** hyprix, Ferrix's Wayland compositor, reads `hyprland.conf`
+  and tiles windows. Since this week it also has a floating layout with
+  snapping, an activities overview, title bars it draws itself, a top bar,
+  and screens added and removed while it runs
+  ([docs/DESKTOP.md](docs/DESKTOP.md)). A fullscreen program's own buffer can
+  go straight to the screen. Each display driver lists the modes its screen
+  can run, on Intel, NVIDIA and virtio GPUs, and the mode can change at run
+  time ([docs/DISPLAY.md](docs/DISPLAY.md)). GTK 4 and libadwaita programs
+  from Debian 13 run on it ([docs/GNOME.md](docs/GNOME.md)). X11 programs
+  appear as ordinary windows through yserver, an X server written in Rust.
+- **Drivers outside the kernel:** disk, network, graphics, input, sound,
+  console and power drivers run as processes. On x86-64 and AArch64 an IOMMU
+  limits what a driver's device can reach. A driver's processes are sealed
+  in a job: none can leave it except by ending, so killing the job ends them
+  all. On the N150, a ring-3 power driver sets the processor's
+  voltage-regulator current limit through typed kernel calls
+  ([docs/POWERCTL.md](docs/POWERCTL.md)).
+- **Real hardware:** on the N150, Ferrix boots to its desktop with `/` on the
+  SATA drive, its own network driver for the Motorcomm YT6801, USB input and
+  the Intel GPU ([docs/N150.md](docs/N150.md)). It has also booted on a
+  Pixel 7, on all eight cores, and on an STM32MP157D-DK1 board. NVIDIA's own
+  driver runs as a process on an RTX 3060 passed to a virtual machine.
+- **Users, namespaces and containers:** the full desktop runs as the user
+  `ferrix`, not root, and passwords are checked by `authd`. Ferrix has pid,
+  user, mount, network, UTS, IPC and cgroup namespaces, cgroup v2 limits and
+  seccomp filters; `cargo xtask test-container` runs an unprivileged
+  container under a memory limit on all three architectures.
+- **Storage, networking, updates:** the root filesystem is btrfs, read and
+  write. Inside Ferrix, `git` clones a repository and `curl` fetches over
+  HTTPS. A disk can carry two system slots, and a new system that does not
+  come up falls back to the good one ([docs/AB-BOOT.md](docs/AB-BOOT.md)).
+- **Developing Ferrix on Ferrix:** the toolchain volume carries `cargo`,
+  `clippy`, `rust-analyzer` and the helix editor, and Ferrix builds its own
+  image ([docs/DEV-ON-FERRIX.md](docs/DEV-ON-FERRIX.md)). The zinc shell is
+  zsh-compatible, runs oh-my-zsh, and behaves as zsh's `sh` emulation when it
+  is started as `sh`.
+- **A kernel without the Linux layer, as a build:** the build flag
+  `linux_abi=off` builds a kernel that speaks only Ferrix's own system calls.
+  Its code is 1.4 MB against 7.4 MB with the Linux layer, on x86-64
+  ([docs/LINUX-ABI-SEPARATION.md](docs/LINUX-ABI-SEPARATION.md)). It is built,
+  not booted or claimed for anything yet.
+
+[The roadmap](docs/roadmap/where-it-stands.md) tracks what is done and what is
+still being built, and [the backlog](docs/BACKLOG.md) what is broken.
+
+## How the fleet works
+
+Ferrix is not one long chat. It is a team of Claude Code sessions with
+roles, and one person, the customer, above them ([AGENTS.md](AGENTS.md)).
+
+- **The customer** decides scope, priorities and every question of
+  judgement: which game to aim at, how slim the kernel stays, whether a
+  power limit may be raised on real hardware.
+- **The product owner**, a Claude session, turns the customer's requests
+  into tasks, starts agents for them, and lands their work.
+- **Worker agents** each work in a git worktree of their own, build and boot
+  their change in QEMU, and send it to a shared **gate pool** that runs the
+  tests a change needs.
+- **A landing lock** lets one session at a time move `main`, fast-forward
+  only, once its tests passed.
+- **The certification consultant**, another Claude session, reviews every
+  change to the kernel's certified core before it lands, and asks for a
+  negative control: the check is broken on purpose and must fail.
+- **Quality roles** watch CI, flaky tests, documentation drift and
+  performance.
+
+The [working rules](docs/CONVENTIONS.md) come from mistakes the fleet made,
+and each says which one. Human contributions are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Certification is an aim, not a fact.** The project aims at Common
+Criteria EAL5+, DO-178C DAL C, IEC 62304 Class C and EN 50716 SIL 2 for the
+kernel's core. Nothing is certified, and no outside assessor is involved:
+the consultant's review is internal, not independent. Its findings register
+holds 28 open and 63 closed findings of 91
+([docs/certification/](docs/certification/README.md)).
+
+<p align="center">
+  <img src="docs/brand/screenshots/desktop-hero.png" alt="Ferrix's Wayland desktop with btop, a zinc terminal and Chrome" width="100%">
+</p>
 
 [![On Ferrix's desktop, rustc compiles and runs a hello-world program in a terminal, then Chrome loads Wikipedia's article on Rust](docs/brand/screenshots/demo-loop.gif)](docs/brand/screenshots/demo.mp4)
 
@@ -67,79 +203,31 @@ this tree at the commits [`components.toml`](components.toml) names.
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <a href="https://github.com/ferrix-os/yserver"><img src="docs/brand/screenshots/steam-yserver.png" alt="Steam's store on Ferrix through yserver"></a>
-      <br><b><a href="https://github.com/ferrix-os/yserver">ferrix-os/yserver</a></b><br>
-      The X server, in Rust, that Steam and other X11 programs draw through, on
-      Ferrix's rootless Wayland backend.
+      <a href="https://github.com/ferrix-os/apps"><img src="docs/brand/screenshots/vkgears.png" alt="vkgears drawing Vulkan gears on Ferrix"></a>
+      <br><b><a href="https://github.com/ferrix-os/apps">ferrix-os/apps</a></b><br>
+      Every program a person starts: Ferrix's own, like badapple and ferrofetch,
+      and those ported onto ferrousli, like foot, btop, curl, git and vkgears.
     </td>
     <td width="50%" valign="top">
       <a href="https://github.com/ferrix-os/ferrix-os.github.io"><img src="docs/brand/screenshots/website.png" alt="Ferrix's website"></a>
       <br><b><a href="https://github.com/ferrix-os/ferrix-os.github.io">ferrix-os/ferrix-os.github.io</a></b><br>
-      The website, at <a href="https://ferrix-os.github.io/">ferrix-os.github.io</a>.
+      The website, at <a href="https://ferrix-os.org/">ferrix-os.org</a>.
     </td>
   </tr>
   <tr>
+    <td width="50%" valign="top">
+      <b><a href="https://github.com/ferrix-os/yserver">ferrix-os/yserver</a></b><br>
+      The X server, in Rust, that Steam, Proton's games and other X11 programs
+      draw through, on Ferrix's rootless Wayland backend.
+    </td>
     <td width="50%" valign="top">
       <a href="https://github.com/ferrix-os/pixel7"><img src="https://raw.githubusercontent.com/ferrix-os/pixel7/main/monitor/icons/icon.png" alt="The Pixel 7 tools' icon" width="128"></a>
       <br><b><a href="https://github.com/ferrix-os/pixel7">ferrix-os/pixel7</a></b><br>
       Ferrix on the Pixel 7: the Android launcher app, the desktop build, release
       packaging and the monitor.
     </td>
-    <td width="50%" valign="top">
-      <a href="https://github.com/ferrix-os/apps"><img src="docs/brand/screenshots/vkgears.png" alt="vkgears drawing Vulkan gears on Ferrix"></a>
-      <br><b><a href="https://github.com/ferrix-os/apps">ferrix-os/apps</a></b><br>
-      Every program a person starts: Ferrix's own, like badapple and ferrofetch,
-      and those ported onto ferrousli, like foot, btop, curl, git and vkgears.
-    </td>
   </tr>
 </table>
-
-## What works
-
-- **Linux programs:** Chrome, `rustc`, `git`, `curl`, Valve's `steamcmd` and
-  other tested binaries run without patches, 32-bit x86 programs included.
-  Valve's Steam client signs in, downloads a native Linux game (Teeworlds)
-  and starts it. Claude Code runs a full session on the desktop. Ferrix implements
-  the Linux system calls they need. It also has its own C library, ferrousli,
-  for native userland programs.
-- **A desktop:** The hyprix Wayland compositor tiles windows and starts with a
-  terminal running the zinc shell. Chrome can play video with sound. X11
-  programs appear as ordinary windows through yserver, an X server written in
-  Rust. The bar, launcher and idle daemon are Rust rewrites of waybar, fuzzel
-  and hypridle that read their usual configuration files.
-- **Users and passwords:** The full desktop (`run-compositor --everything`)
-  runs as the user `ferrix`, not root, and its lock screen unlocks only with
-  that user's password. `cargo xtask run --login` boots to a console login
-  prompt, and `su` asks the user's own password. Passwords are checked by
-  `authd`, a service of Ferrix's own that stores them as Argon2id hashes.
-- **Drivers outside the kernel:** Disk, network, graphics, input, sound and
-  console drivers run as processes. On x86-64 and AArch64, an IOMMU limits their device
-  access. Ferrix can restart them after a crash.
-- **Persistent storage and networking:** The root filesystem is btrfs, and an
-  installer can put Ferrix on a virtual machine's own disk. Inside Ferrix,
-  `git` can clone a repository and `curl` can fetch over HTTPS.
-- **Developing Ferrix on Ferrix:** The toolchain volume carries `cargo`,
-  `rustfmt`, `clippy`, `rust-analyzer` and the helix editor. Ferrix builds its
-  own image, and `pkg install --replace` swaps an app in one step
-  ([docs/DEV-ON-FERRIX.md](docs/DEV-ON-FERRIX.md)).
-- **Updates with a way back:** A disk can carry two system slots. `bootctl try`
-  writes a new system into the idle slot, the loader boots it once, and a
-  system that does not come up falls back to the good slot
-  ([docs/AB-BOOT.md](docs/AB-BOOT.md)).
-- **Real hardware drivers, in progress:** NVMe and xHCI (USB keyboard, mouse
-  and storage) drivers are built and tested under QEMU. The NVMe driver has
-  driven a real WD SN720 through VFIO and installed Ferrix onto it. On a bare
-  Ryzen PC the loader boots, then the kernel stops before its first message
-  ([docs/POSTMORTEM.md](docs/POSTMORTEM.md) for the post-mortem tools).
-- **NVIDIA:** NVIDIA's own driver runs as a process on an RTX 3060 passed to
-  a virtual machine, and the desktop shows on the card's monitor. GPU buffer
-  sharing (dmabufs and sync files) is in; GPU rendering for every program is
-  still being built.
-- **Three architectures:** Boot tests cover x86-64, AArch64 and ARMv7-A.
-  Ferrix has also booted on an STM32MP157D-DK1 board and a Pixel 7.
-
-[The roadmap](docs/roadmap/where-it-stands.md) tracks what is done and what is
-still being built. Ferrix is not ready as an everyday operating system.
 
 ## Try it without building
 
@@ -197,15 +285,8 @@ an x86-64 image built inside Ferrix. On 2026-10-03 Ferrix also built its own
 AArch64 image inside Ferrix on a Pixel 7, in the phone's own virtual machine,
 and that image passed the boot test. The [guide](docs/GUIDE.md#proof-you-can-run)
 has the commands and serial output. These tests demonstrate specific working
-paths; they are not a claim that every Linux app works.
-
-## How the project is built
-
-Claude sessions write most of the code in separate worktrees. A human owner
-sets priorities, and changes have to pass their tests before landing. The
-[working rules](docs/CONVENTIONS.md) include mistakes the project has made
-and what changed afterward. Human contributions are welcome; see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+paths; they are not a claim that every Linux app works. The N150's figures
+above come from runs on that one machine, not from a gate.
 
 Ferrix is MIT licensed. [Explore the code and component docs](docs/GUIDE.md#layout),
 [get the logo and press kit](docs/marketing/README.md), or

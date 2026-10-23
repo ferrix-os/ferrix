@@ -59,21 +59,27 @@ JetBrains Mono on the web for code and terminal output.
 
 - **Claims come with their proof.** Put a screenshot, command or test close to
   each technical claim. Write "runs `rustc`", not "supports Rust development".
-- **Describe how it is built plainly.** Explain the Claude sessions in the
-  project story, after explaining what Ferrix does.
+- **Lead with how it is built.** Say plainly and early that a fleet of
+  Claude Code sessions writes Ferrix and a person, the customer, decides
+  what they build (the customer, 2026-10-23). Then say what Ferrix does.
 - **Show the evidence.** Name a working program, a test or a screenshot instead
   of using adjectives such as "massive" or "incredible".
 - **Honest about limits.** It is not a daily driver. Say so before someone asks.
+- **Screenshots are real captures** with a neutral wallpaper, such as
+  xtask's `ember`, and are described in `screenshots/CAPTIONS.md`.
 
 Website hero:
 
-* Eyebrow: *Ferrix · an experimental Rust OS*
+* Eyebrow: *Ferrix · an operating system written by Claude Code agents*
 * Headline: *Linux apps without Linux.*
 
 The README banner uses the same headline. Explain it nearby: tested Linux
 programs run unchanged on Ferrix's own Rust kernel. Name working programs as
-evidence, and say that drivers run in separate, restartable processes. Keep
-the project's working process in its own section. Never imply that every
+evidence, and say that drivers run in separate, restartable processes. The
+lede names the Claude Code sessions and the customer first, and the
+working process gets its own section near the top. Never call Ferrix a
+hobby OS. Certification is an aim: nothing is certified, and the
+consultant's review is internal, not independent. Never imply that every
 Linux program works or that Ferrix is ready for daily use.
 
 Avoid "self-hosting" on its own: stage 20 (full self-hosting) is still in
