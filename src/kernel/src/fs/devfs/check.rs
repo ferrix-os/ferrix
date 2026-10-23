@@ -88,8 +88,8 @@ const READ_SECTORS: u64 = 2;
 const PARTITIONS: &[u8] = b"major minor  #blocks  name\n\n 254      250         32 ferrixcheck0\n";
 
 /// The character nodes, in the order `/dev` lists them.
-const STATIC_NODES: [&[u8]; 8] = [
-    b"null", b"zero", b"full", b"random", b"urandom", b"tty", b"console", b"ptmx",
+const STATIC_NODES: [&[u8]; 9] = [
+    b"null", b"zero", b"full", b"random", b"urandom", b"tty", b"console", b"ptmx", b"kmsg",
 ];
 
 /// `shm`, which `/dev` lists after the disks and always: the one directory

@@ -45,6 +45,7 @@ use crate::sync::SpinLock;
 
 use crate::arch;
 use crate::console::{log, println};
+use crate::fs::kmsg as kmsg_file;
 use crate::mm;
 use crate::smp;
 use crate::syscall::attributes::int;
@@ -54,6 +55,7 @@ use crate::syscall::process::Process;
 use crate::syscall::time;
 use crate::syscall::uaccess::{self, WORD};
 use crate::syscall::userns::{self, UserNamespace};
+use ferrix_linux_abi::kmsg;
 
 /// Bytes in each of `utsname`'s six fields.
 const FIELD: usize = 65;
@@ -481,35 +483,51 @@ pub(crate) fn sys_getcpu(process: &Process, cpu_at: u64, node_at: u64) -> Result
 /// any context (`console::log`) -- so a waiting reader looks for itself: often
 /// enough that `dmesg -w` follows a boot as it prints, and seldom enough to
 /// cost nothing while nothing does.
-const READ_POLL_NANOS: u64 = 15_000_000;
+pub(crate) const READ_POLL_NANOS: u64 = 15_000_000;
 
-/// The most a read copies out under the reader's lock at once, through the
-/// stack.
-const CHUNK: usize = 512;
+/// `SYSLOG_ACTION_READ`'s place: one for the whole system, as Linux's
+/// `syslog_seq` and `syslog_partial` are, so that two readers share the log
+/// rather than each read it all.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReaderAt {
+    /// The next line to read (`console::log::Line::seq`).
+    seq: u64,
+    /// How much of that line's text a read too short for it already took.
+    partial: usize,
+}
 
-/// `SYSLOG_ACTION_READ`'s cursor: one for the whole system, as Linux's
-/// `syslog_seq` is, so that two readers share the log rather than each read it
-/// all. A place in the kernel log's sequence (`console::log`).
-static READER: SpinLock<u64> = SpinLock::new(0);
+/// See [`ReaderAt`].
+static READER: SpinLock<ReaderAt> = SpinLock::new(ReaderAt { seq: 0, partial: 0 });
 
-/// Where `SYSLOG_ACTION_CLEAR` left the log: `READ_ALL` reads nothing before
-/// it. Linux's `clear_seq`.
+/// The first line `SYSLOG_ACTION_CLEAR` left: `READ_ALL` and `/dev/kmsg`'s
+/// `SEEK_DATA` read nothing before it. Linux's `clear_seq`.
 static CLEARED: AtomicU64 = AtomicU64::new(0);
+
+/// The first line the last `SYSLOG_ACTION_CLEAR` left.
+pub(crate) fn cleared() -> u64 {
+    CLEARED.load(Ordering::Relaxed)
+}
 
 /// `syslog`, the kernel log's system call.
 ///
 /// The log is the console's: every byte it sent since boot, the kernel's
-/// lines and programs' output alike, as they were written, in a ring of
-/// [`log::CAPACITY`] bytes (`console::log`). The actions are Linux's
-/// (`kernel/printk/printk.c`), over raw bytes rather than records: a line
-/// carries no `<level>` prefix, which busybox's `dmesg` prints as it is.
+/// lines and programs' output alike, in a ring of 128 KiB or what
+/// `log_buf_len=` asked (`console::log::size_from`),
+/// with where each line starts, when, and at what priority (`console::log`).
+/// The actions are Linux's (`kernel/printk/printk.c`, v7.0), over those
+/// lines as Linux's records, each read out as Linux formats it:
+/// `<6>[   12.345678] text`, the kernel's lines at `KERN_INFO`, programs'
+/// output at `LOG_USER`'s (`ferrix_linux_abi::kmsg`).
 ///
-/// * `READ` (2) takes what the one system-wide reader has not read yet, and
-///   waits for something if there is nothing, interruptibly and restarted
-///   under `SA_RESTART` as a blocking read is. The console never wakes it, so
-///   it looks again every [`READ_POLL_NANOS`].
-/// * `READ_ALL` (3) copies the newest `len` bytes kept since the last clear,
-///   and `READ_CLEAR` (4) does the same and then clears.
+/// * `READ` (2) takes the lines the one system-wide reader has not read yet,
+///   as many whole ones as fit, or as much of the first as fits; it waits for
+///   one if there is none, interruptibly and restarted under `SA_RESTART` as
+///   a blocking read is. The console never wakes it, so it looks again every
+///   [`READ_POLL_NANOS`].
+/// * `READ_ALL` (3) copies the newest lines kept since the last clear that
+///   fit, and `READ_CLEAR` (4) does the same and then clears. Lines the log
+///   dropped since the clear, before the first it keeps, are said first, as
+///   `** N printk messages dropped **` at `KERN_WARNING`.
 /// * `CLEAR` (5) makes `READ_ALL` start from here; the reader's place is its
 ///   own, as on Linux.
 /// * `SIZE_UNREAD` (9) is what `READ` would have to read, and `SIZE_BUFFER`
@@ -545,13 +563,13 @@ pub(crate) fn sys_syslog(
             }
         }
         5 => {
-            let _ = CLEARED.fetch_max(log::written(), Ordering::Relaxed);
+            let _ = CLEARED.fetch_max(log::lines_begun(), Ordering::Relaxed);
             Ok(0)
         }
         // Console level.
         8 if (1..=8).contains(&len) => Ok(0),
-        9 => Ok(clamp(log::unread(*READER.lock()))),
-        10 => Ok(log::CAPACITY),
+        9 => size_unread(),
+        10 => Ok(log::capacity()),
         _ => Err(Errno::EINVAL),
     }
 }
@@ -572,20 +590,21 @@ fn user_buffer(buf: u64, len: i32) -> Result<Option<usize>, Errno> {
     Ok(usize::try_from(len.unsigned_abs()).ok())
 }
 
-/// A count of bytes, as a system call's answer.
-fn clamp(count: u64) -> usize {
-    usize::try_from(count).unwrap_or(usize::MAX)
+/// A buffer one formatted line fits in.
+fn line_buffer() -> Result<Vec<u8>, Errno> {
+    crate::fallible::try_filled(0, kmsg::MESSAGE_MAX).map_err(|_| Errno::ENOMEM)
 }
 
-/// `SYSLOG_ACTION_READ`: what the reader has not read, up to `len` bytes and
-/// at least one, waiting until there is one.
+/// `SYSLOG_ACTION_READ`: the lines the reader has not read, waiting until
+/// there is one.
 ///
 /// It waits on its process's signals, never on its process's end, which only
 /// this thread leaving can bring about; a process ended while it waits counts
 /// as a signal pending.
 fn read_waiting(process: &Process, buf: u64, len: usize) -> Result<usize, Errno> {
+    let mut text = line_buffer()?;
     loop {
-        let copied = read_unread(process, buf, len)?;
+        let copied = read_unread(process, buf, len, &mut text)?;
         if copied != 0 {
             return Ok(copied);
         }
@@ -599,45 +618,149 @@ fn read_waiting(process: &Process, buf: u64, len: usize) -> Result<usize, Errno>
     }
 }
 
-/// Take up to `len` bytes from the reader's place, at most a [`CHUNK`], and
-/// copy them to `buf`. Bytes the log dropped before the reader came for them
+/// Copy to `buf` the whole lines from the reader's place that fit in `len`,
+/// or, when the first does not, as much of it as fits, as Linux's
+/// `syslog_print` does. Lines the log dropped before the reader came for them
 /// are skipped, as Linux skips records it no longer holds.
-fn read_unread(process: &Process, buf: u64, len: usize) -> Result<usize, Errno> {
-    let mut chunk = [0u8; CHUNK];
-    let room = chunk.get_mut(..len.min(CHUNK)).unwrap_or_default();
-    let copied = {
-        let mut cursor = READER.lock();
-        // A reader parked past the log's end (`park_reader`) stays there
-        // rather than being brought back to it.
-        if log::unread(*cursor) == 0 {
-            return Ok(0);
+fn read_unread(process: &Process, buf: u64, len: usize, text: &mut [u8]) -> Result<usize, Errno> {
+    let mut done = 0usize;
+    loop {
+        let mut reader = READER.lock();
+        let Some(line) = log::line_from(reader.seq) else {
+            break;
+        };
+        if line.seq != reader.seq {
+            *reader = ReaderAt {
+                seq: line.seq,
+                partial: 0,
+            };
         }
-        log::read(&mut cursor, room).copied
-    };
-    let taken = room.get(..copied).unwrap_or_default();
-    uaccess::copy_to_user(process.space(), buf, taken).map_err(|_| Errno::EFAULT)?;
-    Ok(copied)
+        let formatted = kmsg_file::syslog_text(&line, text);
+        let skip = reader.partial.min(formatted);
+        let rest = formatted - skip;
+        let room = len - done;
+        let take = if rest <= room {
+            *reader = ReaderAt {
+                seq: line.seq.wrapping_add(1),
+                partial: 0,
+            };
+            rest
+        } else if done == 0 {
+            reader.partial = reader.partial.saturating_add(room);
+            room
+        } else {
+            0
+        };
+        drop(reader);
+        if take == 0 {
+            break;
+        }
+        let piece = text.get(skip..skip + take).unwrap_or_default();
+        let at = buf.saturating_add(done as u64);
+        uaccess::copy_to_user(process.space(), at, piece).map_err(|_| Errno::EFAULT)?;
+        done += take;
+        if done == len {
+            break;
+        }
+    }
+    Ok(done)
 }
 
-/// `SYSLOG_ACTION_READ_ALL`, and with `clear` `READ_CLEAR`: the newest `len`
-/// bytes kept since the last clear, oldest first.
+/// `SYSLOG_ACTION_SIZE_UNREAD`: how much `READ` would copy, the part of a
+/// line already read left out.
+fn size_unread() -> Result<usize, Errno> {
+    let mut text = line_buffer()?;
+    let (mut seq, partial) = {
+        let reader = READER.lock();
+        (reader.seq, reader.partial)
+    };
+    let mut total = 0usize;
+    let mut first = true;
+    while let Some(line) = log::line_from(seq) {
+        let formatted = kmsg_file::syslog_text(&line, &mut text);
+        let skipped = if first && line.seq == seq { partial } else { 0 };
+        total = total.saturating_add(formatted.saturating_sub(skipped));
+        first = false;
+        seq = line.seq.wrapping_add(1);
+    }
+    Ok(total)
+}
+
+/// `SYSLOG_ACTION_READ_ALL`, and with `clear` `READ_CLEAR`: the newest whole
+/// lines kept since the last clear that fit in `len`, oldest first, as Linux's
+/// `syslog_print_all` finds them.
 fn read_all(process: &Process, buf: u64, len: usize, clear: bool) -> Result<usize, Errno> {
-    let end = log::written();
-    let from = end.saturating_sub(len as u64);
-    let mut cursor = from.max(CLEARED.load(Ordering::Relaxed));
-    let mut chunk = [0u8; CHUNK];
+    let mut text = line_buffer()?;
+    let from = CLEARED.load(Ordering::Relaxed);
+    // How much every line from the clear on takes, then the first whose
+    // following lines all fit.
+    let mut sizes: Vec<usize> = Vec::new();
+    let mut first = None;
+    let mut seq = from;
+    while let Some(line) = log::line_from(seq) {
+        let _ = first.get_or_insert(line);
+        let formatted = kmsg_file::syslog_text(&line, &mut text);
+        crate::fallible::try_push(&mut sizes, formatted).map_err(|_| Errno::ENOMEM)?;
+        seq = line.seq.wrapping_add(1);
+    }
+    let Some(first) = first else {
+        return Ok(0);
+    };
+    // Lines the log dropped between the clear and the first it still keeps,
+    // a chatty writer's doing, and the oldest the buffer has no room for:
+    // said first, in the words Linux's console uses for the records it
+    // drops, so that a reader knows what it is given is not the whole log.
+    let first_usec = first.usec;
+    let first = first.seq;
+    let mut total: usize = sizes.iter().sum();
+    let mut skip = 0u64;
+    // Room kept for the note whenever one is said: its longest, a count of
+    // twenty digits with the prefix and the newline.
+    const NOTE_ROOM: usize = 96;
+    let room_for = |skip: u64| {
+        if first.saturating_sub(from).saturating_add(skip) == 0 {
+            0
+        } else {
+            NOTE_ROOM
+        }
+    };
+    for size in &sizes {
+        if total.saturating_add(room_for(skip)) <= len {
+            break;
+        }
+        total -= size;
+        skip += 1;
+    }
+    let mut note = [0u8; NOTE_ROOM];
+    let dropped = first.saturating_sub(from).saturating_add(skip);
+    let mut note_len = 0;
+    if dropped != 0 && total.saturating_add(NOTE_ROOM) <= len {
+        let words =
+            crate::fallible::try_format(format_args!("** {dropped} printk messages dropped **"))
+                .map_err(|_| Errno::ENOMEM)?;
+        note_len = kmsg::syslog_line(kmsg::DEFAULT_LEVEL, first_usec, words.as_bytes(), &mut note)
+            .unwrap_or(0);
+    }
+    let mut seq = first.saturating_add(skip);
     let mut done = 0usize;
-    while cursor < end && done < len {
-        let wanted = clamp(end.saturating_sub(cursor)).min(len - done);
-        let room = chunk.get_mut(..wanted.min(CHUNK)).unwrap_or_default();
-        let read = log::read(&mut cursor, room);
-        let taken = room.get(..read.copied).unwrap_or_default();
+    if note_len != 0 {
+        let piece = note.get(..note_len).unwrap_or_default();
+        uaccess::copy_to_user(process.space(), buf, piece).map_err(|_| Errno::EFAULT)?;
+        done = note_len;
+    }
+    while let Some(line) = log::line_from(seq) {
+        let formatted = kmsg_file::syslog_text(&line, &mut text);
+        if done + formatted > len {
+            break;
+        }
         let at = buf.saturating_add(done as u64);
-        uaccess::copy_to_user(process.space(), at, taken).map_err(|_| Errno::EFAULT)?;
-        done = done.saturating_add(read.copied);
+        let piece = text.get(..formatted).unwrap_or_default();
+        uaccess::copy_to_user(process.space(), at, piece).map_err(|_| Errno::EFAULT)?;
+        done += formatted;
+        seq = line.seq.wrapping_add(1);
     }
     if clear {
-        let _ = CLEARED.fetch_max(end, Ordering::Relaxed);
+        let _ = CLEARED.fetch_max(seq, Ordering::Relaxed);
     }
     Ok(done)
 }
@@ -646,12 +769,18 @@ fn read_all(process: &Process, buf: u64, len: usize, clear: bool) -> Result<usiz
 /// waits however much is logged, and answer where it was. For the syscall
 /// check's program that must stay blocked in the read until it is killed;
 /// [`unpark_reader`] puts it back.
-pub(crate) fn park_reader() -> u64 {
-    core::mem::replace(&mut *READER.lock(), u64::MAX)
+pub(crate) fn park_reader() -> ReaderAt {
+    core::mem::replace(
+        &mut *READER.lock(),
+        ReaderAt {
+            seq: u64::MAX,
+            partial: 0,
+        },
+    )
 }
 
 /// Put `SYSLOG_ACTION_READ`'s reader back where [`park_reader`] found it.
-pub(crate) fn unpark_reader(at: u64) {
+pub(crate) fn unpark_reader(at: ReaderAt) {
     *READER.lock() = at;
 }
 

@@ -585,6 +585,21 @@ pub trait Inode: Send + Sync + fmt::Debug {
         Ok(None)
     }
 
+    /// The count of who may write this inode and who denies that anyone may,
+    /// for a regular file a program can run from: see [`crate::writers`].
+    /// `None`, the default, keeps no count, and nothing is refused either way.
+    fn writers(&self) -> Option<&core::sync::atomic::AtomicIsize> {
+        None
+    }
+
+    /// `lseek` on a stream that answers it itself: `/dev/kmsg`, whose
+    /// position is a record. `None`, the default, leaves the answer to
+    /// [`Inode::seek_is_noop`] and `ESPIPE`.
+    fn seek_stream(&self, offset: i64, whence: crate::Whence) -> Option<Result<u64>> {
+        let _ = (offset, whence);
+        None
+    }
+
     /// Whether the VFS may remember what [`Inode::lookup`] answers in this
     /// directory.
     ///

@@ -16,6 +16,12 @@
 //!   this task reads: the count is exact, every byte read is one the writers
 //!   wrote, and every byte is either read or reported lost.
 //!
+//! On a ring and lines of the check's own, where the log's lines begin
+//! ([`log::Lines`]): after a newline and where the priority changes, each
+//! stamped once and with its priority; a line still being written handed to
+//! no reader; a reader behind the lines kept, or behind the bytes kept, given
+//! the first line kept whole.
+//!
 //! On the kernel log, that the console records what it sends and nothing
 //! it was told not to: a task's write as a program's output is (without the
 //! CR the port was sent), a line written the way a failure report is written
@@ -29,7 +35,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 
-use super::log::{self, Read, Ring};
+use super::log::{self, Line, Lines, Read, Ring, Stamp};
 
 /// The small ring wrap, overrun and partial reads are checked on.
 const SMALL: usize = 64;
@@ -66,6 +72,8 @@ pub(crate) struct Report {
     pub(crate) read_racing: u64,
     /// Processors the writers ran on.
     pub(crate) processors: usize,
+    /// Lines the check's own ring of lines began.
+    pub(crate) lines: u64,
 }
 
 /// Run the check.
@@ -79,7 +87,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let (kept, lost) = wrap_overrun_and_partial()?;
     let (read_racing, processors) = two_writers()?;
     console_records()?;
+    let lines = lines_begin_and_are_found()?;
+    grown_rings_keep_what_they_held()?;
+    sizes_asked()?;
     Ok(Report {
+        lines,
         kept,
         lost,
         raced: RACE_BYTES.saturating_mul(2),
@@ -224,6 +236,222 @@ fn only(cpu: usize) -> Result<CpuSet, &'static str> {
     Ok(set)
 }
 
+/// The ring the lines check records into: small, so that its bytes wrap.
+const LINE_BYTES: usize = 64;
+
+/// The lines it notes: fewer than the bytes hold, so that they wrap too.
+const LINE_SLOTS: usize = 8;
+
+static LINE_RING: Ring<LINE_BYTES> = Ring::new();
+static LINE_STARTS: Lines<LINE_SLOTS> = Lines::new();
+
+/// Record `bytes` at `priority` in the check's ring and lines, with `usec` as
+/// the stamp any line they begin takes.
+fn note(bytes: &[u8], priority: u8, usec: u64) {
+    let now = move || usec;
+    log::record_lines(
+        &LINE_RING,
+        &LINE_STARTS,
+        bytes,
+        priority,
+        &mut Stamp::new(&now),
+    );
+}
+
+/// Line `seq` of the check's lines, as a reader finds it now.
+fn found(seq: u64) -> Option<Line> {
+    LINE_STARTS.line(seq, LINE_RING.oldest(), LINE_RING.written())
+}
+
+/// Where lines begin, what they are stamped with, and what a reader is given,
+/// on [`LINE_RING`] and [`LINE_STARTS`]. Answers how many lines began.
+///
+/// Verifies: L.console.50, L.console.51, L.console.52
+fn lines_begin_and_are_found() -> Result<u64, &'static str> {
+    // A kernel line, a program's line written in two pieces, and a kernel
+    // line printed into a program's half-written one.
+    note(b"one\n", log::KERNEL, 100);
+    note(b"tw", log::PROGRAM, 200);
+    note(b"o\n", log::PROGRAM, 300);
+    note(b"pro", log::PROGRAM, 400);
+    note(b"k\n", log::KERNEL, 500);
+    let expected = [
+        (0, 4, 100, log::KERNEL),
+        (4, 8, 200, log::PROGRAM),
+        (8, 11, 400, log::PROGRAM),
+        (11, 13, 500, log::KERNEL),
+    ];
+    for (seq, (start, end, usec, priority)) in (0u64..).zip(expected) {
+        let want = Line {
+            seq,
+            start,
+            end,
+            usec,
+            priority,
+        };
+        if found(seq) != Some(want) {
+            return Err(
+                "a line of the log did not begin after a newline or a change of priority, \
+                 with its first piece's stamp and its priority",
+            );
+        }
+    }
+    // A line still being written is no line yet; the next line makes it one.
+    note(b"half", log::PROGRAM, 600);
+    if found(4).is_some() {
+        return Err("a line still being written was handed to a reader");
+    }
+    note(b"\n", log::PROGRAM, 700);
+    if found(4).map(|line| (line.start, line.end, line.usec)) != Some((13, 18, 600)) {
+        return Err("a line ended by its newline was not handed to a reader whole");
+    }
+    // A record of its own begins a line whatever it follows.
+    note(b"pre", log::PROGRAM, 800);
+    LINE_STARTS.break_line();
+    note(b"rec\n", log::PROGRAM, 900);
+    if found(6).map(|line| (line.start, line.usec)) != Some((21, 900)) {
+        return Err("a line broken for a record of its own did not begin there");
+    }
+    // More lines than the slots keep, then more bytes than the ring keeps:
+    // each time, the first line handed out is the first one kept whole.
+    for _ in 0..LINE_SLOTS {
+        note(b"ab\n", log::KERNEL, 1000);
+    }
+    let first = LINE_STARTS.first(LINE_RING.oldest());
+    let begun = LINE_STARTS.begun();
+    if found(0).is_some() || first != begun - (LINE_SLOTS as u64 - 1) || found(first).is_none() {
+        return Err("a line whose slot was reused was handed out, or the first kept was not");
+    }
+    // A long line pushes the ring's oldest byte into the line two before
+    // it: that one's start is gone, the one after it is the first kept.
+    // The eight short lines begin at byte 25, three apart, and end at 49;
+    // 59 more and a newline leave the ring's oldest at 46, the last's start.
+    note(&[b'z'; LINE_BYTES - 5], log::KERNEL, 1100);
+    note(b"\n", log::KERNEL, 1100);
+    let first = LINE_STARTS.first(LINE_RING.oldest());
+    let kept = found(first);
+    if first != LINE_STARTS.begun() - 2
+        || kept.is_none_or(|line| line.start < LINE_RING.oldest())
+        || found(first - 1).is_some()
+    {
+        return Err("a line whose bytes were overwritten was handed out");
+    }
+    Ok(LINE_STARTS.begun())
+}
+
+/// The ring and lines the grow check grows: small, and grown once.
+static GROW_RING: Ring<16> = Ring::new();
+static GROW_LINES: Lines<4> = Lines::new();
+
+/// What [`Ring::grow`] and [`Lines::grow`] keep and refuse, on
+/// [`GROW_RING`] and [`GROW_LINES`]: a ring written past its 16 bytes and
+/// its 4 lines, grown to 64 and 16, still hands out what it kept, at the
+/// same places and numbers, and keeps more after; a second grow, slots no
+/// longer or not a power of two are refused.
+///
+/// Verifies: L.console.55, L.console.56
+fn grown_rings_keep_what_they_held() -> Result<(), &'static str> {
+    let record = |bytes: &[u8], usec: u64| {
+        let now = move || usec;
+        log::record_lines(
+            &GROW_RING,
+            &GROW_LINES,
+            bytes,
+            log::KERNEL,
+            &mut Stamp::new(&now),
+        );
+    };
+    for usec in 0..6 {
+        record(b"line\n", usec);
+    }
+    let found = |seq| GROW_LINES.line(seq, GROW_RING.oldest(), GROW_RING.written());
+    let before: Vec<Option<Line>> = (0..6).map(found).collect();
+    let mut kept = [0u8; 15];
+    let mut cursor = GROW_RING.oldest();
+    let copied = GROW_RING.read(&mut cursor, &mut kept).copied;
+    let five: &'static [log::LineSlot] = Vec::leak((0..5).map(|_| log::LineSlot::new()).collect());
+    let odd: &'static [core::sync::atomic::AtomicU8] = Vec::leak(
+        (0..48)
+            .map(|_| core::sync::atomic::AtomicU8::new(0))
+            .collect(),
+    );
+    let small: &'static [core::sync::atomic::AtomicU8] = Vec::leak(
+        (0..16)
+            .map(|_| core::sync::atomic::AtomicU8::new(0))
+            .collect(),
+    );
+    if GROW_RING.grow(odd) || GROW_RING.grow(small) || GROW_LINES.grow(five) {
+        return Err("a log ring grew into slots no longer or not a power of two");
+    }
+    let bytes: &'static [core::sync::atomic::AtomicU8] = Vec::leak(
+        (0..64)
+            .map(|_| core::sync::atomic::AtomicU8::new(0))
+            .collect(),
+    );
+    let lines: &'static [log::LineSlot] =
+        Vec::leak((0..16).map(|_| log::LineSlot::new()).collect());
+    if !GROW_RING.grow(bytes) || !GROW_LINES.grow(lines) {
+        return Err("a log ring did not grow into longer slots");
+    }
+    let mut again = [0u8; 15];
+    let mut cursor = GROW_RING.written() - copied as u64;
+    let read = GROW_RING.read(&mut cursor, &mut again);
+    if read.copied != copied || again != kept {
+        return Err("a grown ring did not hand out the bytes it kept, at their places");
+    }
+    if (0..6).map(found).collect::<Vec<_>>() != before {
+        return Err("grown lines did not hand out the lines they kept, numbered as they were");
+    }
+    for usec in 6..12 {
+        record(b"line\n", usec);
+    }
+    // 60 bytes and 12 lines now, more than 16 and 4: all kept from where
+    // the early ring stopped holding them, byte 15 and line 3, and nothing
+    // from before that, which was never copied.
+    if GROW_RING.capacity() != 64
+        || GROW_RING.oldest() != 15
+        || found(3).is_none()
+        || found(11).is_none()
+        || found(2).is_some()
+    {
+        return Err(
+            "a grown ring did not keep more than it could before, or handed out what it never held",
+        );
+    }
+    let spare: &'static [core::sync::atomic::AtomicU8] = Vec::leak(
+        (0..128)
+            .map(|_| core::sync::atomic::AtomicU8::new(0))
+            .collect(),
+    );
+    if GROW_RING.grow(spare) {
+        return Err("a log ring grew a second time");
+    }
+    Ok(())
+}
+
+/// What `log_buf_len=` grows the kernel log to (`log::size_asked`).
+///
+/// Verifies: L.console.57
+fn sizes_asked() -> Result<(), &'static str> {
+    let current = 1 << 17;
+    let cases: [(&str, Result<Option<usize>, &str>); 6] = [
+        ("1M", Ok(Some(1 << 20))),
+        ("300k", Ok(Some(1 << 19))),
+        ("0x100000", Ok(Some(1 << 20))),
+        ("64K", Ok(None)),
+        ("1G", Ok(Some(1 << 22))),
+        ("lots", Err("log_buf_len is not a size")),
+    ];
+    for (asked, want) in cases {
+        if log::size_asked(asked, current) != want {
+            return Err(
+                "log_buf_len did not size the log as a power of two between the log's size and 4 MiB",
+            );
+        }
+    }
+    Ok(())
+}
+
 /// A task's write, as a program's output.
 const PROGRAM: &[u8] = b"  log      a task's write, as a program's output is: in the kernel log\n";
 /// A line written as a failure report is.
@@ -251,6 +479,78 @@ fn console_records() -> Result<(), &'static str> {
     }
     if contains(&recent, UNLOGGED.as_bytes()) {
         return Err("a line sent unlogged is in the kernel log");
+    }
+    priorities_logged()
+}
+
+/// The priorities [`console_records`]' lines were logged at: a program's for
+/// the task's write, the kernel's for the line written as a failure report.
+/// Found by reading the kernel log's lines back from those begun just before.
+///
+/// Verifies: L.console.54
+fn priorities_logged() -> Result<(), &'static str> {
+    let program = PROGRAM.strip_suffix(b"\n").unwrap_or(PROGRAM);
+    let (mut task, mut report) = (None, None);
+    let mut seq = log::lines_begun().saturating_sub(64);
+    let mut room = vec![0u8; WINDOW];
+    while let Some(line) = log::line_from(seq) {
+        let mut cursor = line.start;
+        let want = usize::try_from(line.end - line.start)
+            .unwrap_or(WINDOW)
+            .min(WINDOW);
+        let read = log::read(&mut cursor, room.get_mut(..want).unwrap_or_default());
+        let text = room.get(..read.copied).unwrap_or_default();
+        if text.starts_with(program) {
+            task = Some(line.priority);
+        } else if text.starts_with(REPORT.as_bytes()) {
+            report = Some(line.priority);
+        }
+        seq = line.seq.wrapping_add(1);
+    }
+    if task != Some(log::PROGRAM) {
+        return Err("a task's write was not logged as a line of its own at a program's priority");
+    }
+    if report != Some(log::KERNEL) {
+        return Err("a kernel line was not logged as a line of its own at the kernel's priority");
+    }
+    a_record_is_a_line_of_its_own()
+}
+
+/// A task's write with no newline, then.
+const HALF: &[u8] = b"  log      a task's write with no newline, then a record: ";
+/// A record, as `/dev/kmsg` writes one, at `user.notice`.
+const RECORD: &[u8] = b"  log      a record written to the log is a line of its own";
+/// The record's priority.
+const RECORD_PRIORITY: u8 = (1 << 3) | 5;
+
+/// `console::write_record` after a task's half-written line: the record is a
+/// line of the kernel log of its own, at the priority it was given, its
+/// newline inside it.
+///
+/// Verifies: L.console.53
+fn a_record_is_a_line_of_its_own() -> Result<(), &'static str> {
+    super::write_bytes(HALF);
+    super::write_record(RECORD_PRIORITY, RECORD);
+    let mut seq = log::lines_begun().saturating_sub(8);
+    let mut room = vec![0u8; WINDOW];
+    let mut found = None;
+    while let Some(line) = log::line_from(seq) {
+        let mut cursor = line.start;
+        let want = usize::try_from(line.end - line.start)
+            .unwrap_or(WINDOW)
+            .min(WINDOW);
+        let read = log::read(&mut cursor, room.get_mut(..want).unwrap_or_default());
+        let text = room.get(..read.copied).unwrap_or_default();
+        if text.starts_with(RECORD) {
+            found = Some((line.priority, text.last() == Some(&b'\n')));
+        }
+        seq = line.seq.wrapping_add(1);
+    }
+    if found != Some((RECORD_PRIORITY, true)) {
+        return Err(
+            "a record written after a half-written line was not a line of its own, \
+                    at its priority, ending in its newline",
+        );
     }
     Ok(())
 }

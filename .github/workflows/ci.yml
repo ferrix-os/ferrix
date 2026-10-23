@@ -9,19 +9,25 @@ name: CI
 
 on:
   # Since 2026-10-23 (docs/REPO-FLOW.md) CI runs on what is about to reach
-  # main or develop, not on every landing: a pull request to either (an
+  # main or develop, not on every landing: a pull request to develop (an
   # outside contribution, an owner's feature), a promotion of develop to main
-  # (the Promote workflow dispatches this file on its promote/<sha> branch,
-  # since a pull request its own token opens starts no run), and develop
-  # nightly. A push to main runs it too, which after the switch is only a
+  # (the Promote workflow dispatches this file on its promote/<sha> branch),
+  # and develop nightly. A push to main runs it too, which after the switch is only a
   # direct push by an administrator: a promotion merges with the workflow's
   # token, and that push starts no run, so the promoted commit is not
   # checked twice. develop's own pushes, many an hour, run nothing here; the
   # gate pool has run each landing's rows before it reached develop.
   push:
     branches: [main]
+  # Not main: every pull request to main is a promotion, which Promote opens
+  # with its own token, and GitHub turns a pull_request run of such a pull
+  # request into one waiting for a person's approval ("action_required")
+  # before any job's `if` is read -- a run nobody needs, since the dispatched
+  # run is the one that counts. Another pull request to main gets its CI the
+  # same way: `gh workflow run ci.yml --ref <branch> -f base=<main's merge
+  # base>`, whose last job posts "CI result" on the commit.
   pull_request:
-    branches: [main, develop]
+    branches: [develop]
   workflow_dispatch:
     inputs:
       base:
@@ -247,6 +253,7 @@ jobs:
             src/user/system/linux/adbd -> target
             src/user/system/linux/pkg -> target
             src/user/system/linux/dhcp -> target
+            src/user/system/linux/dmesg -> target
 
       # `cargo xtask check` first asks whether the commit hooks are armed,
       # which is local configuration a fresh checkout does not have.

@@ -15,8 +15,8 @@ How a change reaches `main` (customer, 2026-10-23). In short:
   **outside lane** (forks, anyone without write access) never merges by
   itself: it needs full CI, the certification consultant's review, a
   security review of the diff, and the owner's approval.
-* **CI runs where a verdict is needed**: on pull requests to `main` and
-  `develop`, on each promotion, and on `develop` once a night. It no longer
+* **CI runs where a verdict is needed**: on pull requests to `develop`, on
+  each promotion, and on `develop` once a night. It no longer
   runs on every push.
 
 Most of the design is plumbing to keep lead time short. A finished
@@ -258,7 +258,8 @@ The new triggers:
 |---|---|
 | Push to `develop` (each landing) | No. The gate pool ran the landing's rows. |
 | Promotion `promote/<sha>` | Yes, once, by dispatch. This is the run that lets it merge. |
-| Pull request to `main` or `develop` | Yes. Outside ones wait for a maintainer's approval first. |
+| Pull request to `develop` | Yes. Outside ones wait for a maintainer's approval first. |
+| Any other pull request to `main` | Not by itself: GitHub would hold a promotion's `pull_request` run for approval (its pull request is opened with the workflow token), so `main` is left out of the trigger. Start it with `gh workflow run ci.yml --ref <branch> -f base=<merge base>`, as Promote does. |
 | Merge of a promotion into `main` | No: the workflow token's push starts nothing. |
 | Direct push to `main` (an administrator, after the switch) | Yes. |
 | `develop`, nightly at 02:17 UTC | Yes, if `develop`'s tip is not in `main` and has not run yet. |

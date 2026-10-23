@@ -7,6 +7,20 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-23 (customer, through the coordinator)** **The central log
+  manager is called lode** ("lode sounds good"; a vein of ore, where you
+  dig for what happened). The program and service binary is `lode` (`lode
+  -b -1 -u hyprix`, `lode -f -p err`, `lode -k`), the crate and package
+  `ferrix-lode`; `journalctl` is a link to it only when `linux_abi=on`
+  (`docs/LOGGING.md`). Chosen after a conflict check: no log tool, command
+  or distribution package named lode (Ubuntu, Arch, AUR, Homebrew);
+  crates.io's `lode` is an unrelated Ruby package manager of 46 downloads,
+  hence `ferrix-lode`; npm's and PyPI's `lode` are small and unrelated;
+  GitHub's look-alikes are other domains (lodepng, lodestar, lodestone,
+  Lode Runner, pyLODE). The first choice, strata, was dropped for Palo
+  Alto Networks' Strata Logging Service, a `strata` crate and the AUR's
+  `strata-bin` and `strata-daemon`.
+
 * **2026-10-23 (customer, through the coordinator)** **The Intel GPU's
   opaque crash mode is built as planned** (`docs/INTEL-GPU.md` §12.9, "start
   with GPU restart phase 2"): the driver splits into a keeper and a worker

@@ -194,6 +194,10 @@ why = "the framebuffer console"
 kind = "flag"
 why = "single-size glyphs on the framebuffer console whatever the screen's width (console/screen.rs, L.console.37)"
 
+[boot_options."log_buf_len"]
+values = ["*"]
+why = "Linux's: the kernel log's size, a memparse size (decimal or 0x hex, K/M/G) rounded up to a power of two, from 128 KiB up to 4 MiB; the log and its lines are grown to it at boot with what was logged before (console/log.rs, size_from); smaller or none keeps 128 KiB, a size that is none is said and ignored"
+
 [boot_options."ferrix.pstore"]
 values = ["on", "off"]
 why = "whether the loader keeps the kernel log across a reset (docs/POSTMORTEM.md §3; read by the loader through ferrix_bootinfo::pstore::switch); any other value is said and taken as off"

@@ -152,49 +152,49 @@
     },
     {
       "file": "console.rs",
-      "lines": "202-203",
+      "lines": "205-206",
       "category": "failure-path",
       "match": "fn write_str(&mut self, text: &str) -> fmt::Result {",
       "why": "`Unlocked::write_str`, and in it the kernel log's record of a failure report written without the port's lock. `Unlocked` is used only by `write_panicking` after `PANIC_SPINS` failed attempts at the lock, which is a processor stopping with the lock held by itself or by another processor that will never release it. A passing run never reaches it. `console::log_check` runs `write_panicking` on every boot, and it takes the lock at the first attempt."
     },
     {
       "file": "console.rs",
-      "lines": "206-207",
+      "lines": "209-210",
       "category": "failure-path",
       "match": "for byte in text.bytes() {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "214",
+      "lines": "217",
       "category": "failure-path",
       "match": "}",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "342",
+      "lines": "357",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it."
     },
     {
       "file": "console.rs",
-      "lines": "352",
+      "lines": "367",
       "category": "failure-path",
       "match": "let _ = Unlocked { logged }.write_fmt(arguments);",
       "why": "As 197: reached only once `PANIC_SPINS` attempts at the port's lock failed during a failure report."
     },
     {
       "file": "console.rs",
-      "lines": "368",
+      "lines": "383",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock."
     },
     {
       "file": "console.rs",
-      "lines": "378",
+      "lines": "393",
       "category": "absent-hardware",
       "match": "output::wake_writers();",
       "why": "A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does."
@@ -838,28 +838,28 @@
     },
     {
       "file": "main.rs",
-      "lines": "1775",
+      "lines": "1795",
       "category": "absent-hardware",
       "match": "mebibytes(unreachable)",
       "why": "Reached only on a machine with RAM above the highest address the direct map covers; every QEMU machine the suite boots has less RAM than the direct map spans, so nothing is unreachable to report."
     },
     {
       "file": "main.rs",
-      "lines": "1799",
+      "lines": "1819",
       "category": "other-architecture",
       "match": "let model = fdt::open(view)",
       "why": "The device tree's model, printed only when the loader handed over a device tree. x86-64's loader hands over ACPI's RSDP and never a device tree, so no x86-64 run reaches it; the Arm boots do."
     },
     {
       "file": "main.rs",
-      "lines": "1801-1802",
+      "lines": "1821-1822",
       "category": "other-architecture",
       "match": ".and_then(|tree| tree.model())",
       "why": "The device tree's model, printed only when the loader handed over a device tree. x86-64's loader hands over ACPI's RSDP and never a device tree, so no x86-64 run reaches it; the Arm boots do."
     },
     {
       "file": "main.rs",
-      "lines": "1893",
+      "lines": "1913",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."

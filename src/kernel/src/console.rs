@@ -124,6 +124,8 @@ struct Writer<'port> {
     /// Whether bytes are recorded in the kernel [`log`]: everything is but
     /// the lines [`write_unlogged`] sends.
     logged: bool,
+    /// The priority they are logged at.
+    priority: u8,
     /// Whether a flush on the way in made room a waiting writer can use.
     wake: bool,
 }
@@ -139,6 +141,7 @@ impl<'port> Writer<'port> {
             queued,
             remembered: kind.remembered(),
             logged: kind.logged(),
+            priority: kind.priority(),
             wake,
         }
     }
@@ -155,7 +158,7 @@ impl<'port> Writer<'port> {
     /// `bytes`, a bare newline as CRLF if `crlf`.
     fn bytes(&mut self, bytes: &[u8], crlf: bool) {
         if self.logged {
-            log::record(bytes);
+            log::record(bytes, self.priority);
         }
         for &byte in bytes {
             // A serial terminal wants CRLF; a bare newline leaves the cursor
@@ -201,7 +204,7 @@ struct Unlocked {
 impl Write for Unlocked {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         if self.logged {
-            log::record(text.as_bytes());
+            log::record(text.as_bytes(), log::KERNEL);
         }
         for byte in text.bytes() {
             if byte == b'\n' {
@@ -256,6 +259,9 @@ enum Kind {
     Unlogged,
     /// A program's output: kept in the log only.
     Program,
+    /// A record a program sent to the log itself, `/dev/kmsg`'s, at its
+    /// priority: kept in the log only, as a line of its own.
+    Record(u8),
 }
 
 impl Kind {
@@ -267,7 +273,16 @@ impl Kind {
 
     /// Whether the bytes are recorded in the kernel [`log`].
     const fn logged(self) -> bool {
-        matches!(self, Kind::Line | Kind::Program)
+        matches!(self, Kind::Line | Kind::Program | Kind::Record(_))
+    }
+
+    /// The priority the bytes are logged at.
+    const fn priority(self) -> u8 {
+        match self {
+            Kind::Line | Kind::Unlogged => log::KERNEL,
+            Kind::Program => log::PROGRAM,
+            Kind::Record(priority) => priority,
+        }
     }
 }
 
@@ -437,6 +452,33 @@ pub(crate) fn write_bytes(bytes: &[u8]) {
 /// program turned `ONLCR` or `OPOST` off. See `crate::fs::terminal`.
 pub(crate) fn write_raw(bytes: &[u8]) {
     emit(bytes, false);
+}
+
+/// Write `line`, a record a program sent to the kernel log at `priority`
+/// (`/dev/kmsg`), to the console as a line of its own: the log begins a line
+/// for it whatever came before, and it ends in a newline.
+///
+/// Written as a kernel line is, never waiting for room, under the port's lock
+/// from its first byte to its newline, so no other writer's bytes land inside
+/// it.
+pub(crate) fn write_record(priority: u8, line: &[u8]) {
+    if !READY.load(Ordering::Acquire) {
+        return;
+    }
+    let queued = may_queue();
+    let wake = {
+        let mut port = PORT.lock();
+        log::break_line();
+        let mut writer = Writer::new(&mut port, queued, Kind::Record(priority));
+        writer.bytes(line, true);
+        if line.last() != Some(&b'\n') {
+            writer.bytes(b"\n", true);
+        }
+        writer.finish()
+    };
+    if wake {
+        output::wake_writers();
+    }
 }
 
 /// Send `bytes` to the port, a bare newline as CRLF if asked.

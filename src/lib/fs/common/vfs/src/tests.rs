@@ -5024,3 +5024,115 @@ fn dentries_of_files_with_cached_pages_are_kept_until_the_pages_or_the_name_go()
     }
     assert_eq!(ns.kept_for_pages(), 0);
 }
+
+// -- Who may write a running program's file (`writers`) ------------------------
+
+/// The inode `path` names.
+fn inode_at(ns: &Namespace, ctx: &Context, path: &str) -> Arc<dyn crate::Inode> {
+    ns.resolve(ctx, None, path.as_bytes(), true)
+        .unwrap()
+        .inode()
+        .unwrap()
+}
+
+#[test]
+fn a_running_file_refuses_writes_truncation_and_a_truncating_open() {
+    let (ns, ctx) = fresh();
+    write_file(&ns, &ctx, "/prog", b"\x7fELF and the rest");
+    let inode = inode_at(&ns, &ctx, "/prog");
+    let running = crate::writers::deny_write_access(&inode).unwrap().unwrap();
+    assert_eq!(crate::writers::count_of(&inode), Some(-1));
+
+    let write_only = OpenFlags {
+        read: false,
+        create: false,
+        ..RW_CREATE
+    };
+    let truncating = OpenFlags {
+        truncate: true,
+        ..write_only
+    };
+    assert_eq!(
+        ns.open(&ctx, None, b"/prog", &write_only, 0).unwrap_err(),
+        Errno::ETXTBSY
+    );
+    assert_eq!(
+        ns.open(&ctx, None, b"/prog", &truncating, 0).unwrap_err(),
+        Errno::ETXTBSY
+    );
+    let at = ns.resolve(&ctx, None, b"/prog", true).unwrap();
+    assert_eq!(ns.truncate(&at, 0).unwrap_err(), Errno::ETXTBSY);
+    // Nothing was cut, and reading is still allowed.
+    assert_eq!(
+        read_file(&ns, &ctx, "/prog").unwrap(),
+        b"\x7fELF and the rest"
+    );
+
+    // A fork's copy denies too, and the file is writable only once both go.
+    let child = running.clone();
+    assert_eq!(crate::writers::count_of(&inode), Some(-2));
+    drop(running);
+    assert_eq!(
+        ns.open(&ctx, None, b"/prog", &truncating, 0).unwrap_err(),
+        Errno::ETXTBSY
+    );
+    drop(child);
+    assert_eq!(crate::writers::count_of(&inode), Some(0));
+    let _ = ns.open(&ctx, None, b"/prog", &truncating, 0).unwrap();
+    assert_eq!(read_file(&ns, &ctx, "/prog").unwrap(), b"");
+    assert_eq!(crate::writers::count_of(&inode), Some(0));
+}
+
+#[test]
+fn a_file_open_for_writing_does_not_run_until_it_is_closed() {
+    let (ns, ctx) = fresh();
+    write_file(&ns, &ctx, "/prog", b"program");
+    let inode = inode_at(&ns, &ctx, "/prog");
+    let writer = ns.open(&ctx, None, b"/prog", &RW_CREATE, 0).unwrap();
+    // `with_io`'s description is a second writer of its own.
+    let second = writer.with_io(Arc::clone(writer.io())).unwrap();
+    assert_eq!(crate::writers::count_of(&inode), Some(2));
+    assert_eq!(
+        crate::writers::deny_write_access(&inode).unwrap_err(),
+        Errno::ETXTBSY
+    );
+    drop(writer);
+    assert_eq!(
+        crate::writers::deny_write_access(&inode).unwrap_err(),
+        Errno::ETXTBSY
+    );
+    drop(second);
+    // A reader is no writer: it neither holds the count nor blocks a run.
+    let _reader = ns.open(&ctx, None, b"/prog", &READ, 0).unwrap();
+    let running = crate::writers::deny_write_access(&inode).unwrap();
+    assert!(running.is_some());
+    // Two programs from one file at once.
+    let other = crate::writers::deny_write_access(&inode).unwrap();
+    assert_eq!(crate::writers::count_of(&inode), Some(-2));
+    drop((running, other));
+    assert_eq!(crate::writers::count_of(&inode), Some(0));
+}
+
+#[test]
+fn a_directory_keeps_no_count_and_a_new_name_can_replace_a_running_file() {
+    let (ns, ctx) = fresh();
+    let mkdir = ns.mkdir(&ctx, None, b"/d", 0o755);
+    assert!(mkdir.is_ok());
+    assert_eq!(crate::writers::count_of(&inode_at(&ns, &ctx, "/d")), None);
+
+    // `install` and `cp --remove-destination` write a new file and rename it
+    // over the old: the running program keeps its inode, as on Linux.
+    write_file(&ns, &ctx, "/prog", b"old");
+    let old = inode_at(&ns, &ctx, "/prog");
+    let _running = crate::writers::deny_write_access(&old).unwrap();
+    write_file(&ns, &ctx, "/prog.new", b"new");
+    ns.rename(
+        &ctx,
+        (None, b"/prog.new"),
+        (None, b"/prog"),
+        RenameMode::Replace,
+    )
+    .unwrap();
+    assert_eq!(read_file(&ns, &ctx, "/prog").unwrap(), b"new");
+    assert_eq!(crate::writers::count_of(&old), Some(-1));
+}
