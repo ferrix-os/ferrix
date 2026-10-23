@@ -85,6 +85,7 @@ kernel or a loader. Each crate sits in exactly one group:
 | `src/lib/network/` | The network stack | `net` `netwire` `nettcp` `netlink` |
 | `src/lib/drivers/` | Device logic over an abstract transport, and the serve loops ring-3 drivers run, grouped by function (see below) | `virtio` and one directory per function |
 | `src/lib/init/` | The service manager's pure core, the restart policy it shares with `devmgr`, and its wire formats | `svc` `restart` `svc-proto` |
+| `src/lib/log/` | The log manager's pure core: records, the segment format, the kernel log's records read, the filter language, the output formats (`docs/LOGGING.md`). The program is `src/user/system/native/lode` | `lode` (`ferrix-lode-core`) |
 | `src/lib/crypto/` | Cryptography user space checks secrets with: the password hash `authd` stores credentials under (`docs/AUTH.md` §5.1). The kernel's random number generator is not here but in `src/lib/kernel/` | `argon2` |
 
 **Drivers by function.** A driver is two crates: its logic in
@@ -137,6 +138,7 @@ initramfs by xtask:
 | `src/user/system/native/devmgr/` | Matches devices to drivers and starts each in a job of its own. |
 | `src/user/system/native/drvupdated/` | Takes a new driver image from root over an abstract socket and hands it to `devmgr` (`docs/DEVMGR.md` §4.1). Only the images `test-restart --update` boots carry it. |
 | `src/user/system/native/drivers/<function>/<name>/` | One process per driver, grouped by function as in the table above. The logic lives in `src/lib/drivers/`; the program is the thin shell around it. |
+| `src/user/system/native/lode/` | lode, the log manager: the service init starts in a sealed job, and the reader `/bin/lode` and `/bin/journalctl` link to (`docs/LOGGING.md`). |
 | `src/user/system/native/pong/`, `src/user/system/native/channel-echo/` | Small native test programs the boot gates start. |
 
 `tools/common/xtask/src/native.rs` lists which of these go into the image.

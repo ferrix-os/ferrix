@@ -479,6 +479,20 @@ name = "ferrix-linux-abi"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-lode"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-lode-core",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
+name = "ferrix-lode-core"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-logctl"
 version = "0.1.0"
 

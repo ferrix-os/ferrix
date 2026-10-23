@@ -145,6 +145,7 @@ mod ipc;
 mod jobs;
 mod kaslr;
 mod keyboard;
+mod lode;
 mod machine_check;
 mod n150;
 mod native;
@@ -557,6 +558,7 @@ const TASKS: &[&[Task]] = &[
     installer::TASKS,
     ipc::TASKS,
     jobs::TASKS,
+    lode::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,
     n150::TASKS,

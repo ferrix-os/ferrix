@@ -1,0 +1,876 @@
+//! The reader: `lode`, or `journalctl` through a link, started from a shell
+//! (`docs/LOGGING.md` §9).
+//!
+//! It reads the segment files itself, as journalctl does; nothing it does
+//! waits on the service. Its arguments come from `/proc/self/cmdline`, since
+//! a native program's entry is given its bootstrap register, not `argv`.
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use ferrix_lode_core::filter::{self, Expr, Op, Test};
+use ferrix_lode_core::format::{self, Output};
+use ferrix_lode_core::ingest;
+use ferrix_lode_core::record::{Record, level};
+use ferrix_lode_core::segment::{self, Header};
+use ferrix_lode_core::time::{self, Civil, Zone};
+use ferrix_lode_core::{console, cursor};
+
+use crate::store::{self, Dir, Segment};
+use crate::{sys, zone};
+
+/// What `lode --help` says.
+const HELP: &str = "\
+lode [OPTIONS...] [FIELD=VALUE...]   read the log (also as journalctl)
+lode mark TEXT...                    write a mark into the log
+lode verify [--kernel] [-b ...]      check the store
+
+  -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
+      --list-boots       the boots the store holds
+  -k, --dmesg            the kernel's own records
+  -u, --unit UNIT        a unit's records (globs; 'name' is name.service)
+  -t, --identifier ID    a program's records;  -T ID leaves one out
+  -p, --priority P[..Q]  at most P (a level's name or number), or P to Q
+  -g, --grep TEXT        records whose message has TEXT (globs; any case if lower case)
+  -S, --since TIME       -U, --until TIME (now, today, -5min, 2026-10-23 14:01, @EPOCH)
+      --since-mark TEXT  --until-mark TEXT: between the latest `lode mark`s that match
+      --around TEXT DUR  every record within DUR (30s, 2min) of one whose message has TEXT
+      --where EXPR       the filter language: unit = \"hyprix*\" and not priority > warning
+  -n, --lines N          the last N;  -r, --reverse newest first
+  -f, --follow           go on printing what is stored after
+  -o, --output FORMAT    human short short-iso short-iso-precise short-precise
+                         short-monotonic with-unit cat json export
+      --after-cursor C   after the record C names;  --show-cursor prints the last's
+  -D, --directory DIR    read DIR instead of /var/log/journal and /run/log/journal
+      --utc              times in UTC
+";
+
+/// The options of a read.
+#[derive(Debug, Default)]
+struct Options {
+    /// `-b`: the boot asked for, as written; `Some("")` for this one.
+    boot: Option<String>,
+    /// `--list-boots`.
+    list_boots: bool,
+    /// What every record must match.
+    expr: Option<Expr>,
+    /// `FIELD=VALUE` arguments, grouped by `+`.
+    matches: Vec<Vec<(String, Vec<u8>)>>,
+    /// `-g`.
+    grep: Option<Vec<u8>>,
+    /// `--since`, `--until`, as written.
+    since: Option<String>,
+    /// `--until`.
+    until: Option<String>,
+    /// `--since-mark`, `--until-mark`.
+    since_mark: Option<Vec<u8>>,
+    /// `--until-mark`.
+    until_mark: Option<Vec<u8>>,
+    /// `--around TEXT DURATION`.
+    around: Option<(Vec<u8>, u64)>,
+    /// `-n`.
+    lines: Option<usize>,
+    /// `-r`.
+    reverse: bool,
+    /// `-f`.
+    follow: bool,
+    /// `-o`.
+    output: Option<Output>,
+    /// `--after-cursor`.
+    after: Option<u64>,
+    /// `--show-cursor`.
+    show_cursor: bool,
+    /// `-D`.
+    directory: Option<Vec<u8>>,
+    /// `--utc`.
+    utc: bool,
+    /// `verify --kernel`.
+    kernel_gaps: bool,
+}
+
+/// Run the reader; the exit status.
+pub(crate) fn run() -> i32 {
+    let args = arguments();
+    let mut rest: &[String] = args.get(1..).unwrap_or_default();
+    match rest.first().map(String::as_str) {
+        Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
+        Some("serve") => {
+            complain("lode: `serve` is the service, which init starts (lode.service)");
+            return 1;
+        }
+        Some("verify") => {
+            rest = rest.get(1..).unwrap_or_default();
+            return match parse(rest) {
+                Ok(mut options) => {
+                    let _ = options.output.get_or_insert(Output::Human);
+                    verify(&options)
+                }
+                Err(why) => usage(&why),
+            };
+        }
+        _ => {}
+    }
+    match parse(rest) {
+        Ok(options) if options.list_boots => list_boots(&options),
+        Ok(options) => show(&options),
+        Err(why) if why.is_empty() => {
+            out(HELP.as_bytes());
+            0
+        }
+        Err(why) => usage(&why),
+    }
+}
+
+/// The process's arguments, from `/proc/self/cmdline`.
+fn arguments() -> Vec<String> {
+    let bytes = sys::read_small(b"/proc/self/cmdline").unwrap_or_default();
+    let mut args: Vec<String> = bytes
+        .split(|&byte| byte == 0)
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect();
+    if args.last().is_some_and(String::is_empty) {
+        let _ = args.pop();
+    }
+    args
+}
+
+/// Say `why` and how to ask for help; status 2.
+fn usage(why: &str) -> i32 {
+    complain(&alloc::format!("lode: {why}\nTry 'lode --help'."));
+    2
+}
+
+/// A line on standard error.
+fn complain(text: &str) {
+    let _ = sys::write_all(2, text.as_bytes());
+    let _ = sys::write_all(2, b"\n");
+}
+
+/// Bytes on standard output; a reader that went away ends lode quietly.
+fn out(bytes: &[u8]) {
+    if sys::write_all(1, bytes).is_err() {
+        ferrix_rt::exit(0);
+    }
+}
+
+/// The arguments, taken one at a time.
+struct Words<'a> {
+    /// All of them.
+    args: &'a [String],
+    /// The next.
+    at: usize,
+}
+
+impl<'a> Words<'a> {
+    /// The next argument.
+    fn next(&mut self) -> Option<&'a String> {
+        let word = self.args.get(self.at)?;
+        self.at += 1;
+        Some(word)
+    }
+
+    /// The next argument, if `take` wants it.
+    fn next_if(&mut self, take: impl Fn(&str) -> bool) -> Option<&'a String> {
+        let word = self.args.get(self.at).filter(|word| take(word))?;
+        self.at += 1;
+        Some(word)
+    }
+}
+
+/// An option's value: given with `=`, or the next argument.
+fn value(
+    flag: &str,
+    inline: Option<&str>,
+    words: &mut Words<'_>,
+    what: &str,
+) -> Result<String, String> {
+    match inline {
+        Some(value) => Ok(String::from(value)),
+        None => words
+            .next()
+            .cloned()
+            .ok_or_else(|| alloc::format!("{flag} needs {what}")),
+    }
+}
+
+/// Read the arguments. `Err("")` asks for the help text.
+fn parse(args: &[String]) -> Result<Options, String> {
+    let mut options = Options::default();
+    let mut words = Words { args, at: 0 };
+    let mut group: Vec<(String, Vec<u8>)> = Vec::new();
+    while let Some(arg) = words.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((flag, value)) if flag.starts_with("--") => (flag, Some(value)),
+            _ => (arg.as_str(), None),
+        };
+        if selection(&mut options, flag, inline, &mut words)?
+            || presentation(&mut options, flag, inline, &mut words)?
+        {
+            continue;
+        }
+        if flag == "+" {
+            options.matches.push(core::mem::take(&mut group));
+        } else if let Some((name, value)) = arg.split_once('=')
+            && !arg.starts_with('-')
+        {
+            group.push((String::from(name), Vec::from(value.as_bytes())));
+        } else {
+            return Err(alloc::format!("{arg}: an option lode does not know"));
+        }
+    }
+    if !group.is_empty() {
+        options.matches.push(group);
+    }
+    Ok(options)
+}
+
+/// The options that choose records. Answers whether `flag` was one.
+fn selection(
+    options: &mut Options,
+    flag: &str,
+    inline: Option<&str>,
+    words: &mut Words<'_>,
+) -> Result<bool, String> {
+    match flag {
+        "-h" | "--help" => return Err(String::new()),
+        "-b" | "--boot" => {
+            let given = inline
+                .map(String::from)
+                .or_else(|| words.next_if(is_boot_word).cloned());
+            options.boot = Some(given.unwrap_or_default());
+        }
+        "--list-boots" => options.list_boots = true,
+        "-k" | "--dmesg" => {
+            let _ = options.boot.get_or_insert_with(String::new);
+            add(
+                &mut options.expr,
+                Expr::Test(Test::field("_TRANSPORT", Op::Eq, b"kernel")),
+            );
+        }
+        "-u" | "--unit" => add(
+            &mut options.expr,
+            unit_expr(&value(flag, inline, words, "a unit")?),
+        ),
+        "-t" | "--identifier" => {
+            let id = value(flag, inline, words, "an identifier")?;
+            add(
+                &mut options.expr,
+                Expr::Test(Test::field("id", Op::Eq, id.as_bytes())),
+            );
+        }
+        "-T" | "--exclude-identifier" => {
+            let id = value(flag, inline, words, "an identifier")?;
+            add(
+                &mut options.expr,
+                Expr::Test(Test::field("id", Op::Ne, id.as_bytes())),
+            );
+        }
+        "-p" | "--priority" => add(
+            &mut options.expr,
+            priority_expr(&value(flag, inline, words, "a priority")?)?,
+        ),
+        "-g" | "--grep" => {
+            options.grep = Some(value(flag, inline, words, "a pattern")?.into_bytes());
+        }
+        "-S" | "--since" => options.since = Some(value(flag, inline, words, "a time")?),
+        "-U" | "--until" => options.until = Some(value(flag, inline, words, "a time")?),
+        "--since-mark" => {
+            options.since_mark = Some(value(flag, inline, words, "a mark")?.into_bytes());
+        }
+        "--until-mark" => {
+            options.until_mark = Some(value(flag, inline, words, "a mark")?.into_bytes());
+        }
+        "--around" => {
+            let text = value(flag, inline, words, "a pattern and a duration")?;
+            let span = value(flag, None, words, "a duration")?;
+            let micros = duration(&span).ok_or_else(|| alloc::format!("{span}: not a duration"))?;
+            options.around = Some((text.into_bytes(), micros));
+        }
+        "--where" => {
+            let text = value(flag, inline, words, "an expression")?;
+            let expr = filter::parse(&text)
+                .map_err(|error| alloc::format!("--where: {} at byte {}", error.why, error.at))?;
+            add(&mut options.expr, expr);
+        }
+        "--after-cursor" | "--cursor" => {
+            let text = value(flag, inline, words, "a cursor")?;
+            options.after =
+                Some(cursor::seqnum(&text).ok_or_else(|| alloc::format!("{text}: not a cursor"))?);
+        }
+        "-D" | "--directory" => {
+            options.directory = Some(value(flag, inline, words, "a directory")?.into_bytes());
+        }
+        "--kernel" => options.kernel_gaps = true,
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// The options that shape the output. Answers whether `flag` was one.
+fn presentation(
+    options: &mut Options,
+    flag: &str,
+    inline: Option<&str>,
+    words: &mut Words<'_>,
+) -> Result<bool, String> {
+    match flag {
+        "-n" | "--lines" => {
+            let count = value(flag, inline, words, "a number")?;
+            let count = count
+                .trim_start_matches('+')
+                .parse()
+                .map_err(|_| alloc::format!("{count}: not a number"))?;
+            options.lines = Some(count);
+        }
+        "-e" | "--pager-end" => {
+            let _ = options.lines.get_or_insert(1000);
+        }
+        "-r" | "--reverse" => options.reverse = true,
+        "-f" | "--follow" => options.follow = true,
+        "-o" | "--output" => {
+            let name = value(flag, inline, words, "a format")?;
+            options.output =
+                Some(Output::named(&name).ok_or_else(|| alloc::format!("{name}: no such format"))?);
+        }
+        "--show-cursor" => options.show_cursor = true,
+        "--utc" => options.utc = true,
+        "--no-pager" | "-a" | "--all" | "-q" | "--quiet" | "-l" | "--full" | "--no-hostname"
+        | "-m" | "--merge" => {}
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// Whether the word after `-b` is its value: a number or a boot id.
+fn is_boot_word(word: &str) -> bool {
+    let digits = word.trim_start_matches(['-', '+']);
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        || segment::parse_id(word).is_some()
+}
+
+/// `expr` and `more`.
+fn add(expr: &mut Option<Expr>, more: Expr) {
+    *expr = Some(match expr.take() {
+        Some(existing) => existing.and(more),
+        None => more,
+    });
+}
+
+/// `-u UNIT`: the unit, and `UNIT.service` for a name with no type.
+fn unit_expr(unit: &str) -> Expr {
+    let exact = Expr::Test(Test::field("unit", Op::Eq, unit.as_bytes()));
+    if unit.contains('.') || unit.contains('*') {
+        return exact;
+    }
+    let service = alloc::format!("{unit}.service");
+    exact.or(Expr::Test(Test::field("unit", Op::Eq, service.as_bytes())))
+}
+
+/// `-p P` (0 to P) or `-p P..Q`.
+fn priority_expr(range: &str) -> Result<Expr, String> {
+    let bad = || alloc::format!("{range}: not a priority");
+    let (low, high) = match range.split_once("..") {
+        Some((from, to)) => (level(from).ok_or_else(bad)?, level(to).ok_or_else(bad)?),
+        None => (0, level(range).ok_or_else(bad)?),
+    };
+    let (low, high) = (low.min(high), low.max(high));
+    let at_least = Expr::Test(Test::field(
+        "priority",
+        Op::Ge,
+        alloc::format!("{low}").as_bytes(),
+    ));
+    let at_most = Expr::Test(Test::field(
+        "priority",
+        Op::Le,
+        alloc::format!("{high}").as_bytes(),
+    ));
+    Ok(at_least.and(at_most))
+}
+
+/// `30s`, `2min`, `1h`, `500ms`, a bare number of seconds: microseconds.
+fn duration(text: &str) -> Option<u64> {
+    if let Some(millis) = text.strip_suffix("ms") {
+        return millis.parse::<u64>().ok()?.checked_mul(1000);
+    }
+    let micros = time::parse(&alloc::format!("+{text}"), 0, &Zone::utc())?;
+    Some(micros)
+}
+
+/// The store directories a read looks in.
+fn directories(options: &Options) -> Result<Vec<Dir>, String> {
+    let paths: Vec<&[u8]> = match &options.directory {
+        Some(path) => alloc::vec![path.as_slice()],
+        None => alloc::vec![store::PERSISTENT, store::VOLATILE],
+    };
+    let mut dirs = Vec::new();
+    let mut refused = None;
+    for path in paths {
+        match Dir::open(path) {
+            Ok(dir) => dirs.push(dir),
+            Err(error) if error.0 == sys::EACCES => refused = Some(path),
+            Err(_) => {}
+        }
+    }
+    if dirs.is_empty() {
+        return Err(match refused {
+            Some(path) => alloc::format!(
+                "{}: permission denied (root and members of adm read the log)",
+                String::from_utf8_lossy(path)
+            ),
+            None => String::from("no log here: neither /var/log/journal nor /run/log/journal"),
+        });
+    }
+    Ok(dirs)
+}
+
+/// A segment with its header.
+struct Known {
+    /// The segment.
+    segment: Segment,
+    /// Its header.
+    header: Header,
+}
+
+/// Every segment with a readable header, oldest first.
+fn known(dirs: &[Dir]) -> Vec<Known> {
+    store::all_segments(dirs)
+        .into_iter()
+        .filter_map(|segment| store::header(&segment).map(|header| Known { segment, header }))
+        .collect()
+}
+
+/// The boots, oldest first: each boot's id once, in the order of its first
+/// segment.
+fn boots(segments: &[Known]) -> Vec<[u8; 16]> {
+    let mut order: Vec<[u8; 16]> = Vec::new();
+    for each in segments {
+        if !order.contains(&each.header.boot_id) {
+            order.push(each.header.boot_id);
+        }
+    }
+    order
+}
+
+/// The boot `-b` names.
+fn chosen_boot(word: &str, boots: &[[u8; 16]]) -> Result<[u8; 16], String> {
+    if let Some(id) = segment::parse_id(word) {
+        return Ok(id);
+    }
+    let offset: i64 = if word.is_empty() {
+        0
+    } else {
+        word.parse()
+            .map_err(|_| alloc::format!("{word}: not a boot"))?
+    };
+    let count = i64::try_from(boots.len()).unwrap_or(0);
+    let index = if offset > 0 {
+        offset - 1
+    } else {
+        count - 1 + offset
+    };
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| boots.get(index))
+        .copied()
+        .ok_or_else(|| alloc::format!("no boot {word} in the log ({count} kept)"))
+}
+
+/// Every record of `segments` that `boot` (if any) allows.
+fn load(segments: &[Known], boot: Option<[u8; 16]>) -> Vec<Record> {
+    let mut records = Vec::new();
+    for each in segments {
+        if boot.is_some_and(|boot| boot != each.header.boot_id) {
+            continue;
+        }
+        if let Some(bytes) = store::bytes(&each.segment, 0)
+            && let Some(scanned) = segment::scan(&bytes, 0)
+        {
+            records.extend(scanned.records.into_iter().map(|found| found.record));
+        }
+    }
+    records.sort_by_key(|record| record.seqnum);
+    records
+}
+
+/// What `-g` matches: a lower-case pattern in any case.
+fn grep_matches(pattern: &[u8], message: &[u8]) -> bool {
+    if pattern.iter().any(u8::is_ascii_uppercase) {
+        return filter::contains(pattern, message);
+    }
+    filter::contains(pattern, &message.to_ascii_lowercase())
+}
+
+/// Whether `record` passes every option but the marks, `--around` and `-n`.
+fn passes(options: &Options, record: &Record, since: Option<u64>, until: Option<u64>) -> bool {
+    if options.after.is_some_and(|after| record.seqnum <= after)
+        || since.is_some_and(|since| record.realtime_us < since)
+        || until.is_some_and(|until| record.realtime_us > until)
+    {
+        return false;
+    }
+    if let Some(expr) = &options.expr
+        && !expr.matches(record)
+    {
+        return false;
+    }
+    if let Some(pattern) = &options.grep
+        && !grep_matches(pattern, record.message())
+    {
+        return false;
+    }
+    options.matches.is_empty()
+        || options
+            .matches
+            .iter()
+            .any(|group| field_group(group, record))
+}
+
+/// journalctl's matches: the same field or'd, different fields and'd.
+fn field_group(group: &[(String, Vec<u8>)], record: &Record) -> bool {
+    let mut names: Vec<&str> = group.iter().map(|(name, _)| name.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names.iter().all(|name| {
+        group
+            .iter()
+            .filter(|(each, _)| each == name)
+            .any(|(_, value)| record.get(name) == Some(value.as_slice()))
+    })
+}
+
+/// The times `--since` and `--until` say.
+fn window(options: &Options, zone: &Zone) -> Result<(Option<u64>, Option<u64>), String> {
+    let now = sys::clock_us(sys::CLOCK_REALTIME);
+    let parse = |text: &Option<String>| -> Result<Option<u64>, String> {
+        text.as_ref()
+            .map(|text| {
+                time::parse(text, now, zone).ok_or_else(|| alloc::format!("{text}: not a time"))
+            })
+            .transpose()
+    };
+    Ok((parse(&options.since)?, parse(&options.until)?))
+}
+
+/// Cut `records` to the marks' window and `--around`'s.
+fn narrow(options: &Options, all: &[Record], records: &mut Vec<Record>) {
+    let mark_at = |text: &[u8], after: u64| {
+        all.iter()
+            .filter(|record| record.seqnum >= after)
+            .filter(|record| {
+                record
+                    .get("MARK")
+                    .is_some_and(|mark| filter::glob(text, mark))
+            })
+            .map(|record| record.seqnum)
+            .collect::<Vec<u64>>()
+    };
+    let mut low = 0;
+    if let Some(text) = &options.since_mark {
+        low = mark_at(text, 0).last().copied().unwrap_or(u64::MAX);
+    }
+    let high = options
+        .until_mark
+        .as_ref()
+        .and_then(|text| mark_at(text, low).first().copied())
+        .unwrap_or(u64::MAX);
+    records.retain(|record| record.seqnum >= low && record.seqnum <= high);
+    if let Some((pattern, span)) = &options.around {
+        let centres: Vec<u64> = all
+            .iter()
+            .filter(|record| grep_matches(pattern, record.message()))
+            .map(|record| record.realtime_us)
+            .collect();
+        records.retain(|record| {
+            centres
+                .iter()
+                .any(|&centre| record.realtime_us.abs_diff(centre) <= *span)
+        });
+    }
+}
+
+/// `lode [options]`: print the records asked for, then follow if asked.
+fn show(options: &Options) -> i32 {
+    let zone = if options.utc {
+        Zone::utc()
+    } else {
+        zone::reader()
+    };
+    let (since, until) = match window(options, &zone) {
+        Ok(window) => window,
+        Err(why) => return usage(&why),
+    };
+    let dirs = match directories(options) {
+        Ok(dirs) => dirs,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            return 1;
+        }
+    };
+    let segments = known(&dirs);
+    let boot = match &options.boot {
+        Some(word) => match chosen_boot(word, &boots(&segments)) {
+            Ok(boot) => Some(boot),
+            Err(why) => {
+                complain(&alloc::format!("lode: {why}"));
+                return 1;
+            }
+        },
+        None => None,
+    };
+    let all = load(&segments, boot);
+    let mut records: Vec<Record> = all
+        .iter()
+        .filter(|record| passes(options, record, since, until))
+        .cloned()
+        .collect();
+    narrow(options, &all, &mut records);
+    let wanted = options.lines.or(options.follow.then_some(10));
+    if let Some(count) = wanted {
+        let skip = records.len().saturating_sub(count);
+        let _ = records.drain(..skip);
+    }
+    if options.reverse {
+        records.reverse();
+    }
+    let output = options.output.unwrap_or(Output::Human);
+    let mut buffer = Vec::new();
+    let mut last = all.last().map_or(0, |record| record.seqnum);
+    for record in &records {
+        format::write(record, output, &zone, &mut buffer);
+        flush_if_full(&mut buffer);
+    }
+    if options.show_cursor
+        && let Some(record) = records.last()
+    {
+        buffer.extend_from_slice(alloc::format!("-- cursor: {}\n", cursor::of(record)).as_bytes());
+    }
+    out(&buffer);
+    if options.follow {
+        follow(options, &dirs, boot, &zone, output, &mut last);
+    }
+    0
+}
+
+/// Write `buffer` out once it holds 64 KiB.
+fn flush_if_full(buffer: &mut Vec<u8>) {
+    if buffer.len() >= 64 * 1024 {
+        out(buffer);
+        buffer.clear();
+    }
+}
+
+/// `-f`: every quarter second, print what was stored after `last`.
+fn follow(
+    options: &Options,
+    dirs: &[Dir],
+    boot: Option<[u8; 16]>,
+    zone: &Zone,
+    output: Output,
+    last: &mut u64,
+) {
+    let mut place: Option<(String, Header, usize)> = None;
+    loop {
+        let segments = known(dirs);
+        let mut fresh: Vec<Record> = Vec::new();
+        for each in &segments {
+            let newer = segments
+                .iter()
+                .rev()
+                .take(2)
+                .any(|tail| tail.segment.name == each.segment.name);
+            if !newer || boot.is_some_and(|boot| boot != each.header.boot_id) {
+                continue;
+            }
+            let from = match &place {
+                Some((name, _, offset)) if *name == each.segment.name => *offset,
+                _ => 0,
+            };
+            let Some(bytes) = store::bytes(&each.segment, 0) else {
+                continue;
+            };
+            let Some(scanned) = segment::scan(&bytes, from) else {
+                continue;
+            };
+            fresh.extend(scanned.records.into_iter().map(|found| found.record));
+            place = Some((each.segment.name.clone(), each.header.clone(), scanned.good));
+        }
+        fresh.sort_by_key(|record| record.seqnum);
+        let mut buffer = Vec::new();
+        for record in fresh {
+            if record.seqnum <= *last {
+                continue;
+            }
+            *last = record.seqnum;
+            if passes(options, &record, None, None) {
+                format::write(&record, output, zone, &mut buffer);
+            }
+        }
+        out(&buffer);
+        sys::sleep_ms(250);
+    }
+}
+
+/// `--list-boots`.
+fn list_boots(options: &Options) -> i32 {
+    let zone = if options.utc {
+        Zone::utc()
+    } else {
+        zone::reader()
+    };
+    let dirs = match directories(options) {
+        Ok(dirs) => dirs,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            return 1;
+        }
+    };
+    let segments = known(&dirs);
+    let order = boots(&segments);
+    let count = i64::try_from(order.len()).unwrap_or(0);
+    let mut buffer = Vec::from(
+        &b"IDX BOOT ID                           FIRST ENTRY                    LAST ENTRY\n"[..],
+    );
+    for (index, boot) in order.iter().enumerate() {
+        let mine: Vec<&Known> = segments
+            .iter()
+            .filter(|each| each.header.boot_id == *boot)
+            .collect();
+        let first = mine.first().map_or(0, |each| each.header.created_us);
+        let last = mine
+            .last()
+            .and_then(|each| store::bytes(&each.segment, 0))
+            .and_then(|bytes| segment::scan(&bytes, 0))
+            .and_then(|scanned| scanned.records.last().map(|found| found.record.realtime_us))
+            .unwrap_or(first);
+        let mut id = String::new();
+        segment::push_hex(&mut id, boot);
+        let offset = i64::try_from(index).unwrap_or(0) + 1 - count;
+        buffer.extend_from_slice(
+            alloc::format!(
+                "{offset:>3} {id} {} {}\n",
+                stamp(first, &zone),
+                stamp(last, &zone)
+            )
+            .as_bytes(),
+        );
+    }
+    out(&buffer);
+    0
+}
+
+/// A time as `2026-10-23 14:01:02 +02:00`.
+fn stamp(realtime_us: u64, zone: &Zone) -> String {
+    let when = Civil::at(realtime_us, zone.offset_at(realtime_us));
+    alloc::format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
+        when.year,
+        when.month,
+        when.day,
+        when.hour,
+        when.minute,
+        when.second,
+        when.offset()
+    )
+}
+
+/// `lode mark TEXT...`: a mark in the kernel log, which the service stores
+/// with `MARK=TEXT`.
+fn mark(words: &[String]) -> i32 {
+    if words.is_empty() {
+        return usage("mark needs a text");
+    }
+    let mut line = Vec::from(&b"<13>"[..]);
+    line.extend_from_slice(console::MARK_PREFIX);
+    line.extend_from_slice(words.join(" ").as_bytes());
+    let written = sys::open(b"/dev/kmsg", sys::O_WRONLY).and_then(|fd| {
+        let result = sys::write(fd, &line);
+        sys::close(fd);
+        result
+    });
+    match written {
+        Ok(_) => 0,
+        Err(error) => {
+            complain(&alloc::format!(
+                "lode: writing the mark to /dev/kmsg: errno {}",
+                error.0
+            ));
+            1
+        }
+    }
+}
+
+/// `lode verify`: every segment's good length, and with `--kernel` the
+/// chosen boot's kernel sequence, with any gap no record says (status 1).
+fn verify(options: &Options) -> i32 {
+    let dirs = match directories(options) {
+        Ok(dirs) => dirs,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            return 1;
+        }
+    };
+    let segments = known(&dirs);
+    let mut buffer = Vec::new();
+    let mut status = 0;
+    for each in &segments {
+        let Some(bytes) = store::bytes(&each.segment, 0) else {
+            continue;
+        };
+        let Some(scanned) = segment::scan(&bytes, 0) else {
+            buffer
+                .extend_from_slice(alloc::format!("{}: no header\n", each.segment.name).as_bytes());
+            status = 1;
+            continue;
+        };
+        let torn = bytes.len() - scanned.good;
+        buffer.extend_from_slice(
+            alloc::format!(
+                "{}: {} record(s), {} byte(s){}\n",
+                each.segment.name,
+                scanned.records.len(),
+                bytes.len(),
+                if torn > 0 {
+                    alloc::format!(", {torn} byte(s) past the last good record")
+                } else {
+                    String::new()
+                }
+            )
+            .as_bytes(),
+        );
+    }
+    if options.kernel_gaps {
+        let boot = chosen_boot(options.boot.as_deref().unwrap_or(""), &boots(&segments));
+        let Ok(boot) = boot else {
+            complain("lode: no boot to check");
+            return 1;
+        };
+        let records = load(&segments, Some(boot));
+        let refs: Vec<&Record> = records.iter().collect();
+        let gaps = ingest::kernel_gaps(&refs);
+        let restarts = records
+            .iter()
+            .filter(|record| record.get_str("MESSAGE_ID") == Some(ingest::MESSAGE_ID_RESTARTED))
+            .count();
+        buffer.extend_from_slice(
+            alloc::format!(
+                "kernel seq {}..{}: {} held, {} said lost, {} restart(s), unsaid gaps: {}\n",
+                gaps.first.unwrap_or(0),
+                gaps.last.unwrap_or(0),
+                gaps.held,
+                gaps.said_lost,
+                restarts,
+                if gaps.unsaid.is_empty() {
+                    String::from("none")
+                } else {
+                    alloc::format!("{:?}", gaps.unsaid)
+                }
+            )
+            .as_bytes(),
+        );
+        if !gaps.unsaid.is_empty() {
+            status = 1;
+        }
+    }
+    out(&buffer);
+    status
+}

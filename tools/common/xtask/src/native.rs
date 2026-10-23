@@ -153,6 +153,13 @@ pub(crate) const PROGRAMS: &[Program] = &[
         binary: "snd",
         directory: DRIVERS,
     },
+    // lode, the log manager (docs/LOGGING.md): the service init starts in a
+    // sealed job, and the reader `/bin/lode` and `/bin/journalctl` link to.
+    Program {
+        package: "ferrix-lode",
+        binary: "lode",
+        directory: DIRECTORY,
+    },
     // Not a driver: the helper `devmgr` publishes drivers' deaths and
     // restarts through (docs/DESKTOP.md §4.2), handed to it as an image
     // the way drvupdated is, and named by no table entry.

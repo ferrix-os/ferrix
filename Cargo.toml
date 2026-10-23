@@ -22,6 +22,7 @@ members = [
     "src/lib/proto/chardevctl",
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
+    "src/lib/log/lode",
     "src/lib/drivers/power/x86-power",
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
@@ -130,6 +131,7 @@ members = [
     "src/user/system/native/devmgr",
     "src/user/system/native/drvupdated",
     "src/user/system/native/devmgr-events",
+    "src/user/system/native/lode",
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/xtask",
@@ -165,6 +167,7 @@ ferrix-chardevctl = { path = "src/lib/proto/chardevctl" }
 ferrix-adb = { path = "src/lib/proto/adb" }
 ferrix-vdagent = { path = "src/lib/drivers/console/vdagent" }
 ferrix-logctl = { path = "src/lib/proto/logctl" }
+ferrix-lode-core = { path = "src/lib/log/lode" }
 ferrix-audit = { path = "src/lib/proto/audit" }
 ferrix-bootinfo = { path = "src/lib/proto/bootinfo" }
 ferrix-slots = { path = "src/lib/proto/slots" }

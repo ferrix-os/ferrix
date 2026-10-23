@@ -548,6 +548,8 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
             content: Content::Link("svc".to_owned()),
         });
     }
+    // lode's reader, under its own name and journalctl's (docs/LOGGING.md).
+    files.extend(crate::lode::links());
     let units = paths::workspace_root().join(UNITS);
     let mut names: Vec<PathBuf> = std::fs::read_dir(&units)
         .map_err(|error| Error::new(format!("reading {}: {error}", units.display())))?
@@ -805,6 +807,8 @@ pub(crate) fn desktop_files(
         "/lib/ferrix/units/graphical.target",
     ));
     files.extend(console_getty(session_user.is_some(), shell));
+    // The desktop keeps its log (docs/LOGGING.md): lode with basic.target.
+    files.push(crate::lode::enabled());
     files.extend(session_files(bus, data_nosuid));
     if let Some(pulsed) = pulsed {
         files.push(File {

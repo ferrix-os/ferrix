@@ -1,0 +1,23 @@
+[package]
+name = "ferrix-lode"
+description = "lode: the log manager -- the service init starts in a sealed job, and the reader (docs/LOGGING.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "lode"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-linux-abi.workspace = true
+ferrix-lode-core.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

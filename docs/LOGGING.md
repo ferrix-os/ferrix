@@ -1168,8 +1168,70 @@ power cut, the real driver's rate.
 
 ## 18. Where it stands (2026-10-23)
 
-Design only, on branch `docs/logging`. No code, no reserved requirement
-ids (none are needed: nothing here is in the item). The kmsg work it builds on is on `develop` (815604fa7). The customer
-said go (2026-10-23, "ok then go with it"): the steps are built in
-order, each gated and landed before the next. USER-WISHES.md's top ten are taken
-in (§2).
+The design landed as dbc6f9bc4. The customer said go (2026-10-23, "ok
+then go with it"): the steps are built in order, each gated and landed
+before the next, the smallest useful first. No requirement ids are needed:
+nothing here is in the item.
+
+### Step 1, as built
+
+`src/lib/log/lode` (`ferrix-lode-core`, `no_std`, no `unsafe`, 31 host
+tests) and `src/user/system/native/lode` (the native program, `/sbin/lode`
+in every initramfs, `/bin/lode` and `/bin/journalctl` linking to it in
+every image that boots init). Kernel lines: 0.
+
+* **The service** (`lode.service`, `Type=native`): started by init with a
+  bootstrap channel, it opens `/dev/kmsg` and makes `/var/log/journal`
+  (or `/run/log/journal` where `/var` cannot be written) as root, gives
+  the store to uid 91 and group `adm` (4), becomes uid 91 for good, cuts a
+  torn tail off the newest segment, finds this boot's last stored kernel
+  sequence number, writes its started or restarted record, says READY,
+  and stores every kernel record as it reads it: one `write` a wakeup,
+  `fdatasync` every 5 s and at once after crit or worse, segments of 16
+  MiB, the oldest removed past 1 GiB. A restart reads the ring from its
+  oldest record, skips what was stored, and says in a record how many
+  were lost where the sequence jumps. The boot id is drawn once a boot
+  and kept in `/run/lode/boot_id` for a restarted instance.
+* **Its box**: `Slice=drivers.slice`, the slice the kernel seals
+  (`docs/CGROUPS.md` §3.3), so lode's job is sealed with no new init or
+  kernel mechanism; init's `Restart=always`. `test-log` checks uid 91,
+  the cgroup `/drivers.slice/lode.service` and a refused move out of it.
+  Not yet: init handing it its descriptors (§11.2.1), so it opens them as
+  root before dropping to its user; `WatchdogSec=`; the sandboxing keys,
+  which init applies to Linux services only.
+* **Sources**: the kernel log alone. Units' output arrives through it,
+  since init writes every unit line to the console as `  init
+  NAME[PID]: TEXT`; lode reads that into `UNIT`, `SYSLOG_IDENTIFIER`
+  and `SYSLOG_PID` -- not the trusted `_SYSTEMD_UNIT`, since anything can
+  write to the console. init's `ferrix.log` channel (step 4 of §17)
+  brings the trusted fields. Kernel subsystems' `  name     text` lines
+  get `FERRIX_SUBSYSTEM`, a driver's `name: text` the identifier.
+* **The reader**: `-b [N|ID]`, `--list-boots`, `-k`, `-u`, `-t`, `-T`,
+  `-p P[..Q]`, `-g` (globs, any case for a lower-case pattern), `-S`/`-U`
+  in every form it prints, `-n`, `-r`, `-e`, `-f`, `-o human|short|
+  short-iso|short-iso-precise|short-precise|short-monotonic|with-unit|
+  cat|json|export`, `--after-cursor`, `--show-cursor`, `-D`, `--utc`,
+  `FIELD=VALUE` matches with `+`, `--where` (the filter language's core:
+  `and`, `or`, `not`, parentheses, globs, `~` as "contains", `priority`
+  by name), and for the N150's needs `lode mark TEXT`, `--since-mark`/
+  `--until-mark`, `--around TEXT DURATION`, and local time from `TZ`,
+  `/etc/TZ` or `/etc/localtime`'s POSIX footer with no zone database.
+  `lode verify [--kernel]` checks the segments and a boot's kernel
+  sequence. No indexes yet (step 5): a query reads the boot's segments
+  whole.
+* **Box tests stream** with `ssh box lode -f -o json --after-cursor=C`
+  and a `--where` filter; the cursor resumes across a dropped connection
+  or a reboot.
+* **The desktop's image** enables it (`basic.target.wants`), so the N150
+  keeps its boots once installed from this landing.
+
+### Known issues
+
+* **test-log on AArch64 is blocked by a kernel finding**, not by lode:
+  `/dev/kmsg` sometimes hands out a record cut short on AArch64 SMP (kernel
+  sequence 807 read as `lod` while the serial port shows `lode flood
+  508`), so the flood's count comes out 2999 in about one run of three,
+  with no gap in the sequence. And a `/dev/kmsg` write that follows a
+  program's half-written console line is merged into it. Both are with the
+  kmsg owner (core ring, `console/log.rs`); once fixed, `test-log --arch
+  aarch64` is run again and this note goes. x86-64 and ARMv7-A pass.

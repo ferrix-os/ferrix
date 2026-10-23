@@ -1,0 +1,379 @@
+//! The Linux calls lode makes, by number through `ferrix_rt::linux::call`
+//! (an app's way: nothing is added to the runtime).
+//!
+//! Where the three architectures differ beyond the number -- ARMv7-A's
+//! 32-bit uid calls and `mmap2` -- it is said here and nowhere else. Every
+//! structure passed is one whose layout is the same on all three: a
+//! `timespec` of two machine words, `pollfd`, `linux_dirent64`, `utsname`.
+
+use alloc::vec::Vec;
+
+use ferrix_rt::linux::{call, numbers};
+
+use crate::arch;
+
+/// An error number.
+pub(crate) use ferrix_linux_abi::errno::Errno;
+
+/// `-100`, the working directory, as `openat` takes it.
+pub(crate) const AT_FDCWD: usize = -100_isize as usize;
+/// `O_RDONLY`.
+pub(crate) const O_RDONLY: usize = 0;
+/// `O_WRONLY`.
+pub(crate) const O_WRONLY: usize = 1;
+/// `O_CREAT`.
+pub(crate) const O_CREAT: usize = 0o100;
+/// `O_EXCL`.
+pub(crate) const O_EXCL: usize = 0o200;
+/// `O_APPEND`.
+pub(crate) const O_APPEND: usize = 0o2000;
+/// `O_NONBLOCK`.
+pub(crate) const O_NONBLOCK: usize = 0o4000;
+/// `O_CLOEXEC`.
+pub(crate) const O_CLOEXEC: usize = 0o2_000_000;
+/// `EPIPE`.
+pub(crate) const EPIPE: u16 = 32;
+/// `EINVAL`.
+pub(crate) const EINVAL: u16 = 22;
+/// `EEXIST`.
+pub(crate) const EEXIST: u16 = 17;
+/// `EACCES`.
+pub(crate) const EACCES: u16 = 13;
+/// `EINTR`.
+pub(crate) const EINTR: u16 = 4;
+/// `POLLIN`.
+const POLLIN: i16 = 1;
+
+/// `path` with its terminating NUL.
+fn c_path(path: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(path.len() + 1);
+    bytes.extend_from_slice(path);
+    bytes.push(0);
+    bytes
+}
+
+/// `openat(dir, path, flags, mode)`.
+pub(crate) fn openat(dir: usize, path: &[u8], flags: usize, mode: usize) -> Result<usize, Errno> {
+    let path = c_path(path);
+    // SAFETY: `path` is a NUL-terminated buffer that lives for the call.
+    unsafe {
+        call(
+            numbers::OPENAT,
+            [dir, path.as_ptr() as usize, flags, mode, 0, 0],
+        )
+    }
+}
+
+/// `open(path, flags)` from the working directory.
+pub(crate) fn open(path: &[u8], flags: usize) -> Result<usize, Errno> {
+    openat(AT_FDCWD, path, flags | O_CLOEXEC, 0)
+}
+
+/// `mkdirat(dir, path, mode)`; one that is there already is not an error.
+pub(crate) fn mkdirat(dir: usize, path: &[u8], mode: usize) -> Result<(), Errno> {
+    let path = c_path(path);
+    // SAFETY: `path` is a NUL-terminated buffer that lives for the call.
+    match unsafe {
+        call(
+            numbers::MKDIRAT,
+            [dir, path.as_ptr() as usize, mode, 0, 0, 0],
+        )
+    } {
+        Ok(_) => Ok(()),
+        Err(error) if error.0 == EEXIST => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// `unlinkat(dir, path, 0)`.
+pub(crate) fn unlinkat(dir: usize, path: &[u8]) -> Result<(), Errno> {
+    let path = c_path(path);
+    // SAFETY: `path` is a NUL-terminated buffer that lives for the call.
+    unsafe { call(numbers::UNLINKAT, [dir, path.as_ptr() as usize, 0, 0, 0, 0]) }.map(|_| ())
+}
+
+/// `read(fd, buf)`.
+pub(crate) fn read(fd: usize, buf: &mut [u8]) -> Result<usize, Errno> {
+    // SAFETY: `buf` is writable for its whole length for the call.
+    unsafe {
+        call(
+            numbers::READ,
+            [fd, buf.as_mut_ptr() as usize, buf.len(), 0, 0, 0],
+        )
+    }
+}
+
+/// `write(fd, buf)`, once.
+pub(crate) fn write(fd: usize, buf: &[u8]) -> Result<usize, Errno> {
+    // SAFETY: `buf` is readable for its whole length for the call.
+    unsafe {
+        call(
+            numbers::WRITE,
+            [fd, buf.as_ptr() as usize, buf.len(), 0, 0, 0],
+        )
+    }
+}
+
+/// All of `buf` to `fd`, going on after a short write or an interruption.
+pub(crate) fn write_all(fd: usize, mut buf: &[u8]) -> Result<(), Errno> {
+    while !buf.is_empty() {
+        match write(fd, buf) {
+            Ok(0) => return Err(Errno(5)),
+            Ok(done) => buf = buf.get(done..).unwrap_or_default(),
+            Err(error) if error.0 == EINTR => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// `close(fd)`.
+pub(crate) fn close(fd: usize) {
+    // SAFETY: no pointer arguments.
+    let _ = unsafe { call(numbers::CLOSE, [fd, 0, 0, 0, 0, 0]) };
+}
+
+/// `lseek(fd, offset, whence)`.
+pub(crate) fn lseek(fd: usize, offset: usize, whence: usize) -> Result<usize, Errno> {
+    // SAFETY: no pointer arguments.
+    unsafe { call(numbers::LSEEK, [fd, offset, whence, 0, 0, 0]) }
+}
+
+/// `SEEK_SET`.
+pub(crate) const SEEK_SET: usize = 0;
+/// `SEEK_END`.
+pub(crate) const SEEK_END: usize = 2;
+
+/// `ftruncate(fd, length)`.
+pub(crate) fn ftruncate(fd: usize, length: usize) -> Result<(), Errno> {
+    // SAFETY: no pointer arguments.
+    unsafe { call(numbers::FTRUNCATE, [fd, length, 0, 0, 0, 0]) }.map(|_| ())
+}
+
+/// `fdatasync(fd)`.
+pub(crate) fn fdatasync(fd: usize) -> Result<(), Errno> {
+    // SAFETY: no pointer arguments.
+    unsafe { call(numbers::FDATASYNC, [fd, 0, 0, 0, 0, 0]) }.map(|_| ())
+}
+
+/// `fchmod(fd, mode)`.
+pub(crate) fn fchmod(fd: usize, mode: usize) -> Result<(), Errno> {
+    // SAFETY: no pointer arguments.
+    unsafe { call(numbers::FCHMOD, [fd, mode, 0, 0, 0, 0]) }.map(|_| ())
+}
+
+/// `fchown(fd, uid, gid)`.
+pub(crate) fn fchown(fd: usize, uid: u32, gid: u32) -> Result<(), Errno> {
+    let number = arch::FCHOWN;
+    // SAFETY: no pointer arguments.
+    unsafe { call(number, [fd, uid as usize, gid as usize, 0, 0, 0]) }.map(|_| ())
+}
+
+/// Become `uid` and `gid` with no supplementary groups, for good.
+pub(crate) fn become_ids(uid: u32, gid: u32) -> Result<(), Errno> {
+    let (groups, resgid, resuid) = (arch::SETGROUPS, arch::SETRESGID, arch::SETRESUID);
+    let (uid, gid) = (uid as usize, gid as usize);
+    // SAFETY: an empty list: no pointer is read.
+    let _ = unsafe { call(groups, [0, 0, 0, 0, 0, 0]) }?;
+    // SAFETY: no pointer arguments.
+    let _ = unsafe { call(resgid, [gid, gid, gid, 0, 0, 0]) }?;
+    // SAFETY: no pointer arguments.
+    unsafe { call(resuid, [uid, uid, uid, 0, 0, 0]) }.map(|_| ())
+}
+
+/// `CLOCK_REALTIME`.
+pub(crate) const CLOCK_REALTIME: usize = 0;
+/// `CLOCK_MONOTONIC`.
+pub(crate) const CLOCK_MONOTONIC: usize = 1;
+
+/// A clock, in microseconds.
+#[must_use]
+pub(crate) fn clock_us(clock: usize) -> u64 {
+    let mut spec = [0_isize; 2];
+    // SAFETY: `spec` is a `timespec` of two machine words, writable for the
+    // call, on every architecture lode is built for.
+    let read = unsafe {
+        call(
+            numbers::CLOCK_GETTIME,
+            [clock, spec.as_mut_ptr() as usize, 0, 0, 0, 0],
+        )
+    };
+    if read.is_err() {
+        return 0;
+    }
+    let [seconds, nanos] = spec;
+    (seconds.max(0) as u64) * 1_000_000 + (nanos.max(0) as u64) / 1000
+}
+
+/// Sleep `millis` milliseconds.
+pub(crate) fn sleep_ms(millis: u64) {
+    let spec = [
+        isize::try_from(millis / 1000).unwrap_or(0),
+        isize::try_from((millis % 1000) * 1_000_000).unwrap_or(0),
+    ];
+    // SAFETY: `spec` is a `timespec`, read for the call; no remainder.
+    let _ = unsafe { call(numbers::NANOSLEEP, [spec.as_ptr() as usize, 0, 0, 0, 0, 0]) };
+}
+
+/// Wait up to `millis` for `fd` to be readable. Answers whether it is.
+pub(crate) fn wait_readable(fd: usize, millis: u64) -> bool {
+    // struct pollfd { int fd; short events; short revents; }
+    let mut pollfd = [0_u8; 8];
+    if let Some(slot) = pollfd.get_mut(0..4) {
+        slot.copy_from_slice(&i32::try_from(fd).unwrap_or(-1).to_ne_bytes());
+    }
+    if let Some(slot) = pollfd.get_mut(4..6) {
+        slot.copy_from_slice(&POLLIN.to_ne_bytes());
+    }
+    let spec = [
+        isize::try_from(millis / 1000).unwrap_or(0),
+        isize::try_from((millis % 1000) * 1_000_000).unwrap_or(0),
+    ];
+    // SAFETY: `pollfd` is one `struct pollfd`, writable for the call, and
+    // `spec` a `timespec` read for it; no signal mask.
+    let ready = unsafe {
+        call(
+            numbers::PPOLL,
+            [
+                pollfd.as_mut_ptr() as usize,
+                1,
+                spec.as_ptr() as usize,
+                0,
+                0,
+                0,
+            ],
+        )
+    };
+    matches!(ready, Ok(count) if count > 0)
+}
+
+/// `getrandom(buf, 0)`, all of it.
+pub(crate) fn random(buf: &mut [u8]) -> Result<(), Errno> {
+    let mut done = 0;
+    while done < buf.len() {
+        let rest = buf.get_mut(done..).unwrap_or_default();
+        // SAFETY: `rest` is writable for its whole length for the call.
+        let got = unsafe {
+            call(
+                numbers::GETRANDOM,
+                [rest.as_mut_ptr() as usize, rest.len(), 0, 0, 0, 0],
+            )
+        }?;
+        done += got;
+    }
+    Ok(())
+}
+
+/// The machine's node name, `uname`'s second field.
+#[must_use]
+pub(crate) fn hostname() -> Vec<u8> {
+    let mut buf = [0_u8; 6 * 65];
+    // SAFETY: `buf` is a `struct utsname` (six 65-byte fields), writable.
+    if unsafe { call(numbers::UNAME, [buf.as_mut_ptr() as usize, 0, 0, 0, 0, 0]) }.is_err() {
+        return Vec::new();
+    }
+    let field = buf.get(65..130).unwrap_or_default();
+    let end = field
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(field.len());
+    Vec::from(field.get(..end).unwrap_or_default())
+}
+
+/// Every name in the directory open on `fd`.
+pub(crate) fn list_dir(fd: usize) -> Result<Vec<Vec<u8>>, Errno> {
+    let mut names = Vec::new();
+    let mut buf = alloc::vec![0_u8; 16 * 1024];
+    loop {
+        // SAFETY: `buf` is writable for its whole length for the call.
+        let got = unsafe {
+            call(
+                numbers::GETDENTS64,
+                [fd, buf.as_mut_ptr() as usize, buf.len(), 0, 0, 0],
+            )
+        }?;
+        if got == 0 {
+            return Ok(names);
+        }
+        let mut at = 0;
+        while at + 19 <= got {
+            // linux_dirent64: u64 ino, i64 off, u16 reclen, u8 type, name.
+            let reclen = buf
+                .get(at + 16..at + 18)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map_or(0, |bytes: [u8; 2]| usize::from(u16::from_ne_bytes(bytes)));
+            if reclen == 0 {
+                return Ok(names);
+            }
+            let name = buf.get(at + 19..at + reclen).unwrap_or_default();
+            let end = name
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(name.len());
+            names.push(Vec::from(name.get(..end).unwrap_or_default()));
+            at += reclen;
+        }
+    }
+}
+
+/// A whole file's bytes, from `offset` on.
+pub(crate) fn read_file_from(dir: usize, name: &[u8], offset: usize) -> Result<Vec<u8>, Errno> {
+    let fd = openat(dir, name, O_RDONLY | O_CLOEXEC, 0)?;
+    let read = read_fd_from(fd, offset);
+    close(fd);
+    read
+}
+
+/// What `fd` holds from `offset` to its end.
+pub(crate) fn read_fd_from(fd: usize, offset: usize) -> Result<Vec<u8>, Errno> {
+    let _ = lseek(fd, offset, SEEK_SET)?;
+    let mut bytes = Vec::new();
+    let mut chunk = alloc::vec![0_u8; 64 * 1024];
+    loop {
+        match read(fd, &mut chunk) {
+            Ok(0) => return Ok(bytes),
+            Ok(got) => bytes.extend_from_slice(chunk.get(..got).unwrap_or_default()),
+            Err(error) if error.0 == EINTR => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// A small file's bytes, or none.
+#[must_use]
+pub(crate) fn read_small(path: &[u8]) -> Option<Vec<u8>> {
+    let fd = open(path, O_RDONLY).ok()?;
+    let bytes = read_fd_from(fd, 0).ok();
+    close(fd);
+    bytes
+}
+
+/// Map `length` bytes of fresh memory, or none.
+#[must_use]
+pub(crate) fn map(length: usize) -> Option<*mut u8> {
+    const PROT_READ_WRITE: usize = 3;
+    const MAP_PRIVATE_ANONYMOUS: usize = 0x22;
+    let number = arch::MMAP;
+    // SAFETY: an anonymous private mapping the kernel places; no pointer
+    // of ours is read or written.
+    let address = unsafe {
+        call(
+            number,
+            [
+                0,
+                length,
+                PROT_READ_WRITE,
+                MAP_PRIVATE_ANONYMOUS,
+                usize::MAX,
+                0,
+            ],
+        )
+    }
+    .ok()?;
+    Some(address as *mut u8)
+}
+
+/// Unmap what [`map`] gave.
+pub(crate) fn unmap(address: *mut u8, length: usize) {
+    let _ = ferrix_rt::linux::munmap(address as usize, length);
+}
