@@ -39,8 +39,8 @@ use core::sync::atomic::Ordering;
 use ferrix_display_modes::scale::Scaler;
 use ferrix_display_modes::{ModeList, add_scaled};
 use ferrix_displayctl::message::{
-    Attach, Hello, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message, PORT_RIGHTS, Rect, ScanoutMode,
-    Status, Timing, Timings, VERSION,
+    Attach, EDID_BYTES, Edid, Hello, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message, PORT_RIGHTS,
+    Rect, ScanoutMode, Status, Timing, Timings, VERSION,
 };
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
@@ -165,13 +165,18 @@ impl Display {
         say(format_args!(
             "intel: card0 published: copies frames into the lit {width}x{height} plane at {phys:#x} ({pitch} bytes a line, write-combining)"
         ));
-        let hotplug = match regs::Regs::map(device, apertures) {
+        let mut hotplug = match regs::Regs::map(device, apertures) {
             Ok(regs) => hotplug::Watch::start(regs),
             Err(why) => {
                 say(format_args!("intel: card0: no hotplug: {why}"));
                 None
             }
         };
+        // The monitor's own EDID, which names it to the compositor
+        // (`docs/DESKTOP.md` §3.4, step 3g).
+        if let Some(watch) = hotplug.as_mut() {
+            send_edid(&control, watch);
+        }
         if hotplug.is_some() {
             schedule(now_ms());
         }
@@ -305,6 +310,10 @@ impl Display {
         let Some(connected) = changed else {
             return true;
         };
+        // A monitor plugged in may be another one: its EDID first.
+        if connected {
+            send_edid(&self.control, watch);
+        }
         match tell_connected(&self.control, &self.screen, connected) {
             Ok(()) => true,
             Err(why) => {
@@ -625,6 +634,30 @@ fn tell_connected(
         send_list(control, screen)?;
     }
     Ok(())
+}
+
+/// The monitor's EDID to the core, for scanout 0: what its connector's
+/// `EDID` property and the compositor's monitor description are made of.
+fn send_edid(control: &Channel<Kernel>, watch: &mut hotplug::Watch) {
+    let Some((bytes, length)) = watch.read_edid() else {
+        return;
+    };
+    let mut edid = Edid {
+        scanout: 0,
+        length: 0,
+        bytes: [0; EDID_BYTES],
+    };
+    let length = length.min(EDID_BYTES);
+    if let (Some(to), Some(from)) = (edid.bytes.get_mut(..length), bytes.get(..length)) {
+        to.copy_from_slice(from);
+        edid.length = length as u32;
+    }
+    if control
+        .write(Message::Edid(edid).encode().as_bytes())
+        .is_err()
+    {
+        say(format_args!("intel: card0: the EDID could not be written"));
+    }
 }
 
 /// The scanout's mode list: the plane's mode and every smaller one shown

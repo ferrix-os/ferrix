@@ -13,10 +13,11 @@
 //! having run on; a `DisplayPort` one needs its link trained again, which
 //! this driver does not do (step 3h), so it stays reported disconnected.
 
+use ferrix_intel_xelp::display::gmbus;
 use ferrix_intel_xelp::display::hotplug::{
     Debounce, POLL_MS, Port, SDEISR, SETTLE_MS, SHOTPLUG_CTL_DDI, TRANSCONF_A, TRANSCONF_ENABLE,
 };
-use ferrix_intel_xelp::io::Mmio;
+use ferrix_intel_xelp::io::{Clock, Mmio};
 use ferrix_intel_xelp::plane::{
     TRANS_DDI_FUNC_CTL_A, TRANS_DDI_FUNC_ENABLE, TRANS_DDI_MODE_DP_MST, TRANS_DDI_MODE_DP_SST,
     TRANS_DDI_MODE_SELECT_SHIFT,
@@ -85,6 +86,30 @@ impl Watch {
         })
     }
 
+    /// The monitor's EDID, read over GMBUS on the port's DDC pins (step
+    /// 3g): the base block and its first extension. `None`, said, when
+    /// nothing answers.
+    pub(crate) fn read_edid(&mut self) -> Option<([u8; 2 * gmbus::EDID_BLOCK], usize)> {
+        let mut out = [0_u8; 2 * gmbus::EDID_BLOCK];
+        let pin = gmbus::pin_of(self.port);
+        match gmbus::read_edid(&mut self.regs, &mut Monotonic, pin, &mut out) {
+            Ok(length) => {
+                say(format_args!(
+                    "intel: card0: port {}'s monitor's EDID read over GMBUS pin {pin}: {length} bytes",
+                    self.port.name()
+                ));
+                Some((out, length))
+            }
+            Err(why) => {
+                say(format_args!(
+                    "intel: card0: no EDID from port {} over GMBUS pin {pin}: {why:?}",
+                    self.port.name()
+                ));
+                None
+            }
+        }
+    }
+
     /// Read the live state at `now_ms`: the new state once a change has
     /// settled, and when to read it next.
     pub(crate) fn poll(&mut self, now_ms: u64) -> (Option<bool>, u64) {
@@ -126,5 +151,22 @@ impl Watch {
             self.port.name()
         ));
         (Some(true), now_ms + next)
+    }
+}
+
+/// `CLOCK_MONOTONIC` in microseconds, and a busy wait on it: what a GMBUS
+/// transfer polls by.
+struct Monotonic;
+
+impl Clock for Monotonic {
+    fn now_us(&mut self) -> u64 {
+        ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1_000
+    }
+
+    fn delay_us(&mut self, us: u32) {
+        let until = self.now_us().saturating_add(u64::from(us));
+        while self.now_us() < until {
+            core::hint::spin_loop();
+        }
     }
 }

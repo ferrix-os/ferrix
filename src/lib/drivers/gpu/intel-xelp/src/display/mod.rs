@@ -4,4 +4,5 @@
 //! light a port. Pure: registers in, decisions out; the driver process does
 //! the reads and writes.
 
+pub mod gmbus;
 pub mod hotplug;

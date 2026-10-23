@@ -135,13 +135,12 @@ impl Debounce {
             return None;
         }
         match self.pending {
-            Some((state, since)) if state == live => {
-                (now_ms.saturating_sub(since) >= SETTLE_MS).then(|| {
+            Some((state, since)) if state == live => (now_ms.saturating_sub(since) >= SETTLE_MS)
+                .then(|| {
                     self.connected = live;
                     self.pending = None;
                     live
-                })
-            }
+                }),
             _ => {
                 self.pending = Some((live, now_ms));
                 None
