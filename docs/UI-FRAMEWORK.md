@@ -869,6 +869,21 @@ more.
   held to its release, hover with entered and exited. Declared properties
   and signals are freed with their component's root. A `counter` demo.
   33 host tests in all.
-* Next: U3b, the window: the Wayland host on `compositor-toolkit` behind
-  tole's `wayland` feature, damage tracking, and the toolkit's present of
-  damaged rectangles; then U3c, focus, keys and the Tab order.
+* **U3b built** (2026-10-23): damage and the window. Each item's drawing
+  is compared with the last frame's; the damage, merged into at most
+  eight rectangles, is drawn into a kept `Frame` and handed over with the
+  toolkit's `draw_damaged` (landed here as 7f86939d6, which also copies
+  what a buffer missed while the others were shown). A part is drawn on a
+  full-size scratch with only the drawing that reaches it: drawing it on
+  a pixmap of its own size or through a mask left edge pixels up to 26
+  levels off, because tiny-skia chops a curve where an edge cuts it; the
+  scratch keeps the kept frame equal to a whole one, pixel for pixel, as
+  a test checks at scales 1, 1.5 and 2. `tole::window::Window` (feature
+  `wayland`) opens a toplevel, feeds the pointer, sizes the root, follows
+  the scale and paces draws by frame callbacks; checked by hand under a
+  headless hyprix. The demos' binary is 2.6 MB stripped: the order of
+  the viewer's, as §4.11 wanted.
+* Next: U3c, focus, keys and the Tab order; then U4, the views and
+  layouts the lode viewer's table needs. The window gets a
+  `test-compositor` row with the viewer's port (U8), where it first runs
+  on Ferrix.
