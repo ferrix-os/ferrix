@@ -197,10 +197,14 @@ pub(crate) struct Display {
     /// plug.
     device: Option<Device<Kernel>>,
     apertures: u32,
+    /// `ferrix.intelgpu.modeset=on`, where the command line says it.
+    written: Option<modeset::Written>,
 }
 
 /// What the second scanout starts with.
 struct Second {
+    /// The command line's word, which a later surface is made under.
+    written: Option<modeset::Written>,
     surface: Option<surface::Surface>,
     /// Its mode where it is lit now.
     size: Option<(u32, u32)>,
@@ -247,8 +251,8 @@ impl Display {
                         modeset::dry(regs, port);
                     }
                 }
-                modeset::Asked::On => {
-                    second = prepare_second(device, apertures, regs);
+                modeset::Asked::On(written) => {
+                    second = prepare_second(written, device, apertures, regs);
                 }
                 modeset::Asked::Nothing => {}
             }
@@ -295,6 +299,7 @@ impl Display {
             watches: [first_watch, None],
             device: None,
             apertures: 0,
+            written: None,
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -306,6 +311,7 @@ impl Display {
             // made now.
             card.device = device.duplicate(Requested::Same).ok();
             card.apertures = apertures;
+            card.written = second.written;
         }
         if let Err(why) = card.announce() {
             say(format_args!("intel: no card0: {why}"));
@@ -405,6 +411,7 @@ fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
 /// there and dark, its port watched, to be tried again at a plug. `None`,
 /// said, only where pipe A drives no combo port.
 fn prepare_second(
+    written: modeset::Written,
     device: &Device<Kernel>,
     apertures: u32,
     regs: &mut regs::Regs,
@@ -414,7 +421,7 @@ fn prepare_second(
         Some(running) => running.port,
         None => dark_port(regs)?,
     };
-    let surface = surface::Surface::make(device, apertures, regs);
+    let surface = surface::Surface::make(written, device, apertures, regs);
     let mut size = None;
     if let (Some(running), Some(surface)) = (cloned, surface.as_ref()) {
         say(format_args!(
@@ -445,6 +452,7 @@ fn prepare_second(
     };
     let watch = hotplug::Watch::on(regs, port, 1);
     Some(Second {
+        written: Some(written),
         surface,
         size,
         connector,
@@ -618,9 +626,9 @@ impl Display {
             return watch.shown_again(regs);
         }
         if self.surface.is_none()
-            && let Some(device) = self.device.as_ref()
+            && let (Some(device), Some(written)) = (self.device.as_ref(), self.written)
         {
-            self.surface = surface::Surface::make(device, self.apertures, regs);
+            self.surface = surface::Surface::make(written, device, self.apertures, regs);
         }
         let Some(surface) = self.surface.as_ref() else {
             return false;

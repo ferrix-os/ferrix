@@ -28,8 +28,15 @@ const ON: &[u8] = b"ferrix.intelgpu.modeset=on";
 pub(crate) enum Asked {
     Nothing,
     Dry,
-    On,
+    On(Written),
 }
+
+/// The proof that the command line says `ferrix.intelgpu.modeset=on`: only
+/// [`asked`] makes one, and everything that writes the display or the GGTT
+/// for the second scanout takes it ([`super::surface::Surface::make`]). A
+/// boot without the word cannot reach them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Written(());
 
 pub(crate) fn asked() -> Asked {
     let mut line = [0_u8; 4096];
@@ -42,7 +49,7 @@ pub(crate) fn asked() -> Asked {
             .split(u8::is_ascii_whitespace)
     };
     if words().any(|word| word == ON) {
-        Asked::On
+        Asked::On(Written(()))
     } else if words().any(|word| word == DRY) {
         Asked::Dry
     } else {

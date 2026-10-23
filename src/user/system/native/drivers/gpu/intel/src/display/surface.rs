@@ -53,7 +53,12 @@ impl Surface {
     /// one, else one whose firmware entries are taken over
     /// ([`light::place`]). `None`, said, when any part is refused: the
     /// second scanout is then there but not lit.
-    pub(crate) fn make(device: &Device<Kernel>, apertures: u32, regs: &mut Regs) -> Option<Self> {
+    pub(crate) fn make(
+        _asked: super::modeset::Written,
+        device: &Device<Kernel>,
+        apertures: u32,
+        regs: &mut Regs,
+    ) -> Option<Self> {
         let bar0 = (0..apertures as usize)
             .filter_map(|index| device.aperture(index).ok())
             .find(|aperture| aperture.bar == 0 && aperture.offset == 0);
