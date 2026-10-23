@@ -918,6 +918,16 @@ more.
   100,000 rows from a Rust model, scrolled to row 50,000. `TableView`
   is not built: the viewer's table is a `ListView` of rows (§3.6), and
   it waits for a consumer that needs cells. 55 host tests.
-* Next: U5, states, transitions and animations. The window gets a
+* **U5 built** (2026-10-23): states (`when`, `state`,
+  `PropertyChanges`), `Transition`s, `Behavior`, and
+  Number/Color/Pause/Sequential/Parallel animations `on` a property with
+  `loops` and `running`, along Qt's easing curves, on a clock the window
+  ticks each frame and tests tick by hand. States and behaviours put a
+  cell in front of a property: what it is set or bound to goes there,
+  and the property is bound anew to the state's choice or the animated
+  value, so a handler's assignment or a binding still reaches it. A
+  `transitions` demo; the README also shows it played, as an animated
+  PNG the PNG writer now writes. 62 host tests.
+* Next: U6, `Fx.Controls` and `Theme`. The window gets a
   `test-compositor` row with the viewer's port (U8), where it first runs
   on Ferrix.
