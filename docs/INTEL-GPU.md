@@ -1577,6 +1577,13 @@ to decide.
    blanks the display for a moment (§12.7).
 3. Whether the keeper's TDR waits two seconds, as Windows', or less.
 
+**Decided (the customer, 2026-10-23, "start with GPU restart phase 2"):**
+(1) the keeper and worker split as §12.3 proposes; (2) a GT reset is
+allowed as the last resort when an engine reset cannot clear a hang --
+which, by §12.10 (6), comes back to the consultant for review against K4
+before any code; (3) the keeper's TDR waits two seconds
+(`remote::keeper::TDR_NS`). `docs/backlog/DECISIONS.md` has the entry.
+
 ### 12.10 The consultant's design verdict (2026-10-22, ledger line 3156)
 
 **OK IF (1) to (9), at code review.** "0 kernel lines" holds:
@@ -1635,6 +1642,66 @@ acknowledged. Branch `intel-fw-reset` releases it first, as i915 does
 (§11.2), shown on the host model only: neither QEMU stand-in has the
 forcewake registers (`intel-fake` touches none). The box run is owed
 again, and must show the `was held by a previous driver; released` line.
+
+### 12.11 Where it stands
+
+2026-10-23, branch `gpu-opaque`, step 1 of §12.8's order. **Kernel lines
+added: 0, removed: 0** (§12.7 holds; no file under `src/kernel` changed).
+
+Built:
+
+* **`remote`** (`ferrix-intel-xelp::remote`): the records (`wire`, one
+  96-byte record per call, up to 128 to a channel message, a bind's
+  address VMO beside it), the keeper's journal and back end (`keeper`),
+  and the worker's side (`worker`). The keeper gives up after eight
+  deaths, on a worker whose facts differ, or on one whose READY says an
+  inherited engine was not reset (§12.10 (2): it then exits and frees
+  nothing of the dead worker's). A ping unanswered for two seconds, a
+  refused call, a death or a worker not READY in 10 s replaces it. A
+  destroyed VM takes its bindings out of the journal. Host-tested against
+  the engine model: a worker killed with three requests in flight and a
+  new one given the journal complete every request once, each store where
+  a run nothing interrupted put it, and the new page tables map every
+  binding to the same pages; plus the give-up rules, the TDR, a refused
+  call, Full queued in the worker in order, the timestamp never going
+  back, and the bindings table through removals (16 tests).
+* **The keeper** (`intel/src/keeper/main.rs` and `link.rs`, binary
+  `intel-keeper`): START with the device, its own job and the worker's
+  image; the render node served over the journal; memory pinned at its
+  first bind, its address VMO handed to the worker read-only for each
+  bind (§12.10 (4): never a client's memory VMO, the device, the
+  interrupt or a control); the MSI forwarded; the worker started in a
+  child of its own job, and a dead one's job waited out (5 s) before the
+  next starts. The journal is a `static` of about a megabyte.
+* **devmgr**: when the initramfs carries `intel-gt`, `intel` is started
+  as a keeper with two more START handles (its job, `TRANSFER | WAIT |
+  MANAGE`; a copy of the worker's image, `READ | TRANSFER`); when it dies
+  its job tree is killed and waited for (`EMPTY`, 5 s) before the quiesce
+  and before the next keeper (§12.10 (1)), said as `devmgr   the driver
+  of 0x… and every process in its job have ended`; an update of `intel`
+  alone is refused (§12.10 (5)). Without `intel-gt` nothing changes.
+* **The fake worker** (`intel-fake-gt`, `intel-gt` in the gate's image).
+* **The gates**: `test-restart --boot intel` kills `intel-gt` twice under
+  `vk-survive`, which must end `survived` (exit 0), the keeper saying each
+  replacement and the new worker up with what it replayed (1 ms after its
+  start on QEMU), and devmgr never seeing a death; `test-restart --boot
+  intel-keeper` kills the keeper twice and wants §11: DIED, the job tree
+  ended, the restart, a new keeper and worker, `DEVICE_LOST`.
+
+Not yet, in §12.8's order:
+
+* **Step 2, the product worker.** `intel` is still one process on every
+  product image (no image carries `intel-gt`). Left: `XelpBackend` over
+  keeper memory (its rings, images, status pages and page-table chunks
+  asked of the keeper by size; Platform over a channel), M1's bring-up
+  and BAR 0 (an `IoMapping` the keeper mints per worker) in the worker,
+  card0 (`display.rs`) moved into the keeper, the ring-3 quarantine of a
+  dead worker's objects (§12.10 (2), the protocol bit is there), the
+  budget headroom (§12.10 (3)), and §12.10 (5)'s V-03, D4 and
+  SAFETY-MANUAL paragraphs, which name an `IoMapping` handed to a worker.
+* **Step 3, context state copied at replay** (§12.4): replayed contexts
+  start from the default image today.
+* **The box run** (§12.8): needs step 2.
 
 ## Appendix A: the probe that printed the numbers
 

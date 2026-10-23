@@ -220,8 +220,8 @@ const FAKE: Program = Program {
 pub(crate) const FAKE_MARKER: &str = "every batch completes at once, nothing runs";
 
 /// Put `intel-fake` in `natives` under the name `intel`, which devmgr starts
-/// for ADL-N: this gate's image, test-compositor's direct-scanout boot and
-/// `test-restart --boot intel`'s, all on the QEMU stand-in alone
+/// for ADL-N: this gate's image and test-compositor's direct-scanout boot,
+/// both on the QEMU stand-in alone
 /// (`Args::intel_gpu_standin`), never on a machine with a GPU.
 pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Result<()> {
     let fake = native::build_one(arch, release, &paths::target_dir(), &FAKE)?;
@@ -233,6 +233,48 @@ pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Resu
     Ok(())
 }
 
+/// The keeper (`docs/INTEL-GPU.md` §12.3), a product program, built
+/// beside `intel` in the same package.
+const KEEPER: Program = Program {
+    package: "ferrix-intel-driver",
+    binary: "intel-keeper",
+    directory: native::DRIVERS,
+};
+
+/// The fake as the keeper's worker.
+const FAKE_WORKER: Program = Program {
+    package: "ferrix-intel-fake",
+    binary: "intel-fake-gt",
+    directory: native::DRIVERS,
+};
+
+/// The name devmgr hands the keeper its worker's image under.
+pub(crate) const WORKER: &str = "intel-gt";
+
+/// Put the keeper in `natives` under the name `intel`, and the fake as its
+/// worker under `intel-gt`: `test-restart --boot intel`'s and
+/// `--boot intel-keeper`'s image, on the QEMU stand-in alone
+/// (`docs/INTEL-GPU.md` §12.8), never on a machine with a GPU.
+pub(crate) fn use_keeper_over_fake(
+    natives: &mut Vec<Built>,
+    arch: Arch,
+    release: bool,
+) -> Result<()> {
+    let keeper = native::build_one(arch, release, &paths::target_dir(), &KEEPER)?;
+    let worker = native::build_one(arch, release, &paths::target_dir(), &FAKE_WORKER)?;
+    let slot = natives
+        .iter_mut()
+        .find(|built| built.name == "intel")
+        .ok_or_else(|| Error::new("the native programs carry no intel driver to replace"))?;
+    slot.bytes = keeper.bytes;
+    natives.push(Built {
+        name: WORKER,
+        directory: native::DRIVERS,
+        bytes: worker.bytes,
+    });
+    Ok(())
+}
+
 /// Refuse an `intel` that is `intel-fake`: every image but this gate's gets
 /// the GT's driver, and the fake must never reach a machine with a GPU (C2).
 ///
@@ -241,7 +283,9 @@ pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Resu
 /// The marker in `intel`'s bytes.
 pub(crate) fn refuse_fake(binary: &str, bytes: &[u8]) -> Result<()> {
     let marker = FAKE_MARKER.as_bytes();
-    if binary == "intel" && bytes.windows(marker.len()).any(|window| window == marker) {
+    if (binary == "intel" || binary == WORKER)
+        && bytes.windows(marker.len()).any(|window| window == marker)
+    {
         return Err(Error::new(
             "intel is intel-fake: only test-intel-uapi's image may carry the fake back end",
         ));
@@ -518,6 +562,7 @@ mod tests {
         let mut bytes = b"\x7fELF...".to_vec();
         bytes.extend_from_slice(FAKE_MARKER.as_bytes());
         assert!(refuse_fake("intel", &bytes).is_err());
+        assert!(refuse_fake("intel-gt", &bytes).is_err());
         assert!(refuse_fake("intel-fake", &bytes).is_ok());
         assert!(refuse_fake("intel", b"\x7fELF the GT's driver").is_ok());
     }

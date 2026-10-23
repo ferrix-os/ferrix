@@ -85,9 +85,15 @@ const PRESSURED: &[&str] = &[
 ];
 
 /// The Intel GPU's restart row (`docs/BACKLOG.md`, *What a landing runs*;
-/// `docs/INTEL-GPU.md` §11): its driver killed twice under a running Vulkan
-/// program on the QEMU stand-in, and Mesa's start-up on the node it serves.
-const TEST_GPU_RESTART: &[&str] = &["test-restart --boot intel", "test-intel-uapi"];
+/// `docs/INTEL-GPU.md` §11, §12.8): its worker killed twice under a running
+/// Vulkan program on the QEMU stand-in, which must never know; its keeper
+/// killed twice, whose program's device is lost; and Mesa's start-up on the
+/// node it serves.
+const TEST_GPU_RESTART: &[&str] = &[
+    "test-restart --boot intel",
+    "test-restart --boot intel-keeper",
+    "test-intel-uapi",
+];
 
 /// What asks for [`TEST_GPU_RESTART`]: the Intel driver, its fake and its
 /// library, devmgr, which starts it again, the chardev core its clients
@@ -277,7 +283,7 @@ fn area_rows(path: &str, rows: &mut Rows) {
         reason(
             rows,
             "the Intel GPU's driver, its restart or its clients' path: test-restart --boot intel \
-             and test-intel-uapi (docs/INTEL-GPU.md §11)",
+             and --boot intel-keeper, and test-intel-uapi (docs/INTEL-GPU.md §11, §12)",
         );
     }
 }

@@ -118,12 +118,16 @@ fn a_budget_the_kernel_refuses_does_not_start_the_gpu() {
 const DEVMGR: &str = include_str!("../../../../user/system/native/devmgr/src/main.rs");
 
 /// The rights a `Requested::Exactly` in devmgr may name: a driver's device
-/// and its control channel, for either ring.
-const NARROWED: [&str; 4] = [
+/// and its control channel, for either ring; and the Intel GPU keeper's job
+/// and its worker's image (`docs/INTEL-GPU.md` §12.3), neither with
+/// `SET_LIMIT` (checked below).
+const NARROWED: [&str; 6] = [
     "Requested::Exactly(DEVICE_RIGHTS)",
     "Requested::Exactly(NET_DEVICE_RIGHTS)",
     "Requested::Exactly(CONTROL_RIGHTS)",
     "Requested::Exactly(NET_CONTROL_RIGHTS)",
+    "Requested::Exactly(KEEPER_JOB_RIGHTS)",
+    "Requested::Exactly(WORKER_IMAGE_RIGHTS)",
 ];
 
 /// Each `fn` in `source`, by name, with its body up to the next `fn`.
@@ -168,6 +172,16 @@ fn every_launch_path_narrows_the_device_to_a_drivers_rights() {
                 .unwrap_or_default()
         );
     }
+    for keeper in ["const KEEPER_JOB_RIGHTS", "const WORKER_IMAGE_RIGHTS"] {
+        let at = DEVMGR
+            .find(keeper)
+            .expect("the keeper's rights are defined");
+        let line = DEVMGR.get(at..).unwrap_or_default();
+        let line = line
+            .get(..line.find(';').unwrap_or(line.len()))
+            .unwrap_or_default();
+        assert!(!line.contains("SET_LIMIT"), "{keeper} names SET_LIMIT");
+    }
     let mut paths = 0;
     for (name, body) in functions(DEVMGR) {
         let starts_a_driver = name.starts_with("start_") || name == "launch_again";
@@ -184,6 +198,7 @@ fn every_launch_path_narrows_the_device_to_a_drivers_rights() {
         .any(|call| body.contains(call));
         assert!(narrowed, "{name} hands a device on without narrowing it");
     }
-    // blk, net, display, input, sound, plain, and a restart.
-    assert_eq!(paths, 7, "a launch path was added or lost; check it here");
+    // blk, net, display, input, sound, plain, the Intel keeper, and a
+    // restart.
+    assert_eq!(paths, 8, "a launch path was added or lost; check it here");
 }

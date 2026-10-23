@@ -1,6 +1,6 @@
 [package]
 name = "ferrix-intel-fake"
-description = "The Intel driver's render node over a fake back end that completes every batch at once: for cargo xtask test-intel-uapi alone, never a product image (docs/INTEL-GPU.md section 6; the consultant's C2)"
+description = "The Intel driver's render node over a fake back end that completes every batch at once, and the same fake as the keeper's GT worker: for cargo xtask test-intel-uapi and test-restart --boot intel alone, never a product image (docs/INTEL-GPU.md sections 6 and 12; the consultant's C2)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,12 @@ publish.workspace = true
 [[bin]]
 name = "intel-fake"
 path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "intel-fake-gt"
+path = "src/worker.rs"
 test = false
 bench = false
 

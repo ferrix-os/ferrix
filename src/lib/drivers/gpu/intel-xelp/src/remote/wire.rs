@@ -60,6 +60,15 @@ pub enum Call {
     Hello {
         /// The generation.
         generation: u32,
+        /// The PCI function's location, for the worker's lines.
+        location: u32,
+        /// The PCI device id, which only the keeper can read: the worker
+        /// holds no device handle.
+        device_id: u16,
+        /// The PCI revision, likewise.
+        revision: u8,
+        /// System memory in bytes, for the uAPI's facts.
+        system_memory_bytes: u64,
     },
     /// `Backend::vm_create`, as keeper VM `vm`.
     VmCreate {
@@ -325,7 +334,19 @@ impl Call {
     #[must_use]
     pub fn encode(&self) -> [u8; RECORD_BYTES] {
         match *self {
-            Call::Hello { generation } => Writer::new(kind::HELLO).u32(generation).done(),
+            Call::Hello {
+                generation,
+                location,
+                device_id,
+                revision,
+                system_memory_bytes,
+            } => Writer::new(kind::HELLO)
+                .u32(generation)
+                .u32(location)
+                .u16(device_id)
+                .u8(revision)
+                .u64(system_memory_bytes)
+                .done(),
             Call::VmCreate { vm } => Writer::new(kind::VM_CREATE).u32(vm).done(),
             Call::VmDestroy { vm } => Writer::new(kind::VM_DESTROY).u32(vm).done(),
             Call::Bind {
@@ -390,6 +411,10 @@ impl Call {
         Ok(match bytes.first().copied() {
             Some(kind::HELLO) => Call::Hello {
                 generation: r.u32()?,
+                location: r.u32()?,
+                device_id: r.u16()?,
+                revision: r.u8()?,
+                system_memory_bytes: r.u64()?,
             },
             Some(kind::VM_CREATE) => Call::VmCreate { vm: r.u32()? },
             Some(kind::VM_DESTROY) => Call::VmDestroy { vm: r.u32()? },

@@ -20,6 +20,6 @@ pub mod worker;
 #[cfg(test)]
 mod tests;
 
-pub use keeper::{GiveUp, KeeperLink, RemoteBackend};
+pub use keeper::{GiveUp, Journal, KeeperLink, RemoteBackend};
 pub use wire::{Call, Event};
 pub use worker::Worker;

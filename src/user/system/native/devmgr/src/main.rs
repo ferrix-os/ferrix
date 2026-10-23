@@ -27,7 +27,7 @@ use ferrix_devmgr_proto::{
 };
 use ferrix_drvupdate_proto::{self as update, Answer, Fingerprint, Outcome, REQUEST_BYTES};
 use ferrix_native_abi::handle::Handle;
-use ferrix_native_abi::rights::Requested;
+use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
     CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceInfo,
@@ -526,6 +526,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut count = 0_u32;
     let mut failed = 0_u32;
     let mut disks = 0_u32;
+    let drv = Drivers::new(&job, &given.names, given.drivers, &given.images);
     for (index, pair) in given.devices.into_iter().take(given.count).enumerate() {
         let Some((device, keep)) = pair else {
             continue;
@@ -562,7 +563,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             failed += 1;
             continue;
         }
-        match start(&job, device, image, &info, plan, &port, u64::from(count)) {
+        match start(&drv, device, image, &info, plan, &port, u64::from(count)) {
             Ok((job, process, bootstrap)) => {
                 // A bus host says when the devices plugged in at boot are
                 // published, and init -- which the kernel starts at REPORT --
@@ -617,13 +618,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     }
 
     report(channel, &mut started, failed)?;
-    let drivers = Drivers {
-        job: &job,
-        names: &given.names,
-        count: given.drivers,
-        images: &given.images,
-    };
-    serve(channel, &port, &mut started, &drivers, &mut inbox)
+    serve(channel, &port, &mut started, &drv, &mut inbox)
 }
 
 /// Whether the driver of `kind` just started at `location` published.
@@ -932,6 +927,32 @@ struct Drivers<'a> {
     names: &'a [[u8; NAME_BYTES]; MAX_DRIVERS],
     count: usize,
     images: &'a [Option<Vmo<Kernel>>; MAX_DRIVERS],
+    /// The Intel GPU's worker image, copied into a VMO of devmgr's own:
+    /// the kernel hands images without `DUPLICATE`, and a keeper is given
+    /// a read-only duplicate of this at every start.
+    worker: Option<Vmo<Kernel>>,
+}
+
+impl<'a> Drivers<'a> {
+    fn new(
+        job: &'a Job<Kernel>,
+        names: &'a [[u8; NAME_BYTES]; MAX_DRIVERS],
+        count: usize,
+        images: &'a [Option<Vmo<Kernel>>; MAX_DRIVERS],
+    ) -> Self {
+        let worker = image_index(names, count, WORKER_NAME.as_bytes())
+            .and_then(|at| images.get(usize::from(at)))
+            .and_then(Option::as_ref)
+            .and_then(|given| copy_image(given, given.size().ok()?))
+            .map(|image| image.vmo);
+        Drivers {
+            job,
+            names,
+            count,
+            images,
+            worker,
+        }
+    }
 }
 
 /// Read every DEVICES message the kernel wrote: the first with the job and
@@ -1129,7 +1150,12 @@ fn serve(
             continue;
         }
         entry.dead = true;
-        entry.quiesced = quiesce(&entry.device);
+        // A keeper's worker lives in its job: the device is quiesced, and
+        // another driver started, only once that whole tree has ended (the
+        // consultant's condition 1, ledger 3156).
+        let keeper = worker_image(entry.plan, drivers).is_some();
+        let tree_ended = !keeper || end_job_tree(&entry.job, entry.location);
+        entry.quiesced = tree_ended && quiesce(&entry.device);
         let _ = channel.write(
             &Message::Unbound {
                 device: entry.index,
@@ -1389,7 +1415,16 @@ fn update_driver(
     let mut tried = 0_u32;
     for entry in started.iter().flatten().filter(|entry| named(entry)) {
         tried += 1;
-        let refused = if !restarted(entry.kind, entry.location) {
+        // A keeper and its worker are one driver (the consultant's
+        // condition 5, ledger 3156): replacing one alone is refused until
+        // the updater carries both.
+        let keeper = worker_image(entry.plan, drivers).is_some();
+        if keeper {
+            say(format_args!(
+                "devmgr   an update of {program} alone is refused: it runs as a keeper over {WORKER_NAME}, and the two are replaced together or not at all"
+            ));
+        }
+        let refused = if keeper || !restarted(entry.kind, entry.location) {
             Outcome::NotRestarted
         } else if entry.dead || !entry.published || entry.unbinding.is_some() {
             Outcome::Busy
@@ -1617,8 +1652,12 @@ fn launch_again(
     inbox: &mut Inbox,
     deadline: Deadline,
 ) -> bool {
-    // The dead driver's job, and anything it left running in it, goes first.
+    // The dead driver's job, and anything it left running in it, goes first,
+    // and a keeper's is waited out whole.
     let _ = entry.job.kill();
+    if worker_image(entry.plan, drivers).is_some() && !end_job_tree(&entry.job, entry.location) {
+        return false;
+    }
     let Some((initramfs, _, _)) =
         driver_for(&entry.info, drivers.names, drivers.count, drivers.images)
     else {
@@ -1636,15 +1675,9 @@ fn launch_again(
     };
     let generation = entry.generation.wrapping_add(1);
     let key = key_of(slot, generation);
-    let Ok((job, process, _bootstrap)) = start(
-        drivers.job,
-        device,
-        image,
-        &entry.info,
-        entry.plan,
-        port,
-        key,
-    ) else {
+    let Ok((job, process, _bootstrap)) =
+        start(drivers, device, image, &entry.info, entry.plan, port, key)
+    else {
         return false;
     };
     entry.generation = generation;
@@ -1749,7 +1782,7 @@ fn driver_name(names: &[[u8; NAME_BYTES]; MAX_DRIVERS], driver: u16) -> &str {
 /// Start `image` on `device`: a ring of the kind the table names, a job, a
 /// process, START over its bootstrap, a watch on its end, and go.
 fn start(
-    job: &Job<Kernel>,
+    drivers: &Drivers<'_>,
     device: Device<Kernel>,
     image: &Vmo<Kernel>,
     info: &DeviceInfo,
@@ -1757,6 +1790,10 @@ fn start(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
+    let job = drivers.job;
+    if let (Plan::Engine(program), Some(worker)) = (plan, worker_image(plan, drivers)) {
+        return start_keeper(job, device, image, info, port, key, program, worker);
+    }
     match plan {
         Plan::Block(name) => start_block(job, device, image, info, name, port, key),
         Plan::Net => start_net(job, device, image, info, port, key),
@@ -1792,6 +1829,91 @@ fn engine_program(info: &DeviceInfo) -> &'static str {
     } else {
         "gc400"
     }
+}
+
+/// The worker image a keeper is handed at START: `intel-gt` for the Intel
+/// GPU's driver, when the initramfs carries it (`docs/INTEL-GPU.md` §12.3).
+/// Without it `intel` is started as one process, as before.
+fn worker_image<'a>(plan: Plan, drivers: &'a Drivers<'_>) -> Option<&'a Vmo<Kernel>> {
+    if !matches!(plan, Plan::Engine("intel")) {
+        return None;
+    }
+    drivers.worker.as_ref()
+}
+
+/// The Intel GPU's worker, in the initramfs.
+const WORKER_NAME: &str = "intel-gt";
+
+/// How long a keeper's job tree may take to end after its kill.
+const TREE_NANOS: u64 = 5_000_000_000;
+
+/// Kill `job` and wait, up to [`TREE_NANOS`], until no process of it or of
+/// any job beneath it is left. `false`, said, when one is: the device is
+/// then not quiesced and nothing is started on it again.
+fn end_job_tree(job: &Job<Kernel>, location: u32) -> bool {
+    let _ = job.kill();
+    let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+    let ended = job
+        .wait_one(Signals::EMPTY, Deadline::At(now.saturating_add(TREE_NANOS)))
+        .is_ok();
+    if ended {
+        say(format_args!(
+            "devmgr   the driver of {location:#010x} and every process in its job have ended"
+        ));
+    } else {
+        say(format_args!(
+            "devmgr   the driver of {location:#010x} left a process in its job {} s after the kill; the device is not handed on",
+            TREE_NANOS / 1_000_000_000
+        ));
+    }
+    ended
+}
+
+/// The rights a keeper holds on its own job: start a worker in a child job
+/// and end it, wait on it, and hand it on; never set its limits.
+const KEEPER_JOB_RIGHTS: Rights = Rights(Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::MANAGE.0);
+
+/// The rights a keeper holds on its worker's image: enough to start it.
+const WORKER_IMAGE_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::TRANSFER.0);
+
+/// Start the Intel GPU's keeper: START as an engine's, with two more
+/// handles after the device, its own job and the worker's image
+/// (`docs/DEVMGR.md` §3).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "start_plain's, and the worker's image"
+)]
+fn start_keeper(
+    job: &Job<Kernel>,
+    device: Device<Kernel>,
+    image: &Vmo<Kernel>,
+    info: &DeviceInfo,
+    port: &Port<Kernel>,
+    key: u64,
+    program: &str,
+    worker: &Vmo<Kernel>,
+) -> Result<Launched, ()> {
+    let child_job = job.create_child().map_err(|_| ())?;
+    let own = child_job
+        .duplicate(Requested::Exactly(KEEPER_JOB_RIGHTS))
+        .map_err(|_| ())?;
+    let worker = worker
+        .duplicate(Requested::Exactly(WORKER_IMAGE_RIGHTS))
+        .map_err(|_| ())?;
+    let device = device
+        .into_owned()
+        .replace(Requested::Exactly(DEVICE_RIGHTS))
+        .map_err(|_| ())?;
+    let encoded = Ring::Start(plain_start(info, program)).encode();
+    launch_in(
+        child_job,
+        image,
+        program,
+        port,
+        key,
+        encoded.as_bytes(),
+        [device, own.into_owned(), worker.into_owned()],
+    )
 }
 
 /// The program a GPU's table entry named: `nvrm` for NVIDIA's, and
@@ -2192,12 +2314,22 @@ fn start_plain(
     key: u64,
     program: &str,
 ) -> Result<Launched, ()> {
+    let device = device
+        .into_owned()
+        .replace(Requested::Exactly(DEVICE_RIGHTS))
+        .map_err(|_| ())?;
+    let encoded = Ring::Start(plain_start(info, program)).encode();
+    launch(job, image, program, port, key, encoded.as_bytes(), [device])
+}
+
+/// START for a driver that gets its device alone, or a keeper's.
+fn plain_start(info: &DeviceInfo, program: &str) -> Start {
     let block = |block: ferrix_native_abi::types::DeviceBlock| Block {
         phys: block.phys,
         offset: block.offset,
         length: block.length,
     };
-    let start = Start {
+    Start {
         common: block(info.common),
         notify: block(info.notify),
         isr: block(info.isr),
@@ -2209,13 +2341,7 @@ fn start_plain(
         name: start_name(program),
         pci_subsystem_vendor_id: info.subsystem_vendor_id,
         pci_subsystem_id: info.subsystem_id,
-    };
-    let device = device
-        .into_owned()
-        .replace(Requested::Exactly(DEVICE_RIGHTS))
-        .map_err(|_| ())?;
-    let encoded = Ring::Start(start).encode();
-    launch(job, image, program, port, key, encoded.as_bytes(), [device])
+    }
 }
 
 /// START's name for `program`: its first eight bytes, NUL-padded.
@@ -2258,6 +2384,19 @@ fn launch<const N: usize>(
     handles: [OwnedHandle<Kernel>; N],
 ) -> Result<Launched, ()> {
     let child_job = job.create_child().map_err(|_| ())?;
+    launch_in(child_job, image, program, port, key, start, handles)
+}
+
+/// [`launch`] in `child_job`, which the caller made.
+fn launch_in<const N: usize>(
+    child_job: Job<Kernel>,
+    image: &Vmo<Kernel>,
+    program: &str,
+    port: &Port<Kernel>,
+    key: u64,
+    start: &[u8],
+    handles: [OwnedHandle<Kernel>; N],
+) -> Result<Launched, ()> {
     let process = pending::create_process(&child_job, image, program).map_err(|_| ())?;
     let (near, far) = channel::create(Kernel).map_err(|_| ())?;
     near.write_with(start, handles).map_err(|_| ())?;

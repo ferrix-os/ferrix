@@ -31,8 +31,11 @@
 //!   `nvme` driver killed: the controller is left enabled with its queues
 //!   in memory the kernel quarantines, and the next driver must reset it,
 //!   take the parked disk up and serve the requests the kernel kept.
-//! * `intel`: the Intel GPU's driver on the QEMU stand-in for ADL-N, under
-//!   a running Vulkan program, with an image of its own ([`intel`]).
+//! * `intel`: the Intel GPU's GT worker killed on the QEMU stand-in for
+//!   ADL-N, under a running Vulkan program that must never know, with an
+//!   image of its own ([`intel`]).
+//! * `intel-keeper`: the same image with the keeper killed instead, whose
+//!   programs are told their device was lost (`docs/INTEL-GPU.md` §11).
 //! * `all`: each of gpu, input, net and blk, one boot each.
 //!
 //! The drivers it kills are looked up afresh each round, and must be ones it
@@ -226,8 +229,10 @@ fn test_restart(args: &Args) -> Result<()> {
     }
     // The Intel GPU's driver has an image of its own: the stand-in, the
     // fake back end and Mesa's volume (`intel`'s module documentation).
-    if args.boot.as_deref() == Some("intel") {
-        return intel::test(args);
+    match args.boot.as_deref() {
+        Some("intel") => return intel::test(args, intel::Victim::Worker),
+        Some("intel-keeper") => return intel::test(args, intel::Victim::Keeper),
+        _ => {}
     }
     let kinds = Kind::asked(args.boot.as_deref())?;
     if args.update && kinds != [Kind::Gpu] {

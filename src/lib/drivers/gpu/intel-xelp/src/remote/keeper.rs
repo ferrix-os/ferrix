@@ -189,8 +189,11 @@ pub struct Replayed {
     pub requests: u32,
 }
 
-/// The journal: every live object the worker must hold.
-struct Journal<T> {
+/// The journal: every live object the worker must hold. About a megabyte:
+/// a program makes it once, in a `static`, and lends it to
+/// [`RemoteBackend::start`], since the front end's tables already take most
+/// of a process's stack.
+pub struct Journal<T> {
     vms: [bool; limits::VMS],
     contexts: [Option<Context>; limits::CONTEXTS],
     bindings: [Option<Bound<T>>; BINDING_SLOTS],
@@ -200,16 +203,42 @@ struct Journal<T> {
     tail: usize,
 }
 
+impl<T> fmt::Debug for Journal<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Journal")
+            .field("requests", &(self.tail - self.head))
+            .finish_non_exhaustive()
+    }
+}
+
+impl<T: Copy> Default for Journal<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Copy> Journal<T> {
-    fn new() -> Self {
+    /// An empty journal.
+    #[must_use]
+    pub const fn new() -> Self {
         Journal {
             vms: [false; limits::VMS],
             contexts: [None; limits::CONTEXTS],
-            bindings: [None; BINDING_SLOTS],
+            bindings: [const { None }; BINDING_SLOTS],
             requests: [None; REQUEST_SLOTS],
             head: 0,
             tail: 0,
         }
+    }
+
+    /// Empty it again, for a keeper's start.
+    fn clear(&mut self) {
+        self.vms = [false; limits::VMS];
+        self.contexts = [None; limits::CONTEXTS];
+        self.bindings.fill(None);
+        self.requests.fill(None);
+        self.head = 0;
+        self.tail = 0;
     }
 
     /// The first slot of `(vm, address)`'s probe.
@@ -277,6 +306,28 @@ impl<T: Copy> Journal<T> {
         }
     }
 
+    /// Forget every binding of `vm`: the front end destroys a VM with its
+    /// bindings in it, and the back end's `vm_destroy` clears them all. The
+    /// rest are put back where a lookup finds them.
+    fn drop_vm_bindings(&mut self, vm: u32) {
+        let mut dropped = false;
+        for slot in &mut self.bindings {
+            if slot.is_some_and(|bound| bound.vm == vm) {
+                *slot = None;
+                dropped = true;
+            }
+        }
+        if !dropped {
+            return;
+        }
+        for at in 0..BINDING_SLOTS {
+            let taken = self.bindings.get_mut(at).and_then(Option::take);
+            if let Some(bound) = taken {
+                let _ = self.insert_binding(bound);
+            }
+        }
+    }
+
     /// Journal a request, or `false` when no slot is free.
     fn push_request(&mut self, request: Request) -> bool {
         if self.tail - self.head >= REQUEST_SLOTS {
@@ -319,10 +370,10 @@ impl<T: Copy> Journal<T> {
 }
 
 /// The keeper's back end.
-pub struct RemoteBackend<L: KeeperLink> {
+pub struct RemoteBackend<'j, L: KeeperLink> {
     link: L,
     facts: Facts,
-    journal: Journal<L::Token>,
+    journal: &'j mut Journal<L::Token>,
     phase: Phase,
     generation: u32,
     restarts: u32,
@@ -339,7 +390,7 @@ pub struct RemoteBackend<L: KeeperLink> {
     started_at: u64,
 }
 
-impl<L: KeeperLink> fmt::Debug for RemoteBackend<L> {
+impl<L: KeeperLink> fmt::Debug for RemoteBackend<'_, L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RemoteBackend")
             .field("phase", &self.phase)
@@ -349,15 +400,16 @@ impl<L: KeeperLink> fmt::Debug for RemoteBackend<L> {
     }
 }
 
-impl<L: KeeperLink> RemoteBackend<L> {
+impl<'j, L: KeeperLink> RemoteBackend<'j, L> {
     /// Start the first worker and wait, until [`START_NS`] has passed, for
     /// its READY: its facts are the ones every later worker must repeat.
+    /// `journal` is emptied and kept for the keeper's life.
     ///
     /// # Errors
     ///
     /// The link back, with [`GiveUp::Start`] or [`GiveUp::NotReset`]
     /// (said to the link first).
-    pub fn start(mut link: L) -> Result<Self, (L, GiveUp)> {
+    pub fn start(mut link: L, journal: &'j mut Journal<L::Token>) -> Result<Self, (L, GiveUp)> {
         if !link.start_worker(1) || !link.flush() {
             link.gave_up(GiveUp::Start);
             return Err((link, GiveUp::Start));
@@ -395,7 +447,10 @@ impl<L: KeeperLink> RemoteBackend<L> {
         Ok(RemoteBackend {
             link,
             facts,
-            journal: Journal::new(),
+            journal: {
+                journal.clear();
+                journal
+            },
             phase: Phase::Live {
                 next_ping: now.saturating_add(PING_NS),
                 sent: None,
@@ -679,7 +734,7 @@ impl<L: KeeperLink> RemoteBackend<L> {
     }
 }
 
-impl<L: KeeperLink> Backend for RemoteBackend<L> {
+impl<L: KeeperLink> Backend for RemoteBackend<'_, L> {
     type Memory = L::Memory;
 
     fn facts(&self) -> &Facts {
@@ -709,6 +764,7 @@ impl<L: KeeperLink> Backend for RemoteBackend<L> {
         if let Some(live) = self.journal.vms.get_mut((vm.0 as usize).wrapping_sub(1)) {
             *live = false;
         }
+        self.journal.drop_vm_bindings(vm.0);
         self.forward(&Call::VmDestroy { vm: vm.0 }, None);
     }
 

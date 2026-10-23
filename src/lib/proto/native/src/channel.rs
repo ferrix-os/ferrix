@@ -268,6 +268,45 @@ impl<S: Syscall> Channel<S> {
         }
     }
 
+    /// `channel_write` of bytes and the handles `handles` holds, in order:
+    /// [`Channel::write_with`] for a count known only at run time. Each
+    /// handle sent is taken out of its slot; a failure leaves every one in
+    /// place.
+    ///
+    /// # Errors
+    ///
+    /// As [`Channel::write_with`]; [`Error::TooBig`] for more handles than a
+    /// message carries.
+    pub fn write_slots(
+        &self,
+        bytes: &[u8],
+        handles: &mut [Option<OwnedHandle<S>>],
+    ) -> Result<(), Error> {
+        let mut buffer = [0_u8; HANDLE_BUFFER];
+        let mut count = 0;
+        for handle in handles.iter().flatten() {
+            let slot = buffer
+                .get_mut(count * HANDLE_BYTES..(count + 1) * HANDLE_BYTES)
+                .ok_or(Error::TooBig)?;
+            slot.copy_from_slice(&handle.raw().0.to_ne_bytes());
+            count += 1;
+        }
+        let value = Call::new(nr::CHANNEL_WRITE)
+            .value(register(self.handle()))
+            .input(bytes)
+            .value(bytes.len())
+            .input(buffer.get(..count * HANDLE_BYTES).unwrap_or_default())
+            .value(count)
+            .make(self.syscall());
+        decode_unit(value)?;
+        for slot in handles.iter_mut() {
+            if let Some(handle) = slot.take() {
+                let _ = handle.into_raw();
+            }
+        }
+        Ok(())
+    }
+
     /// `channel_read`: the next message, into `bytes` and `handles`.
     ///
     /// The handles written are this process's from then on; adopt each one

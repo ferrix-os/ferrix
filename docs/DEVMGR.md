@@ -403,7 +403,25 @@ chardev and display cores wait out its claims, the next driver resets every
 engine its predecessor left pointed at a status page before it brings the
 GT up and sends HELLO, and its clients' old files answer `ENODEV`, which
 Mesa reports as `VK_ERROR_DEVICE_LOST` (`cargo xtask test-restart --boot
-intel`). Every other kind is not started again: the serial port (`vport`) has no core to wait for, and a
+intel-keeper`).
+
+**The Intel GPU's keeper** ([INTEL-GPU.md](INTEL-GPU.md) §12.3). When the
+initramfs carries `intel-gt`, the GT's worker, `intel` is started as a
+keeper: its START carries two more handles after the device, its own job
+(`TRANSFER | WAIT | MANAGE`, so it can start the worker in a child of it)
+and a read-only copy of `intel-gt`'s image (`READ | TRANSFER`; devmgr
+copies the image once, since the kernel hands images without
+`DUPLICATE`). This one driver alone; without `intel-gt` it is started as
+any engine. The keeper replaces a dead worker itself, and devmgr never sees
+that. When the keeper dies, devmgr kills its job and waits, up to five
+seconds, until no process of that job tree is left -- the worker included
+-- before it quiesces the device and before it starts the next keeper
+(`devmgr   the driver of 0x… and every process in its job have ended`); a
+tree that does not empty leaves the device unquiesced and nothing is
+started on it. An update of `intel` alone is refused while it runs as a
+keeper: keeper and worker are one driver and are replaced together
+(`cargo xtask test-restart --boot intel` kills the worker, `--boot
+intel-keeper` the keeper). Every other kind is not started again: the serial port (`vport`) has no core to wait for, and a
 board's USB host (`usbhid` on a tree node), the DK1's GPU engine (`gc400`), the
 gadget (`usbdev`) and a GPU under `nvrm` (§3.2) stay quiesced after their
 driver dies. `devmgr` itself stays fatal until the

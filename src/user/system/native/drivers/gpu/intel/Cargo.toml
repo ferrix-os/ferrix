@@ -13,6 +13,12 @@ path = "src/main.rs"
 test = false
 bench = false
 
+[[bin]]
+name = "intel-keeper"
+path = "src/keeper/main.rs"
+test = false
+bench = false
+
 [dependencies]
 ferrix-blkring.workspace = true
 ferrix-chardevctl.workspace = true

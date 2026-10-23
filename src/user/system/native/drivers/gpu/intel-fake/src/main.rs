@@ -22,17 +22,14 @@
 #![no_std]
 #![no_main]
 
+mod fake;
 /// The serving loop, shared with `intel` (`../../intel/src/serve.rs`).
 #[path = "../../intel/src/serve.rs"]
 mod serve;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_intel_xelp::device_info;
-use ferrix_intel_xelp::frontend::{
-    Backend, Completion, ContextParams, Engine, Facts, Frontend, HwContext, RequestId, SubmitError,
-    VmId,
-};
-use ferrix_intel_xelp::sseu::{Fuses, gen12_sseu_info_init};
+use ferrix_intel_xelp::frontend::Frontend;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::signals::Signals;
@@ -46,23 +43,6 @@ use ferrix_rt::{Bootstrap, Kernel};
 use crate::serve::{AsVmo, say};
 
 ferrix_rt::entry!(main);
-
-/// The engines the fake answers for: the render and copy engines, those
-/// the GT back end drives (M2).
-static ENGINES: [Engine; 2] = [
-    Engine {
-        class: 0,
-        instance: 0,
-    },
-    Engine {
-        class: 1,
-        instance: 0,
-    },
-];
-
-/// The system memory the fake reports: Mesa sizes its heaps from it. The
-/// gate's guest has 4 GiB.
-const SYSTEM_MEMORY: u64 = 4 << 30;
 
 /// Where a run stopped, as the exit status.
 #[derive(Clone, Copy, Debug)]
@@ -78,6 +58,10 @@ enum Step {
     Serve = 4,
 }
 
+/// The system memory the fake reports: Mesa sizes its heaps from it. The
+/// gate's guest has 4 GiB.
+const SYSTEM_MEMORY: u64 = 4 << 30;
+
 /// An object's memory: a plain anonymous VMO.
 struct Memory {
     vmo: Vmo<Kernel>,
@@ -86,99 +70,6 @@ struct Memory {
 impl AsVmo for Memory {
     fn vmo(&self) -> &Vmo<Kernel> {
         &self.vmo
-    }
-}
-
-/// The fake GT: every submission done at once.
-struct Fake {
-    facts: Facts,
-    next: u32,
-    done: [RequestId; 64],
-    pending: usize,
-}
-
-impl Backend for Fake {
-    type Memory = Memory;
-
-    fn facts(&self) -> &Facts {
-        &self.facts
-    }
-
-    fn create_memory(&mut self, bytes: u64) -> Result<Memory, Errno> {
-        let bytes = usize::try_from(bytes).map_err(|_| Errno::ENOMEM)?;
-        vmo::create(Kernel, bytes)
-            .map(|vmo| Memory { vmo })
-            .map_err(|_| Errno::ENOMEM)
-    }
-
-    fn vm_create(&mut self) -> Result<VmId, Errno> {
-        self.next += 1;
-        Ok(VmId(self.next))
-    }
-
-    fn vm_destroy(&mut self, _vm: VmId) {}
-
-    fn bind(
-        &mut self,
-        _vm: VmId,
-        _address: u64,
-        _memory: &Memory,
-        _bytes: u64,
-        pat_index: u8,
-    ) -> Result<(), Errno> {
-        if pat_index > self.facts.max_pat_index {
-            return Err(Errno::EINVAL);
-        }
-        Ok(())
-    }
-
-    fn unbind(&mut self, _vm: VmId, _address: u64, _bytes: u64) {}
-
-    fn context_create(
-        &mut self,
-        _vm: VmId,
-        _engine: Engine,
-        params: ContextParams,
-    ) -> Result<HwContext, Errno> {
-        let ring = params.ring_bytes;
-        if !ring.is_power_of_two() || !(4 << 10..=2 << 20).contains(&ring) {
-            return Err(Errno::EINVAL);
-        }
-        self.next += 1;
-        Ok(HwContext(self.next))
-    }
-
-    fn context_destroy(&mut self, _context: HwContext) {}
-
-    fn submit(
-        &mut self,
-        _context: HwContext,
-        _batch: u64,
-        _length: u32,
-        request: RequestId,
-    ) -> Result<(), SubmitError> {
-        let slot = self.done.get_mut(self.pending).ok_or(SubmitError::Full)?;
-        *slot = request;
-        self.pending += 1;
-        Ok(())
-    }
-
-    fn service(&mut self, _now_ns: u64, _interrupt: bool) {}
-
-    fn next_deadline(&self) -> Option<u64> {
-        None
-    }
-
-    fn completed(&mut self, sink: &mut dyn FnMut(RequestId, Completion)) {
-        for id in self.done.iter().take(self.pending) {
-            sink(*id, Completion::Ok);
-        }
-        self.pending = 0;
-    }
-
-    fn timestamp(&mut self) -> u64 {
-        // The command streamer's clock at 19.2 MHz, from the monotonic one.
-        ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1000 * 192 / 10
     }
 }
 
@@ -225,39 +116,24 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         return Err(Step::Identity);
     }
     let revision = device.config_read(0x08, 1).map_or(0, |value| value as u8);
-    // M0's ADL-N (`docs/INTEL-GPU.md` §10): one slice, two DSS of twelve
-    // EUs (pairs 3 and 7 fused off), the CS timestamp at 19.2 MHz.
-    let facts = Facts {
-        device_id: info.device_id,
-        revision,
-        sseu: gen12_sseu_info_init(Fuses {
-            slice_enable: 1,
-            geometry_dss_enable: 0x3,
-            eu_disable: 0x88,
-        }),
-        cs_timestamp_hz: 19_200_000,
-        engines: &ENGINES,
-        ggtt_bytes: 4 << 30,
-        ppgtt_bits: 48,
-        system_memory_bytes: SYSTEM_MEMORY,
-        max_pat_index: 3,
-    };
+    let facts = fake::facts(info.device_id, revision, SYSTEM_MEMORY);
     say(format_args!(
-        "intel-fake: {:#010x} {:04x}:{:04x} rev {revision}: facts {} EUs, DSS {:#x}, CS {} Hz; every batch completes at once, nothing runs",
+        "intel-fake: {:#010x} {:04x}:{:04x} rev {revision}: facts {} EUs, DSS {:#x}, CS {} Hz; {}",
         info.location,
         info.vendor_id,
         info.device_id,
         facts.sseu.eu_total,
         facts.sseu.subslice_mask,
-        facts.cs_timestamp_hz
+        facts.cs_timestamp_hz,
+        fake::MARKER
     ));
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
-    let mut frontend = Frontend::new(Fake {
-        facts,
-        next: 0,
-        done: [0; 64],
-        pending: 0,
-    });
+    let mut frontend = Frontend::new(fake::Fake::new(facts, |bytes| {
+        let bytes = usize::try_from(bytes).map_err(|_| Errno::ENOMEM)?;
+        vmo::create(Kernel, bytes)
+            .map(|vmo| Memory { vmo })
+            .map_err(|_| Errno::ENOMEM)
+    }));
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
     match serve::serve(&mut host, &port, &mut frontend, &mut |_, _| {}) {
         Ok(never) => match never {},

@@ -11,7 +11,7 @@ use std::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
 
-use super::keeper::{GiveUp, KeeperLink, MAX_RESTARTS, PING_NS, RemoteBackend, TDR_NS};
+use super::keeper::{GiveUp, Journal, KeeperLink, MAX_RESTARTS, PING_NS, RemoteBackend, TDR_NS};
 use super::wire::{self, Call, Event, Malformed, UAPI_ENGINES, kind};
 use super::worker::Worker;
 use crate::backend::{Identity, XelpBackend};
@@ -220,14 +220,25 @@ fn on_big_stack(body: fn()) {
         .expect("the test passed");
 }
 
-fn keeper(link: Link) -> RemoteBackend<Link> {
-    RemoteBackend::start(link)
+/// A journal of the test's own, as a program's `static` is.
+fn journal() -> &'static mut Journal<usize> {
+    std::boxed::Box::leak(std::boxed::Box::new(Journal::new()))
+}
+
+fn keeper(link: Link) -> RemoteBackend<'static, Link> {
+    RemoteBackend::start(link, journal())
         .map_err(|(_, why)| why)
         .expect("up")
 }
 
 /// A batch at `at` storing `value` at `target`, both bound in `vm`.
-fn store(keeper: &mut RemoteBackend<Link>, vm: VmId, at: u64, target: u64, value: u32) -> usize {
+fn store(
+    keeper: &mut RemoteBackend<'static, Link>,
+    vm: VmId,
+    at: u64,
+    target: u64,
+    value: u32,
+) -> usize {
     let batch = keeper.create_memory(4096).expect("memory");
     let out = keeper.create_memory(4096).expect("memory");
     let mut words = [0_u32; 6];
@@ -245,7 +256,7 @@ fn store(keeper: &mut RemoteBackend<Link>, vm: VmId, at: u64, target: u64, value
 
 /// Run the GT and service the keeper until nothing moves; every
 /// completion handed to the front end, in order.
-fn settle(keeper: &mut RemoteBackend<Link>, done: &mut Vec<(u64, Completion)>) {
+fn settle(keeper: &mut RemoteBackend<'static, Link>, done: &mut Vec<(u64, Completion)>) {
     for _ in 0..32 {
         keeper.link().run();
         keeper.link().now += 1_000;
@@ -257,7 +268,13 @@ fn settle(keeper: &mut RemoteBackend<Link>, done: &mut Vec<(u64, Completion)>) {
 
 /// Four requests on two contexts, a worker killed (or not) after the
 /// first ran, and what the GPU did.
-fn scenario(kill: bool) -> (Vec<(u64, Completion)>, Vec<u32>, RemoteBackend<Link>) {
+fn scenario(
+    kill: bool,
+) -> (
+    Vec<(u64, Completion)>,
+    Vec<u32>,
+    RemoteBackend<'static, Link>,
+) {
     let mut keeper = keeper(Link::new());
     let vm = keeper.vm_create().expect("vm");
     let mut outs = Vec::new();
@@ -302,7 +319,13 @@ fn every_record_round_trips() {
 fn every_record_round_trips_body() {
     let facts = *model_backend(0).facts();
     let calls = [
-        Call::Hello { generation: 3 },
+        Call::Hello {
+            generation: 3,
+            location: 0x10,
+            device_id: 0x46d4,
+            revision: 1,
+            system_memory_bytes: 16 << 30,
+        },
         Call::VmCreate { vm: 7 },
         Call::VmDestroy { vm: 7 },
         Call::Bind {
@@ -573,7 +596,7 @@ fn an_engine_left_running_and_not_reset_gives_up_body() {
     assert!(!keeper.live());
     let mut link = Link::new();
     link.reset_done = false;
-    let refused = RemoteBackend::start(link)
+    let refused = RemoteBackend::start(link, journal())
         .map(|_| ())
         .map_err(|(_, why)| why);
     assert_eq!(refused, Err(GiveUp::NotReset));
@@ -758,4 +781,42 @@ fn facts_name_engines_by_a_static_prefix_body() {
     };
     assert_eq!(read, facts);
     assert!(core::ptr::eq(read.engines.as_ptr(), UAPI_ENGINES.as_ptr()));
+}
+
+#[test]
+fn a_destroyed_vm_takes_its_bindings_out_of_the_journal() {
+    on_big_stack(a_destroyed_vm_takes_its_bindings_out_of_the_journal_body);
+}
+
+fn a_destroyed_vm_takes_its_bindings_out_of_the_journal_body() {
+    // A program's file closed: its VM goes with every binding in it, and
+    // the next program's VM, which may get the same id, binds the same
+    // addresses (Mesa's are fixed).
+    let mut keeper = keeper(Link::new());
+    let other = keeper.vm_create().expect("vm");
+    let memory = keeper.create_memory(4096).expect("memory");
+    keeper.bind(other, 0x9000, &memory, 4096, 0).expect("bound");
+    let vm = keeper.vm_create().expect("vm");
+    for n in 0..64_u64 {
+        keeper
+            .bind(vm, 0x1_0000_0000 + n * 0x1000, &memory, 4096, 0)
+            .expect("bound");
+    }
+    keeper.vm_destroy(vm);
+    let again = keeper.vm_create().expect("vm");
+    assert_eq!(again, vm, "the slot is used again");
+    for n in 0..64_u64 {
+        keeper
+            .bind(again, 0x1_0000_0000 + n * 0x1000, &memory, 4096, 0)
+            .expect("bound again");
+    }
+    assert_eq!(
+        keeper.bind(other, 0x9000, &memory, 4096, 0),
+        Err(Errno::EINVAL)
+    );
+    keeper.flush();
+    keeper.link().kill();
+    keeper.service(1, false);
+    let said = keeper.link().lines.join("\n");
+    assert!(said.contains("replayed 2 VMs, 65 bindings"), "{said}");
 }

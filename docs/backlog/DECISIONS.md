@@ -7,6 +7,14 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-23 (customer, through the coordinator)** **The Intel GPU's
+  opaque crash mode is built as planned** (`docs/INTEL-GPU.md` §12.9, "start
+  with GPU restart phase 2"): the driver splits into a keeper and a worker
+  as §12.3 proposes; a GT reset (`GRDOM_FULL`) is allowed as the last resort
+  when an engine reset cannot clear a hang (it comes back to the consultant
+  against K4 before any code, ledger 3156 (6)); the keeper's TDR waits two
+  seconds.
+
 * **2026-10-23 (customer, through the coordinator)** **The power core
   (`docs/POWERCTL.md`) is a standing interface, with a 48 A / 23 A row.**
   Asked "Power limits (consultant OK IF): accept about +500 kernel lines?

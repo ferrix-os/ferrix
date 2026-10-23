@@ -10,8 +10,9 @@
 //! front end, and the front end's deadlines and the back end's interrupt
 //! packets wake the loop.
 //!
-//! Both drivers use this file: `intel`, over the GT back end (M2, which
-//! adds it to its module tree), and `intel-fake`
+//! Three drivers use this file: `intel`, over the GT back end (M2, which
+//! adds it to its module tree), the keeper (`keeper/main.rs`), over a
+//! journal and a worker process (`docs/INTEL-GPU.md` §12), and `intel-fake`
 //! (`../../intel-fake`), over the fake back end only `test-intel-uapi`'s
 //! image carries (consultant C2, ledger 2352).
 
@@ -40,6 +41,10 @@ pub(crate) const KEY_CONTROL: u64 = 1;
 /// The port key the back end binds its interrupt to: a packet with it is
 /// an interrupt, and the back end is serviced with `interrupt` set.
 pub(crate) const KEY_INTERRUPT: u64 = 2;
+/// The port key of a back end in another process (the keeper's worker,
+/// `docs/INTEL-GPU.md` §12): a packet with it services the back end as a
+/// deadline does. The display card's is 3.
+pub(crate) const KEY_BACKEND: u64 = 4;
 
 /// A line on standard error, which a native process has open on the
 /// console.
@@ -287,6 +292,7 @@ where
     };
     arm(host)?;
     loop {
+        frontend.backend.flush();
         let deadline = frontend
             .next_deadline()
             .map_or(Deadline::Never, Deadline::At);
@@ -299,6 +305,7 @@ where
                 arm(host)?;
             }
             Ok(packet) if packet.key == KEY_INTERRUPT => frontend.service(host, true),
+            Ok(packet) if packet.key == KEY_BACKEND => frontend.service(host, false),
             Ok(packet) => other(packet.key, port),
             Err(Error::TimedOut) => frontend.service(host, false),
             Err(_) => return Err(Stopped::Port),
