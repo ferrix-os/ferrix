@@ -258,6 +258,19 @@ impl<B: Backend> Frontend<B> {
         fence::settle(self, host);
     }
 
+    /// The program waiting in chardev request `request` has a signal to
+    /// take. A call held in a wait has changed nothing yet -- a syncobj or
+    /// GEM wait, or an execbuffer held for a busy binding or a full ring,
+    /// which made bindings only -- so it is answered `ERESTARTSYS` and the
+    /// program, its handler run, calls again, as i915's interruptible waits
+    /// answer. A call already answered, or run to its end, is not held, and
+    /// the notice finds nothing: its work stands and its answer went.
+    pub fn interrupt<H: Host<B::Memory>>(&mut self, host: &mut H, request: u64) {
+        if self.state.waits.take(request).is_some() {
+            host.reply(request, -(Errno::ERESTARTSYS.0 as i32));
+        }
+    }
+
     /// An ioctl on file `file`.
     pub fn ioctl<H: Host<B::Memory>>(
         &mut self,

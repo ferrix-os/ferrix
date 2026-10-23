@@ -39,6 +39,14 @@
 //!   lost and reaches the driver after every request of its file (N8).
 //! * When the driver goes, its nodes go: every open file answers `ENODEV`
 //!   for good, and every waiter wakes with `ENODEV` (N9).
+//! * A signal abandons a request the driver has not been sent, and one to a
+//!   driver whose HELLO did not ask for interrupts. A driver that did
+//!   (`VERSION_INTERRUPTS`) is sent an `INTERRUPT` naming a request it has,
+//!   once, and the program waits on for the answer: a wait that changed
+//!   nothing answers `ERESTARTSYS`, work in progress finishes. Abandoned
+//!   part-way, an Intel `EXECBUFFER2` had its copies refused after its batch
+//!   was queued, and Mesa, told `EINTR`, submitted it again. A process that
+//!   is ending abandons the request whatever its driver.
 //!
 //! A HELLO may list the render node alone, as the Intel GPU's driver does
 //! (`docs/INTEL-GPU.md` §4.2; the consultant's K3 (1), ledger 2352): then
@@ -163,6 +171,8 @@ pub(crate) struct Control {
     dmabufs: SpinLock<dmabuf::Table>,
     /// Its unsignalled fences, by cookie (N3b sync, [`sync`]).
     syncs: SpinLock<sync::Table>,
+    /// Whether its driver takes [`Op::Interrupt`] (its HELLO said so).
+    interrupts: AtomicBool,
 }
 
 /// [`Control::apertures`].
@@ -220,6 +230,9 @@ enum Outgoing {
     DmabufRelease {
         cookie: u64,
     },
+    /// The program waiting in a request the driver has has a signal to
+    /// take ([`interrupt`]).
+    Interrupt(Arc<Request>),
 }
 
 /// One program's request, outstanding until answered or abandoned.
@@ -363,6 +376,7 @@ fn make_control(
         }),
         work: WaitQueue::new(),
         gone: AtomicBool::new(false),
+        interrupts: AtomicBool::new(false),
         apertures: SpinLock::new(Apertures::default()),
         dmabufs: SpinLock::new(Vec::new()),
         syncs: SpinLock::new(Vec::new()),
@@ -500,6 +514,9 @@ fn take_up(control: &Arc<Control>) -> Option<Publication> {
                 return None;
             }
             control.device.hello_accepted();
+            control
+                .interrupts
+                .store(publication.interrupts, Ordering::Release);
             let render = usize::from(publication.minors().contains(&RENDER_MINOR));
             crate::console::println!(
                 "  chardev  {} node(s) of major {MAJOR} and {render} render node published for \
@@ -589,7 +606,7 @@ fn serve(control: &Arc<Control>) {
             let next = {
                 let mut state = control.state.lock();
                 let next = state.outgoing.pop_front();
-                if let Some(Outgoing::Request(_)) = next {
+                if let Some(Outgoing::Request(_) | Outgoing::Interrupt(_)) = next {
                     state.queued = state.queued.saturating_sub(1);
                 }
                 next
@@ -599,7 +616,7 @@ fn serve(control: &Arc<Control>) {
             };
             // A request answered or abandoned before its turn is not
             // written: nobody waits for it (F-63).
-            if let Outgoing::Request(request) = &next {
+            if let Outgoing::Request(request) | Outgoing::Interrupt(request) = &next {
                 let inner = request.inner.lock();
                 if !inner.alive || inner.answer.is_some() {
                     continue;
@@ -612,6 +629,18 @@ fn serve(control: &Arc<Control>) {
                     file: *file,
                     op: Op::Release,
                     minor: *minor,
+                    pid: 0,
+                    euid: 0,
+                    egid: 0,
+                    cmd: 0,
+                    arg: 0,
+                    pages: 0,
+                },
+                Outgoing::Interrupt(request) => Wire {
+                    id: request.wire.id,
+                    file: 0,
+                    op: Op::Interrupt,
+                    minor: 0,
                     pid: 0,
                     euid: 0,
                     egid: 0,
@@ -875,7 +904,13 @@ fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<
     Ok(request)
 }
 
-/// Wait for `request`'s answer, or abandon it on a signal.
+/// Wait for `request`'s answer, or abandon it on a signal -- unless its
+/// driver takes interrupts and has the request already: then it is told,
+/// and the answer waited for, since it may be running the request. Linux's
+/// drivers take a signal only in a wait that has changed nothing yet; one
+/// abandoned mid-way had its copies refused after its work was queued
+/// (an Intel `EXECBUFFER2` ran, and the program, told `EINTR`, submitted
+/// it again). A process that is ending abandons it still.
 fn await_answer(
     control: &Control,
     request: &Arc<Request>,
@@ -885,6 +920,15 @@ fn await_answer(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
     );
+    if request.inner.lock().answer.is_none()
+        && !client.caller_must_leave()
+        && interrupt(control, request)
+    {
+        let _ = request.waiters.wait_until_deadline(
+            || request.inner.lock().answer.is_some() || client.caller_must_leave(),
+            u64::MAX,
+        );
+    }
     let answered = request.inner.lock().answer.clone();
     if let Some(answer) = answered {
         // A reply from one driver thread may come while another is still
@@ -895,6 +939,34 @@ fn await_answer(
     }
     abandon(control, request);
     Err(Errno::EINTR)
+}
+
+/// Tell `control`'s driver that `request`'s program has a signal to take,
+/// if the driver takes interrupts and the request has left the queue for
+/// it: true when told. A request still queued is the caller's to abandon,
+/// since no driver has seen it; and with the queue at its bound the old way
+/// is kept, so the queue never outgrows its reserved room (F-63).
+fn interrupt(control: &Control, request: &Arc<Request>) -> bool {
+    if !control.interrupts.load(Ordering::Acquire) {
+        return false;
+    }
+    {
+        let mut state = control.state.lock();
+        let queued = state
+            .outgoing
+            .iter()
+            .any(|held| matches!(held, Outgoing::Request(held) if Arc::ptr_eq(held, request)));
+        if queued || state.queued >= MAX_OUTSTANDING {
+            return false;
+        }
+        // NOALLOC: `queued` is below MAX_OUTSTANDING, the room reserved.
+        state
+            .outgoing
+            .push_back(Outgoing::Interrupt(Arc::clone(request)));
+        state.queued += 1;
+    }
+    control.work.wake_all();
+    true
 }
 
 /// Wait until no copy for `request` is in flight. Each copy re-checks the
@@ -998,7 +1070,7 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
             // An import is answered with its status alone (K5).
             Op::DmabufImport => Ok(Answer::Value(0)),
             // Never a request anyone waits in.
-            Op::DmabufRelease => Err(Errno::EIO),
+            Op::DmabufRelease | Op::Interrupt => Err(Errno::EIO),
         }
     };
     let accepted = outcome.is_ok() || status < 0;

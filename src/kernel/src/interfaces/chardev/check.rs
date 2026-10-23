@@ -120,7 +120,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 
-use ferrix_chardevctl::message::{Hello, MAX_NODES, Message, Op, VERSION};
+use ferrix_chardevctl::message::{Hello, MAX_NODES, Message, Op, VERSION, VERSION_INTERRUPTS};
 use ferrix_chardevctl::node::{MODE, RENDER_MINOR};
 use ferrix_chardevctl::session::Refusal;
 use ferrix_linux_abi::errno::Errno;
@@ -137,7 +137,8 @@ use crate::device::{self, DeviceNode};
 use crate::object::check::{SCRATCH, Side, device_handle, reg};
 use crate::sched;
 use crate::sync::SpinLock;
-use crate::syscall::process::Process;
+use crate::syscall::process::{self as process_calls, Process};
+use crate::syscall::signal::Origin;
 use crate::timer;
 
 /// A message being sent.
@@ -213,6 +214,9 @@ pub struct Report {
     pub combining_checks: u32,
     /// Whether a VMO was made write-combining here (x86-64 only).
     pub combining: bool,
+    /// Signals to programs waiting in requests (ledger 3471): told to a
+    /// driver that takes interrupts, abandoned otherwise.
+    pub interrupts: u32,
     /// Why the cases needing a second driver were not checked.
     pub one_device: bool,
     /// Why nothing was checked.
@@ -291,6 +295,7 @@ pub fn run() -> Result<Report, &'static str> {
     )?;
     abandoned(&driver, control, &core, &program, &mut report)?;
     answered_drains(&driver, control, &core, &program, &mut report)?;
+    signal_abandons(&driver, control, &core, &program, &mut report)?;
     out_of_order(&driver, control, &core, &program, &mut report)?;
     combining_maps(&driver, control, &core, &program, &mut report)?;
     bounded(&driver, control, &core, &program, &mut report)?;
@@ -317,6 +322,7 @@ pub fn run() -> Result<Report, &'static str> {
     fenced_after_death(&program, &fenced, &mut report)?;
     after_death(&driver, first, &core, &program, &kept, &mut report)?;
     stale_fence_refused(&driver, first, &core, &program, fence, &mut report)?;
+    interrupted(&driver, first, &core, &program, &mut report)?;
     // The dead control's last reference goes; its fence keeps its maker.
     drop(core);
     gone_control_fence_has_a_maker(&program, fence)?;
@@ -1154,6 +1160,242 @@ fn abandoned(
     }
     report.refusals += 1;
     drain_channel(side, control);
+    Ok(())
+}
+
+/// Make `SIGUSR1` pending for `process`, caught so that it is not fatal,
+/// and wake `request`'s waiter as a signal wakes a thread's task.
+fn send_signal(process: &Process, request: &Request) {
+    process.with_signals(|signals| signals.install_action(SIGUSR1, HANDLER, 0));
+    let _ = process.post_signal(SIGUSR1, Origin::Kernel);
+    request.waiters.wake_all();
+}
+
+/// Take the pending `SIGUSR1` back, as the program's handler would have run.
+fn taken(process: &Process) {
+    process.with_signals(|signals| {
+        let _ = crate::syscall::signal::take_shared(signals, crate::syscall::signal::bit(SIGUSR1));
+        signals.install_action(SIGUSR1, 0, 0);
+    });
+}
+
+/// `SIGUSR1`, and the handler address its disposition names: never run,
+/// since the check's programs have no thread.
+const SIGUSR1: u32 = ferrix_linux_abi::types::SIGUSR1;
+const HANDLER: u64 = 0x1000;
+
+/// (d) of ledger 3471: to a driver whose HELLO named version 1, a signal
+/// to a program waiting in a request the driver has abandons it: `EINTR`,
+/// no `INTERRUPT`, and its copies refused.
+fn signal_abandons(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    send_signal(&program.process, &request);
+    let outcome = finish()?;
+    taken(&program.process);
+    if outcome != Err(Errno::EINTR) {
+        return Err("a signal did not abandon a version-1 driver's request with EINTR");
+    }
+    if read(side, control).is_some() {
+        return Err("a version-1 driver was sent something for a signal");
+    }
+    if copy(side, control, wire.id, nr::CHARDEV_COPY_IN, 8) != Err(status::BAD_STATE) {
+        return Err("a copy for a request a signal abandoned was not refused");
+    }
+    report.interrupts += 1;
+    Ok(())
+}
+
+/// (a) of [`interrupted`].
+fn interrupt_told(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    send_signal(&program.process, &request);
+    match receive(side, control)? {
+        Some(Message::Request(told)) if told.op == Op::Interrupt && told.id == wire.id => {}
+        _ => return Err("a signal to a program in a request its driver had sent no INTERRUPT"),
+    }
+    still_waiting("a program whose driver was told of its signal did not wait for the answer")?;
+    if read(side, control).is_some() {
+        return Err("a driver was sent a second message for one signal");
+    }
+    let _ = copy(side, control, wire.id, nr::CHARDEV_COPY_IN, 8)
+        .map_err(|_| "a copy for an interrupted request was refused while its program waited")?;
+    reply(side, control, wire.id, VALUE)?;
+    let outcome = finish()?;
+    taken(&program.process);
+    if outcome != Ok(VALUE as usize) {
+        return Err("an interrupted request's call did not return its driver's answer");
+    }
+    if copy(side, control, wire.id, nr::CHARDEV_COPY_OUT, 8) != Err(status::BAD_STATE) {
+        return Err("a copy after an interrupted request's reply was not refused");
+    }
+    report.interrupts += 1;
+    Ok(())
+}
+
+/// (b) of [`interrupted`].
+fn interrupt_queued(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    // (b): the driver's channel is filled with requests it then answers
+    // unread, so a request taken in after them stays queued for certain.
+    let unread = fill(core, program)?;
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while queued(core) != 0 {
+        if timer::now_nanos() > deadline {
+            return Err("the control's task did not fill its driver's channel");
+        }
+        sched::sleep_for(1_000_000);
+    }
+    for request in &unread {
+        reply(side, control, request.wire.id, VALUE)?;
+    }
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    send_signal(&program.process, &request);
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let outcome = finish()?;
+    taken(&program.process);
+    if outcome != Err(Errno::EINTR) {
+        return Err("a signal to a program whose request was still queued did not answer EINTR");
+    }
+    while let Some(bytes) = read(side, control) {
+        if Message::decode(&bytes).is_ok_and(|message| {
+            matches!(message, Message::Request(told)
+                if told.op == Op::Interrupt || told.id == request.wire.id)
+        }) {
+            return Err("a request abandoned while queued reached its driver");
+        }
+    }
+    report.interrupts += 1;
+    Ok(())
+}
+
+/// (c) of [`interrupted`].
+fn interrupt_killed(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    _program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    // (c): a program of its own, killed once its driver was told.
+    let doomed = Side::new()?;
+    let request = admit(core, &doomed.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&doomed.process),
+    ))?;
+    let wire = loop {
+        match receive(side, control)? {
+            Some(Message::Request(wire)) if wire.op == Op::Ioctl => break wire,
+            Some(_) => {}
+            None => return Err("a driver taking interrupts lost its control"),
+        }
+    };
+    send_signal(&doomed.process, &request);
+    match receive(side, control)? {
+        Some(Message::Request(told)) if told.op == Op::Interrupt && told.id == wire.id => {}
+        _ => return Err("a signal to a program in a request its driver had sent no INTERRUPT"),
+    }
+    process_calls::kill(&doomed.process, 128 + 9);
+    request.waiters.wake_all();
+    if finish().map_err(|_| "a program killed while its driver had its request never returned")?
+        != Err(Errno::EINTR)
+    {
+        return Err("a program killed while its driver had its request did not return EINTR");
+    }
+    if copy(side, control, wire.id, nr::CHARDEV_COPY_IN, 8) != Err(status::BAD_STATE) {
+        return Err("a copy for a killed program's request was not refused");
+    }
+    report.interrupts += 1;
+    doomed.close_everything();
+    Ok(())
+}
+
+/// Ledger 3471's (a) to (c), on a driver whose HELLO named
+/// `VERSION_INTERRUPTS`: (a) a signal to a program waiting in a request the
+/// driver has read sends one `INTERRUPT` naming it and the program waits on,
+/// the driver's copies still reach it, and its reply is what the call
+/// returns, copies refused after; (b) a signal to one whose request is still
+/// queued abandons it, `EINTR`, and nothing is sent for it; (c) a kill after
+/// the `INTERRUPT` ends the call with `EINTR`, the request abandoned.
+fn interrupted(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    old: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    unclaimed(node)?;
+    let device = device_handle(side, node)?;
+    let control = create(side, device)?;
+    hello_as(side, control, location(node), &[0], VERSION_INTERRUPTS)?;
+    if !matches!(receive(side, control)?, Some(Message::Ready(1))) {
+        return Err("a HELLO naming VERSION_INTERRUPTS was not answered READY");
+    }
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let core = loop {
+        let found = CONTROLS
+            .lock()
+            .iter()
+            .find(|held| Arc::ptr_eq(&held.device, node) && !Arc::ptr_eq(held, old))
+            .cloned();
+        if let Some(found) = found {
+            break found;
+        }
+        if timer::now_nanos() > deadline {
+            return Err("a driver taking interrupts has no live control");
+        }
+        sched::sleep_for(1_000_000);
+    };
+    interrupt_told(side, control, &core, program, report)?;
+    interrupt_queued(side, control, &core, program, report)?;
+    interrupt_killed(side, control, &core, program, report)?;
+    close(side, control)?;
+    drop(core);
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while published(0).is_some() {
+        if timer::now_nanos() > deadline {
+            return Err("a node stayed published after its driver went");
+        }
+        sched::sleep_for(1_000_000);
+    }
     Ok(())
 }
 
@@ -2854,12 +3096,23 @@ fn location(node: &DeviceNode) -> u32 {
 
 /// Say HELLO for `minors` at `at`.
 fn hello(side: &Side, control: Handle, at: u32, minors: &[u16]) -> Result<(), &'static str> {
+    hello_as(side, control, at, minors, VERSION)
+}
+
+/// [`hello`] naming protocol `version`.
+fn hello_as(
+    side: &Side,
+    control: Handle,
+    at: u32,
+    minors: &[u16],
+    version: u8,
+) -> Result<(), &'static str> {
     let mut list = [0_u16; MAX_NODES];
     for (slot, minor) in list.iter_mut().zip(minors) {
         *slot = *minor;
     }
     let encoded = Message::Hello(Hello {
-        version: VERSION,
+        version,
         location: at,
         count: minors.len(),
         minors: list,

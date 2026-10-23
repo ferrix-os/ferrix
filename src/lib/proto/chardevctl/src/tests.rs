@@ -1,4 +1,6 @@
-use crate::message::{Hello, MAX_NODES, Malformed, Message, Op, Request, VERSION};
+use crate::message::{
+    Hello, MAX_NODES, Malformed, Message, Op, Request, VERSION, VERSION_INTERRUPTS,
+};
 use crate::node::{self, CONTROL_MINOR, MODESET_MINOR, RENDER_MINOR};
 use crate::session::{self, Refusal};
 
@@ -163,6 +165,30 @@ fn the_judge_takes_nvidias_minors_and_refuses_the_rest() {
     let mut old = hello(&[255]);
     old.version = 0;
     assert_eq!(session::judge(&old, 0x0200), Err(Refusal::Version));
+    assert!(!session::judge(&hello(&[255]), 0x0200).unwrap().interrupts);
+    let mut interrupts = hello(&[RENDER_MINOR]);
+    interrupts.version = VERSION_INTERRUPTS;
+    assert!(session::judge(&interrupts, 0x0200).unwrap().interrupts);
+    interrupts.version = VERSION_INTERRUPTS + 1;
+    assert_eq!(session::judge(&interrupts, 0x0200), Err(Refusal::Version));
+}
+
+/// An interrupt names its request and goes there and back.
+#[test]
+fn an_interrupt_round_trips() {
+    let message = Message::Request(Request {
+        id: 41,
+        file: 0,
+        op: Op::Interrupt,
+        minor: 0,
+        pid: 0,
+        euid: 0,
+        egid: 0,
+        cmd: 0,
+        arg: 0,
+        pages: 0,
+    });
+    assert_eq!(Message::decode(message.encode().as_bytes()), Ok(message));
 }
 
 /// Every refusal's byte names it again, and no two share one.

@@ -169,6 +169,17 @@ impl Waits {
         count
     }
 
+    /// Let go of the wait held for chardev request `request`, if one is:
+    /// what an interrupt asks ([`super::Frontend::interrupt`]).
+    pub fn take(&mut self, request: u64) -> Option<Wait> {
+        let index = self
+            .slots
+            .iter()
+            .find(|(_, wait)| wait.request == request)
+            .map(|(index, _)| index)?;
+        self.slots.remove(index)
+    }
+
     /// Forget every wait of a released file: its program is gone.
     pub fn drop_file(&mut self, file: u8) {
         let mut doomed = [usize::MAX; limits::WAITS];

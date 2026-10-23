@@ -18,6 +18,11 @@ pub const KIND_REQUEST: u8 = 4;
 /// The protocol version a HELLO names.
 pub const VERSION: u8 = 1;
 
+/// The version a HELLO names to say its driver also takes
+/// [`Op::Interrupt`]: a program's signal then tells the driver, rather than
+/// abandoning a request the driver may be running. Otherwise the same.
+pub const VERSION_INTERRUPTS: u8 = 2;
+
 /// The most minors one HELLO lists.
 pub const MAX_NODES: usize = 8;
 
@@ -59,6 +64,15 @@ pub enum Op {
     /// status (0 or a negative errno, two's complement) for
     /// [`IMPORT_SIGNALLED`], else zero. Answered as an ioctl: 0 or an errno.
     DmabufImport,
+    /// The program waiting in request `id` has a signal to take (Linux's
+    /// `signal_pending`), sent only to a driver whose HELLO named
+    /// [`VERSION_INTERRUPTS`], at most once a request, and only after the
+    /// request itself. The driver answers a request it holds in a wait
+    /// that has changed nothing yet with `-ERESTARTSYS`, as Linux's
+    /// interruptible waits do, and lets one it is running finish; the
+    /// program waits for that answer. Every other field is zero; answered
+    /// by nobody itself.
+    Interrupt,
 }
 
 /// An import's fence for [`Op::DmabufImport`]: one of this driver's own
@@ -95,6 +109,7 @@ impl Op {
             Op::Mmap => 4,
             Op::DmabufRelease => 5,
             Op::DmabufImport => 6,
+            Op::Interrupt => 7,
         }
     }
 
@@ -106,6 +121,7 @@ impl Op {
             4 => Some(Op::Mmap),
             5 => Some(Op::DmabufRelease),
             6 => Some(Op::DmabufImport),
+            7 => Some(Op::Interrupt),
             _ => None,
         }
     }

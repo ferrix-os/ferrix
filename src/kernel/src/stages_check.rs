@@ -1467,6 +1467,12 @@ pub(super) fn check_chardev() {
         },
     );
     println!(
+        "  chardev  {} signals to programs waiting in requests: a version-1 driver's request \
+         abandoned, EINTR; a driver taking interrupts sent one INTERRUPT and answered, a queued \
+         request abandoned with nothing sent, a killed program's request abandoned",
+        report.interrupts,
+    );
+    println!(
         "  chardev  render-only HELLO {}; {} HELLOs of the Intel GPU refused while its DMA is \
          untranslated, one of another function taken; {} requests answered out of order",
         report.render_only.map_or_else(

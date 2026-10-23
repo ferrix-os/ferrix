@@ -40,6 +40,12 @@
 //!    read back what it wrote. Endfield on the N150 compiled its shaders
 //!    for 45 minutes on every start (2026-10-22); this rules out the driver
 //!    and the kernel under Mesa's cache as the cause on QEMU.
+//! 6. `vk-submit-signals` (`nvrm/test/vk-submit-signals.c`), run after
+//!    `vk-offscreen`: 30 s of submits and fence waits while another thread
+//!    sends the submitting one `SIGUSR1` every 30 us, as Wine's
+//!    `SuspendThread` does a game's render thread; every fence signalled,
+//!    and no `uapi refused EXECBUFFER2 EFAULT` line anywhere, which a
+//!    signal abandoning an execbuffer the driver was running gave.
 //!
 //! Every `intel: unserved …` line is printed: what Mesa asked that the front
 //! end does not serve, to be added as M3 to M5 find them (§8, risk 4).
@@ -126,6 +132,8 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABL
 echo "intel-uapi-gate: vulkaninfo exited $?"
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1     /bin/vk-offscreen 2>&1
 echo "intel-uapi-gate: vk-offscreen exited $?"
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1     /bin/vk-submit-signals 2>&1
+echo "intel-uapi-gate: vk-submit-signals exited $?"
 for run in 1 2; do
     VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DIR=/tmp/anv-cache \
         MESA_SHADER_CACHE_SHOW_STATS=1 /bin/vk-shader-cache > /tmp/shader-cache$run.txt 2>&1
@@ -165,6 +173,8 @@ const ANV: &str = "DRIVER_ID_INTEL_OPEN_SOURCE_MESA";
 const READ_BACK: &[&str] = &["pixels wrong on", "pixels cleared to"];
 /// Where `vk-offscreen` is in the image.
 const OFFSCREEN_PATH: &str = "bin/vk-offscreen";
+/// Where `vk-submit-signals` is in the image.
+const SUBMIT_SIGNALS_PATH: &str = "bin/vk-submit-signals";
 /// Where `vk-shader-cache` is in the image.
 const SHADER_CACHE_PATH: &str = "bin/vk-shader-cache";
 /// The pipelines `vk-shader-cache` creates (its `PIPELINES`).
@@ -338,6 +348,11 @@ pub(crate) fn test_intel_uapi(args: &Args) -> Result<()> {
         content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-offscreen")?),
     });
     files.push(crate::ports::File {
+        path: SUBMIT_SIGNALS_PATH.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-submit-signals")?),
+    });
+    files.push(crate::ports::File {
         path: SHADER_CACHE_PATH.to_owned(),
         mode: 0o755,
         content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-shader-cache")?),
@@ -390,7 +405,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
             line.trim()
         ));
     }
-    let wants: [Want<'_>; 8] = [
+    let wants: [Want<'_>; 9] = [
         ("the fake back end's facts", &|line| {
             line.contains(FACTS) && line.contains("24 EUs")
         }),
@@ -412,6 +427,13 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         ("vk-offscreen reading its pixels back", &|line| {
             line.contains("vk-offscreen: ") && READ_BACK.iter().any(|said| line.contains(said))
         }),
+        (
+            "every submit under a SIGUSR1 storm signalled its fence",
+            &|line| {
+                line.contains("vk-submit-signals: ")
+                    && line.contains(" SIGUSR1, 0 fences never signalled, 0 errors: PASS")
+            },
+        ),
         ("iris's renderer", &|line| {
             line.contains(RENDERER) && line.contains(DEVICE)
         }),
@@ -421,6 +443,18 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         if !rest.any(|line| wanted(line)) {
             return Err(format!("no line showed {what}, in order"));
         }
+    }
+    // A signal that abandoned an execbuffer the driver was running had its
+    // copies refused part-way (`EFAULT`), after its work might be queued,
+    // and the program submitted it again.
+    if let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("uapi refused EXECBUFFER2 EFAULT"))
+    {
+        return Err(format!(
+            "an execbuffer was cut off part-way by a signal: {}",
+            line.trim()
+        ));
     }
     if !lines
         .iter()
@@ -493,6 +527,8 @@ mod tests {
   3.2 | intel-uapi-gate: vulkaninfo exited 0
   3.5 | vk-offscreen: 4096 of 4096 pixels wrong on Intel(R) Graphics (ADL-N); first is (0,0,0,0)
   3.6 | intel-uapi-gate: vk-offscreen exited 1
+  3.7 | vk-submit-signals: 91536 submits under SIGUSR1, 0 fences never signalled, 0 errors: PASS
+  3.8 | intel-uapi-gate: vk-submit-signals exited 0
   4.0 | OpenGL core profile renderer: Mesa Intel(R) Graphics (ADL-N)
   4.1 | intel-uapi-gate: eglinfo exited 0
   4.2 | intel-uapi-gate: vk-shader-cache run 1 exited 0
@@ -517,6 +553,7 @@ mod tests {
             ("driverID", "driver id"),
             ("vulkaninfo exited 0", "vulkaninfo exiting 0"),
             ("pixels wrong", "vk-offscreen"),
+            ("submits under SIGUSR1", "SIGUSR1 storm"),
             ("OpenGL core profile renderer", "iris's renderer"),
         ] {
             let text: Vec<String> = lines(GOOD)
@@ -545,6 +582,21 @@ mod tests {
             .filter(|line| !line.contains("disk shader cache"))
             .collect();
         assert!(judge(&text).is_err_and(|error| error.contains("no disk shader cache")));
+    }
+
+    #[test]
+    fn an_execbuffer_cut_off_by_a_signal_fails() {
+        let mut text = lines(GOOD);
+        text.insert(
+            9,
+            "  3.65 | intel: uapi refused EXECBUFFER2 EFAULT - (0 not said before it)".to_owned(),
+        );
+        assert!(judge(&text).is_err_and(|error| error.contains("cut off part-way")));
+        let text: Vec<String> = lines(GOOD)
+            .into_iter()
+            .map(|line| line.replace("0 fences never signalled", "1 fences never signalled"))
+            .collect();
+        assert!(judge(&text).is_err_and(|error| error.contains("SIGUSR1 storm")));
     }
 
     #[test]

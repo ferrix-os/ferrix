@@ -19,7 +19,7 @@
 use core::fmt::{self, Write as _};
 
 use ferrix_chardevctl::message::{
-    self, Hello, MAP_VMO, MAP_WRITE_COMBINING, MAX_NODES, Message, Op, Request, VERSION,
+    self, Hello, MAP_VMO, MAP_WRITE_COMBINING, MAX_NODES, Message, Op, Request, VERSION_INTERRUPTS,
 };
 use ferrix_chardevctl::node::RENDER_MINOR;
 use ferrix_intel_xelp::frontend::{Backend, Frontend, Host, Installed};
@@ -265,7 +265,8 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
         *first = RENDER_MINOR;
     }
     let hello = Hello {
-        version: VERSION,
+        // It takes `Op::Interrupt` ([`answer`]).
+        version: VERSION_INTERRUPTS,
         location,
         count: 1,
         minors,
@@ -374,6 +375,7 @@ where
         Op::Release => frontend.release(host, request.file),
         Op::Mmap => frontend.mmap(host, request.id, request.file, request.arg, request.pages),
         Op::DmabufRelease => frontend.dmabuf_release(host, request.arg),
+        Op::Interrupt => frontend.interrupt(host, request.id),
         Op::DmabufImport => frontend.dmabuf_import(
             host,
             request.id,

@@ -214,7 +214,9 @@ fn execute<B: Backend, H: Host<B::Memory>>(
         },
     );
     let signalled = signal(frontend, host, call, args, &fences, id);
-    marked.and(signalled)
+    marked
+        .and(signalled)
+        .map_err(|errno| frontend.state.refuse("after its request was queued", errno))
 }
 
 /// `check_buffer_count` and `i915_gem_check_execbuffer`: the object count.
