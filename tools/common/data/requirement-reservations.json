@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["H.OBJ.22", "L.object.248-251", "L.device.54"],
+      "owner": "gpu-opaque",
+      "branch": "sealed-job",
+      "date": "2026-10-23",
+      "purpose": "A sealed job (customer, 2026-10-23, 'do a small kernel fix', then 'full fix pls'; consultant OK IF (1)-(9), ledger 3233; F-92): a process in a sealed job leaves its tree only by ending and starts nothing outside it (H.OBJ.22); Process::move_to refuses moves out of or into a sealed job (248); clone starts stay in the tree (249); sealed exactly when made with JOB_SEALED or inside a sealed job (250); process_create by a sealed member outside its tree refused (251); drivers.slice sealed (L.device.54)"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
