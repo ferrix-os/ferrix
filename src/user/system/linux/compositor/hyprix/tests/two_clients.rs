@@ -836,6 +836,50 @@ fn a_floating_workspace_floats_and_cascades_new_windows() {
     }
 }
 
+/// `hyprctl output create headless` adds a screen while clients run and
+/// `output remove` takes it away again; removing the last real one leaves
+/// the headless stand-in, so the windows always have a monitor
+/// (`docs/DESKTOP.md` §3.2).
+#[test]
+fn screens_are_added_and_removed_while_the_compositor_runs() {
+    let answers = answers_after(
+        "outputs",
+        &[
+            "output create headless SIDE",
+            "monitors",
+            "output remove SIDE",
+            "monitors",
+            "output remove HEADLESS-1",
+            "monitors",
+            "clients",
+        ],
+    );
+    let [made, two, removed, one, last, stand_in, clients] = answers.as_slice() else {
+        panic!("seven answers: {answers:?}");
+    };
+    assert_eq!(made.trim(), "ok", "{answers:?}");
+    assert_eq!(removed.trim(), "ok", "{answers:?}");
+    assert_eq!(last.trim(), "ok", "{answers:?}");
+    assert!(
+        two.contains("Monitor HEADLESS-1") && two.contains("Monitor SIDE"),
+        "{two}"
+    );
+    assert!(
+        two.contains("1024x768@60.00000 at 1024x0"),
+        "SIDE to the right: {two}"
+    );
+    assert!(
+        one.contains("Monitor HEADLESS-1") && !one.contains("SIDE"),
+        "{one}"
+    );
+    assert!(
+        stand_in.contains("Monitor FALLBACK") && !stand_in.contains("HEADLESS-1"),
+        "{stand_in}"
+    );
+    // Both windows are still there, on the monitor left.
+    assert_eq!(clients.matches("Window ").count(), 2, "{clients}");
+}
+
 /// A window behind a fullscreen one is still a window: `hyprctl clients`
 /// lists it, not hidden and not taking input, at the place it tiles at, as
 /// Hyprland does. With a maximized Chrome only Chrome was listed while

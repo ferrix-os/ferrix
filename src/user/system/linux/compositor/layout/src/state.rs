@@ -969,6 +969,51 @@ impl State {
         Some(Rect::new(x, y, width, height))
     }
 
+    /// Pull every floating window of `workspace` inside its floating area:
+    /// no larger than it, and moved in from whichever edge it hangs over. A
+    /// snapped window is snapped again to the area it is in now.
+    fn keep_floating_inside(&mut self, workspace: WorkspaceId) {
+        let area = self.float_work_area_of(workspace);
+        if area.width <= 0 || area.height <= 0 {
+            return;
+        }
+        let (ox, oy) = self.origin(workspace);
+        let windows: Vec<WindowId> = self
+            .workspaces
+            .get(&workspace)
+            .map(|ws| ws.floating.clone())
+            .unwrap_or_default();
+        for window in windows {
+            if let Some(snap) = self.snap_of(window)
+                && let Some(rect) = self.snap_rect(window, snap)
+                && let Some((_, back)) = self.snapped.get(&window).copied()
+            {
+                let _ = self.place_floating(window, rect);
+                let _ = self.snapped.insert(window, (snap, back));
+                continue;
+            }
+            let Some(rect) = self
+                .floating_rects
+                .get(&window)
+                .map(|rect| rect.translate(ox, oy))
+            else {
+                continue;
+            };
+            let bar = self.title_bar(window);
+            let top = area.y.saturating_add(bar);
+            let width = rect.width.min(area.width);
+            let height = rect.height.min(area.height.saturating_sub(bar).max(1));
+            let x = rect.x.clamp(area.x, area.right().saturating_sub(width));
+            let y = rect
+                .y
+                .clamp(top, area.bottom().saturating_sub(height).max(top));
+            let inside = Rect::new(x, y, width, height);
+            if inside != rect {
+                let _ = self.place_floating(window, inside);
+            }
+        }
+    }
+
     /// Where a floating window is snapped, if it is.
     #[must_use]
     pub fn snap_of(&self, window: WindowId) -> Option<Snap> {
@@ -1378,11 +1423,24 @@ impl State {
             state.outputs.retain(|output| output.monitor.id != id);
             let fallback = state.outputs.first().map(|output| output.monitor.id);
             if let Some(fallback) = fallback {
+                let moved: Vec<WorkspaceId> = state
+                    .workspaces
+                    .iter()
+                    .filter(|(_, ws)| ws.monitor == id)
+                    .map(|(workspace, _)| *workspace)
+                    .collect();
                 state
                     .workspaces
                     .values_mut()
                     .filter(|ws| ws.monitor == id)
                     .for_each(|ws| ws.monitor = fallback);
+                // Their floating windows are kept on the monitor they are
+                // on now: a window of a larger monitor, or one further
+                // right, would otherwise float off it (`docs/DESKTOP.md`
+                // §3.2).
+                for workspace in moved {
+                    state.keep_floating_inside(workspace);
+                }
             }
             if state.focused_monitor == Some(id) {
                 state.focused_monitor = fallback;

@@ -29,6 +29,12 @@ pub struct Global {
 #[derive(Clone, Debug, Default)]
 pub struct Globals {
     entries: Vec<Global>,
+    /// The name the next global added takes: names are never reused, even
+    /// after a global is removed.
+    next: u32,
+    /// Globals removed, which a client that had not yet heard may still
+    /// bind: the protocol makes that no error, and the object is inert.
+    removed: Vec<Global>,
 }
 
 impl Globals {
@@ -37,6 +43,8 @@ impl Globals {
     pub const fn new() -> Self {
         Self {
             entries: Vec::new(),
+            next: 1,
+            removed: Vec::new(),
         }
     }
 
@@ -49,7 +57,8 @@ impl Globals {
         if version == 0 || version > interface.version {
             return None;
         }
-        let name = u32::try_from(self.entries.len()).ok()?.checked_add(1)?;
+        let name = self.next.max(1);
+        self.next = name.checked_add(1)?;
         self.entries.push(Global {
             name,
             interface,
@@ -62,8 +71,22 @@ impl Globals {
     /// The global `name` names, if there is one.
     #[must_use]
     pub fn get(&self, name: u32) -> Option<&Global> {
-        let index = usize::try_from(name.checked_sub(1)?).ok()?;
-        self.entries.get(index)
+        self.entries.iter().find(|global| global.name == name)
+    }
+
+    /// Take the global `name` away: a monitor unplugged. Gives what it was.
+    pub fn remove(&mut self, name: u32) -> Option<Global> {
+        let at = self.entries.iter().position(|global| global.name == name)?;
+        let global = self.entries.remove(at);
+        self.removed.push(global);
+        Some(global)
+    }
+
+    /// A global removed since the client could have heard: binding it makes
+    /// an object that does nothing.
+    #[must_use]
+    pub fn removed(&self, name: u32) -> Option<&Global> {
+        self.removed.iter().find(|global| global.name == name)
     }
 
     /// Every global, in announcement order.

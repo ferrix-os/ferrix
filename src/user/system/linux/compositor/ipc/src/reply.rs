@@ -80,6 +80,18 @@ pub enum Reply {
         /// `all` named could not be moved and some could.
         answer: String,
     },
+    /// `output create headless [NAME]`: a screen in memory added while the
+    /// compositor runs, as a monitor plugged in is (`docs/DESKTOP.md`
+    /// §3.2).
+    OutputCreate {
+        /// What to call it; `HEADLESS-N` when not given.
+        name: Option<String>,
+    },
+    /// `output remove NAME`: a screen taken away, as a monitor unplugged is.
+    OutputRemove {
+        /// Which.
+        name: String,
+    },
 }
 
 impl Reply {
@@ -204,13 +216,30 @@ pub fn answer(request: &Request, snapshot: &Snapshot, version: Version) -> Reply
         "decorations" => text(decorations(flags, &request.argument, snapshot)),
         "getprop" => text(window_property(flags, &request.argument, snapshot)),
         "switchxkblayout" => switch_xkb_layout(&request.argument, &snapshot.devices.keyboards),
+        // `output create headless [NAME]` and `output remove NAME`, as
+        // Hyprland's: the compositor adds or takes away the screen. Other
+        // backends than `headless` are the card's, not this compositor's to
+        // make.
+        "output" => {
+            let words: Vec<&str> = request.argument.split_whitespace().collect();
+            match words.as_slice() {
+                ["create", "headless"] => Reply::OutputCreate { name: None },
+                ["create", "headless", name] => Reply::OutputCreate {
+                    name: Some((*name).to_owned()),
+                },
+                ["create", ..] => text(
+                    "only headless screens are made here; the others are the card's\n".to_owned(),
+                ),
+                ["remove", name] => Reply::OutputRemove {
+                    name: (*name).to_owned(),
+                },
+                _ => text("output takes create headless [NAME] or remove NAME\n".to_owned()),
+            }
+        }
         // Each of these acts on something this compositor does not have,
-        // and says so rather than pretending. `output` creates and removes
-        // headless screens, which this compositor's screens are not;
-        // `setcursor` names a cursor theme, and the cursor here is drawn in
-        // code; `kill` is Hyprland's click-to-kill mode, which needs a
-        // pointer grab.
-        "output" => text("the screens are the card's, not this compositor's to make\n".to_owned()),
+        // and says so rather than pretending. `setcursor` names a cursor
+        // theme, and the cursor here is drawn in code; `kill` is Hyprland's
+        // click-to-kill mode, which needs a pointer grab.
         "setcursor" => {
             text("the cursor is drawn in code; there is no theme to choose\n".to_owned())
         }

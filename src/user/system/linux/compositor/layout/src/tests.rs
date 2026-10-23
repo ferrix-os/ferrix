@@ -4635,3 +4635,22 @@ fn a_title_bar_is_kept_inside_the_work_area() {
         .expect("a place");
     assert_eq!(top, r(0, 38, 1920, 1042));
 }
+
+/// A monitor unplugged takes its workspaces to the one left, and a floating
+/// window that hung off the smaller monitor is pulled inside it.
+#[test]
+fn a_removed_monitors_floating_windows_are_pulled_inside_the_one_left() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    let _added = state.add_monitor(monitor(M2, 1920, 0, 2560, 1440)).unwrap();
+    let _moved = dispatch(&mut state, "focusmonitor", "1");
+    let _moved = dispatch(&mut state, "focusmonitor", "r");
+    open(&mut state, &[1]);
+    let _floated = state
+        .float_window(WindowId(1), r(1920 + 1500, 900, 1000, 500))
+        .unwrap();
+    let _removed = state.remove_monitor(M2).unwrap();
+    // Its workspace is on M1 now; show it there.
+    let workspace = state.workspace_of(WindowId(1)).unwrap();
+    let _shown = dispatch(&mut state, "workspace", &workspace.0.to_string());
+    assert_eq!(rects(&state), [(1, r(920, 580, 1000, 500))]);
+}

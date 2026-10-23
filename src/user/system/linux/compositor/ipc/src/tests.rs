@@ -1789,7 +1789,7 @@ fn a_notification_comes_back_with_its_message() {
 #[test]
 fn the_commands_with_nothing_to_act_on_say_so() {
     for (line, wanted) in [
-        ("output create headless", "the card's"),
+        ("output create drm", "the card's"),
         ("setcursor Adwaita 24", "no theme"),
         ("kill", "click-to-kill"),
     ] {
@@ -2467,4 +2467,28 @@ fn monitors_list_every_mode_the_connector_has_as_hyprland_prints_them() {
     );
     // A monitor that cannot say lists its own mode.
     assert!(text("monitors").contains("\tavailableModes: 1024x768@60.00Hz \n"));
+}
+
+/// `output create headless [NAME]` and `output remove NAME` come back for
+/// the compositor to carry out, as Hyprland's do.
+#[test]
+fn output_create_and_remove_are_the_compositors() {
+    let asked = |line: &str| answer(&Request::parse(line), &told(), Version::default());
+    assert_eq!(
+        asked("output create headless"),
+        Reply::OutputCreate { name: None }
+    );
+    assert_eq!(
+        asked("output create headless SIDE"),
+        Reply::OutputCreate {
+            name: Some("SIDE".to_owned())
+        }
+    );
+    assert_eq!(
+        asked("output remove SIDE"),
+        Reply::OutputRemove {
+            name: "SIDE".to_owned()
+        }
+    );
+    assert!(told_text("output").contains("create headless"));
 }

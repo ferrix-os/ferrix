@@ -390,6 +390,9 @@ struct Compositor<'r> {
     drag: Option<crate::act::Drag>,
     /// The activities overview (`docs/DESKTOP.md` §1.2).
     overview: crate::overview::Overview,
+    /// The highest monitor id handed out, so that a monitor plugged in
+    /// after another was unplugged is never given its id again.
+    last_monitor: u32,
     /// The title bars the compositor draws (`docs/DESKTOP.md` §2.2).
     bars: crate::titlebar::Bars,
     /// The drag a client started with `wl_data_device.start_drag`, while one
@@ -665,6 +668,7 @@ impl<'r> Compositor<'r> {
             urgent: Vec::new(),
             drag: None,
             overview: crate::overview::Overview::default(),
+            last_monitor: 0,
             bars: crate::titlebar::Bars::default(),
             carried: None,
             quit: false,
@@ -834,15 +838,22 @@ impl<'r> Compositor<'r> {
     /// was resized -- has its screens follow, where their `monitor =` line
     /// leaves the mode to the monitor.
     fn follow_card_modes(&mut self) {
-        if self.screens.iter_mut().fold(false, |changed, screen| {
+        let changed = self.screens.iter_mut().fold(false, |changed, screen| {
             screen.backend.modes_changed() | changed
-        }) && follow_modes(
-            &mut self.screens,
-            &self.fixed.monitor_rules,
-            self.options.renderer,
-            &mut self.state,
-            self.report,
-        ) {
+        });
+        // A monitor plugged in or unplugged is a connector change too.
+        if changed && self.hotplug() {
+            self.owed = true;
+        }
+        if changed
+            && follow_modes(
+                &mut self.screens,
+                &self.fixed.monitor_rules,
+                self.options.renderer,
+                &mut self.state,
+                self.report,
+            )
+        {
             self.screens_moved();
         }
     }
@@ -1529,7 +1540,18 @@ impl<'r> Compositor<'r> {
         let mut pending = Vec::new();
         let forced_before = self.forced;
         let mut monitors = false;
+        let mut screens_asked = Vec::new();
         for reply in asked {
+            // `hyprctl output create headless` and `output remove`: a
+            // screen added or taken away, once the requests are read.
+            if matches!(
+                reply,
+                compositor_ipc::Reply::OutputCreate { .. }
+                    | compositor_ipc::Reply::OutputRemove { .. }
+            ) {
+                screens_asked.push(reply);
+                continue;
+            }
             // `hyprctl reload`: the file read again, and what it says in
             // force from the next frame. The compositor's own, since only it
             // knows where the file is.
@@ -1607,7 +1629,197 @@ impl<'r> Compositor<'r> {
             self.apply_monitor_rules();
             changed = true;
         }
+        for reply in screens_asked {
+            match reply {
+                compositor_ipc::Reply::OutputCreate { name } => {
+                    let name = name.unwrap_or_else(|| self.headless_name());
+                    let (width, height) = self
+                        .screens
+                        .first()
+                        .map_or((1920, 1080), |screen| screen.backend.size());
+                    let mut backend = Headless::new(width, height);
+                    backend.call(&name);
+                    changed |= self.add_screen(Box::new(backend));
+                }
+                compositor_ipc::Reply::OutputRemove { name } => {
+                    match self.screens.iter().position(|screen| screen.name == name) {
+                        Some(which) => changed |= self.remove_screen(which),
+                        None => (self.report)(&format!("hyprix: output remove: no screen {name}")),
+                    }
+                }
+                _ => {}
+            }
+        }
         changed
+    }
+
+    /// The next free `HEADLESS-N` name.
+    fn headless_name(&self) -> String {
+        (2..)
+            .map(|number| format!("HEADLESS-{number}"))
+            .find(|name| !self.screens.iter().any(|screen| &screen.name == name))
+            .unwrap_or_else(|| "HEADLESS".to_owned())
+    }
+
+    /// After a card said its connectors changed: a screen whose monitor was
+    /// unplugged goes, and a monitor plugged in beside the running screens
+    /// becomes one (`docs/DESKTOP.md` §3.2). Gives whether any screen came
+    /// or went.
+    fn hotplug(&mut self) -> bool {
+        let mut changed = false;
+        let mut which = 0;
+        while which < self.screens.len() {
+            let gone = self
+                .screens
+                .get(which)
+                .is_some_and(|screen| screen.backend.connected() == Some(false));
+            if gone && self.remove_screen(which) {
+                changed = true;
+                continue;
+            }
+            which += 1;
+        }
+        // Each card once: its running screens' connectors and CRTCs, and
+        // what is plugged in beside them.
+        let mut cards: Vec<i32> = Vec::new();
+        let mut found: Vec<Box<dyn Backend>> = Vec::new();
+        for screen in &self.screens {
+            let Some((card, _)) = screen.backend.card_place() else {
+                continue;
+            };
+            if cards.contains(&card) {
+                continue;
+            }
+            cards.push(card);
+            let held: Vec<(u32, u32)> = self
+                .screens
+                .iter()
+                .filter_map(|other| other.backend.card_place())
+                .filter(|(other, _)| *other == card)
+                .map(|(_, place)| place)
+                .collect();
+            found.extend(screen.backend.plugged_in(&held, &self.fixed.monitor_rules));
+        }
+        for backend in found {
+            changed |= self.add_screen(backend);
+        }
+        changed
+    }
+
+    /// A monitor plugged in, or made by `output create`: a screen on
+    /// `backend`, placed as its `monitor =` line says or to the right of the
+    /// others, a monitor in the layout, a `wl_output` global for every
+    /// client, and `monitoradded` on the event socket (`docs/DESKTOP.md`
+    /// §3.2). Gives whether it was added.
+    pub(crate) fn add_screen(&mut self, backend: Box<dyn Backend>) -> bool {
+        let x = self
+            .screens
+            .iter()
+            .map(|screen| screen.rect.right())
+            .max()
+            .unwrap_or(0);
+        let id = MonitorId(
+            self.screens
+                .iter()
+                .map(|screen| screen.monitor.0)
+                .max()
+                .unwrap_or(0)
+                .max(self.last_monitor)
+                .saturating_add(1),
+        );
+        let screen = match Screen::make(
+            backend,
+            &self.fixed.monitor_rules,
+            self.options.renderer,
+            x,
+            id,
+            self.report,
+        ) {
+            Ok(Some(screen)) => screen,
+            Ok(None) => return false,
+            Err(why) => {
+                (self.report)(&format!("hyprix: a screen could not be added: {why}"));
+                return false;
+            }
+        };
+        self.last_monitor = id.0;
+        let added = self.state.add_monitor(Monitor {
+            id: screen.monitor,
+            name: screen.name.clone(),
+            rect: screen.rect,
+            reserved: compositor_layout::Gaps::default(),
+            scale: screen.scale,
+            transform: screen.transform,
+            description: screen.description.clone(),
+            made: screen.made.clone(),
+        });
+        if let Err(error) = added {
+            (self.report)(&format!(
+                "hyprix: a screen could not be laid out: {error:?}"
+            ));
+            return false;
+        }
+        let name = screen.name.clone();
+        (self.report)(&format!(
+            "hyprix: screen {name} added, {}x{} at {},{}",
+            screen.rect.width, screen.rect.height, screen.rect.x, screen.rect.y
+        ));
+        // The stand-in kept while there was no monitor goes once a real
+        // one is back.
+        let stand_in = self.screens.iter().position(|held| held.name == STAND_IN);
+        self.screens.push(screen);
+        for slot in &mut self.slots {
+            slot.client_mut().output_added();
+        }
+        self.screens_moved();
+        if let Some(which) = stand_in {
+            let _ = self.remove_screen(which);
+        }
+        true
+    }
+
+    /// A monitor unplugged, or `output remove`: its screen goes, its
+    /// workspaces move to the first one left with their windows pulled
+    /// inside it, every client's `wl_output` global for it is removed, and
+    /// `monitorremoved` goes on the event socket. The last screen is not
+    /// left with nothing: a headless stand-in of its size takes its place
+    /// first, as Hyprland's fallback monitor does. Gives whether it went.
+    pub(crate) fn remove_screen(&mut self, which: usize) -> bool {
+        let Some(going) = self.screens.get(which) else {
+            return false;
+        };
+        if self.screens.len() == 1 {
+            let (width, height) = going.backend.size();
+            let mut backend = Headless::new(width, height);
+            backend.call(STAND_IN);
+            if !self.add_screen(Box::new(backend)) {
+                return false;
+            }
+        }
+        let screen = self.screens.remove(which);
+        let _ = self.state.remove_monitor(screen.monitor);
+        for slot in &mut self.slots {
+            slot.client_mut().output_removed(which);
+        }
+        // What was kept by a screen's place moves with the places.
+        let gammas = std::mem::take(&mut self.gammas);
+        self.gammas = gammas
+            .into_iter()
+            .filter(|(at, _)| *at != which)
+            .map(|(at, gamma)| (if at > which { at - 1 } else { at }, gamma))
+            .collect();
+        let _ = self.dpms.remove(&screen.name);
+        if let Some(held) = self.lock.as_mut() {
+            let surfaces = std::mem::take(&mut held.surfaces);
+            held.surfaces = surfaces
+                .into_iter()
+                .filter(|(at, _)| *at != which)
+                .map(|(at, surface)| (if at > which { at - 1 } else { at }, surface))
+                .collect();
+        }
+        (self.report)(&format!("hyprix: screen {} removed", screen.name));
+        self.screens_moved();
+        true
     }
 
     /// A connection that ended takes its windows with it, and the slots
@@ -3264,94 +3476,112 @@ impl Screen {
         renderer: crate::options::Renderer,
         report: &mut dyn FnMut(&str),
     ) -> Result<Vec<Self>, String> {
-        let mut screens = Vec::with_capacity(backends.len());
+        let mut screens: Vec<Self> = Vec::with_capacity(backends.len());
         let mut x = 0i64;
         let mut id = 0u32;
-        for mut backend in backends {
-            let name = backend.name();
-            let description = backend.description();
-            // The last rule that names this monitor, or the last rule with
-            // no name at all: Hyprland reads the file top to bottom and a
-            // later line wins, but a catch-all is only for a monitor no line
-            // names. A rule names a monitor by its connector or by `desc:`
-            // and its description, and a person writes the second because a
-            // connector's name moves when a cable does.
-            let rule = MonitorRule::for_monitor(rules, &name, &description);
-            if rule.is_some_and(|rule| rule.disabled) {
+        for backend in backends {
+            let next = MonitorId(id.saturating_add(1));
+            let Some(screen) = Self::make(backend, rules, renderer, x, next, report)? else {
                 continue;
-            }
-            let scale = rule.map_or(1.0, MonitorRule::scale_factor);
-            let transform = rule.map_or(Transform::Normal, |rule| rule.transform);
-            // The monitor as it is read: a 1024x768 connector turned a
-            // quarter is 768 wide and 1024 tall, which is Hyprland's
-            // `m_transformedSize`. Everything is drawn at this size and
-            // turned into the connector's own on the way out.
-            let (width, height) = transform.size(backend.size());
-            let canvas =
-                Canvas::new(width, height).map_err(|error| format!("a canvas: {error:?}"))?;
-            let backdrop = compositor_render::Backdrop::new(width, height)
-                .map_err(|error| format!("a backdrop: {error:?}"))?;
-            let mut gpu = gpu_for(renderer, &name, (width, height), report)?;
-            // And if this screen can be pointed at what that renderer draws
-            // into, point it: the frame is then shown where it was made,
-            // and nothing of it crosses between the device and the guest.
-            //
-            // Not a turned one: the GPU draws the monitor upright, and a
-            // card pointed at that would show it upright on a monitor that
-            // is not. Its frame is fetched and turned on the way to the
-            // card instead, as the software canvas's is.
-            if let Some(held) = gpu.as_mut() {
-                if transform == Transform::Normal {
-                    adopt(held, backend.as_mut(), (width, height), &name, report);
-                } else {
-                    report(&format!(
-                        "hyprix: {name}: the monitor is turned (transform {}), so the GPU's frame \
-                         is fetched and turned rather than shown where it was drawn",
-                        transform.value()
-                    ));
-                }
-            }
-            // The monitor is laid out in logical pixels: a 1024x768 screen
-            // at `scale = 2` tiles its windows in 512x384, as Hyprland's
-            // does.
-            let (logical_width, logical_height) = (logical(width, scale), logical(height, scale));
-            let (at_x, at_y) = match rule.map(|rule| rule.position) {
-                Some(Position::At(x, y)) => (x, y),
-                // `auto`, which puts it to the right of the ones placed.
-                _ => (x, 0),
             };
-            x = at_x.saturating_add(logical_width);
-            id = id.saturating_add(1);
-            screens.push(Self {
-                name,
-                description,
-                made: backend.made(),
-                backend,
-                canvas,
-                backdrop,
-                gpu,
-                monitor: MonitorId(id),
-                rect: Rect::new(at_x, at_y, logical_width, logical_height),
-                scale,
-                transform,
-                // Nothing drawn yet, which is what makes a screen's first
-                // frame a whole one.
-                watch: crate::damage::Watch::default(),
-                plane: crate::plane::Plane::default(),
-                said_gone: false,
-                said_dropped: false,
-                stale: false,
-                scanning: None,
-                said_not_scanned: None,
-                hidden: Vec::new(),
-                gpu_failures: 0,
-                gpu_again: None,
-            });
+            x = screen.rect.right();
+            id = next.0;
+            screens.push(screen);
         }
         if screens.is_empty() {
             return Err("every monitor is disabled".to_owned());
         }
         Ok(screens)
+    }
+
+    /// One screen on `backend`, put at `x` unless its rule says where, as
+    /// monitor `id`: what [`Screen::all`] makes each of, and what a monitor
+    /// plugged in while the compositor runs is made as. `None` for one its
+    /// rule disables.
+    fn make(
+        mut backend: Box<dyn Backend>,
+        rules: &[MonitorRule],
+        renderer: crate::options::Renderer,
+        x: i64,
+        id: MonitorId,
+        report: &mut dyn FnMut(&str),
+    ) -> Result<Option<Self>, String> {
+        let name = backend.name();
+        let description = backend.description();
+        // The last rule that names this monitor, or the last rule with
+        // no name at all: Hyprland reads the file top to bottom and a
+        // later line wins, but a catch-all is only for a monitor no line
+        // names. A rule names a monitor by its connector or by `desc:`
+        // and its description, and a person writes the second because a
+        // connector's name moves when a cable does.
+        let rule = MonitorRule::for_monitor(rules, &name, &description);
+        if rule.is_some_and(|rule| rule.disabled) {
+            return Ok(None);
+        }
+        let scale = rule.map_or(1.0, MonitorRule::scale_factor);
+        let transform = rule.map_or(Transform::Normal, |rule| rule.transform);
+        // The monitor as it is read: a 1024x768 connector turned a
+        // quarter is 768 wide and 1024 tall, which is Hyprland's
+        // `m_transformedSize`. Everything is drawn at this size and
+        // turned into the connector's own on the way out.
+        let (width, height) = transform.size(backend.size());
+        let canvas = Canvas::new(width, height).map_err(|error| format!("a canvas: {error:?}"))?;
+        let backdrop = compositor_render::Backdrop::new(width, height)
+            .map_err(|error| format!("a backdrop: {error:?}"))?;
+        let mut gpu = gpu_for(renderer, &name, (width, height), report)?;
+        // And if this screen can be pointed at what that renderer draws
+        // into, point it: the frame is then shown where it was made,
+        // and nothing of it crosses between the device and the guest.
+        //
+        // Not a turned one: the GPU draws the monitor upright, and a
+        // card pointed at that would show it upright on a monitor that
+        // is not. Its frame is fetched and turned on the way to the
+        // card instead, as the software canvas's is.
+        if let Some(held) = gpu.as_mut() {
+            if transform == Transform::Normal {
+                adopt(held, backend.as_mut(), (width, height), &name, report);
+            } else {
+                report(&format!(
+                    "hyprix: {name}: the monitor is turned (transform {}), so the GPU's frame \
+                         is fetched and turned rather than shown where it was drawn",
+                    transform.value()
+                ));
+            }
+        }
+        // The monitor is laid out in logical pixels: a 1024x768 screen
+        // at `scale = 2` tiles its windows in 512x384, as Hyprland's
+        // does.
+        let (logical_width, logical_height) = (logical(width, scale), logical(height, scale));
+        let (at_x, at_y) = match rule.map(|rule| rule.position) {
+            Some(Position::At(x, y)) => (x, y),
+            // `auto`, which puts it to the right of the ones placed.
+            _ => (x, 0),
+        };
+        Ok(Some(Self {
+            name,
+            description,
+            made: backend.made(),
+            backend,
+            canvas,
+            backdrop,
+            gpu,
+            monitor: id,
+            rect: Rect::new(at_x, at_y, logical_width, logical_height),
+            scale,
+            transform,
+            // Nothing drawn yet, which is what makes a screen's first
+            // frame a whole one.
+            watch: crate::damage::Watch::default(),
+            plane: crate::plane::Plane::default(),
+            said_gone: false,
+            said_dropped: false,
+            stale: false,
+            scanning: None,
+            said_not_scanned: None,
+            hidden: Vec::new(),
+            gpu_failures: 0,
+            gpu_again: None,
+        }))
     }
 
     /// Run the screen at `size`, the connector's own pixels: its buffers,
@@ -3728,7 +3958,12 @@ fn run_ipc(
             // changes what the keys mean and not where anything is.
             false
         }
-        compositor_ipc::Reply::Reload | compositor_ipc::Reply::Text(_) => false,
+        // The compositor's own, carried out by `run_asked` with the screens
+        // in hand.
+        compositor_ipc::Reply::Reload
+        | compositor_ipc::Reply::Text(_)
+        | compositor_ipc::Reply::OutputCreate { .. }
+        | compositor_ipc::Reply::OutputRemove { .. } => false,
     }
 }
 
@@ -6598,6 +6833,10 @@ fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: Win
     let focused = state.focused_window() == Some(window);
     client.configure_toplevel(toplevel, width, height, &states(focused, look));
 }
+
+/// What the headless screen kept while no monitor is plugged in is called
+/// (`Compositor::remove_screen`).
+const STAND_IN: &str = "FALLBACK";
 
 /// The globals the compositor offers. `dmabuf` is whether a client's GPU
 /// buffer can be imported and drawn where it lies, which is only where the

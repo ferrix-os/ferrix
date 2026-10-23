@@ -7,11 +7,16 @@
 //! in `outputs.rs`, and the logical size a bar reads, `xdg-output`, is in
 //! `desktop.rs`.
 
-use compositor_protocol::core::wl_output;
+use compositor_protocol::core::{self, wl_output, wl_registry};
 use compositor_wire::{Arg, ArgType, ObjectId};
 
 use crate::client::Client;
+use crate::role::Role;
 use crate::surface::Output;
+
+/// The `wl_output` version every monitor is advertised at, as hyprix's own
+/// list has it.
+pub(crate) const OUTPUT_VERSION: u32 = 4;
 
 impl Client {
     /// Say what the screen is, before any client binds `wl_output`.
@@ -25,6 +30,81 @@ impl Client {
     pub fn set_outputs(&mut self, outputs: Vec<Output>) {
         if !outputs.is_empty() {
             self.outputs = outputs;
+        }
+    }
+
+    /// A monitor was plugged in: a `wl_output` global more, after the
+    /// others, which every registry is told of. Its place is the last of
+    /// the list the next [`Client::set_outputs`] gives (`docs/DESKTOP.md`
+    /// §3.2).
+    pub fn output_added(&mut self) {
+        let Some(name) = self
+            .globals
+            .add(&core::WL_OUTPUT, OUTPUT_VERSION, Role::Output)
+        else {
+            return;
+        };
+        for registry in self.registries.clone() {
+            let _ = self.out.write(
+                registry,
+                wl_registry::event::GLOBAL,
+                &[
+                    ArgType::Uint,
+                    ArgType::Str { nullable: false },
+                    ArgType::Uint,
+                ],
+                &[
+                    Arg::Uint(name),
+                    Arg::Str(Some(core::WL_OUTPUT.name)),
+                    Arg::Uint(OUTPUT_VERSION),
+                ],
+            );
+        }
+    }
+
+    /// A monitor was unplugged: the `wl_output` global at place `which` is
+    /// removed and every registry told. Objects bound from it name no
+    /// monitor any more, as the protocol leaves them inert; the ones of the
+    /// monitors after it move down a place, as the list
+    /// [`Client::set_outputs`] is given next does.
+    pub fn output_removed(&mut self, which: usize) {
+        let Some(name) = self
+            .globals
+            .all()
+            .iter()
+            .filter(|global| global.role == Role::Output)
+            .nth(which)
+            .map(|global| global.name)
+        else {
+            return;
+        };
+        let _ = self.globals.remove(name);
+        for registry in self.registries.clone() {
+            let _ = self.out.write(
+                registry,
+                wl_registry::event::GLOBAL_REMOVE,
+                &[ArgType::Uint],
+                &[Arg::Uint(name)],
+            );
+        }
+        // Everything kept by a monitor's place: what named this one names
+        // nothing now, and the places after it move down.
+        for places in [
+            &mut self.output_objects,
+            &mut self.xdg_outputs,
+            &mut self.lock_surfaces,
+            &mut self.gammas,
+            &mut self.powers,
+        ] {
+            places.retain(|_, at| *at != which);
+            for at in places.values_mut() {
+                if *at > which {
+                    *at -= 1;
+                }
+            }
+        }
+        if which < self.outputs.len() {
+            let _ = self.outputs.remove(which);
         }
     }
 

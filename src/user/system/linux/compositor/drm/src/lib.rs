@@ -26,7 +26,8 @@ mod render;
 
 #[cfg(target_os = "linux")]
 pub use card::{
-    Card, Dumb, Flusher, Imported, News, Plan, Shown, cards, plan, planes, plans, rename, show,
+    Card, Dumb, Flusher, Imported, News, Plan, Shown, cards, connected, plan, planes, plans,
+    plans_beside, rename, show,
 };
 #[cfg(target_os = "linux")]
 pub use device::RenderDevice;

@@ -264,6 +264,18 @@ pub fn plan(card: &Card) -> io::Result<Plan> {
 ///
 /// Whatever the card said.
 pub fn plans(card: &Card) -> io::Result<Vec<Plan>> {
+    plans_beside(card, &[])
+}
+
+/// The connected connectors of `card` that are not among `held`, each with
+/// a CRTC none of `held` drives: the monitors plugged in beside the
+/// screens already running, each `(connector, crtc)` of `held` one of them
+/// (`docs/DESKTOP.md` §3.2).
+///
+/// # Errors
+///
+/// What the card answered.
+pub fn plans_beside(card: &Card, held: &[(u32, u32)]) -> io::Result<Vec<Plan>> {
     let mut resources = CardRes::ZERO;
     card.ioctl(drm::IOCTL_MODE_GETRESOURCES, &mut resources)?;
     let mut crtcs = vec![0u32; resources.count_crtcs as usize];
@@ -279,8 +291,11 @@ pub fn plans(card: &Card) -> io::Result<Vec<Plan>> {
     card.ioctl(drm::IOCTL_MODE_GETRESOURCES, &mut resources)?;
 
     let mut found: Vec<Plan> = Vec::new();
-    let mut taken: Vec<u32> = Vec::new();
+    let mut taken: Vec<u32> = held.iter().map(|&(_, crtc)| crtc).collect();
     for &connector_id in &connectors {
+        if held.iter().any(|&(connector, _)| connector == connector_id) {
+            continue;
+        }
         let mut connector = GetConnector {
             connector_id,
             ..GetConnector::ZERO
@@ -349,6 +364,21 @@ pub fn plans(card: &Card) -> io::Result<Vec<Plan>> {
         });
     }
     Ok(found)
+}
+
+/// Whether `connector` of `card` has a monitor plugged in, as the card
+/// says now.
+///
+/// # Errors
+///
+/// What the card answered.
+pub fn connected(card: &Card, connector: u32) -> io::Result<bool> {
+    let mut asked = GetConnector {
+        connector_id: connector,
+        ..GetConnector::ZERO
+    };
+    card.ioctl(drm::IOCTL_MODE_GETCONNECTOR, &mut asked)?;
+    Ok(asked.connection == drm::CONNECTION_CONNECTED && asked.count_modes > 0)
 }
 
 /// The `possible_crtcs` bits of the CRTCs in `free`, which count in the

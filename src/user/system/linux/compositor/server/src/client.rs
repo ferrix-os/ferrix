@@ -200,6 +200,9 @@ pub struct Client {
     events: Vec<Event>,
     fatal: Option<Fatal>,
     globals: Globals,
+    /// Every `wl_registry` the client made: each is told of a global added
+    /// or removed while it runs.
+    registries: Vec<ObjectId>,
     surfaces: BTreeMap<ObjectId, Surface>,
     regions: BTreeMap<ObjectId, Region>,
     pools: BTreeMap<ObjectId, Pool>,
@@ -406,6 +409,7 @@ impl Client {
             events: Vec::new(),
             fatal: None,
             globals,
+            registries: Vec::new(),
             surfaces: BTreeMap::new(),
             regions: BTreeMap::new(),
             pools: BTreeMap::new(),
@@ -848,6 +852,7 @@ impl Client {
                 if !self.make(id, &core::WL_REGISTRY, 1, Role::Registry) {
                     return;
                 }
+                self.registries.push(id);
                 self.announce(id);
             }
             _ => {}
@@ -873,6 +878,17 @@ impl Client {
         // Copied out: `make` below takes the whole client, and a global is
         // three words.
         let global = self.globals.get(*name).copied();
+        // A global removed while the bind was on its way -- a monitor
+        // unplugged -- is bound as an object that names nothing.
+        if global.is_none()
+            && let Some(gone) = self.globals.removed(*name).copied()
+            && version != 0
+            && version <= gone.version
+            && interface == gone.interface.name
+        {
+            let _ = self.make(id, gone.interface, version, gone.role);
+            return;
+        }
         let Some(global) = global else {
             self.fail(Fatal::BadBind {
                 name: *name,

@@ -256,6 +256,33 @@ pub trait Backend: core::fmt::Debug {
     fn made(&self) -> (String, String, String) {
         (String::new(), String::new(), String::new())
     }
+
+    /// Whether a monitor is still plugged into this screen's connector,
+    /// asked after the card said its connectors changed: `None` for a
+    /// screen with no connector, which never goes (`docs/DESKTOP.md` §3.2).
+    fn connected(&self) -> Option<bool> {
+        None
+    }
+
+    /// Which card this screen is on, as a number the screens of one card
+    /// share, and the connector and CRTC it drives: what
+    /// [`Backend::plugged_in`] is told of the screens already running.
+    fn card_place(&self) -> Option<(i32, (u32, u32))> {
+        None
+    }
+
+    /// Screens for the monitors plugged into this screen's card beside
+    /// `held`, its running screens' connectors and CRTCs, each with the
+    /// mode its `monitor =` line in `rules` asks where the connector lists
+    /// it.
+    fn plugged_in(
+        &self,
+        held: &[(u32, u32)],
+        rules: &[compositor_config::MonitorRule],
+    ) -> Vec<Box<dyn Backend>> {
+        let _ = (held, rules);
+        Vec::new()
+    }
 }
 
 /// A screen that is only memory: the everyday one, and the one a test reads.
@@ -267,6 +294,9 @@ pub struct Headless {
     frames: u32,
     /// How many more frames it refuses to show.
     refusing: u32,
+    /// What it is called: `HEADLESS-1`, or the name `output create
+    /// headless` gave it.
+    name: Option<String>,
 }
 
 impl Headless {
@@ -280,7 +310,13 @@ impl Headless {
             bytes,
             frames: 0,
             refusing: 0,
+            name: None,
         }
+    }
+
+    /// Call it `name`, as `hyprctl output create headless NAME` does.
+    pub fn call(&mut self, name: &str) {
+        self.name = Some(name.to_owned());
     }
 
     /// The same screen, refusing its first `frames` frames as a card whose
@@ -333,7 +369,7 @@ impl Backend for Headless {
 
     fn name(&self) -> String {
         // What Hyprland's own headless backend calls its output.
-        "HEADLESS-1".to_owned()
+        self.name.clone().unwrap_or_else(|| "HEADLESS-1".to_owned())
     }
 
     fn description(&self) -> String {
@@ -1200,6 +1236,58 @@ impl Backend for Drm {
 
     fn name(&self) -> String {
         self.plan.name.clone()
+    }
+
+    fn connected(&self) -> Option<bool> {
+        if self.lost.is_some() {
+            // A card that went is the driver's restart, not an unplug.
+            return Some(true);
+        }
+        compositor_drm::connected(&self.card, self.plan.connector).ok()
+    }
+
+    fn card_place(&self) -> Option<(i32, (u32, u32))> {
+        Some((self.card.raw_fd(), (self.plan.connector, self.plan.crtc)))
+    }
+
+    fn plugged_in(
+        &self,
+        held: &[(u32, u32)],
+        rules: &[compositor_config::MonitorRule],
+    ) -> Vec<Box<dyn Backend>> {
+        if self.lost.is_some() {
+            return Vec::new();
+        }
+        let Ok(plans) = compositor_drm::plans_beside(&self.card, held) else {
+            return Vec::new();
+        };
+        let mut screens: Vec<Box<dyn Backend>> = Vec::new();
+        for mut plan in plans {
+            let description = plan
+                .edid
+                .as_ref()
+                .map(|edid| edid.describe(compositor_drm::registered))
+                .unwrap_or_default();
+            let rule = compositor_config::MonitorRule::for_monitor(rules, &plan.name, &description);
+            let listed: Vec<(u32, u32, i32)> = plan
+                .modes
+                .iter()
+                .map(|mode| {
+                    (
+                        u32::from(mode.hdisplay),
+                        u32::from(mode.vdisplay),
+                        compositor_drm::modeset::refresh_mhz(mode),
+                    )
+                })
+                .collect();
+            if let Some((size, refresh)) = rule.and_then(|rule| pick_mode(rule.mode, &listed)) {
+                let _ = plan.take(size, refresh);
+            }
+            if let Ok(screen) = Self::on(std::rc::Rc::clone(&self.card), plan) {
+                screens.push(Box::new(screen));
+            }
+        }
+        screens
     }
 
     fn description(&self) -> String {

@@ -5446,3 +5446,47 @@ fn a_refused_lock_may_be_destroyed() {
     assert_eq!(client.read(&bytes, &[]), bytes.len());
     assert_eq!(client.fatal(), None);
 }
+
+/// A monitor plugged in is a `wl_output` global more, told to every
+/// registry; one unplugged is a `global_remove` of its name, its bound
+/// objects name no monitor, and the next monitor's objects move down a
+/// place (docs/DESKTOP.md §3.2).
+#[test]
+fn outputs_come_and_go_while_a_client_runs() {
+    let mut globals = Globals::new();
+    assert!(globals.add(&core::WL_OUTPUT, 4, Role::Output).is_some());
+    assert!(globals.add(&core::WL_OUTPUT, 4, Role::Output).is_some());
+    let mut client = Client::new(globals);
+    let mut bytes = get_registry(2);
+    bytes.extend(bind(2, 1, "wl_output", 4, 3));
+    bytes.extend(bind(2, 2, "wl_output", 4, 4));
+    assert_eq!(client.read(&bytes, &[]), bytes.len());
+    let _ = sent(&mut client);
+    assert_eq!(client.output_of(ObjectId(3)), Some(0));
+    assert_eq!(client.output_of(ObjectId(4)), Some(1));
+
+    client.output_added();
+    let added: Vec<_> = sent(&mut client)
+        .into_iter()
+        .filter(|event| event.sender == ObjectId(2))
+        .collect();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].opcode, core::wl_registry::event::GLOBAL);
+    assert_eq!(added[0].args[0], "Uint(3)", "a name never used before");
+
+    client.output_removed(0);
+    let removed: Vec<_> = sent(&mut client)
+        .into_iter()
+        .filter(|event| event.sender == ObjectId(2))
+        .collect();
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].opcode, core::wl_registry::event::GLOBAL_REMOVE);
+    assert_eq!(removed[0].args, ["Uint(1)"]);
+    assert_eq!(client.output_of(ObjectId(3)), None, "inert");
+    assert_eq!(client.output_of(ObjectId(4)), Some(0), "moved down");
+
+    // A bind of the removed name now makes nothing of it.
+    let late = bind(2, 1, "wl_output", 4, 5);
+    let _ = client.read(&late, &[]);
+    assert_eq!(client.output_of(ObjectId(5)), None);
+}
