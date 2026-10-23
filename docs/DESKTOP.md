@@ -96,8 +96,28 @@ read-only register dump of the same registers while Linux drives the
 second HDMI port, the ground truth; then h2, the writes, behind
 `ferrix.intelgpu.modeset=on`.
 
-Next: h1 and h2 of 3h, part 4 (4a and 4b built on the branch), 3e on the
-3060.
+h1 is built (57ce6f566): the WRPLL, DPLL, transcoder timing, DDI, pipe
+source and primary plane words for the mode the EDID prefers, printed under
+`modeset=dry`; host tests check the WRPLL dividers against i915's own
+arithmetic. h2 waits for the box's dump.
+
+**Part 4 is built** (18 points estimated):
+
+| Step | Commit | What |
+|---|---|---|
+| 4a | 1f92468ad | `devmgr-events`, a native helper `devmgr` starts after REPORT: each DIED, RESTARTED and gave-up as one line to every reader of `\0ferrix.devmgr.events`, the last 32 kept for a late reader; `devmgr` never waits on it |
+| 4b | 19e64e50b | `compositor/dbus`: SASL `EXTERNAL`, the little-endian marshalling, `Hello`, `RequestName`, calls, returns, errors and signals; tested against byte strings and against the host's `dbus-daemon` |
+| 4c, 4d | ec382429d | `notifyd`: `org.freedesktop.Notifications`, GNOME-like banners at the top centre (a fixed-size overlay surface whose input region is only the cards), the list from the bar's clock (`notifyd --toggle-list`) with Clear, and the bridge: one banner per device with a count, gave-up critical, a reconnect's replay dropped. The theme starts it; the compositor's test image carries it |
+| | 09c64c30e | found on the way: a layer surface with a zone of 0 is placed after every exclusive one, as wlroots does, so a banner that started before the bar is not under it |
+
+Screenshots, a headless hyprix with waybar, a private `dbus-daemon`,
+`gdbus call ... Notify` and a stand-in for `devmgr-events`:
+`4-notify-banners.png` and `4-notify-list.png`. Left of part 4: notification
+icons are not drawn, the list's close crosses do nothing, and no image but
+the compositor's test image carries `notifyd` (as for the bar, nothing
+installs the theme yet).
+
+Next: h2 of 3h once the box's dump is in, 3e on the 3060.
 
 ## 1. Floating mode
 
