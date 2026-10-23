@@ -1699,6 +1699,11 @@ run time, which a static Ferrix program cannot.
   saying so; the filter language sees that level.
 * `test-compositor --boot lode-viewer` boots it on the desktop, types a
   query into it and requires the 13 records of 801 it must find (x86-64).
+* On a Linux desktop too (nazuna's GNOME, any Wayland session; its
+  README's `install-linux.sh`), with a machine picker over the stores
+  `lode-receive` keeps, `~/.local/share/ferrix/lode-receive/<machine-id>/`
+  (or `host-<hostname>/`), each followed Live; `--import FILE.jsonl --into
+  DIR` makes such a store from an export.
 * Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
   and dragging the brush's edges.
 
