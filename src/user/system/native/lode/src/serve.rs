@@ -141,6 +141,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         synced_at: 0,
     };
     let sequence = store.take_up(&mut said);
+    store.summarise_old();
     let text = if restarted {
         alloc::format!(
             "lode restarted: an earlier instance of this boot ended; last stored kernel seq {}",
@@ -710,11 +711,35 @@ impl Store {
     /// Seal class `index`'s segment: synced and closed, the next record
     /// begins another.
     fn seal(&mut self, index: usize) {
+        let dir = self.dir_of(index);
         if let Some(slot) = self.writers.get_mut(index)
             && let Some(writer) = slot.take()
         {
             let _ = sys::fdatasync(writer.fd);
             sys::close(writer.fd);
+            store::write_summary(dir, &writer.name);
+        }
+    }
+
+    /// Summarise sealed segments that have no summary -- sealed by an older
+    /// lode, or by one killed before it wrote it -- at most 64 a start.
+    fn summarise_old(&self) {
+        let active: Vec<&str> = self
+            .writers
+            .iter()
+            .flatten()
+            .map(|writer| writer.name.as_str())
+            .collect();
+        let mut done = 0;
+        for each in self.segments().iter().rev() {
+            if done >= 64 {
+                break;
+            }
+            if active.contains(&each.name.as_str()) || store::summary(each).is_some() {
+                continue;
+            }
+            store::write_summary(each.dir, &each.name);
+            done += 1;
         }
     }
 
@@ -772,6 +797,7 @@ impl Store {
                 .collect();
             for name in retention::vacuum(&self.classes, &kept, now, limit) {
                 let _ = sys::unlinkat(dir, name.as_bytes());
+                let _ = sys::unlinkat(dir, alloc::format!("{name}.sum").as_bytes());
             }
         }
     }

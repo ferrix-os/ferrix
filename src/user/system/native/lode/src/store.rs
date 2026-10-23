@@ -111,3 +111,47 @@ pub(crate) fn size(segment: &Segment) -> u64 {
         size as u64
     })
 }
+
+/// Write `<name>.sum` beside the sealed segment `name` in `dir`, from its
+/// records (`ferrix_lode_core::summary`): a new file, then renamed over any
+/// old one, so a reader sees one summary or the other, whole.
+pub(crate) fn write_summary(dir: usize, name: &str) {
+    use ferrix_lode_core::summary::Summary;
+    let Ok(bytes) = sys::read_file_from(dir, name.as_bytes(), 0) else {
+        return;
+    };
+    let Some(scanned) = segment::scan(&bytes, 0) else {
+        return;
+    };
+    let records: Vec<_> = scanned
+        .records
+        .into_iter()
+        .map(|found| found.record)
+        .collect();
+    let summary = Summary::of(&records).encode();
+    let fresh = alloc::format!(".{name}.sum.new");
+    let Ok(fd) = sys::openat(
+        dir,
+        fresh.as_bytes(),
+        sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
+        0o640,
+    ) else {
+        return;
+    };
+    let written = sys::write_all(fd, &summary);
+    sys::close(fd);
+    if written.is_ok() {
+        let _ = sys::renameat(
+            dir,
+            fresh.as_bytes(),
+            alloc::format!("{name}.sum").as_bytes(),
+        );
+    }
+}
+
+/// A segment's summary, if it has one that reads.
+pub(crate) fn summary(segment: &Segment) -> Option<ferrix_lode_core::summary::Summary> {
+    let name = alloc::format!("{}.sum", segment.name);
+    let bytes = sys::read_file_from(segment.dir, name.as_bytes(), 0).ok()?;
+    ferrix_lode_core::summary::Summary::decode(&bytes)
+}

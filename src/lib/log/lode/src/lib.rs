@@ -23,6 +23,7 @@
 //! * [`protocols`]: syslog, systemd's native protocol and stdout streams, read.
 //! * [`limit`]: floods held -- the rules, the folding of repeats, the limiter.
 //! * [`retention`]: which records are kept how long.
+//! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
 
 #![no_std]
@@ -43,6 +44,7 @@ pub mod record;
 pub mod retention;
 pub mod segment;
 pub mod session;
+pub mod summary;
 pub mod time;
 
 #[cfg(test)]

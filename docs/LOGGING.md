@@ -1099,6 +1099,13 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 
 ## 17. Plan
 
+**Where it stands (2026-10-23).** Landed: the design and steps 1, 2,
+2a, 2b, 3 and 4; step 5 as below. Next, one step at a time:
+store-and-forward to a collector (§10.2), compression of sealed segments,
+the write-budget row (§8.3), then the TUI viewer.
+
+
+
 | Step | What | Points | Rows (tests) |
 |---|---|---:|---|
 | 1 | `src/lib/log/`: record, segment format with `FORMAT.md`, torn-tail recovery, sealing with zstd and indexes, summaries, retention classes, vacuum; `logproto` | 9 | host tests; Miri; fuzz `log_segment`; `check` |
@@ -1470,6 +1477,33 @@ Box tests stream to nazuna (§10.1; the N150's needs 2 and 10).
 * Not yet: lode's own store-and-forward to a collector (§10.2's
   journal-upload, RFC 5424 and JSON outputs) and receiving (§10.3); ssh is
   the transport and its authentication the access control.
+
+### Step 5, as built
+
+Queries that stay fast as the store grows (USER-WISHES top item 2, §8.4).
+
+* At every seal the service writes `<segment>.sum` beside the segment
+  (`ferrix-lode-core` `summary`): its sequence and time range, record
+  count, priority range, and every value of `SYSLOG_IDENTIFIER`, `UNIT`,
+  `_SYSTEMD_UNIT`, `_TRANSPORT`, `SESSION_ID` and `_FERRIX_DRIVER` it
+  holds, with counts, under a CRC; a new file renamed over the old. At
+  start it summarises up to 64 sealed segments that have none (an older
+  lode's); vacuum removes a summary with its segment; `lode delete`
+  rewrites the summary of each segment it rewrites.
+* A reader skips a segment whose summary proves the query cannot match
+  (a time range missed, a cursor already past it, a priority range or a
+  summarised field's value absent under an `and`), and reads a segment
+  with no summary -- the one being written -- always.
+* `-n N` with no marks or `--around` reads the candidate segments newest
+  first and stops once no segment left can hold a newer match than the
+  Nth found; `--list-boots` takes the last time from summaries.
+* `lode bench RECORDS [DIR]` writes a store of that many records over 200
+  units and times `-u <rare unit> -n 50` both ways. On 200,000 records (3
+  segments): x86-64 25 ms through summaries against 409 ms reading all,
+  AArch64 133 ms against 1,970 ms, the same 50 records. test-log requires
+  the same answer and no slower, and `-u lode-test -n 3` on its own store.
+* Not yet: the field indexes inside a sealed segment and its sparse time
+  index (a segment that may match is read whole); compression.
 
 ### Known issues
 

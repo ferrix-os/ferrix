@@ -13,6 +13,7 @@ use ferrix_lode_core::format::{self, Output};
 use ferrix_lode_core::ingest;
 use ferrix_lode_core::record::{Record, level};
 use ferrix_lode_core::segment::{self, Header};
+use ferrix_lode_core::summary::Summary;
 use ferrix_lode_core::time::{self, Civil, Zone};
 use ferrix_lode_core::{console, cursor};
 
@@ -29,6 +30,7 @@ lode session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX
 lode session end ID                  what a seat's owner tells lode (root's)
 COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
                                      its lines into the log, as systemd-cat's
+lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 
@@ -105,6 +107,7 @@ pub(crate) fn run() -> i32 {
         Some("rotate") => return rotate(),
         Some("session") => return announce(rest.get(1..).unwrap_or_default()),
         Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
+        Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("delete") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
@@ -448,20 +451,110 @@ fn directories(options: &Options) -> Result<Vec<Dir>, String> {
     Ok(dirs)
 }
 
-/// A segment with its header.
+/// A segment with its header, and its summary when it has one.
 struct Known {
     /// The segment.
     segment: Segment,
     /// Its header.
     header: Header,
+    /// Its summary: a sealed segment's (step 5).
+    summary: Option<Summary>,
+}
+
+impl Known {
+    /// The last sequence number it can hold: its summary's, or, being
+    /// written, any.
+    fn last_seq(&self) -> u64 {
+        self.summary
+            .as_ref()
+            .map_or(u64::MAX, |summary| summary.seqs.1)
+    }
 }
 
 /// Every segment with a readable header, oldest first.
 fn known(dirs: &[Dir]) -> Vec<Known> {
     store::all_segments(dirs)
         .into_iter()
-        .filter_map(|segment| store::header(&segment).map(|header| Known { segment, header }))
+        .filter_map(|segment| {
+            let header = store::header(&segment)?;
+            let summary = store::summary(&segment);
+            Some(Known {
+                segment,
+                header,
+                summary,
+            })
+        })
         .collect()
+}
+
+/// The segments a read may find a match in: `boot`'s, and of those the
+/// ones whose summary does not rule the options out (step 5).
+fn candidates<'a>(
+    segments: &'a [Known],
+    boot: Option<[u8; 16]>,
+    options: &Options,
+    (since, until): (Option<u64>, Option<u64>),
+) -> Vec<&'a Known> {
+    segments
+        .iter()
+        .filter(|each| boot.is_none_or(|boot| boot == each.header.boot_id))
+        .filter(|each| {
+            each.summary.as_ref().is_none_or(|summary| {
+                summary.overlaps(since, until)
+                    && options.after.is_none_or(|after| summary.seqs.1 > after)
+                    && options
+                        .expr
+                        .as_ref()
+                        .is_none_or(|expr| summary.may_match(expr))
+            })
+        })
+        .collect()
+}
+
+/// The records of one segment.
+fn records_of(each: &Known) -> Vec<Record> {
+    store::bytes(&each.segment, 0)
+        .and_then(|bytes| segment::scan(&bytes, 0))
+        .map(|scanned| {
+            scanned
+                .records
+                .into_iter()
+                .map(|found| found.record)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The newest `count` records `options` lets through, reading the
+/// candidate segments newest first and stopping once no segment left can
+/// hold a newer match than the `count`th found (step 5: a unit's last
+/// lines cost the same on a store of any size).
+fn newest(
+    candidates: &[&Known],
+    options: &Options,
+    window: (Option<u64>, Option<u64>),
+    count: usize,
+) -> Vec<Record> {
+    let mut order: Vec<&&Known> = candidates.iter().collect();
+    order.sort_by_key(|each| core::cmp::Reverse(each.last_seq()));
+    let mut found: Vec<Record> = Vec::new();
+    for each in order {
+        if found.len() >= count
+            && let Some(threshold) = found.get(count - 1).map(|record| record.seqnum)
+            && each.last_seq() < threshold
+        {
+            break;
+        }
+        found.extend(
+            records_of(each)
+                .into_iter()
+                .filter(|record| passes(options, record, window.0, window.1)),
+        );
+        found.sort_by_key(|record| core::cmp::Reverse(record.seqnum));
+        found.truncate(count);
+    }
+    found.reverse();
+    found
 }
 
 /// The boots, oldest first: each boot's id once, in the order of its first
@@ -642,24 +735,47 @@ fn show(options: &Options) -> i32 {
         },
         None => None,
     };
-    let all = load(&segments, boot);
-    let mut records: Vec<Record> = all
-        .iter()
-        .filter(|record| passes(options, record, since, until))
-        .cloned()
-        .collect();
-    narrow(options, &all, &mut records);
     let wanted = options.lines.or(options.follow.then_some(10));
-    if let Some(count) = wanted {
-        let skip = records.len().saturating_sub(count);
-        let _ = records.drain(..skip);
-    }
+    let whole =
+        options.since_mark.is_some() || options.until_mark.is_some() || options.around.is_some();
+    let (mut records, last) = match wanted {
+        Some(count) if !whole => {
+            let chosen = candidates(&segments, boot, options, (since, until));
+            let records = newest(&chosen, options, (since, until), count);
+            let last = segments
+                .iter()
+                .filter_map(|each| each.summary.as_ref().map(|summary| summary.seqs.1))
+                .chain(records.last().map(|record| record.seqnum))
+                .chain(
+                    segments
+                        .last()
+                        .map(|each| records_of(each).last().map_or(0, |record| record.seqnum)),
+                )
+                .max()
+                .unwrap_or(0);
+            (records, last)
+        }
+        _ => {
+            let all = load(&segments, boot);
+            let mut records: Vec<Record> = all
+                .iter()
+                .filter(|record| passes(options, record, since, until))
+                .cloned()
+                .collect();
+            narrow(options, &all, &mut records);
+            if let Some(count) = wanted {
+                let skip = records.len().saturating_sub(count);
+                let _ = records.drain(..skip);
+            }
+            (records, all.last().map_or(0, |record| record.seqnum))
+        }
+    };
+    let mut last = last;
     if options.reverse {
         records.reverse();
     }
     let output = options.output.unwrap_or(Output::Human);
     let mut buffer = Vec::new();
-    let mut last = all.last().map_or(0, |record| record.seqnum);
     for record in &records {
         format::write(record, output, &zone, &mut buffer);
         flush_if_full(&mut buffer);
@@ -775,10 +891,19 @@ fn list_boots(options: &Options) -> i32 {
             .collect();
         let first = mine.first().map_or(0, |each| each.header.created_us);
         let last = mine
-            .last()
-            .and_then(|each| store::bytes(&each.segment, 0))
-            .and_then(|bytes| segment::scan(&bytes, 0))
-            .and_then(|scanned| scanned.records.last().map(|found| found.record.realtime_us))
+            .iter()
+            .filter_map(|each| each.summary.as_ref().map(|summary| summary.times.1))
+            .max()
+            .filter(|_| mine.last().is_some_and(|each| each.summary.is_some()));
+        let last = last
+            .or_else(|| {
+                mine.last()
+                    .and_then(|each| store::bytes(&each.segment, 0))
+                    .and_then(|bytes| segment::scan(&bytes, 0))
+                    .and_then(|scanned| {
+                        scanned.records.last().map(|found| found.record.realtime_us)
+                    })
+            })
             .unwrap_or(first);
         let mut id = String::new();
         segment::push_hex(&mut id, boot);
@@ -997,6 +1122,7 @@ fn delete(options: &Options) -> i32 {
         }
         match replace(&each.segment, &rest) {
             Ok(()) => {
+                store::write_summary(each.segment.dir, &each.segment.name);
                 removed += count;
                 rewritten += 1;
             }
@@ -1327,4 +1453,100 @@ fn connect_datagram(path: &[u8]) -> Result<usize, sys::Errno> {
             Err(error)
         }
     }
+}
+
+/// `lode bench RECORDS [DIR]`: write a store of `RECORDS` records spread
+/// over 200 units in 16 MiB segments, sealed and summarised, into `DIR`
+/// (`/tmp/lode-bench`), then time `-u <a rare unit> -n 50` read through the
+/// summaries and by reading every segment. Step 5's benchmark.
+fn bench(words: &[String]) -> i32 {
+    use ferrix_lode_core::record::Record;
+    let Some(count) = words.first().and_then(|word| word.parse::<u64>().ok()) else {
+        return usage("bench needs a number of records");
+    };
+    let path = words
+        .get(1)
+        .map_or(b"/tmp/lode-bench".to_vec(), |dir| dir.clone().into_bytes());
+    let _ = sys::mkdirat(sys::AT_FDCWD, &path, 0o755);
+    let Ok(dir) = Dir::open(&path) else {
+        complain("lode: bench: no directory");
+        return 1;
+    };
+    let header = |first: u64| Header {
+        boot_id: [0xbe; 16],
+        machine_id: [0; 16],
+        first_seqnum: first,
+        created_us: 1_700_000_000_000_000,
+        host: String::from("bench"),
+    };
+    let mut bytes = header(1).encode();
+    let mut first = 1;
+    let write = |first: u64, bytes: &[u8]| {
+        let name = segment::file_name("system", &[0xbe; 16], first);
+        if let Ok(fd) = sys::openat(
+            dir.fd,
+            name.as_bytes(),
+            sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
+            0o644,
+        ) {
+            let _ = sys::write_all(fd, bytes);
+            sys::close(fd);
+            store::write_summary(dir.fd, &name);
+        }
+    };
+    for seq in 1..=count {
+        // Unit 0 is rare: only in the first and the last thousand records.
+        let unit = if seq <= 1000 || seq + 1000 > count {
+            0
+        } else {
+            1 + seq % 199
+        };
+        let mut record = Record::new(6, 1_700_000_000_000_000 + seq, seq);
+        record.seqnum = seq;
+        record.push(
+            "MESSAGE",
+            alloc::format!("bench record {seq}, a line of about the length a driver writes")
+                .as_bytes(),
+        );
+        record.push("UNIT", alloc::format!("unit{unit}.service").as_bytes());
+        record.push("SYSLOG_IDENTIFIER", alloc::format!("unit{unit}").as_bytes());
+        segment::encode_record(&record, &mut bytes);
+        if bytes.len() >= 16 * 1024 * 1024 {
+            write(first, &bytes);
+            first = seq + 1;
+            bytes = header(first).encode();
+        }
+    }
+    write(first, &bytes);
+    let dirs = [Dir { fd: dir.fd }];
+    let options = Options {
+        expr: Some(unit_expr("unit0.service")),
+        ..Options::default()
+    };
+    let started = sys::clock_us(sys::CLOCK_MONOTONIC);
+    let segments = known(&dirs);
+    let chosen = candidates(&segments, None, &options, (None, None));
+    let fast = newest(&chosen, &options, (None, None), 50);
+    let summarised = sys::clock_us(sys::CLOCK_MONOTONIC) - started;
+    let started = sys::clock_us(sys::CLOCK_MONOTONIC);
+    let all = load(&segments, None);
+    let slow: Vec<&Record> = all
+        .iter()
+        .filter(|record| passes(&options, record, None, None))
+        .collect();
+    let whole = sys::clock_us(sys::CLOCK_MONOTONIC) - started;
+    let same = fast.len() == 50
+        && slow.len() >= 50
+        && slow
+            .get(slow.len() - 50..)
+            .is_some_and(|tail| tail.iter().zip(&fast).all(|(a, b)| a.seqnum == b.seqnum));
+    out(alloc::format!(
+        "bench: {count} records, {} segments; -u unit0 -n 50: {} ms through summaries, {} ms reading all; same answer: {}\n",
+        segments.len(),
+        summarised / 1000,
+        whole / 1000,
+        if same { "yes" } else { "no" }
+    )
+    .as_bytes());
+    i32::from(!same)
 }

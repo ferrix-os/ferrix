@@ -176,6 +176,10 @@ say "cgroup: $($bb cat /proc/$pid/cgroup)"
 if echo $pid > /sys/fs/cgroup/cgroup.procs 2>/dev/null; then say "sealed: moved"; else say "sealed: refused"; fi
 say "boots: $(/bin/lode --list-boots | $bb tail -n +2 | $bb wc -l)"
 say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
+# Fast reads (step 5): a unit's last lines through the segments' summaries,
+# on a generated store and on this one.
+say "bench: $(/bin/lode bench 200000 /tmp/lode-bench)"
+say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
 # Without lode, syslog() is refused at once, not left waiting.
 /bin/svc stop lode.service > /dev/null 2>&1
 $bb timeout 5 $bb logger -t gone "with no lode" ; said=$?
@@ -303,7 +307,33 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         return Err("the unit's own lines were not stored under lode-test.service".into());
     }
     isolated(lines)?;
-    held(lines)
+    held(lines)?;
+    fast(lines)
+}
+
+/// Step 5: the summaries' read gives what reading everything gives, and
+/// no slower; a unit's last lines on the boot's own store.
+fn fast(lines: &[String]) -> std::result::Result<(), String> {
+    let bench = said(lines, "lode-test: bench:").unwrap_or_default();
+    let tail = bench.split_once("-n 50: ").map_or("", |(_, tail)| tail);
+    let through: Option<u64> = tail.split_whitespace().next().and_then(|n| n.parse().ok());
+    let whole: Option<u64> = tail
+        .split(", ")
+        .nth(1)
+        .and_then(|part| part.split_whitespace().next())
+        .and_then(|n| n.parse().ok());
+    match (through, whole) {
+        (Some(through), Some(whole)) if bench.contains("same answer: yes") && through <= whole => {}
+        _ => {
+            return Err(format!(
+                "the summaries' read was wrong or slower: `{bench}`"
+            ));
+        }
+    }
+    if said(lines, "lode-test: newest:") != Some("3") {
+        return Err("`-u lode-test -n 3` did not give 3 lines".into());
+    }
+    Ok(())
 }
 
 /// Step 2: what the rules, the folding and the limiter held back, each
@@ -428,7 +458,9 @@ lode-test: session: 2 0 1
 lode-test: capture: 1 1 1 qoif provide-stub: refused
 lode-test: front: 1 1 1 1 0
 lode-test: devlog: /run/systemd/journal/dev-log
-lode-test: no lode: returned";
+lode-test: no lode: returned
+lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes
+lode-test: newest: 3";
 
     /// [`CLEAN`] with the line beginning `what` replaced by `with`.
     fn run(what: &str, with: &str) -> Vec<String> {

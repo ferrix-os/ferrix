@@ -893,3 +893,51 @@ mod protocols {
         assert!(protocols::stream_header(b"half\nheader\n").is_none());
     }
 }
+
+mod summaries {
+    use alloc::vec::Vec;
+
+    use crate::filter;
+    use crate::record::Record;
+    use crate::summary::Summary;
+
+    fn records() -> Vec<Record> {
+        let mut out = Vec::new();
+        for (seq, (unit, priority)) in [("a.service", 6_u8), ("b.service", 3), ("a.service", 7)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut record = Record::new(priority, 1000 + seq as u64, seq as u64);
+            record.seqnum = 10 + seq as u64;
+            record.push("UNIT", unit.as_bytes());
+            record.push("SYSLOG_IDENTIFIER", b"x");
+            out.push(record);
+        }
+        out
+    }
+
+    #[test]
+    fn a_summary_round_trips_and_says_what_cannot_match() {
+        let summary = Summary::of(&records());
+        assert_eq!(summary.seqs, (10, 12));
+        assert_eq!(summary.times, (1000, 1002));
+        assert_eq!(summary.levels, (3, 7));
+        let bytes = summary.encode();
+        assert_eq!(Summary::decode(&bytes), Some(summary.clone()));
+        let mut broken = bytes;
+        broken[20] ^= 1;
+        assert_eq!(Summary::decode(&broken), None);
+        let may = |text: &str| summary.may_match(&filter::parse(text).unwrap());
+        assert!(may(r#"unit = "a*""#));
+        assert!(!may(r#"unit = "c.service""#));
+        assert!(may("priority <= err"));
+        assert!(!may("priority <= crit"));
+        assert!(!may(r#"unit = "c.service" and priority <= err"#));
+        assert!(may(r#"unit = "c.service" or priority <= err"#));
+        assert!(may(r#"MESSAGE = "anything""#));
+        assert!(may(r#"not unit = "a.service""#));
+        assert!(summary.overlaps(Some(1001), None));
+        assert!(!summary.overlaps(Some(2000), None));
+        assert!(!summary.overlaps(None, Some(999)));
+    }
+}
