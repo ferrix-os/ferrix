@@ -1097,7 +1097,7 @@ impl Socket {
                 WriteOutcome::WouldBlock if nonblock => Errno::EAGAIN,
                 WriteOutcome::WouldBlock => match wait(
                     &peer.writable,
-                    || peer.is_refused() || peer.buffer.lock().can_write(1),
+                    || peer.is_refused() || peer.buffer.lock().can_write(rest.len()),
                     deadline,
                 ) {
                     Ok(()) => continue,
@@ -1354,7 +1354,7 @@ impl Socket {
         let (room, peer_refuses) = match &peer {
             Some(peer) => {
                 let refused = peer.is_refused();
-                (refused || peer.buffer.lock().can_write(1), refused)
+                (refused || peer.buffer.lock().writable(), refused)
             }
             None => (true, false),
         };

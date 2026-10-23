@@ -1407,6 +1407,7 @@ fn check_a_stream_read_takes_all_there_is(
     let region = u64::try_from(region).map_err(|_| "mmap returned an impossible address")?;
     let outcome = fill_from_a_pipe(process, page, region)
         .and_then(|()| fill_from_a_socket(process, page, region))
+        .and_then(|()| fill_a_socket_with_small_sends(process, page))
         .and_then(|()| fill_from_zero(process, page, region));
     let _ = memory::sys_munmap(process, region, FILL + PAGE_SIZE);
     outcome
@@ -1509,6 +1510,63 @@ fn fill_from_a_socket(process: &Process, page: u64, region: u64) -> Result<(), &
     )?;
     answers(fd::sys_close(process, one), 0, "a socket would not close")?;
     answers(fd::sys_close(process, other), 0, "a socket would not close")
+}
+
+/// How long each send of [`fill_a_socket_with_small_sends`] is: no divisor
+/// of the buffer's size, so a send that took what room was left would show.
+const SMALL_SEND: u64 = 24;
+
+/// A small send on a non-blocking Unix stream socket is queued whole or
+/// refused with `EAGAIN`, never cut short, as Linux's is: measured on a 7.0
+/// host, a socketpair filled with 24-byte sends ends in `EAGAIN` with every
+/// send whole. Here the last one used to take the 16 bytes left (212976 of
+/// 212992), and yserver, which sends a DRI3 or MIT-SHM reply and its
+/// descriptor in one `sendmsg` and does not look at the count, lost the
+/// rest: the client's stream was torn. Wine's server treats a short count as
+/// a protocol error and ends the client.
+fn fill_a_socket_with_small_sends(process: &Process, page: u64) -> Result<(), &'static str> {
+    use ferrix_linux_abi::socket::{SOCK_NONBLOCK, SOCKET_BUFFER_DEFAULT};
+    const AF_UNIX: u64 = 1;
+    const SOCK_STREAM: u64 = 1;
+    answers(
+        by_number(
+            process,
+            Syscall::Socketpair,
+            [
+                AF_UNIX,
+                SOCK_STREAM | u64::from(SOCK_NONBLOCK),
+                0,
+                page + AT_FDS,
+                0,
+                0,
+            ],
+        ),
+        0,
+        "a non-blocking socketpair was refused",
+    )?;
+    let (one, other) = pair(process, page)?;
+    let most = SOCKET_BUFFER_DEFAULT / usize::try_from(SMALL_SEND).unwrap_or(1) + 2;
+    let mut outcome = Err("a non-blocking socket never filled");
+    for _ in 0..most {
+        match file::sys_write(process, one, page + AT_DATA, SMALL_SEND) {
+            Ok(sent) if u64::try_from(sent) == Ok(SMALL_SEND) => {}
+            Ok(_) => {
+                outcome = Err("a small send on a nearly full socket was cut short");
+                break;
+            }
+            Err(Errno::EAGAIN) => {
+                outcome = Ok(());
+                break;
+            }
+            Err(_) => {
+                outcome = Err("a small send on a socket was refused other than with EAGAIN");
+                break;
+            }
+        }
+    }
+    answers(fd::sys_close(process, one), 0, "a socket would not close")?;
+    answers(fd::sys_close(process, other), 0, "a socket would not close")?;
+    outcome
 }
 
 /// The /dev/zero half of [`check_a_stream_read_takes_all_there_is`]. Its
@@ -2381,13 +2439,13 @@ fn check_splice_refuses(process: &Process, page: u64, fds: Spliced) -> Result<()
 
 /// `splice` out of a pipe leaves in the pipe what the output refused, as
 /// Linux does -- measured on a 7.0 host: into a full non-blocking socket it
-/// is `EAGAIN` and the pipe still holds all six bytes. Then into the same
-/// socket with room for two: what the socket did not take is still at the
-/// pipe's front, in order. Linux would take all six there: it charges a
-/// socket by its buffers rather than its bytes, and into a full socket
-/// whose peer had read 20000 bytes it spliced all 60006 a pipe held. So
-/// what is checked is that the socket took some and not all, so that the
-/// path ran, and that no byte was lost or moved.
+/// is `EAGAIN` and the pipe still holds all six bytes. A socket queues a
+/// small send whole or not at all (`fill_a_socket_with_small_sends`), so
+/// with room for two it is `EAGAIN` again and the pipe keeps all six; with
+/// room for eight it takes all six. Linux takes all six already at two: it
+/// charges a socket by its buffers rather than its bytes, and into a full
+/// socket whose peer had read 20000 bytes it spliced all 60006 a pipe held.
+/// What is checked is that no byte is ever lost or moved.
 fn check_splice_keeps_what_the_output_refused(
     process: &Process,
     page: u64,
@@ -2446,19 +2504,26 @@ fn check_splice_keeps_what_the_output_refused(
         2,
         "a full socket's peer would not read",
     )?;
-    let taken = pipe::sys_splice(process, reader, 0, one, 0, 6, 0)
-        .map_err(|_| "splice from a pipe into a socket with room for part was refused")?;
-    if taken == 0 || taken >= 6 {
-        return Err("splice into a socket with room for part did not take part");
-    }
-    answers(
-        file::sys_read(process, reader, page + AT_BACK, 64),
-        6 - taken,
-        "splice into a socket that took part lost the rest from the pipe",
+    refuses(
+        pipe::sys_splice(process, reader, 0, one, 0, 6, 0),
+        Errno::EAGAIN,
+        "splice of six bytes into a socket with room for two was not EAGAIN",
     )?;
-    if read_back(process, page + AT_BACK, 6 - taken)? != DATA.get(taken..6).unwrap_or_default() {
-        return Err("splice into a socket that took part left the rest out of order");
-    }
+    answers(
+        file::sys_read(process, other, page + AT_BACK, 6),
+        6,
+        "a full socket's peer would not read",
+    )?;
+    answers(
+        pipe::sys_splice(process, reader, 0, one, 0, 6, 0),
+        6,
+        "splice of six bytes into a socket with room for eight did not take them all",
+    )?;
+    refuses(
+        file::sys_read(process, reader, page + AT_BACK, 64),
+        Errno::EAGAIN,
+        "splice into a socket that took everything left bytes in the pipe",
+    )?;
     for fd in [reader, writer, one, other] {
         answers(
             fd::sys_close(process, fd),
