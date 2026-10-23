@@ -25,6 +25,7 @@ mod seat;
 mod serve;
 mod store;
 mod sys;
+mod upload;
 mod zone;
 
 use ferrix_rt::Bootstrap;

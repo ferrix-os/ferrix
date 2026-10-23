@@ -56,6 +56,15 @@ pub(crate) fn enabled() -> File {
     }
 }
 
+/// The uploader's unit, shipped beside [`UNIT`].
+pub(crate) const UPLOAD_UNIT: &str = "lode-upload.service";
+
+/// test-log's collector: the `upload-stub` the flood's unit starts.
+const UPLOAD_CONF: &str = "\
+# test-log's collector (tools/common/xtask/src/lode.rs).
+stub http://127.0.0.1:19532/upload export where id = \"uploadme\"
+";
+
 /// The flood's unit: after lode, its output through init's log pipe.
 const TEST_UNIT: &str = "\
 # test-log's flood (tools/common/xtask/src/lode.rs).
@@ -77,6 +86,7 @@ const TEST_RULES: &str = "\
 # test-log's rules (tools/common/xtask/src/lode.rs).
 limit 100/2s where id = noisy
 fold 0s where id = noisy
+fold 0s where id = uploadme
 fold 0s where message ~ \"lode flood\"
 drop where id = dropme
 limit 100000/30s where transport = console
@@ -94,6 +104,15 @@ until [ -n "$($bb pidof lode)" ]; do
   i=$((i+1)); [ $i -gt 200 ] && { say "FAIL lode never ran"; say done; exit 1; }
   $bb usleep 100000
 done
+# Store-and-forward (step 6): a collector that comes up after the
+# uploader, so its first tries fail and back off.
+up=/tmp/uploaded
+# The service: the lode that is neither the uploader nor the collector.
+lode_pid() { for p in $($bb pidof lode); do $bb grep -q upload /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
+( exec /bin/lode upload-stub 19532 $up ) > /tmp/upload-stub 2>&1 &
+upload_count() { n=$($bb grep -c '^MESSAGE=upload ' $up 2>/dev/null); echo ${n:-0}; }
+upload_wait() { i=0; until [ "$(upload_count)" -ge "$1" ]; do i=$((i+1)); [ $i -gt 400 ] && break; $bb usleep 100000; done; }
+i=0; while [ $i -lt 5 ]; do echo "<14>uploadme: upload $i" > /dev/kmsg; i=$((i+1)); done
 # Floods held (step 2): a repeat folded, a source over its rule's limit,
 # a dropped source, an error in its own class, a deletion.
 i=0; while [ $i -lt 50 ]; do echo "<14>folder: the same line" > /dev/kmsg; i=$((i+1)); done
@@ -115,6 +134,21 @@ $bb sleep 11
 say "folded: $(/bin/lode -b -t folder -o cat | $bb grep -c '^the same line$') $(/bin/lode -b -t folder -o json | $bb grep -c '"REPEATED":"49"')"
 say "limited: $(/bin/lode -b -t noisy -o cat | $bb grep -c '^line ') $(/bin/lode -b -t lode -o json | $bb grep '"SUPPRESSED_SOURCE":"noisy"' | $bb sed 's/.*"N_SUPPRESSED":"\([0-9]*\)".*/\1/' | $bb head -n 1)"
 say "dropped: $(/bin/lode -b -t dropme -o cat | $bb wc -l) $(/bin/lode -b --where 'rule = "drop*"' -o json | $bb grep -c '"N_DROPPED":"20"')"
+upload_wait 5
+say "uploaded: $(upload_count)"
+# The collector down: nothing kept, nothing lost, sent once it is back.
+$bb touch $up.refuse
+i=5; while [ $i -lt 10 ]; do echo "<14>uploadme: upload $i" > /dev/kmsg; i=$((i+1)); done
+$bb sleep 3
+say "while down: $(upload_count)"
+$bb rm $up.refuse
+upload_wait 10
+# The uploader killed: started again, it goes on from its cursor.
+for p in $($bb pidof lode); do $bb tr '\0' ' ' < /proc/$p/cmdline | $bb grep -q ' upload $' && $bb kill -9 $p && say "killed the uploader"; done
+i=10; while [ $i -lt 15 ]; do echo "<14>uploadme: upload $i" > /dev/kmsg; i=$((i+1)); done
+upload_wait 15
+$bb sleep 1
+say "upload: $(upload_count) $($bb grep '^MESSAGE=upload ' $up | $bb sort -u | $bb wc -l) $($bb grep -c '^SYSLOG_IDENTIFIER=uploadme$' $up) $($bb grep -vc '^MESSAGE=upload \|^$\|=' $up) $(/bin/lode -b -t lode-upload -o cat | $bb grep -c 'trying again in')"
 say "fields: $(/bin/lode -b -t similar -o json | $bb grep -c '"REPEATED":"19"') $(/bin/lode -b -t similar -o json | $bb grep -c '"LAST_MESSAGE":"frame 19 at 57,99"') $(/bin/lode -b -t usbhid -o cat | $bb grep -c '^glued$')"
 say "levels: $(/bin/lode -b -t levelless -o json | $bb grep -c '"FERRIX_LEVEL":"unspecified"') $(/bin/lode -b -t levelless -o json | $bb grep -c '"PRIORITY"') $(/bin/lode -b -t levelless -p err -o cat | $bb wc -l) $(/bin/lode -b -t levelless -p err,unspecified -o cat | $bb wc -l) $(/bin/lode -b -t levelless | $bb grep -c ' ? levelless: just words') $(/bin/lode -b -t levelless -o verbose | $bb grep -c '^    FERRIX_LEVEL=unspecified$') $(/bin/lode -b -t guessy -p err -o json | $bb grep -c '"FERRIX_PRIORITY_SOURCE":"derived"') $(/bin/lode levels -b | $bb grep -c '^levelless ')"
 say "classes: $($bb ls /var/log/journal | $bb grep -c '^errors@') $(/bin/lode -b -t erring -o cat | $bb wc -l)"
@@ -131,7 +165,7 @@ say "front: $(/bin/lode -b -t sysloggy -o json | $bb grep -c '"_TRANSPORT":"sysl
 # Sessions (step 2a): what a seat's owner tells lode, kept across lode's restart.
 /bin/lode session begin 7 seat=seat0 uid=0 pid=$$ scope=session-7.scope unit=lode-test.service token=00112233445566778899aabbccddeeff || say "FAIL lode session begin"
 say "in session"
-first=$($bb pidof lode)
+first=$(lode_pid)
 /bin/lode mark "flood begins" || say "FAIL lode mark"
 n=0
 while [ $n -lt 3000 ]; do
@@ -145,7 +179,7 @@ until /bin/lode -b -g "lode flood 2999" -o cat | $bb grep -q "lode flood 2999"; 
   i=$((i+1)); [ $i -gt 300 ] && { say "FAIL the flood's last line was never stored"; break; }
   $bb usleep 100000
 done
-say "restarted as $($bb pidof -s lode)"
+say "restarted as $(lode_pid)"
 say "still in session"
 $bb sleep 1
 /bin/lode session end 7
@@ -183,7 +217,7 @@ for m in $($bb cat /tmp/missing); do /bin/lode -b -g "flood $m" -o json | while 
 if [ -s /tmp/missing ]; then m=$($bb cat /tmp/missing | $bb awk '{print $1}'); /bin/lode -b -o json | $bb grep -n "lode flood $((m-1))\"" -A3 | while read -r l; do say "near: $l"; done; fi
 say "restart records: $(/bin/lode -b -t lode -g "lode restarted" -o cat | $bb grep -c "lode restarted")"
 say "unit: $(/bin/lode -b -u lode-test -g "killed lode" -o json | $bb grep -c '"UNIT":"lode-test.service"')"
-pid=$($bb pidof -s lode)
+pid=$(lode_pid)
 say "uid: $($bb grep '^Uid:' /proc/$pid/status | $bb awk '{print $2}')"
 say "cgroup: $($bb cat /proc/$pid/cgroup)"
 if echo $pid > /sys/fs/cgroup/cgroup.procs 2>/dev/null; then say "sealed: moved"; else say "sealed: refused"; fi
@@ -223,6 +257,16 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         content: Content::Bytes(busybox),
     });
     files.push(enabled());
+    files.push(File {
+        path: format!("etc/ferrix/units/multi-user.target.wants/{UPLOAD_UNIT}"),
+        mode: 0o777,
+        content: Content::Link(format!("/lib/ferrix/units/{UPLOAD_UNIT}")),
+    });
+    files.push(File {
+        path: "etc/ferrix/lode-upload.conf".to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(UPLOAD_CONF.as_bytes().to_vec()),
+    });
     // No shell for a console getty to start: masked, so its retries do not
     // write half lines into the log the flood is counted in.
     files.push(File {
@@ -321,7 +365,37 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     }
     isolated(lines)?;
     held(lines)?;
+    forwarded(lines)?;
     fast(lines)
+}
+
+/// Step 6: a collector sent every record once, through its own outage and
+/// the uploader's restart, and the failures said and waited out.
+fn forwarded(lines: &[String]) -> std::result::Result<(), String> {
+    if said(lines, "lode-test: uploaded:") != Some("5") {
+        return Err(format!(
+            "a collector that came up late was not sent the 5 records: `{}`",
+            said(lines, "lode-test: uploaded:").unwrap_or_default()
+        ));
+    }
+    if said(lines, "lode-test: while down:") != Some("5") {
+        return Err("a collector that answered 503 was counted as having kept records".into());
+    }
+    if said(lines, "lode-test: killed the uploader").is_none() {
+        return Err("the uploader was never killed".into());
+    }
+    let counts: Vec<u32> = said(lines, "lode-test: upload:")
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|count| count.parse().ok())
+        .collect();
+    match counts.as_slice() {
+        [15, 15, 15, 0, retries] if *retries > 0 => Ok(()),
+        other => Err(format!(
+            "15 records were not each sent once in the export format, or no failure was said \
+             (sent, distinct, identified, unreadable lines, retries said): {other:?}"
+        )),
+    }
 }
 
 /// Step 5: the summaries' read gives what reading everything gives, and
@@ -487,7 +561,11 @@ lode-test: front: 1 1 1 1 0
 lode-test: devlog: /run/systemd/journal/dev-log
 lode-test: no lode: returned
 lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes
-lode-test: newest: 3";
+lode-test: newest: 3
+lode-test: uploaded: 5
+lode-test: while down: 5
+lode-test: killed the uploader
+lode-test: upload: 15 15 15 0 2";
 
     /// [`CLEAN`] with the line beginning `what` replaced by `with`.
     fn run(what: &str, with: &str) -> Vec<String> {
@@ -540,6 +618,24 @@ lode-test: newest: 3";
     #[test]
     fn a_fold_not_said_fails() {
         assert!(judge(&run("lode-test: folded:", "lode-test: folded: 50 0")).is_err());
+    }
+
+    #[test]
+    fn a_record_sent_twice_fails() {
+        assert!(
+            judge(&run(
+                "lode-test: upload:",
+                "lode-test: upload: 16 15 15 0 2"
+            ))
+            .is_err()
+        );
+        assert!(
+            judge(&run(
+                "lode-test: upload:",
+                "lode-test: upload: 15 15 15 0 0"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

@@ -1324,3 +1324,129 @@ mod unspecified {
         );
     }
 }
+
+/// Store-and-forward (`docs/LOGGING.md` §10.2).
+mod uploads {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use crate::record::Record;
+    use crate::time::Zone;
+    use crate::upload::{self, Backoff, Format, Url};
+
+    #[test]
+    fn a_configuration_reads_and_says_what_is_wrong() {
+        let destinations = upload::parse_config(
+            "# comment\n\
+             collector http://127.0.0.1:19532/upload export\n\
+             vector http://localhost:8080 json auth where priority <= warning\n\
+             plain http://localhost export\n",
+        )
+        .unwrap();
+        assert_eq!(destinations.len(), 3);
+        assert_eq!(destinations[0].url.path, "/upload");
+        assert_eq!(destinations[1].url.address, [127, 0, 0, 1]);
+        assert_eq!(destinations[1].url.path, "/");
+        assert!(destinations[1].auth && destinations[1].filter.is_some());
+        assert_eq!(destinations[2].url.port, upload::DEFAULT_PORT);
+        assert_eq!(destinations[2].url.path, "/upload");
+        for bad in [
+            "x http://10.0.2.2:19532 export",
+            "x https://127.0.0.1 export",
+            "x http://127.0.0.1 xml",
+            "x/y http://127.0.0.1 export",
+            "x http://127.0.0.1:0 export",
+            "x http://127.0.0.1 export loud",
+            "x http://127.0.0.1",
+            "x http://127.0.0.1 export\nx http://127.0.0.1 json",
+        ] {
+            assert!(upload::parse_config(bad).is_err(), "{bad}");
+        }
+        assert!(
+            upload::parse_config("x http://10.0.2.2 export")
+                .unwrap_err()
+                .contains("ssh tunnel")
+        );
+    }
+
+    fn record(seq: u64, facility: &str) -> Record {
+        let mut record = Record::new(6, 1_761_228_062_000_000, seq);
+        record.seqnum = seq;
+        record.push("MESSAGE", alloc::format!("line {seq}").as_bytes());
+        record.push("SYSLOG_FACILITY", facility.as_bytes());
+        record
+    }
+
+    #[test]
+    fn auth_stays_unless_named_and_the_filter_chooses() {
+        let all = &upload::parse_config("a http://localhost export").unwrap()[0];
+        let auth = &upload::parse_config("a http://localhost export auth").unwrap()[0];
+        let some = &upload::parse_config("a http://localhost export where message = \"line 1\"")
+            .unwrap()[0];
+        assert!(all.wants(&record(1, "1")));
+        assert!(!all.wants(&record(1, "10")));
+        assert!(!all.wants(&record(1, "4")));
+        assert!(auth.wants(&record(1, "4")));
+        assert!(some.wants(&record(1, "1")) && !some.wants(&record(2, "1")));
+        let mut unit = record(1, "1");
+        unit.push("_SYSTEMD_UNIT", b"auth.service");
+        assert!(!all.wants(&unit));
+    }
+
+    #[test]
+    fn a_request_and_its_answer() {
+        let url = Url::parse("http://localhost:19532/upload", "/").unwrap();
+        let records = [record(1, "1"), record(2, "1")];
+        let refs: Vec<&Record> = records.iter().collect();
+        let (body, taken) = upload::body(Format::Export, &refs, &Zone::utc());
+        assert_eq!(taken, 2);
+        assert_eq!(
+            body.windows(13).filter(|w| *w == b"MESSAGE=line ").count(),
+            2
+        );
+        let request = upload::request(&url, Format::Export, &body);
+        let text = String::from_utf8_lossy(&request);
+        assert!(text.starts_with("POST /upload HTTP/1.1\r\nHost: localhost:19532\r\n"));
+        assert!(text.contains("Content-Type: application/vnd.fdo.journal\r\n"));
+        let (start, length) = upload::request_head(&request).unwrap();
+        assert_eq!(length, body.len());
+        assert_eq!(&request[start..], &body[..]);
+        assert_eq!(upload::status(b"HTTP/1.1 202 Accepted\r\n"), Some(202));
+        assert_eq!(upload::status(b"HTTP/1.0 503 Busy\r\nx"), Some(503));
+        assert_eq!(upload::status(b"HTTP/1.1 200"), None);
+        assert_eq!(upload::status(b"SSH-2.0 x\r\n"), None);
+        let (json, _) = upload::body(Format::Json, &refs, &Zone::utc());
+        assert_eq!(json.iter().filter(|&&byte| byte == b'\n').count(), 2);
+    }
+
+    #[test]
+    fn a_batch_stops_at_its_bytes_but_holds_one() {
+        let mut big = record(1, "1");
+        // A value is cut at 64 KiB: seventeen of them pass a megabyte.
+        for _ in 0..17 {
+            big.push("BLOB", &alloc::vec![b'x'; 64 * 1024]);
+        }
+        let records = [big, record(2, "1")];
+        let refs: Vec<&Record> = records.iter().collect();
+        assert_eq!(upload::body(Format::Export, &refs, &Zone::utc()).1, 1);
+    }
+
+    #[test]
+    fn backoff_doubles_to_five_minutes_and_resets() {
+        let mut backoff = Backoff::default();
+        let waits: Vec<u64> = (0..12).map(|_| backoff.fail()).collect();
+        assert_eq!(&waits[..4], [1000, 2000, 4000, 8000]);
+        assert_eq!(*waits.last().unwrap(), upload::BACKOFF_MAX_MS);
+        backoff.succeed();
+        assert_eq!(backoff.fail(), 1000);
+    }
+
+    #[test]
+    fn records_gone_before_they_were_sent_are_counted() {
+        assert_eq!(upload::unsent(10, [11, 12, 13]), 0);
+        assert_eq!(upload::unsent(10, [15, 16, 20]), 7);
+        assert_eq!(upload::unsent(10, [9, 10, 11]), 0);
+        assert_eq!(upload::read_cursor(b"42\n"), Some(42));
+        assert_eq!(upload::read_cursor(b"x"), None);
+    }
+}

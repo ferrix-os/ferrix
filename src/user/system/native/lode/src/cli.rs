@@ -31,6 +31,8 @@ lode session end ID                  what a seat's owner tells lode (root's)
 COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
                                      its lines into the log, as systemd-cat's
 lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
+lode upload [--config FILE]          send the log on to collectors (lode-upload.service)
+lode upload-stub PORT FILE           a collector on 127.0.0.1:PORT that keeps what it is sent (a test peer)
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 lode levels [-b ...] [filters]       records with no level, and with a guessed one, per source
@@ -113,6 +115,8 @@ pub(crate) fn run() -> i32 {
         Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
+        Some("upload") => return crate::upload::run(rest.get(1..).unwrap_or_default()),
+        Some("upload-stub") => return crate::upload::stub(rest.get(1..).unwrap_or_default()),
         Some("levels") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
                 Ok(mut options) => {
@@ -171,19 +175,19 @@ fn arguments() -> Vec<String> {
 }
 
 /// Say `why` and how to ask for help; status 2.
-fn usage(why: &str) -> i32 {
+pub(crate) fn usage(why: &str) -> i32 {
     complain(&alloc::format!("lode: {why}\nTry 'lode --help'."));
     2
 }
 
 /// A line on standard error.
-fn complain(text: &str) {
+pub(crate) fn complain(text: &str) {
     let _ = sys::write_all(2, text.as_bytes());
     let _ = sys::write_all(2, b"\n");
 }
 
 /// Bytes on standard output; a reader that went away ends lode quietly.
-fn out(bytes: &[u8]) {
+pub(crate) fn out(bytes: &[u8]) {
     if sys::write_all(1, bytes).is_err() {
         ferrix_rt::exit(0);
     }
@@ -446,19 +450,19 @@ fn directories(options: &Options) -> Result<Vec<Dir>, String> {
 }
 
 /// A segment with its header, and its summary when it has one.
-struct Known {
+pub(crate) struct Known {
     /// The segment.
-    segment: Segment,
+    pub(crate) segment: Segment,
     /// Its header.
-    header: Header,
+    pub(crate) header: Header,
     /// Its summary: a sealed segment's (step 5).
-    summary: Option<Summary>,
+    pub(crate) summary: Option<Summary>,
 }
 
 impl Known {
     /// The last sequence number it can hold: its summary's, or, being
     /// written, any.
-    fn last_seq(&self) -> u64 {
+    pub(crate) fn last_seq(&self) -> u64 {
         self.summary
             .as_ref()
             .map_or(u64::MAX, |summary| summary.seqs.1)
@@ -466,7 +470,7 @@ impl Known {
 }
 
 /// Every segment with a readable header, oldest first.
-fn known(dirs: &[Dir]) -> Vec<Known> {
+pub(crate) fn known(dirs: &[Dir]) -> Vec<Known> {
     store::all_segments(dirs)
         .into_iter()
         .filter_map(|segment| {
@@ -506,7 +510,7 @@ fn candidates<'a>(
 }
 
 /// The records of one segment.
-fn records_of(each: &Known) -> Vec<Record> {
+pub(crate) fn records_of(each: &Known) -> Vec<Record> {
     store::bytes(&each.segment, 0)
         .and_then(|bytes| segment::scan(&bytes, 0))
         .map(|scanned| {
@@ -1457,7 +1461,7 @@ fn send_native(fd: usize, identifier: &str, priority: Option<u8>, line: &[u8]) {
 }
 
 /// A datagram socket connected to `path`.
-fn connect_datagram(path: &[u8]) -> Result<usize, sys::Errno> {
+pub(crate) fn connect_datagram(path: &[u8]) -> Result<usize, sys::Errno> {
     use ferrix_rt::linux as rt;
     let fd = rt::socket(rt::AF_UNIX, 2, 0)?;
     let Some((address, length)) = rt::sockaddr_un(path) else {

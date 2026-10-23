@@ -816,6 +816,9 @@ the reconnecting, writes the stream to the run's log directory, and turns
 
 ### 10.2 Continuous forwarding
 
+(Built in part: see §18, "Store-and-forward, as built". TLS, RFC 5424,
+OTLP and receiving are still to come.)
+
 `lode-upload.service`, its own unit, user and sealed job, off unless
 `/etc/ferrix/lode-upload.conf` names a destination (theme 9):
 
@@ -1136,9 +1139,11 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 ## 17. Plan
 
 **Where it stands (2026-10-23).** Landed: the design and steps 1, 2,
-2a, 2b, 3 and 4; step 5 as below. Next, one step at a time:
-store-and-forward to a collector (§10.2), compression of sealed segments,
-the write-budget row (§8.3), then the TUI viewer.
+2a, 2b, 3, 4 and 5, and the field-quality fixes from the N150's first
+records; store-and-forward to a collector (§10.2's first part) as below.
+Next, one step at a time: compression of sealed segments, the
+write-budget row (§8.3), then the TUI viewer, whose design the customer
+is drawing from the box data.
 
 
 
@@ -1585,6 +1590,58 @@ wrong, fixed in one landing before step 6:
   with its last line, a glued name read, and a line with no level shown as
   unspecified in json, human and verbose, left out by `-p err`, brought in
   by `-p err,unspecified`, and counted by `lode levels`.
+
+### Store-and-forward, as built (§10.2's first part)
+
+`lode upload`, `lode-upload.service`, sends the log on to collectors.
+
+* **The store is the buffer.** Each destination keeps a cursor in
+  `/var/lib/ferrix/lode-upload/<name>`: the store sequence number of the
+  last record it acknowledged. The cursor is written through a new file
+  renamed over the old one, and only after the destination answered
+  `2xx`. A destination that is down is tried again after 1 s, 2, 4, ...,
+  up to 5 min, for ever; the uploader never gives up and exits. Killed,
+  init starts it again and it goes on from the cursor: nothing is sent
+  twice that was acknowledged, nothing lost that the store still holds.
+* **What was gone before it was sent is said.** Records missing from the
+  store's sequence after a cursor (vacuum, `lode delete`, a RAM-only class
+  at a reboot) are counted in a record of their own: `MESSAGE_ID`
+  e2a6c4b8d0f24e1a9c3b5d7f9e1a3c5b, `N_UNSENT`, `UPLOAD_DESTINATION`, the
+  range.
+* **Configuration**: `/etc/ferrix/lode-upload.conf`, one destination a
+  line, `NAME URL FORMAT [auth] [where EXPR]`. No file, or no line: it
+  says so and ends. `export` posts the Journal Export Format as
+  `systemd-journal-upload` posts it (`POST /upload`, `Content-Type:
+  application/vnd.fdo.journal`); `json` posts journald's JSON a line
+  (`application/x-ndjson`) for Vector, Loki and Fluent Bit. At most 1,000
+  records or 1 MiB a request. The filter is §6's language; records of the
+  auth and authpriv facilities and of `auth.service` go only to a line that
+  says `auth`.
+* **Plain HTTP only to this machine** (`localhost`, `127.0.0.0/8`): a
+  configuration naming another host is refused and says to use an ssh
+  tunnel. TLS is not built yet; it comes with a TLS stack for native
+  programs.
+* **Its box**: started as root to make its state directory, then uid 92 in
+  `adm`, which reads the log and nothing else. An ordinary Linux service
+  in `system.slice`, not the sealed `drivers.slice`: that slice takes
+  native services only (init's start of a Linux process there fails
+  `EPERM`), and the uploader holds nothing the log depends on. Off unless
+  an image enables the unit.
+* **Reading**: it reads only what follows its cursor -- sealed segments
+  that end before it are skipped by their summaries, the one being written
+  is read from where the last read stopped -- at most 5,000 records ahead,
+  and an idle pass, which sees no segment change size, reads nothing.
+* `test-log` runs `lode upload-stub`, a collector on 127.0.0.1 that keeps
+  what it is sent and answers 503 while told to. The uploader starts
+  before it; 5 records reach it; while it refuses, nothing is counted as
+  kept and the failures are said; once it is back, 5 more follow. Then the
+  uploader is killed, and after init starts it again, 5 more. All 15
+  arrive exactly once, in the export format.
+* Not yet: TLS and client certificates; RFC 5424 over TCP; OTLP;
+  `lode-receive` and `--merge` (§10.3, §10.4); a check against a real
+  `systemd-journal-remote` (nazuna has none installed; the body is the
+  same `-o export` that the format tests cover); a cursor past a store that was
+  wiped and begun again, which today waits for the new store to pass it.
 
 ### Known issues
 

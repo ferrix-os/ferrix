@@ -25,6 +25,7 @@
 //! * [`retention`]: which records are kept how long.
 //! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
+//! * [`upload`]: store-and-forward to a collector.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -46,6 +47,7 @@ pub mod segment;
 pub mod session;
 pub mod summary;
 pub mod time;
+pub mod upload;
 
 #[cfg(test)]
 mod tests;

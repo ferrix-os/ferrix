@@ -675,3 +675,80 @@ pub(crate) fn symlink(target: &[u8], link: &[u8]) -> Result<(), Errno> {
     }
     .map(|_| ())
 }
+
+/// `AF_INET`.
+const AF_INET: usize = 2;
+
+/// A `sockaddr_in` for `address`:`port`.
+fn sockaddr_in(address: [u8; 4], port: u16) -> [u8; 16] {
+    let mut out = [0_u8; 16];
+    out[..2].copy_from_slice(&u16::try_from(AF_INET).unwrap_or(2).to_ne_bytes());
+    out[2..4].copy_from_slice(&port.to_be_bytes());
+    out[4..8].copy_from_slice(&address);
+    out
+}
+
+/// A TCP connection to `address`:`port`, its reads given up after
+/// `seconds`.
+pub(crate) fn tcp_connect(address: [u8; 4], port: u16, seconds: usize) -> Result<usize, Errno> {
+    use ferrix_rt::linux as rt;
+    let fd = rt::socket(AF_INET, rt::SOCK_STREAM | O_CLOEXEC, 0)?;
+    let sockaddr = sockaddr_in(address, port);
+    // SAFETY: `sockaddr` is a `sockaddr_in` of 16 bytes, read for the call.
+    let connected = unsafe {
+        call(
+            numbers::CONNECT,
+            [fd, sockaddr.as_ptr() as usize, sockaddr.len(), 0, 0, 0],
+        )
+    }
+    .and_then(|_| rt::receive_timeout(fd, seconds));
+    match connected {
+        Ok(_) => Ok(fd),
+        Err(error) => {
+            close(fd);
+            Err(error)
+        }
+    }
+}
+
+/// A listening TCP socket on `127.0.0.1`:`port`, blocking.
+pub(crate) fn tcp_listen(port: u16) -> Result<usize, Errno> {
+    use ferrix_rt::linux as rt;
+    let fd = rt::socket(AF_INET, rt::SOCK_STREAM | O_CLOEXEC, 0)?;
+    let sockaddr = sockaddr_in([127, 0, 0, 1], port);
+    let bound = rt::bind(fd, &sockaddr, sockaddr.len()).and_then(|_| rt::listen(fd, 16));
+    if let Err(error) = bound {
+        close(fd);
+        return Err(error);
+    }
+    Ok(fd)
+}
+
+/// The next connection on a blocking `listener`.
+pub(crate) fn accept_blocking(listener: usize) -> Result<usize, Errno> {
+    ferrix_rt::linux::accept4(listener, O_CLOEXEC)
+}
+
+/// Give `path` to `uid` and `gid`.
+pub(crate) fn chown(path: &[u8], uid: u32, gid: u32) -> Result<(), Errno> {
+    let fd = open(path, O_RDONLY)?;
+    let done = fchown(fd, uid, gid);
+    close(fd);
+    done
+}
+
+/// Replace the file `path` with `bytes`, through a new file renamed over it.
+pub(crate) fn replace_file(path: &[u8], bytes: &[u8]) -> Result<(), Errno> {
+    let mut fresh = Vec::from(path);
+    fresh.extend_from_slice(b".new");
+    let fd = openat(
+        AT_FDCWD,
+        &fresh,
+        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        0o640,
+    )?;
+    let written = write_all(fd, bytes).and_then(|()| fdatasync(fd));
+    close(fd);
+    written?;
+    rename(&fresh, path)
+}

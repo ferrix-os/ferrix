@@ -1,0 +1,16 @@
+# lode upload: the log sent on to collectors (docs/LOGGING.md §10.2). An
+# ordinary Linux service, not in the sealed drivers.slice: that slice takes
+# native services only, and the uploader holds nothing the log depends on
+# (the store is its buffer; killed, it goes on from its cursor). It reads
+# the store as uid 92 in adm and sends what follows each destination's
+# cursor; with no /etc/ferrix/lode-upload.conf it says so and ends. Not
+# started unless an image enables it (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Send the log on to collectors
+After=lode.service
+
+[Service]
+Type=simple
+ExecStart=/sbin/lode upload
+Restart=on-failure
+RestartSec=5s
