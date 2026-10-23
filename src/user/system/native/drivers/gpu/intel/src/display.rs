@@ -168,11 +168,9 @@ impl Display {
         ));
         let mut hotplug = match regs::Regs::map(device, apertures) {
             Ok(mut regs) => {
-                // `ferrix.intelgpu.modeset=dry`: the plan for the second
-                // port, printed and not written (`docs/DESKTOP.md` §3.5).
-                if modeset::asked() {
-                    modeset::print_plan(&mut regs);
-                }
+                // `ferrix.intelgpu.modeset=dry` or `=on`: the second port,
+                // its steps printed or taken (`docs/DESKTOP.md` §3.5).
+                modeset::run(&mut regs);
                 hotplug::Watch::start(regs)
             }
             Err(why) => {

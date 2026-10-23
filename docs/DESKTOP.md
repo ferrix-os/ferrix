@@ -98,8 +98,39 @@ second HDMI port, the ground truth; then h2, the writes, behind
 
 h1 is built (57ce6f566): the WRPLL, DPLL, transcoder timing, DDI, pipe
 source and primary plane words for the mode the EDID prefers, printed under
-`modeset=dry`; host tests check the WRPLL dividers against i915's own
-arithmetic. h2 waits for the box's dump.
+`modeset=dry`.
+
+**h2 is built**, after the ground truth: the box's inspection Linux with
+a monitor on each HDMI port (`~/.local/share/ferrix/n150-linux/evidence/3h-dump-2026-10-23`;
+Linux had a 1024x600 DVI monitor on pipe A, DDI B, DPLL1 and the TV on
+pipe B, DDI A, DPLL0). The planner's PLL words for both clocks, the
+transcoder's timings and source, `TRANS_DDI_FUNC_CTL`'s port, sync and
+mode, and the plane's size and stride all equal Linux's. What it lacked,
+now there:
+
+* `DVI` mode for a sink with no HDMI vendor block, `PLANE_CTL`'s
+  `ARB_SLOTS(1)`;
+* i915's whole `hsw_crtc_enable` order for HDMI on a combo port
+  (`intel-xelp/src/display/light.rs`): PW2 and pipe B's well with their
+  fuses, DBUF slices S3 and S4 (pipe B's beside pipe A,
+  `adlp_allowed_dbufs`), `PIPE_MBUS_DBOX_CTL`, the PLL's power, dividers
+  and lock, `DPCLKA_CFGCR0`'s select and ungate, the DDI I/O well,
+  `TRANS_CLK_SEL`, pipe source and misc, timings, `TRANS_MULT`, the frame
+  start delay, `WM_LINETIME`, `PIPE_CHICKEN`, the plane's DBUF share and
+  watermarks, the function, the transcoder on, the PHY's HDMI signal level
+  and lanes, `DDI_BUF_CTL`, and the plane last;
+* from the dump rather than arithmetic: the PHY's signal level (Linux's,
+  identical on both PHYs), pipe B's DBUF share and watermarks (i915's for
+  1080p at 148.5 MHz, so modes above that clock are refused).
+
+`ferrix.intelgpu.modeset=on` reads the display first and writes nothing if
+it is not as the steps expect (pipe B or port B on, MBUS joined, DC
+states on, no free PLL, a clock above 148.5 MHz), then takes each step,
+saying it, and stops at the first wait that does not end. The new monitor
+shows the lit pipe's own surface, a mirror of its top-left, until `card0`
+has a second scanout (HELLO `scanouts: 2`, the last row of the table in
+§3.5). Host tests run the steps on a model of the firmware's display and
+compare every value with the dump. The box run is the coordinator's.
 
 **Part 4 is built** (18 points estimated):
 
@@ -117,7 +148,14 @@ icons are not drawn, the list's close crosses do nothing, and no image but
 the compositor's test image carries `notifyd` (as for the bar, nothing
 installs the theme yet).
 
-Next: h2 of 3h once the box's dump is in, 3e on the 3060.
+Found on the way and landed: the shipped wallpaper (89073b34e,
+`docs/brand/wallpaper/`, `compositor/wallpaper`, a `test-compositor` boot);
+a buffer destroyed after its commit stays shown and a placed surface with
+nothing to draw is said once (e4f11d32d, swaybg on the N150); a zone of -1
+covers the monitor (4bac20cb0); a monitor plugged back in after its card's
+last screen went is found again, at its old place (f5accc7ef).
+
+Next: the box run of h2, then the second scanout; 3e on the 3060.
 
 ## 1. Floating mode
 
