@@ -29,15 +29,10 @@ tests run in QEMU.
 [Boot Ferrix](#boot-ferrix) · [Read the technical guide](docs/GUIDE.md) ·
 [Visit the website](https://ferrix-os.org/)
 
-<!-- TODO(hero-n150): the hero is a real capture of the N150's desktop with
-     Endfield windowed, still being taken. Put it at
-     docs/brand/screenshots/hero-n150.png (1920x1080 PNG, under 1.5 MB, a
-     neutral wallpaper), describe it in docs/brand/screenshots/CAPTIONS.md,
-     and check the alt text and caption below against what it shows. -->
-![Ferrix's desktop on an Intel N150 mini PC, with Arknights: Endfield in a window](docs/brand/screenshots/hero-n150.png)
+![Ferrix's desktop on an Intel N150 mini PC: Arknights: Endfield in a window, ferrofetch and btop beside it](docs/brand/screenshots/hero-n150.png)
 
-*Ferrix on an Intel N150 mini PC, with Arknights: Endfield running in a
-window through Ferrix's own Intel GPU driver.*
+*Ferrix on an Intel N150 mini PC: Arknights: Endfield from Steam, in a window,
+through Ferrix's own Intel GPU driver, with ferrofetch and btop beside it.*
 
 ## Where it stands, 2026-10-23
 

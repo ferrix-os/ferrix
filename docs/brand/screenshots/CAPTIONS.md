@@ -2,14 +2,19 @@
 
 ## The N150 hero, 2026-10-23
 
-<!-- TODO(hero-n150): hero-n150.png is being taken. Fill in: the commit the
-     box booted, the machine (Intel N150 mini PC), the capture method, the
-     wallpaper (neutral), the game's resolution and what is on screen. The
-     README and the website use it as their first picture. -->
-
-**hero-n150.png** (1920x1080): Ferrix's desktop on the Intel N150 mini PC,
-with Arknights: Endfield running in a window, drawn by Ferrix's own Intel
-GPU driver. Not taken yet.
+**hero-n150.png** (1920x1080): Ferrix's desktop on the Intel N150 mini PC
+(4 Gracemont cores, Intel UHD iGPU, 16 GB), captured from the compositor on
+2026-10-23 with the box running image `main-628202493`. On screen:
+Arknights: Endfield from Steam through Proton, windowed at 1280x720 (graphics
+"Very Low", render scale 60 %, 30 fps cap), drawn by Ferrix's own ring-3
+Intel GPU driver; `ferrofetch` and `btop` in two `term` windows; waybar. The
+desktop configuration is the customer's own Hyprland and waybar setup carried
+onto the box (host-only daemons removed). The wallpaper is Ferrix's brand
+wallpaper (the mark moved to the upper right for this shot), drawn by swaybg
+1.2.1 built without gdk-pixbuf and patched to keep its shm pool and buffer:
+hyprix loses a buffer whose pool the client destroys right after creating it
+(a bug found while taking this picture, being fixed). The game's UID is
+blurred. Steam's never-drawn helper windows were left on another workspace.
 
 ## The install guide, 2026-10-19
 
