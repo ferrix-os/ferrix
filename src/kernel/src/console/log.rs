@@ -169,6 +169,16 @@ impl<const N: usize> Ring<N> {
         record_at(self.slots(), &self.written, byte)
     }
 
+    /// The byte at place `at`, if the ring still holds it.
+    pub(crate) fn byte_at(&self, at: u64) -> Option<u8> {
+        let mut cursor = at;
+        let mut byte = [0u8; 1];
+        let read = self.read(&mut cursor, &mut byte);
+        byte.first()
+            .copied()
+            .filter(|_| read.copied == 1 && read.lost == 0)
+    }
+
     /// The oldest place a reader can trust now.
     pub(crate) fn oldest(&self) -> u64 {
         let written = self.written();
@@ -401,9 +411,13 @@ impl<const M: usize> Lines<M> {
         true
     }
 
-    /// Note that a byte of `priority` went to place `at`: a line begins
-    /// there if the byte before ended one or was of another priority. The
-    /// stamp is `now`'s answer, asked once however many lines begin.
+    /// Note that a byte of `priority` is about to go to place `at`: a line
+    /// begins there if the byte before ended one or was of another priority.
+    /// The stamp is `now`'s answer, asked once however many lines begin.
+    ///
+    /// Before the byte is recorded, never after: a reader that sees the
+    /// byte in its log's count sees the line it begins too, so it can never
+    /// take the byte for part of the line before (`Lines::line`).
     pub(crate) fn note(&self, at: u64, byte: u8, priority: u8, stamp: &mut Stamp<'_>) {
         let open = u32::from(priority).saturating_add(1);
         if self.open.load(Ordering::Relaxed) != open {
@@ -413,9 +427,10 @@ impl<const M: usize> Lines<M> {
         self.open.store(next, Ordering::Relaxed);
     }
 
-    /// Make the next byte noted begin a line, whatever came before it.
-    pub(crate) fn break_line(&self) {
-        self.open.store(0, Ordering::Relaxed);
+    /// Make the next byte noted begin a line, whatever came before it, and
+    /// say whether a line was left without its newline.
+    pub(crate) fn break_line(&self) -> bool {
+        self.open.swap(0, Ordering::Relaxed) != 0
     }
 
     /// Record that line `begun` starts at `at`: stored into its slots, then
@@ -454,11 +469,19 @@ impl<const M: usize> Lines<M> {
         seq < begun && begun - seq < length && seq >= self.floor.load(Ordering::Relaxed)
     }
 
-    /// Line `seq`, if it is kept and its first byte is still at or after
-    /// `oldest`, the oldest byte its log keeps; `written` is the log's end.
-    /// A line is whole once another has begun after it or its last byte
-    /// was a newline; `None` too for one still being written.
-    pub(crate) fn line(&self, seq: u64, oldest: u64, written: u64) -> Option<Line> {
+    /// Line `seq` of `ring`'s lines, if it is kept and its first byte is
+    /// still at or after the oldest byte `ring` keeps. A line is whole once
+    /// another has begun after it, or, the last begun, once the log's last
+    /// byte is a newline; `None` too for one still being written.
+    ///
+    /// The log's count is read first: every line whose first byte is below
+    /// it has begun by then, since a line begins before its first byte is
+    /// recorded ([`Lines::note`]), so no byte of a later line is taken for
+    /// this one's. A line's end is where the next one begins, never the
+    /// count read here, which a writer may have passed since.
+    pub(crate) fn line<const N: usize>(&self, seq: u64, ring: &Ring<N>) -> Option<Line> {
+        let written = ring.written();
+        let oldest = ring.oldest_at(ring.capacity(), written);
         let begun = self.begun();
         let slots = self.slots();
         let length = slots.len() as u64;
@@ -470,7 +493,7 @@ impl<const M: usize> Lines<M> {
         let next = seq.wrapping_add(1);
         let end = if next < begun {
             slot_in(slots, next)?.start.load(Ordering::Relaxed)
-        } else if self.open.load(Ordering::Relaxed) == 0 {
+        } else if written > start && ring.byte_at(written - 1) == Some(b'\n') {
             written
         } else {
             return None;
@@ -485,7 +508,7 @@ impl<const M: usize> Lines<M> {
         Some(Line {
             seq,
             start,
-            end: end.min(written),
+            end,
             usec: stamp >> 8,
             priority: u8::try_from(stamp & 0xFF).unwrap_or(KERNEL),
         })
@@ -586,15 +609,17 @@ pub(crate) fn record_lines<const N: usize, const M: usize>(
     stamp: &mut Stamp<'_>,
 ) {
     for &byte in bytes {
-        let at = ring.record_byte_at(byte);
-        lines.note(at, byte, priority, stamp);
+        // Under the port's lock the place the byte takes is the count now.
+        lines.note(ring.written(), byte, priority, stamp);
+        let _ = ring.record_byte_at(byte);
     }
 }
 
 /// Make the next byte recorded begin a line of its own: for a record a
 /// program sent through `/dev/kmsg`, which is a line whatever came before.
-pub(crate) fn break_line() {
-    LOG_LINES.break_line();
+/// Says whether a line was left without its newline.
+pub(crate) fn break_line() -> bool {
+    LOG_LINES.break_line()
 }
 
 /// Grow the kernel log to what `log_buf_len=` asks, if it asks for more than
@@ -675,8 +700,6 @@ pub(crate) fn first_line() -> u64 {
 /// Line `seq` of the kernel log, whole; or, if it is gone, the first one
 /// kept after it. `None` when there is no whole line from `seq` on yet.
 pub(crate) fn line_from(seq: u64) -> Option<Line> {
-    let written = LOG.written();
-    let oldest = LOG.oldest();
-    let from = seq.max(LOG_LINES.first(oldest));
-    LOG_LINES.line(from, oldest, written)
+    let from = seq.max(LOG_LINES.first(LOG.oldest()));
+    LOG_LINES.line(from, &LOG)
 }

@@ -74,6 +74,10 @@ pub(crate) struct Report {
     pub(crate) processors: usize,
     /// Lines the check's own ring of lines began.
     pub(crate) lines: u64,
+    /// Lines a reader found whole while a writer on another processor wrote.
+    pub(crate) whole: u64,
+    /// Processors the writer and the reader ran on.
+    pub(crate) whole_processors: usize,
 }
 
 /// Run the check.
@@ -88,10 +92,13 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let (read_racing, processors) = two_writers()?;
     console_records()?;
     let lines = lines_begin_and_are_found()?;
+    let (whole, whole_processors) = lines_whole_while_written()?;
     grown_rings_keep_what_they_held()?;
     sizes_asked()?;
     Ok(Report {
         lines,
+        whole,
+        whole_processors,
         kept,
         lost,
         raced: RACE_BYTES.saturating_mul(2),
@@ -260,7 +267,7 @@ fn note(bytes: &[u8], priority: u8, usec: u64) {
 
 /// Line `seq` of the check's lines, as a reader finds it now.
 fn found(seq: u64) -> Option<Line> {
-    LINE_STARTS.line(seq, LINE_RING.oldest(), LINE_RING.written())
+    LINE_STARTS.line(seq, &LINE_RING)
 }
 
 /// Where lines begin, what they are stamped with, and what a reader is given,
@@ -307,7 +314,7 @@ fn lines_begin_and_are_found() -> Result<u64, &'static str> {
     }
     // A record of its own begins a line whatever it follows.
     note(b"pre", log::PROGRAM, 800);
-    LINE_STARTS.break_line();
+    let _ = LINE_STARTS.break_line();
     note(b"rec\n", log::PROGRAM, 900);
     if found(6).map(|line| (line.start, line.usec)) != Some((21, 900)) {
         return Err("a line broken for a record of its own did not begin there");
@@ -339,6 +346,134 @@ fn lines_begin_and_are_found() -> Result<u64, &'static str> {
     Ok(LINE_STARTS.begun())
 }
 
+/// The ring and lines a writer and a reader race on: the ring small enough
+/// to go round many times, the lines fewer than its bytes hold.
+static RACE_LINES_RING: Ring<4096> = Ring::new();
+static RACE_LINES: Lines<256> = Lines::new();
+
+/// Rounds the racing writer writes: a line left without its newline, then a
+/// record that cuts it, as `/dev/kmsg`'s does.
+const RACE_ROUNDS: u32 = 20_000;
+
+/// Whether the writer is done.
+static RACE_DONE: AtomicBool = AtomicBool::new(false);
+
+/// The racing writer: [`RACE_ROUNDS`] of `half`, a program's line with no
+/// newline, then a break and `rec NNNNNN` and a newline at the kernel's.
+fn line_writer(_: usize) {
+    while !GO.load(Ordering::SeqCst) {
+        core::hint::spin_loop();
+    }
+    let now = || 0;
+    for round in 0..RACE_ROUNDS {
+        let mut record = *b"rec 000000\n";
+        let mut value = round;
+        for digit in record.get_mut(4..10).unwrap_or_default().iter_mut().rev() {
+            *digit = b'0' + u8::try_from(value % 10).unwrap_or(0);
+            value /= 10;
+        }
+        log::record_lines(
+            &RACE_LINES_RING,
+            &RACE_LINES,
+            b"half",
+            log::PROGRAM,
+            &mut Stamp::new(&now),
+        );
+        let _ = RACE_LINES.break_line();
+        log::record_lines(
+            &RACE_LINES_RING,
+            &RACE_LINES,
+            &record,
+            log::KERNEL,
+            &mut Stamp::new(&now),
+        );
+    }
+    RACE_DONE.store(true, Ordering::SeqCst);
+}
+
+/// Whether `text` is a whole line [`line_writer`] wrote: `half` at a
+/// program's priority, or `rec`, six digits and a newline at the kernel's.
+fn written_whole(text: &[u8], priority: u8) -> bool {
+    match priority {
+        log::PROGRAM => text == b"half",
+        log::KERNEL => {
+            text.len() == 11
+                && text.starts_with(b"rec ")
+                && text.ends_with(b"\n")
+                && text
+                    .get(4..10)
+                    .is_some_and(|digits| digits.iter().all(u8::is_ascii_digit))
+        }
+        _ => false,
+    }
+}
+
+/// Lines handed out whole while they are written, on two processors where
+/// there are two: a writer on one writes [`RACE_ROUNDS`] rounds of a line
+/// cut by a record while this task, on another, reads every line it can as
+/// it goes. Each one handed out must be one the writer wrote, whole: not cut
+/// short, and not run into the record after it. Answers the lines read and
+/// the processors used.
+///
+/// Verifies: L.console.51
+fn lines_whole_while_written() -> Result<(u64, usize), &'static str> {
+    let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
+    let (reader, writer) = if online >= 2 { (0, 1) } else { (0, 0) };
+    GO.store(false, Ordering::SeqCst);
+    RACE_DONE.store(false, Ordering::SeqCst);
+    let task = crate::sched::spawn_on(
+        "log-lines",
+        line_writer,
+        0,
+        NICE_0_WEIGHT,
+        writer,
+        only(writer)?,
+    )?;
+    GO.store(true, Ordering::SeqCst);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let mut seq = 0u64;
+    let mut whole = 0u64;
+    let mut text = [0u8; 64];
+    loop {
+        let done = RACE_DONE.load(Ordering::SeqCst) && task.is_dead();
+        let first = RACE_LINES.first(RACE_LINES_RING.oldest());
+        seq = seq.max(first);
+        while let Some(line) = RACE_LINES.line(seq, &RACE_LINES_RING) {
+            let mut cursor = line.start;
+            let want = usize::try_from(line.end - line.start)
+                .unwrap_or(text.len())
+                .min(text.len());
+            let read = RACE_LINES_RING.read(&mut cursor, text.get_mut(..want).unwrap_or_default());
+            // A line the ring went round while it was copied is gone, not
+            // wrong: the writer is that much ahead.
+            if read.lost == 0 && read.copied == want {
+                if !written_whole(text.get(..want).unwrap_or_default(), line.priority) {
+                    return Err(
+                        "a line was handed out cut short, or run into the line after it, \
+                                while a writer on another processor wrote",
+                    );
+                }
+                whole += 1;
+            }
+            seq = line.seq.wrapping_add(1);
+        }
+        if done {
+            break;
+        }
+        if crate::timer::now_nanos() >= deadline {
+            return Err("the log check's line writer never finished");
+        }
+        // On one processor the writer runs only when this task lets it.
+        if reader == writer {
+            crate::sched::yield_now();
+        }
+    }
+    if whole == 0 {
+        return Err("a reader of a writer's lines found none whole");
+    }
+    Ok((whole, if reader == writer { 1 } else { 2 }))
+}
+
 /// The ring and lines the grow check grows: small, and grown once.
 static GROW_RING: Ring<16> = Ring::new();
 static GROW_LINES: Lines<4> = Lines::new();
@@ -364,7 +499,7 @@ fn grown_rings_keep_what_they_held() -> Result<(), &'static str> {
     for usec in 0..6 {
         record(b"line\n", usec);
     }
-    let found = |seq| GROW_LINES.line(seq, GROW_RING.oldest(), GROW_RING.written());
+    let found = |seq| GROW_LINES.line(seq, &GROW_RING);
     let before: Vec<Option<Line>> = (0..6).map(found).collect();
     let mut kept = [0u8; 15];
     let mut cursor = GROW_RING.oldest();
@@ -523,14 +658,22 @@ const RECORD: &[u8] = b"  log      a record written to the log is a line of its 
 /// The record's priority.
 const RECORD_PRIORITY: u8 = (1 << 3) | 5;
 
+/// A second record, written with no line open.
+const SECOND: &[u8] = b"  log      a record after a whole line is sent no newline before it";
+
 /// `console::write_record` after a task's half-written line: the record is a
 /// line of the kernel log of its own, at the priority it was given, its
-/// newline inside it.
+/// newline inside it; and the port was sent a newline before it, which the
+/// recent-output ring shows -- it keeps records and kernel lines, not a
+/// program's output, so the newline it holds before the record is the cut's,
+/// after the newline of the kernel line before. A record written with no
+/// line open is sent none: the byte before its newline is the last record's.
 ///
 /// Verifies: L.console.53
 fn a_record_is_a_line_of_its_own() -> Result<(), &'static str> {
     super::write_bytes(HALF);
     super::write_record(RECORD_PRIORITY, RECORD);
+    super::write_record(RECORD_PRIORITY, SECOND);
     let mut seq = log::lines_begun().saturating_sub(8);
     let mut room = vec![0u8; WINDOW];
     let mut found = None;
@@ -551,6 +694,17 @@ fn a_record_is_a_line_of_its_own() -> Result<(), &'static str> {
             "a record written after a half-written line was not a line of its own, \
                     at its priority, ending in its newline",
         );
+    }
+    let mut recent = vec![0u8; super::RECENT_BYTES];
+    let kept = super::recent(&mut recent);
+    let recent = recent.get(..kept).unwrap_or_default();
+    let cut: Vec<u8> = [&b"\n\n"[..], RECORD].concat();
+    if !contains(recent, &cut) {
+        return Err("a record that cut a half-written line was not sent a newline before it");
+    }
+    let whole: Vec<u8> = [RECORD, &b"\n"[..], SECOND].concat();
+    if !contains(recent, &whole) {
+        return Err("a record written with no line open was sent a newline before it");
     }
     Ok(())
 }

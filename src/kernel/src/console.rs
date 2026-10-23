@@ -119,7 +119,8 @@ struct Writer<'port> {
     /// to the port by polling.
     queued: bool,
     /// Whether bytes are kept in [`RECENT`] for a failure report: the
-    /// kernel's own lines are, a program's output is not.
+    /// kernel's own lines and the records programs send the log are, a
+    /// program's console output is not.
     remembered: bool,
     /// Whether bytes are recorded in the kernel [`log`]: everything is but
     /// the lines [`write_unlogged`] sends.
@@ -260,7 +261,8 @@ enum Kind {
     /// A program's output: kept in the log only.
     Program,
     /// A record a program sent to the log itself, `/dev/kmsg`'s, at its
-    /// priority: kept in the log only, as a line of its own.
+    /// priority: kept in the log, as a line of its own, and for a failure
+    /// report, as a kernel line is.
     Record(u8),
 }
 
@@ -268,7 +270,7 @@ impl Kind {
     /// Whether the bytes are kept in [`RECENT`]. Every kind is drawn on the
     /// screen under `ferrix.fbcon`.
     const fn remembered(self) -> bool {
-        matches!(self, Kind::Line | Kind::Unlogged)
+        matches!(self, Kind::Line | Kind::Unlogged | Kind::Record(_))
     }
 
     /// Whether the bytes are recorded in the kernel [`log`].
@@ -456,7 +458,8 @@ pub(crate) fn write_raw(bytes: &[u8]) {
 
 /// Write `line`, a record a program sent to the kernel log at `priority`
 /// (`/dev/kmsg`), to the console as a line of its own: the log begins a line
-/// for it whatever came before, and it ends in a newline.
+/// for it whatever came before, the port is sent a newline first if another
+/// writer's line was left open, and it ends in a newline.
 ///
 /// Written as a kernel line is, never waiting for room, under the port's lock
 /// from its first byte to its newline, so no other writer's bytes land inside
@@ -468,8 +471,16 @@ pub(crate) fn write_record(priority: u8, line: &[u8]) {
     let queued = may_queue();
     let wake = {
         let mut port = PORT.lock();
-        log::break_line();
+        let cut = log::break_line();
         let mut writer = Writer::new(&mut port, queued, Kind::Record(priority));
+        // A line another writer left without its newline is ended on the
+        // port, as Linux's console ends a continued line a record cuts, and
+        // only there: the log has ended it already.
+        if cut {
+            writer.logged = false;
+            writer.bytes(b"\n", true);
+            writer.logged = true;
+        }
         writer.bytes(line, true);
         if line.last() != Some(&b'\n') {
             writer.bytes(b"\n", true);

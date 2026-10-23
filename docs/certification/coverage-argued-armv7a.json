@@ -218,28 +218,28 @@
     },
     {
       "file": "console.rs",
-      "lines": "205, 210",
+      "lines": "206, 211",
       "category": "failure-path",
       "match": "fn write_str(&mut self, text: &str) -> fmt::Result {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "217",
+      "lines": "218",
       "category": "failure-path",
       "match": "}",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "357",
+      "lines": "359",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it."
     },
     {
       "file": "console.rs",
-      "lines": "383",
+      "lines": "385",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock."
