@@ -2225,3 +2225,124 @@ architectures.
 | TLS forwarding to nazuna | built | `lode-upload`, `lode-receive`, `test-log-remote` on all three architectures |
 | The box's field quality | built | §18 "Field quality" |
 | Box run of TLS forwarding | waiting | the PO's box run |
+| Crash records name their process | built, landing | §18 "Crash records name their process"; `test-log` "crash" row |
+| Session programs' output under their names | built, landing | §18 "Session programs, names and event kinds"; `test-log` "streams" row |
+| Names and paths on every record | built, landing | `_COMM`, `_CMDLINE`, `_EXE` (from init for units); `test-log` "names" row |
+| App-error events with a screenshot | built, landing | hyprix `lode_events.rs`; `Capture=yes` on desktop images |
+| Event kinds configurable and reloadable | partly | `events.conf`, `lode events`, `lode reload` (rules, alerts, events; not yet retention or capture) |
+| Hang snapshot (`lode snapshot PID`) | missing | the next landing |
+| The image and command line on the boot record | missing | the next landing |
+
+### 20.6 Where logs still go that lode does not get (the audit, 2026-10-24)
+
+The customer: "if there is a gap, we need to close it." Every place on a
+Ferrix image where something writes a log, and whether lode has it.
+
+| Where | Who writes it | lode has it? | What closes it, or why not |
+|---|---|---|---|
+| The kernel log, drivers' prints | the kernel, ring-3 drivers on standard error | yes | `/dev/kmsg`, from its first record |
+| Units' standard output and error | every unit | yes | init's pipes, trusted (§18 "Users' own records and units' runs") |
+| `devmgr`'s DIED/RESTARTED events | `devmgr-events` | partly | `devmgr`'s own lines reach the kernel log; the event socket itself is not read (plan step 7) |
+| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP; plan step 9 imports it as `lode -b -1`'s end |
+| Firmware and EFI logs | the firmware, the loader | partly | the loader's lines are the kernel log's first; the firmware's own (UEFI's console, TF-A's) are not kept anywhere on Ferrix |
+| `/tmp/yserver.log` | the desktop's X server | yes, landing | `lode cat -t yserver --tee` |
+| `/tmp/steam.log` | Steam's `desktop.sh` | yes, landing | `lode cat -t steam --tee` |
+| `~/plog/proton.out` | the N150's game script | yes, landing | `lode cat -t proton --tee` |
+| `~/plog/dxvk/*.log`, the game's `Player.log`, CrashSight's logs, Steam's `logs/*.txt` | DXVK, Unity, the anti-cheat, Steam, each to a file | no | file sources (§5, plan step 9): `lode follow FILE -t ID`, next |
+| `/tmp/ef-fullscreen.log`, `plog/status`, `plog/gpu-report.txt` | the N150's scripts | no | reports, not logs (§13.1); `ef-fullscreen.sh` should pipe into `lode cat` too |
+| hyprix's programs' standard output | waybar, notifyd, fuzzel, `exec` lines | yes, under hyprix's unit; under their own names with `session-streams on` | the wrapper loses a program's output if the program outlives its session (§18) |
+| Programs started from a terminal | foot's children | no | a terminal's programs write to the terminal; `lode cat` in a person's pipeline is the way |
+| `/var/log/audit/<id>.bin` | init, the kernel's FAU rings | no, by design | §15: the audit record stays its own store |
+| `/var/log/ferrix/auth.log` | `authd` | no | `authd`'s lines could also go to `/dev/log` with `LOG_AUTHPRIV`; its own file stays (`docs/AUTH.md` §3.6) |
+| Test rigs' `/tmp/yserver.log` (`:1`) | `test-yserver`, `test-dxvk`, shader cache | no, by choice | gate rigs read their own file and run without lode |
+| A hung process's threads | -- | no | a hang snapshot, next |
+
+## 21. Tombstones (research, 2026-10-24; not built)
+
+The customer asked what Android records when a process crashes, how Linux
+does the same, and what Ferrix could keep: a "tombstone" record in lode
+that links a crash to its log tail, its screenshot (§19) and its session.
+
+### 21.1 What Android records
+
+* **debuggerd and crash_dump.** The C library's signal handler for fatal
+  signals (`debuggerd_handler`, linked into every native process) clones a
+  child that execs `crash_dump`, which `ptrace`s the crashed thread's
+  process while the crashed thread waits in the handler. Since Android 12
+  `tombstoned` hands out the output file and keeps the directory.
+* **What a tombstone holds** (`/data/tombstones/tombstone_NN`, and since
+  Android 12 a protobuf `tombstone_NN.pb` beside the text): the build
+  fingerprint, revision, ABI, timestamp, process uptime; pid, tid, thread
+  name, process name, uid, the command line; the signal, its code and fault
+  address, a cause guess (null pointer, stack overflow, MTE fault);
+  the abort message (`android_set_abort_message`, set by `abort()` callers
+  and libc's fortify checks); every register of the crashing thread; a
+  backtrace of every thread of the process (libunwindstack: `.eh_frame`,
+  `.debug_frame`, ARM's exidx, symbols from `.symtab`/`.dynsym` and
+  MiniDebugInfo, build ids); memory around the registers (256 bytes either
+  side of each pointer-like register); the memory map with build ids and
+  offsets; the open file descriptors with their paths and owners (fdsan
+  tags); the last lines of logcat for the process (and the system's).
+* **Rotation**: at most 32 tombstones (`tombstoned`'s
+  `tombstone.max_count`), the oldest overwritten; readable by `system` and
+  `log`; uploaded with `dropbox` entries.
+
+### 21.2 How Linux does it
+
+* **`core_pattern`**: `|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c
+  %h` hands the core dump on a pipe to a helper the kernel starts as root.
+* **systemd-coredump** stores the core (compressed, in
+  `/var/lib/systemd/coredump`, size limits in `coredump.conf`), runs
+  elfutils' unwinder over it for a backtrace of every thread, and logs one
+  journal entry with `COREDUMP_PID`, `COREDUMP_UID`, `COREDUMP_SIGNAL`,
+  `COREDUMP_EXE`, `COREDUMP_CMDLINE`, `COREDUMP_COMM`, `COREDUMP_UNIT`,
+  `COREDUMP_CGROUP`, `COREDUMP_OPEN_FDS`, `COREDUMP_PROC_STATUS`,
+  `COREDUMP_PROC_MAPS`, `COREDUMP_PROC_LIMITS`, `COREDUMP_ENVIRON`,
+  `COREDUMP_FILENAME`, `COREDUMP_PACKAGE_JSON` (the ELF's package note),
+  and the stack trace in `MESSAGE`. `coredumpctl` lists and opens them.
+  Privacy: a core holds the process's memory, so it is root's (or the
+  user's own, through ACLs), and `Storage=none` keeps only the entry.
+
+### 21.3 What Ferrix can capture, and where
+
+| Part | Where | Cost |
+|---|---|---|
+| pid, name, exe, cmdline, module+offset of the pc | the kernel, at the fault: built (§18) | about 85 kernel lines |
+| signal, code, fault address, trap | the kernel: built (`ended by signal`) | 0 |
+| registers of the faulting thread | the kernel at the fault: the trap frame is there; one more line of the same kind | about 30 kernel lines, three architectures |
+| every thread's state, the open fds, the maps, the status lines | a ring-3 collector reading `/proc/<pid>/{task/*/stat,status,fd,maps}` while the process is held | ring 3: the kernel must hold a fatally signalled process instead of reaping it at once, which is Linux's `core_pattern` pipe's own semantics: about 60 kernel lines, in the load ring |
+| a backtrace of every thread | ring 3: unwind from each thread's registers through `.eh_frame` of the mapped files, without symbols (offsets and build ids); `ferrix-lode-core` gains a CFA interpreter (about 600 lines, host-tested on the tree's own binaries); reading another process's memory needs `process_vm_readv` or `/proc/<pid>/mem`, which the kernel has for a ptrace-able target | 0 kernel lines if the hold above exists |
+| memory around the registers | ring 3, the same reads | 0 |
+| the abort message | ring 3: ferrousli and musl write `abort()`'s reason to standard error, which units' streams carry; a field would need the C library to say it | 0 |
+| the log tail | lode: the crashing process's last 50 records by `_PID` and its unit's, linked by cursor | 0 |
+| the screenshot | lode: built (§19), linked by `CAPTURE_OF` | 0 |
+| the session | lode: `SESSION_ID` (§19.1) | 0 |
+| the build | lode: the image's commit and the kernel command line on the boot record (next landing) | 0 |
+
+**Recommendation.** A tombstone is a lode record set, not a file format:
+one `TOMBSTONE=1` record per crash (`MESSAGE_ID` of its own) carrying the
+fields above, the backtrace as `TOMBSTONE_BACKTRACE` (one line a frame:
+module, offset, build id), and cursors to its log tail, its screenshot and
+its session; `lode tombstones` lists them, `lode tombstone SEQ` prints one
+as Android's text does, and the viewer's Crashes page reads the same
+fields. Build it in three landings:
+
+1. **The record from what exists** (2 points): the crash record, its log
+   tail by `_PID` and unit, the screenshot and session links, the boot's
+   image and command line. No kernel lines.
+2. **The ring-3 collector** (6 points): `lode-crashd`, a root unit, sealed
+   job, told of each crash by lode; the kernel holds a process a fatal
+   signal ends until the collector says it is done or 2 s pass (a load-ring
+   change of about 60 lines with a consultant review); the collector reads
+   threads, fds, maps and status, and unwinds each thread through
+   `.eh_frame` (`ferrix-lode-core` `unwind`, no symbols). Registers through
+   the same `/proc/<pid>/task/<tid>/` reads it uses for ptrace's
+   `PTRACE_GETREGS`.
+3. **Retention and privacy** (1 point): tombstones are a retention class
+   of their own, 32 kept, 64 MiB, `lode:adm 0640` as the journal, the
+   memory dump bytes off by default (`events.conf`'s `tombstone-memory`),
+   never forwarded unless a forwarding line names them.
+
+Kernel lines for all three: about 60 (the hold) beyond what is built; 30
+more for the registers in the kernel line if the collector cannot read
+them. Points: about 9.
