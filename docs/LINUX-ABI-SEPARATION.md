@@ -386,3 +386,255 @@ gated.
   `cargo check -p ferrix-kernel --target <t>` for the three targets.
 * Line counts: `check-item-boundary.py --report` on b8b8871d6, and `wc -l`
   over the crates named in `src/kernel/Cargo.toml`, `src/` without tests.
+
+## 11. Two ABIs behind one build flag (the customer's follow-up, 2026-10-23)
+
+The customer asked whether the kernel could offer two ABIs, with a build
+flag choosing which one, and with both able to coexist. As the
+coordinator framed it: one flag with three values. `native` would offer
+the Ferrix ABI only, `linux` the Linux ABI only, and `both` would be
+today's kernel and the default.
+
+**Short answer.** `native` and `both` are coherent. `linux`, read
+literally, is not, because Ferrix's drivers *are* native programs. Read as
+"native only for the system's own driver processes, Linux for everything
+else", it is coherent and cheap, but it saves attack surface, not code.
+
+| Value | What ring 0 holds | Coherent? | Points (*guess*) |
+|---|---|---|---:|
+| `native` | core + item (native entry, objects, devices), no load | yes | ~85 (65 to 120); 5 to build only |
+| `linux` (literal: no native ABI at all) | core + item minus the native table + the Linux layer + a new Linux-shaped device-access surface | no, see 11.2 | 150 to 250, not recommended |
+| `linux` (as recommended: native for driver processes only) | today's code, with the native range closed to every process not given the right | yes | 12 to 18 |
+| `both` (made clean) | today's code, with one process model and a personality per process | yes | ~10 on top of `native`'s rows 11 and 12; ~35 alone |
+| Wiring, shared by all values | flag, xtask, gates, item boundary per value | | ~8 |
+
+### 11.1 `native`
+
+This is §7's rows 1 to 14, written in terms of the flag:
+
+* `abi=native` puts `#[cfg(not(ferrix_abi = "native"))]` on the 3 module
+  declarations in `main.rs`, the 52 personality modules in
+  `syscall/mod.rs`, the load's ~15 sites in `main.rs`, and the 25 check
+  modules that borrow a Linux program until row 13 re-homes them (rows 1
+  to 4, 5 points: the experiment 94a41c2af, made permanent).
+* `main.rs:134` composes a personality that answers `ENOSYS` (row 1).
+  `register_load`'s required hooks become per-value: no launcher, no
+  filesystem flush, and served calls whose answer is `ENOSYS` (rows 2 and
+  5).
+* It boots only once rows 8 to 12 exist. Those are a native host for
+  processes, a native loader for the first images, a boot path through the
+  initramfs without the VFS, the native exit, thread, clock, log and unmap
+  calls, and `rt` and the socket-speaking drivers moved onto them. Each
+  value's gates are in 11.4.
+
+### 11.2 `linux`: cutting the native ABI
+
+**The experiment** is commit 2e420d625 on the local branch
+`linux-abi-native-cut-experiment`, from b8b8871d6. It used the same
+`cargo check` method as §4.
+
+* **Refusing the native range at the item's entry** gives **0 errors**.
+  `syscall/mod.rs:136`'s `native_call` answers `ENOSYS` instead. Only
+  `native_call` and one `native.rs` item go dead. The rest of
+  `syscall/native.rs` stays reachable through devmgr's start
+  (`discovery/devmgr.rs:842` calls `native::dispatch`), the IPC fast path
+  (`main.rs:155`) and the boot checks.
+* **Removing the native table** (undeclaring `syscall::native`) breaks
+  **13 product files**: the eight device cores (`interfaces/*/mod.rs`),
+  `fs/cgroupfs.rs`, `fs/portfd.rs`, `discovery/devmgr.rs`,
+  `syscall/launch.rs` and `main.rs`. Every break is the same seam: the
+  native table's hook lists (`native::serve` for the 21 served calls,
+  `register_server`, `control_channel`, `Processes`, `insert_new`). The
+  *objects* stay (`object/**`: channels, ports, VMOs, jobs, interrupts,
+  I/O mappings, pins). The kernel uses them internally too, for example
+  init's bootstrap channel and the device cores' control channels.
+
+**Why a literal "Linux-only" is not coherent.** A driver reaches its
+device only through native objects. It gets an `IoMapping` and an
+`Interrupt` token by handle, pins DMA memory through `VMO_PIN` into an
+IOMMU domain, and has its configuration space mediated by
+`DEVICE_CONFIG_*`. All of it is held to the item's device rules (AoU-12,
+`verify_config`, the pin quarantine). The Linux ABI has none of this.
+Linux's own answer is VFIO (container, group and device files; `mmap` of
+BARs; DMA mapping by `ioctl`; interrupts through `eventfd`/`irqfd`). For
+`linux` to mean "no native ABI", Ferrix would have to:
+
+* build a VFIO-shaped device surface in the Linux personality, which is
+  device authority, today the item's, now reached through the uncertified
+  layer;
+* port devmgr, the 17 drivers and the driver library to it;
+* rebuild every device core's driver end (block ring, net ring, display,
+  render, input, audio, chardev, logctl) from native channels onto files;
+* find another way for init to start devmgr (`DEVMGR_START`), read the
+  audit log (`AUDIT_READ`) and map cgroups to jobs (`JOB_FOR_CGROUP`), for
+  authd and sessiond to keep their seat channels, and for nvrm to keep
+  `CHARDEV_*`.
+
+That is 150 to 250 points (a *guess*). It moves device authority out of
+the item into the load, and it goes against MICROKERNEL's route C, where
+the native ABI is the kernel's whole interface. **I recommend not
+building it.**
+
+**What `linux` should mean instead: "native for the system's own
+drivers, Linux for everything else".** The native range is refused
+(`ENOSYS`, audited) to any process without a **native-ABI right**. The
+kernel grants that right to the processes it starts as drivers: devmgr,
+which it starts under `ferrix.devmgr=kernel`, and whatever devmgr starts
+in the drivers job. Today's mixed programs need it as well: init for
+`DEVMGR_START` (retired once the kernel starts devmgr) and for
+`AUDIT_READ` and `JOB_FOR_CGROUP`, authd and sessiond for their channels,
+and nvrm for `CHARDEV_*`. Either the right is granted explicitly, through
+a handle init is given, or those calls move behind files.
+
+* **What it saves.** No code: the native entry (3,588 lines) and the
+  objects stay, because drivers need them. The gain is attack surface.
+  An ordinary Linux program, which is every app, Steam and Wine, cannot
+  reach any of the 0x1000 range's ~60 calls. That matters because the
+  native ABI is the item's exported interface, and today every Linux
+  process can call it.
+* **What it costs** is 12 to 18 points:
+  * the right on the core process and its grant rule;
+  * one check in `dispatch_with` before `native_call`, on the hot path, so
+    a single compare;
+  * an audit record for each refusal;
+  * a boot check with a negative control (a Linux program's
+    `channel_create` refused, then allowed with the right);
+  * init's four native uses settled;
+  * the requirement ids and the consultant's review, since the change is
+    in the item.
+* **It is worth having in `both` too, as a policy rather than a build
+  value.** The same right lets a `both` kernel close the native range to
+  apps. In that case `linux` hardly needs to be its own build value: it is
+  `both` with the right granted narrowly. See 11.3.
+
+### 11.3 `both`: what makes coexistence clean
+
+Today the two ABIs coexist by accident of history. There is one process
+type, the Linux one, and a native process is a Linux process that happens
+to make native calls. Coexistence would be clean with four rules:
+
+1. **One process model, with a personality per process.** The core
+   process (`object::process::Process`: space, handles, job, exit) is the
+   process. A Linux personality is *attached* to it: descriptors,
+   credentials, signals, namespaces. A native process has none attached.
+   `Host` (`object/process.rs:777`) gets a native implementation beside
+   the Linux one (row 12). K11's shared processes and `linuxd` take the
+   same shape, so this does not diverge from MICROKERNEL.
+2. **Dispatch by personality, not only by number.** `dispatch_with`
+   (`syscall/mod.rs:136`) splits off the native range by number, as it
+   does today. A Linux number then goes to the caller's attached
+   personality, and a process without one gets `ENOSYS`. The native range
+   checks the right from 11.2. The composition at `main.rs:134` becomes
+   per value: `both` composes `Linux`, `native` composes the `ENOSYS`
+   personality. No indirect call is added.
+3. **The fault outcome follows the personality.** Today the core's
+   `ReturnPath` (`trap.rs:558`) is global, and with none registered a user
+   fault panics (`trap.rs:640`). Per process: a Linux process gets
+   `fault_signal` (a POSIX signal); a native process gets K4's exception
+   channel to its supervisor, or, until K4, ends with a status that names
+   the fault. Kill, exit and "must leave a wait" follow the same split
+   (`Host::kill`, `syscall/native.rs` `must_leave`).
+4. **A process may use both, as a capability.** Drivers use both today
+   (native work, Linux `exit`, clock and log), and so do init, authd,
+   sessiond and nvrm (Linux work, native channels). MICROKERNEL §2.4
+   keeps "a native call goes straight to the kernel, against the calling
+   process's own handle table". I recommend keeping mixing allowed, under
+   two rules:
+   * **Linux processes reach the native range only with the native-ABI
+     right (11.2).** Handles are capabilities already, but the creating
+     calls (`channel_create`, `vmo_create`, `job_create`) and the
+     waits/ports are reachable by any process today.
+   * **Native processes stop needing Linux calls.** With native exit,
+     clock, log and unmap (row 11), a native process has no Linux
+     personality attached, and a Linux number from it is `ENOSYS`. Drivers
+     then never touch the Linux layer, which is what `native` needs anyway.
+
+Points: about 10 on top of `native`'s rows 11 and 12, which `both`
+needs as well (dispatch by personality, the per-process fault outcome,
+the mixing rule with its checks and controls). About 35 if `both` is
+done alone.
+
+### 11.4 How the flag is wired
+
+* **Name and values.** A new flag, `abi = native | linux | both`, in
+  `tools/common/data/build-flags.toml`, turned by xtask into
+  `--cfg ferrix_abi="..."`. That follows the existing rule: a `--cfg`,
+  never a Cargo feature (`kernel_cargo_features` stays 0); every value
+  declared for `--check-cfg`; `unexpected_cfgs` denied. I advise against
+  reusing `personality`. It already means *where* the Linux layer runs
+  (`kernel` in ring 0, `user` as `linuxd`), which is orthogonal to
+  *whether* it is offered. Folding both into one flag would need values
+  like `both-kernel` and `linux-user`. Instead:
+  * `personality` gains `none`, which requires `abi=native`;
+  * `abi=linux|both` requires `personality=kernel|user`;
+  * `fs=kernel` keeps requiring `personality=kernel`, and `abi=native`
+    requires `fs=server` or a new `fs=none`.
+
+  The kernel reports the value in its `build` boot line from `cfg!`
+  (`build_flags.rs`, as `personality` is today), so the boot rows can
+  check it.
+* **Levels.** Each value's `allows` follows what it puts in ring 0:
+  * `native`: `sc4, present, sc2, none`, because no load is linked.
+  * `both` and `linux` with `personality=kernel`: `none`, plus `present`
+    under today's dated exception until M5; with `personality=user`, as
+    `user` allows.
+* **Profiles.** `present`, `desktop`, `max` and `fast` keep `abi=both`
+  (the default). A new profile, `native` (or a `--set abi=native` on any
+  profile), selects the native-only kernel. `xtask` already takes
+  `--set name=value` (`args.rs:869`) and resolves it against the profile's
+  rules (`flags.rs`).
+* **Gate rows per value.**
+  * `both`: today's whole gate table, unchanged.
+  * `linux`: today's table, plus one refusal row. A Linux program's native
+    call is refused without the right and answered with it, with a
+    negative control. Plus a check that init, authd and sessiond still
+    work with the rights they are given.
+  * `native`: needs an image of its own, with devmgr as the first process,
+    the drivers and native test programs in the initramfs, and no Linux
+    pid 1. Rows: the four boots (x86-64 KVM and TCG, AArch64, ARMv7-A)
+    with the item's checks re-homed onto native test programs (row 13),
+    one driver row per device kind that has a native consumer, and the
+    IPC rows.
+
+  There is no Linux test, Steam or compositor row for `native`.
+* **The check that keeps every value building.** `xtask check` builds
+  (clippy) the kernel for every value on all three architectures. Today
+  that is one kernel per architecture; with this it is three, about 7 s a
+  `cargo check` each on nazuna (measured here), more under clippy. There
+  is also one boot row per value in the landing table for the item's
+  checks (`native` on its image, `both` and `linux` on today's). A change
+  that breaks a value it does not touch is caught at check time, the way
+  the experiment showed the seams.
+* **The certified item per value.** `check-item-boundary.py` today
+  classifies by path and ignores `cfg`. Each value needs the set of files
+  actually compiled under it. The gate would read the `cfg` attributes on
+  `mod` declarations, or take the set from rustc's dep-info for that
+  value's build, and report rings, sizes and edges per value:
+  * `native`: the item is core plus item, no load ring, and the load's
+    `in_ring0_when` exception does not apply. This is the first value
+    whose ring 0 holds no QM code.
+  * `both` and `linux`: today's item and load, unchanged, plus `linux`'s
+    native-right check in the item.
+
+  The consultant sees one reference configuration per certified value
+  (MICROKERNEL §12.3): traceability and coverage per value and
+  architecture, a requirement whose truth depends on the value saying so,
+  and the per-value file sets in `certification-item.json`. The flag
+  itself is an item change (BUILD-FLAGS rule 2), and so are `linux`'s
+  native right and `both`'s per-process fault outcome. All three need the
+  consultant's review before landing; `native`'s `cfg`s on `main.rs` do
+  too.
+* **Points for the wiring:** ~8, shared by all values: the flag, the
+  profile rules, `xtask check`'s matrix, the item gate's per-value file
+  sets, and the boot-line expectations.
+
+### 11.5 Recommendation
+
+Build `abi` with `both` (the default) and `native`. Make "Linux programs
+get no native calls unless granted" a per-process right that `both`
+enforces, instead of a third kernel. That gives the customer the switch
+and the coexistence at about 85 + 10 + 8 ≈ **100 points**, and every row
+of it is on MICROKERNEL's path anyway. Add `linux` as a build value only
+if a customer needs a kernel that *cannot* be configured to give apps the
+native ABI. Then it is `both` with the grant hard-wired to the drivers
+job, about 5 more points.
