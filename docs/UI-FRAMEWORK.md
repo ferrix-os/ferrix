@@ -1054,4 +1054,30 @@ more.
   CheckBox's tick drawn as shapes (IBM Plex has neither glyph), and the
   Theme's `accentInv`. `test-compositor --boot tole-demo` boots tole's
   controls demo in a window on Ferrix and checks the screen shows it.
+* **The file chooser** (2026-10-24, the customer's "Key File Dialog"
+  design): `FileDialog` rewritten as the chooser every tole program gets
+  -- list or grid with thumbnails, Up, breadcrumbs, places, a search in
+  three modes (the name contains it; a pattern `*.png | my?.txt |
+  [image]`; a regular expression, through `compositor-regex`) with its
+  errors and how to write one, a preview (text, a picture, a folder's
+  names, a private key's first and last lines with its contents
+  hidden), a filter by type (what it accepts, all files, a pattern of
+  one's own), hidden files, the keys (Up, Down, Return, Backspace,
+  Escape), and the line at its foot saying why a file is refused
+  ("Public key: use the file without .pub"). The old API stays;
+  `acceptedTypes`, `acceptedLabel`/`acceptedNoun`, `placeNames`/
+  `placePaths`, `openLabel`, `typeFilter`, `customPattern`, `gridView`
+  and `searchMode` are new, so Settings' wallpaper picker is the same
+  dialog with `[image]`. Underneath, for a file manager too:
+  `FolderListModel` filters and sorts what it read without reading it
+  again (search, `accept` pattern, sort, `revision`, `count`,
+  `totalSize`, `crumbs`, `current`), each row with its kind (a key told
+  by its first line), badge, size and date as read; `FileInfo`, one
+  file as a preview shows it; the `Image` item, a PNG, JPEG or SVG file
+  drawn through `compositor-image`, fitted or cropped and kept decoded
+  at the pixels it covers; `FileIcon`; and a modal popup takes the keys
+  while open and gives them back. The lode viewer's key choice takes
+  private keys, with .ssh among its places. Two screenshots (dark,
+  light) of a home made at run time with its clock fixed -- no file
+  shaped like a private key is kept in the tree. 90 host tests.
 * Next: U9, the new Settings (the customer's design), its plan first.
