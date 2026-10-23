@@ -2128,3 +2128,33 @@ fn a_summary_counts_each_sources_lines_and_bytes() {
     };
     assert_eq!(Summary::decode(&older.encode()).unwrap().sources, None);
 }
+
+#[test]
+fn every_named_field_is_named_once_and_the_rest_are_other() {
+    use crate::fields::{FieldGroup, NAMES, name_of, order_of};
+    for (at, known) in NAMES.iter().enumerate() {
+        assert!(
+            valid_name(known.key) || known.key.starts_with("__"),
+            "{}",
+            known.key
+        );
+        assert_eq!(order_of(known.key), at, "{} once", known.key);
+    }
+    let named = |key: &str| name_of(key).map(|f| (f.name, f.group));
+    assert_eq!(
+        named("_SYSTEMD_UNIT"),
+        Some(("Service", FieldGroup::Origin))
+    );
+    assert_eq!(named("CRASH_PC"), Some(("Code address", FieldGroup::Crash)));
+    assert_eq!(named("__CURSOR"), Some(("Cursor", FieldGroup::Storage)));
+    assert_eq!(
+        named("__REALTIME_TIMESTAMP"),
+        Some(("Time", FieldGroup::Time))
+    );
+    assert_eq!(
+        named("MESSAGE_ID"),
+        Some(("Message type", FieldGroup::Message))
+    );
+    assert_eq!(named("SOMETHING_ELSE"), None);
+    assert_eq!(order_of("SOMETHING_ELSE"), NAMES.len());
+}

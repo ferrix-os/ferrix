@@ -45,6 +45,7 @@ pub mod compress;
 pub mod console;
 pub mod crc;
 pub mod cursor;
+pub mod fields;
 pub mod filter;
 pub mod format;
 pub mod ingest;
