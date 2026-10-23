@@ -155,7 +155,27 @@ nothing to draw is said once (e4f11d32d, swaybg on the N150); a zone of -1
 covers the monitor (4bac20cb0); a monitor plugged back in after its card's
 last screen went is found again, at its old place (f5accc7ef).
 
-Next: the box run of h2, then the second scanout; 3e on the 3060.
+**The second scanout is built** (the customer, 2026-10-23: extended
+monitors, not mirroring). Under `ferrix.intelgpu.modeset=on`, `card0`
+says HELLO with two scanouts:
+
+* pipe B gets a surface of its own: 1920x1200 at a 7680-byte stride,
+  pages pinned into 00:02.0's domain, entered into the GGTT on the first
+  2 MiB boundary past the firmware's framebuffer (refused if an entry there
+  is present or it would leave BAR 2's aperture), and written through BAR 2
+  write-combining as the lit window is (`intel/src/display/surface.rs`);
+* port B is lit onto it at boot where a monitor is there (h2's steps), or
+  when one is plugged in later; where the firmware cloned one surface onto
+  both pipes, the running pipe B is pointed at the new surface instead
+  (`light::running`, `light::repoint`);
+* both combo ports are watched for hotplug, each telling its own scanout's
+  `MODES`, mode list and EDID; SCANOUT, FLUSH and SET_MODE act per
+  scanout, so hyprix places two screens side by side.
+
+Host tests place the surface and repoint a cloned pipe against the dump's
+values; the rest runs on the box only.
+
+Next: the box run of h2 and the second scanout; 3e on the 3060.
 
 ## 1. Floating mode
 

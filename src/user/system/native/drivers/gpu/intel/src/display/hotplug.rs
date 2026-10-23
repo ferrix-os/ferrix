@@ -7,8 +7,9 @@
 //! turns either into a connector change, and hyprix adds or removes the
 //! screen.
 //!
-//! Only the port the firmware lit, and only a combo PHY port: a Type-C
-//! port's live state is in the north display and the FIA. An HDMI or DVI
+//! The port the firmware lit and, with a second pipe, the other combo port
+//! (`docs/DESKTOP.md` §3.5); only combo PHY ports: a Type-C port's live
+//! state is in the north display and the FIA. An HDMI or DVI
 //! sink plugged back in is shown again with no programming, the transcoder
 //! having run on; a `DisplayPort` one needs its link trained again, which
 //! this driver does not do (step 3h), so it stays reported disconnected.
@@ -26,10 +27,11 @@ use ferrix_intel_xelp::plane::{
 use super::regs::Regs;
 use crate::say;
 
-/// The lit port's hot-plug state.
+/// A combo port's hot-plug state, and the pipe that shows it.
 pub(crate) struct Watch {
-    regs: Regs,
     port: Port,
+    /// The transcoder and pipe that drive it: A is 0.
+    pub(crate) pipe: u32,
     bit: u32,
     debounce: Debounce,
     /// Whether the transcoder drives `DisplayPort`, which a replug cannot
@@ -38,12 +40,9 @@ pub(crate) struct Watch {
 }
 
 impl Watch {
-    /// Start watching the port `TRANS_DDI_FUNC_CTL_A` drives: its detection
-    /// enabled in `SHOTPLUG_CTL_DDI` if the firmware left it off (one bit
-    /// set, the others kept, as i915's `icp_ddi_hpd_enable_detection`
-    /// does), and the state it is in now taken as the starting one.
+    /// Start watching the port `TRANS_DDI_FUNC_CTL_A` drives, as pipe A's.
     /// `None`, said, for a port this cannot follow.
-    pub(crate) fn start(mut regs: Regs) -> Option<Self> {
+    pub(crate) fn start(regs: &mut Regs) -> Option<Self> {
         let function = regs.read32(TRANS_DDI_FUNC_CTL_A);
         let Some(port) = Port::of_ddi_func_ctl(function) else {
             say(format_args!(
@@ -51,6 +50,15 @@ impl Watch {
             ));
             return None;
         };
+        Self::on(regs, port, 0)
+    }
+
+    /// Start watching `port` as `pipe`'s: its detection enabled in
+    /// `SHOTPLUG_CTL_DDI` if the firmware left it off (one bit set, the
+    /// others kept, as i915's `icp_ddi_hpd_enable_detection` does), and
+    /// the state it is in now taken as the starting one. `None`, said, for
+    /// a Type-C port.
+    pub(crate) fn on(regs: &mut Regs, port: Port, pipe: u32) -> Option<Self> {
         let Some(bit) = port.live_bit() else {
             say(format_args!(
                 "intel: card0: no hotplug: port {} is Type-C, whose live state is not read yet",
@@ -68,8 +76,10 @@ impl Watch {
                 regs.read32(SHOTPLUG_CTL_DDI)
             ));
         }
+        let function = regs.read32(TRANS_DDI_FUNC_CTL_A + pipe * 0x1000);
         let mode = (function >> TRANS_DDI_MODE_SELECT_SHIFT) & 0x7;
-        let display_port = mode == TRANS_DDI_MODE_DP_SST || mode == TRANS_DDI_MODE_DP_MST;
+        let display_port = function & TRANS_DDI_FUNC_ENABLE != 0
+            && (mode == TRANS_DDI_MODE_DP_SST || mode == TRANS_DDI_MODE_DP_MST);
         let live = regs.read32(SDEISR) & bit != 0;
         say(format_args!(
             "intel: card0: watching port {} for hotplug (SDEISR bit {}), {} now",
@@ -78,8 +88,8 @@ impl Watch {
             if live { "connected" } else { "disconnected" }
         ));
         Some(Self {
-            regs,
             port,
+            pipe,
             bit,
             debounce: Debounce::new(live),
             display_port,
@@ -89,10 +99,13 @@ impl Watch {
     /// The monitor's EDID, read over GMBUS on the port's DDC pins (step
     /// 3g): the base block and its first extension. `None`, said, when
     /// nothing answers.
-    pub(crate) fn read_edid(&mut self) -> Option<([u8; 2 * gmbus::EDID_BLOCK], usize)> {
+    pub(crate) fn read_edid(
+        &self,
+        regs: &mut Regs,
+    ) -> Option<([u8; 2 * gmbus::EDID_BLOCK], usize)> {
         let mut out = [0_u8; 2 * gmbus::EDID_BLOCK];
         let pin = gmbus::pin_of(self.port);
-        match gmbus::read_edid(&mut self.regs, &mut Monotonic, pin, &mut out) {
+        match gmbus::read_edid(regs, &mut Monotonic, pin, &mut out) {
             Ok(length) => {
                 say(format_args!(
                     "intel: card0: port {}'s monitor's EDID read over GMBUS pin {pin}: {length} bytes",
@@ -110,10 +123,11 @@ impl Watch {
         }
     }
 
-    /// Read the live state at `now_ms`: the new state once a change has
-    /// settled, and when to read it next.
-    pub(crate) fn poll(&mut self, now_ms: u64) -> (Option<bool>, u64) {
-        let live = self.regs.read32(SDEISR) & self.bit != 0;
+    /// Read the live state at `now_ms`: the settled change, if one, and when
+    /// to read it next. A plug is reported only where the pipe's
+    /// transcoder runs (`running` says whether it may be lit first).
+    pub(crate) fn poll(&mut self, regs: &mut Regs, now_ms: u64) -> (Option<bool>, u64) {
+        let live = regs.read32(SDEISR) & self.bit != 0;
         let changed = self.debounce.feed(live, now_ms);
         let next = if live == self.debounce.connected {
             POLL_MS
@@ -123,34 +137,38 @@ impl Watch {
         let Some(connected) = changed else {
             return (None, now_ms + next);
         };
-        if !connected {
-            say(format_args!(
-                "intel: card0: port {} disconnected",
-                self.port.name()
-            ));
-            return (Some(false), now_ms + next);
-        }
-        // Plugged back in: shown again only where the transcoder still
-        // runs, and not for DisplayPort, whose link is not trained here.
-        let transcoder = self.regs.read32(TRANSCONF_A) & TRANSCONF_ENABLE != 0;
-        let function = self.regs.read32(TRANS_DDI_FUNC_CTL_A) & TRANS_DDI_FUNC_ENABLE != 0;
+        say(format_args!(
+            "intel: card0: port {} {}",
+            self.port.name(),
+            if connected {
+                "has a sink"
+            } else {
+                "disconnected"
+            }
+        ));
+        (Some(connected), now_ms + next)
+    }
+
+    /// Whether a sink plugged back in is shown with no programming: the
+    /// pipe's transcoder and function still run, and not for `DisplayPort`,
+    /// whose link is not trained here.
+    pub(crate) fn shown_again(&self, regs: &mut Regs) -> bool {
+        let at = self.pipe * 0x1000;
+        let transcoder = regs.read32(TRANSCONF_A + at) & TRANSCONF_ENABLE != 0;
+        let function = regs.read32(TRANS_DDI_FUNC_CTL_A + at) & TRANS_DDI_FUNC_ENABLE != 0;
         if self.display_port || !transcoder || !function {
             say(format_args!(
-                "intel: card0: port {} has a sink again, but {}; it stays disconnected",
+                "intel: card0: port {} has a sink again, but {}",
                 self.port.name(),
                 if self.display_port {
                     "a DisplayPort link is not trained again by this driver yet"
                 } else {
-                    "transcoder A no longer runs"
+                    "its transcoder does not run"
                 }
             ));
-            return (None, now_ms + next);
+            return false;
         }
-        say(format_args!(
-            "intel: card0: port {} connected",
-            self.port.name()
-        ));
-        (Some(true), now_ms + next)
+        true
     }
 }
 

@@ -1,7 +1,6 @@
 //! Lighting a port the firmware did not light (`docs/DESKTOP.md` §3.5):
 //! the monitor on the second combo port (port B, transcoder and pipe B),
-//! showing the lit pipe's own surface -- a mirror of its top-left corner
-//! until `card0` has a second scanout.
+//! showing a surface of its own, `card0`'s second scanout.
 //!
 //! `ferrix.intelgpu.modeset=dry` (h1) prints every step and writes none;
 //! `ferrix.intelgpu.modeset=on` (h2) checks the display is as the steps
@@ -25,13 +24,13 @@ const ON: &[u8] = b"ferrix.intelgpu.modeset=on";
 
 /// What the command line asks for.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Asked {
+pub(crate) enum Asked {
     Nothing,
     Dry,
     On,
 }
 
-fn asked() -> Asked {
+pub(crate) fn asked() -> Asked {
     let mut line = [0_u8; 4096];
     let Some(length) = crate::steps::read_cmdline(&mut line) else {
         return Asked::Nothing;
@@ -50,57 +49,77 @@ fn asked() -> Asked {
     }
 }
 
-/// The lit pipe's primary plane: `PLANE_SURF_1_A`, `PLANE_STRIDE_1_A`,
-/// `PLANE_SIZE_1_A`.
-const LIT_SURF: u32 = 0x7_019C;
-const LIT_STRIDE: u32 = 0x7_0188;
-const LIT_SIZE: u32 = 0x7_0190;
-
-/// Light port B as the command line asks: print the steps under `dry`,
-/// take them under `on`, nothing otherwise.
-pub(crate) fn run(regs: &mut Regs) {
-    let asked = asked();
-    if asked == Asked::Nothing {
-        return;
-    }
-    let tag = if asked == Asked::On {
-        "modeset"
-    } else {
-        "modeset dry"
-    };
-    let Some(light) = plan(regs, tag) else {
+/// Print the steps that would light port B, writing none
+/// (`ferrix.intelgpu.modeset=dry`).
+pub(crate) fn dry(regs: &mut Regs) {
+    let tag = "modeset dry";
+    let Some(light) = plan(regs, tag, 0) else {
         return;
     };
     if let Err(why) = light::preflight(regs, &light) {
         say(format_args!(
-            "intel: {tag}: port B is not lit: {why:?} (nothing written)"
+            "intel: {tag}: port B would not be lit: {why:?}"
         ));
         return;
+    }
+    let mut taken = 0_u32;
+    let _ = light::steps(&light, &mut |step| {
+        taken += 1;
+        show(tag, step, None);
+        true
+    });
+    say(format_args!("intel: {tag}: {taken} steps, none taken"));
+}
+
+/// Light port B on pipe B showing the surface at GGTT `surface`
+/// (`ferrix.intelgpu.modeset=on`): its mode, once lit; `None`, said, when
+/// it is not.
+pub(crate) fn light_port_b(regs: &mut Regs, surface: u32) -> Option<Mode> {
+    let tag = "modeset";
+    let light = plan(regs, tag, surface)?;
+    if let Err(why) = light::preflight(regs, &light) {
+        say(format_args!(
+            "intel: {tag}: port B is not lit: {why:?} (nothing written)"
+        ));
+        return None;
     }
     let mut clock = super::hotplug::Monotonic;
     let mut taken = 0_u32;
     let all = light::steps(&light, &mut |step| {
         taken += 1;
-        if asked != Asked::On {
-            show(tag, step, None);
-            return true;
-        }
         let result = light::take(regs, &mut clock, step);
         show(tag, step, Some(result));
         result.is_ok()
     });
-    if asked != Asked::On {
-        say(format_args!("intel: {tag}: {taken} steps, none taken"));
-    } else if all {
+    if all {
         say(format_args!(
-            "intel: modeset: port B lit, {}x{} on pipe B, mirroring pipe A's surface ({taken} steps)",
+            "intel: modeset: port B lit, {}x{} on pipe B ({taken} steps)",
             light.mode.h[0], light.mode.v[0]
         ));
+        Some(light.mode)
     } else {
         say(format_args!(
             "intel: modeset: stopped at step {taken}; what was done stays as it is"
         ));
+        None
     }
+}
+
+/// Point a pipe the firmware runs at the surface at GGTT `surface`: the
+/// boot where it cloned one surface onto both pipes.
+pub(crate) fn repoint(regs: &mut Regs, pipe: u32, surface: u32, size: (u32, u32)) -> bool {
+    let mut clock = super::hotplug::Monotonic;
+    light::repoint(
+        pipe,
+        surface,
+        light::SURFACE_PITCH / 64,
+        size,
+        &mut |step| {
+            let result = light::take(regs, &mut clock, step);
+            show("modeset", step, Some(result));
+            result.is_ok()
+        },
+    )
 }
 
 /// One step, and what came of it.
@@ -153,10 +172,10 @@ fn show(tag: &str, step: Step, result: Option<Result<u32, u32>>) {
 
 /// What lighting port B takes, read from the display: its sink and EDID,
 /// the mode (the preferred one, else the first listed at most 148.5 MHz),
-/// whether it is HDMI, a free PLL, the reference clock and the lit
-/// plane's surface. `None`, having said why, when there is no sink, no
+/// whether it is HDMI, a free PLL, the reference clock, and `surface`,
+/// the second surface's GGTT offset. `None`, having said why, when there is no sink, no
 /// reference clock or no free PLL.
-fn plan(regs: &mut Regs, tag: &str) -> Option<Light> {
+fn plan(regs: &mut Regs, tag: &str, surface: u32) -> Option<Light> {
     const PORT: Port = Port::Combo(1);
     let live = PORT
         .live_bit()
@@ -181,7 +200,6 @@ fn plan(regs: &mut Regs, tag: &str) -> Option<Light> {
         ));
         return None;
     };
-    let size = regs.read32(LIT_SIZE);
     let light = Light {
         port: PORT,
         pipe: 1,
@@ -189,9 +207,9 @@ fn plan(regs: &mut Regs, tag: &str) -> Option<Light> {
         hdmi,
         pll,
         nssc_khz: nssc,
-        surface: regs.read32(LIT_SURF),
-        stride: regs.read32(LIT_STRIDE),
-        surface_size: ((size & 0x1FFF) + 1, ((size >> 16) & 0x1FFF) + 1),
+        surface,
+        stride: light::SURFACE_PITCH / 64,
+        surface_size: light::SURFACE_SIZE,
     };
     say(format_args!(
         "intel: {tag}: {}x{} at {} kHz, h {:?} v {:?}, sync {}{}, PLL {pll}, reference {nssc} kHz, surface {:#x} ({}x{}, stride {} x 64)",

@@ -10,8 +10,8 @@ use std::vec::Vec;
 
 use super::{
     DBUF_CTL_S3_S4, DDI_BUF_CTL_A, DPCLKA_CFGCR0, DPLL_ENABLE, FUSE_STATUS, Light, MBUS_CTL,
-    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Refusal, Step, TRANSCONF_A, free_pll, is_hdmi, preflight,
-    steps, take,
+    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Refusal, Running, SURFACE_BYTES, Step, TRANSCONF_A, free_pll,
+    is_hdmi, preflight, repoint, running, steps, surface_place, take,
 };
 use crate::display::hotplug::Port;
 use crate::display::modeset::Mode;
@@ -370,4 +370,45 @@ fn an_hdmi_sink_is_known_by_its_vendor_block() {
     edid[136] = 0x04;
     assert!(!is_hdmi(&edid));
     assert!(!is_hdmi(&edid[..128]), "no extension");
+}
+
+/// The second surface goes on the first 2 MiB boundary past the firmware's
+/// framebuffer, and not at all where the aperture ends first.
+#[test]
+fn the_second_surface_is_placed_past_the_firmwares() {
+    let aperture = 256 << 20;
+    // The box's lit 1920x1080 window: 8 294 400 bytes from GGTT 0.
+    assert_eq!(surface_place(8_294_400, aperture), Some(8 << 20));
+    assert_eq!(surface_place((8 << 20) + 1, aperture), Some(10 << 20));
+    assert_eq!(surface_place(aperture - SURFACE_BYTES + 1, aperture), None);
+}
+
+/// A pipe the firmware runs is read as the dump has pipe B: the TV on DDI
+/// A at 1920x1080; and pointed at a surface of its own, surface last.
+#[test]
+fn a_cloned_pipe_gets_its_own_surface() {
+    let mut display = Display::firmware();
+    assert_eq!(running(&mut display, 1), None);
+    display.write32(TRANSCONF_A + 0x1000, 1 << 31);
+    display.write32(0x6_1400, 0x8803_0000);
+    display.write32(0x6_101C, 0x077F_0437);
+    assert_eq!(
+        running(&mut display, 1),
+        Some(Running {
+            port: Port::Combo(0),
+            size: (1920, 1080),
+            function: 0x8803_0000,
+        })
+    );
+    let mut clock = Instant(0);
+    assert!(repoint(1, 10 << 20, 7680 / 64, (1920, 1080), &mut |step| {
+        take(&mut display, &mut clock, step).is_ok()
+    }));
+    assert_eq!(display.value(0x7_1188), 120);
+    assert_eq!(display.value(0x7_1190), 0x0437_077F);
+    assert_eq!(display.value(0x7_119C), 10 << 20);
+    assert_eq!(
+        display.writes.last().map(|(offset, _)| *offset),
+        Some(0x7_119C)
+    );
 }

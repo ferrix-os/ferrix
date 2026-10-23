@@ -689,6 +689,98 @@ fn port_on(phy: u32, base: u32, push: &mut dyn FnMut(Step)) {
     });
 }
 
+/// The second pipe's own surface (`docs/DESKTOP.md` §3.5): the largest a
+/// monitor lit here can take -- 1920x1200, every mode up to
+/// [`MAX_CLOCK_KHZ`] -- at one stride, in the GGTT just past what the
+/// firmware mapped, inside BAR 2's aperture so the driver writes it as the
+/// lit window is written.
+pub const SURFACE_SIZE: (u32, u32) = (1920, 1200);
+/// Its stride in bytes: a 64-byte multiple, as a linear plane takes.
+pub const SURFACE_PITCH: u32 = SURFACE_SIZE.0 * 4;
+/// Its bytes.
+pub const SURFACE_BYTES: u64 = SURFACE_PITCH as u64 * SURFACE_SIZE.1 as u64;
+/// Where in the GGTT it may start: a 2 MiB boundary, which a linear plane's
+/// alignment needs a fraction of and which keeps its GGTT entries a whole
+/// number of pages.
+pub const SURFACE_ALIGN: u64 = 2 << 20;
+
+/// Where the second surface goes: the first [`SURFACE_ALIGN`] boundary at or
+/// past `firmware_end` (the end of what the firmware mapped) whose
+/// [`SURFACE_BYTES`] end inside `aperture` (BAR 2's length). `None` when
+/// it does not fit.
+#[must_use]
+pub const fn surface_place(firmware_end: u64, aperture: u64) -> Option<u64> {
+    let at = firmware_end.next_multiple_of(SURFACE_ALIGN);
+    if at + SURFACE_BYTES <= aperture {
+        Some(at)
+    } else {
+        None
+    }
+}
+
+/// A pipe the firmware already runs, as read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Running {
+    /// The port its transcoder drives.
+    pub port: Port,
+    /// Its size, from `PIPESRC`.
+    pub size: (u32, u32),
+    /// Its `TRANS_DDI_FUNC_CTL`, which names the connector's kind.
+    pub function: u32,
+}
+
+/// Whether `pipe` runs (its transcoder and its function on), and on what
+/// and at what size. Reads only.
+pub fn running<M: Mmio + ?Sized>(mmio: &mut M, pipe: Pipe) -> Option<Running> {
+    let at = pipe * 0x1000;
+    if mmio.read32(TRANSCONF_A + at) & (1 << 31) == 0 {
+        return None;
+    }
+    let function = mmio.read32(0x6_0400 + at);
+    if function & (1 << 31) == 0 {
+        return None;
+    }
+    let port = Port::of_ddi_func_ctl(function)?;
+    let source = mmio.read32(0x6_001C + at);
+    Some(Running {
+        port,
+        size: (((source >> 16) & 0x1FFF) + 1, (source & 0x1FFF) + 1),
+        function,
+    })
+}
+
+/// A running pipe's primary plane pointed at a surface of its own: the
+/// boot where the firmware cloned one surface onto both pipes. The stride
+/// and size first, the surface last, which arms them at the next frame.
+pub fn repoint(
+    pipe: Pipe,
+    surface: u32,
+    stride: u32,
+    size: (u32, u32),
+    step: &mut dyn FnMut(Step) -> bool,
+) -> bool {
+    let at = pipe * 0x1000;
+    let (width, height) = (size.0.min(SURFACE_SIZE.0), size.1.min(SURFACE_SIZE.1));
+    [
+        (PLANE_STRIDE_1_A, stride, "PLANE_STRIDE"),
+        (PLANE_POS_1_A, 0, "PLANE_POS"),
+        (
+            PLANE_SIZE_1_A,
+            ((height.max(1) - 1) << 16) | (width.max(1) - 1),
+            "PLANE_SIZE",
+        ),
+        (PLANE_SURF_1_A, surface, "PLANE_SURF"),
+    ]
+    .into_iter()
+    .all(|(offset, value, name)| {
+        step(Step::Write {
+            offset: offset + at,
+            value,
+            name,
+        })
+    })
+}
+
 /// Do one step on `mmio`, waiting on `clock`. Gives what the register read
 /// after it, `Err` with the last value read for a wait that timed out.
 ///

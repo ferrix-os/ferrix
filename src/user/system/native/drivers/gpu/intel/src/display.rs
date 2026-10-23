@@ -32,6 +32,15 @@
 //! bars, as Linux's panel fitter shows one. The connector is named by what
 //! drives pipe A (`ferrix_intel_xelp::plane::Output`), so the box's
 //! monitor is `HDMI-A-1` and not `Virtual-1`.
+//!
+//! Under `ferrix.intelgpu.modeset=on` the card has a second scanout
+//! (`docs/DESKTOP.md` §3.5): pipe B on the other combo port, showing a
+//! surface of its own ([`surface`]) -- lit by the driver
+//! ([`modeset::light_port_b`]), or, where the firmware cloned its surface
+//! onto both pipes, the running pipe B pointed at the new one. Both ports
+//! are watched for hotplug, and a monitor plugged into the second port
+//! later is lit then. Each scanout is copied into on its own, so a
+//! compositor places two screens side by side.
 
 use core::ptr;
 use core::sync::atomic::Ordering;
@@ -55,12 +64,17 @@ use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::port::Port;
 use ferrix_rt::native::vmo::Vmo;
 
+use ferrix_intel_xelp::display::hotplug::Port as PortOf;
+use ferrix_intel_xelp::display::light;
+use ferrix_intel_xelp::io::Mmio;
+
 use crate::m2::ScreenPlane;
 use crate::say;
 
 mod hotplug;
 mod modeset;
 mod regs;
+mod surface;
 
 /// The port key the display control's signals arrive under, beside
 /// `serve::KEY_CONTROL` (1) and `serve::KEY_INTERRUPT` (2).
@@ -85,14 +99,40 @@ const MAX_BUFFERS: usize = 16;
 /// The refresh the one timing is listed at.
 const REFRESH_HZ: u64 = 60;
 
-/// The lent window, mapped, and the plane's mode.
-struct Screen {
-    _mapping: IoMapping<Kernel>,
+/// What one scanout shows, and where its pixels are written: the lent
+/// window for the first, the second surface for the second.
+struct Output {
     base: usize,
     len: usize,
     width: usize,
     height: usize,
     pitch: usize,
+    shown: Option<(u32, Rect)>,
+    /// Whether a SCANOUT changed the buffer shown and no FLUSH has copied
+    /// it since: the next FLUSH of it copies all of it.
+    owed_whole: bool,
+    /// How a mode smaller than the plane is shown on it, since `SET_MODE`
+    /// chose one; `None` at the plane's own.
+    scaler: Option<Scaler>,
+}
+
+impl Output {
+    const fn new(base: usize, len: usize, (width, height): (usize, usize), pitch: usize) -> Self {
+        Self {
+            base,
+            len,
+            width,
+            height,
+            pitch,
+            shown: None,
+            owed_whole: false,
+            scaler: None,
+        }
+    }
+
+    const fn size(&self) -> (u32, u32) {
+        (self.width as u32, self.height as u32)
+    }
 }
 
 /// A buffer the screen may show.
@@ -106,22 +146,37 @@ struct Buffer {
     height: usize,
 }
 
+/// The scanouts a card can have here: pipe A's, and pipe B's.
+const SCANOUTS: usize = 2;
+
 /// The display card.
 pub(crate) struct Display {
-    screen: Screen,
+    _window: IoMapping<Kernel>,
+    /// The second scanout's memory, kept while the card runs.
+    surface: Option<surface::Surface>,
+    outputs: [Option<Output>; SCANOUTS],
+    /// How many scanouts HELLO said.
+    scanouts: usize,
+    /// Each scanout's mode as last told the core.
+    modes: [ScanoutMode; MAX_SCANOUTS],
     control: Channel<Kernel>,
     buffers: [Option<Buffer>; MAX_BUFFERS],
-    shown: Option<(u32, Rect)>,
-    /// Whether a SCANOUT changed the buffer shown and no FLUSH has copied
-    /// it since: the next FLUSH of it copies all of it.
-    owed_whole: bool,
-    /// How a mode smaller than the plane is shown on it, since `SET_MODE`
-    /// chose one; `None` at the plane's own.
-    scaler: Option<Scaler>,
     /// Frames copied, for the first lines.
     flushes: u64,
-    /// The lit port's hot-plug state, where it can be followed.
-    hotplug: Option<hotplug::Watch>,
+    /// The display registers, for hotplug and lighting.
+    regs: Option<regs::Regs>,
+    /// Each scanout's port, where it can be followed.
+    watches: [Option<hotplug::Watch>; SCANOUTS],
+}
+
+/// What the second scanout starts with.
+struct Second {
+    surface: surface::Surface,
+    /// Its mode where it is lit now.
+    size: Option<(u32, u32)>,
+    /// DRM's connector type for it.
+    connector: u32,
+    watch: Option<hotplug::Watch>,
 }
 
 impl Display {
@@ -140,8 +195,7 @@ impl Display {
             say(format_args!("intel: no card0: pipe A's plane is not lit"));
             return None;
         };
-        let (screen, phys) = map_screen(device, apertures, plane)?;
-        let (width, height, pitch) = (screen.width, screen.height, screen.pitch);
+        let (window, first, phys) = map_screen(device, apertures, plane)?;
         let control = device
             .display_control()
             .inspect_err(|error| {
@@ -150,7 +204,28 @@ impl Display {
                 ));
             })
             .ok()?;
-        if let Err(why) = introduce(&control, port, location, &screen, plane.connector) {
+        let mut regs = regs::Regs::map(device, apertures)
+            .inspect_err(|why| say(format_args!("intel: card0: no hotplug: {why}")))
+            .ok();
+        // `ferrix.intelgpu.modeset=dry` prints the steps for the second port;
+        // `=on` gives the card a second scanout (`docs/DESKTOP.md` §3.5).
+        let mut second = None;
+        if let Some(regs) = regs.as_mut() {
+            match modeset::asked() {
+                modeset::Asked::Dry => modeset::dry(regs),
+                modeset::Asked::On => {
+                    let firmware_end = u64::from(plane.ggtt) + first.len as u64;
+                    second = prepare_second(device, apertures, firmware_end, regs);
+                }
+                modeset::Asked::Nothing => {}
+            }
+        }
+        let first_watch = regs.as_mut().and_then(hotplug::Watch::start);
+        let (scanouts, modes, connectors) = hello_parts(&first, plane.connector, second.as_ref());
+        let running = timing(first.width as u16, first.height as u16);
+        if let Err(why) = introduce(
+            &control, port, location, scanouts, modes, connectors, running,
+        ) {
             say(format_args!("intel: no card0: {why}"));
             return None;
         }
@@ -164,39 +239,174 @@ impl Display {
             return None;
         }
         say(format_args!(
-            "intel: card0 published: copies frames into the lit {width}x{height} plane at {phys:#x} ({pitch} bytes a line, write-combining)"
+            "intel: card0 published: copies frames into the lit {}x{} plane at {phys:#x} ({} bytes a line, write-combining){}",
+            first.width,
+            first.height,
+            first.pitch,
+            if scanouts == 2 {
+                ", and a second scanout"
+            } else {
+                ""
+            }
         ));
-        let mut hotplug = match regs::Regs::map(device, apertures) {
-            Ok(mut regs) => {
-                // `ferrix.intelgpu.modeset=dry` or `=on`: the second port,
-                // its steps printed or taken (`docs/DESKTOP.md` §3.5).
-                modeset::run(&mut regs);
-                hotplug::Watch::start(regs)
-            }
-            Err(why) => {
-                say(format_args!("intel: card0: no hotplug: {why}"));
-                None
-            }
-        };
-        // The monitor's own EDID, which names it to the compositor
-        // (`docs/DESKTOP.md` §3.4, step 3g).
-        if let Some(watch) = hotplug.as_mut() {
-            send_edid(&control, watch);
-        }
-        if hotplug.is_some() {
-            schedule(now_ms());
-        }
-        Some(Display {
-            screen,
+        let mut card = Display {
+            _window: window,
+            surface: None,
+            outputs: [Some(first), None],
+            scanouts,
+            modes,
             control,
             buffers: [None; MAX_BUFFERS],
-            shown: None,
-            owed_whole: false,
-            scaler: None,
             flushes: 0,
-            hotplug,
-        })
+            regs,
+            watches: [first_watch, None],
+        };
+        if let Some(second) = second {
+            if let Some(size) = second.size {
+                card.outputs[1] = Some(Output::new(
+                    second.surface.base,
+                    second.surface.len,
+                    (size.0 as usize, size.1 as usize),
+                    light::SURFACE_PITCH as usize,
+                ));
+            }
+            card.surface = Some(second.surface);
+            card.watches[1] = second.watch;
+        }
+        if let Err(why) = card.announce() {
+            say(format_args!("intel: no card0: {why}"));
+            return None;
+        }
+        if card.watches.iter().any(Option::is_some) {
+            schedule(now_ms());
+        }
+        Some(card)
     }
+
+    /// Each lit scanout's modes, and the monitors' own EDIDs, which name
+    /// them to the compositor (`docs/DESKTOP.md` §3.4, step 3g).
+    fn announce(&mut self) -> Result<(), &'static str> {
+        for scanout in 0..self.scanouts {
+            let lit = self
+                .outputs
+                .get(scanout)
+                .and_then(Option::as_ref)
+                .map(Output::size);
+            if let Some(size) = lit
+                && self.modes.get(scanout).is_some_and(|mode| mode.enabled)
+            {
+                send_list(&self.control, scanout as u32, size)?;
+                self.send_edid(scanout);
+            }
+        }
+        Ok(())
+    }
+
+    /// The EDID of scanout `scanout`'s monitor to the core.
+    fn send_edid(&mut self, scanout: usize) {
+        let (Some(regs), Some(Some(watch))) = (self.regs.as_mut(), self.watches.get(scanout))
+        else {
+            return;
+        };
+        send_edid(&self.control, watch, regs, scanout as u32);
+    }
+}
+
+/// HELLO's scanout count, modes and connectors: pipe A's plane, and the
+/// second scanout's where there is one -- enabled where it is lit now, at
+/// its size, else at 1920x1080 until a monitor is plugged in.
+fn hello_parts(
+    first: &Output,
+    connector: u32,
+    second: Option<&Second>,
+) -> (usize, [ScanoutMode; MAX_SCANOUTS], [u32; MAX_SCANOUTS]) {
+    let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
+    let mut connectors = [0; MAX_SCANOUTS];
+    if let (Some(mode), Some(slot)) = (modes.first_mut(), connectors.first_mut()) {
+        *mode = ScanoutMode {
+            width: first.width as u32,
+            height: first.height as u32,
+            enabled: true,
+            refresh_mhz: 0,
+        };
+        *slot = connector;
+    }
+    let Some(second) = second else {
+        return (1, modes, connectors);
+    };
+    if let (Some(mode), Some(slot)) = (modes.get_mut(1), connectors.get_mut(1)) {
+        let (width, height) = second.size.unwrap_or((1920, 1080));
+        *mode = ScanoutMode {
+            width,
+            height,
+            enabled: second.size.is_some(),
+            refresh_mhz: 0,
+        };
+        *slot = second.connector;
+    }
+    (2, modes, connectors)
+}
+
+/// The second scanout under `ferrix.intelgpu.modeset=on`: the other combo
+/// port, its surface made past `firmware_end`, and pipe B lit on it now
+/// where a monitor is there -- or, where the firmware runs pipe B already
+/// (both ports cloned onto one surface), pipe B pointed at the new surface.
+/// `None`, said, when there is no second port or no surface.
+fn prepare_second(
+    device: &Device<Kernel>,
+    apertures: u32,
+    firmware_end: u64,
+    regs: &mut regs::Regs,
+) -> Option<Second> {
+    let first =
+        PortOf::of_ddi_func_ctl(regs.read32(ferrix_intel_xelp::plane::TRANS_DDI_FUNC_CTL_A));
+    let cloned = light::running(regs, 1);
+    let port = match (cloned, first) {
+        (Some(running), _) => running.port,
+        (None, Some(PortOf::Combo(0))) => PortOf::Combo(1),
+        (None, Some(PortOf::Combo(1))) => PortOf::Combo(0),
+        _ => {
+            say(format_args!(
+                "intel: card0: no second scanout: pipe A drives no combo port"
+            ));
+            return None;
+        }
+    };
+    let surface = surface::Surface::make(device, apertures, firmware_end)?;
+    let mut size = None;
+    if let Some(running) = cloned {
+        say(format_args!(
+            "intel: card0: the firmware runs pipe B on port {} at {}x{}: it gets a surface of its own",
+            running.port.name(),
+            running.size.0,
+            running.size.1
+        ));
+        if modeset::repoint(regs, 1, surface.ggtt, running.size) {
+            size = Some(running.size);
+        }
+    } else if port
+        .live_bit()
+        .is_some_and(|bit| regs.read32(ferrix_intel_xelp::display::hotplug::SDEISR) & bit != 0)
+    {
+        size = modeset::light_port_b(regs, surface.ggtt).map(|mode| (mode.h[0], mode.v[0]));
+    }
+    let function = regs.read32(ferrix_intel_xelp::plane::TRANS_DDI_FUNC_CTL_A + 0x1000);
+    let connector = match (ferrix_intel_xelp::plane::Output {
+        ddi_func_ctl: function,
+        pp_status: 0,
+    })
+    .drm_connector()
+    {
+        0 => ferrix_intel_xelp::plane::DRM_CONNECTOR_HDMIA,
+        named => named,
+    };
+    let watch = hotplug::Watch::on(regs, port, 1);
+    Some(Second {
+        surface,
+        size,
+        connector,
+        watch,
+    })
 }
 
 /// The lent window found, checked against the lit plane, and mapped
@@ -205,7 +415,7 @@ fn map_screen(
     device: &Device<Kernel>,
     apertures: u32,
     plane: ScreenPlane,
-) -> Option<(Screen, u64)> {
+) -> Option<(IoMapping<Kernel>, Output, u64)> {
     if !plane.linear_xrgb8888() {
         say(format_args!(
             "intel: no card0: the lit plane is not linear XRGB8888 (PLANE_CTL {:#010x})",
@@ -273,14 +483,8 @@ fn map_screen(
         })
         .ok()?;
     Some((
-        Screen {
-            _mapping: mapping,
-            base,
-            len,
-            width,
-            height,
-            pitch,
-        },
+        mapping,
+        Output::new(base, len, (width, height), pitch),
         window.phys,
     ))
 }
@@ -305,28 +509,87 @@ impl Display {
         self.on_packet(port)
     }
 
-    /// Read the lit port's hot-plug state, tell the core of a settled
-    /// change, and set the next poll. `false` when the core cannot be told.
+    /// Read each watched port's hot-plug state, tell the core of a
+    /// settled change, and set the next poll. A monitor plugged into the
+    /// second port before it was ever lit is lit now. `false` when the core
+    /// cannot be told.
     fn poll_hotplug(&mut self) -> bool {
-        let Some(watch) = self.hotplug.as_mut() else {
+        let Some(regs) = self.regs.as_mut() else {
             return true;
         };
-        let (changed, next) = watch.poll(now_ms());
-        schedule(next);
-        let Some(connected) = changed else {
-            return true;
-        };
-        // A monitor plugged in may be another one: its EDID first.
-        if connected {
-            send_edid(&self.control, watch);
-        }
-        match tell_connected(&self.control, &self.screen, connected) {
-            Ok(()) => true,
-            Err(why) => {
-                say(format_args!("intel: card0 stopped: {why}"));
-                false
+        let now = now_ms();
+        let mut next = u64::MAX;
+        let mut changes = [None; SCANOUTS];
+        for (watch, change) in self.watches.iter_mut().zip(changes.iter_mut()) {
+            if let Some(watch) = watch {
+                let (changed, at) = watch.poll(regs, now);
+                next = next.min(at);
+                *change = changed;
             }
         }
+        schedule(next);
+        for (scanout, change) in changes.into_iter().enumerate() {
+            if let Some(connected) = change
+                && let Err(why) = self.changed(scanout, connected)
+            {
+                say(format_args!("intel: card0 stopped: {why}"));
+                return false;
+            }
+        }
+        true
+    }
+
+    /// A settled change on `scanout`'s port told to the core: on a plug,
+    /// the port lit first if it never was, its EDID, then `MODES` and the
+    /// mode list.
+    fn changed(&mut self, scanout: usize, connected: bool) -> Result<(), &'static str> {
+        if connected && !self.shows(scanout) {
+            return Ok(());
+        }
+        if connected {
+            self.send_edid(scanout);
+        }
+        let size = self
+            .outputs
+            .get(scanout)
+            .and_then(Option::as_ref)
+            .map(Output::size);
+        if let Some(mode) = self.modes.get_mut(scanout) {
+            if let Some((width, height)) = size {
+                mode.width = width;
+                mode.height = height;
+            }
+            mode.enabled = connected;
+        }
+        tell_connected(&self.control, &self.modes, scanout, size, connected)
+    }
+
+    /// Whether `scanout`'s monitor, plugged in, is shown: its pipe runs
+    /// still, or the second port, never lit, is lit now.
+    fn shows(&mut self, scanout: usize) -> bool {
+        let (Some(regs), Some(Some(watch))) = (self.regs.as_mut(), self.watches.get(scanout))
+        else {
+            return false;
+        };
+        if self.outputs.get(scanout).is_some_and(Option::is_some) {
+            return watch.shown_again(regs);
+        }
+        let Some(surface) = self.surface.as_ref() else {
+            return false;
+        };
+        let Some(mode) = modeset::light_port_b(regs, surface.ggtt) else {
+            return false;
+        };
+        let lit = Output::new(
+            surface.base,
+            surface.len,
+            (mode.h[0] as usize, mode.v[0] as usize),
+            light::SURFACE_PITCH as usize,
+        );
+        if let Some(slot) = self.outputs.get_mut(scanout) {
+            *slot = Some(lit);
+        }
+        true
     }
 
     /// A packet under [`KEY_DISPLAY`]: every message taken and answered, the
@@ -404,13 +667,15 @@ impl Display {
                 buffer: attach.buffer,
                 status: Status::Invalid,
             }),
-            Message::Scanout { buffer, rect, .. } => {
-                if buffer == 0 || self.buffer(buffer).is_none() {
-                    self.shown = None;
-                    self.owed_whole = false;
-                } else {
-                    self.shown = Some((buffer, rect));
-                    self.owed_whole = true;
+            Message::Scanout {
+                scanout,
+                buffer,
+                rect,
+            } => {
+                let known = buffer != 0 && self.buffer(buffer).is_some();
+                if let Some(Some(output)) = self.outputs.get_mut(scanout as usize) {
+                    output.shown = known.then_some((buffer, rect));
+                    output.owed_whole = known;
                 }
                 Ok(())
             }
@@ -419,16 +684,7 @@ impl Display {
                 sequence,
                 rect,
             } => {
-                if let Some((id, whole)) = self.shown
-                    && id == buffer
-                {
-                    let changed = if core::mem::take(&mut self.owed_whole) {
-                        whole
-                    } else {
-                        rect
-                    };
-                    self.copy(buffer, changed);
-                }
+                self.flush(buffer, rect);
                 self.reply(Message::Flipped {
                     sequence,
                     status: Status::Ok,
@@ -440,19 +696,22 @@ impl Display {
             }
             // A mode of the list: the plane's own, or a smaller one shown
             // scaled. Nothing answers it.
-            Message::SetMode { timing, .. } => {
+            Message::SetMode { scanout, timing } => {
+                let Some(Some(output)) = self.outputs.get_mut(scanout as usize) else {
+                    return Err("SET_MODE for a scanout that is not lit");
+                };
                 let size = (u32::from(timing.hdisplay), u32::from(timing.vdisplay));
-                let plane = (self.screen.width as u32, self.screen.height as u32);
+                let plane = output.size();
                 if size.0 > plane.0 || size.1 > plane.1 || !timing.is_mode() {
                     return Err("SET_MODE for a mode larger than the plane");
                 }
-                self.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
-                self.clear();
+                output.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
+                clear(output);
                 say(format_args!(
-                    "intel: card0: mode {}x{}{}",
+                    "intel: card0: scanout {scanout} mode {}x{}{}",
                     size.0,
                     size.1,
-                    if self.scaler.is_some() {
+                    if output.scaler.is_some() {
                         ", scaled to the plane"
                     } else {
                         ""
@@ -461,6 +720,34 @@ impl Display {
                 Ok(())
             }
             _ => Err("a message a copying card without a cursor takes no part in"),
+        }
+    }
+
+    /// `changed` of `buffer` copied to every scanout that shows it -- all of
+    /// it to one that has not since its SCANOUT.
+    fn flush(&mut self, buffer: u32, rect: Rect) {
+        let Some(source) = self.buffer(buffer) else {
+            return;
+        };
+        for output in self.outputs.iter_mut().flatten() {
+            let Some((id, whole)) = output.shown else {
+                continue;
+            };
+            if id != buffer {
+                continue;
+            }
+            let changed = if core::mem::take(&mut output.owed_whole) {
+                whole
+            } else {
+                rect
+            };
+            copy(output, &source, changed);
+            self.flushes += 1;
+            if self.flushes == 1 {
+                say(format_args!(
+                    "intel: card0: the first frame is on the screen"
+                ));
+            }
         }
     }
 
@@ -506,150 +793,141 @@ impl Display {
         let Some(buffer) = slot.take() else {
             return Status::Invalid;
         };
-        if self.shown.is_some_and(|(shown, _)| shown == id) {
-            self.shown = None;
+        for output in self.outputs.iter_mut().flatten() {
+            if output.shown.is_some_and(|(shown, _)| shown == id) {
+                output.shown = None;
+            }
         }
         if ferrix_rt::linux::munmap(buffer.base, buffer.length).is_err() {
             return Status::DeviceRefused;
         }
         Status::Ok
     }
+}
 
-    /// Black on every pixel of the plane, then the barrier: the bars a
-    /// scaled mode leaves, and nothing of the mode before.
-    fn clear(&self) {
-        let screen = &self.screen;
-        for row in 0..screen.height {
-            let target = (screen.base + row * screen.pitch) as *mut u32;
-            for column in 0..screen.width {
-                // SAFETY: `target` starts a line of the lent window mapped
-                // for this process, which holds `width` four-byte pixels
-                // from there (`map_screen` checked pitch times height
-                // against the window), and is four-byte aligned.
-                unsafe { ptr::write_volatile(target.wrapping_add(column), 0) };
-            }
-        }
-        ferrix_rt::device_barrier();
-    }
-
-    /// The scaled copy: each plane pixel whose nearest buffer pixel lies in
-    /// `changed` is read from there (efifb's `copy_scaled`).
-    fn copy_scaled(&self, scaler: &Scaler, buffer: &Buffer, shown: Rect, changed: Rect) {
-        let in_shown = Rect {
-            x: changed.x.saturating_sub(shown.x),
-            y: changed.y.saturating_sub(shown.y),
-            ..changed
-        };
-        let Some(area) = scaler.damaged(in_shown) else {
-            return;
-        };
-        let screen = &self.screen;
-        for y in area.y..area.y + area.height {
-            let source_y = (scaler.source_y(y - scaler.area.y) + shown.y) as usize;
-            let line = (y as usize) * screen.pitch;
-            for x in area.x..area.x + area.width {
-                let source_x = (scaler.source_x(x - scaler.area.x) + shown.x) as usize;
-                let from = source_y * buffer.stride + source_x * PIXEL;
-                let to = line + (x as usize) * PIXEL;
-                if source_x >= buffer.width
-                    || source_y >= buffer.height
-                    || from + PIXEL > buffer.length
-                    || to + PIXEL > screen.len
-                {
-                    continue;
-                }
-                // SAFETY: `from` is a pixel inside the buffer's read-only
-                // mapping, which lives until its DETACH takes it from
-                // `self`, and `to` one inside the lent window; both
-                // bounds-checked just above and four-byte aligned.
-                let pixel = unsafe { ptr::read_volatile((buffer.base + from) as *const u32) };
-                // SAFETY: as above.
-                unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
-            }
+/// Black on every pixel of a plane, then the barrier: the bars a scaled
+/// mode leaves, and nothing of the mode before.
+fn clear(screen: &Output) {
+    for row in 0..screen.height {
+        let target = (screen.base + row * screen.pitch) as *mut u32;
+        for column in 0..screen.width {
+            // SAFETY: `target` starts a line of the plane's memory mapped
+            // for this process, which holds `width` four-byte pixels from
+            // there (`map_screen` and `surface` checked pitch times height
+            // against it), and is four-byte aligned.
+            unsafe { ptr::write_volatile(target.wrapping_add(column), 0) };
         }
     }
+    ferrix_rt::device_barrier();
+}
 
-    /// `changed` of buffer `id`, clipped as efifb clips it, copied into the
-    /// window, then the barrier that makes it shown.
-    fn copy(&mut self, id: u32, changed: Rect) {
-        let (Some(buffer), Some((_, shown))) = (self.buffer(id), self.shown) else {
-            return;
-        };
-        if let Some(scaler) = self.scaler {
-            self.copy_scaled(&scaler, &buffer, shown, changed);
-        } else if let Some(area) = area(&buffer, shown, changed, &self.screen) {
-            let screen = &self.screen;
-            for row in 0..area.rows {
-                let from = (area.source_y + row) * buffer.stride + area.source_x * PIXEL;
-                let to = (area.screen_y + row) * screen.pitch + area.screen_x * PIXEL;
-                let bytes = area.columns * PIXEL;
-                if from + bytes > buffer.length || to + bytes > screen.len {
-                    break;
-                }
-                let source = (buffer.base + from) as *const u8;
-                let target = (screen.base + to) as *mut u8;
-                // One row as one copy, not a volatile load and store a pixel:
-                // the window is write-combining memory, which takes whole
-                // lines best, and a pixel at a time held a 1920x1200 frame
-                // to about a gigabyte a second (9.5 ms of hyprix's frame on
-                // the N150). Linux's `memcpy_toio` is a plain `memcpy` on
-                // x86 for the same reason. The writes are not elided: the
-                // window is memory outside anything the compiler can see,
-                // and the barrier below drains them to it.
-                //
-                // SAFETY: `source` is inside the buffer's read-only mapping,
-                // which lives until its DETACH takes it from `self`, and
-                // `target` inside the lent window mapped for this process;
-                // both bounds-checked for the whole row above, and the two
-                // mappings are different memory, so they do not overlap.
-                unsafe { ptr::copy_nonoverlapping(source, target, bytes) };
+/// The scaled copy: each plane pixel whose nearest buffer pixel lies in
+/// `changed` is read from there (efifb's `copy_scaled`).
+fn copy_scaled(screen: &Output, scaler: &Scaler, buffer: &Buffer, shown: Rect, changed: Rect) {
+    let in_shown = Rect {
+        x: changed.x.saturating_sub(shown.x),
+        y: changed.y.saturating_sub(shown.y),
+        ..changed
+    };
+    let Some(area) = scaler.damaged(in_shown) else {
+        return;
+    };
+    for y in area.y..area.y + area.height {
+        let source_y = (scaler.source_y(y - scaler.area.y) + shown.y) as usize;
+        let line = (y as usize) * screen.pitch;
+        for x in area.x..area.x + area.width {
+            let source_x = (scaler.source_x(x - scaler.area.x) + shown.x) as usize;
+            let from = source_y * buffer.stride + source_x * PIXEL;
+            let to = line + (x as usize) * PIXEL;
+            if source_x >= buffer.width
+                || source_y >= buffer.height
+                || from + PIXEL > buffer.length
+                || to + PIXEL > screen.len
+            {
+                continue;
             }
-        }
-        ferrix_rt::device_barrier();
-        self.flushes += 1;
-        if self.flushes == 1 {
-            say(format_args!(
-                "intel: card0: the first frame is on the screen"
-            ));
+            // SAFETY: `from` is a pixel inside the buffer's read-only
+            // mapping, which lives until its DETACH takes it from the
+            // card, and `to` one inside the plane's memory; both
+            // bounds-checked just above and four-byte aligned.
+            let pixel = unsafe { ptr::read_volatile((buffer.base + from) as *const u32) };
+            // SAFETY: as above.
+            unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
         }
     }
 }
 
-/// Tell the core the monitor on the lit port is there or not, as
-/// virtio-gpu does when its host window comes or goes: `MODES` with the
-/// scanout enabled or not, and on a plug the mode list again, which the
-/// core counts as the connector's change.
+/// `changed` of `buffer`, clipped as efifb clips it, copied into the
+/// plane's memory, then the barrier that makes it shown.
+fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
+    let Some((_, shown)) = screen.shown else {
+        return;
+    };
+    if let Some(scaler) = screen.scaler {
+        copy_scaled(screen, &scaler, buffer, shown, changed);
+    } else if let Some(area) = area(buffer, shown, changed, screen) {
+        for row in 0..area.rows {
+            let from = (area.source_y + row) * buffer.stride + area.source_x * PIXEL;
+            let to = (area.screen_y + row) * screen.pitch + area.screen_x * PIXEL;
+            let bytes = area.columns * PIXEL;
+            if from + bytes > buffer.length || to + bytes > screen.len {
+                break;
+            }
+            let source = (buffer.base + from) as *const u8;
+            let target = (screen.base + to) as *mut u8;
+            // One row as one copy, not a volatile load and store a pixel:
+            // the plane's memory is write-combining, which takes whole
+            // lines best, and a pixel at a time held a 1920x1200 frame to
+            // about a gigabyte a second (9.5 ms of hyprix's frame on the
+            // N150). Linux's `memcpy_toio` is a plain `memcpy` on x86 for
+            // the same reason. The writes are not elided: the memory is
+            // outside anything the compiler can see, and the barrier below
+            // drains them to it.
+            //
+            // SAFETY: `source` is inside the buffer's read-only mapping,
+            // which lives until its DETACH takes it from the card, and
+            // `target` inside the plane's memory mapped for this process;
+            // both bounds-checked for the whole row above, and the two
+            // mappings are different memory, so they do not overlap.
+            unsafe { ptr::copy_nonoverlapping(source, target, bytes) };
+        }
+    }
+    ferrix_rt::device_barrier();
+}
+
+/// Tell the core a scanout's monitor is there or not, as virtio-gpu does
+/// when its host window comes or goes: `MODES` with every scanout as it is
+/// now, and on a plug the scanout's mode list again, which the core counts
+/// as the connector's change.
 fn tell_connected(
     control: &Channel<Kernel>,
-    screen: &Screen,
+    modes: &[ScanoutMode; MAX_SCANOUTS],
+    scanout: usize,
+    size: Option<(u32, u32)>,
     connected: bool,
 ) -> Result<(), &'static str> {
-    let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
-    if let Some(first) = modes.first_mut() {
-        *first = ScanoutMode {
-            width: screen.width as u32,
-            height: screen.height as u32,
-            enabled: connected,
-            refresh_mhz: 0,
-        };
-    }
     control
-        .write(Message::Modes { modes }.encode().as_bytes())
+        .write(Message::Modes { modes: *modes }.encode().as_bytes())
         .map_err(|_| "MODES could not be written")?;
-    if connected {
-        send_list(control, screen)?;
+    if connected && let Some(size) = size {
+        send_list(control, scanout as u32, size)?;
     }
     Ok(())
 }
 
-/// The monitor's EDID to the core, for scanout 0: what its connector's
-/// `EDID` property and the compositor's monitor description are made of.
-fn send_edid(control: &Channel<Kernel>, watch: &mut hotplug::Watch) {
-    let Some((bytes, length)) = watch.read_edid() else {
+/// A monitor's EDID to the core, for `scanout`: what its connector's `EDID`
+/// property and the compositor's monitor description are made of.
+fn send_edid(
+    control: &Channel<Kernel>,
+    watch: &hotplug::Watch,
+    regs: &mut regs::Regs,
+    scanout: u32,
+) {
+    let Some((bytes, length)) = watch.read_edid(regs) else {
         return;
     };
     let mut edid = Edid {
-        scanout: 0,
+        scanout,
         length: 0,
         bytes: [0; EDID_BYTES],
     };
@@ -666,50 +944,46 @@ fn send_edid(control: &Channel<Kernel>, watch: &mut hotplug::Watch) {
     }
 }
 
-/// The scanout's mode list: the plane's mode and every smaller one shown
+/// A scanout's mode list: its plane's mode and every smaller one shown
 /// scaled.
-fn send_list(control: &Channel<Kernel>, screen: &Screen) -> Result<(), &'static str> {
+fn send_list(
+    control: &Channel<Kernel>,
+    scanout: u32,
+    (width, height): (u32, u32),
+) -> Result<(), &'static str> {
     let mut list = ModeList::new();
-    add_scaled(&mut list, timing(screen.width as u16, screen.height as u16));
+    add_scaled(&mut list, timing(width as u16, height as u16));
     list.sort();
-    for page in list.pages(0) {
+    for page in list.pages(scanout) {
         control
             .write(page.encode().as_bytes())
             .map_err(|_| "the mode list could not be written")?;
     }
     say(format_args!(
-        "intel: card0: {} modes listed, the smaller ones shown scaled",
+        "intel: card0: scanout {scanout}: {} modes listed, the smaller ones shown scaled",
         list.len()
     ));
     Ok(())
 }
 
-/// HELLO for the one scanout at the plane's size, READY taken, and the
-/// scanout's mode list sent.
+/// HELLO for `scanouts` scanouts, READY taken.
 fn introduce(
     control: &Channel<Kernel>,
     port: &Port<Kernel>,
     location: u32,
-    screen: &Screen,
-    connector: u32,
+    scanouts: usize,
+    modes: [ScanoutMode; MAX_SCANOUTS],
+    connectors: [u32; MAX_SCANOUTS],
+    running: Timing,
 ) -> Result<(), &'static str> {
-    let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
-    if let Some(first) = modes.first_mut() {
-        *first = ScanoutMode {
-            width: screen.width as u32,
-            height: screen.height as u32,
-            enabled: true,
-            refresh_mhz: 0,
-        };
-    }
     let mut timings = Timings::NONE;
     if let Some(slot) = timings.list.first_mut() {
-        *slot = timing(screen.width as u16, screen.height as u16);
+        *slot = running;
         timings.count = 1;
     }
     let hello = Hello {
         version: VERSION,
-        scanouts: 1,
+        scanouts: scanouts as u16,
         location,
         modes,
         virgl: false,
@@ -719,13 +993,7 @@ fn introduce(
         cursor: false,
         timings,
         copies: true,
-        connectors: {
-            let mut connectors = [0; MAX_SCANOUTS];
-            if let Some(first) = connectors.first_mut() {
-                *first = connector;
-            }
-            connectors
-        },
+        connectors,
     };
     let share = port
         .as_owned()
@@ -746,11 +1014,10 @@ fn introduce(
         drop(OwnedHandle::from_raw(Kernel, *handle));
     }
     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-        Ok(Message::Ready(_)) if received.handles == 1 => {}
-        Ok(Message::Refused(_)) => return Err("the display core refused the card"),
-        _ => return Err("the display core did not answer READY"),
+        Ok(Message::Ready(_)) if received.handles == 1 => Ok(()),
+        Ok(Message::Refused(_)) => Err("the display core refused the card"),
+        _ => Err("the display core did not answer READY"),
     }
-    send_list(control, screen)
 }
 
 /// The one timing listed: the plane's size at 60 Hz with reduced blanking,
@@ -784,7 +1051,7 @@ struct Area {
     rows: usize,
 }
 
-fn area(buffer: &Buffer, shown: Rect, changed: Rect, screen: &Screen) -> Option<Area> {
+fn area(buffer: &Buffer, shown: Rect, changed: Rect, screen: &Output) -> Option<Area> {
     let clip = |start: u32, length: u32, low: usize, high: usize| {
         let end = (start as usize).saturating_add(length as usize).min(high);
         let start = (start as usize).max(low);
