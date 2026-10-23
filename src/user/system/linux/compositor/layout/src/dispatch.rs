@@ -8,6 +8,46 @@
 
 use crate::{Error, WorkspaceId};
 
+/// Where a floating window is snapped: its work area whole, or one half.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Snap {
+    /// The whole work area: maximized.
+    Maximized,
+    /// The left half.
+    Left,
+    /// The right half.
+    Right,
+}
+
+/// What `snapwindow` asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapTarget {
+    /// `max`, `left`, `right`: snap there. Asking a window snapped to one
+    /// half for the other half restores it, as a floating window manager's
+    /// `SUPER+Left` on a window tiled right does.
+    To(Snap),
+    /// `restore`: back to the rectangle it had before it was snapped.
+    Restore,
+    /// `toggle`: maximized, or restored when it is: a title bar's double
+    /// click and its maximize button.
+    Toggle,
+}
+
+impl SnapTarget {
+    /// Parse `snapwindow`'s argument.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "max" | "maximize" | "u" => Some(Self::To(Snap::Maximized)),
+            "left" | "l" => Some(Self::To(Snap::Left)),
+            "right" | "r" => Some(Self::To(Snap::Right)),
+            "restore" | "d" => Some(Self::Restore),
+            "toggle" | "" => Some(Self::Toggle),
+            _ => None,
+        }
+    }
+}
+
 /// A direction, from `l`, `r`, `u` or `t`, and `d` or `b`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -253,6 +293,11 @@ pub enum Dispatcher {
     SetFloating,
     /// `settiled`: tile it, the same way round.
     SetTiled,
+    /// `snapwindow max|left|right|restore|toggle`, hyprix's own
+    /// (`docs/DESKTOP.md` §1.2): a floating window maximized to its work
+    /// area or tiled to one half of it, keeping the rectangle it had to go
+    /// back to.
+    SnapWindow(SnapTarget),
     /// `centerwindow`: put a floating window in the middle of its monitor.
     /// `1` centres it on the monitor including the reserved strips, which
     /// is what Hyprland's argument means.
@@ -504,6 +549,7 @@ impl Dispatcher {
             "setfloating" => Ok(Self::SetFloating),
             "settiled" => Ok(Self::SetTiled),
             "centerwindow" => Ok(Self::CenterWindow { whole: arg == "1" }),
+            "snapwindow" => SnapTarget::parse(arg).map(Self::SnapWindow).ok_or_else(bad),
             "pin" => Ok(Self::Pin),
             "pseudo" => Ok(Self::Pseudo),
             "resizeactive" => Move::parse(arg).map(Self::ResizeActive).ok_or_else(bad),

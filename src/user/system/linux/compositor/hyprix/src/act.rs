@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use compositor_layout::{Corner, Move, State, WindowId};
+use compositor_layout::{Corner, Move, Snap, SnapTarget, State, WindowId};
 
 use crate::frame::Source;
 use crate::seat::{Action, Seat};
@@ -50,6 +50,10 @@ pub struct Drag {
     /// of the tiling for it: it is dropped back in where the drag ends
     /// (`compositor_layout::State::drop_window`).
     pub lifted: bool,
+    /// Where the window snaps if it is dropped now: the pointer is at a
+    /// monitor's edge (`compositor_layout::State::edge_snap_at`), and the
+    /// frame draws the rectangle it would take (`docs/DESKTOP.md` §1.2).
+    pub edge: Option<Snap>,
 }
 
 /// What started a [`Drag`].
@@ -392,12 +396,7 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
         let Some(held) = around.drag.take() else {
             return false;
         };
-        if held.lifted {
-            return state
-                .drop_window(held.window, around.seat.pointer())
-                .is_ok_and(|changes| !changes.is_empty());
-        }
-        return false;
+        return ended(held, state, around.seat.pointer());
     }
     let resizing = match action {
         "movewindow" => false,
@@ -435,6 +434,7 @@ fn mouse(argument: &str, state: &mut State, around: &mut Around<'_>) -> bool {
         began: Began::Bind,
         from,
         lifted,
+        edge: None,
     });
     true
 }
@@ -458,7 +458,7 @@ const BTN_LEFT: u32 = 0x110;
 /// bind's key goes up and its button is the client's business.
 pub fn grab_border(
     actions: Vec<Action>,
-    state: &State,
+    state: &mut State,
     seat: &Seat,
     drag: &mut Option<Drag>,
 ) -> Vec<Action> {
@@ -470,7 +470,9 @@ pub fn grab_border(
             && drag.is_some_and(|held| held.began == Began::Client)
             && !seat.buttons_held()
         {
-            *drag = None;
+            if let Some(held) = drag.take() {
+                let _ = ended(held, state, seat.pointer());
+            }
             kept.push(action);
             continue;
         }
@@ -504,9 +506,12 @@ pub fn grab_border(
                 began: Began::Border,
                 from,
                 lifted: false,
+                edge: None,
             });
         } else if drag.is_some_and(|held| held.began == Began::Border) {
-            *drag = None;
+            if let Some(held) = drag.take() {
+                let _ = ended(held, state, seat.pointer());
+            }
         } else {
             kept.push(action);
         }
@@ -559,6 +564,7 @@ pub fn client_drag(
         began: Began::Client,
         from,
         lifted: false,
+        edge: None,
     });
     true
 }
@@ -569,6 +575,23 @@ pub fn client_drag(
 /// from a dispatcher: a drag is one bind and then every pointer movement
 /// until the button comes back up.
 pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
+    // A snapped or maximized window moved by the pointer goes back to the
+    // size it had, under the pointer, the moment it moves; and while the
+    // pointer is at a monitor's edge the frame shows where it would snap.
+    let mut unsnapped = false;
+    if !drag.resizing && !drag.lifted {
+        let before = drag.edge;
+        drag.edge = state
+            .is_floating(drag.window)
+            .then(|| state.edge_snap_at((x, y)))
+            .flatten();
+        unsnapped = drag.edge != before;
+        if (x, y) != drag.from && state.snap_of(drag.window).is_some() {
+            let _restored = state.unsnap_under(drag.window, drag.from, (x, y));
+            drag.from = (x, y);
+            return true;
+        }
+    }
     let by = Move {
         x: x.saturating_sub(drag.from.0),
         y: y.saturating_sub(drag.from.1),
@@ -591,7 +614,27 @@ pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
     } else {
         state.drag_window_pixel(drag.window, &by)
     };
-    moved.is_ok_and(|changes| !changes.is_empty())
+    moved.is_ok_and(|changes| !changes.is_empty()) || unsnapped
+}
+
+/// A drag is over, the pointer at `pointer`: a window lifted out of the
+/// tiling goes back in where it was let go of, which is Hyprland's
+/// `dragEnd`, and a floating window dropped at a monitor's edge snaps
+/// there. Gives whether the layout changed.
+pub fn ended(held: Drag, state: &mut State, pointer: (f64, f64)) -> bool {
+    if held.lifted {
+        return state
+            .drop_window(held.window, pointer)
+            .is_ok_and(|changes| !changes.is_empty());
+    }
+    if let Some(snap) = held.edge
+        && !held.resizing
+    {
+        return state
+            .snap_window(held.window, SnapTarget::To(snap))
+            .is_ok_and(|changes| !changes.is_empty());
+    }
+    false
 }
 
 /// `pass <window>`: send the key that fired this bind on to another window.
@@ -853,7 +896,7 @@ mod tests {
     //! what each leaves for the client.
 
     use compositor_config::NoSources;
-    use compositor_layout::{Corner, Monitor, MonitorId, Rect, State, WindowId};
+    use compositor_layout::{Corner, Monitor, MonitorId, Rect, Snap, State, WindowId};
 
     use super::{Action, Began, Drag, Seat, client_drag, dragged, grab_border};
     use crate::seat::Input;
@@ -899,12 +942,12 @@ mod tests {
     /// told about half a click.
     #[test]
     fn a_press_on_a_border_grabs_it_and_never_reaches_the_client() {
-        let (state, mut seat) = ready(ON);
+        let (mut state, mut seat) = ready(ON);
         // Just inside window 2's left edge's grab ring, and outside window 2.
         let _moved = seat.warp(508.0, 400.0);
         let mut drag = None;
 
-        let kept = grab_border(vec![pressed(true)], &state, &seat, &mut drag);
+        let kept = grab_border(vec![pressed(true)], &mut state, &seat, &mut drag);
         assert_eq!(kept, [], "the press was swallowed");
         assert_eq!(
             drag,
@@ -918,10 +961,11 @@ mod tests {
                 began: Began::Border,
                 from: (508, 400),
                 lifted: false,
+                edge: None,
             })
         );
 
-        let kept = grab_border(vec![pressed(false)], &state, &seat, &mut drag);
+        let kept = grab_border(vec![pressed(false)], &mut state, &seat, &mut drag);
         assert_eq!(kept, [], "and so was the release that ended it");
         assert_eq!(drag, None);
     }
@@ -930,16 +974,16 @@ mod tests {
     /// behind.
     #[test]
     fn a_press_inside_a_window_reaches_the_client() {
-        let (state, mut seat) = ready(ON);
+        let (mut state, mut seat) = ready(ON);
         let _moved = seat.warp(200.0, 400.0);
         let mut drag = None;
 
-        let kept = grab_border(vec![pressed(true)], &state, &seat, &mut drag);
+        let kept = grab_border(vec![pressed(true)], &mut state, &seat, &mut drag);
         assert_eq!(kept, [pressed(true)]);
         assert_eq!(drag, None);
 
         // And the release, with no border drag to end, goes through as well.
-        let kept = grab_border(vec![pressed(false)], &state, &seat, &mut drag);
+        let kept = grab_border(vec![pressed(false)], &mut state, &seat, &mut drag);
         assert_eq!(kept, [pressed(false)]);
     }
 
@@ -947,10 +991,10 @@ mod tests {
     /// default and what every other boot of this compositor has had.
     #[test]
     fn a_border_is_not_grabbed_when_the_option_is_off() {
-        let (state, mut seat) = ready("general:gaps_in = 0\ngeneral:gaps_out = 0\n");
+        let (mut state, mut seat) = ready("general:gaps_in = 0\ngeneral:gaps_out = 0\n");
         let _moved = seat.warp(508.0, 400.0);
         let mut drag = None;
-        let kept = grab_border(vec![pressed(true)], &state, &seat, &mut drag);
+        let kept = grab_border(vec![pressed(true)], &mut state, &seat, &mut drag);
         assert_eq!(kept, [pressed(true)]);
         assert_eq!(drag, None);
     }
@@ -982,9 +1026,57 @@ mod tests {
         assert!(dragged(drag.as_mut().unwrap(), &mut state, (740, 320)));
 
         let up = press(&mut seat, false);
-        let kept = grab_border(up.clone(), &state, &seat, &mut drag);
+        let kept = grab_border(up.clone(), &mut state, &seat, &mut drag);
         assert_eq!(kept, up, "the release went on to the client");
         assert_eq!(drag, None);
+    }
+
+    /// A floating window dragged by its own title bar to the screen's left
+    /// edge shows where it would snap, and dropped there takes the left
+    /// half; dragged away again it takes its old size back under the
+    /// pointer (`docs/DESKTOP.md` §1.2).
+    #[test]
+    fn a_window_dropped_at_an_edge_snaps_and_dragged_away_unsnaps() {
+        let (mut state, mut seat) = ready(ON);
+        let _ = state.focus_window(WindowId(2)).unwrap();
+        let _ = state.dispatch_str("setfloating", "").unwrap();
+        let _ = state
+            .float_window(WindowId(2), Rect::new(300, 200, 400, 300))
+            .unwrap();
+        let _moved = seat.warp(500.0, 210.0);
+        let _ = press(&mut seat, true);
+        let mut drag = None;
+        assert!(client_drag(WindowId(2), 0, &state, &seat, &mut drag));
+
+        // Away from every edge: nothing would snap.
+        let _ = dragged(drag.as_mut().unwrap(), &mut state, (400, 300));
+        assert_eq!(drag.unwrap().edge, None);
+        // At the left edge: the left half would.
+        let _ = dragged(drag.as_mut().unwrap(), &mut state, (2, 300));
+        assert_eq!(drag.unwrap().edge, Some(Snap::Left));
+
+        let _moved = seat.warp(2.0, 300.0);
+        let up = press(&mut seat, false);
+        let _kept = grab_border(up, &mut state, &seat, &mut drag);
+        assert_eq!(drag, None);
+        assert_eq!(state.snap_of(WindowId(2)), Some(Snap::Left));
+        let placed = |state: &State| {
+            state.layout()[0]
+                .windows
+                .iter()
+                .find(|placed| placed.window == WindowId(2))
+                .unwrap()
+                .rect
+        };
+        assert_eq!(placed(&state), Rect::new(0, 0, 512, 768));
+
+        // Picked up again at its middle and moved: its old size back.
+        let _moved = seat.warp(256.0, 10.0);
+        let _ = press(&mut seat, true);
+        assert!(client_drag(WindowId(2), 0, &state, &seat, &mut drag));
+        assert!(dragged(drag.as_mut().unwrap(), &mut state, (300, 40)));
+        assert_eq!(state.snap_of(WindowId(2)), None);
+        assert_eq!(placed(&state), Rect::new(100, 30, 400, 300));
     }
 
     /// A `resize` pulls the edges it names.

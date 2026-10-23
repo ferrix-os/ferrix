@@ -1230,7 +1230,7 @@ impl<'r> Compositor<'r> {
         // press it never saw the end of would think the button is still
         // held. Hyprland's `processMouseDownNormal` returns before
         // `sendPointerButton` for the same reason.
-        let actions = crate::act::grab_border(actions, &self.state, &self.seat, &mut self.drag);
+        let actions = crate::act::grab_border(actions, &mut self.state, &self.seat, &mut self.drag);
         if actions.is_empty() {
             return false;
         }
@@ -2231,7 +2231,7 @@ fn configure_first(
     if floated {
         let _ = unsized_dialogs.insert(window);
         let focused = state.focused_window() == Some(window);
-        client.configure_toplevel(toplevel, 0, 0, &states(focused, true));
+        client.configure_toplevel(toplevel, 0, 0, &states(focused, Look::Floating));
     } else {
         configure(client, state, toplevel, window);
     }
@@ -6084,10 +6084,27 @@ fn for_the_bar(
                 .dispatch_str("fullscreen", "0")
                 .is_ok_and(|made| !made.is_empty())
         }
-        // Maximised and minimised are states this compositor does not have,
-        // and a bar is told so: the window is never reported in either, so
-        // a request to leave one is already true and a request to enter one
-        // is refused by doing nothing rather than by doing the wrong thing.
+        // A floating window is maximized as `snapwindow` maximizes it
+        // (`docs/DESKTOP.md` §1.2); a tiled one has no maximized state of
+        // its own, so a request about one is answered by leaving it be.
+        ForeignRequest::Maximized(on) if state.is_floating(window) => {
+            let is = state.snap_of(window) == Some(compositor_layout::Snap::Maximized);
+            if is == on {
+                return false;
+            }
+            let target = if on {
+                compositor_layout::SnapTarget::To(compositor_layout::Snap::Maximized)
+            } else {
+                compositor_layout::SnapTarget::Restore
+            };
+            state
+                .snap_window(window, target)
+                .is_ok_and(|made| !made.is_empty())
+        }
+        // Minimised is a state this compositor does not have yet, and a
+        // bar is told so: the window is never reported in it, so a request
+        // to leave it is already true and a request to enter it is refused
+        // by doing nothing rather than by doing the wrong thing.
         ForeignRequest::Maximized(_) | ForeignRequest::Minimized(_) => false,
     }
 }
@@ -6287,7 +6304,7 @@ fn place_layers(
 /// again: an unchanged size is a round trip a client does not need, and
 /// Hyprland does not send one either.
 fn reconfigure(slots: &mut [Slot], state: &State) {
-    let mut sizes: BTreeMap<WindowId, (i32, i32, bool, bool)> = BTreeMap::new();
+    let mut sizes: BTreeMap<WindowId, (i32, i32, bool, Look)> = BTreeMap::new();
     for output in state.layout() {
         for placed in &output.windows {
             let _ = sizes.insert(
@@ -6296,7 +6313,7 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
                     i32::try_from(placed.rect.width).unwrap_or(0),
                     i32::try_from(placed.rect.height).unwrap_or(0),
                     placed.focused,
-                    placed.floating && !placed.fullscreen,
+                    Look::of(state, placed),
                 ),
             );
         }
@@ -6304,8 +6321,7 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
     for slot in slots.iter_mut() {
         let windows = slot.windows.clone();
         for (toplevel, window) in windows {
-            let Some((mut width, mut height, focused, floating)) = sizes.get(&window).copied()
-            else {
+            let Some((mut width, mut height, focused, look)) = sizes.get(&window).copied() else {
                 continue;
             };
             // A dialog still choosing its own size (`float_dialog`) is not
@@ -6317,7 +6333,7 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
             // The states as well as the size: a window that has just been
             // focused is the same size and a different state, and a client
             // that is not told has a title bar that never lights up.
-            let wanted = states(focused, floating);
+            let wanted = states(focused, look);
             let already = slot
                 .client
                 .toplevel(toplevel)
@@ -6331,21 +6347,46 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
     }
 }
 
+/// How a window sits, for the `xdg_toplevel` states it is told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Look {
+    /// Tiled, or fullscreen.
+    Tiled,
+    /// Floating on its own.
+    Floating,
+    /// A floating window snapped (`docs/DESKTOP.md` §1.2).
+    Snapped(compositor_layout::Snap),
+}
+
+impl Look {
+    fn of(state: &State, placed: &compositor_layout::Placed) -> Self {
+        if !placed.floating || placed.fullscreen {
+            return Self::Tiled;
+        }
+        state
+            .snap_of(placed.window)
+            .map_or(Self::Floating, Self::Snapped)
+    }
+}
+
 /// The `xdg_toplevel` states a window is in: a tiled one is tiled on
 /// every edge, which tells a toolkit to square its corners and drop its
 /// shadow; a floating one is told no edge, so a client that draws its own
 /// frame draws it whole, rounded corners and shadow, as under a floating
-/// window manager (Hyprland's `setTiled(!floating)` says the same).
-fn states(focused: bool, floating: bool) -> Vec<u32> {
-    let mut states = if floating {
-        Vec::new()
-    } else {
-        vec![
-            xdg_shell::xdg_toplevel::state::TILED_LEFT,
-            xdg_shell::xdg_toplevel::state::TILED_RIGHT,
-            xdg_shell::xdg_toplevel::state::TILED_TOP,
-            xdg_shell::xdg_toplevel::state::TILED_BOTTOM,
-        ]
+/// window manager (Hyprland's `setTiled(!floating)` says the same). A
+/// maximized one is `maximized`; one snapped to a half is tiled on the
+/// three edges it touches, as mutter tells a half-tiled window.
+fn states(focused: bool, look: Look) -> Vec<u32> {
+    use compositor_layout::Snap;
+    use xdg_shell::xdg_toplevel::state::{
+        MAXIMIZED, TILED_BOTTOM, TILED_LEFT, TILED_RIGHT, TILED_TOP,
+    };
+    let mut states = match look {
+        Look::Tiled => vec![TILED_LEFT, TILED_RIGHT, TILED_TOP, TILED_BOTTOM],
+        Look::Floating => Vec::new(),
+        Look::Snapped(Snap::Maximized) => vec![MAXIMIZED],
+        Look::Snapped(Snap::Left) => vec![TILED_LEFT, TILED_TOP, TILED_BOTTOM],
+        Look::Snapped(Snap::Right) => vec![TILED_RIGHT, TILED_TOP, TILED_BOTTOM],
     };
     if focused {
         states.push(xdg_shell::xdg_toplevel::state::ACTIVATED);
@@ -6357,18 +6398,18 @@ fn states(focused: bool, floating: bool) -> Vec<u32> {
 fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: WindowId) {
     let mut width = 0;
     let mut height = 0;
-    let mut floating = false;
+    let mut look = Look::Tiled;
     for output in state.layout() {
         for placed in &output.windows {
             if placed.window == window {
                 width = i32::try_from(placed.rect.width).unwrap_or(0);
                 height = i32::try_from(placed.rect.height).unwrap_or(0);
-                floating = placed.floating && !placed.fullscreen;
+                look = Look::of(state, placed);
             }
         }
     }
     let focused = state.focused_window() == Some(window);
-    client.configure_toplevel(toplevel, width, height, &states(focused, floating));
+    client.configure_toplevel(toplevel, width, height, &states(focused, look));
 }
 
 /// The globals the compositor offers. `dmabuf` is whether a client's GPU

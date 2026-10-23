@@ -469,6 +469,19 @@ impl Compositor<'_> {
                     rules: crate::frame::LayerRules::default(),
                 })
             });
+        // Where a window dragged to a monitor's edge would snap.
+        let tile_preview = self
+            .drag
+            .as_ref()
+            .filter(|_| !dark && self.lock.is_none())
+            .and_then(|held| self.state.snap_rect(held.window, held.edge?))
+            .map(|rect| crate::frame::local(rect, origin, scale))
+            .filter(|rect| {
+                rect.x < i64::from(width)
+                    && rect.y < i64::from(height)
+                    && rect.right() > 0
+                    && rect.bottom() > 0
+            });
         // The pointer, unless the session is locked: a lock screen
         // draws its own and the compositor's arrow over it would be
         // two pointers.
@@ -549,6 +562,7 @@ impl Compositor<'_> {
                     crate::frame::drag_rect(&self.slots, &icon, origin, scale)?,
                 ))
             }),
+            tile_preview,
             overlay: picture.as_ref().map(|picture| picture.stamp),
             plane: screen
                 .plane
@@ -561,6 +575,7 @@ impl Compositor<'_> {
             plan,
             over,
             drag_icon,
+            tile_preview,
             cursor,
             gamma,
             picture,
@@ -585,6 +600,7 @@ impl Compositor<'_> {
             plan,
             over,
             drag_icon,
+            tile_preview,
             cursor,
             gamma,
             picture,
@@ -624,6 +640,7 @@ impl Compositor<'_> {
             scale,
             transform: screen.transform,
             drag_icon,
+            tile_preview,
             gamma,
             cursor,
             present: frame.screen,
@@ -871,6 +888,8 @@ struct Planned {
     over: Vec<crate::frame::Placed>,
     /// The surface a drag is carrying, drawn at the pointer.
     drag_icon: Option<crate::frame::Placed>,
+    /// Where a dragged window would snap, in the screen's own pixels.
+    tile_preview: Option<Rect>,
     /// The pointer, where it is drawn into the frame.
     cursor: Option<crate::frame::Cursor>,
     /// The ramps a night-light set on this screen.

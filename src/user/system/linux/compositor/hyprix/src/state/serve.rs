@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use compositor_layout::WindowId;
+use compositor_layout::{Snap, SnapTarget, WindowId};
 use compositor_server::{Event, ForeignRequest, Role};
 use compositor_socket::RecvError;
 use compositor_wire::{Fd, ObjectId};
@@ -1055,6 +1055,25 @@ impl Compositor<'_> {
                 .workspace_of(window)
                 .and_then(|workspace| self.state.fullscreen(workspace))
                 .is_some_and(|(id, _)| id == window);
+            // A floating window's maximize is its own rectangle grown to
+            // the work area, as under a floating window manager: the
+            // rectangle it had is kept to go back to, and other floating
+            // windows still go above it (`docs/DESKTOP.md` §1.2).
+            if !fullscreen && !holds && self.state.is_floating(window) {
+                let snapped = self.state.snap_of(window) == Some(Snap::Maximized);
+                let target = match (maximized, snapped) {
+                    (true, false) => Some(SnapTarget::To(Snap::Maximized)),
+                    (false, true) => Some(SnapTarget::Restore),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    changed |= self
+                        .state
+                        .snap_window(window, target)
+                        .is_ok_and(|changes| !changes.is_empty());
+                }
+                continue;
+            }
             // `fullscreen <mode>` turns it on and off again, so a window
             // already where it asked to be is left alone.
             let mode = match wanted {

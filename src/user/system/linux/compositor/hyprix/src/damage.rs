@@ -366,6 +366,8 @@ pub(crate) struct Plan {
     pub(crate) cursor: Option<(Cursor, Rect)>,
     /// The surface a drag is carrying, the same way.
     pub(crate) drag_icon: Option<(Placed, Rect)>,
+    /// Where a dragged window would snap, in the screen's own pixels.
+    pub(crate) tile_preview: Option<Rect>,
     /// The client's surface the screen's cursor plane shows, which no frame
     /// draws: what it paints goes to the plane and damages nothing.
     pub(crate) plane: Option<(usize, ObjectId)>,
@@ -719,6 +721,11 @@ impl Plan {
         if old.drag_icon != self.drag_icon {
             for at in [old.drag_icon, self.drag_icon].into_iter().flatten() {
                 region.add(at.1);
+            }
+        }
+        if old.tile_preview != self.tile_preview {
+            for at in [old.tile_preview, self.tile_preview].into_iter().flatten() {
+                region.add(at);
             }
         }
     }

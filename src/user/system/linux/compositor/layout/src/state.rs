@@ -35,8 +35,8 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use compositor_config::{Bind, Config, Gaps, WorkspaceRule};
 
 use crate::dispatch::{
-    Direction, Dispatcher, FullscreenMode, GroupMember, Locking, MonitorTarget, Move,
-    WorkspaceOption, WorkspaceTarget,
+    Direction, Dispatcher, FullscreenMode, GroupMember, Locking, MonitorTarget, Move, Snap,
+    SnapTarget, WorkspaceOption, WorkspaceTarget,
 };
 use crate::dwindle::Dwindle;
 use crate::geometry::{self, Area, overlap, sticks};
@@ -467,6 +467,11 @@ pub struct State {
     /// focus rather than opening behind it where nobody can reach it
     /// ([`State::raise_over_fullscreen`]).
     over_fullscreen: BTreeSet<WindowId>,
+    /// Floating windows snapped by `snapwindow` or a drag to an edge, each
+    /// with where it is snapped and the rectangle it goes back to, in its
+    /// workspace's coordinates as `floating_rects` are. Any other change of
+    /// the window's floating rectangle forgets it ([`State::hold_floating`]).
+    snapped: BTreeMap<WindowId, (Snap, Rect)>,
     /// Each window the focus went to since [`State::take_focus_trail`] was
     /// last asked, in order: `None` where nothing was focused.
     focus_trail: Vec<Option<WindowId>>,
@@ -561,6 +566,7 @@ impl State {
             lifted: BTreeMap::new(),
             history: Vec::new(),
             over_fullscreen: BTreeSet::new(),
+            snapped: BTreeMap::new(),
             focus_trail: Vec::new(),
             names: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -904,6 +910,210 @@ impl State {
             };
         }
         Some(Rect::new(x, y, width, height))
+    }
+
+    /// Where a floating window is snapped, if it is.
+    #[must_use]
+    pub fn snap_of(&self, window: WindowId) -> Option<Snap> {
+        self.snapped
+            .get(&window)
+            .filter(|_| self.is_floating(window))
+            .map(|(snap, _)| *snap)
+    }
+
+    /// The rectangle a window snapped `snap` takes on `window`'s workspace:
+    /// its floating work area whole, or the left or right half of it (the
+    /// right half takes the odd pixel).
+    #[must_use]
+    pub fn snap_rect(&self, window: WindowId, snap: Snap) -> Option<Rect> {
+        let area = self.float_area(window)?;
+        let half = area.width / 2;
+        Some(match snap {
+            Snap::Maximized => area,
+            Snap::Left => Rect::new(area.x, area.y, half, area.height),
+            Snap::Right => Rect::new(
+                area.x.saturating_add(half),
+                area.y,
+                area.width.saturating_sub(half),
+                area.height,
+            ),
+        })
+    }
+
+    /// `snapwindow` on `window`. A tiled window is floated first, with the
+    /// rectangle `togglefloating` would give it to go back to.
+    ///
+    /// # Errors
+    ///
+    /// A window this state does not have.
+    pub fn snap_window(
+        &mut self,
+        window: WindowId,
+        target: SnapTarget,
+    ) -> Result<Vec<Change>, Error> {
+        if !self.windows.contains_key(&window) {
+            return Err(Error::UnknownWindow(window));
+        }
+        Ok(self.run(|state| state.snap_by(window, target)))
+    }
+
+    fn snap_by(&mut self, window: WindowId, target: SnapTarget) -> Vec<Change> {
+        let now = self.snap_of(window);
+        let wanted = match (target, now) {
+            (SnapTarget::To(Snap::Left), Some(Snap::Right))
+            | (SnapTarget::To(Snap::Right), Some(Snap::Left))
+            | (SnapTarget::Restore, _)
+            | (SnapTarget::Toggle, Some(Snap::Maximized)) => None,
+            (SnapTarget::To(snap), _) => Some(snap),
+            (SnapTarget::Toggle, _) => Some(Snap::Maximized),
+        };
+        if wanted == now {
+            return Vec::new();
+        }
+        let Some(workspace) = self.workspace_of(window) else {
+            return Vec::new();
+        };
+        let (ox, oy) = self.origin(workspace);
+        let Some(snap) = wanted else {
+            // Back to where it was.
+            let Some((_, back)) = self.snapped.remove(&window) else {
+                return Vec::new();
+            };
+            return self.place_floating(window, back.translate(ox, oy));
+        };
+        let Some(to) = self.snap_rect(window, snap) else {
+            return Vec::new();
+        };
+        let mut changes = Vec::new();
+        // What it goes back to: the rectangle it floats at now, or for a
+        // window snapped already the one it had before that.
+        let back = match self.snapped.get(&window) {
+            Some((_, back)) => *back,
+            None if self.is_floating(window) => match self.floating_rects.get(&window) {
+                Some(rect) => *rect,
+                None => return Vec::new(),
+            },
+            None => {
+                // A tiled window: floated at half its work area, centred,
+                // the rectangle it goes back to.
+                let area = self.float_work_area_of(workspace);
+                let (width, height) = (area.width / 2, area.height / 2);
+                let back = Rect::new(
+                    area.x.saturating_add(area.width.saturating_sub(width) / 2),
+                    area.y
+                        .saturating_add(area.height.saturating_sub(height) / 2),
+                    width.max(1),
+                    height.max(1),
+                );
+                changes.extend(self.float_now(window, back));
+                back.translate(ox.saturating_neg(), oy.saturating_neg())
+            }
+        };
+        changes.extend(self.place_floating(window, to));
+        let _previous = self.snapped.insert(window, (snap, back));
+        changes
+    }
+
+    /// Float a tiled window at `rect`, as [`State::float_window`] does,
+    /// inside a [`State::run`] already.
+    fn float_now(&mut self, window: WindowId, rect: Rect) -> Vec<Change> {
+        let Some(workspace) = self.workspace_of(window) else {
+            return Vec::new();
+        };
+        let (x, y) = self.origin(workspace);
+        self.hold_floating(
+            window,
+            rect.translate(x.saturating_neg(), y.saturating_neg()),
+        );
+        if self.is_floating(window) {
+            return Vec::new();
+        }
+        if let Some(ws) = self.workspaces.get_mut(&workspace) {
+            if ws.fullscreen.is_some_and(|(id, _)| id == window) {
+                ws.fullscreen = None;
+            }
+            ws.tiling.remove(window);
+            ws.floating.push(window);
+        }
+        vec![Change::Floating {
+            window,
+            floating: true,
+        }]
+    }
+
+    /// A snapped window a drag has begun to move: it goes back to the size
+    /// it had before it was snapped, under the pointer now at `pointer`,
+    /// held at the same fraction of its width as the snapped window was
+    /// grabbed at `grabbed`, and as far below its top (within its height)
+    /// -- as a floating window manager lets go of a maximized window dragged
+    /// by its title bar. Nothing for a window that is not snapped.
+    pub fn unsnap_under(
+        &mut self,
+        window: WindowId,
+        grabbed: (i64, i64),
+        pointer: (i64, i64),
+    ) -> Vec<Change> {
+        if self.snap_of(window).is_none() {
+            return Vec::new();
+        }
+        let Some(workspace) = self.workspace_of(window) else {
+            return Vec::new();
+        };
+        let (ox, oy) = self.origin(workspace);
+        let Some(now) = self
+            .floating_rects
+            .get(&window)
+            .map(|rect| rect.translate(ox, oy))
+        else {
+            return Vec::new();
+        };
+        let Some((_, back)) = self.snapped.get(&window).copied() else {
+            return Vec::new();
+        };
+        let across = grabbed.0.saturating_sub(now.x).clamp(0, now.width.max(1));
+        let x = pointer
+            .0
+            .saturating_sub(across.saturating_mul(back.width) / now.width.max(1));
+        let down = grabbed
+            .1
+            .saturating_sub(now.y)
+            .clamp(0, back.height.saturating_sub(1).max(0));
+        let y = pointer.1.saturating_sub(down);
+        let rect = Rect::new(x, y, back.width, back.height);
+        self.run(|state| {
+            let _snapped = state.snapped.remove(&window);
+            state.place_floating(window, rect)
+        })
+    }
+
+    /// Where a floating window dragged with the pointer at `pointer` would
+    /// snap when dropped: maximized at a monitor's top edge, a half at its
+    /// left or right edge, within `EDGE` pixels -- but not at an edge
+    /// another monitor continues past, where the pointer goes on to that
+    /// monitor instead.
+    #[must_use]
+    pub fn edge_snap_at(&self, pointer: (i64, i64)) -> Option<Snap> {
+        const EDGE: i64 = 8;
+        let (px, py) = pointer;
+        let inside = |x: i64, y: i64| {
+            self.monitors().any(|m| {
+                x >= m.rect.x && x < m.rect.right() && y >= m.rect.y && y < m.rect.bottom()
+            })
+        };
+        let monitor = self.monitors().find(|m| {
+            px >= m.rect.x && px < m.rect.right() && py >= m.rect.y && py < m.rect.bottom()
+        })?;
+        let rect = monitor.rect;
+        if py < rect.y.saturating_add(EDGE) && !inside(px, rect.y.saturating_sub(1)) {
+            return Some(Snap::Maximized);
+        }
+        if px < rect.x.saturating_add(EDGE) && !inside(rect.x.saturating_sub(1), py) {
+            return Some(Snap::Left);
+        }
+        if px >= rect.right().saturating_sub(EDGE) && !inside(rect.right(), py) {
+            return Some(Snap::Right);
+        }
+        None
     }
 
     /// A workspace's fullscreen window and its mode.
@@ -1279,6 +1489,7 @@ impl State {
             let _rect = state.floating_rects.remove(&window);
             let _lifted = state.lifted.remove(&window);
             let _over = state.over_fullscreen.remove(&window);
+            let _snapped = state.snapped.remove(&window);
             // `master:focus_master_on_close`: the focus goes to the master
             // rather than to whatever the history has next, which is what
             // `getNextCandidate` does with the option on.
@@ -1375,6 +1586,10 @@ impl State {
             Dispatcher::SetFloating => state.set_floating(true),
             Dispatcher::SetTiled => state.set_floating(false),
             Dispatcher::CenterWindow { whole } => state.center_window(whole),
+            Dispatcher::SnapWindow(target) => state
+                .focused_window()
+                .map(|window| state.snap_by(window, target))
+                .unwrap_or_default(),
             Dispatcher::Pin => state.pin(),
             Dispatcher::Pseudo => state.toggle_pseudo(),
             Dispatcher::ResizeActive(by) => state.resize_active(&by),
@@ -2987,6 +3202,7 @@ impl State {
             .unwrap_or_default()
             .hold(rect);
         let _previous = self.floating_rects.insert(window, held);
+        let _snapped = self.snapped.remove(&window);
     }
 
     /// `min_size`, `max_size`, `no_max_size` and `keep_aspect_ratio` for

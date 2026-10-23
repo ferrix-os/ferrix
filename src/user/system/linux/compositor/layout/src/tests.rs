@@ -3,8 +3,8 @@ use compositor_config::{Config, Gaps, NoSources, parse};
 use crate::Group;
 use crate::{
     Change, Corner, Direction, Dispatcher, Error, ForceSplit, FullscreenMode, Layout, Limits,
-    Monitor, MonitorId, Move, NewStatus, Orientation, Rect, Settings, State, WindowId, WorkspaceId,
-    WorkspaceTarget,
+    Monitor, MonitorId, Move, NewStatus, Orientation, Rect, Settings, Snap, SnapTarget, State,
+    WindowId, WorkspaceId, WorkspaceTarget,
 };
 
 /// No gaps and no border, so slots and client rectangles coincide.
@@ -4447,4 +4447,108 @@ fn a_new_floating_window_stays_out_of_a_bars_strip() {
         .new_floating_place(WindowId(1), (4000, 3000), None)
         .expect("a place");
     assert_eq!(huge, r(10, 50, 1900, 1020));
+}
+
+/// `snapwindow` maximizes a floating window to its work area, halves it,
+/// and gives back the rectangle it had; the other half restores, as
+/// `SUPER+Left` on a window tiled right does.
+#[test]
+fn snapwindow_maximizes_halves_and_restores() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1]);
+    let _floated = state
+        .float_window(WindowId(1), r(100, 100, 640, 480))
+        .unwrap();
+    focus(&mut state, 1);
+
+    let _snapped = dispatch(&mut state, "snapwindow", "max");
+    assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
+    assert_eq!(state.snap_of(WindowId(1)), Some(Snap::Maximized));
+
+    // From maximized to a half keeps the rectangle to go back to.
+    let _snapped = dispatch(&mut state, "snapwindow", "left");
+    assert_eq!(rects(&state), [(1, r(0, 0, 960, 1080))]);
+    let _snapped = dispatch(&mut state, "snapwindow", "right");
+    assert_eq!(
+        rects(&state),
+        [(1, r(100, 100, 640, 480))],
+        "left then right restores"
+    );
+    let _snapped = dispatch(&mut state, "snapwindow", "right");
+    assert_eq!(rects(&state), [(1, r(960, 0, 960, 1080))], "the right half");
+    let _snapped = dispatch(&mut state, "snapwindow", "left");
+    assert_eq!(
+        rects(&state),
+        [(1, r(100, 100, 640, 480))],
+        "right then left restores"
+    );
+    assert_eq!(state.snap_of(WindowId(1)), None);
+
+    // Toggle: maximized, then back.
+    let _snapped = dispatch(&mut state, "snapwindow", "toggle");
+    assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
+    let _snapped = dispatch(&mut state, "snapwindow", "toggle");
+    assert_eq!(rects(&state), [(1, r(100, 100, 640, 480))]);
+
+    // Moving a snapped window by any other means forgets the snap.
+    let _snapped = dispatch(&mut state, "snapwindow", "max");
+    let _moved = dispatch(&mut state, "moveactive", "10 0");
+    assert_eq!(state.snap_of(WindowId(1)), None);
+
+    assert!(state.dispatch_str("snapwindow", "sideways").is_err());
+}
+
+/// A tiled window asked to snap is floated, and restoring it leaves it
+/// floating at half its work area, centred.
+#[test]
+fn snapwindow_floats_a_tiled_window() {
+    let mut state = setup(BARE);
+    open(&mut state, &[1, 2]);
+    focus(&mut state, 1);
+    let _snapped = dispatch(&mut state, "snapwindow", "max");
+    assert!(state.is_floating(WindowId(1)));
+    assert_eq!(state.snap_of(WindowId(1)), Some(Snap::Maximized));
+    let _snapped = state.snap_window(WindowId(1), SnapTarget::Restore).unwrap();
+    let one = rects(&state)
+        .into_iter()
+        .find(|(id, _)| *id == 1)
+        .unwrap()
+        .1;
+    assert_eq!(one, r(480, 270, 960, 540));
+}
+
+/// A snapped window dragged away takes its old size back under the
+/// pointer, at the same fraction of its width.
+#[test]
+fn a_snapped_window_dragged_away_takes_its_old_size_under_the_pointer() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1]);
+    let _floated = state
+        .float_window(WindowId(1), r(100, 100, 640, 480))
+        .unwrap();
+    let _snapped = state
+        .snap_window(WindowId(1), SnapTarget::To(Snap::Maximized))
+        .unwrap();
+    // The pointer three quarters across the maximized window's title.
+    // Grabbed three quarters across the maximized window's title and
+    // moved 20 pixels down.
+    let _unsnapped = state.unsnap_under(WindowId(1), (1440, 10), (1440, 30));
+    assert_eq!(rects(&state), [(1, r(960, 20, 640, 480))]);
+    assert_eq!(state.snap_of(WindowId(1)), None);
+    // A window that is not snapped is left alone.
+    assert!(state.unsnap_under(WindowId(1), (0, 0), (0, 0)).is_empty());
+}
+
+/// The top edge of a monitor maximizes, its sides halve, and an edge
+/// another monitor continues past does neither.
+#[test]
+fn a_drag_to_a_monitor_edge_says_where_it_would_snap() {
+    let mut state = setup(BARE);
+    let _added = state.add_monitor(monitor(M2, 1920, 0, 1920, 1080)).unwrap();
+    assert_eq!(state.edge_snap_at((900, 0)), Some(Snap::Maximized));
+    assert_eq!(state.edge_snap_at((0, 500)), Some(Snap::Left));
+    assert_eq!(state.edge_snap_at((3839, 500)), Some(Snap::Right));
+    assert_eq!(state.edge_snap_at((1919, 500)), None, "M2 continues past");
+    assert_eq!(state.edge_snap_at((1920, 500)), None, "M1 continues past");
+    assert_eq!(state.edge_snap_at((900, 500)), None);
 }
