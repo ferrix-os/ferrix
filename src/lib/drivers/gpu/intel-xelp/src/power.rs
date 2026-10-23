@@ -90,6 +90,10 @@ pub struct Sample {
     pub energy_raw: u32,
     /// `PKG_ENERGY_UNIT`: counts are 1/2^unit joules.
     pub energy_unit: u32,
+    /// `SA_PERF_STATUS_0_0_0_MCHBAR_PC`: the memory controller's clock
+    /// now (see [`rps::qclk_mhz`]), so a log shows which QGV point the
+    /// memory runs at while the GT works.
+    pub sa_perf_status: u32,
 }
 
 /// What may hold the GT below its request, read once: the firmware's
@@ -360,6 +364,7 @@ impl Rps {
             rc6_count: mmio.read32(gr::GEN6_GT_GFX_RC6.offset()),
             energy_raw: mmio.read32(rps::PCU_PACKAGE_ENERGY_STATUS.offset()),
             energy_unit: unit,
+            sa_perf_status: mmio.read32(rps::SA_PERF_STATUS_0_0_0_MCHBAR_PC.offset()),
         }
     }
 }

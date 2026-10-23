@@ -1373,3 +1373,13 @@ fn ggtt_space() {
     assert_eq!(small.alloc(4096, 4096), Err(SpaceError::Full));
     assert_eq!(small.used_bytes(), 8192);
 }
+
+/// `qclk_mhz`: the ratio in bits 9:2 times 100 MHz with bit 10 set, else
+/// times 133.33 MHz.
+#[test]
+fn qclk_from_sa_perf_status() {
+    use crate::rps::qclk_mhz;
+    assert_eq!(qclk_mhz(24 << 2 | 1 << 10), 2400);
+    assert_eq!(qclk_mhz(24 << 2), 3200);
+    assert_eq!(qclk_mhz(0), 0);
+}

@@ -23,6 +23,25 @@ pub const MCHBAR_MIRROR_BASE_SNB: u32 = 0x14_0000;
 pub const GEN6_RP_STATE_CAP: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5998);
 /// `GEN10_FREQ_INFO_REC`.
 pub const GEN10_FREQ_INFO_REC: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5ef0);
+/// `SA_PERF_STATUS_0_0_0_MCHBAR_PC` (`intel_mchbar_regs.h`): the system
+/// agent's clocks now, the memory controller's (QCLK) among them.
+pub const SA_PERF_STATUS_0_0_0_MCHBAR_PC: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5918);
+/// `DG1_QCLK_RATIO_MASK`.
+pub const QCLK_RATIO_MASK: u32 = crate::reg::genmask(9, 2);
+/// `DG1_QCLK_REFERENCE`: set, the ratio counts 100 MHz; clear, 133.33 MHz.
+pub const QCLK_REFERENCE: u32 = 1 << 10;
+
+/// The memory controller's clock in MHz from `SA_PERF_STATUS`, as
+/// `dg1_mchbar_read_qgv_point_info` reckons it (ratio times reference).
+#[must_use]
+pub const fn qclk_mhz(sa_perf_status: u32) -> u32 {
+    let ratio = crate::reg::field_get(QCLK_RATIO_MASK, sa_perf_status);
+    if sa_perf_status & QCLK_REFERENCE != 0 {
+        ratio * 100
+    } else {
+        ratio * 400 / 3
+    }
+}
 /// `RPE_MASK`, in `GEN10_FREQ_INFO_REC`.
 pub const RPE_MASK: u32 = genmask(15, 8);
 /// `GEN9_FREQ_SCALER`: hardware units are 50/3 MHz.
