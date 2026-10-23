@@ -928,6 +928,43 @@ more.
   value, so a handler's assignment or a binding still reaches it. A
   `transitions` demo; the README also shows it played, as an animated
   PNG the PNG writer now writes. 62 host tests.
-* Next: U6, `Fx.Controls` and `Theme`. The window gets a
-  `test-compositor` row with the viewer's port (U8), where it first runs
-  on Ferrix.
+* **U6a built** (2026-10-23): `Fx.Controls` and `Theme`, first half.
+  `import Fx.Controls` brings `Button`, `CheckBox`, `RadioButton`,
+  `Switch`, `Label`, `ProgressBar`, `TabBar` and `GroupBox`, each a
+  `.tole` file inside the compiler; one style, every token of it in the
+  `Theme` singleton: the lode viewer's palette in light and dark, which
+  `Theme.dark` switches. A radio button is an outlined ring unchecked
+  and a filled one checked (customer: the viewer's grey dot read as
+  disabled). The compiler gained modules, `singleton`, `property alias`
+  (the aliased item's own cell, so a change either way is seen both
+  ways), `default property alias` for where a use's children go, and
+  parameters with defaults; a `controls` demo is drawn light and dark.
+  Departures: a file sees its own declarations, then what it imports,
+  then the rest of the program's, so an app's own `Button` and the
+  controls' never meet; from Rust a singleton is
+  `fx_controls::Theme::instance(&mut ui)` (`Ui::global` underneath)
+  rather than `ui.global::<Theme>()`; `TabBar` takes its titles as
+  `tabs: list<string>` rather than `TabButton` children, since a child
+  cannot learn its index; radio buttons are exclusive by
+  `Exclusive.checked: checked` among siblings rather than Qt's
+  `autoExclusive`; and a `Behavior` does not animate what changes before
+  the clock's first tick after it was made, as QML's do not before a
+  component completes. 68 host tests.
+* **U6b built** (2026-10-23): `TextField` and `TextArea` on two
+  primitives, `TextInput` (one line, scrolled to keep the caret in view)
+  and `TextEdit` (lines, broken between words at its width): caret,
+  selection by pointer (double click a word, triple the line) and keys,
+  Control word moves, Ctrl+A/C/X/V. A letter is typed only with neither
+  Control nor Alt held, so Ctrl+V never types `v` (the viewer's bug). In
+  a window the clipboard is the desktop's through
+  `ext_data_control_v1`, as the viewer copies; a paste reads the
+  selection through a pipe, waiting at most half a second, or takes the
+  window's own copy while that is the selection. A password shows dots
+  and is never copied. `MouseArea` gained `doubleClicked`,
+  `positionChanged` and `cursorShape`. Departures: positions are byte
+  offsets, not Qt's UTF-16 indices; no undo, no input methods, and the
+  caret does not blink yet; a `TextArea` grows with its text or scrolls
+  by the wheel, but does not yet follow the caret. 73 host tests.
+* Next: U6c, `Popup`, `Menu`, `ComboBox`, `ScrollBar`, `SplitView` and
+  a file chooser. The window gets a `test-compositor` row with the
+  viewer's port (U8), where it first runs on Ferrix.
