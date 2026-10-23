@@ -759,7 +759,7 @@ fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> 
         .get(usize::from(index))
         .and_then(Option::as_ref)?;
     let started = (|| {
-        let job = drivers.job.create_child().ok()?;
+        let job = drivers.job.create_sealed_child().ok()?;
         let process = pending::create_process(&job, image, "drvupdated").ok()?;
         let (near, far) = channel::create(Kernel).ok()?;
         process.start(far.into_owned()).ok()?;
@@ -1514,7 +1514,7 @@ fn copy_image(given: &Vmo<Kernel>, length: u64) -> Option<Image> {
 /// and gone again -- or the answer is no -- before anything is stopped (the certification
 /// consultant's C7, 2026-10-07).
 fn loads(job: &Job<Kernel>, image: &Vmo<Kernel>, program: &str) -> bool {
-    let Ok(scratch) = job.create_child() else {
+    let Ok(scratch) = job.create_sealed_child() else {
         return false;
     };
     let loaded = match pending::create_process(&scratch, image, program) {
@@ -1893,7 +1893,7 @@ fn start_keeper(
     program: &str,
     worker: &Vmo<Kernel>,
 ) -> Result<Launched, ()> {
-    let child_job = job.create_child().map_err(|_| ())?;
+    let child_job = job.create_sealed_child().map_err(|_| ())?;
     let own = child_job
         .duplicate(Requested::Exactly(KEEPER_JOB_RIGHTS))
         .map_err(|_| ())?;
@@ -2383,7 +2383,7 @@ fn launch<const N: usize>(
     start: &[u8],
     handles: [OwnedHandle<Kernel>; N],
 ) -> Result<Launched, ()> {
-    let child_job = job.create_child().map_err(|_| ())?;
+    let child_job = job.create_sealed_child().map_err(|_| ())?;
     launch_in(child_job, image, program, port, key, start, handles)
 }
 

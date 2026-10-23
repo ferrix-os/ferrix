@@ -1709,6 +1709,21 @@ with a check or a kernel citation, that a process in a devmgr driver job
 cannot leave it (a `cgroup.procs` move), since `EMPTY` on the keeper's
 job proves nothing about a process moved out (3198 S1).
 
+**S1, answered (2026-10-23).** It could: as root in the gate's image,
+`echo <worker pid> > /sys/fs/cgroup/cgroup.procs` moved `intel-gt` from
+`drivers.slice/job-…/job-…` to `/` (F-92, on main for every driver). The
+customer chose a small kernel fix ("do a small kernel fix", then "full fix
+pls"; consultant OK IF (1)-(9), ledger 3233): sealed jobs (`docs/CGROUPS.md`
+§3.3, `H.OBJ.22`, `L.object.248`-`251`, `L.device.54`). Every driver's job
+is sealed, so a process leaves it only by ending and starts nothing outside
+it, and `test-restart --boot intel-keeper` now has root try that move and
+requires `EPERM` (the S1 row). The S1 row's control is `sealed-ctl-moveto`
+(the move refusal removed, FIRED at stage 13's check): the probe cannot
+fire alone, since any change that would free the worker stops the boot at
+the kernel's own checks first (ledger 3269). The worker handing its `IoMapping` over a
+channel to a process outside its tree is not covered by `H.OBJ.22`; step 2
+shows the worker holds no channel but the keeper's (AoU-35, ledger 3233).
+
 Not yet, in §12.8's order:
 
 * **Step 2, the product worker.** `intel` is still one process on every

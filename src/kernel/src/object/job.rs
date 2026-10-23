@@ -97,6 +97,8 @@ pub(crate) enum JobError {
     /// The no-internal-process rule forbids it (`docs/CGROUPS.md` §3.1):
     /// processes beside controllers enabled for the children.
     Internal,
+    /// It, or the job the process is in, is sealed (`L.object.248`).
+    Sealed,
     /// There was no memory for it.
     NoMemory,
 }
@@ -204,6 +206,8 @@ pub(crate) struct Job {
     /// (`docs/OPAQUE-KERNEL.md` §9.2): set only as it is made, by
     /// [`Job::new_child_domain`], and never changed.
     domain: u64,
+    /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
+    sealed: bool,
 }
 
 /// Whose audit budget a new job's refusals are charged to: decided by
@@ -387,8 +391,14 @@ impl Job {
     ///
     /// [`AllocError`].
     pub(crate) fn new_root() -> Result<Arc<Job>, AllocError> {
-        let quota = Quota::new(None)?;
-        fallible::try_arc(Job::bare(None, None, Some(quota), Budget::Own)?)
+        Job::new_root_as(false)
+    }
+
+    /// [`Job::new_root`], sealed as asked.
+    pub(crate) fn new_root_as(sealed: bool) -> Result<Arc<Job>, AllocError> {
+        let mut job = Job::bare(None, None, Some(Quota::new(None)?), Budget::Own)?;
+        job.sealed = sealed;
+        fallible::try_arc(job)
     }
 
     /// The tree's root: a job with no parent and no quota, since nothing is
@@ -430,6 +440,7 @@ impl Job {
             charge: Charge::none(Resource::Objects),
             audit_budget,
             domain: 0,
+            sealed: false,
         })
     }
 
@@ -440,12 +451,14 @@ impl Job {
         name: Option<Box<str>>,
         budget: Budget,
         domain: u64,
+        sealed: bool,
     ) -> Result<Arc<Job>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let quota = Quota::new(self.quota.as_ref())?;
         let mut child = Job::bare(Some(Arc::clone(self)), name, Some(quota), budget)?;
         child.charge = charge;
         child.domain = domain;
+        child.sealed = sealed || self.sealed;
         fallible::try_arc(child)
     }
 
@@ -456,7 +469,7 @@ impl Job {
     ///
     /// [`JobError::Killed`], [`JobError::NoMemory`].
     pub(crate) fn new_child(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
-        self.new_child_in(0)
+        self.new_child_in(0, false)
     }
 
     /// [`Job::new_child`], made a speculation domain of its own: the switch
@@ -468,7 +481,45 @@ impl Job {
     ///
     /// As [`Job::new_child`].
     pub(crate) fn new_child_domain(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
-        self.new_child_in(NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed))
+        self.new_child_in(NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed), false)
+    }
+
+    /// [`Job::new_child`], a speculation domain if `domain`, sealed if
+    /// `sealed` (`job_create`'s options).
+    pub(crate) fn new_child_as(
+        self: &Arc<Job>,
+        domain: bool,
+        sealed: bool,
+    ) -> Result<Arc<Job>, JobError> {
+        let domain = if domain {
+            NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed)
+        } else {
+            0
+        };
+        self.new_child_in(domain, sealed)
+    }
+
+    /// Whether a seal refuses moving a process from `from` to `to`
+    /// (`L.object.248`); `placing` is `process_create`'s placement of one
+    /// not yet started, which none refuses.
+    pub(crate) fn seal_refuses(from: &Job, to: &Job, placing: bool) -> bool {
+        !placing && (from.sealed || to.sealed)
+    }
+
+    /// Whether it is sealed.
+    pub(crate) fn sealed(&self) -> bool {
+        self.sealed
+    }
+
+    /// Whether a member of `self` may start a process in `to` (`L.object.249`,
+    /// `251`): a sealed job's members only within its tree; and, but by
+    /// native `process_create`, nobody into a sealed job from outside it.
+    pub(crate) fn may_start_in(&self, to: &Job, native: bool) -> bool {
+        if self.sealed {
+            self.contains(to)
+        } else {
+            native || !to.sealed
+        }
     }
 
     /// The speculation domain it is: zero for none.
@@ -477,8 +528,8 @@ impl Job {
     }
 
     /// [`Job::new_child`] as speculation domain `domain`, zero for none.
-    fn new_child_in(self: &Arc<Job>, domain: u64) -> Result<Arc<Job>, JobError> {
-        let child = self.bare_child(None, Budget::Parents, domain)?;
+    fn new_child_in(self: &Arc<Job>, domain: u64, sealed: bool) -> Result<Arc<Job>, JobError> {
+        let child = self.bare_child(None, Budget::Parents, domain, sealed)?;
         let mut members = self.state.lock();
         if members.killed {
             return Err(JobError::Killed);
@@ -504,9 +555,19 @@ impl Job {
         name: &str,
         budget: Budget,
     ) -> Result<Arc<Job>, JobError> {
+        self.new_named_child_as(name, budget, false)
+    }
+
+    /// [`Job::new_named_child`], sealed as asked: `drivers.slice`.
+    pub(crate) fn new_named_child_as(
+        self: &Arc<Job>,
+        name: &str,
+        budget: Budget,
+        sealed: bool,
+    ) -> Result<Arc<Job>, JobError> {
         self.room_for_a_child()?;
         let name_held = fallible::try_boxed_str(name)?;
-        let child = self.bare_child(Some(name_held), budget, 0)?;
+        let child = self.bare_child(Some(name_held), budget, 0, sealed)?;
         let mut members = self.state.lock();
         if members.killed {
             return Err(JobError::Killed);

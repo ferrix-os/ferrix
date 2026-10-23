@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 142 packages, 7393 elements, 217 relations. Model digest `441752f62e652693`.
+26 files, 142 packages, 7422 elements, 217 relations. Model digest `f2fe2020cb70f00e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -277,8 +277,9 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.16` | The peer of a destroyed channel end shall observe PEER_CLOSED from the moment the close returns, and what the destroyed end held shall be freed. | After one end of a channel holding a queued VMO is closed, a read and a write on the survivor are refused PEER_CLOSED, 2 of 2, and 0 frames are leaked. | `O.CAPABILITY, O.QUOTA` |
 | `H.OBJ.17` | A port registration shall queue exactly one packet, with its key and the asserted signals it asked for, when one of them is first asserted, at once if one already is. | A registration does not fire before its signal, fires once on the message that asserts it and not on a second, fires at once for a state already true, and fires when the peer closes for PEER_CLOSED, each packet with its key. | `G.7, O.CAPABILITY` |
 | `H.OBJ.18` | Every result of channel_write_read answered by the fast path shall be a result the general path gives in the same circumstances, and the fast path shall bypass no filter, audit record or speculation barrier. x86-64 only, behind ferrix.fastpath. | ipc-equiv's transcripts with the fast path on and off are the same line for line, with trips taken on and no counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path cases hold both boots to the general path's results (the `fastcase` line); a filtered call is refused with the filter's errno. | `G.7, O.CAPABILITY` |
+| `H.OBJ.22` | A process in a sealed job shall leave that job's tree only by ending and shall start no process outside it; a job made inside a sealed job shall be sealed, and no job shall be unsealed. | Stage 13's cgroupfs check: root's moves out of, within and into a sealed tree are refused EPERM and every process stays; a sealed member's starts outside its tree are refused; jobs made inside a sealed one read as sealed; and every job in drivers.slice reads as sealed (the sysfs check); test-restart --boot intel-keeper's root move of the GPU's worker out of its driver job is refused (INTEL-GPU.md §12.11 S1). | `G.8, O.QUOTA, O.CAPABILITY` |
 
-18 requirements.
+19 requirements.
 
 ### Scheduling
 
@@ -4052,6 +4053,10 @@ flowchart LR
 | `L.object.131` | `theAnswerInRegisters` | — | — | — |
 | `L.object.132` | `aTrustingWaitIsWokenByWhatEndsIt` | — | — | — |
 | `L.object.247` | `aPortWaitTrustsItsWakes` | — | — | — |
+| `L.object.248` | `aSealedJobRefusesMoves` | — | — | — |
+| `L.object.249` | `aSealedJobsStartsStayInside` | — | — | — |
+| `L.object.250` | `sealedAsMade` | — | — | — |
+| `L.object.251` | `aSealedMemberCreatesInside` | — | — | — |
 | `L.object.140` | `anEndsWordIsItsInbox` | — | — | — |
 | `L.object.141` | `aWakerFencesTheWordBeforeItsWake` | — | — | — |
 | `L.object.164` | `aParkIsSetBesideAnEmptyInbox` | — | — | — |
@@ -4690,6 +4695,7 @@ flowchart LR
 | `L.device.51` | `powerNodeOnlyWhereTheTableSays` | — | — | — |
 | `L.device.52` | `powerClaimOneHolderNoCopy` | — | — | — |
 | `L.device.53` | `powerNodeHasNothingElse` | — | — | — |
+| `L.device.54` | `driversSliceIsSealed` | — | — | — |
 | `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.armv7a.3` | `nothingInsideADomain` | — | — | — |

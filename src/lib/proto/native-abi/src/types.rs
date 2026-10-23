@@ -133,6 +133,16 @@ pub const UNLIMITED: u64 = u64::MAX;
 /// §9.2). Only as the job is made; any other bit is `INVALID_ARGS`.
 pub const JOB_SPECULATION_DOMAIN: u64 = 1;
 
+/// `job_create`'s option: seal the new job (`H.OBJ.22`, `docs/CGROUPS.md`
+/// §3.3). No cgroupfs write moves a process out of, into or within a sealed
+/// job's tree, whoever writes; its members start processes only in their
+/// own job or beneath it (`clone3`'s `CLONE_INTO_CGROUP` answers `EPERM`,
+/// `process_create` into a job outside the tree `ACCESS_DENIED`); and every
+/// job made inside it is sealed too. The authority is the parent's
+/// `MANAGE`, as for any child; nothing unseals one. devmgr seals each
+/// driver's job, so the driver cannot leave the job whose kill ends it.
+pub const JOB_SEALED: u64 = 2;
+
 /// [`crate::nr::NativeCall::AuditRead`]'s `which`: the high-value ring --
 /// grants, ends, device events, changes and the system's records.
 pub const AUDIT_HIGH: u64 = 0;

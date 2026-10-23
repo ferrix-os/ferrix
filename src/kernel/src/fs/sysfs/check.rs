@@ -202,6 +202,7 @@ pub(crate) fn run() -> Checked<Report> {
     check_refusals(&mut harness)?;
     check_dmi(&mut harness)?;
     check_cgroup_mount_point(&harness)?;
+    check_drivers_sealed()?;
 
     let root = ns
         .resolve(&harness.ctx, None, CHECK_AT, true)
@@ -209,6 +210,43 @@ pub(crate) fn run() -> Checked<Report> {
     ns.unmount(&root).map_err(|_| "sysfs did not unmount")?;
     let _ = ns.rmdir(&harness.ctx, None, CHECK_AT);
     Ok(harness.report)
+}
+
+/// `drivers.slice` is sealed, and so is every job beneath it: devmgr's and
+/// each driver's, once devmgr has started.
+///
+/// Verifies: L.device.54
+fn check_drivers_sealed() -> Checked<()> {
+    let children = crate::object::job::root()
+        .children()
+        .map_err(|_| "no memory to list the root job's children")?;
+    let Some(drivers) = children
+        .into_iter()
+        .find(|job| job.name() == Some("drivers.slice"))
+    else {
+        return Ok(());
+    };
+    let mut pending = alloc::vec![drivers];
+    let mut seen = 0_usize;
+    while let Some(job) = pending.pop() {
+        if !job.sealed() {
+            return Err("a job in drivers.slice is not sealed");
+        }
+        seen += 1;
+        if seen > 4096 {
+            return Err("drivers.slice holds more jobs than the check walks");
+        }
+        let below = job
+            .children()
+            .map_err(|_| "no memory to list a driver job's children")?;
+        pending
+            .try_reserve(below.len())
+            .map_err(|_| "no memory to walk drivers.slice")?;
+        pending.extend(below);
+    }
+    // Under `ferrix.devmgr=init` init has not started devmgr yet, and
+    // drivers.slice may be all there is to read.
+    Ok(())
 }
 
 /// Every name in the tree, from the root down.

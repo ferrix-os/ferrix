@@ -528,6 +528,11 @@ impl Process {
             if Arc::ptr_eq(&membership, to) {
                 return Ok(());
             }
+            // A started process leaves or enters a sealed job by no move
+            // (`L.object.248`); `process_create` places one not yet started.
+            if Job::seal_refuses(&membership, to, checked) {
+                return Err(JobError::Sealed);
+            }
             let tasks = self.tasks.load(Ordering::Acquire);
             if checked {
                 quota::charge(to.quota_index(), Resource::Tasks, tasks)

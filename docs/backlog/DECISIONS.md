@@ -15,6 +15,14 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   against K4 before any code, ledger 3156 (6)); the keeper's TDR waits two
   seconds.
 
+* **2026-10-23 (customer, through the coordinator)** **A sealed job, the
+  full fix** ("do a small kernel fix", then "full fix pls"): a job made
+  sealed, or inside a sealed one, keeps its processes -- no cgroupfs move
+  out, in or within, root's included -- and its members start nothing
+  outside its tree; `drivers.slice` and every driver's job are sealed. About
+  40 to 60 kernel lines, under the consultant's OK IF (1)-(9), ledger 3233,
+  closing F-92 (`docs/CGROUPS.md` §3.3; `docs/INTEL-GPU.md` §12.11 S1).
+
 * **2026-10-23 (customer, through the coordinator)** **The power core
   (`docs/POWERCTL.md`) is a standing interface, with a 48 A / 23 A row.**
   Asked "Power limits (consultant OK IF): accept about +500 kernel lines?

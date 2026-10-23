@@ -140,6 +140,18 @@ impl<S: Syscall> Job<S> {
         self.create_with(types::JOB_SPECULATION_DOMAIN)
     }
 
+    /// `job_create` with [`types::JOB_SEALED`]: a job inside this one that no
+    /// cgroupfs write moves a process into or out of, whoever writes, and
+    /// whose own children are sealed too. What devmgr makes each driver's
+    /// job, so that its kill reaches everything the driver started.
+    ///
+    /// # Errors
+    ///
+    /// As [`Job::create_child`].
+    pub fn create_sealed_child(&self) -> Result<Job<S>, Error> {
+        self.create_with(types::JOB_SEALED)
+    }
+
     /// `job_create` with `options`.
     fn create_with(&self, options: u64) -> Result<Job<S>, Error> {
         let value = Call::new(nr::JOB_CREATE)

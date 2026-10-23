@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 664 | 397 | 138 | **129** |
-| aarch64 | debug | 648 | 314 | 158 | **176** |
-| armv7a | debug | 1001 | 417 | 352 | **232** |
+| x86_64 | debug | 663 | 396 | 138 | **129** |
+| aarch64 | debug | 647 | 313 | 158 | **176** |
+| armv7a | debug | 1000 | 416 | 352 | **232** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,13 +16,13 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**664** unreached statements, debug profile.
+**663** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 178 | 27% |
 | Reached only when the kernel is stopping | 138 | 21% |
-| Reached only when something has already failed | 72 | 11% |
+| Reached only when something has already failed | 71 | 11% |
 | Run, and credited to another line | 9 | 1% |
 | Hardware the measured machine does not have | 138 | 21% |
 | Needs a test | 129 | 19% |
@@ -66,16 +66,16 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### x86_64: Reached only when something has already failed — 72 statements
+### x86_64: Reached only when something has already failed — 71 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 10 | `item` | `syscall/native.rs` |
-| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `core` | `iommu.rs` |
 | 8 | `core` | `user/space.rs` |
+| 7 | `item` | `discovery/devmgr.rs` |
 | 6 | `core` | `object/port.rs` |
 | 4 | `core` | `object/pin.rs` |
 | 4 | `core` | `sched/queue.rs` |
@@ -162,7 +162,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 292 statements
+### x86_64: argued line by line — 291 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -210,7 +210,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
 | `discovery/devmgr.rs` | 1053 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1057 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1068 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
@@ -303,7 +302,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `mm.rs` | 1900-1903 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `mm.rs` | 1913-1919 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
-| `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
+| `object/job.rs` | 138 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 673 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
 | `object/pin.rs` | 696 | Hardware the measured machine does not have | A pin closed whose device may still reach its pages: one into an untranslated domain, or one its domain would not unpin. Every PCI function the measured machine pins for sits behind a translating unit (VT-d on x86-64's q35, the SMMUv3 on AArch64's `virt`), whose unpin succeeds, so the frames are freed; ARMv7-A, whose `virt` has no SMMU, reaches this line. |
 | `object/pin.rs` | 746-747, 752 | Reached only when something has already failed | A dead driver's pin whose frames could not all be shared into the quarantine: `mm::share_frame` fails only for a frame the allocator does not count as one order-0 allocation, and drivers pin only VMOs, whose frames are allocator order-0 frames. Were one not, the pin is kept for good, mapped and held, never freed -- which is what the branch does. |
@@ -312,9 +311,9 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `object/port.rs` | 280 | Reached only when something has already failed | A packet taken by a wait whose buffer faulted, put back when the queue is at capacity and cannot grow. Its slot is taken meanwhile only if a user packet was queued between the take and the put-back, and then the reserve must also fail; the object edge check puts packets back into a queue with room (`object/edge_check.rs`). The line after the loss is its return. |
 | `object/port.rs` | 485 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
 | `object/port.rs` | 487-488 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
-| `object/process.rs` | 908 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
-| `object/process.rs` | 933 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
-| `object/process.rs` | 1075 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
+| `object/process.rs` | 913 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
+| `object/process.rs` | 938 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
+| `object/process.rs` | 1080 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
 | `power.rs` | 126 | Unreachable on the measured architecture | `/chosen/bootargs`, read only when the loader handed over a device tree; the x86-64 loader hands over ACPI and never a device tree. |
 | `sched/mod.rs` | 1393 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
 | `sched/mod.rs` | 1630 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
@@ -349,12 +348,12 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `syscall/native.rs` | 305 | Reached only when something has already failed | The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality. |
 | `syscall/native.rs` | 527-528 | Run, and credited to another line | Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors. |
 | `syscall/native.rs` | 1320-1321 | Reached only when something has already failed | The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory. |
-| `syscall/native.rs` | 1999 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
-| `syscall/native.rs` | 2065 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
-| `syscall/native.rs` | 2068 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
-| `syscall/native.rs` | 2078 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2084-2085 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2614 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
+| `syscall/native.rs` | 1998 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
+| `syscall/native.rs` | 2064 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
+| `syscall/native.rs` | 2067 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
+| `syscall/native.rs` | 2077 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2083-2084 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2613 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture cannot read a system call trap's registers. On x86-64 only `int $0x80` classifies as one, and its gate is not open to ring 3. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An invalid opcode or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the stage 3 fault check, through the arm above these. |
@@ -383,13 +382,13 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**648** unreached statements, debug profile.
+**647** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 104 | 16% |
 | Reached only when the kernel is stopping | 120 | 19% |
-| Reached only when something has already failed | 80 | 12% |
+| Reached only when something has already failed | 79 | 12% |
 | Run, and credited to another line | 10 | 2% |
 | Hardware the measured machine does not have | 158 | 24% |
 | Needs a test | 176 | 27% |
@@ -427,15 +426,15 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### aarch64: Reached only when something has already failed — 80 statements
+### aarch64: Reached only when something has already failed — 79 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `core` | `iommu.rs` |
 | 8 | `item` | `syscall/native.rs` |
+| 7 | `item` | `discovery/devmgr.rs` |
 | 7 | `core` | `iommu/smmuv3.rs` |
 | 7 | `core` | `object/port.rs` |
 | 6 | `core` | `user/space.rs` |
@@ -524,7 +523,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 283 statements
+### aarch64: argued line by line — 282 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -597,7 +596,6 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
 | `discovery/devmgr.rs` | 1053 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1057 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1068 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
@@ -681,7 +679,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `mm.rs` | 1917 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `mm.rs` | 1919 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
-| `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
+| `object/job.rs` | 138 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 673 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
 | `object/pin.rs` | 746-747, 752 | Reached only when something has already failed | A dead driver's pin whose frames could not all be shared into the quarantine: `mm::share_frame` fails only for a frame the allocator does not count as one order-0 allocation, and drivers pin only VMOs, whose frames are allocator order-0 frames. Were one not, the pin is kept for good, mapped and held, never freed -- which is what the branch does. |
 | `object/port.rs` | 117 | Reached only when something has already failed | A packet that found no room. The queue's capacity is kept at PORT_CAPACITY plus every registration's and binding's promised packet (`Promise::new` reserves before a registration is accepted), so a packet either kind of limit allows always fits; the count is what would show the accounting broken. |
@@ -690,9 +688,9 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `object/port.rs` | 485 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
 | `object/port.rs` | 487-488 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
 | `object/port.rs` | 490 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
-| `object/process.rs` | 908 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
-| `object/process.rs` | 933 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
-| `object/process.rs` | 1075 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
+| `object/process.rs` | 913 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
+| `object/process.rs` | 938 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
+| `object/process.rs` | 1080 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
 | `sched/mod.rs` | 1393 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
 | `sched/mod.rs` | 1630 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
 | `sched/mod.rs` | 2601-2603 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
@@ -721,10 +719,10 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `syscall/native.rs` | 305 | Reached only when something has already failed | The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality. |
 | `syscall/native.rs` | 526 | Run, and credited to another line | Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy. |
 | `syscall/native.rs` | 1320-1321 | Reached only when something has already failed | The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory. |
-| `syscall/native.rs` | 1999 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
-| `syscall/native.rs` | 2078 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2084-2085 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2614 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
+| `syscall/native.rs` | 1998 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
+| `syscall/native.rs` | 2077 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2083-2084 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2613 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/aarch64/trap.rs) refuses only an `svc` taken from EL1, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/aarch64/trap/check.rs), through the arm above these. |
@@ -751,13 +749,13 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**1001** unreached statements, debug profile.
+**1000** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 157 | 16% |
 | Reached only when the kernel is stopping | 174 | 17% |
-| Reached only when something has already failed | 67 | 7% |
+| Reached only when something has already failed | 66 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 352 | 35% |
 | Needs a test | 232 | 23% |
@@ -796,15 +794,15 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### armv7a: Reached only when something has already failed — 67 statements
+### armv7a: Reached only when something has already failed — 66 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 10 | `core` | `user/space.rs` |
-| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `item` | `syscall/native.rs` |
+| 7 | `item` | `discovery/devmgr.rs` |
 | 6 | `core` | `iommu.rs` |
 | 6 | `core` | `object/port.rs` |
 | 4 | `core` | `vmap.rs` |
@@ -895,7 +893,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/quota.rs` |
 | 4 | | *and 4 more files* |
 
-### armv7a: argued line by line — 369 statements
+### armv7a: argued line by line — 368 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -975,7 +973,6 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
 | `discovery/devmgr.rs` | 1124 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
 | `early.rs` | 123 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
 | `early.rs` | 126 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
@@ -1097,15 +1094,15 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `mm.rs` | 1900-1903 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `mm.rs` | 1913-1919 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
-| `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
+| `object/job.rs` | 138 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 673 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
 | `object/port.rs` | 117 | Reached only when something has already failed | A packet that found no room. The queue's capacity is kept at PORT_CAPACITY plus every registration's and binding's promised packet (`Promise::new` reserves before a registration is accepted), so a packet either kind of limit allows always fits; the count is what would show the accounting broken. |
 | `object/port.rs` | 268 | Reached only when something has already failed | A packet taken by a wait whose buffer faulted, put back when the queue is at capacity and cannot grow. Its slot is taken meanwhile only if a user packet was queued between the take and the put-back, and then the reserve must also fail; the object edge check puts packets back into a queue with room (`object/edge_check.rs`). The line after the loss is its return. |
 | `object/port.rs` | 485 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
 | `object/port.rs` | 487-489 | Reached only when something has already failed | A fired registration that did not fit on its object's firing list. `register` reserves room on `firing` for every listed registration as each is listed, so moving one there never allocates and cannot fail; the arm keeps the registration listed rather than lose it if that accounting ever broke. The arm's last rows are its jump back into the loop. |
-| `object/process.rs` | 908 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
-| `object/process.rs` | 933 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
-| `object/process.rs` | 1075 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
+| `object/process.rs` | 913 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
+| `object/process.rs` | 938 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
+| `object/process.rs` | 1080 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
 | `sched/mod.rs` | 980 | Reached only when something has already failed | The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails. |
 | `sched/mod.rs` | 1393 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
 | `sched/mod.rs` | 1630 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
@@ -1136,12 +1133,12 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `syscall/native.rs` | 526 | Run, and credited to another line | Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy. |
 | `syscall/native.rs` | 527 | Run, and credited to another line | Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors. |
 | `syscall/native.rs` | 1320-1321 | Reached only when something has already failed | The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory. |
-| `syscall/native.rs` | 1999 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
-| `syscall/native.rs` | 2065 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
-| `syscall/native.rs` | 2068 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
-| `syscall/native.rs` | 2078 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2085 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
-| `syscall/native.rs` | 2614 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
+| `syscall/native.rs` | 1998 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
+| `syscall/native.rs` | 2064 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
+| `syscall/native.rs` | 2067 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
+| `syscall/native.rs` | 2077 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2084 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
+| `syscall/native.rs` | 2613 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/armv7a/trap.rs) refuses only an `svc` taken from SVC mode, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/armv7a/trap/check.rs), through the arm above these. |

@@ -42,7 +42,13 @@ Not recorded: successful calls in general (a mapping, a message), because
 their volume would make the record useless and they are no decision against
 anyone. What is recorded of successes is authority handed over (`GRANTED`)
 and TSF data changed (`CHANGED`), which FAU_GEN.1 expects whatever else is
-left out.
+left out. A job made with `JOB_SEALED` (`H.OBJ.22`) makes no record: a seal
+hands no authority over and changes no TSF data, since it only takes moves
+away from the job it is made with, by the authority that made the job. A
+refused move out of, into or within a sealed job, or a refused start
+outside one, makes none either; it is answered `EPERM` or `ACCESS_DENIED`
+to the caller as any refused call is (`docs/CGROUPS.md` §3.3). A record
+of attempts would be a later landing's (`docs/BACKLOG.md`).
 
 **The safe state.** A panic halts the TSF (O.FAILSAFE) and cannot write a
 record anyone reads. Its FX code and explanation survive in the console's

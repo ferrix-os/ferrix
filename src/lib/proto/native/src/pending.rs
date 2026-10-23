@@ -49,8 +49,9 @@ object_handle!(
 ///
 /// # Errors
 ///
-/// [`Error::Unsupported`] on a kernel without the call; the rest are not yet
-/// decided.
+/// [`Error::Unsupported`] on a kernel without the call;
+/// [`Error::AccessDenied`] without `MANAGE` on `job`, or when the caller's
+/// own job is sealed and `job` is outside its tree (`types::JOB_SEALED`).
 pub fn create_process<S: Syscall>(
     job: &Job<S>,
     elf: &Vmo<S>,

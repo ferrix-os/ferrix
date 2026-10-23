@@ -362,6 +362,9 @@ fn cgroup_target(parent: &Process, descriptor: i32, thread: bool) -> Result<Arc<
     let file = fd::file(parent, descriptor).map_err(|_| Errno::EBADF)?;
     let from = parent.job();
     let to = cgroupfs::clone_target(&file, parent, &from)?;
+    if !from.may_start_in(&to, false) {
+        return Err(Errno::EPERM);
+    }
     if thread && !Arc::ptr_eq(&to, &from) {
         return Err(Errno::EOPNOTSUPP);
     }

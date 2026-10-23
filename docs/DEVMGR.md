@@ -405,6 +405,13 @@ GT up and sends HELLO, and its clients' old files answer `ENODEV`, which
 Mesa reports as `VK_ERROR_DEVICE_LOST` (`cargo xtask test-restart --boot
 intel-keeper`).
 
+**Every driver's job is sealed** (2026-10-23, `docs/CGROUPS.md` §3.3,
+`H.OBJ.22`). The kernel makes `drivers.slice` sealed, and devmgr makes each
+job with `JOB_SEALED` as well. No `cgroup.procs` write, root's included,
+moves a driver or anything it started out of its job, and a driver starts
+nothing outside it, so devmgr's kill of the job ends everything that holds
+the driver's device, mappings and `IoMapping` (F-92).
+
 **The Intel GPU's keeper** ([INTEL-GPU.md](INTEL-GPU.md) §12.3). When the
 initramfs carries `intel-gt`, the GT's worker, `intel` is started as a
 keeper: its START carries two more handles after the device, its own job

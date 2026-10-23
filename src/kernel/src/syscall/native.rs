@@ -61,8 +61,8 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, APERTURE_INFO_BYTES, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
-    DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, POWER_READ_WORDS,
-    PortPacket, ProcessStatus, ReadActual, TREE_X86_POWER,
+    DEVICE_INFO_BYTES, DeviceInfo, JOB_SEALED, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE,
+    POWER_READ_WORDS, PortPacket, ProcessStatus, ReadActual, TREE_X86_POWER,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
@@ -1687,7 +1687,7 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
 
 /// `job_create`.
 fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, Errno> {
-    if options & !JOB_SPECULATION_DOMAIN != 0 {
+    if options & !(JOB_SPECULATION_DOMAIN | JOB_SEALED) != 0 {
         return Err(status::INVALID_ARGS);
     }
     // MANAGE on the parent is the authority both to make a job and to make
@@ -1695,11 +1695,7 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
     // before anything is made, so a refusal marks nothing.
     let parent = job_in(process, parent, Rights::MANAGE)?;
     let domain = options & JOB_SPECULATION_DOMAIN != 0;
-    let made = if domain {
-        parent.new_child_domain()
-    } else {
-        parent.new_child()
-    };
+    let made = parent.new_child_as(domain, options & JOB_SEALED != 0);
     let child = made.map_err(|why| match why {
         job::JobError::NoMemory => status::NO_MEMORY,
         _ => status::BAD_STATE,
@@ -1934,6 +1930,9 @@ fn process_create(
 ) -> Result<usize, Errno> {
     let process = caller.core();
     let job = job_in(process, job, Rights::MANAGE)?;
+    if !process.job().may_start_in(&job, true) {
+        return Err(status::ACCESS_DENIED);
+    }
     let vmo = process.with_handles(|table| vmo_in(table, image, Rights::READ))?;
     let name_len = usize::try_from(name.count)
         .ok()

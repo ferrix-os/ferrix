@@ -1924,6 +1924,57 @@ package FerrixObjectRequirements {
                 "object::port::Port::queue_interrupt", "object::port::Port::put_back",
                 "object::interrupt::Line::fire");
         }
+        requirement <'L.object.248'> aSealedJobRefusesMoves : ItemLowLevel {
+            attribute :>> statement = "Process::move_to shall refuse to move a
+                started process out of a sealed job or into one, leaving it in
+                its job; a cgroup.procs write so refused shall answer EPERM
+                whoever writes, a privileged writer in the initial cgroup
+                namespace included.";
+            attribute :>> criterion = "Stage 13's cgroupfs check: root's writes
+                moving a process out of a sealed job, between two jobs of its
+                tree and into it answer EPERM, 3 of 3, and each process is still
+                in its job.";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("object::process::Process::move_charged",
+                "object::job::Job::seal_refuses");
+        }
+        requirement <'L.object.249'> aSealedJobsStartsStayInside : ItemLowLevel {
+            attribute :>> statement = "Job::may_start_in shall allow a member of a
+                sealed job to start a process only in that job or a job beneath
+                it, and shall allow a start in a sealed job from outside it only
+                as native process_create's.";
+            attribute :>> criterion = "Stage 13's cgroupfs check: may_start_in
+                refuses a sealed member's start outside its tree and an outside
+                start into a sealed job, and allows a sealed member's start into
+                its own inner job.";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("object::job::Job::may_start_in");
+        }
+        requirement <'L.object.250'> sealedAsMade : ItemLowLevel {
+            attribute :>> statement = "A job shall be sealed exactly when it was
+                made with JOB_SEALED or inside a sealed job, fixed before it is
+                listed in its parent, and never unsealed; job_create shall
+                refuse any option bit but JOB_SPECULATION_DOMAIN and JOB_SEALED
+                with INVALID_ARGS, before anything is made.";
+            attribute :>> criterion = "Stage 13's cgroupfs check: a job made with
+                JOB_SEALED, one made inside it by job_create without the bit and
+                one made inside it by mkdir read as sealed, the cgroup they were
+                made in does not, and an unknown option bit is INVALID_ARGS.";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("object::job::Job::bare_child",
+                "object::job::Job::new_child_as", "object::job::Job::new_named_child_as",
+                "syscall::native::job_create");
+        }
+        requirement <'L.object.251'> aSealedMemberCreatesInside : ItemLowLevel {
+            attribute :>> statement = "process_create by a process whose job is
+                sealed shall refuse a job outside that job's tree with
+                ACCESS_DENIED and make nothing.";
+            attribute :>> criterion = "Stage 13's cgroupfs check: a check process
+                in a sealed job is refused process_create into an outside job with
+                ACCESS_DENIED, and passes that refusal for its own inner job.";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("syscall::native::process_create");
+        }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state
                 word's NONEMPTY shall be set exactly when the inbox holds a message,

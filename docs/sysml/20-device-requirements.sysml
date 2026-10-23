@@ -1052,5 +1052,19 @@ package FerrixDeviceRequirements {
                 "arch::x86_64::power_unserved",
                 "arch::x86_64::powerctl::unserved");
         }
+        requirement <'L.device.54'> driversSliceIsSealed : ItemLowLevel {
+            attribute :>> statement = "drivers_job shall make drivers.slice sealed
+                on each of its three paths, so that devmgr and every driver's job
+                beneath it are sealed.";
+            attribute :>> criterion = "The sysfs check, once devmgr has reported
+                (or, under ferrix.devmgr=init, before init has started it):
+                drivers.slice and every job beneath it read as sealed. A boot
+                exercises drivers_job's first path, the named child, only; the
+                second and third, for a name taken or no memory, rest on their
+                argued coverage entries.";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("discovery::devmgr::drivers_job",
+                "object::job::Job::new_root_as");
+        }
     }
 }

@@ -780,3 +780,14 @@ is that [FINDINGS.md](FINDINGS.md) F-20 and F-22 are no longer blocked on a
 device that does not exist: the element-level analysis is §5, the element-level
 safety argument is §2 to §4, and what remains is the integrator's half, which
 is exported rather than missing.
+
+### AoU-35 — a driver that hands out its `IoMapping` keeps the receiver inside its job
+A driver's `IoMapping` is never revoked by the kernel; the reach it gives
+ends when devmgr's kill of the driver's job has ended every process that
+holds it (`H.OBJ.22`: a process leaves a sealed job's tree only by ending,
+and every driver's job is sealed). The element holds the job; the driver
+shall hold the handle: a driver that passes an `IoMapping`, or a mapping of
+one, to another process shall pass it only to a process it started in its
+own job or beneath it, and over no channel a process outside that tree
+holds. The Intel GPU's keeper does so for its worker (`docs/INTEL-GPU.md`
+§12.3).

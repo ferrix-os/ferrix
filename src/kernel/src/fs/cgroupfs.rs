@@ -80,6 +80,7 @@ mod limits_check;
 mod native_check;
 mod oom_check;
 mod reclaim_check;
+mod sealed_check;
 
 /// The result every operation here returns.
 type Result<T> = core::result::Result<T, Errno>;
@@ -183,6 +184,8 @@ fn move_errno(refused: JobError) -> Errno {
         // `cgroup_migrate_vet_dst`.
         JobError::Internal => Errno::EBUSY,
         JobError::NoMemory => Errno::ENOMEM,
+        // A sealed job (`L.object.248`), which Linux has no counterpart of.
+        JobError::Sealed => Errno::EPERM,
         // Sealed by the native `job_kill`, which Linux has no counterpart of.
         JobError::Killed
         | JobError::Exists
@@ -527,9 +530,11 @@ impl Inode for Directory {
                 JobError::Limited => Errno::EAGAIN,
                 JobError::Removed => Errno::ENODEV,
                 JobError::NoMemory => Errno::ENOMEM,
-                JobError::Killed | JobError::Missing | JobError::Busy | JobError::Internal => {
-                    Errno::ENOENT
-                }
+                JobError::Killed
+                | JobError::Missing
+                | JobError::Busy
+                | JobError::Internal
+                | JobError::Sealed => Errno::ENOENT,
             })?;
         own_new(&child, permissions)?;
         Ok(Arc::new(Directory {
@@ -1513,6 +1518,7 @@ pub(crate) fn check() -> Checked<Report> {
     harness.report.moves = delegated.moves;
     harness.report.cloned = delegated.cloned;
     harness.report.emptied = native_check::run(&mut harness)?;
+    sealed_check::run(&mut harness)?;
     harness.report.controlled = controllers_check::run(&mut harness, &process)?;
     harness.report.oom_killed = oom_check::run(&mut harness)?;
     harness.report.created_as = creator_check::run(&mut harness)?;

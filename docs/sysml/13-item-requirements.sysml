@@ -451,6 +451,20 @@ package FerrixItemRequirements {
                 line); a filtered call is refused with the filter's errno.";
             attribute :>> parent = ("G.7", "O.CAPABILITY");
         }
+        requirement <'H.OBJ.22'> aSealedJobKeepsItsOwn : ItemHighLevel {
+            attribute :>> statement = "A process in a sealed job shall leave that
+                job's tree only by ending and shall start no process outside it;
+                a job made inside a sealed job shall be sealed, and no job shall
+                be unsealed.";
+            attribute :>> criterion = "Stage 13's cgroupfs check: root's moves
+                out of, within and into a sealed tree are refused EPERM and every
+                process stays; a sealed member's starts outside its tree are
+                refused; jobs made inside a sealed one read as sealed; and every
+                job in drivers.slice reads as sealed (the sysfs check);
+                test-restart --boot intel-keeper's root move of the GPU's worker
+                out of its driver job is refused (INTEL-GPU.md §12.11 S1).";
+            attribute :>> parent = ("G.8", "O.QUOTA", "O.CAPABILITY");
+        }
     }
 
     package Scheduling {

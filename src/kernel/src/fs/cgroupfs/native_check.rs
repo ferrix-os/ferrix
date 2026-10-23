@@ -105,7 +105,7 @@ fn descriptor_at(harness: &Harness, side: &Side, whole: &[u8]) -> Checked<u64> {
 }
 
 /// The rights the handle `handle` of `side` carries, and its job.
-fn held(side: &Side, handle: Handle) -> Checked<(Arc<Job>, Rights)> {
+pub(super) fn held(side: &Side, handle: Handle) -> Checked<(Arc<Job>, Rights)> {
     side.process.with_handles(|table| match table.get(handle) {
         Ok((Object::Job(job), rights)) => Ok((Arc::clone(job), rights)),
         _ => Err("job_for_cgroup answered a handle that names no job"),

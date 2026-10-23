@@ -120,6 +120,16 @@ until [ -e /dev/dri/renderD128 ]; do
     [ $waited -gt 120 ] && { say "no render node after 120 s"; exit 5; }
     sleep 1
 done
+# S1 (docs/INTEL-GPU.md §12.11): root may not move the worker out of the
+# driver job whose kill ends it; its job is sealed (L.object.248).
+mkdir -p /sys/fs/cgroup
+mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
+w=$(newest intel-gt)
+if echo $w > /sys/fs/cgroup/cgroup.procs 2>/tmp/s1.err; then
+    say "S1: root MOVED worker $w out of its driver job: $(cat /proc/$w/cgroup)"
+else
+    say "S1: root's move of worker $w out of its driver job was refused: $(cat /tmp/s1.err)"
+fi
 for round in 1 2; do
     rm -f /tmp/vk-survive.stop /tmp/survive.out
     /bin/vk-survive > /tmp/survive.out 2>&1 &
@@ -330,6 +340,18 @@ pub(crate) fn judge(lines: &[String], victim: Victim) -> std::result::Result<(),
             died.trim()
         ));
     }
+    if let Some(moved) = lines.iter().find(|line| line.contains("S1: root MOVED")) {
+        return Err(format!(
+            "root moved the worker out of its sealed driver job: `{}`",
+            moved.trim()
+        ));
+    }
+    let _ = find(
+        lines,
+        0,
+        "root's move of the worker out of its driver job refused",
+        &|line| line.contains("out of its driver job was refused"),
+    )?;
     let mut at = find(lines, 0, "the first worker up at boot", &|line| {
         line.contains(&format!("{UP}1{UP_TAIL}"))
     })?;
@@ -445,7 +467,8 @@ mod tests {
     const BOOT: &str = "\
   0.8 | intel: 0x00000010 8086:46d4 rev 0: the keeper; the GT is driven by worker processes it starts and replaces (docs/INTEL-GPU.md §12)
   0.9 | intel-fake: worker 1: 0x00000010 8086:46d4 rev 0: facts 24 EUs, DSS 0x3, CS 19200000 Hz; every batch completes at once, nothing runs
-  0.9 | intel: the GT's worker 1 is up: 2 engines, 24 EUs, CS 19200000 Hz";
+  0.9 | intel: the GT's worker 1 is up: 2 engines, 24 EUs, CS 19200000 Hz
+  1.0 | gpu-restart-gate: S1: root's move of worker 434 out of its driver job was refused: sh: write error: Operation not permitted";
 
     const WORKER_ROUND: &str = "\
   @.0 | gpu-restart-gate: round @: killing intel-gt 9 under vk-survive 40
@@ -546,6 +569,28 @@ mod tests {
         assert!(
             judge(&lines(&seen), Victim::Worker).is_err_and(|error| error.contains("devmgr saw"))
         );
+    }
+
+    #[test]
+    fn a_worker_root_moved_out_fails_both_runs() {
+        for (round, victim) in [
+            (WORKER_ROUND, Victim::Worker),
+            (KEEPER_ROUND, Victim::Keeper),
+        ] {
+            let gone = without(&run(round), "out of its driver job was refused");
+            assert!(
+                judge(&gone, victim).is_err_and(|error| error.contains("refused")),
+                "{victim:?}"
+            );
+            let moved = run(round).replace(
+                "S1: root's move of worker 434 out of its driver job was refused: sh: write error: Operation not permitted",
+                "S1: root MOVED worker 434 out of its driver job: 0::/",
+            );
+            assert!(
+                judge(&lines(&moved), victim).is_err_and(|error| error.contains("sealed")),
+                "{victim:?}"
+            );
+        }
     }
 
     #[test]

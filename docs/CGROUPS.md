@@ -216,6 +216,35 @@ descriptor past `INT_MAX` or a `struct clone_args` shorter than
 `CLONE_ARGS_SIZE_VER2`. A thread asked into another cgroup is
 `EOPNOTSUPP`. It is init's race-free start (`docs/INIT.md` §5.2).
 
+### 3.3 Sealed jobs (2026-10-23, `H.OBJ.22`)
+
+A job made with the native `job_create` option `JOB_SEALED`, or made inside
+a sealed job by any means (`job_create` without the bit, cgroupfs `mkdir`),
+is sealed from the moment it exists and is never unsealed. Linux has no
+counterpart. Sealed means:
+
+* no `cgroup.procs` write moves a process out of it, into it, or between two
+  jobs of its tree: `EPERM` for every writer, root in the initial cgroup
+  namespace included (`Process::move_to`, `L.object.248`);
+* a member starts processes only in its own job or a job beneath it, and
+  nobody starts one in a sealed job from outside it, but by native
+  `process_create` (`Job::may_start_in`, `L.object.249`): `clone3`'s
+  `CLONE_INTO_CGROUP` otherwise answers `EPERM` (load behaviour,
+  `syscall/family.rs`, with no item claim of its own), and a sealed
+  member's `process_create` into a job outside its tree `ACCESS_DENIED`
+  (`L.object.251`);
+* `drivers.slice` is made sealed by the kernel, so devmgr and every driver's
+  job are sealed (`L.device.54`).
+
+What stays allowed, and is availability, not an escape: `cgroup.kill`,
+`cgroup.freeze`, the limits, reading every file, `mkdir` (whose job is
+sealed) and `rmdir` of an empty job. A process reaches a sealed job by
+`process_create` alone, which is how devmgr starts a driver. Why: a driver
+keeps its `IoMapping` for as long as it lives, since the kernel never
+revokes one, so devmgr's kill of its job must reach it; before this, root
+could move a driver out of its job with one write (F-92, found by
+`docs/INTEL-GPU.md` §12.11 S1).
+
 ## 4. `POLLPRI`: the change notification
 
 `cgroup.events` changes are announced as Linux announces them: the file polls

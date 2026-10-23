@@ -993,9 +993,9 @@ const DRIVERS_JOB: &str = "drivers.slice";
 /// When there was no memory for any job at all.
 fn drivers_job() -> Result<Arc<Job>, &'static str> {
     let root = job::root();
-    root.new_named_child(DRIVERS_JOB, job::Budget::Own)
-        .or_else(|_| root.new_child())
-        .or_else(|_| Job::new_root())
+    root.new_named_child_as(DRIVERS_JOB, job::Budget::Own, true)
+        .or_else(|_| root.new_child_as(false, true))
+        .or_else(|_| Job::new_root_as(true))
         .map_err(|_| "no memory for the drivers' job")
 }
 

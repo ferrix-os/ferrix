@@ -360,7 +360,7 @@ fn check_marking(tree: &Arc<Job>) -> Result<(), &'static str> {
     }
     if side.call(
         nr::JOB_CREATE,
-        &[u64::from(manager.0), JOB_SPECULATION_DOMAIN << 1],
+        &[u64::from(manager.0), JOB_SPECULATION_DOMAIN << 2],
     ) != Err(status::INVALID_ARGS)
     {
         return Err("case 4: job_create took an option it does not know");

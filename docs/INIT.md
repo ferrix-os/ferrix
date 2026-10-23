@@ -847,6 +847,12 @@ may fault on the disk it serves, still holds, because init starts `devmgr`
 from the initramfs before any mount it depends on. This is landing L12,
 and it is the rehearsal that proves the backend table true.
 
+`drivers.slice` is sealed since 2026-10-23 (`docs/CGROUPS.md` §3.3): init
+starts `devmgr.service` there by `job_for_cgroup` and the kernel's
+`devmgr_start`, which is not a cgroupfs move, and nothing else. A scope or
+a Linux unit placed in `drivers.slice` is refused `EPERM`: no process enters
+it through `cgroup.procs` or `CLONE_INTO_CGROUP`.
+
 **As built (L12, 2026-09-27), after the certification review.** Two things
 differ from the sketch above, both for the item's sake. The DEVICES channel
 carries every device's authority, and through it DMA, so it never passes
