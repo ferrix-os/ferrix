@@ -143,7 +143,7 @@ pub(crate) fn dispatch_with<P: Personality>(
     // entry: the native ABI is 64-bit words, and a 32-bit program's
     // `int $0x80` reaches the i386 table alone.
     if args.abi == Abi::Native && ferrix_native_abi::nr::is_native(args.number) {
-        return native_call(args);
+        return Outcome::Return(Errno::ENOSYS.as_return_value());
     }
     // The table is the entry's (`crate::trap::Abi`), each behind its own
     // clamp in the facade.
