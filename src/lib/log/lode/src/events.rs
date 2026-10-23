@@ -43,7 +43,7 @@ pub struct Kind {
 
 /// Every kind, with its defaults: errors and crashes on, what could flood
 /// off.
-pub const KINDS: [Kind; 6] = [
+pub const KINDS: [Kind; 7] = [
     Kind {
         name: "window-opened",
         on: false,
@@ -78,6 +78,13 @@ pub const KINDS: [Kind; 6] = [
         level: 6,
         made_by: "lode",
         what: "a record with _PID gets _COMM, _EXE and _CMDLINE, read while the process writes",
+    },
+    Kind {
+        name: "snapshot",
+        on: true,
+        level: 5,
+        made_by: "hyprix",
+        what: "an app error takes a hang snapshot of the window's process (lode snapshot)",
     },
     Kind {
         name: "capture",

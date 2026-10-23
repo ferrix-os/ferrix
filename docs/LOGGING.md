@@ -2121,6 +2121,39 @@ trace.
   the image and command line on lode's boot record; the window's process
   through yserver for X clients (`WINDOW_PID` is yserver's).
 
+### Hang snapshots, file sources and the boot record, as built (2026-10-24)
+
+What the night of the Endfield start failures needed beyond streams.
+
+* **`lode snapshot PID [-n N] [--reason TEXT]`**: one record set under a
+  `SNAPSHOT` id (`FERRIX_EVENT=snapshot`): the process's record --
+  `SNAPSHOT_COMM`, `SNAPSHOT_EXE`, `SNAPSHOT_CMDLINE`, `SNAPSHOT_FDS` (how
+  many descriptors), `SNAPSHOT_STATUS` (its whole `status`, the `Sig*` lines
+  included), `SNAPSHOT_TAIL` (its last N lines in the log), `SNAPSHOT_REASON`
+  -- and one record a thread: `THREAD_TID`, `THREAD_COMM`, `THREAD_STATE`,
+  `THREAD_SYSCALL`, `THREAD_WCHAN`, `THREAD_SIGNALS`. Read from `/proc` as
+  the person running it (their own processes; root's, anyone's), written
+  through the native protocol, and printed. hyprix takes one of an app
+  error's window's process (`events.conf`'s `snapshot`, on); for an X
+  client that is yserver's process until yserver says its client's pid.
+* **`lode follow FILE [-t ID] [--from-start] [--until-pid PID]`**: a file
+  a program writes, a line a record under ID -- the game's `Player.log`,
+  its crash reporter's, DXVK's -- read on every quarter second from its end
+  (or start), from the beginning again when it is cut short or replaced
+  (its inode), ending once PID is gone and the file read to its end. A
+  launch script runs it beside the program it watches.
+* **The boot record** ("lode started for this boot") carries
+  `BOOT_CMDLINE` (the kernel's command line), `BOOT_DEPLOY` (a deploy's
+  `n150.deploy=` nonce) and `BOOT_IMAGE` (the tree's commit the image was
+  built from, `-dirty` for a changed tree), which xtask writes to
+  `/etc/ferrix/image` in every image that boots init.
+* **Echoes, second form**: a unit's line that arrives before the echo it
+  copies is held up to 0.5 s while an echoing stream is open, so the order
+  the two arrive in does not matter.
+* `test-log` "box" row: a snapshot of a sleeping process records its
+  thread, `lode follow` takes a file's three lines as another process
+  writes them, the boot record has the command line and the image.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
@@ -2256,8 +2289,8 @@ architectures.
 | Names and paths on every record | built, landing | `_COMM`, `_CMDLINE`, `_EXE` (from init for units); `test-log` "names" row |
 | App-error events with a screenshot | built, landing | hyprix `lode_events.rs`; `Capture=yes` on desktop images |
 | Event kinds configurable and reloadable | partly | `events.conf`, `lode events`, `lode reload` (rules, alerts, events; not yet retention or capture) |
-| Hang snapshot (`lode snapshot PID`) | missing | the next landing |
-| The image and command line on the boot record | missing | the next landing |
+| Hang snapshot (`lode snapshot PID`) | built, landing | §18 "Hang snapshots"; `test-log` "box" row |
+| The image and command line on the boot record | built, landing | `BOOT_IMAGE`, `BOOT_CMDLINE`, `BOOT_DEPLOY` |
 
 ### 20.6 Where logs still go that lode does not get (the audit, 2026-10-24)
 
@@ -2274,14 +2307,14 @@ Ferrix image where something writes a log, and whether lode has it.
 | `/tmp/yserver.log` | the desktop's X server | yes, landing | `lode cat -t yserver --tee` |
 | `/tmp/steam.log` | Steam's `desktop.sh` | yes, landing | `lode cat -t steam --tee` |
 | `~/plog/proton.out` | the N150's game script | yes, landing | `lode cat -t proton --tee` |
-| `~/plog/dxvk/*.log`, the game's `Player.log`, CrashSight's logs, Steam's `logs/*.txt` | DXVK, Unity, the anti-cheat, Steam, each to a file | no | file sources (§5, plan step 9): `lode follow FILE -t ID`, next |
+| `~/plog/dxvk/*.log`, the game's `Player.log`, CrashSight's logs, Steam's `logs/*.txt` | DXVK, Unity, the anti-cheat, Steam, each to a file | by a launch script | `lode follow FILE -t ID --until-pid PID` beside the program (§18 "Hang snapshots, file sources") |
 | `/tmp/ef-fullscreen.log`, `plog/status`, `plog/gpu-report.txt` | the N150's scripts | no | reports, not logs (§13.1); `ef-fullscreen.sh` should pipe into `lode cat` too |
 | hyprix's programs' standard output | waybar, notifyd, fuzzel, `exec` lines | yes, under hyprix's unit; under their own names with `session-streams on` | the wrapper loses a program's output if the program outlives its session (§18) |
 | Programs started from a terminal | foot's children | no | a terminal's programs write to the terminal; `lode cat` in a person's pipeline is the way |
 | `/var/log/audit/<id>.bin` | init, the kernel's FAU rings | no, by design | §15: the audit record stays its own store |
 | `/var/log/ferrix/auth.log` | `authd` | no | `authd`'s lines could also go to `/dev/log` with `LOG_AUTHPRIV`; its own file stays (`docs/AUTH.md` §3.6) |
 | Test rigs' `/tmp/yserver.log` (`:1`) | `test-yserver`, `test-dxvk`, shader cache | no, by choice | gate rigs read their own file and run without lode |
-| A hung process's threads | -- | no | a hang snapshot, next |
+| A hung process's threads | -- | on asking | `lode snapshot PID`; hyprix takes one at an app error |
 
 ## 21. Tombstones (researched 2026-10-24; the customer approved the three landings)
 

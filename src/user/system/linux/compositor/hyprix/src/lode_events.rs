@@ -178,15 +178,28 @@ pub fn window_opened(class: &str, title: &str, pid: i32, dialog_of: bool) {
     } else {
         "window-opened"
     };
-    let switch = switch(kind);
-    if !switch.on {
+    let setting = switch(kind);
+    if !setting.on {
         return;
     }
-    let fields = window_fields(kind, switch.level, class, title, pid, dialog_of);
+    let fields = window_fields(kind, setting.level, class, title, pid, dialog_of);
     if let Ok(socket) = UnixDatagram::unbound()
         && socket.connect(JOURNAL).is_ok()
     {
         let _ = socket.send(&datagram(&fields));
+    }
+    // What the program is doing while it shows its error: a hang snapshot
+    // of the window's process, by `lode snapshot` as this session's user.
+    if kind == "app-error"
+        && pid > 0
+        && switch("snapshot").on
+        && std::path::Path::new(LODE).exists()
+        && let Ok(child) = std::process::Command::new(LODE)
+            .args(["snapshot", &pid.to_string(), "--reason", "app-error"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+    {
+        crate::children::started(child.id());
     }
 }
 

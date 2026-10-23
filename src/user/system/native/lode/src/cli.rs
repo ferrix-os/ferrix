@@ -45,6 +45,11 @@ lode top [-b ...] [-n ROWS] [filters]
 lode top --live [SECONDS]            who writes most now, per second, every SECONDS (2)
 lode alerts                          follow the alerts lode says (`alert` rules)
 lode events                          the kinds of event and whether each is on (events.conf)
+lode snapshot PID [-n N] [--reason TEXT]
+                                     what a process is doing, into the log: every thread's state,
+                                     system call, wait and signals, its descriptors, its last lines
+lode follow FILE [-t ID] [--from-start] [--until-pid PID]
+                                     a file a program writes, into the log as it grows
 lode reload                          read the rules, alerts and events again (root's)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
@@ -192,6 +197,8 @@ pub(crate) fn run() -> i32 {
         Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
         Some("alerts") => return crate::top::alerts(),
         Some("events") => return events(),
+        Some("snapshot") => return crate::snapshot::snapshot(rest.get(1..).unwrap_or_default()),
+        Some("follow") => return crate::snapshot::follow(rest.get(1..).unwrap_or_default()),
         Some("reload") => {
             return crate::admin::ask(&Options {
                 ask: Some(crate::control::Request::Reload),
@@ -1835,6 +1842,12 @@ fn open_cat(journal: bool, identifier: &str, priority: Option<u8>, echo: bool) -
         return None;
     }
     Some(fd)
+}
+
+/// A stdout stream to lode under `identifier`, its header said; `None`
+/// when lode is not there.
+pub(crate) fn open_stream(identifier: &str) -> Option<usize> {
+    open_cat(false, identifier, None, false)
 }
 
 /// Whole `lines` to lode on `fd`; whether it took them.

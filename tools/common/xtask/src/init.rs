@@ -548,8 +548,10 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
             content: Content::Link("svc".to_owned()),
         });
     }
-    // lode's reader, under its own name and journalctl's (docs/LOGGING.md).
+    // lode's reader, under its own name and journalctl's (docs/LOGGING.md),
+    // and what the image was built from, which lode's boot record says.
     files.extend(crate::lode::links());
+    files.push(crate::lode::image_file());
     let units = paths::workspace_root().join(UNITS);
     let mut names: Vec<PathBuf> = std::fs::read_dir(&units)
         .map_err(|error| Error::new(format!("reading {}: {error}", units.display())))?

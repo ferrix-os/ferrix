@@ -47,6 +47,32 @@ pub(crate) fn links() -> Vec<File> {
         .collect()
 }
 
+/// `/etc/ferrix/image`: the tree's commit the image was built from, with
+/// `-dirty` when the tree had changes, for lode's boot record
+/// (`docs/LOGGING.md` §18 "The boot record").
+pub(crate) fn image_file() -> File {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(crate::paths::workspace_root())
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let commit = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"])
+        .is_some_and(|changes| !changes.is_empty());
+    File {
+        path: "etc/ferrix/image".to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(
+            format!("commit={commit}{}\n", if dirty { "-dirty" } else { "" }).into_bytes(),
+        ),
+    }
+}
+
 /// The link that starts `lode.service` with `basic.target`.
 pub(crate) fn enabled() -> File {
     File {
@@ -89,6 +115,7 @@ app-error       on   warning
 session-streams off
 crash-names     on
 process-names   on
+snapshot        on
 capture         on
 ";
 
@@ -357,6 +384,18 @@ echo "echoed line" | /bin/lode cat -t echoey --echo
 $bb sleep 2
 say "streams: $($bb cat /tmp/teey.log) $(/bin/lode -b -t teey -o cat | $bb wc -l) $(/bin/lode -b -g '^echoed line$' -o cat | $bb wc -l) $(/bin/lode -b -t echoey -o json | $bb grep -c '"_KERNEL_SEQNUM"') $(/bin/lode events | $bb grep -c '^app-error  *on ') $(/bin/lode reload && echo reloaded)"
 say "names: $(/bin/lode -b -t teey -o json | $bb grep -c '"_CMDLINE":"/bin/lode cat -t teey --tee /tmp/teey.log"') $(/bin/lode -b -u lode-test -g 'to stderr once' -o json | $bb grep -c '"_EXE":"/bin/busybox"')"
+# For a box run (the customer's acceptance case): what a hung process is
+# doing, a file a program writes followed, the boot's image and command line.
+( $bb sleep 30 ) &
+sleeper=$!
+/bin/lode snapshot $sleeper --reason test > /tmp/snap 2>&1
+$bb usleep 500000
+( for w in alpha beta gamma; do echo "file line $w" >> /tmp/game.log; $bb usleep 300000; done ) &
+writer=$!
+/bin/lode follow /tmp/game.log -t gamelog --from-start --until-pid $writer
+$bb kill $sleeper
+$bb sleep 1
+say "box: $($bb grep -c '^snapshot .*: thread ' /tmp/snap) $(/bin/lode -b --where 'event = snapshot' -o json | $bb grep -c '"THREAD_STATE"') $(/bin/lode -b -t gamelog -o cat | $bb grep -c '^file line ') $(/bin/lode -b -t lode -g 'lode started for this boot' -o json | $bb grep '"BOOT_CMDLINE"' | $bb grep -c '"BOOT_IMAGE":"[0-9a-f]')"
 # A crash names its process (the kernel's identity line): its name, the
 # path it was started from, where its pc was, its command line.
 /bin/lode fault-stub > /dev/null 2>&1
@@ -673,6 +712,12 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
              program's _EXE",
         ),
         (
+            "lode-test: box:",
+            "1 1 3 1",
+            "lode snapshot did not record the thread, lode follow did not take a file's three \
+             lines, or the boot record did not carry the image and command line",
+        ),
+        (
             "lode-test: crash:",
             "1",
             "a crash record did not name its process: CRASH_EXE, CRASH_MODULE and CRASH_CMDLINE \
@@ -870,6 +915,7 @@ lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
 lode-test: streams: teed line 1 1 1 1 reloaded
 lode-test: names: 1 1
+lode-test: box: 1 1 3 1
 lode-test: crash: 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1

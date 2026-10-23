@@ -27,6 +27,7 @@ mod handout;
 mod heap;
 mod seat;
 mod serve;
+mod snapshot;
 mod store;
 mod sys;
 mod top;

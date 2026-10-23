@@ -229,6 +229,14 @@ impl Front {
         self.name(record, pid, now, true);
     }
 
+    /// Whether a stream whose lines are also echoed to a unit's output is
+    /// open: units' lines then wait a moment for their echoes.
+    pub(crate) fn echo_open(&self) -> bool {
+        self.streams
+            .iter()
+            .any(|stream| stream.header.as_ref().is_some_and(|header| header.echoed))
+    }
+
     /// Give `record`, from process `pid`, its `_COMM`, `_EXE` and
     /// `_CMDLINE` -- and with `units` its cgroup and unit -- read from
     /// `/proc` the first time the pid is seen, while it is writing and so

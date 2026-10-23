@@ -2282,16 +2282,31 @@ fn an_echoed_stream_line_is_kept_once_as_the_streams() {
     };
     let mut line = units::record(&unit_line("bar ready", Stream::Out), now);
     line.push("_KERNEL_SEQNUM", b"40");
-    let kept = echoes.unit_line(line);
+    let kept = echoes.unit_line(line, 10, true).unwrap();
     assert_eq!(kept.get("SYSLOG_IDENTIFIER"), Some(&b"waybar"[..]));
     assert_eq!(kept.get("_KERNEL_SEQNUM"), Some(&b"40"[..]));
-    // Another unit line passes as it is; an echo that never came back is
-    // kept after its wait.
+    // Another unit line passes as it is with no echoing stream open; with
+    // one open it is held for its echo, and kept when that comes later.
     let other = units::record(&unit_line("something else", Stream::Out), now);
     assert_eq!(
-        echoes.unit_line(other).get("SYSLOG_IDENTIFIER"),
+        echoes
+            .unit_line(other.clone(), 10, false)
+            .unwrap()
+            .get("SYSLOG_IDENTIFIER"),
         Some(&b"web"[..])
     );
+    let mut late = other.clone();
+    late.push("_KERNEL_SEQNUM", b"41");
+    assert!(echoes.unit_line(late, 10, true).is_none());
+    echoes.echoed(
+        crate::protocols::stream_line(&header, b"something else", 1, 2),
+        11,
+        &mut out,
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].get("_KERNEL_SEQNUM"), Some(&b"41"[..]));
+    assert_eq!(out[0].get("SYSLOG_IDENTIFIER"), Some(&b"waybar"[..]));
+    out.clear();
     echoes.echoed(
         crate::protocols::stream_line(&header, b"lonely", 1, 2),
         10,

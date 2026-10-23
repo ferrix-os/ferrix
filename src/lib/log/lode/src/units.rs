@@ -336,12 +336,39 @@ impl Pairing {
 pub struct Echoes {
     /// Echoed stream records not yet matched, with when they arrived.
     waiting: VecDeque<(Record, u64)>,
+    /// Units' lines held while an echoing stream is open, for an echo that
+    /// is still on its way, with when they arrived.
+    held: VecDeque<(Record, u64)>,
+}
+
+/// How long a unit's line is held for an echo that has not come yet.
+pub const ECHO_WAIT_US: u64 = 500_000;
+
+/// Whether `echoed`, a stream's line, is the copy `line`, a unit's, came
+/// back as.
+fn echoes(echoed: &Record, line: &Record) -> bool {
+    line.get("UNIT").is_some() && crate::console::strip_ansi(echoed.message()) == line.message()
+}
+
+/// `echoed` with `line`'s kernel sequence number: the one record kept.
+fn merged(mut echoed: Record, line: &Record) -> Record {
+    if let Some(seq) = line.get("_KERNEL_SEQNUM") {
+        echoed.push("_KERNEL_SEQNUM", seq);
+    }
+    echoed
 }
 
 impl Echoes {
-    /// An echoed stream record, arrived at `now`; the oldest waiting one
-    /// goes into `out` when too many wait.
+    /// An echoed stream record, arrived at `now`: kept with the unit's line
+    /// held for it into `out`, or waiting for that line; the oldest waiting
+    /// one goes into `out` when too many wait.
     pub fn echoed(&mut self, record: Record, now: u64, out: &mut Vec<Record>) {
+        if let Some(at) = self.held.iter().position(|(line, _)| echoes(&record, line))
+            && let Some((line, _)) = self.held.remove(at)
+        {
+            out.push(merged(record, &line));
+            return;
+        }
         if self.waiting.len() >= HELD_MAX
             && let Some((oldest, _)) = self.waiting.pop_front()
         {
@@ -350,38 +377,40 @@ impl Echoes {
         self.waiting.push_back((record, now));
     }
 
-    /// A unit's line: the echoed stream record it copies, given its kernel
-    /// sequence number, or the line itself when none waits.
-    pub fn unit_line(&mut self, record: Record) -> Record {
-        if self.waiting.is_empty() || record.get("UNIT").is_none() {
-            return record;
+    /// A unit's line, at `now`: the echoed stream record it copies, given
+    /// its kernel sequence number; else, while an echoing stream is open
+    /// (`echo_open`), nothing yet -- it is held [`ECHO_WAIT_US`] for its
+    /// echo; else the line itself.
+    pub fn unit_line(&mut self, record: Record, now: u64, echo_open: bool) -> Option<Record> {
+        if record.get("UNIT").is_none() {
+            return Some(record);
         }
-        let message = record.message();
-        let Some(at) = self
+        if let Some(at) = self
             .waiting
             .iter()
-            .position(|(echoed, _)| crate::console::strip_ansi(echoed.message()) == message)
-        else {
-            return record;
-        };
-        let Some((mut echoed, _)) = self.waiting.remove(at) else {
-            return record;
-        };
-        if let Some(seq) = record.get("_KERNEL_SEQNUM") {
-            echoed.push("_KERNEL_SEQNUM", seq);
+            .position(|(echoed, _)| echoes(echoed, &record))
+            && let Some((echoed, _)) = self.waiting.remove(at)
+        {
+            return Some(merged(echoed, &record));
         }
-        echoed
+        if echo_open && self.held.len() < HELD_MAX {
+            self.held.push_back((record, now));
+            return None;
+        }
+        Some(record)
     }
 
-    /// Echoed records that waited [`PAIR_US`]: stored as they are.
+    /// Echoed records that waited [`PAIR_US`], and units' lines held
+    /// [`ECHO_WAIT_US`]: stored as they are.
     pub fn expire(&mut self, now: u64, out: &mut Vec<Record>) {
-        while self
-            .waiting
-            .front()
-            .is_some_and(|(_, at)| now.saturating_sub(*at) >= PAIR_US)
-        {
-            if let Some((record, _)) = self.waiting.pop_front() {
-                out.push(record);
+        for (queue, wait) in [(&mut self.waiting, PAIR_US), (&mut self.held, ECHO_WAIT_US)] {
+            while queue
+                .front()
+                .is_some_and(|(_, at)| now.saturating_sub(*at) >= wait)
+            {
+                if let Some((record, _)) = queue.pop_front() {
+                    out.push(record);
+                }
             }
         }
     }

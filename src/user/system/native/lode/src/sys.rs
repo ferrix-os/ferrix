@@ -848,3 +848,35 @@ pub(crate) fn read_link(path: &[u8]) -> Option<Vec<u8>> {
     buf.truncate(length);
     Some(buf)
 }
+
+/// Which file `fd` is, as its device and inode: a file replaced under the
+/// same name is another.
+pub(crate) fn identity(fd: usize) -> Option<u64> {
+    // `struct statx`'s first fields are enough: `statx(fd, "", AT_EMPTY_PATH,
+    // STATX_INO)`; the inode is at byte 32 and the device's major and minor
+    // at 136 and 140 on every architecture.
+    const AT_EMPTY_PATH: usize = 0x1000;
+    const STATX_INO: usize = 0x100;
+    let mut buf = [0_u8; 256];
+    let empty = [0_u8; 1];
+    // SAFETY: `empty` is a NUL-terminated empty path and `buf` 256 writable
+    // bytes, the size of `struct statx`, both for the call.
+    let _ = unsafe {
+        call(
+            numbers::STATX,
+            [
+                fd,
+                empty.as_ptr() as usize,
+                AT_EMPTY_PATH,
+                STATX_INO,
+                buf.as_mut_ptr() as usize,
+                0,
+            ],
+        )
+    }
+    .ok()?;
+    let inode = u64::from_ne_bytes(buf.get(32..40)?.try_into().ok()?);
+    let major = u32::from_ne_bytes(buf.get(136..140)?.try_into().ok()?);
+    let minor = u32::from_ne_bytes(buf.get(140..144)?.try_into().ok()?);
+    Some(inode ^ (u64::from(major) << 48) ^ (u64::from(minor) << 32))
+}

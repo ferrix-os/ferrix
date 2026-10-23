@@ -214,10 +214,9 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     } else {
         ingest::MESSAGE_ID_STARTED
     };
-    said.insert(
-        0,
-        ingest::own(if restarted { 4 } else { 6 }, id, &text, now),
-    );
+    let mut first = ingest::own(if restarted { 4 } else { 6 }, id, &text, now);
+    boot_facts(&mut first);
+    said.insert(0, first);
     if !dropped {
         said.push(ingest::own(
             4,
@@ -397,7 +396,12 @@ impl Service {
             if drained {
                 let mut expired = Vec::new();
                 self.units.pairing.expire(now.monotonic_us, &mut expired);
-                self.echoes.expire(now.monotonic_us, &mut expired);
+                let mut echoes = Vec::new();
+                self.echoes.expire(now.monotonic_us, &mut echoes);
+                for mut record in echoes {
+                    self.seat.stamp(&mut record);
+                    self.admit_now(record, now, &mut batch);
+                }
                 self.admit_all(expired, now, &mut batch);
             }
             if rotate {
@@ -504,7 +508,16 @@ impl Service {
     fn admit(&mut self, record: Record, now: Now, batch: &mut Vec<Record>) {
         // A unit's line a program also sent on its own stream is kept once,
         // as the stream's.
-        let mut record = self.echoes.unit_line(record);
+        let echo_open = self.front.echo_open();
+        let Some(record) = self.echoes.unit_line(record, now.monotonic_us, echo_open) else {
+            // Held for its echo, which [`units::Echoes::expire`] gives up on.
+            return;
+        };
+        self.admit_now(record, now, batch);
+    }
+
+    /// [`admit`] past the echoes: names, alerts, the limiter.
+    fn admit_now(&mut self, mut record: Record, now: Now, batch: &mut Vec<Record>) {
         // Every record that names a process names it: its `_COMM`, `_EXE`
         // and `_CMDLINE` (`events.conf`'s process-names).
         if self.events.on("process-names")
@@ -705,6 +718,28 @@ fn with_program(mut record: Record, known: Option<console::Identity>) -> Record 
         }
     }
     record
+}
+
+/// What the boot record says of the boot (`docs/LOGGING.md` §18 "The boot
+/// record"): the kernel's command line, a deploy's nonce on it
+/// (`n150.deploy=`), and the image's commit from `/etc/ferrix/image`.
+fn boot_facts(record: &mut Record) {
+    if let Some(line) = sys::read_small(b"/proc/cmdline") {
+        let line = line.strip_suffix(b"\n").unwrap_or(&line);
+        record.push("BOOT_CMDLINE", line);
+        for word in line.split(|&byte| byte == b' ') {
+            if let Some(nonce) = word.strip_prefix(b"n150.deploy=") {
+                record.push("BOOT_DEPLOY", nonce);
+            }
+        }
+    }
+    if let Some(image) = sys::read_small(b"/etc/ferrix/image") {
+        for line in image.split(|&byte| byte == b'\n') {
+            if let Some(commit) = line.strip_prefix(b"commit=") {
+                record.push("BOOT_IMAGE", commit);
+            }
+        }
+    }
 }
 
 /// Whether init has closed the channel: the service is being stopped.
