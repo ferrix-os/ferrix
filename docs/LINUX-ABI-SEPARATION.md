@@ -665,3 +665,46 @@ is there as well:
   consultant's review before landing.
 * The estimate stays about **100 points** (§11.5) less the 5 a `linux`
   value would have cost.
+
+### 11.7 Room for more ABIs: one flag per personality (the customer, 2026-10-23)
+
+The customer, on §11.6: "I would design it in a way that if e.g. in the
+future we want windows ABI as well we could add a windows flag there
+easily". So the Linux ABI is the first of a kind, not a special case:
+
+* **One boolean flag per foreign ABI**, all of one shape:
+  `linux-abi = on | off` now, `windows-abi = on | off` (or any other)
+  later, each turned into its own `--cfg ferrix_<name>_abi`. The native
+  ABI is in every kernel and has no flag. Adding an ABI is: a flag row in
+  `build-flags.toml` with its levels and requires rules, a module behind
+  its `cfg`, a registry entry, its gate rows. Nothing in the core changes.
+* **A personality interface in the core**, which the Linux layer is the
+  first to implement, so that the core never names an ABI:
+  * syscall dispatch: each process carries the personality it was loaded
+    with, and entry dispatches by it (no global hook);
+  * the fault outcome per personality (a Linux signal, a Windows SEH
+    exception, a native exception channel);
+  * the program loader per personality (ELF for Linux, PE for Windows,
+    the native loader), chosen at exec by the image's format;
+  * per-personality process state behind one native process type (§11.3),
+    created and freed by the personality;
+  * optional user-visible pieces (vDSO/sigpage for Linux; a Windows
+    personality would bring its own).
+  This is §11.3's "clean coexistence" made general: the same four seams,
+  defined once as a trait, with a registry the kernel builds from the
+  enabled flags.
+* **Several ABIs at once** (`linux-abi=on` and `windows-abi=on`): each
+  process has exactly one personality; the native-call right of §11.6
+  stays per process and independent of the personality.
+* **A Windows ABI here means NT syscalls in the kernel or in a ring-3
+  server**, which is a large undertaking (Wine's approach, NT syscalls
+  translated in user space on top of the Linux ABI, already runs Windows
+  programs on Ferrix). The design only keeps the door open; nothing is
+  planned. As with Linux, `personality = kernel | user` says where a
+  foreign ABI runs, and the consultant's line 3208 holds for any of them:
+  one in ring 0 keeps the certified levels at today's, one in ring 3
+  (like `linuxd`) does not.
+* **Cost:** the trait and registry are what §11.3 already costs (~10
+  points on top of `off`); generality adds ~2 to 3 points (naming, a
+  registry instead of one hook, the flag rows' shared rule). A Windows
+  personality itself is not estimated.
