@@ -138,7 +138,7 @@ the net, input, disk, sound and display drivers read no boot word either.
 | `ferrix.target` | init (`src/user/system/linux/init/init/src/main.rs:244`) | a unit name | `default.target` (→ `multi-user.target`; desktop images link it to `graphical.target` in `/etc/ferrix/units`) | the target init boots; a bad name or a failed transaction isolates `rescue.target` | admin ("boot to console / desktop / rescue" is a user-facing candidate) |
 | any word | init's `ConditionKernelCommandLine=` (`init/src/probe.rs`) | `word` or `key=value` | — | unit conditions; no shipped unit uses it | admin |
 | `console` | `getty-generator` (`init/getty/src/bin/getty-generator.rs`) | `NAME[,speed]`, `/dev/` stripped; `uart…` and address forms mean `console` | `console` | one `getty@NAME.service` per console | admin |
-| `ferrix.statd.interval` | statd (`src/user/apps/statd/src/main.rs:221`) | ms | 500, at least 100 | sampling interval; `--interval` wins | test-only (Pixel 7 stat runs) |
+| `ferrix.statd.interval` | the statd app (its `src/main.rs:221`, apps component) | ms | 500, at least 100 | sampling interval; `--interval` wins | test-only (Pixel 7 stat runs) |
 | `ferrix.statd.seconds` | statd (`:225`) | seconds | 0 = forever | run length; `--seconds` wins | test-only |
 | `ferrix.slot`, `.boot`, `.seq`, `.disk` | `bootctl` (`installer/src/bootctl.rs`, `ferrix_slots::plan::parse_words`) | as §1.2 | — | which slot this system runs; refuses to act when record and line disagree | read-only |
 | `ferrix.intelgpu.modeset` | intel driver (`native/drivers/gpu/intel/src/display/modeset.rs`) | `dry`, `on` | nothing | `dry` prints the second scanout's modeset plan, `on` carries it out | test-only (N150 bring-up) |
@@ -278,7 +278,7 @@ store for a Displays page.
 
 | Path | Keys | Default | Reader | When | Class |
 |---|---|---|---|---|---|
-| `~/.config/waybar/config(.jsonc)`, `style.css` (search: `-c`, `$WAYBAR_CONFIG_DIR`, `$XDG_CONFIG_HOME/waybar`, `~/.config/waybar`, `~/waybar`, `/etc/xdg/waybar`) | upstream waybar; modules clock, custom, hyprland, network, pulseaudio, system, tray | seeded from `/etc/skel` | waybar (`src/user/apps/waybar/src/config.rs:60`) | start; SIGUSR1 shows/hides; **SIGUSR2 reload not built** | user-facing (Bar) |
+| `~/.config/waybar/config(.jsonc)`, `style.css` (search: `-c`, `$WAYBAR_CONFIG_DIR`, `$XDG_CONFIG_HOME/waybar`, `~/.config/waybar`, `~/waybar`, `/etc/xdg/waybar`) | upstream waybar; modules clock, custom, hyprland, network, pulseaudio, system, tray | seeded from `/etc/skel` | waybar (the waybar app's `src/config.rs:60` (apps component)) | start; SIGUSR1 shows/hides; **SIGUSR2 reload not built** | user-facing (Bar) |
 | `~/.config/hypr/hypridle.conf` (XDG chain, `/etc/xdg`) | `general:` lock_cmd, unlock_cmd, on_lock_cmd, on_unlock_cmd, before/after_sleep_cmd, ignore_*_inhibit, inhibit_sleep; `listener:` timeout, on-timeout, on-resume, ignore_inhibit, condition_cmd, condition_retry | — | hypridle | start | **user-facing** (Idle, lock after …) |
 | `~/.config/hypr/hyprlock.conf` (XDG chain, `/etc/xdg/hypr`) | general, auth, animations, background, input-field, label, image, shape | — | hyprlock | start | user-facing (Lock screen look) |
 | `~/.config/fuzzel/fuzzel.ini` (XDG chain, `/etc/xdg`) | upstream fuzzel `[main] [colors] [border] [dmenu] [key-bindings]`; parsed but not carried out: gamma-correct-blending, scaling-filter other than box, list-executables-in-path, message-mode=expand | — | fuzzel | start | user-facing (Launcher) |
@@ -299,7 +299,7 @@ N=V`. notifyd has none (5000 ms default timeout, colours in code).
 
 | Path | Keys | Default | Reader | When | Class |
 |---|---|---|---|---|---|
-| `~/.config/ferrix/game-mode.conf` | as §3.4; written atomically, 0644 | — | Settings (`src/user/apps/settings/src/store.rs`) | read at window open and before each switch | user-facing |
+| `~/.config/ferrix/game-mode.conf` | as §3.4; written atomically, 0644 | — | the Settings app (its `src/store.rs`, apps component) | read at window open and before each switch | user-facing |
 | `~/.config/ferrix/lode/machines.conf` | `[machine NAME]`, `kind = ssh\|tls`, `host`, `user`, `port` (22), `key` | — | lode viewer (`remote.rs`) | start; written by its form | user-facing |
 | `~/.config/ferrix/lode/viewer-queries.conf` | `name = filter` | built-in `triage`, `gpu` | lode viewer (`query.rs`) | start; written on save | user-facing |
 | `~/.config/ferrix/lode/keys/NAME` | a private key, 0600 | — | lode viewer | form submit | user-facing |
