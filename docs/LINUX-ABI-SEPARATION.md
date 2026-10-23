@@ -649,14 +649,17 @@ is there as well:
 
 | `linux-abi` | Was in §11.1–11.5 | Ring 0 | Points |
 |---|---|---|---|
-| `on` (default) | `both` | the item plus the Linux load, under today's exception until M5 | ~10 on top of `off`'s rows (one process model, per-personality fault outcome, the native right for apps) |
+| `on` | `both` | the item plus the Linux load, under today's exception until M5 | ~10 on top of `off`'s rows (one process model, per-personality fault outcome, the native right for apps) |
 | `off` | `native` | the item only, no QM code | ~85 (65–120); ~5 to only build |
 
 * There is no Linux-only value. §11.2's "drivers only" right is not a
   build value but part of `on`: Linux programs get no native calls unless
   granted (devmgr, the drivers job, init, authd, sessiond, nvrm).
-* `--cfg ferrix_linux_abi` when `on`, nothing when `off`; declared for
-  `--check-cfg`. `personality` gains `none`, which requires
+* `--cfg ferrix_linux_abi="on"` or `="off"`, always passed, both values
+  declared for `--check-cfg`, the boot line computed from `cfg!`; the row
+  in `build-flags.toml` is `linux_abi`. A bare `cfg` left out for `off`
+  would let a forgotten flag select a configuration silently (BUILD-FLAGS
+  rules 1 and 6; ledger 3218 (9)). `personality` gains `none`, which requires
   `linux-abi=off`; `linux-abi=on` requires `personality=kernel|user`.
 * Everything else in §11.4 holds with `both` read as `on` and `native` as
   `off`: the profiles keep `on`; `xtask check` builds both values on all
@@ -674,7 +677,8 @@ easily". So the Linux ABI is the first of a kind, not a special case:
 
 * **One boolean flag per foreign ABI**, all of one shape:
   `linux-abi = on | off` now, `windows-abi = on | off` (or any other)
-  later, each turned into its own `--cfg ferrix_<name>_abi`. The native
+  later, each turned into its own key-value `--cfg ferrix_<name>_abi="on"|"off"`,
+  always passed (§11.6, ledger 3218 (9)). The native
   ABI is in every kernel and has no flag. Adding an ABI is: a flag row in
   `build-flags.toml` with its levels and requires rules, a module behind
   its `cfg`, a registry entry, its gate rows. Nothing in the core changes.
@@ -708,3 +712,12 @@ easily". So the Linux ABI is the first of a kind, not a special case:
   points on top of `off`); generality adds ~2 to 3 points (naming, a
   registry instead of one hook, the flag rows' shared rule). A Windows
   personality itself is not estimated.
+
+Corrections owed to ledger 3208 and 3218 (the consultant's OK IF, (1)-(10)):
+§11.6's table says "the item only, no QM code" for `off` and that the
+profiles "keep `on`"; both are corrected by (1) and (2): `off` *allows* the
+levels, carries no claim until it is a named profile with its own evidence,
+still has the board glue and F-76's unclassified crates in ring 0, and
+every certified profile sets `linux_abi` explicitly (no default applies to
+a certified profile). Which level an `off` profile claims, and when, is the
+customer's to decide (3208 (7)).
