@@ -11,6 +11,6 @@ After=lode.service
 
 [Service]
 Type=simple
-ExecStart=/sbin/lode upload
+ExecStart=/bin/lode-upload
 Restart=on-failure
 RestartSec=5s

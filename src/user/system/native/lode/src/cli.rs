@@ -31,7 +31,6 @@ lode session end ID                  what a seat's owner tells lode (root's)
 COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
                                      its lines into the log, as systemd-cat's
 lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
-lode upload [--config FILE]          send the log on to collectors (lode-upload.service)
 lode upload-stub PORT FILE           a collector on 127.0.0.1:PORT that keeps what it is sent (a test peer)
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
@@ -115,7 +114,6 @@ pub(crate) fn run() -> i32 {
         Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
-        Some("upload") => return crate::upload::run(rest.get(1..).unwrap_or_default()),
         Some("upload-stub") => return crate::upload::stub(rest.get(1..).unwrap_or_default()),
         Some("levels") => {
             return match parse(rest.get(1..).unwrap_or_default()) {

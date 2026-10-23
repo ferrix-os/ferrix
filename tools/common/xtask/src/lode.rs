@@ -108,7 +108,7 @@ done
 # uploader, so its first tries fail and back off.
 up=/tmp/uploaded
 # The service: the lode that is neither the uploader nor the collector.
-lode_pid() { for p in $($bb pidof lode); do $bb grep -q upload /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
+lode_pid() { for p in $($bb pidof lode); do $bb grep -q upload-stub /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
 ( exec /bin/lode upload-stub 19532 $up ) > /tmp/upload-stub 2>&1 &
 upload_count() { n=$($bb grep -c '^MESSAGE=upload ' $up 2>/dev/null); echo ${n:-0}; }
 upload_wait() { i=0; until [ "$(upload_count)" -ge "$1" ]; do i=$((i+1)); [ $i -gt 400 ] && break; $bb usleep 100000; done; }
@@ -144,7 +144,7 @@ say "while down: $(upload_count)"
 $bb rm $up.refuse
 upload_wait 10
 # The uploader killed: started again, it goes on from its cursor.
-for p in $($bb pidof lode); do $bb tr '\0' ' ' < /proc/$p/cmdline | $bb grep -q ' upload $' && $bb kill -9 $p && say "killed the uploader"; done
+for p in $($bb pidof lode-upload); do $bb kill -9 $p && say "killed the uploader"; done
 i=10; while [ $i -lt 15 ]; do echo "<14>uploadme: upload $i" > /dev/kmsg; i=$((i+1)); done
 upload_wait 15
 $bb sleep 1
@@ -261,6 +261,7 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         content: Content::Bytes(busybox),
     });
     files.push(enabled());
+    files.extend(crate::lode_net::carried(arch)?);
     files.push(File {
         path: format!("etc/ferrix/units/multi-user.target.wants/{UPLOAD_UNIT}"),
         mode: 0o777,
