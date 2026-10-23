@@ -1,0 +1,39 @@
+name: Nightly
+
+# CI on develop once a night (docs/REPO-FLOW.md). Promotions already run CI on
+# each develop commit they carry; this run is for the nights a promotion is
+# held -- red, or waiting for a verdict -- so develop's newest commit still
+# gets a verdict a day. A scheduled workflow runs on the default branch, so it
+# dispatches ci.yml on develop rather than running it; nothing runs when
+# develop is where main already is, or where last night's run was.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  develop:
+    name: CI on develop
+    if: vars.FLOW_PROMOTE == 'on'   # set by github-flow-setup.sh switch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git fetch -q origin main develop
+          tip=$(git rev-parse origin/develop)
+          if git merge-base --is-ancestor "$tip" origin/main; then echo "develop is in main"; exit 0; fi
+          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch develop \
+                   --event workflow_dispatch --limit 1 --json headSha --jq '.[0].headSha // ""')
+          if [ "$last" = "$tip" ]; then echo "develop's tip already ran"; exit 0; fi
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref develop -f "base=$(git merge-base origin/main "$tip")"

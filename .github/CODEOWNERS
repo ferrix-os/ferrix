@@ -1,0 +1,31 @@
+# Code owners (docs/REPO-FLOW.md). The develop ruleset requires a code
+# owner's approval on every pull request it does not let bypass, which is
+# every outside contribution; the owner's own and the fleet's pull requests
+# take the owner lane and need none.
+#
+# Everything is the owner's. The paths below are listed again, on purpose,
+# as the places a smuggled change does its work: what runs in CI or at build
+# time, what fetches or pins something from outside, what decides what is
+# trusted. A review of an outside pull request that touches one of them reads
+# it line by line, with the supply-chain flags beside it.
+
+*                                   @SetZero
+
+/.github/                           @SetZero
+/.githooks/                         @SetZero
+/.claude/                           @SetZero
+/.cargo/                            @SetZero
+**/build.rs                         @SetZero
+**/Cargo.toml                       @SetZero
+**/Cargo.lock                       @SetZero
+/rust-toolchain.toml                @SetZero
+/deny.toml                          @SetZero
+/components.toml                    @SetZero
+/tools/common/xtask/                @SetZero
+/tools/common/fetch/                @SetZero
+/tools/common/check/                @SetZero
+/tools/common/release/              @SetZero
+/tools/common/data/                 @SetZero
+/vendor/                            @SetZero
+/docs/certification/                @SetZero
+/docs/sysml/                        @SetZero

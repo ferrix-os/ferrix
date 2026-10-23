@@ -8,12 +8,30 @@ name: CI
 # can tell us the thing actually runs.
 
 on:
+  # Since 2026-10-23 (docs/REPO-FLOW.md) CI runs on what is about to reach
+  # main or develop, not on every landing: a pull request to either (an
+  # outside contribution, an owner's feature), a promotion of develop to main
+  # (the Promote workflow dispatches this file on its promote/<sha> branch,
+  # since a pull request its own token opens starts no run), and develop
+  # nightly. A push to main runs it too, which after the switch is only a
+  # direct push by an administrator: a promotion merges with the workflow's
+  # token, and that push starts no run, so the promoted commit is not
+  # checked twice. develop's own pushes, many an hour, run nothing here; the
+  # gate pool has run each landing's rows before it reached develop.
   push:
-    # develop is where sessions land (docs/BACKLOG.md), and main moves only to
-    # a develop commit verified whole, so both are gated.
-    branches: [main, develop]
+    branches: [main]
   pull_request:
+    branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      base:
+        description: The commit the run's range starts at, for the one-author check (the Promote workflow passes main's merge base)
+        required: false
+
+# A pull request's code runs here with a read-only token and no secrets,
+# whoever wrote it; jobs that need more ask for it themselves.
+permissions:
+  contents: read
 
 # Only the newest commit on a branch needs a verdict. main is pushed after
 # every landing, often several times an hour, and each run is about twenty
@@ -64,6 +82,8 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request'
                     && github.event.pull_request.base.sha
+                    || github.event_name == 'workflow_dispatch'
+                    && inputs.base
                     || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request'
                     && github.event.pull_request.head.sha
@@ -803,3 +823,57 @@ jobs:
           name: fuzz-artifacts
           path: src/tests/fuzz/artifacts/
           if-no-files-found: ignore
+
+  # ----------------------------------------------------------------
+  # What a pull request adds to the dependency graph, against GitHub's
+  # advisory database: a known-vulnerable crate or action, or a licence
+  # deny.toml would refuse, fails here before a person reads the diff.
+  # Pull requests only; cargo-deny covers the tree as a whole.
+  # ----------------------------------------------------------------
+  dependencies:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+
+  # ----------------------------------------------------------------
+  # The one check the rulesets require of CI (docs/REPO-FLOW.md), so the
+  # required list does not have to name twenty jobs and change whenever one
+  # is added. It fails when any job it waits for failed or was cancelled; a
+  # job skipped by its own `if` (dependency review outside pull requests)
+  # counts as passed.
+  #
+  # ADVISORY jobs are run and shown but do not decide: "rustc on Ferrix"
+  # fails most runs on the hosted runner's KVM with two kernel self-check
+  # panics no other host shows (getrusage(RUSAGE_THREAD) above the wall
+  # clock; the stage 9 XINUSE wake check), and while it does, a required
+  # check that included it would stop every promotion. Take it out of
+  # ADVISORY when both have their fix.
+  # ----------------------------------------------------------------
+  result:
+    name: CI result
+    if: always()
+    needs: [authorship, assembly, audits, model, layering, check, test, ferrousli,
+            build, boot, rustc, deny, miri, fuzz, dependencies]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          ADVISORY: rustc
+        run: |
+          python3 - <<'PY'
+          import json, os
+          needs = json.loads(os.environ["NEEDS"])
+          advisory = set(os.environ["ADVISORY"].split())
+          bad = {k: v["result"] for k, v in needs.items()
+                 if v["result"] in ("failure", "cancelled") and k not in advisory}
+          for k, v in sorted(needs.items()):
+              print(f"{k:14} {v['result']}{'  (advisory)' if k in advisory else ''}")
+          if bad:
+              raise SystemExit(f"failed: {', '.join(sorted(bad))}")
+          PY
