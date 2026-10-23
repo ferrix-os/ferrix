@@ -725,7 +725,11 @@ mod tests {
         for y in 0..height {
             for x in 0..width {
                 let grey = (at.0..at.0 + 200).contains(&x) && (at.1..at.1 + 100).contains(&y);
-                pixels.extend_from_slice(if grey { &[127, 135, 150] } else { &[20, 26, 43] });
+                pixels.extend_from_slice(if grey {
+                    &[127, 135, 150]
+                } else {
+                    &[20, 26, 43]
+                });
             }
         }
         Image {
@@ -740,9 +744,16 @@ mod tests {
     #[test]
     fn the_wallpaper_is_judged_by_where_its_mark_is() {
         assert!(judge_wallpaper(&screen((580, 360))).is_ok());
-        assert!(judge_wallpaper(&screen((100, 100))).is_err(), "the mark moved");
+        assert!(
+            judge_wallpaper(&screen((100, 100))).is_err(),
+            "the mark moved"
+        );
         let mut black = screen((580, 360));
-        black.pixels.iter_mut().take(3 * 1024).for_each(|byte| *byte = 0);
+        black
+            .pixels
+            .iter_mut()
+            .take(3 * 1024)
+            .for_each(|byte| *byte = 0);
         assert!(judge_wallpaper(&black).is_err(), "a black row");
     }
 }
