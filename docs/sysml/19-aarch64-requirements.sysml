@@ -745,6 +745,19 @@ package FerrixAarch64Requirements {
                 "arch::aarch64::speculation::Seen::unpack",
                 "arch::aarch64::speculation::kind_of", "arch::aarch64::init_speculation");
         }
+        requirement <'L.aarch64.67'> eachProcessorsIdentityIsReadBack : ItemLowLevel {
+            attribute :>> statement = "midr_of shall answer the MIDR_EL1 that
+                processor <logical> recorded while starting, and None for a
+                processor that has not recorded, for one at or beyond MAX_CPUS,
+                and for every processor of a kernel built without its
+                side-channel defences, which records nothing.";
+            attribute :>> criterion = "After every processor has started,
+                midr_of answers each one's record, which for the processor
+                running the check is its own MIDR_EL1, and None for every
+                logical number from the processor count to MAX_CPUS.";
+            attribute :>> parent = "H.TRAP.3";
+            attribute :>> unit = ("arch::aarch64::speculation::midr_of");
+        }
         requirement <'L.aarch64.42'> defencesAreAppliedAndReadBack : ItemLowLevel {
             attribute :>> statement = "apply shall clear SCTLR_EL1.DSSBS and
                 PSTATE.SSBS on a core that needs the store bypass defence and has

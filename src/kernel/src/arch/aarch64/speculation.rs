@@ -478,9 +478,8 @@ fn kind_of(logical: usize) -> Option<(u64, Defences)> {
 /// processor that has not recorded, and in a kernel built without its
 /// side-channel defences, which records nothing.
 pub(crate) fn midr_of(logical: usize) -> Option<u32> {
-    SEEN.get(logical)
-        .and_then(|slot| Seen::unpack(slot.load(Ordering::Acquire)))
-        .and_then(|seen| u32::try_from(seen.core.midr).ok())
+    let seen = Seen::unpack(SEEN.get(logical)?.load(Ordering::Acquire))?;
+    u32::try_from(seen.core.midr).ok()
 }
 
 /// Say what the machine is exposed to, once every processor has started and

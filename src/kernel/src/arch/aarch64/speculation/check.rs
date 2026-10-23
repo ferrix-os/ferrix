@@ -11,7 +11,12 @@
 
 use core::sync::atomic::Ordering;
 
-use super::{Answer, BHB_LOOPS, Core, Defences, Exposure, Firmware, Seen, applied_by};
+use ferrix_sched::MAX_CPUS;
+
+use super::{
+    Answer, BHB_LOOPS, Core, Defences, Exposure, Firmware, HARDENED, SEEN, Seen, applied_by,
+    midr_of, read_midr, this_cpu,
+};
 
 /// What the boot check adds on this architecture: that the entry loop runs
 /// exactly when some processor recorded that it needs it.
@@ -30,11 +35,57 @@ use super::{Answer, BHB_LOOPS, Core, Defences, Exposure, Firmware, Seen, applied
 pub(crate) fn check() -> Result<(), &'static str> {
     check_part_tables()?;
     check_firmware_answers()?;
+    check_midr_records()?;
     let needed = (0..crate::smp::count()).any(|logical| {
         applied_by(logical).is_some_and(|applied| applied.contains(Defences::BHB_LOOP))
     });
     if needed != (BHB_LOOPS.load(Ordering::Relaxed) != 0) {
         return Err("the branch history loop's count disagrees with what the processors recorded");
+    }
+    Ok(())
+}
+
+/// `midr_of`, which `/proc/cpuinfo` reads each processor's identity
+/// through: for every processor that started, the `MIDR_EL1` its record
+/// holds, and for this one the register itself; `None` past the last
+/// processor, for a slot no processor recorded in, and everywhere in a
+/// kernel built without its defences, which records nothing.
+///
+/// # Errors
+///
+/// A processor's answer that is not its record or its register, or an
+/// answer where nothing was recorded.
+///
+/// Verifies: L.aarch64.67
+fn check_midr_records() -> Result<(), &'static str> {
+    let online = |logical: usize| {
+        crate::smp::topology()
+            .and_then(|topology| topology.cpus().get(logical))
+            .is_some_and(crate::smp::PerCpu::is_online)
+    };
+    let started = crate::smp::count();
+    for logical in (0..started).filter(|&logical| online(logical)) {
+        let recorded = SEEN
+            .get(logical)
+            .and_then(|slot| Seen::unpack(slot.load(Ordering::Acquire)))
+            .and_then(|seen| u32::try_from(seen.core.midr).ok());
+        if HARDENED && recorded.is_none() {
+            return Err("a processor that started recorded no MIDR");
+        }
+        if midr_of(logical) != recorded.filter(|_| HARDENED) {
+            return Err("midr_of does not answer a processor's recorded MIDR");
+        }
+    }
+    // The register itself, where the check did not move between the two
+    // reads: on a machine of mixed cores the other processor's answer is
+    // another part.
+    let here = this_cpu();
+    let own = u32::try_from(read_midr()).ok();
+    if HARDENED && this_cpu() == here && midr_of(here) != own {
+        return Err("midr_of does not answer this processor's own MIDR_EL1");
+    }
+    if (started..=MAX_CPUS).any(|logical| midr_of(logical).is_some()) {
+        return Err("midr_of answers for a processor that recorded nothing");
     }
     Ok(())
 }
