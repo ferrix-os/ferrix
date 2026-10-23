@@ -947,6 +947,9 @@ const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("dhcp", "src/user/system/linux/dhcp"),
     ("dmesg", "src/user/system/linux/dmesg"),
     ("installer", "src/user/system/linux/installer"),
+    // tole, the UI framework: a component (components.toml), checked out
+    // beside the compositor's workspace.
+    ("tole", "src/user/system/linux/tole"),
 ];
 
 /// `cargo xtask check-unit`: the one unit `FERRIX_CHECK_UNIT` names, as

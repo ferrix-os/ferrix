@@ -7,6 +7,13 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-23 (customer, through the coordinator)** **tole is a
+  repository of its own**, https://github.com/ferrix-os/tole, a component
+  checked out at `src/user/system/linux/tole` (`components.toml`), built
+  alone with its own CI; its Wayland backend is behind a feature. The
+  compositor's `text` and `toolkit` crates stay in this tree and tole
+  reaches them by path (`docs/UI-FRAMEWORK.md` §4.13).
+
 * **2026-10-23 (customer, through the coordinator)** **Ferrix's UI
   framework is called tole** (painted sheet metal, French *tôle*), built
   as designed in `docs/UI-FRAMEWORK.md` without waiting for a review: a

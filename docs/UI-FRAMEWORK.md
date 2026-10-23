@@ -729,12 +729,22 @@ compositor's workspace. No crate is added.
 
 ### 4.13 Where it lives
 
-`src/user/system/linux/compositor/tole/` (runtime) and
-`src/user/system/linux/compositor/tole-compiler/` (compiler and the `Fx`
-and `Fx.Controls` modules), members of the compositor's workspace, beside
-`toolkit` and `text`: same lints, same tiny-skia pin, and `cargo xtask
-check` already runs that workspace's formatting, clippy and tests. Apps
-reach them by relative path, as they reach the toolkit.
+tole is a repository of its own, https://github.com/ferrix-os/tole
+(customer, 2026-10-23), and a component of this tree (`components.toml`),
+checked out at `src/user/system/linux/tole`: a workspace of the crates
+`tole` (runtime) and `tole-compiler` (compiler and the `Fx` and
+`Fx.Controls` modules), with the compositor's lints. It is not in the
+compositor's workspace but beside it, and reaches two of its crates by
+path: `text` (fonts, shaping, glyphs), which the runtime draws with, and
+`toolkit` (the Wayland client runtime), which only the window backend
+behind the `wayland` feature uses. Both stay in this tree, where the
+compositor's own clients use them; moving them would make every client of
+the compositor depend on a component. tole builds alone wherever that
+layout is -- its CI checks out the compositor's directory and the tree's
+Inter beside it -- and `cargo xtask check` runs its formatting, clippy and
+tests as one of the Linux workspaces. Apps reach it by relative path, as
+they reach the toolkit. A change to tole is two landings, as for every
+component (`docs/CONVENTIONS.md`).
 
 ## 5. Testing
 
@@ -813,7 +823,9 @@ more.
      small stated antialiasing tolerance (§5).
   4. **One style:** Settings and the desktop clients take tole's
      `Fx.Controls` look; theme tokens give light and dark and the accents.
-* **U1 built** (2026-10-23): `src/user/system/linux/compositor/tole`. The
+* **U1 built** (2026-10-23), landed as 91eb77d24 in the compositor's
+  workspace, then moved with its history to ferrix-os/tole (§4.13), pinned
+  here. The
   property cells and bindings with dependency tracking (lazy: a change
   marks, a read evaluates; dropped dependencies forgotten; loops found and
   said once), the item arena with generations, `Item`, `Rectangle`,
