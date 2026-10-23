@@ -43,6 +43,18 @@ git config core.hooksPath .githooks
 **Never use `git commit --no-verify` or `git push --no-verify` here.** If a hook
 refuses a message, fix the message.
 
+## Where a landing goes
+
+Landings go to `develop`; `main` moves only by pull request
+([REPO-FLOW.md](REPO-FLOW.md), customer, 2026-10-23). The fleet's
+promotions and the owner's pull requests merge themselves once `CI
+result`, `flow/lane` and `certification/verdict` pass; an outside pull
+request is reviewed by the consultant, a security review and the owner,
+and merged by hand. Name a branch for what it is: `feature/`, `bugfix/`,
+`chore/`, `docs/`, `wip/` or `park/` and a few words. Where this file or
+another says to rebase onto, fast-forward or boot `main` for a landing,
+it means `develop`.
+
 ## Working beside other sessions
 
 Several sessions change this repository at once, most of them from worktrees
@@ -153,8 +165,8 @@ rule below comes from something seen there.
    with your stream's name, and remove only those, by exact name.
 7. **Make agent worktrees by hand.** The Agent tool's `isolation: worktree`
    refuses this checkout: the session's path is `f:\…`, git reports `F:/…`,
-   and the tool sees a redirect. Run `git worktree add -b <branch>
-   .claude/worktrees/<name> main` yourself, and give the agent that path.
+   and the tool sees a redirect. Run `git worktree add -b feature/<name>
+   .claude/worktrees/<name> develop` yourself, and give the agent that path.
    Tell every agent to run gates and boots in the foreground, because a
    subagent is not woken by its own background task.
 8. **Wind down to a state the next session can start from.** When asked to
@@ -204,6 +216,14 @@ do not need it. The review checks the rules the evidence rests on:
 
 The review is internal, not independent verification in the standards'
 sense (F-27, F-29).
+
+Since 2026-10-23 the review shows in the commit: a promotion to `main`
+waits on every commit that touches the item unless its message names the
+review (`ledger <line>`, a standing pattern's `SP-n:` list, the consultant)
+or says in a line `Certification: <why none is needed>` -- a roll-up, a
+fix-up of a reviewed landing. `tools/common/release/cert-verdict.py
+develop..<branch>` shows what a promotion would wait on; run it before
+joining a batch (`docs/REPO-FLOW.md`, "The certification verdict").
 
 ### Standing patterns: approved once, audited after
 

@@ -65,14 +65,22 @@ table are in `docs/BACKLOG.md`. This skill does not repeat them.
 * `batch.sh status` and `gate.sh status`: is a batch open that more ready
   branches could join, and is any branch running its full row alone that a
   batch would have carried?
+* *The promotion* (since 2026-10-23, `docs/REPO-FLOW.md`): is the open
+  `promote/<sha>` pull request green, or merged? A red one, or one whose
+  `certification/verdict` waits, holds every landing back from `main`: give
+  the CI failure to the landing that caused it, and the waiting verdict to a
+  consultant subagent (`cert-verdict.py <range> --verdict OK --note "ledger
+  <line>" --post <sha>`). Fast-forward the root checkout's `main` to
+  `origin/main` after a promotion merges.
 * *Red on `main`*: is any gate failing on `main` itself? A working `main`
   comes before every other row. When one is, find the landing that broke it
   and give its fix to the session that landed it (*A red `main` goes back to
   whoever broke it*, below).
-* Push `main` to `origin` when `origin/main..main` is not empty: fast-forward
-  only, never forced, never with `--no-verify` (customer, 2026-09-27). Before
-  pushing, `git fetch origin`, because the customer merges pull requests on
-  GitHub.
+* Push `develop` to `origin` when `origin/develop..develop` is not empty:
+  fast-forward only, never forced, never with `--no-verify` (customer,
+  2026-09-27). Before pushing, `git fetch origin`, because the customer
+  merges outside pull requests into `develop` on GitHub. `main` is never
+  pushed: promotions move it.
 * The root checkout is clean. Another session's edits there block every
   fast-forward. Ask the session that made them to move them to a worktree,
   and never reset them yourself.
@@ -94,7 +102,7 @@ and queue the rest. With eight running on 2026-09-29, the usage limit
 stopped all of them within twenty minutes, mid-gate. Brief each agent:
 
 * Its own worktree, made by hand (`git worktree add -b <branch>
-  .claude/worktrees/<name> main`), and its own `CARGO_TARGET_DIR` on the gate
+  .claude/worktrees/<name> develop`), and its own `CARGO_TARGET_DIR` on the gate
   host. Two trees never share one. Gates and negative controls go through
   `~/.local/share/ferrix/fleet/gate.sh` (`run`, `control --expect`,
   `status`), whose slots keep warm target dirs (`docs/TEST-TIME.md`, Phase 3).

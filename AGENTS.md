@@ -35,7 +35,9 @@ The customer names the session ("you are the po now"). The product owner
 acts for the customer between the customer's words: who works on what, when
 a row is done, the landing order, hardware use, and disagreements between
 sessions. Scope and priority stay the customer's. It holds the landing lock,
-lands PASSED batch stacks and pushes `main`.
+lands PASSED batch stacks and pushes `develop`; `main` moves by itself
+through promotion pull requests (`docs/REPO-FLOW.md`), and a red promotion
+is the product owner's first job in a round.
 
 The role itself is the project skill
 [`.claude/skills/product-owner/SKILL.md`](.claude/skills/product-owner/SKILL.md):
@@ -53,7 +55,8 @@ with near-identical work while 20 more runs wait half an hour each for a
 slot. `~/.local/share/ferrix/fleet/batch.sh` runs it once for several
 branches (customer, 2026-10-04):
 
-* **Join when ready.** A branch that is rebased onto `main`, has passed its
+* **Join when ready.** A branch that is rebased onto the landing branch
+  (`develop` since 2026-10-23, `docs/REPO-FLOW.md`), has passed its
   own fast gates and has the consultant's OK when it needs one runs
   `batch.sh join <session> <ref> <tag>`, with `--gate FILE` for the lines its
   row adds beyond the profile (one xtask command a line, as `gate.sh run`
