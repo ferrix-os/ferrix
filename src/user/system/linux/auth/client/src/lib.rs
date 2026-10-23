@@ -283,6 +283,31 @@ pub fn converse(
     }
 }
 
+/// The listening uids a privileged client of `authd` talks to: the init's,
+/// which owns a socket it activates, and `authd`'s own account's.
+pub const AUTHD_UIDS: [u32; 2] = [0, 90];
+
+/// The certification consultant's U1, for every privileged client (`su`,
+/// `settingsd`): whether whoever listens at the other end of `connection`
+/// is the init or `authd`, by the uid `SO_PEERCRED` recorded, so a server a
+/// user started is refused before a byte is sent.
+///
+/// # Errors
+///
+/// Who listens instead, or why it cannot be told, in words.
+pub fn talks_to_authd(connection: &Connection) -> Result<(), String> {
+    let listener = connection
+        .peer_uid()
+        .map_err(|error| format!("cannot tell who listens at authd's socket: {error}"))?;
+    if AUTHD_UIDS.contains(&listener) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the authentication socket is held by uid {listener}, not authd"
+        ))
+    }
+}
+
 /// A person at a command line.
 #[derive(Debug, Default)]
 pub struct Terminal {

@@ -150,7 +150,7 @@ leaves the desktop running as root.
 |---|---|---|---|
 | **TA.WALKUP** A person at a *locked* screen, with the keyboard, the pointer and a USB port | In | The lock takes the keyboard (hyprix, stage 18). Only `authd`'s verdict opens it. The throttle (§3.5) makes guessing slow. A USB keyboard that types guesses gets the same throttle. | Same, and the compositor unlocks only on `authd`'s grant for the lock that is up (§3.7). Crashing the locker leaves the screen locked, and a new locker, started by a `bindl` key, may take over; it too needs the password. |
 | **TA.WALKUP'** The same person at an *unlocked*, unattended screen | Keep access later | `passwd` asks for the old password first, so they cannot change it. They can do anything else root can: phase 1 does not defend this. | `passwd` and becoming root both ask for a password. They can run anything as the user, and that is out of scope (§2.3). |
-| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **Killing hyprix ends the session at the console's login and nothing of the user's starts it again (§6.4, P2.7)**. What it can keep: a program of its own moved into a scope of the user's outlives the session, with the user's files and network and no device, lock channel or later session's socket; closing that is the customer's decision (§6.4). **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). **Since P2.6 that password is also root's** on an image where the user is in `wheel`, as `ferrix` is on `--everything` (decision 5): a phished password, or a guess at the throttle's rate, now reaches root through `su`. `/dev/tty` is the caller's own terminal since 2026-10-03 (§1); until then any program of the user's could write to the console and read from it. Since 2026-10-04 getty revokes the console before every login (§1), so a program left from an earlier console session reads nothing of the next login's password; it can still write to the console, and so put up a fake prompt. |
+| **TA.CLIENT** A compromised desktop client | The password, or an unlock | It is root and can read the store. Phase 1 does not defend this, and says so. | Same uid as the session. It cannot read the store (`0700 auth`) or `authd`'s memory (no `ptrace`, §1). It cannot forge the grant: the seat channel is init-routed to `sessiond`, which relays over the session's own socket pair and takes nothing grant-shaped from hyprix (§3.7). It cannot reopen that socket through `/proc`. It can guess only at the throttle's rate. Killing hyprlock and taking its lock over unlocks nothing (§3.7, `--boot hyprlock-session`). **Killing hyprix ends the session at the console's login and nothing of the user's starts it again (§6.4, P2.7)**. What it can keep: a program of its own moved into a scope of the user's outlives the session, with the user's files and network and no device, lock channel or later session's socket; closing that is the customer's decision (§6.4). **It can draw a fake lock screen and phish**, which no design on a same-uid desktop prevents (§2.3). **Since P2.6 that password is also root's** on an image where the user is in `wheel`, as `ferrix` is on `--everything` (decision 5): a phished password, or a guess at the throttle's rate, now reaches root through `su`. `/dev/tty` is the caller's own terminal since 2026-10-03 (§1); until then any program of the user's could write to the console and read from it. Since 2026-10-04 getty revokes the console before every login (§1), so a program left from an earlier console session reads nothing of the next login's password; it can still write to the console, and so put up a fake prompt. **Since 2026-10-24 `settingsd` takes passwords too** (`docs/SETTINGS-WRITER.md` §5): any process of a wheel member's uid, a desktop client or an ssh session, can drive it with that member's password, which it can phish as above, and with no password at all for an area whose policy an administrator set to `Methods=none`. Its failures count against the account's one throttle, as `su`'s and `login`'s do. |
 | **TA.NET** A network attacker, once ssh or a network login exists | A shell | `sshdt` stays key-only (`tools/common/xtask/src/ssh.rs:29-31`). `authd` listens on no network socket. | Password or keyboard-interactive ssh goes through `authd` (phase 3), with the same throttle and audit. Until then it stays off. |
 | **TA.ROOT** A Linux-ABI program running as root | Everything | Out of reach by design. Root reads any file and can replace `authd`. What still holds: the hashes are Argon2id, so a stolen store costs a lot of work per guess (§5.1). | Same. Phase 2 makes root rarer: no desktop client runs as root. |
 | **TA.OFFLINE** Someone with a copy of the disk (`build/root.img`, the DK1's SD card) | Passwords, which people reuse | Argon2id with a per-user salt. Nothing else: there is no disk encryption. | Same. |
@@ -558,6 +558,19 @@ Account=self
 Methods=password      # the old one first, then the new one twice
 ```
 
+**`Methods=none`** (2026-10-24, `docs/SETTINGS-WRITER.md` §5; the
+certification consultant's ledger line 3482): the conversation is ACCEPTED
+with no prompt. It is honoured only for a service whose name starts with
+`settings.` and whose merged policy says `Callers=root`, a `TargetGroup=`,
+`Purpose=authenticate` and no `Grant=` or `FirstPassword=`; anywhere else
+it is warned about and read as `password`. It is decided where the
+password would be asked, after the caller, the target, the group, the
+throttle and the account's record have been checked, so a locked account,
+one with no password and a non-member are refused as before; the audit
+line says `method=none`. It means *any process of a group member, with no
+check that a person is there*: an administrator who sets it for an area
+lets every program running as a wheel member change that area.
+
 | Service | Who asks | Account | Methods | Phase |
 |---|---|---|---|---|
 | `hyprlock` (or `auth:pam:module`) | the lock client | self | password; later + fingerprint or FIDO2 | 1 |
@@ -565,6 +578,7 @@ Methods=password      # the old one first, then the new one twice
 | `login` | Ferrix's `login` on a getty | any, from a root caller | password | 2 |
 | `su` | Ferrix's `su` | the caller, for a wheel member | password | 2 |
 | `greeter` | a graphical login | any, from `sessiond` | password | 3 |
+| `settings.<area>` | `settingsd`, root, for the person who asked (`docs/SETTINGS-WRITER.md`) | any, from a root caller, in wheel | password, or none where an admin's drop-in says so | built 2026-10-24 |
 | `polkit`-style prompts | a privileged service asks for the session user's consent (§4.5) | the session user | password | 3 |
 | `sshd` | `sshdt`, keyboard-interactive | any, from a root caller | password + TOTP | 3 |
 
