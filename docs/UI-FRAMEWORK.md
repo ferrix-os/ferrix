@@ -23,7 +23,7 @@ recommended compile model without waiting for a review of this document.
 ## 1. Why, and what it replaces
 
 Every graphical program Ferrix writes itself draws by hand today. The lode
-viewer (`src/user/apps/lode-viewer`) is the largest: 6,400 lines, of which
+viewer (the `lode-viewer` app) is the largest: 6,400 lines, of which
 about 2,700 are drawing -- `draw.rs`'s `Canvas` (rounded boxes, outlines,
 dashes, hatching, text in two faces), `ui/mod.rs`, `ui/logs.rs` and
 `ui/overview.rs`, which place every box in logical pixels, and `window.rs`,
@@ -31,7 +31,7 @@ which joins them to a Wayland toplevel. Its widgets are each written once,
 in place: a virtualized table with rows of six kinds, chips, facets with
 checkboxes, a query field, segmented buttons, a side navigation, a detail
 pane, charts and sparklines, a palette in light and dark. Settings
-(`src/user/apps/settings`, 2,600 lines) has its own `layout.rs`, `paint/`
+(the `settings` app, 2,600 lines) has its own `layout.rs`, `paint/`
 and `theme.rs` doing the same things a second time, and the desktop clients
 (notifyd, wallpaper, caption, vptr) a third.
 
