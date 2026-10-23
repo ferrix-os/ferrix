@@ -1,0 +1,12 @@
+# Where settingsd listens (docs/SETTINGS-WRITER.md §1). Anyone may connect:
+# SO_PEERCRED says who asked, and authd decides what they may change.
+# settingsd is started by the first connection and handed this socket.
+[Unit]
+Description=The settings writer's socket
+
+[Socket]
+ListenSequentialPacket=/run/ferrix/settings
+SocketMode=0666
+
+[Install]
+WantedBy=sockets.target

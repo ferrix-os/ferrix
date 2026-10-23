@@ -943,6 +943,8 @@ const NO_SYSTEM_BUS: &str = "unix:path=/nonexistent/ferrix-check-has-no-system-b
 const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("init", "src/user/system/linux/init"),
     ("auth", "src/user/system/linux/auth"),
+    // The settings writer (docs/SETTINGS-WRITER.md).
+    ("settingsd", "src/user/system/linux/settingsd"),
     ("pkg", "src/user/system/linux/pkg"),
     ("dhcp", "src/user/system/linux/dhcp"),
     ("dmesg", "src/user/system/linux/dmesg"),

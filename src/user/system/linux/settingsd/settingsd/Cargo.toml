@@ -1,0 +1,21 @@
+[package]
+name = "settingsd"
+description = "/sbin/settingsd: makes the typed changes a Settings app asks for, once authd says the person may (docs/SETTINGS-WRITER.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The socket, its peer's credentials, sethostname, fsync.
+libc = "0.2.189"
+ferrix-settings-proto = { path = "../proto" }
+# The conversation settingsd relays: authd's own client and records.
+ferrix-auth-client = { path = "../../auth/client" }
+ferrix-auth-proto = { path = "../../../../../lib/proto/auth-proto" }
+# init's control records, for service-enable-persistent.
+ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
+
+[lints]
+workspace = true

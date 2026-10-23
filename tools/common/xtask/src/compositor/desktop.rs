@@ -126,6 +126,9 @@ pub(super) fn desktop_auth(arch: Arch, args: &Args) -> Result<Vec<crate::ports::
     if files.is_empty() {
         return Ok(files);
     }
+    // The settings writer, which the Settings app asks for system-wide
+    // changes (docs/SETTINGS-WRITER.md); authd carries its policies.
+    files.extend(crate::settingsd::carried(arch)?);
     files.extend(crate::auth::seeds(args)?);
     for (path, text) in [
         (

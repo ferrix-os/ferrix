@@ -1,0 +1,19 @@
+[package]
+name = "ferrix-settings-client"
+description = "Ask settingsd for a change: the Settings app's and settingsctl's half (docs/SETTINGS-WRITER.md §7)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The socket and its peer's uid.
+libc = "0.2.189"
+ferrix-settings-proto = { path = "../proto" }
+# The socket helpers and the `Person` a command line answers with, as
+# authd's clients have them.
+ferrix-auth-client = { path = "../../auth/client" }
+
+[lints]
+workspace = true

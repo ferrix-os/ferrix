@@ -187,6 +187,7 @@ mod selfhost;
 mod sem;
 mod serial;
 mod session;
+mod settingsd;
 mod sha256;
 mod shader_cache;
 mod shell;
@@ -589,6 +590,7 @@ const TASKS: &[&[Task]] = &[
     seat::TASKS,
     sem::TASKS,
     serial::TASKS,
+    settingsd::TASKS,
     shader_cache::TASKS,
     slot_image::TASKS,
     steamcmd::TASKS,

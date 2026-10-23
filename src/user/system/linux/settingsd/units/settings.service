@@ -1,0 +1,15 @@
+# settingsd (docs/SETTINGS-WRITER.md): root, since it writes /etc and sets
+# the running host name; it runs no program, and every change it makes is
+# one of a closed list of typed requests that authd has allowed.
+[Unit]
+Description=The settings writer
+Requires=settings.socket
+After=settings.socket
+
+[Service]
+Type=simple
+ExecStart=/sbin/settingsd
+Restart=on-failure
+RestartSec=1s
+MemoryMax=64M
+TasksMax=16

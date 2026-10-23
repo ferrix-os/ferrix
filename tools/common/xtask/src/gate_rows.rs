@@ -209,9 +209,14 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     } else if under("src/user/system/linux/init/") || under("src/lib/init/svc/") {
         rows.add(&["check", "test-init --arch all"]);
         reason(rows, "init's row");
+    } else if under("src/user/system/linux/settingsd/")
+        || path == "tools/common/xtask/src/settingsd.rs"
+    {
+        rows.add(&["check", "test-settings"]);
+        reason(rows, "the settings writer's row: check, then test-settings");
     } else if under("src/user/system/linux/auth/") || path == "tools/common/xtask/src/auth.rs" {
         rows.add(IMAGE_ROW);
-        rows.add(&["test-auth --arch all"]);
+        rows.add(&["test-auth --arch all", "test-settings"]);
         reason(rows, "authd's row: the image row, then test-auth");
         rows.ask(
             "authd: does it change what authd refuses? then test-auth --arch x86_64 \
@@ -649,7 +654,7 @@ mod tests {
         assert_eq!(rows.commands.iter().filter(|c| *c == "check").count(), 1);
         assert_eq!(
             rows.commands.last().map(String::as_str),
-            Some("test-auth --arch all")
+            Some("test-settings")
         );
     }
 
