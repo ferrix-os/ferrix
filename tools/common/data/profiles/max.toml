@@ -30,6 +30,7 @@ program_barrier = "switch"
 ssbd = "always"
 smt = "off"
 runtime_trades = "none"
+linux_abi = "on"
 
 [boot_options]
 "ferrix.checks" = ["run"]

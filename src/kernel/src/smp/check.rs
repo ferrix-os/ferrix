@@ -62,7 +62,11 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     grace(topology, &mut report)?;
     contended(topology, &mut report)?;
     arch::check_user_counter()?;
+    // Both are x86-64's raised trap and paranoid checks, which a kernel
+    // without the Linux ABI does not build (LINUX-ABI-SEPARATION.md §11.11).
+    #[cfg(ferrix_linux_abi = "on")]
     arch::check_x87_controls()?;
+    #[cfg(ferrix_linux_abi = "on")]
     arch::check_machine_check_enabled()?;
     Ok(report)
 }

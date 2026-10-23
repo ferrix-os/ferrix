@@ -88,14 +88,16 @@ why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A'
 # `cfg(ferrix_<flag> = "<value>")` (rule 6 b).
 
 [flags.personality]
-why = "the Linux layer as linuxd in user space, or built into ring 0 through the shim (MICROKERNEL.md §4)"
+why = "where the Linux ABI runs: as linuxd in user space, built into ring 0 through the shim (MICROKERNEL.md §4), or nowhere, with linux_abi=off (LINUX-ABI-SEPARATION.md §11.7: the Linux ABI's placement flag)"
 values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes" }
+values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["linux_abi=off"] }
 
 [flags.fs]
-why = "btrfs as btrfsd, or the btrfs crates in ring 0 with today's glue"
+why = "btrfs as btrfsd, the btrfs crates in ring 0 with today's glue, or no filesystem in a kernel without the Linux ABI, whose VFS it is"
 values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 [flags.mitigations]
 why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes leave it with DF6"
@@ -106,7 +108,7 @@ values.off = { allows = ["none"], lands = "M0", built = "yes" }
 why = "the barriers at a restricted exit (`exit`) or only at partition switches (`partition`); not applicable to a hybrid kernel"
 values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
 values.partition = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
-values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.ipc_fastpath]
 why = "the fast path for channel_write_read (0x1013); `on` allows sc4 and present only once the 2026-10-02 rule is met, recorded as a dated change here"
@@ -117,7 +119,7 @@ values.on = { allows = ["sc2", "none"], lands = "M0", built = "stand-in", stands
 why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
-values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
+values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.kernel_memory]
 why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
@@ -154,6 +156,11 @@ values.stibp = { allows = ["present", "sc2", "none"], lands = "today", built = "
 why = "whether the image contains game mode's privileged, per-application run-time trades; with `none` their code is absent"
 values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.game_mode = { allows = ["none"], lands = "game mode's design", built = "stand-in", stands_in = "none" }
+
+[flags.linux_abi]
+why = "whether the kernel offers the Linux ABI beside its native ABI (LINUX-ABI-SEPARATION.md §11.6-11.8); its levels are its placement's, `personality`. `off` is build-only today: it type-checks on every architecture and carries no claim, and boots nothing useful until §7's rows land (§11.11)"
+values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any

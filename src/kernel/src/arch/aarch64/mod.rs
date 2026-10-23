@@ -32,6 +32,7 @@ pub(crate) use cpu::sync_instructions;
 pub(crate) use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
 
 use core::sync::atomic::{AtomicBool, Ordering};
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) use trap::check::{drive_native_words, drive_system_call};
 
 use ferrix_bootinfo::{Arch, BootView};

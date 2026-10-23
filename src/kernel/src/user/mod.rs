@@ -5,12 +5,15 @@
 //! builds address spaces it does not itself run in, and hands a processor to
 //! code it does not trust.
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod alloc_check;
 pub(crate) mod cache;
 pub(crate) mod check;
 pub(crate) mod edge_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod madvise_check;
 pub(crate) mod memory_type;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod rmap_check;
 pub(crate) mod space;
 pub(crate) mod vmo;

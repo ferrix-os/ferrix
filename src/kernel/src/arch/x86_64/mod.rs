@@ -22,6 +22,7 @@ mod smp;
 pub(super) mod speculation;
 pub(super) mod switch;
 mod syscall;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) use syscall::check::{drive_native_words, drive_system_call};
 pub(super) mod trap;
 
@@ -2237,6 +2238,7 @@ pub(crate) static X87_CONTROLS_TAKEN: core::sync::atomic::AtomicUsize =
 /// # Errors
 ///
 /// A processor whose `CR0` does not hold them.
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) fn check_x87_controls() -> Result<(), &'static str> {
     trap::check::check_x87_controls()
 }
@@ -2292,6 +2294,7 @@ pub(crate) static MACHINE_CHECK_ENABLED: core::sync::atomic::AtomicUsize =
 /// # Errors
 ///
 /// A processor on which it is not enabled.
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
     paranoid::check::check_machine_check_enabled()
 }

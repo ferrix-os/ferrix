@@ -23,6 +23,7 @@ use core::cell::UnsafeCell;
 use super::cpu;
 use super::gdt;
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(in crate::arch) mod check;
 
 /// Vectors in an interrupt descriptor table. Fixed by the architecture.

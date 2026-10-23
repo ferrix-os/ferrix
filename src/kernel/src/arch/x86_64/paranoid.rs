@@ -87,6 +87,7 @@ use super::cpu;
 use super::trap::TrapFrame;
 use crate::panic::catalog;
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(super) mod check;
 
 /// `#DB`.

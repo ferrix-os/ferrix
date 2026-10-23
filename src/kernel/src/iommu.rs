@@ -76,6 +76,7 @@ use crate::{arch, mm, println};
 mod check;
 // Stage 10's check, raised above the core with the kernel split
 // (`docs/KERNEL-CRATES.md`): `check_iommu`, which main.rs runs.
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod domain_check;
 mod gate;
 pub(crate) mod remapping;

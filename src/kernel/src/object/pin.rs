@@ -126,6 +126,7 @@ use crate::println;
 use crate::sync::SpinLock;
 use crate::user::vmo::Held;
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod check;
 
 /// Whether a kept pin has been announced.

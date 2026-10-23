@@ -19,6 +19,7 @@ mod x86_64;
 mod speculation;
 mod speculation_check;
 // The stage checks every architecture answers, by one name (`stage_check.rs`).
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod stage_check;
 #[cfg(target_arch = "aarch64")]
 use aarch64::speculation as machine_speculation;
@@ -62,11 +63,11 @@ pub(crate) enum StatLayout {
 
 // The core's own system call entry, run with a call the boot check chose
 // (`syscall::seccomp_check`).
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", ferrix_linux_abi = "on"))]
 pub(crate) use aarch64::{drive_native_words, drive_system_call};
-#[cfg(target_arch = "arm")]
+#[cfg(all(target_arch = "arm", ferrix_linux_abi = "on"))]
 pub(crate) use armv7a::{drive_native_words, drive_system_call};
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", ferrix_linux_abi = "on"))]
 pub(crate) use x86_64::{drive_native_words, drive_system_call};
 
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
@@ -433,7 +434,7 @@ pub(crate) const fn check_user_counter() -> Result<(), &'static str> {
 // checked once all are online: x86-64's `CR0.NE`, with `MP` set and `EM` and
 // `TS` clear (L.x86_64.178). The Arm architectures have no legacy route
 // for a floating-point error to choose against.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", ferrix_linux_abi = "on"))]
 pub(crate) use x86_64::check_x87_controls;
 
 /// That every processor reports a program's x87 error as the exception,
@@ -442,7 +443,7 @@ pub(crate) use x86_64::check_x87_controls;
 /// # Errors
 ///
 /// None.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), ferrix_linux_abi = "on"))]
 #[expect(
     clippy::unnecessary_wraps,
     reason = "x86-64's check returns what failed, and the caller is shared"
@@ -455,7 +456,7 @@ pub(crate) const fn check_x87_controls() -> Result<(), &'static str> {
 // all are online: x86-64's `CR4.MCE` (L.x86_64.175, F-73). On the Arm
 // architectures an external abort or SError is taken through the vectors
 // with nothing to enable.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", ferrix_linux_abi = "on"))]
 pub(crate) use x86_64::check_machine_check_enabled;
 
 /// That every processor takes a machine check, checked: nothing to enable
@@ -464,7 +465,7 @@ pub(crate) use x86_64::check_machine_check_enabled;
 /// # Errors
 ///
 /// None.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), ferrix_linux_abi = "on"))]
 #[expect(
     clippy::unnecessary_wraps,
     reason = "x86-64's check returns what failed, and the caller is shared"

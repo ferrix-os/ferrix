@@ -871,3 +871,84 @@ Linux layer in ring 0 the profile needs no exception. That claim waits on
 §11's rows, (16)'s equivalence and its own evidence (3208 (1), (6)(g)). The
 `sc4` rows above stay `max`'s path (MICROKERNEL M1, M3, M6, M7 and the
 streams), and an `off` kernel reaches `sc4` with them, not before.
+
+### 11.11 The build-only `linux_abi=off`, as built (2026-10-23)
+
+The first step of the consultant's order (3208 (6)(a)): §7's rows 1 to 4,
+the experiment 94a41c2af made permanent under the flag, with no claim.
+The later steps (KERNEL-CRATES S3, the personality trait, the crate
+extraction, `xtask cert-tree`) replace these `cfg`s; until then they are the
+switch.
+
+**The flag.** `tools/common/data/build-flags.toml` declares `linux_abi =
+on | off`, key-value, both values declared to `--check-cfg` and named on
+the kernel's `build` line from `cfg!` (3218 (9)); it is last in the flag
+file's order, so the audit record's existing two-bit places do not move.
+Its levels are its placement's: `personality` gains `none`, with
+`linux_abi=off` requiring `personality=none` and `personality=none`
+requiring `linux_abi=off`; `fs` gains `none`, requiring `personality=none`;
+`partition_speculation` and `restricted_fastpath`'s `not_applicable` now
+conflict with `personality=user` instead of requiring `kernel`, which is the
+same set plus `none`. Every profile sets `linux_abi = "on"` explicitly
+(3208 (2)); no profile carries `off`, so it has no claim and its `build`
+line says `no claim` (3208 (1)). `personality` keeps its name here; the
+rename to a per-ABI placement flag (§11.7) is left to the trait's landing,
+which changes the flag's meaning anyway.
+
+**What `off` compiles out**, each by `#[cfg(ferrix_linux_abi = "on")]` on
+a declaration or a statement:
+
+* `main.rs`: the modules `fs`, `net`, `interfaces`, `service_check` and
+  `stages_check`; `syscall::deliver::install`; the seccomp filter; the
+  boot's filesystem, block-ring, devmgr, driver, btrfs and net bring-up and
+  checks; the configuration-window and skipped-arm checks; the measured
+  stage 3 timer check; the wall clock (`set_boot_time`); the boot
+  framebuffer's note to the display core.
+* `syscall/mod.rs`: the 55 personality and check modules (all but
+  `native`, `program` and `uaccess`).
+* The 22 check modules outside `syscall` that build a Linux test program
+  (with `stages_check` and `service_check`, §4's list:
+  `arch/*/{trap,switch,paranoid}/check`, `arch/stage_check`, `object/*_check`,
+  `object/pin/check`, `user/{alloc,madvise,rmap}_check`,
+  `device/config_check`, `iommu/domain_check`), the per-architecture
+  `drive_*` re-exports, and x86-64's x87 and machine-check wrappers with
+  their two calls in `smp/check.rs`.
+
+`main.rs` composes `NoLinux` (every Linux number `ENOSYS`, the native range
+answered as always) and a `register_load` of its own that registers board
+support alone and requires only its bindings and the boot mode (§7 rows 1,
+2, 5). An `off` kernel never prints the success marker: its boot ends with
+`FERRIX-BOOT-UNCHECKED ... the self-checks that run a Linux program not
+built: linux_abi=off`. Under `off` alone the crate allows `dead_code`,
+`unused_imports`, `unused_variables`, `unfulfilled_lint_expectations` and
+`unused_crate_dependencies`, with a reason: about 750 items only the cut code
+used, and the 20 library crates only the Linux ABI reaches, which stay
+ordinary dependencies (3220 (14) option (a)).
+
+**Evidence** (release builds, nazuna, 2026-10-23):
+
+| | x86-64 | AArch64 | ARMv7-A |
+|---|---:|---:|---:|
+| `on` image, text bytes | 7,434,265 | 6,750,641 | 7,853,044 |
+| `off` image, text bytes | 1,366,645 | 1,175,201 | 1,421,024 |
+| `off`: symbols of the Linux-only library crates / of `fs`, `net`, `interfaces`, `syscall::{linux,exec,signal,fd,file}` | 0 / 0 | 0 / 0 | 0 / 0 |
+| `on`: the same | 443 / 2,691 | 436 / 2,713 | 435 / 2,781 |
+
+* `cargo clippy -D warnings` passes for `on` and `off` on all three
+  architectures; `cargo xtask check` now lints `linux_abi=off` beside
+  `checks=off` and `mitigations=off`, so a new static coupling fails the
+  check the day it lands (§9 recommendation 2).
+* The `present` x86-64 image against `main`'s: the same 7,618 symbols with
+  the same sizes, `.text` the same length; only `__data_start` moves, by the
+  flag table's growth in read-only data.
+* `xtask`'s resolver test: `off` without `personality=none`, and
+  `personality=none` with `on`, are refused; with `personality=none` and
+  `fs=none` it resolves as an ad-hoc build at level `none`.
+
+**What it is not.** The `off` image links but does not boot usefully: no
+process can be started (§7 rows 8 to 12), a user fault still ends in
+`trap.rs`'s fatal (3208 (5)), stage 1's and stage 3's checks in
+`stages_check` are not built until row 13 splits it, and no requirement
+counts as verified in it (3208 (8)). Kernel lines: +277 / -14 in
+`src/kernel` (almost all `cfg` attributes and the two `off` functions);
+nothing is added to the `on` image's code.

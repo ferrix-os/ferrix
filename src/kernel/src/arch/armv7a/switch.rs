@@ -17,6 +17,7 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(in crate::arch) mod check;
 
 /// Bytes the switch pushes: nine registers and one word of padding.

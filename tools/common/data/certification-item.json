@@ -39,9 +39,10 @@
       "xtask from a profile file, read only in the kernel crate, and printed by",
       "the kernel on its `build` boot line, which the gate compares with the",
       "profile. `present` sets every one; a build changed by `--set` is ad hoc",
-      "and carries no claim. `mitigations=off` and `checks=off` are such builds.",
+      "and carries no claim. `mitigations=off`, `checks=off` and `linux_abi=off`",
+      "(LINUX-ABI-SEPARATION.md 11.11, build-only) are such builds.",
       "`cargo xtask check` type-checks (clippy, no link) the kernel in every",
-      "buildable profile, checks=off and mitigations=off on every architecture",
+      "buildable profile, checks=off, mitigations=off and linux_abi=off on every architecture",
       "so none can rot; `cargo xtask test-flags` links and boots each buildable",
       "profile, and `test-boot --mitigations off --no-claim` the off build.",
       "check-item-boundary.py holds the values below to present.toml's."

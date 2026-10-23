@@ -9,6 +9,25 @@
 
 #![no_std]
 #![no_main]
+// A kernel without the Linux ABI is build-only and carries no claim
+// (LINUX-ABI-SEPARATION.md §11.11): what only the Linux ABI and the checks
+// that run a Linux program used is left unused in it, about 750 items, until
+// those checks are re-homed onto native test programs (§7 row 13, ledger 3208
+// (6) b), and the expectations of dead code those items carry go
+// unfulfilled. The library crates only the Linux ABI reaches stay ordinary
+// dependencies, unused here, and are not linked into the image (ledger 3220
+// (14) a). Never in a build with `linux_abi=on`, which every profile sets.
+#![cfg_attr(
+    ferrix_linux_abi = "off",
+    allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unfulfilled_lint_expectations,
+        unused_crate_dependencies,
+        reason = "linux_abi=off is build-only until the checks that run a Linux program are re-homed"
+    )
+)]
 
 extern crate alloc;
 
@@ -25,15 +44,18 @@ mod discovery;
 mod early;
 mod fallible;
 mod fastpath;
+#[cfg(ferrix_linux_abi = "on")]
 mod fs;
 mod hooks;
 mod init;
 mod init_check;
+#[cfg(ferrix_linux_abi = "on")]
 mod interfaces;
 mod iommu;
 mod irq;
 mod mm;
 mod mmio;
+#[cfg(ferrix_linux_abi = "on")]
 mod net;
 mod object;
 mod panic;
@@ -57,9 +79,11 @@ mod platform {
 mod power;
 mod random;
 mod sched;
+#[cfg(ferrix_linux_abi = "on")]
 mod service_check;
 mod signal_frame;
 mod smp;
+#[cfg(ferrix_linux_abi = "on")]
 mod stages_check;
 mod sync;
 mod syscall;
@@ -75,6 +99,7 @@ use console::{println, println_unlogged};
 use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
+#[cfg(ferrix_linux_abi = "on")]
 use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
 
@@ -130,17 +155,52 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 /// nothing more (`docs/SECCOMP.md` §3.3), with the one question the fast
 /// path asks of it before running ahead of it: whether the filter would look
 /// at a call at all (`docs/OPAQUE-KERNEL.md` §9.7, T2).
+#[cfg(ferrix_linux_abi = "on")]
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
     trap::set_quiet_syscall_filter(syscall::seccomp::check);
 }
 
+/// Without the Linux ABI (`linux_abi=off`, `docs/LINUX-ABI-SEPARATION.md`
+/// §11.11): the native range is answered as always, every Linux number is
+/// `ENOSYS`, and no program filter is registered, so the core's
+/// [`trap::filter_quiet`] reads none and asks nothing.
+#[cfg(ferrix_linux_abi = "off")]
+fn register_system_calls() {
+    trap::set_syscall_entry(syscall::dispatch_with::<NoLinux>);
+}
+
+/// The personality a kernel without the Linux ABI composes: it answers no
+/// Linux call.
+#[cfg(ferrix_linux_abi = "off")]
+struct NoLinux;
+
+#[cfg(ferrix_linux_abi = "off")]
+impl syscall::Personality for NoLinux {
+    fn answer(
+        _call: ferrix_linux_abi::nr::Syscall,
+        _args: &trap::SyscallArgs,
+        _regs: Option<&arch::UserRegs>,
+    ) -> trap::Outcome {
+        trap::Outcome::Return(ferrix_linux_abi::errno::Errno::ENOSYS.as_return_value())
+    }
+}
+
 /// The core's T2 hook, bound when the kernel is linked: the personality's
 /// quiet predicate, called directly (`trap::filter_quiet`, which decides
 /// whether to ask).
+#[cfg(ferrix_linux_abi = "on")]
 #[unsafe(no_mangle)]
 fn ferrix_filter_quiet() -> bool {
     syscall::seccomp::quiet()
+}
+
+/// Without the Linux ABI no filter is registered, so [`trap::filter_quiet`]
+/// never asks this.
+#[cfg(ferrix_linux_abi = "off")]
+#[unsafe(no_mangle)]
+fn ferrix_filter_quiet() -> bool {
+    false
 }
 
 // Each hook is the type `trap` declares it with: see the `const _`s there.
@@ -176,6 +236,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // personality's, and the core holds only a pointer to it
     // (`crate::trap::ReturnPath`). Registered here because the first user
     // program is a boot check below, not init.
+    #[cfg(ferrix_linux_abi = "on")]
     syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
@@ -200,6 +261,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // are all check are gated here, in the order they run; the steps that do
     // both gate their own checks inside.
     if checks::run() {
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_allocators_and_traps(&stats, view);
     }
 
@@ -254,6 +316,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // task, which the scheduler just made this, into the ring the port's
     // interrupt empties. Early, because every line after this one is sent
     // the way it checks.
+    #[cfg(ferrix_linux_abi = "on")]
     stages_check::check_console_output();
 
     // Stage 6, so far the memory objects a process is built from and the
@@ -262,15 +325,18 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // and requires the count to return to where it started, which is a
     // measurement the reclaim below would otherwise move under it.
     if checks::run() {
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_user_memory();
     }
 
     // Stage 8's root filesystem. Before stage 7's checks, which open files,
     // and after stage 6's, because file contents are VMO pages and the
     // frames they take have to come back.
+    #[cfg(ferrix_linux_abi = "on")]
     check_filesystems(view);
 
     if checks::run() {
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_programs();
     }
 
@@ -294,7 +360,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // Straight after enumeration, which builds the PCI half.
     check_devices(view);
     iommu::report(view, device::devices());
+    #[cfg(ferrix_linux_abi = "on")]
     iommu::domain_check::check_iommu();
+    #[cfg(ferrix_linux_abi = "on")]
     iommu::domain_check::check_rmrr_identity(view.regions());
 
     // Stage 9's device objects, on the nodes just published: an I/O mapping of
@@ -302,8 +370,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // child, and an interrupt held from delivery to acknowledgement. After
     // `check_devices`, because before it there are no nodes to mint from.
     if checks::run() {
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_device_objects();
     }
+    #[cfg(ferrix_linux_abi = "on")]
     check_block_ring();
 
     // The rest of stage 2, deliberately last. Each of these needs something a
@@ -329,6 +399,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
 /// Stage 3's timer check, when the checks run, and then the realtime clock
 /// and the random generator, which are bring-up and started either way --
 /// without the check, from a counter nobody has measured this boot.
+#[cfg(ferrix_linux_abi = "on")]
 fn check_timer_and_start_clocks(view: &BootView<'_>) {
     if !checks::run() {
         report_clock_and_random(view);
@@ -351,6 +422,24 @@ fn check_timer_and_start_clocks(view: &BootView<'_>) {
         );
     }
     stages_check::check_waits_before_the_scheduler();
+}
+
+/// Without the Linux ABI, stage 3's measured timer check and its waits are
+/// not built (they are `stages_check`'s, which runs Linux programs:
+/// LINUX-ABI-SEPARATION.md §11.11), so the clock and the random generator
+/// start from a counter nobody measured, as with `ferrix.checks=skip`, and
+/// the machine's own check runs when the checks do.
+#[cfg(ferrix_linux_abi = "off")]
+fn check_timer_and_start_clocks(view: &BootView<'_>) {
+    if checks::run()
+        && let Err(problem) = arch::check_machine()
+    {
+        fatal!(
+            catalog::STAGE3_MACHINE,
+            "stage 3 self-check failed: {problem}"
+        );
+    }
+    report_clock_and_random(view);
 }
 
 /// Stop the machine if a hook a stage 9 check armed inside the item is still
@@ -407,31 +496,48 @@ fn say_booted() {
         mm::managed_frames() * 4,
         mm::watermark() * 4,
     );
-    if checks::run() {
+    // Without the Linux ABI the checks that run a Linux program are not
+    // built (LINUX-ABI-SEPARATION.md §11.11), so such a kernel never says its
+    // stages were checked.
+    let checked = checks::run() && cfg!(ferrix_linux_abi = "on");
+    if checked {
         // After every check that counts what was given back, since it loses
         // memory on purpose.
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_a_give_up();
         // Last before the marker, so every driver the boot starts has run: a
         // DMA fault its unit recorded and nothing provoked fails the boot
         // here rather than sitting unread in the unit's record.
         // After the reclaim, which must have given an RMRR's frames to
         // nobody (`L.iommu.75`).
+        #[cfg(ferrix_linux_abi = "on")]
         iommu::domain_check::check_rmrr_frames();
         let dma_faults_read = iommu::check_dma_faults();
         // And after it, since reading the faults is what records them.
+        #[cfg(ferrix_linux_abi = "on")]
         stages_check::check_audit_booted(dma_faults_read);
+        #[cfg(ferrix_linux_abi = "off")]
+        let _ = dma_faults_read;
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
         // The faults nothing else reads in a boot without checks: one line,
         // never fatal (`L.iommu.72`).
         iommu::report_unchecked_faults();
-        println!(
-            "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks of 2 to 12 skipped as \
-             ferrix.checks=skip asks"
-        );
+        if cfg!(ferrix_linux_abi = "off") {
+            println!(
+                "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks that run a Linux \
+                 program not built: linux_abi=off"
+            );
+        } else {
+            println!(
+                "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks of 2 to 12 skipped \
+                 as ferrix.checks=skip asks"
+            );
+        }
     }
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 8: build the root from the initramfs, and require it to be what the
 /// build wrote and to store what it is given.
 ///
@@ -541,6 +647,7 @@ fn check_filesystems(view: &BootView<'_>) {
     );
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// What unpacking the initramfs made, and `verified`: whether the check that
 /// it came through intact passed, or that it did not run.
 fn report_initrd(built: &fs::Report, verified: &str) {
@@ -559,6 +666,7 @@ fn report_initrd(built: &fs::Report, verified: &str) {
     }
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 10: the block ring's control plane, driven from a process that is
 /// given a device, up to a published disk and back.
 ///
@@ -620,6 +728,7 @@ fn check_block_ring() {
     }
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// The net core, over the loopback: a socket call reaches the stack, the
 /// stack builds a packet, and the packet comes back up the input path.
 ///
@@ -658,6 +767,7 @@ fn check_net() {
     stages_check::check_netlink();
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 10's exit, the half that is a driver: `/sbin/blk`, started from
 /// here the way `devmgr` will start it, serves the test disk through the
 /// block ring with the IOMMU on, and sectors read through the registry come
@@ -699,6 +809,7 @@ fn check_driver(started_by_devmgr: bool) {
     check_btrfs_write();
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 10: `devmgr`, started from the initramfs with every device and
 /// every driver image, and its REPORT (`docs/DEVMGR.md`). Answers whether it
 /// started the block drivers, so the driver check reads through them rather
@@ -726,6 +837,7 @@ fn check_devmgr() -> bool {
     report.started > 0
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 12's exit, the guest's half: a blank btrfs volume on the third disk,
 /// mounted writable, written, unmounted and mounted again, and read back —
 /// so every byte compared comes off the disk rather than out of a cache.
@@ -903,10 +1015,12 @@ fn check_devices(view: &BootView<'_>) {
                 "stage 10 self-check failed: {problem}"
             ),
         }
+        #[cfg(ferrix_linux_abi = "on")]
         check_config_window();
     }
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Stage 10's checks of a driver's configuration window and of
 /// `device_aperture` (`docs/NVIDIA.md` §12.1, W1 to W7).
 ///
@@ -974,6 +1088,7 @@ fn report_processors(cpus: &smp::Topology) {
     arch::report_speculation();
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// The timer's skipped arm (`stages_check::check_a_skipped_arm`), on the
 /// boot processor with its record and before any other processor runs.
 fn check_the_skipped_arm() {
@@ -1011,6 +1126,7 @@ fn bring_up_processors(view: &BootView<'_>) -> &'static smp::Topology {
 
     // The timer's skipped arm, which needs this processor's record and no
     // other processor arming a timer: here, between the two.
+    #[cfg(ferrix_linux_abi = "on")]
     check_the_skipped_arm();
 
     // Then the rest of them. Each is started, waited for, and required to
@@ -1260,6 +1376,7 @@ fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
     mm::check::check_pstore_never_free()
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Report the clocks interrupt bring-up measured, then read what the end of
 /// boot is to do: `power::init` says so on the console, and says it after the
 /// clocks, as it always has.
@@ -1281,12 +1398,19 @@ fn report_stage3(measured: u64, view: &BootView<'_>) {
 /// read the counter the timer check has just proved.
 fn report_clock_and_random(view: &BootView<'_>) {
     let info = view.raw();
+    #[cfg(ferrix_linux_abi = "on")]
     match syscall::time::set_boot_time(info) {
         Some(seconds) => {
             println!("  clock    {seconds} seconds since the epoch, from firmware's clock");
         }
         None => println!("  clock    firmware has no clock: CLOCK_REALTIME starts at the epoch"),
     }
+    // The wall clock is the Linux ABI's (`syscall::time`); the native ABI
+    // has none yet (LINUX-ABI-SEPARATION.md §7 row 6).
+    #[cfg(ferrix_linux_abi = "off")]
+    println!(
+        "  clock    not kept: the wall clock is the Linux ABI's, which this kernel is built without"
+    );
     let mut trng = [0_u8; 48];
     let trng_bytes = arch::firmware_entropy(view, &mut trng);
     let seeding = random::init(info, trng.get(..trng_bytes).unwrap_or(&[]));
@@ -1377,6 +1501,7 @@ fn start_audit(view: &BootView<'_>) {
     }
 }
 
+#[cfg(ferrix_linux_abi = "on")]
 /// Register the load ring's side of every interface the certified item
 /// reaches it through, and check that each was registered.
 ///
@@ -1452,6 +1577,40 @@ fn register_load(view: &BootView<'_>) {
     );
 }
 
+/// [`register_load`] in a kernel without the Linux ABI: only board support
+/// is above the item to register, and only what it registers is required.
+/// No filesystem flush, init launcher, `devmgr` reader or native process
+/// maker exists to be registered, and the native calls the load would have
+/// served stay unserved (LINUX-ABI-SEPARATION.md §7 rows 2 and 5, §11.11).
+#[cfg(ferrix_linux_abi = "off")]
+fn register_load(view: &BootView<'_>) {
+    let registered = platform::st::stm32mp1::install(view)
+        .and_then(|()| platform::google::gs201::usb::install());
+    if let Err(hooks::Full) = registered {
+        fatal!(
+            catalog::LOAD_REGISTRATION,
+            "a registration list is full: the load ring registers more than the item expects"
+        );
+    }
+    let boards = board::board_bindings();
+    let missing = if boards == 0 {
+        Some("no board support registered a device binding")
+    } else if !power::has_boot_mode() {
+        Some("no board support registered where reboot's word goes")
+    } else {
+        None
+    };
+    if let Some(missing) = missing {
+        fatal!(
+            catalog::LOAD_REGISTRATION,
+            "a registration is missing: {missing}"
+        );
+    }
+    println!(
+        "  hooks    {boards} board bindings and the boot mode registered; no Linux ABI: no filesystem, init launcher, devmgr reader or native process maker"
+    );
+}
+
 fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     report_clocks(clocks);
     // What the item reaches above it through, registered by what is above it,
@@ -1460,10 +1619,13 @@ fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     // mounted that a power-off must commit, and long before init.
     register_load(view);
     power::init(view);
+    #[cfg(ferrix_linux_abi = "on")]
     fs::btrfs_powerfail::init(view);
+    #[cfg(ferrix_linux_abi = "on")]
     fs::root_disk::init(view);
     init::read_option(view);
     devmgr::read_option(view);
+    #[cfg(ferrix_linux_abi = "on")]
     fs::procfs::remember_command_line(view.cmdline());
 }
 
@@ -1689,6 +1851,7 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the memory map reports no usable RAM");
     }
 
+    #[cfg(ferrix_linux_abi = "on")]
     stages_check::check_loader_allocations(view)?;
 
     // Every read-only mapping the loader made, the kernel's text and rodata
@@ -1697,10 +1860,14 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the kernel can write through a read-only mapping: CR0.WP is clear");
     }
 
+    #[cfg(ferrix_linux_abi = "on")]
     stages_check::check_layout(view)?;
+    #[cfg(ferrix_linux_abi = "on")]
     stages_check::check_direct_map(view, memory)?;
     check_early_mapper(view, memory)?;
-    stages_check::check_no_early_window_wraps(memory)
+    #[cfg(ferrix_linux_abi = "on")]
+    stages_check::check_no_early_window_wraps(memory)?;
+    Ok(())
 }
 
 /// Say where the layout came from, without the addresses, which `report`
@@ -1828,6 +1995,7 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
     // write-combining from its first map only under the kernel's table.
     arch::program_memory_types();
     let framebuffer = view.raw().framebuffer;
+    #[cfg(ferrix_linux_abi = "on")]
     display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
     if !framebuffer.is_present() || framebuffer.is_reclaimable() {
         return Ok(());

@@ -24,6 +24,7 @@
 
 use super::cpu;
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(in crate::arch) mod check;
 
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and must be a

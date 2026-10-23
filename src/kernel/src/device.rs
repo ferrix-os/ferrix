@@ -122,6 +122,7 @@ use crate::sync::SpinLock;
 use crate::{arch, iommu, irq, vmap};
 
 pub(crate) mod check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod config_check;
 
 /// GIC interrupt identifiers below this are software-generated or private to

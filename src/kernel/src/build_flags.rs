@@ -27,7 +27,7 @@ struct Flag {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 15] = [
+const FLAGS: [Flag; 16] = [
     Flag {
         name: "profile",
         values: &[
@@ -52,6 +52,7 @@ const FLAGS: [Flag; 15] = [
         values: &[
             (cfg!(ferrix_personality = "user"), "user"),
             (cfg!(ferrix_personality = "kernel"), "kernel"),
+            (cfg!(ferrix_personality = "none"), "none"),
         ],
     },
     Flag {
@@ -59,6 +60,7 @@ const FLAGS: [Flag; 15] = [
         values: &[
             (cfg!(ferrix_fs = "server"), "server"),
             (cfg!(ferrix_fs = "kernel"), "kernel"),
+            (cfg!(ferrix_fs = "none"), "none"),
         ],
     },
     Flag {
@@ -148,6 +150,13 @@ const FLAGS: [Flag; 15] = [
         values: &[
             (cfg!(ferrix_runtime_trades = "none"), "none"),
             (cfg!(ferrix_runtime_trades = "game_mode"), "game_mode"),
+        ],
+    },
+    Flag {
+        name: "linux_abi",
+        values: &[
+            (cfg!(ferrix_linux_abi = "on"), "on"),
+            (cfg!(ferrix_linux_abi = "off"), "off"),
         ],
     },
 ];

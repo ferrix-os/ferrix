@@ -1183,7 +1183,7 @@ fn cross_target_clippy() -> Result<()> {
     // build, and the kernel `mitigations=off` another in its own target
     // directory, so the two run at once (`docs/TEST-TIME.md`, C1).
     step(
-        "clippy (kernel, every architecture: each buildable profile, checks=off, mitigations=off)",
+        "clippy (kernel, every architecture: each buildable profile, checks=off, mitigations=off, linux_abi=off)",
         kernel_clippy_every_build,
     )?;
     for arch in Arch::ALL {
@@ -2382,7 +2382,7 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// kernel build that can be made today, which is what `check` "builds"
 /// them with: every named profile that builds (`present`, `desktop`), and the
 /// two ad-hoc builds that must not rot (`docs/BUILD-FLAGS.md` §6):
-/// `checks=off` (BF7) and `mitigations=off`. A profile refused by `lands`
+/// `checks=off` (BF7), `mitigations=off` and `linux_abi=off`. A profile refused by `lands`
 /// (`max`, `fast` before M5) is reported as not yet buildable, not as a
 /// failure; one that does not resolve at all fails.
 ///
@@ -2427,6 +2427,21 @@ fn kernel_clippy_every_build() -> Result<()> {
             .map(|resolved| (format!("ad hoc, {flag}=off"), resolved))
     };
     builds.push(ad_hoc("checks")?);
+    // Without the Linux ABI (`docs/LINUX-ABI-SEPARATION.md` §11.11): the
+    // flag and its placement together, since `linux_abi=off` requires
+    // `personality=none` and only `fs=none` goes with that.
+    let without_linux: Vec<(String, String)> = [
+        ("linux_abi", "off"),
+        ("personality", "none"),
+        ("fs", "none"),
+    ]
+    .iter()
+    .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
+    .collect();
+    builds.push((
+        "ad hoc, linux_abi=off".to_owned(),
+        crate::flags::resolve(None, &without_linux)?,
+    ));
     let (_, off) = ad_hoc("mitigations")?;
 
     let configs: Vec<String> = Arch::ALL

@@ -477,13 +477,18 @@ kernel at its fixed address; it exists to measure what they cost and for
 owners who have decided they need none. It is not a Cargo feature, it is an
 ad-hoc build with no claim, and the claims here are made of `present` alone
 (SAFETY-MANUAL AoU-8). `cargo xtask check` type-checks the kernel (clippy,
-no link) in every buildable profile and in the ad-hoc `mitigations=off` and
-`checks=off` builds on all three architectures, so that none can stop
-compiling unnoticed; the images are linked and booted by `cargo xtask
+no link) in every buildable profile and in the ad-hoc `mitigations=off`,
+`checks=off` and `linux_abi=off` builds on all three architectures, so that
+none can stop compiling unnoticed; the images are linked and booted by `cargo xtask
 test-flags` (each buildable profile, on each architecture) and by
 `cargo xtask test-boot --mitigations off --no-claim`. The running kernel
 prints what it was built as on its `build` line, which every test boot's
 gate compares with the profile file (`tools/common/check/check-boot-line.py`).
+`linux_abi=off` (`docs/LINUX-ABI-SEPARATION.md` §11.11) compiles the Linux
+layer, the device cores and the check modules that run a Linux program
+out of the kernel; it is build-only, links, carries no claim and boots
+nothing useful, and nothing here is claimed of it. Every profile sets
+`linux_abi=on`.
 
 The second boot option is whether the kernel keeps its log across a reset
 (`docs/POSTMORTEM.md` §3). Under `on`, the reference, the loader gives the

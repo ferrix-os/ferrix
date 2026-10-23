@@ -20,13 +20,20 @@
 //! to [`dispose`], which drops them one level at a time in a loop. However
 //! deep the chain, the stack holds one drop at a time.
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod alloc_check;
 pub(crate) mod channel;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod device_copy_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod domain_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod edge_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod fast_path_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod format_check;
 pub(crate) mod interrupt;
 pub(crate) mod io_mapping;
@@ -36,7 +43,9 @@ pub(crate) mod pin;
 pub(crate) mod port;
 pub(crate) mod process;
 pub(crate) mod quota;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod quota_check;
+#[cfg(ferrix_linux_abi = "on")]
 pub(crate) mod write_read_check;
 
 use alloc::sync::Arc;

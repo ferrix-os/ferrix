@@ -733,6 +733,42 @@ mod tests {
     }
 
     #[test]
+    fn linux_abi_off_goes_only_with_no_placement_and_carries_no_claim() {
+        // Every profile names the Linux ABI on (rule 4: explicitly).
+        for profile in ["present", "desktop", "max", "fast"] {
+            let resolved = resolve_unbuilt(Some(profile), &[]).unwrap();
+            assert_eq!(resolved.value("linux_abi"), Some("on"), "{profile}");
+        }
+        // Off without its placement, and a placement of none with it on, are
+        // refused both ways.
+        let why = resolve(None, &set(&[("linux_abi", "off")]))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("requires personality=none"), "{why}");
+        let why = resolve(None, &set(&[("personality", "none")]))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("requires linux_abi=off"), "{why}");
+        // With fs=kernel left as present's, its own rule refuses it.
+        let why = resolve(None, &set(&[("linux_abi", "off"), ("personality", "none")]))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("requires personality=kernel"), "{why}");
+        let off = resolve(
+            None,
+            &set(&[
+                ("linux_abi", "off"),
+                ("personality", "none"),
+                ("fs", "none"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!((off.profile.as_str(), off.level.as_str()), ("none", "none"));
+        assert!(off.cfg_words().ends_with("linux_abi=off"));
+        assert!(off.boot_line().ends_with("; no claim"));
+    }
+
+    #[test]
     fn a_stand_in_builds_only_without_a_claim() {
         let resolved = resolve(None, &set(&[("program_barrier", "session")])).unwrap();
         assert_eq!(resolved.level, "none");

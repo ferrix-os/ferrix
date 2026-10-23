@@ -25,6 +25,7 @@ program_barrier = "session"
 ssbd = "on_request"
 smt = "stibp"
 runtime_trades = "game_mode"
+linux_abi = "on"
 
 # No claim, so every option the registry declares, with any of its values.
 [boot_options]

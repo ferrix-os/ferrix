@@ -25,6 +25,7 @@ use ferrix_sched::MAX_CPUS;
 use super::cpu;
 use super::gdt;
 
+#[cfg(ferrix_linux_abi = "on")]
 pub(in crate::arch) mod check;
 
 /// Bytes the switch pushes: six registers and the return address.
