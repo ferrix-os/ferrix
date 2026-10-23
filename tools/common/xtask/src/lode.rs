@@ -132,6 +132,24 @@ $bb usleep 500000
 say "out of session"
 $bb sleep 1
 say "session: $(/bin/lode -s 7 -o cat | $bb grep -c 'in session$') $(/bin/lode -s 7 -o cat | $bb grep -c 'out of session') $(/bin/lode -b -t lode -o cat | $bb grep -c '^session 7 began on seat0')"
+# Crash screenshots (step 2b): none without a provider; a picture from the
+# one that is the session's pid with its token; a refusal for one that is not.
+/bin/lode mark "capture me 1"
+$bb usleep 500000
+token=0123456789abcdef0123456789abcdef
+( $bb sleep 1; exec /bin/lode provide-stub $token ) > /tmp/stub 2>&1 &
+stub=$!
+/bin/lode session begin 8 seat=seat0 uid=0 pid=$stub scope=session-8.scope unit=lode-test.service token=$token
+i=0; until $bb grep -q accepted /tmp/stub; do i=$((i+1)); [ $i -gt 100 ] && break; $bb usleep 100000; done
+/bin/lode provide-stub 00000000000000000000000000000000 > /tmp/wrong 2>&1
+/bin/lode mark "capture me 2"
+i=0; until $bb grep -q "sent record" /tmp/stub; do i=$((i+1)); [ $i -gt 100 ] && break; $bb usleep 100000; done
+$bb usleep 500000
+seq_of() { /bin/lode -b --where "mark = \"$1\"" -o json | $bb sed 's/.*"__SEQNUM":"\([0-9]*\)".*/\1/' | $bb head -n 1; }
+s1=$(seq_of "capture me 1"); s2=$(seq_of "capture me 2")
+say "capture: $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s1\",\"CAPTURE\":\"none\"") $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s2\",\"CAPTURE\":\"stored\"") $($bb ls /var/log/journal/captures | $bb wc -l) $($bb head -c 4 /var/log/journal/captures/* 2>/dev/null) $($bb cat /tmp/wrong)"
+$bb kill $stub
+/bin/lode session end 8
 /bin/lode rotate
 say "verify: $(/bin/lode verify --kernel -b | $bb tail -n 1)"
 /bin/lode -b --since-mark "flood begins" --until-mark "flood ends" -o cat > /tmp/window
@@ -181,6 +199,11 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         path: "etc/ferrix/units/getty@.service".to_owned(),
         mode: 0o777,
         content: Content::Link("/dev/null".to_owned()),
+    });
+    files.push(File {
+        path: "etc/ferrix/lode.d/capture.conf".to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(b"Capture=yes\ncapture where mark = \"capture me*\"\n".to_vec()),
     });
     files.push(File {
         path: "etc/ferrix/lode.d/test.rules".to_owned(),
@@ -289,6 +312,12 @@ fn held(lines: &[String]) -> std::result::Result<(), String> {
     }
     for (what, want, why) in [
         (
+            "lode-test: capture:",
+            "1 1 1 qoif provide-stub: refused",
+            "a crash screenshot was not none without a provider, one stored file from the proven \
+             provider, and a refusal for an unproven one",
+        ),
+        (
             "lode-test: session:",
             "2 0 1",
             "a session's lines were not stamped with its id, across lode's restart, and only while it lasted",
@@ -367,7 +396,8 @@ lode-test: limited: 100 200
 lode-test: dropped: 0 1
 lode-test: classes: 1 1
 lode-test: deleted: 0 1
-lode-test: session: 2 0 1";
+lode-test: session: 2 0 1
+lode-test: capture: 1 1 1 qoif provide-stub: refused";
 
     /// [`CLEAN`] with the line beginning `what` replaced by `with`.
     fn run(what: &str, with: &str) -> Vec<String> {

@@ -466,3 +466,35 @@ pub(crate) fn rename(from: &[u8], to: &[u8]) -> Result<(), Errno> {
     }
     .map(|_| ())
 }
+
+/// The pid and uid at the other end of a connected socket (`SO_PEERCRED`).
+pub(crate) fn peer(fd: usize) -> Option<(u32, u32)> {
+    const SOL_SOCKET: usize = 1;
+    const SO_PEERCRED: usize = 17;
+    // `struct ucred`: pid, uid, gid, each 32 bits.
+    let mut credentials = [0_u32; 3];
+    let mut length: u32 = 12;
+    // SAFETY: `credentials` is 12 bytes and `length` says so; the kernel
+    // writes at most that many, then the length.
+    let got = unsafe {
+        call(
+            numbers::GETSOCKOPT,
+            [
+                fd,
+                SOL_SOCKET,
+                SO_PEERCRED,
+                credentials.as_mut_ptr() as usize,
+                (&raw mut length) as usize,
+                0,
+            ],
+        )
+    };
+    let _ = got.ok()?;
+    let [pid, uid, _] = credentials;
+    Some((pid, uid))
+}
+
+/// Write what `buf` can take now, without waiting: how much was written.
+pub(crate) fn write_some(fd: usize, buf: &[u8]) -> usize {
+    write(fd, buf).unwrap_or(0)
+}

@@ -302,6 +302,9 @@ struct Compositor<'r> {
     lock: Option<Lock>,
     /// Whether a lock goes on `authd`'s grant, and the channel it comes by.
     grants: crate::grants::Grants,
+    /// lode's crash screenshots: this compositor as seat0's provider, when
+    /// `sessiond` gave it the session's token (`docs/LOGGING.md` §19).
+    lodeshot: crate::lodeshot::Provider,
     /// `misc:lock_grace`, capped: how long a fresh lock's holder may unlock
     /// with no grant.
     lock_grace: Duration,
@@ -647,6 +650,7 @@ impl<'r> Compositor<'r> {
             shots: Vec::new(),
             lock: None,
             grants: crate::grants::Grants::adopted(),
+            lodeshot: crate::lodeshot::Provider::new(options.lode.clone()),
             lock_grace,
             method: None,
             listener,
@@ -755,6 +759,7 @@ impl<'r> Compositor<'r> {
         changed |= self.carry_asks(asks, now);
         self.after_clients();
         changed |= self.carry_grants();
+        self.carry_lodeshot();
         changed |= self.run_asked(asked, &placements, now);
         changed |= self.drop_gone();
 
@@ -1456,6 +1461,33 @@ impl<'r> Compositor<'r> {
             }
         }
         changed
+    }
+
+    /// lode's crash screenshots: connect when it is time, and answer each
+    /// capture with the first screen as last shown -- or decline it while
+    /// the session is locked.
+    fn carry_lodeshot(&mut self) {
+        self.lodeshot.connect("seat0", self.report);
+        let woke = self
+            .lodeshot
+            .raw_fd()
+            .is_some_and(|fd| self.ready.as_ref().is_none_or(|ready| ready.contains(&fd)));
+        if !woke {
+            return;
+        }
+        for request in self.lodeshot.read(self.report) {
+            if self.lock.is_some() {
+                self.lodeshot.answer(request, Err("the session is locked"));
+            } else if let Some(screen) = self.screens.first() {
+                self.lodeshot.answer(request, Ok(screen_pixels(screen)));
+                (self.report)(&format!(
+                    "hyprix: sent lode a screenshot for record {}",
+                    request.seqnum
+                ));
+            } else {
+                self.lodeshot.answer(request, Err("there is no screen"));
+            }
+        }
     }
 
     /// The lock channel: what `sessiond` said, a waiting unlock given up on,
@@ -2475,6 +2507,7 @@ impl<'r> Compositor<'r> {
                 .and_then(crate::children::Children::raw_fd),
         );
         fds.extend(self.grants.raw_fd());
+        fds.extend(self.lodeshot.raw_fd());
         // A client whose socket was full has bytes waiting for it; the loop
         // wakes when it can take them, not only when it next asks something.
         let writable: Vec<i32> = self
@@ -4902,6 +4935,28 @@ fn shot_area(screen: &Screen, region: Option<ServerRect>) -> Option<Rect> {
         wanted(y, region.height, height),
     );
     (w > 0 && h > 0).then(|| Rect::new(i64::from(x), i64::from(y), i64::from(w), i64::from(h)))
+}
+
+/// A screen as last shown, for lode: its width, height, row stride and
+/// XRGB bytes -- the frame the GPU or a client's buffer gave, or the
+/// software canvas.
+fn screen_pixels(screen: &Screen) -> (u32, u32, usize, &[u8]) {
+    if screen.gpu.is_some() || screen.stale {
+        let (width, height) = screen.backend.size();
+        (
+            width,
+            height,
+            screen.backend.drawn_stride() as usize,
+            screen.backend.drawn(),
+        )
+    } else {
+        (
+            screen.canvas.width(),
+            screen.canvas.height(),
+            screen.canvas.width() as usize * 4,
+            screen.canvas.data(),
+        )
+    }
 }
 
 /// Write the screen into the client's buffer, row by row.

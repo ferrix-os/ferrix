@@ -17,6 +17,7 @@
 extern crate alloc;
 
 mod arch;
+mod capture;
 mod cli;
 mod heap;
 mod seat;

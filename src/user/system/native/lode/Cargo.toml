@@ -15,6 +15,7 @@ bench = false
 
 [dependencies]
 ferrix-linux-abi.workspace = true
+ferrix-lode-capture.workspace = true
 ferrix-lode-core.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-rt.workspace = true

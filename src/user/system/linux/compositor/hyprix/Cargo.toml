@@ -37,6 +37,8 @@ compositor-virgl = { path = "../virgl" }
 compositor-server = { path = "../server" }
 compositor-socket = { path = "../socket" }
 compositor-wire = { path = "../wire" }
+# The screenshot provider protocol to lode (docs/LOGGING.md §19).
+ferrix-lode-capture = { path = "../../../../../lib/proto/lode-capture" }
 # The evdev numbers the devices report.
 ferrix-linux-abi = { path = "../../../../../lib/proto/linux-abi" }
 # The bitmap face `debug:overlay` writes its numbers in.
@@ -65,6 +67,8 @@ compositor-lock = { path = "../lock" }
 # tracking has to be shown by is a client that repaints a corner of its
 # window and says so, which `src/user/system/linux/compositor/pattern` does not do.
 compositor-shm = { path = "../shm" }
+# lode's screenshot protocol, for the crash-screenshot test.
+ferrix-lode-capture = { path = "../../../../../lib/proto/lode-capture" }
 
 [lints]
 workspace = true

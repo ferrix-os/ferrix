@@ -115,6 +115,11 @@ impl Seat {
         }
     }
 
+    /// The sessions open now.
+    pub(crate) fn sessions(&self) -> &Sessions {
+        &self.sessions
+    }
+
     /// Stamp `record` with the session it came from.
     pub(crate) fn stamp(&self, record: &mut Record) {
         self.sessions.stamp(record);

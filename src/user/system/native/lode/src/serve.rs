@@ -32,6 +32,7 @@ use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
 
+use crate::capture::Capture;
 use crate::seat::Seat;
 use crate::store::{self, Dir};
 use crate::{sys, zone};
@@ -117,6 +118,12 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     }
     let (boot_id, restarted) = boot_id();
     let seat = Seat::open();
+    let journal = if persistent.is_some() {
+        store::PERSISTENT
+    } else {
+        store::VOLATILE
+    };
+    let capture = Capture::open(journal, &boot_id);
     let dropped = sys::become_ids(UID, GID).is_ok();
     let zone = zone::local();
     let now = clocks();
@@ -159,7 +166,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             now,
         ));
     }
-    store.append(said, &zone).map_err(|()| Step::Segment)?;
+    let _ = store.append(said, &zone).map_err(|()| Step::Segment)?;
     say_ready(channel)?;
     let limiter = Limiter::new(rules);
     let mut service = Service {
@@ -168,6 +175,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         sequence,
         limiter,
         seat,
+        capture,
         zone,
     };
     service.serve(channel, restarted)
@@ -185,6 +193,8 @@ struct Service {
     limiter: Limiter,
     /// The seat's owner's socket and the sessions.
     seat: Seat,
+    /// Crash screenshots, when they are on.
+    capture: Capture,
     /// The local zone, for the offsets records carry.
     zone: Zone,
 }
@@ -253,8 +263,29 @@ impl Service {
                     record.realtime_us = now.realtime_of(record.monotonic_us);
                 }
             }
-            self.store
+            let wanted: Vec<(usize, String)> = batch
+                .iter()
+                .enumerate()
+                .filter(|(_, record)| self.capture.wants(record))
+                .map(|(index, record)| {
+                    let text = String::from_utf8_lossy(record.message());
+                    (index, text.chars().take(160).collect())
+                })
+                .collect();
+            let seqnums = self
+                .store
                 .append(batch, &self.zone)
+                .map_err(|()| Step::Segment)?;
+            let mut more: Vec<Record> = Vec::new();
+            for (index, what) in wanted {
+                if let Some(&seqnum) = seqnums.get(index) {
+                    self.capture.ask(seqnum, &what, now, &mut more);
+                }
+            }
+            self.capture.serve(now, self.seat.sessions(), &mut more);
+            let _ = self
+                .store
+                .append(more, &self.zone)
                 .map_err(|()| Step::Segment)?;
             if rotate {
                 self.store.rotate_all();
@@ -267,6 +298,7 @@ impl Service {
             if idle {
                 let mut fds = alloc::vec![self.kmsg];
                 fds.extend(self.seat.fds());
+                fds.extend(self.capture.fds());
                 sys::wait_any(&fds, WAIT_MS);
             }
         }
@@ -576,26 +608,31 @@ impl Store {
     }
 
     /// Number, stamp and write `records`, each to its class's segment.
-    fn append(&mut self, records: Vec<Record>, zone: &Zone) -> Result<(), ()> {
+    /// Answers each record's sequence number, in order.
+    fn append(&mut self, records: Vec<Record>, zone: &Zone) -> Result<Vec<u64>, ()> {
+        let mut seqnums = Vec::with_capacity(records.len());
         if records.is_empty() {
-            return Ok(());
+            return Ok(seqnums);
         }
-        let mut bytes: Vec<Vec<u8>> = self.classes.iter().map(|_| Vec::new()).collect();
+        let mut bytes: Vec<(u64, Vec<u8>)> = self.classes.iter().map(|_| (0, Vec::new())).collect();
         for mut record in records {
             record.seqnum = self.next;
+            seqnums.push(self.next);
             record.utc_offset_s = zone.offset_at(record.realtime_us);
             self.next += 1;
             let class = retention::assign(&self.classes, &record);
-            if let Some(out) = bytes.get_mut(class) {
+            if let Some((first, out)) = bytes.get_mut(class) {
+                if out.is_empty() {
+                    *first = record.seqnum;
+                }
                 segment::encode_record(&record, out);
             }
         }
-        let first = self.next;
-        for (index, out) in bytes.iter().enumerate() {
+        for (index, (first, out)) in bytes.iter().enumerate() {
             if out.is_empty() {
                 continue;
             }
-            self.ready(index, first)?;
+            self.ready(index, *first)?;
             let Some(Some(writer)) = self.writers.get_mut(index) else {
                 return Err(());
             };
@@ -603,7 +640,7 @@ impl Store {
             writer.size += out.len();
             writer.dirty = true;
         }
-        Ok(())
+        Ok(seqnums)
     }
 
     /// Make sure class `index` has a segment with room, begun at `first`

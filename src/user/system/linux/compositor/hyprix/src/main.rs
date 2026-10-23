@@ -25,8 +25,11 @@ fn main() {
         ),
         None => {}
     }
+    // And the session's token, which lode trusts a screenshot provider by
+    // (docs/LOGGING.md §19): out of the environment before any child.
+    let lode = hyprix::lodeshot::adopt();
     let options = match Options::parse(std::env::args().skip(1)) {
-        Ok(options) => options,
+        Ok(options) => Options { lode, ..options },
         Err(message) => {
             report(&format!("hyprix: {message}"));
             report(Options::USAGE);

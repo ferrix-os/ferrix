@@ -483,10 +483,15 @@ name = "ferrix-lode"
 version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
+ "ferrix-lode-capture",
  "ferrix-lode-core",
  "ferrix-native-abi",
  "ferrix-rt",
 ]
+
+[[package]]
+name = "ferrix-lode-capture"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-lode-core"

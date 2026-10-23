@@ -1382,6 +1382,39 @@ that `n`, the one its scope already has.
 * Kernel lines: 0; ring-3 programs only (`sessiond`, lode), none in the
   item.
 
+### Step 2b, as built
+
+Crash screenshots (§19), on the session token of step 2a.
+
+* `src/lib/proto/lode-capture` (`ferrix-lode-capture`, `no_std`, no
+  `unsafe`): the provider protocol's seven messages as frames, decoded
+  strictly, and a QOI encoder and decoder -- the one picture format every
+  provider can write without a library. Host-tested.
+* lode (`capture.rs`): off unless `/etc/ferrix/lode.d/capture.conf` says
+  `Capture=yes`; then `/run/lode/capture` (0666) and
+  `<journal>/captures/` (`lode:adm 2750`). A REGISTER is accepted only from
+  the pid `sessiond` named for the seat with that session's token
+  (`SO_PEERCRED`); anything else is REFUSED and dropped. Triggers: crash
+  records, `devmgr` lines saying a driver died, and `capture where EXPR`
+  lines of the file. The crash record is stored first; then one CAPTURE to
+  the seat's provider, at most one each 10 s; the answer within 2 s or a
+  `timed-out` record, three in a row dropping the provider. Every outcome
+  is a record, `CAPTURE_OF=<seqnum>` and `CAPTURE=stored|none|declined|
+  timed-out|skipped`; a stored picture is
+  `captures/<boot>-<seqnum>-<time>.qoi`, 0640, kept 7 days and 256 MiB.
+* hyprix (`lodeshot.rs`): takes `FERRIX_SESSION_TOKEN` out of its
+  environment first thing in `main`, registers for seat0, and answers each
+  CAPTURE with its first screen as last shown (the GPU's or a client's
+  buffer, or the software canvas), or declines while the session is
+  locked. A host test runs the compositor headless against a socket
+  standing in for lode and decodes the 1024x768 picture it sends.
+* `lode provide-stub TOKEN` is the protocol's smallest peer (a 2x2
+  picture): what `test-log` proves lode's side with -- `none` with no
+  provider, one stored QOI file from the proven one, a refusal for one
+  with the wrong token.
+* Not yet: `lode delete` removing a deleted crash's picture; PNG.
+* Kernel lines: 0; ring-3 only (lode, sessiond, hyprix), none in the item.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

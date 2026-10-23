@@ -3207,3 +3207,83 @@ fn an_event_socket_too_long_for_sun_path_is_refused_as_the_request_socket_is() {
         "{error}"
     );
 }
+
+/// lode's crash screenshots (`docs/LOGGING.md` §19): a compositor given
+/// lode's socket and the session's token registers with that token, takes
+/// lode's acceptance, and answers a capture with its whole screen, in QOI.
+#[test]
+fn answers_lode_with_the_screen() {
+    use ferrix_lode_capture::{FORMAT_QOI, Message, qoi};
+    use std::io::{Read as _, Write as _};
+    use std::os::unix::net::UnixListener;
+
+    let desk = Desk::new("lodeshot", "");
+    let socket = desk.work.join("lode-capture");
+    let listener = UnixListener::bind(&socket).expect("lode's socket");
+    let token = [0x5a; 16];
+    let options = Options {
+        lode: Some((socket.clone(), token)),
+        ..desk.options()
+    };
+    let (_, picture) = running(&desk, &options, move |ends| {
+        let (mut lode, _) = listener.accept().expect("the compositor's connection");
+        lode.set_read_timeout(Some(PATIENCE))
+            .expect("a read timeout");
+        let mut held = Vec::new();
+        let mut read_one = |lode: &mut std::os::unix::net::UnixStream| loop {
+            if let Ok(Some((message, used))) = Message::decode(&held) {
+                let _ = held.drain(..used);
+                return message;
+            }
+            let mut buf = vec![0_u8; 1 << 16];
+            let got = lode.read(&mut buf).expect("a read");
+            assert!(got > 0, "the compositor closed lode's connection");
+            held.extend_from_slice(&buf[..got]);
+        };
+        match read_one(&mut lode) {
+            Message::Register {
+                token: given, seat, ..
+            } => {
+                assert_eq!(given, [0x5a; 16]);
+                assert_eq!(seat, "seat0");
+            }
+            other => panic!("not a registration: {other:?}"),
+        }
+        lode.write_all(
+            &Message::Accepted {
+                formats: FORMAT_QOI,
+            }
+            .encode(),
+        )
+        .expect("accepted");
+        lode.write_all(
+            &Message::Capture {
+                request: 1,
+                seqnum: 99,
+                what: "a test".to_owned(),
+            }
+            .encode(),
+        )
+        .expect("a capture");
+        let picture = read_one(&mut lode);
+        ends.stop();
+        picture
+    })
+    .expect("the compositor ran");
+    match picture {
+        Message::Image {
+            request: 1,
+            format,
+            width,
+            height,
+            bytes,
+        } => {
+            assert_eq!(format, FORMAT_QOI);
+            assert_eq!((width, height), (WIDTH, HEIGHT));
+            let (w, h, rgba) = qoi::decode(&bytes).expect("a QOI picture");
+            assert_eq!((w, h), (WIDTH, HEIGHT));
+            assert_eq!(rgba.len(), (WIDTH * HEIGHT * 4) as usize);
+        }
+        other => panic!("not a picture: {other:?}"),
+    }
+}

@@ -27,6 +27,7 @@ lode verify [--kernel] [-b ...]      check the store
 lode rotate                          seal every class's segment, begin new ones
 lode session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX
 lode session end ID                  what a seat's owner tells lode (root's)
+lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
@@ -101,6 +102,7 @@ pub(crate) fn run() -> i32 {
         Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
         Some("rotate") => return rotate(),
         Some("session") => return announce(rest.get(1..).unwrap_or_default()),
+        Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("delete") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
                 Ok(options) => delete(&options),
@@ -1052,22 +1054,8 @@ fn announce(words: &[String]) -> i32 {
     if ferrix_lode_core::session::parse(line.trim_end()).is_none() {
         return usage("that is not a session line lode takes");
     }
-    use ferrix_rt::linux as rt;
-    let sent = rt::socket(rt::AF_UNIX, rt::SOCK_STREAM, 0).and_then(|fd| {
-        let result = match rt::sockaddr_un(crate::seat::SOCKET) {
-            Some((address, length)) => {
-                // SAFETY: `address` is a `sockaddr_un` of `length` bytes, read
-                // for the call.
-                let connected = unsafe {
-                    rt::call(
-                        rt::numbers::CONNECT,
-                        [fd, address.as_ptr() as usize, length, 0, 0, 0],
-                    )
-                };
-                connected.and_then(|_| sys::write_all(fd, line.as_bytes()).map(|()| 0))
-            }
-            None => Err(sys::Errno(22)),
-        };
+    let sent = connect(crate::seat::SOCKET).and_then(|fd| {
+        let result = sys::write_all(fd, line.as_bytes());
         sys::close(fd);
         result
     });
@@ -1082,4 +1070,115 @@ fn announce(words: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Connect to a socket at `path`, blocking: the descriptor.
+fn connect(path: &[u8]) -> Result<usize, sys::Errno> {
+    use ferrix_rt::linux as rt;
+    let fd = rt::socket(rt::AF_UNIX, rt::SOCK_STREAM, 0)?;
+    let Some((address, length)) = rt::sockaddr_un(path) else {
+        sys::close(fd);
+        return Err(sys::Errno(22));
+    };
+    // SAFETY: `address` is a `sockaddr_un` of `length` bytes, read for the call.
+    let connected = unsafe {
+        rt::call(
+            rt::numbers::CONNECT,
+            [fd, address.as_ptr() as usize, length, 0, 0, 0],
+        )
+    };
+    match connected {
+        Ok(_) => Ok(fd),
+        Err(error) => {
+            sys::close(fd);
+            Err(error)
+        }
+    }
+}
+
+/// Read frames from `fd` into `buf` until one is whole: it, or `None` at
+/// the end or on a frame that does not read.
+fn next_frame(fd: usize, buf: &mut Vec<u8>) -> Option<ferrix_lode_capture::Message> {
+    use ferrix_lode_capture::Message;
+    let mut chunk = [0_u8; 4096];
+    loop {
+        match Message::decode(buf) {
+            Ok(Some((message, used))) => {
+                let _ = buf.drain(..used);
+                return Some(message);
+            }
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        match sys::read(fd, &mut chunk) {
+            Ok(0) | Err(_) => return None,
+            Ok(got) => buf.extend_from_slice(chunk.get(..got).unwrap_or_default()),
+        }
+    }
+}
+
+/// `lode provide-stub TOKEN [SEAT]`: the provider protocol's smallest peer,
+/// for a test or a provider's author: registers with `TOKEN`, says whether
+/// lode accepted it, then answers every request with a 2x2 picture.
+fn provide_stub(words: &[String]) -> i32 {
+    use ferrix_lode_capture::{FORMAT_QOI, Message, qoi};
+    let Some(token) = words.first().and_then(|word| segment::parse_id(word)) else {
+        return usage("provide-stub needs the session's token, 32 hex digits");
+    };
+    let seat = words
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| String::from("seat0"));
+    let mut fd = None;
+    for _ in 0..100 {
+        if let Ok(connected) = connect(b"/run/lode/capture") {
+            fd = Some(connected);
+            break;
+        }
+        sys::sleep_ms(100);
+    }
+    let Some(fd) = fd else {
+        complain("lode: provide-stub: /run/lode/capture never answered (is Capture=yes?)");
+        return 1;
+    };
+    let register = Message::Register {
+        name: String::from("provide-stub"),
+        seat,
+        outputs: String::from("stub-1"),
+        formats: FORMAT_QOI,
+        token,
+    };
+    if sys::write_all(fd, &register.encode()).is_err() {
+        return 1;
+    }
+    let mut buf = Vec::new();
+    match next_frame(fd, &mut buf) {
+        Some(Message::Accepted { .. }) => out(b"provide-stub: accepted\n"),
+        _ => {
+            out(b"provide-stub: refused\n");
+            return 1;
+        }
+    }
+    // Two rows of two: red, green; blue, white (XRGB in memory: B, G, R, X).
+    let screen = [0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0];
+    let picture = qoi::encode(2, 2, 8, &screen).unwrap_or_default();
+    while let Some(message) = next_frame(fd, &mut buf) {
+        if let Message::Capture {
+            request, seqnum, ..
+        } = message
+        {
+            let image = Message::Image {
+                request,
+                format: FORMAT_QOI,
+                width: 2,
+                height: 2,
+                bytes: picture.clone(),
+            };
+            if sys::write_all(fd, &image.encode()).is_err() {
+                break;
+            }
+            out(alloc::format!("provide-stub: sent record {seqnum}'s picture\n").as_bytes());
+        }
+    }
+    0
 }

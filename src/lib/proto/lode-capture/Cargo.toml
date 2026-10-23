@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-lode-capture"
+description = "The screenshot provider protocol between lode and a desktop: register, capture, image or declined (docs/LOGGING.md §19)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

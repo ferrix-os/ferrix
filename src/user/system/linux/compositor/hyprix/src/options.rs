@@ -21,6 +21,10 @@ pub struct Options {
     pub exec: Vec<String>,
     /// Give up after this many milliseconds, so a test can never hang.
     pub deadline: Option<u64>,
+    /// lode's screenshot-provider socket and the session's token, when
+    /// `sessiond` gave this compositor one (`crate::lodeshot`); `main` fills
+    /// it from the environment, a test with a socket of its own.
+    pub lode: Option<(PathBuf, [u8; 16])>,
     /// The instance name `hyprctl` finds the control socket under, in
     /// `$XDG_RUNTIME_DIR/hypr/<instance>/`. Without one the socket is not
     /// bound at all, which is what a test that does not want it asks for.
@@ -73,6 +77,7 @@ impl Default for Options {
             dump: None,
             exec: Vec::new(),
             deadline: None,
+            lode: None,
             instance: None,
             renderer: Renderer::Auto,
             refuse_flips: 0,
