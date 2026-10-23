@@ -102,6 +102,8 @@ pub struct Around<'a> {
     pub urgent: &'a mut Vec<WindowId>,
     /// A drag with the mouse, while one is going on.
     pub drag: &'a mut Option<Drag>,
+    /// The activities overview, which `overview` opens and closes.
+    pub overview: &'a mut crate::overview::Overview,
     /// Actions a dispatcher caused, which the caller delivers.
     pub pending: &'a mut Vec<Action>,
     /// Set when a dispatcher asked the compositor to end.
@@ -177,6 +179,7 @@ pub fn compositor(
         "event" => Some(event(argument, around)),
         "global" => Some(global(argument, around)),
         "dpms" => Some(dpms(argument, around)),
+        "overview" => Some(crate::overview::dispatch(argument, around.overview)),
         "movecursor" => Some(move_cursor(argument, around)),
         "movecursortocorner" => Some(move_cursor_to_corner(argument, state, around)),
         "mouse" => Some(mouse(argument, state, around)),

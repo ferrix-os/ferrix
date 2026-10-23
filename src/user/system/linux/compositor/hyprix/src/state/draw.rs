@@ -121,7 +121,13 @@ impl Compositor<'_> {
         }
         self.overlay
             .screens(self.screens.iter().map(|screen| screen.name.as_str()));
-        let outputs = self.state.layout();
+        // The overview draws every window in a tile of its own in place of
+        // where the layout keeps it (`crate::overview`).
+        let outputs = if self.overview.on {
+            crate::overview::outputs(&self.state, &self.overview)
+        } else {
+            self.state.layout()
+        };
         #[expect(
             clippy::cast_possible_truncation,
             reason = "the pointer is held inside the screen, which is far inside i64"
@@ -135,12 +141,20 @@ impl Compositor<'_> {
         // protocol's multiplier is the client's own word about how much
         // of its surface shows, so it wins over a rule's opacity.
         let own_frames = self.config.int("hyprix:own_frames").unwrap_or(0) != 0;
-        let drawn_with = drawn_with(
+        let mut drawn_with = drawn_with(
             self.window_rules.styles(),
             &self.slots,
             &self.sources,
             own_frames.then_some(&self.state),
         );
+        if self.overview.on {
+            // The hovered tile is outlined whatever its frame.
+            if let Some(hovered) = self.overview.hovered {
+                let style = drawn_with.entry(hovered).or_default();
+                style.border = None;
+                style.decorate = true;
+            }
+        }
         let began = Instant::now();
         let mut drew = Drew::default();
         let with = Drawing {

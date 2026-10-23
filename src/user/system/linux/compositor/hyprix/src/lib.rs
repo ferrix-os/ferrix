@@ -41,6 +41,7 @@ pub mod keymap;
 mod knobs;
 pub mod options;
 pub mod overlay;
+pub mod overview;
 pub(crate) mod pace;
 pub mod plane;
 pub mod plugins;

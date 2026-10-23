@@ -388,6 +388,8 @@ struct Compositor<'r> {
     urgent: Vec<WindowId>,
     /// The drag a `bindm` started.
     drag: Option<crate::act::Drag>,
+    /// The activities overview (`docs/DESKTOP.md` §1.2).
+    overview: crate::overview::Overview,
     /// The drag a client started with `wl_data_device.start_drag`, while one
     /// is going on. Two clients that cannot see each other, joined by the
     /// compositor.
@@ -660,6 +662,7 @@ impl<'r> Compositor<'r> {
             was_locked: false,
             urgent: Vec::new(),
             drag: None,
+            overview: crate::overview::Overview::default(),
             carried: None,
             quit: false,
             swallow: false,
@@ -1231,10 +1234,18 @@ impl<'r> Compositor<'r> {
         // held. Hyprland's `processMouseDownNormal` returns before
         // `sendPointerButton` for the same reason.
         let actions = crate::act::grab_border(actions, &mut self.state, &self.seat, &mut self.drag);
+        // While the overview is up the pointer and the keys are its own:
+        // nothing reaches a client, and binds still run.
+        let (actions, looked) = crate::overview::take_input(
+            actions,
+            &mut self.overview,
+            &mut self.state,
+            self.seat.pointer(),
+        );
         if actions.is_empty() {
-            return false;
+            return looked;
         }
-        let mut changed = false;
+        let mut changed = looked;
         // A pointer drawn into the frame makes moving it a change to the
         // screen even when nothing else moved: without this the arrow
         // would stay where the last redraw left it and catch up only
@@ -1281,6 +1292,7 @@ impl<'r> Compositor<'r> {
                 screens: placements,
                 urgent: &mut self.urgent,
                 drag: &mut self.drag,
+                overview: &mut self.overview,
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
@@ -1544,6 +1556,7 @@ impl<'r> Compositor<'r> {
                 screens: placements,
                 urgent: &mut self.urgent,
                 drag: &mut self.drag,
+                overview: &mut self.overview,
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
