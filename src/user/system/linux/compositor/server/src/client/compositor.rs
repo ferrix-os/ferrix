@@ -79,6 +79,9 @@ impl Client {
                     return;
                 };
                 surface.pending.buffer = (!buffer.is_null()).then_some(buffer);
+                if let Some(orphan) = self.orphans.get_mut(&sender) {
+                    orphan.replaced = true;
+                }
                 // Before version 5 `attach` carries the offset; from 5 it
                 // must be zero and `offset` carries it. A client bound below
                 // 5 that sends one is obeyed.
@@ -231,7 +234,18 @@ impl Client {
         let Some(surface) = self.surfaces.get_mut(&sender) else {
             return;
         };
-        let change = surface.commit();
+        let mut change = surface.commit();
+        // What a destroyed buffer showed is shown until an attach replaces
+        // it, and a buffer the client destroyed is never released: its id
+        // may be another object's by now.
+        if let Some(orphan) = self.orphans.get(&sender).copied() {
+            if change.released == Some(orphan.id) {
+                change.released = None;
+            }
+            if orphan.replaced {
+                self.drop_orphan(sender);
+            }
+        }
         self.events.push(Event::SurfaceCommitted {
             surface: sender,
             change,

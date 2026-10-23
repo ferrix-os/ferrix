@@ -260,10 +260,9 @@ impl Compositor<'_> {
             // A buffer going may be the last one of a pool the client
             // has already destroyed, which is when the memory is
             // finally let go. A surface still showing a buffer that has
-            // gone is drawn as its border and background instead, which
-            // is a change to the screen no commit announced; every
-            // other destroy changes nothing, since a client destroys a
-            // buffer it has finished with.
+            // gone goes on showing it (`Client::shown_buffer`); it is
+            // repainted all the same, which costs one frame and keeps
+            // the screen right if a client's memory went with it.
             Event::Destroyed {
                 object,
                 role: Role::Buffer,

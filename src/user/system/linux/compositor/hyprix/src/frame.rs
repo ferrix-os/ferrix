@@ -591,11 +591,7 @@ fn scanned_out(
     let source = sources.get(&placed.window).ok_or("no window")?;
     let slot = clients.get(source.client).ok_or("no client")?;
     let client = slot.client();
-    let buffer = client
-        .surface(source.surface)
-        .and_then(|state| state.current.buffer)
-        .and_then(|buffer| client.buffer(buffer))
-        .ok_or("no buffer")?;
+    let buffer = client.shown_buffer(source.surface).ok_or("no buffer")?;
     if !buffer.dmabuf {
         return Err("the window's buffer is shared memory, not a dmabuf".to_owned());
     }
@@ -1031,7 +1027,7 @@ pub(crate) fn window_crop(client: &compositor_server::Client, surface: ObjectId)
     if state.viewport_source.is_some() || state.transform != 0 {
         return None;
     }
-    let buffer = client.buffer(state.buffer?)?;
+    let buffer = client.shown_buffer(surface)?;
     let scale = state.scale.max(1);
     // A viewport that only says the surface is its buffer's size -- what a
     // toolkit using fractional scaling sends at a scale of 1, GTK 4 among
@@ -1174,6 +1170,37 @@ pub(crate) fn cursor_rect(
     ))
 }
 
+/// Why [`pixels`] has nothing for `surface`, in words for the log.
+pub(crate) fn why_no_pixels(slot: &Slot, surface: ObjectId) -> String {
+    let client = slot.client();
+    let Some(state) = client.surface(surface) else {
+        return "its wl_surface is gone".to_owned();
+    };
+    let Some(id) = state.current.buffer else {
+        return "no buffer is attached and committed".to_owned();
+    };
+    let Some(buffer) = client.shown_buffer(surface) else {
+        return format!("its buffer {} is not one this connection has", id.0);
+    };
+    if buffer.dmabuf {
+        return if slot.dmabufs().contains_key(&buffer.pool) {
+            "its dmabuf's range is outside the import".to_owned()
+        } else {
+            "its dmabuf was never imported or was let go".to_owned()
+        };
+    }
+    if buffer.solid.is_some() {
+        return "its single-pixel buffer could not be read".to_owned();
+    }
+    match slot.pools().get(&buffer.pool) {
+        None => format!("the memory of its pool {} is not mapped", buffer.pool.0),
+        Some(_) => format!(
+            "its {}x{} buffer (stride {}, offset {}) lies outside its pool's mapping",
+            buffer.width, buffer.height, buffer.stride, buffer.offset
+        ),
+    }
+}
+
 /// The pixels a surface is showing, if it is showing any.
 pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     let (client, pools) = (slot.client(), slot.pools());
@@ -1181,8 +1208,7 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     // a slot's place is not, and the `wl_surface` on it. A renderer that
     // keeps a surface's pixels somewhere of its own keeps them by this.
     let name = (slot.serial() << 32) | u64::from(surface.0);
-    let state = client.surface(surface)?;
-    let buffer = client.buffer(state.current.buffer?)?;
+    let buffer = client.shown_buffer(surface)?;
     // A `wp_single_pixel_buffer_v1` is in no pool: the colour is the
     // buffer, four bytes held on the buffer itself. A window drawn from one
     // is scaled to its rectangle like any other, so one pixel fills it.

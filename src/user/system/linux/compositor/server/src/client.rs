@@ -209,6 +209,9 @@ pub struct Client {
     /// How many pools this connection has made: the last [`PoolKey`](crate::shm::PoolKey) given.
     pools_made: u64,
     buffers: BTreeMap<ObjectId, Buffer>,
+    /// The buffers a surface is still showing that the client has
+    /// destroyed, by surface ([`Orphan`]).
+    orphans: BTreeMap<ObjectId, Orphan>,
     /// Each `zwp_linux_buffer_params_v1` and what it has been told.
     params: BTreeMap<ObjectId, dmabuf::Params>,
     xdg_surfaces: BTreeMap<ObjectId, XdgSurface>,
@@ -418,6 +421,7 @@ impl Client {
             pools: BTreeMap::new(),
             pools_made: 0,
             buffers: BTreeMap::new(),
+            orphans: BTreeMap::new(),
             params: BTreeMap::new(),
             xdg_surfaces: BTreeMap::new(),
             toplevels: BTreeMap::new(),
@@ -642,6 +646,7 @@ impl Client {
         match role {
             Role::Surface => {
                 let _ = self.surfaces.remove(&id);
+                self.drop_orphan(id);
                 // A layer surface whose `wl_surface` went has nothing to
                 // show; the protocol calls destroying them in that order
                 // undefined, and dropping the record is the reading that
@@ -700,22 +705,33 @@ impl Client {
             Role::Buffer => {
                 // A dmabuf's import is its buffer's alone, so it is retired
                 // with it and let go of as a pool is once nothing uses it.
-                if let Some(buffer) = self.buffers.remove(&id)
-                    && buffer.dmabuf
-                {
+                let Some(buffer) = self.buffers.remove(&id) else {
+                    return;
+                };
+                if buffer.dmabuf {
                     self.events.push(Event::PoolRetired { pool: buffer.pool });
                 }
                 // A buffer a surface is showing that the client destroys
-                // leaves the surface showing nothing, which is what
-                // `wl_buffer`'s description says: "destroying the
-                // wl_buffer... the surface contents become undefined". Every
-                // compositor treats that as unmapped rather than as garbage.
-                for surface in self.surfaces.values_mut() {
-                    if surface.current.buffer == Some(id) {
-                        surface.current.buffer = None;
+                // stays what the surface shows until its next commit puts
+                // something else there, as wlroots keeps it locked: swaybg
+                // attaches, commits and destroys at once, "we will not reuse
+                // the buffer". Its description is kept by the surface, and
+                // its memory by `pool_in_use`. One attached and not yet
+                // committed is dropped from the pending state: there is
+                // nothing to show of it.
+                for (&surface, state) in &mut self.surfaces {
+                    if state.pending.buffer == Some(id) && state.current.buffer != Some(id) {
+                        state.pending.buffer = None;
                     }
-                    if surface.pending.buffer == Some(id) {
-                        surface.pending.buffer = None;
+                    if state.current.buffer == Some(id) {
+                        let _ = self.orphans.insert(
+                            surface,
+                            Orphan {
+                                id,
+                                buffer,
+                                replaced: false,
+                            },
+                        );
                     }
                 }
             }
@@ -1070,4 +1086,45 @@ const fn error_signature() -> &'static [ArgType] {
         ArgType::Uint,
         ArgType::Str { nullable: false },
     ]
+}
+
+/// A buffer the client destroyed while a surface was showing it: what the
+/// surface goes on showing until a commit replaces it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Orphan {
+    /// The id it had, which the surface's state still names and which the
+    /// client may already have given to another object.
+    pub(crate) id: ObjectId,
+    /// What it was.
+    pub(crate) buffer: Buffer,
+    /// Whether an `attach` since names what the next commit shows.
+    pub(crate) replaced: bool,
+}
+
+impl Client {
+    /// The buffer `surface` is showing: its current one, or the one it
+    /// shows still that the client destroyed. `None` for no surface or no
+    /// buffer.
+    #[must_use]
+    pub fn shown_buffer(&self, surface: ObjectId) -> Option<&Buffer> {
+        let id = self.surfaces.get(&surface)?.current.buffer?;
+        match self.orphans.get(&surface) {
+            Some(orphan) if orphan.id == id => Some(&orphan.buffer),
+            _ => self.buffers.get(&id),
+        }
+    }
+
+    /// Forget what `surface` showed of a destroyed buffer, and retire its
+    /// memory if nothing else holds it.
+    pub(crate) fn drop_orphan(&mut self, surface: ObjectId) {
+        let Some(orphan) = self.orphans.remove(&surface) else {
+            return;
+        };
+        let pool = orphan.buffer.pool;
+        if pool != crate::shm::PoolKey::NONE
+            && (orphan.buffer.dmabuf || !self.pools.values().any(|live| live.key == pool))
+        {
+            self.events.push(Event::PoolRetired { pool });
+        }
+    }
 }

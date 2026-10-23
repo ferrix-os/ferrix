@@ -355,6 +355,10 @@ struct Compositor<'r> {
     sources: BTreeMap<WindowId, Source>,
     /// Where the layer surfaces were last placed.
     placed_layers: Vec<crate::frame::Placed>,
+    /// The placed surfaces with no pixels to draw, by connection serial
+    /// and surface: since when, and whether that has been said. Each is said
+    /// once, and again only after it has had some.
+    bare: BTreeMap<(u64, ObjectId), (Instant, bool)>,
     /// Whether the last frame drew animations still moving, which owes one
     /// frame more.
     settling: bool,
@@ -659,6 +663,7 @@ impl<'r> Compositor<'r> {
             connections: 0,
             sources: BTreeMap::new(),
             placed_layers: Vec::new(),
+            bare: BTreeMap::new(),
             settling: false,
             owed: false,
             held_until: None,
@@ -2870,7 +2875,7 @@ fn drawn_size(client: &Client, surface: ObjectId) -> Option<(i64, i64)> {
         .map(|(_, _, width, height)| (i64::from(width), i64::from(height)))
         .or_else(|| {
             let state = client.surface(surface)?;
-            let buffer = client.buffer(state.current.buffer?)?;
+            let buffer = client.shown_buffer(surface)?;
             let scale = i64::from(state.current.scale.max(1));
             Some((
                 i64::from(buffer.width) / scale,
@@ -4444,9 +4449,8 @@ enum Shot {
 /// the next commit's lists empty.
 fn painted(client: &Client, index: usize, surface: ObjectId) -> crate::damage::Painted {
     let state = client.surface(surface);
-    let buffer = state
-        .and_then(|state| state.current.buffer)
-        .and_then(|held| client.buffer(held))
+    let buffer = client
+        .shown_buffer(surface)
         .map(|buffer| (i64::from(buffer.width), i64::from(buffer.height)));
     let mut rects = Vec::new();
     if let Some(state) = state {
@@ -4622,11 +4626,9 @@ fn remember_size(
 fn showing_from(client: &Client, pool: PoolKey) -> Vec<ObjectId> {
     client
         .surfaces()
-        .filter(|(_, state)| {
-            state
-                .current
-                .buffer
-                .and_then(|held| client.buffer(held))
+        .filter(|(id, _)| {
+            client
+                .shown_buffer(*id)
                 .is_some_and(|buffer| buffer.pool == pool)
         })
         .map(|(id, _)| id)

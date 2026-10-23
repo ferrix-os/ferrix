@@ -17,6 +17,10 @@ use super::{
     dump, frames_done, refresh_ns, sync_planes,
 };
 
+/// How long a placed surface may have no buffer before that is said: a
+/// client's first drawing after its first configure.
+const BARE_GRACE: Duration = Duration::from_secs(3);
+
 impl Compositor<'_> {
     /// Draw a frame if one is owed and the screens can take it. `changed`
     /// gains whatever moving the pointer's planes changed. Gives whether
@@ -195,6 +199,7 @@ impl Compositor<'_> {
         // client that paces itself by these -- Chrome's BeginFrames on
         // Wayland -- has the drawing's time too for its next frame, which at
         // 120 Hz's 8.3 ms it needs.
+        self.say_bare_surfaces(&outputs);
         let unseen = self.unseen_layers(&outputs, &drawn_with, u64::from(now));
         frames_done(
             &mut self.slots,
@@ -367,6 +372,60 @@ impl Compositor<'_> {
                 .chain(popups.iter().copied())
                 .collect()
         }
+    }
+
+    /// Say once, for each window and layer surface placed with a size,
+    /// that it has no pixels to draw and why -- a surface skipped in
+    /// silence cost an hour on the N150 (swaybg's destroyed buffer).
+    fn say_bare_surfaces(&mut self, outputs: &[compositor_layout::MonitorLayout]) {
+        let windows = outputs
+            .iter()
+            .flat_map(|output| output.windows.iter())
+            .filter_map(|placed| {
+                let source = self.sources.get(&placed.window)?;
+                Some(("window", source.client, source.surface, placed.rect))
+            });
+        let layers = self
+            .placed_layers
+            .iter()
+            .map(|placed| ("layer surface", placed.client, placed.surface, placed.rect));
+        let placed: Vec<_> = windows.chain(layers).collect();
+        for (what, client, surface, rect) in placed {
+            if rect.width <= 0 || rect.height <= 0 {
+                continue;
+            }
+            let Some(slot) = self.slots.get(client) else {
+                continue;
+            };
+            let key = (slot.serial(), surface);
+            if crate::frame::pixels(slot, surface).is_some() {
+                let _ = self.bare.remove(&key);
+                continue;
+            }
+            // A surface placed before its first buffer is every layer
+            // surface between its first commit and its first drawing, so
+            // one is said only when it has had a buffer, or has had none
+            // for longer than a client takes to draw.
+            let since = self.bare.entry(key).or_insert((Instant::now(), false));
+            let has_buffer = slot
+                .client()
+                .surface(surface)
+                .is_some_and(|state| state.current.buffer.is_some());
+            if !since.1 && (has_buffer || since.0.elapsed() > BARE_GRACE) {
+                since.1 = true;
+                (self.report)(&format!(
+                    "hyprix: a {what} placed at {},{} {}x{} has nothing to draw: {}",
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    crate::frame::why_no_pixels(slot, surface)
+                ));
+            }
+        }
+        let live: std::collections::BTreeSet<u64> =
+            self.slots.iter().map(crate::state::Slot::serial).collect();
+        self.bare.retain(|(serial, _), _| live.contains(serial));
     }
 
     /// The layer surfaces under the windows that the frame about to be

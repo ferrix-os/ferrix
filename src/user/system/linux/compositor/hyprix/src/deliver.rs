@@ -533,7 +533,7 @@ fn window_part(slot: &Slot, surface: ObjectId) -> Option<(f64, f64, f64, f64)> {
     if let Some((width, height)) = state.viewport_size {
         return Some((0.0, 0.0, f64::from(width), f64::from(height)));
     }
-    let buffer = client.buffer(state.buffer?)?;
+    let buffer = client.shown_buffer(surface)?;
     let scale = f64::from(state.scale.max(1));
     Some((
         0.0,

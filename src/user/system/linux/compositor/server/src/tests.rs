@@ -1377,24 +1377,80 @@ fn attaching_something_that_is_not_a_buffer_ends_the_connection() {
     );
 }
 
+/// swaybg's way, the wlroots world's: the pool destroyed as soon as the
+/// buffer is cut from it, the buffer as soon as it is committed. The surface
+/// goes on showing it -- its description and its memory are kept -- and is
+/// never told the destroyed id is released, which may be another object's
+/// by then. libwayland gives the id to the next buffer; attaching that one
+/// shows it, and the first pool's memory is let go.
 #[test]
-fn a_buffer_the_client_destroys_leaves_the_surface_showing_nothing() {
-    // `wl_buffer`'s description: destroying it while a surface shows it makes
-    // the contents undefined. Every compositor treats that as unmapped
-    // rather than as garbage on screen.
+fn a_buffer_destroyed_after_its_commit_is_shown_until_the_next() {
+    let mut client = drawing_client();
+    let mut bytes = create_surface(3);
+    bytes.extend(create_pool(6, 4096));
+    bytes.extend(create_buffer(6, 7, 0, 16, 16, 64, 1));
+    bytes.extend(request(6, core::wl_shm_pool::request::DESTROY, &[], &[]));
+    bytes.extend(attach(3, 7, 0, 0));
+    bytes.extend(commit(3));
+    bytes.extend(request(7, core::wl_buffer::request::DESTROY, &[], &[]));
+    assert_eq!(client.read(&bytes, &[Fd(3)]), bytes.len());
+    assert_eq!(client.fatal(), None);
+    assert!(client.buffer(ObjectId(7)).is_none(), "the object is gone");
+    let shown = client
+        .shown_buffer(ObjectId(3))
+        .copied()
+        .expect("still shown");
+    assert_eq!((shown.width, shown.height), (16, 16));
+    assert!(client.surface(ObjectId(3)).is_some_and(Surface::is_mapped));
+    assert!(client.pool_in_use(shown.pool), "its memory is kept");
+    let _ = client.take_events();
+
+    // A commit with nothing attached changes nothing.
+    let again = commit(3);
+    assert_eq!(client.read(&again, &[]), again.len());
+    assert!(client.shown_buffer(ObjectId(3)).is_some());
+    let _ = client.take_events();
+
+    // The next buffer under the same id, attached and committed.
+    let mut next = create_pool(8, 8192);
+    next.extend(create_buffer(8, 7, 0, 32, 32, 128, 1));
+    next.extend(attach(3, 7, 0, 0));
+    next.extend(commit(3));
+    let _ = client.take_outgoing();
+    assert_eq!(client.read(&next, &[Fd(4)]), next.len());
+    assert_eq!(client.fatal(), None);
+    let events = client.take_events();
+    let released: Vec<Option<ObjectId>> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::SurfaceCommitted { change, .. } => Some(change.released),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(released, [None], "nothing is released to the reused id");
+    assert!(events.contains(&Event::PoolRetired { pool: shown.pool }));
+    assert!(!client.pool_in_use(shown.pool), "the first pool is let go");
+    let now = client
+        .shown_buffer(ObjectId(3))
+        .copied()
+        .expect("the new one");
+    assert_eq!((now.width, now.height), (32, 32));
+}
+
+/// The control: a buffer destroyed after its attach and before the commit
+/// leaves the commit nothing to show.
+#[test]
+fn a_buffer_destroyed_before_its_commit_shows_nothing() {
     let mut client = drawing_client();
     let mut bytes = create_surface(3);
     bytes.extend(create_pool(6, 4096));
     bytes.extend(create_buffer(6, 7, 0, 16, 16, 64, 1));
     bytes.extend(attach(3, 7, 0, 0));
+    bytes.extend(request(7, core::wl_buffer::request::DESTROY, &[], &[]));
     bytes.extend(commit(3));
     assert_eq!(client.read(&bytes, &[Fd(3)]), bytes.len());
-    assert!(client.surface(ObjectId(3)).is_some_and(Surface::is_mapped));
-
-    let destroy = request(7, core::wl_buffer::request::DESTROY, &[], &[]);
-    assert_eq!(client.read(&destroy, &[]), destroy.len());
-    assert!(!client.is_finished());
-    assert!(client.buffer(ObjectId(7)).is_none());
+    assert_eq!(client.fatal(), None);
+    assert!(client.shown_buffer(ObjectId(3)).is_none());
     assert!(!client.surface(ObjectId(3)).is_some_and(Surface::is_mapped));
 }
 

@@ -2486,8 +2486,8 @@ mod patch {
 }
 
 use compositor_protocol::core::{
-    WL_BUFFER, WL_CALLBACK, WL_DISPLAY, WL_REGISTRY, WL_SHM, WL_SHM_POOL, WL_SURFACE, wl_callback,
-    wl_compositor, wl_display, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    WL_BUFFER, WL_CALLBACK, WL_DISPLAY, WL_REGISTRY, WL_SHM, WL_SHM_POOL, WL_SURFACE, wl_buffer,
+    wl_callback, wl_compositor, wl_display, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
 use compositor_protocol::xdg_shell::{self, xdg_surface, xdg_toplevel, xdg_wm_base};
 use compositor_socket::{Connection, RecvError};
@@ -2500,6 +2500,23 @@ struct Patcher {
     shared: Option<compositor_shm::Shared>,
     drawn: u32,
     marked: u32,
+    throw: Throw,
+}
+
+/// What the patching client does with its pool and its buffer once it has
+/// used them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Throw {
+    /// Keeps both, as a toolkit that draws again does.
+    Keep,
+    /// swaybg's way: the pool destroyed right after its buffer is made
+    /// (`pool-buffer.c`), and the buffer right after its commit (`main.c`,
+    /// "we will not reuse the buffer"). The window must still be drawn.
+    Both,
+    /// The negative control: the buffer destroyed after its attach and
+    /// before its commit, so the commit has nothing to show and the window
+    /// is never drawn -- which the pixel count must see.
+    BeforeCommit,
 }
 
 /// Queue one request. The only way this fails is a message longer than
@@ -2649,6 +2666,9 @@ impl Patcher {
                 Arg::Uint(wl_shm::format::XRGB8888),
             ],
         );
+        if self.throw == Throw::Both {
+            send(out, patch::POOL, wl_shm_pool::request::DESTROY, &[], &[]);
+        }
         self.attach(out, (0, 0, width, height));
         Ok(())
     }
@@ -2700,7 +2720,13 @@ impl Patcher {
                 Arg::Int(damage.3),
             ],
         );
+        if self.throw == Throw::BeforeCommit {
+            send(out, patch::BUFFER, wl_buffer::request::DESTROY, &[], &[]);
+        }
         send(out, patch::SURFACE, wl_surface::request::COMMIT, &[], &[]);
+        if self.throw == Throw::Both {
+            send(out, patch::BUFFER, wl_buffer::request::DESTROY, &[], &[]);
+        }
         self.drawn = self.drawn.saturating_add(1);
     }
 
@@ -2778,6 +2804,11 @@ impl Patcher {
 /// that asks to be configured, and then a buffer attached and committed for
 /// each frame. What is unusual is only the damage.
 fn patching(socket: &Path, title: &str, marks: u32) -> String {
+    patching_with(socket, title, marks, Throw::Keep)
+}
+
+/// [`patching`], doing `throw` with its pool and buffer.
+fn patching_with(socket: &Path, title: &str, marks: u32, throw: Throw) -> String {
     let stream = std::os::unix::net::UnixStream::connect(socket)
         .unwrap_or_else(|error| panic!("connecting to {}: {error}", socket.display()));
     let mut connection = Connection::new(stream).expect("a connection");
@@ -2802,6 +2833,7 @@ fn patching(socket: &Path, title: &str, marks: u32) -> String {
         shared: None,
         drawn: 0,
         marked: 0,
+        throw,
     };
     let started = std::time::Instant::now();
     let mut last = started;
@@ -2962,6 +2994,61 @@ fn a_small_commit_redraws_a_small_part_of_the_screen() {
         least < whole / 16,
         "the smallest frame of the run redrew {least} pixels of {whole}, which is the screen: \
          {report}"
+    );
+}
+
+/// The window a client drew with `throw`, alone on the screen: how many of
+/// the last frame's pixels are its colour, and what was said.
+fn thrown(name: &str, throw: Throw) -> (usize, String) {
+    let work = workspace(name);
+    let socket = work.join("wayland");
+    let frames = work.join("frames");
+    let options = Options {
+        display: socket.to_string_lossy().into_owned(),
+        headless: Some((WIDTH, HEIGHT)),
+        dump: Some(frames.clone()),
+        deadline: Some(3000),
+        config: Some(undithered(&work)),
+        ..Options::default()
+    };
+    let for_client = socket.clone();
+    let client = std::thread::spawn(move || {
+        for _ in 0..400 {
+            if for_client.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        patching_with(&for_client, "thrown", 0, throw)
+    });
+    let line = hyprix::run(&options).expect("the compositor ran");
+    let said = client
+        .join()
+        .unwrap_or_else(|_| "the client panicked".to_owned());
+    (
+        how_many(&last_frame(&frames), patch::BASE),
+        format!("{line} | {said}"),
+    )
+}
+
+/// A client that destroys its pool as soon as its buffer is made and its
+/// buffer as soon as it is committed -- swaybg, and much of the wlroots
+/// world -- has its window drawn: the committed buffer is the surface's
+/// until a commit replaces it, and the memory lives while it is (on the
+/// N150 swaybg's wallpaper was never drawn). The control destroys the
+/// buffer before the commit, which leaves nothing to draw, and the count
+/// sees it.
+#[test]
+fn a_buffer_and_pool_destroyed_after_the_commit_are_still_drawn() {
+    let (drawn, report) = thrown("thrown-both", Throw::Both);
+    assert!(
+        drawn > 100_000,
+        "only {drawn} pixels of the window's colour: {report}"
+    );
+    let (control, report) = thrown("thrown-control", Throw::BeforeCommit);
+    assert_eq!(
+        control, 0,
+        "a buffer destroyed before its commit still drew {control} pixels: {report}"
     );
 }
 

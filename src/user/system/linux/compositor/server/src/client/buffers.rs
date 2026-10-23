@@ -125,6 +125,10 @@ impl Client {
     #[must_use]
     pub fn pool_in_use(&self, pool: PoolKey) -> bool {
         self.buffers.values().any(|buffer| buffer.pool == pool)
+            || self
+                .orphans
+                .values()
+                .any(|orphan| orphan.buffer.pool == pool)
     }
 
     /// Tell the client a buffer is its own again.
