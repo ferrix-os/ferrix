@@ -1,6 +1,8 @@
 //! The second pipe's own surface (`docs/DESKTOP.md` §3.5): memory the
-//! driver pins into 00:02.0's domain, entered into the GGTT just past what
-//! the firmware mapped, and written through the driver's own mapping of it.
+//! driver pins into 00:02.0's domain, entered into the GGTT below the
+//! driver's own window where no plane scans out (the firmware keeps entries
+//! far past its lit framebuffer), and written through the driver's own
+//! mapping of it.
 //! BAR 2's aperture is not lent to the driver (the box lends BAR 0 alone),
 //! and the display engine does not read through the processor's caches,
 //! so each line the copy writes is flushed to memory after it
@@ -24,6 +26,7 @@ use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::pin::{DeviceAddress, Pin, PinAccess, device_address};
 use ferrix_rt::native::vmo::{self, Vmo};
 
+use super::regs::Regs;
 use crate::say;
 
 /// Pages pinned at a time: one GGTT page of entries.
@@ -45,37 +48,27 @@ pub(crate) struct Surface {
 }
 
 impl Surface {
-    /// Make it past `firmware_end` (the end of the firmware's framebuffer
-    /// in the GGTT), cleared to black. `None`, said, when any part is
-    /// refused: there is no second screen then.
-    pub(crate) fn make(device: &Device<Kernel>, apertures: u32, firmware_end: u64) -> Option<Self> {
-        let find = |bar: u8| {
-            (0..apertures as usize)
-                .filter_map(|index| device.aperture(index).ok())
-                .find(|aperture| aperture.bar == bar && aperture.offset == 0)
-        };
-        let Some(bar0) = find(0) else {
+    /// Make it, cleared to black, in a GGTT range below the driver's own
+    /// window that no plane scans out: a free one where the firmware left
+    /// one, else one whose firmware entries are taken over
+    /// ([`light::place`]). `None`, said, when any part is refused: the
+    /// second scanout is then there but not lit.
+    pub(crate) fn make(device: &Device<Kernel>, apertures: u32, regs: &mut Regs) -> Option<Self> {
+        let bar0 = (0..apertures as usize)
+            .filter_map(|index| device.aperture(index).ok())
+            .find(|aperture| aperture.bar == 0 && aperture.offset == 0);
+        let Some(bar0) = bar0 else {
             say(format_args!(
                 "intel: card0: no second surface: BAR 0 is not lent"
             ));
             return None;
         };
-        let Some(at) = light::surface_place(firmware_end, light::SURFACE_GGTT_LIMIT) else {
-            say(format_args!(
-                "intel: card0: no second surface: {SURFACE_BYTES:#x} bytes past {firmware_end:#x} do not fit below {:#x}",
-                light::SURFACE_GGTT_LIMIT
-            ));
-            return None;
-        };
-        let len = usize::try_from(SURFACE_BYTES).ok()?;
-        let pages = len.div_ceil(GTT_PAGE_SIZE as usize);
-        let first = at / GTT_PAGE_SIZE;
-        // The entries: one GGTT page holds 512, and `at` is 2 MiB aligned,
-        // so the range starts on a page.
+        // The entries below the driver's window: 64 Ki of them, 512 KiB.
+        let below = light::SURFACE_GGTT_LIMIT / GTT_PAGE_SIZE;
         let entries = device
             .io_mapping(IoMappingSpec {
-                phys: bar0.phys + GTTADR_OFFSET + first * 8,
-                len: (pages * 8).next_multiple_of(4096) as u64,
+                phys: bar0.phys + GTTADR_OFFSET,
+                len: below * 8,
             })
             .inspect_err(|error| {
                 say(format_args!(
@@ -84,18 +77,21 @@ impl Surface {
             })
             .ok()?;
         let table = entries.map(None).ok()?;
-        // Nothing of the firmware's may be there.
-        for index in 0..pages {
-            // SAFETY: inside the entries' mapping, eight-byte aligned.
-            let pte = unsafe { ptr::read_volatile((table + index * 8) as *const u64) };
-            if pte & 1 != 0 {
-                say(format_args!(
-                    "intel: card0: no second surface: GGTT entry {:#x} is the firmware's",
-                    first + index as u64
-                ));
-                return None;
+        let placed = place(table, below, regs)?;
+        let at = placed.placed.at;
+        let planes = placed.planes;
+        say(format_args!(
+            "intel: card0: the second surface at GGTT {at:#x}..{:#x}, {} ({planes} planes scanned out elsewhere)",
+            at + SURFACE_BYTES,
+            if placed.placed.reclaimed {
+                "over firmware entries no plane scans out"
+            } else {
+                "in entries the firmware left free"
             }
-        }
+        ));
+        let len = usize::try_from(SURFACE_BYTES).ok()?;
+        let pages = len.div_ceil(GTT_PAGE_SIZE as usize);
+        let first = at / GTT_PAGE_SIZE;
         let memory = vmo::create(Kernel, len).ok()?;
         let mut pins: [Option<Pin<Kernel>>; CHUNKS] = Default::default();
         let mut addresses: [DeviceAddress; CHUNK] = [[0; 8]; CHUNK];
@@ -121,7 +117,12 @@ impl Surface {
                 let pte = gen8_ggtt_pte_encode(device_address(*address));
                 // SAFETY: inside the entries' mapping (`pages` entries),
                 // eight-byte aligned; one 64-bit store, as `gen8_set_pte`.
-                unsafe { ptr::write_volatile((table + (start + page) * 8) as *mut u64, pte) };
+                unsafe {
+                    ptr::write_volatile(
+                        (table + (first as usize + start + page) * 8) as *mut u64,
+                        pte,
+                    );
+                };
             }
             *slot = Some(pin);
         }
@@ -145,4 +146,36 @@ impl Surface {
             ggtt,
         })
     }
+}
+
+/// Where the surface goes: the GGTT's first `below` entries (mapped at
+/// `table`) read for the ones present, and every plane's scanned range
+/// kept clear.
+fn place(table: usize, below: u64, regs: &mut Regs) -> Option<Placement> {
+    let mut present = |page: u64| {
+        page < below
+            // SAFETY: inside the entries' mapping (`below` entries),
+            // eight-byte aligned.
+            && unsafe { ptr::read_volatile((table + page as usize * 8) as *const u64) } & 1 != 0
+    };
+    let mut busy = [(0, 0); 24];
+    let planes = light::scanned(regs, &mut busy);
+    let Some(placed) = light::place(
+        &mut present,
+        busy.get(..planes).unwrap_or_default(),
+        light::SURFACE_GGTT_LIMIT,
+    ) else {
+        say(format_args!(
+            "intel: card0: no second surface: no {SURFACE_BYTES:#x} bytes below GGTT {:#x} that no plane scans out",
+            light::SURFACE_GGTT_LIMIT
+        ));
+        return None;
+    };
+    Some(Placement { placed, planes })
+}
+
+/// [`light::place`]'s answer and how many planes it kept clear of.
+struct Placement {
+    placed: light::Placed,
+    planes: usize,
 }

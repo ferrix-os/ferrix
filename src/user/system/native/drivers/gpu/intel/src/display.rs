@@ -193,11 +193,15 @@ pub(crate) struct Display {
     regs: Option<regs::Regs>,
     /// Each scanout's port, where it can be followed.
     watches: [Option<hotplug::Watch>; SCANOUTS],
+    /// The device and its aperture count, for a second surface made at a
+    /// plug.
+    device: Option<Device<Kernel>>,
+    apertures: u32,
 }
 
 /// What the second scanout starts with.
 struct Second {
-    surface: surface::Surface,
+    surface: Option<surface::Surface>,
     /// Its mode where it is lit now.
     size: Option<(u32, u32)>,
     /// DRM's connector type for it.
@@ -244,8 +248,7 @@ impl Display {
                     }
                 }
                 modeset::Asked::On => {
-                    let firmware_end = u64::from(plane.ggtt) + first.len as u64;
-                    second = prepare_second(device, apertures, firmware_end, regs);
+                    second = prepare_second(device, apertures, regs);
                 }
                 modeset::Asked::Nothing => {}
             }
@@ -290,13 +293,19 @@ impl Display {
             flushes: 0,
             regs,
             watches: [first_watch, None],
+            device: None,
+            apertures: 0,
         };
         if let Some(second) = second {
-            if let Some(size) = second.size {
-                card.outputs[1] = Some(Output::surface(&second.surface, size));
+            if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
+                card.outputs[1] = Some(Output::surface(surface, size));
             }
-            card.surface = Some(second.surface);
+            card.surface = second.surface;
             card.watches[1] = second.watch;
+            // Kept to make the surface at a later plug where it could not be
+            // made now.
+            card.device = device.duplicate(Requested::Same).ok();
+            card.apertures = apertures;
         }
         if let Err(why) = card.announce() {
             say(format_args!("intel: no card0: {why}"));
@@ -388,34 +397,26 @@ fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
     }
 }
 
-/// The second scanout under `ferrix.intelgpu.modeset=on`: the other combo
-/// port, its surface made past `firmware_end`, and pipe B lit on it now
-/// where a monitor is there -- or, where the firmware runs pipe B already
-/// (both ports cloned onto one surface), pipe B pointed at the new surface.
-/// `None`, said, when there is no second port or no surface.
+/// The second scanout under `ferrix.intelgpu.modeset=on`: the combo port
+/// pipe A does not drive -- or, where the firmware runs pipe B already
+/// (both ports cloned onto one surface), pipe B's -- its own surface, and
+/// pipe B lit on it now where a monitor is there, or pointed at it where
+/// the firmware runs it. A surface that cannot be made leaves the scanout
+/// there and dark, its port watched, to be tried again at a plug. `None`,
+/// said, only where pipe A drives no combo port.
 fn prepare_second(
     device: &Device<Kernel>,
     apertures: u32,
-    firmware_end: u64,
     regs: &mut regs::Regs,
 ) -> Option<Second> {
-    let first =
-        PortOf::of_ddi_func_ctl(regs.read32(ferrix_intel_xelp::plane::TRANS_DDI_FUNC_CTL_A));
     let cloned = light::running(regs, 1);
-    let port = match (cloned, first) {
-        (Some(running), _) => running.port,
-        (None, Some(PortOf::Combo(0))) => PortOf::Combo(1),
-        (None, Some(PortOf::Combo(1))) => PortOf::Combo(0),
-        _ => {
-            say(format_args!(
-                "intel: card0: no second scanout: pipe A drives no combo port"
-            ));
-            return None;
-        }
+    let port = match cloned {
+        Some(running) => running.port,
+        None => dark_port(regs)?,
     };
-    let surface = surface::Surface::make(device, apertures, firmware_end)?;
+    let surface = surface::Surface::make(device, apertures, regs);
     let mut size = None;
-    if let Some(running) = cloned {
+    if let (Some(running), Some(surface)) = (cloned, surface.as_ref()) {
         say(format_args!(
             "intel: card0: the firmware runs pipe B on port {} at {}x{}: it gets a surface of its own",
             running.port.name(),
@@ -425,9 +426,10 @@ fn prepare_second(
         if modeset::repoint(regs, 1, surface.ggtt, running.size) {
             size = Some(running.size);
         }
-    } else if port
-        .live_bit()
-        .is_some_and(|bit| regs.read32(ferrix_intel_xelp::display::hotplug::SDEISR) & bit != 0)
+    } else if let Some(surface) = surface.as_ref()
+        && port
+            .live_bit()
+            .is_some_and(|bit| regs.read32(ferrix_intel_xelp::display::hotplug::SDEISR) & bit != 0)
     {
         size = modeset::light_port(regs, port, surface.ggtt).map(|mode| (mode.h[0], mode.v[0]));
     }
@@ -614,6 +616,11 @@ impl Display {
         };
         if self.outputs.get(scanout).is_some_and(Option::is_some) {
             return watch.shown_again(regs);
+        }
+        if self.surface.is_none()
+            && let Some(device) = self.device.as_ref()
+        {
+            self.surface = surface::Surface::make(device, self.apertures, regs);
         }
         let Some(surface) = self.surface.as_ref() else {
             return false;

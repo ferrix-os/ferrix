@@ -10,8 +10,9 @@ use std::vec::Vec;
 
 use super::{
     DBUF_CTL_S3_S4, DDI_BUF_CTL_A, DPCLKA_CFGCR0, DPLL_ENABLE, FUSE_STATUS, Light, MBUS_CTL,
-    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Refusal, Running, SURFACE_BYTES, Step, TRANSCONF_A, free_pll,
-    is_hdmi, preflight, repoint, running, steps, surface_place, take,
+    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Placed, Refusal, Running, SURFACE_BYTES, SURFACE_GGTT_LIMIT,
+    Step, TRANSCONF_A, free_pll, is_hdmi, place, preflight, repoint, running, scanned, steps,
+    surface_place, take,
 };
 use crate::display::hotplug::Port;
 use crate::display::modeset::Mode;
@@ -493,4 +494,63 @@ fn the_tv_is_lit_on_port_a_when_the_firmware_lit_b() {
                 && !(0x6_C000..0x6_D000).contains(offset)),
         "port B untouched"
     );
+}
+
+/// The box's GGTT on 2026-10-23: the firmware kept entries far past its
+/// lit 1024x600 framebuffer (present from 0 to 0x22FFF, with holes). The
+/// surface goes in the first free aligned run; where there is none below
+/// the driver's window, on the first range no plane scans out, reclaimed.
+#[test]
+fn the_surface_finds_room_in_a_firmware_ggtt() {
+    // Every page below 64 MiB present but a hole of 12 MiB at 100 MiB.
+    let mut box_ggtt = |page: u64| {
+        page < (64 << 20) / 4096
+            || !((100 << 20) / 4096..(112 << 20) / 4096).contains(&page) && page < 0x23000
+    };
+    let lit = [(0, 1024 * 600 * 4)];
+    assert_eq!(
+        place(&mut box_ggtt, &lit, SURFACE_GGTT_LIMIT),
+        Some(Placed {
+            at: 100 << 20,
+            reclaimed: false
+        })
+    );
+    // No hole at all: the first range past the lit plane, reclaimed.
+    let mut full = |_: u64| true;
+    assert_eq!(
+        place(&mut full, &lit, SURFACE_GGTT_LIMIT),
+        Some(Placed {
+            at: 4 << 20,
+            reclaimed: true
+        })
+    );
+    // A second plane the firmware scans out at 4 MiB pushes it past.
+    let both = [(0, 1024 * 600 * 4), (4 << 20, (4 << 20) + 1920 * 1080 * 4)];
+    assert_eq!(
+        place(&mut full, &both, SURFACE_GGTT_LIMIT).map(|placed| placed.at),
+        Some(12 << 20)
+    );
+}
+
+/// What the planes scan out is read from their registers: pipe A's plane
+/// 1 lit, pipe B's cloned onto the same surface, a cursor on pipe A.
+#[test]
+fn the_scanned_ranges_are_every_enabled_planes() {
+    let mut display = Display::firmware();
+    display.write32(0x7_0180, 0x9400_0000);
+    display.write32(0x7_0188, 0x40);
+    display.write32(0x7_0190, (599 << 16) | 1023);
+    display.write32(0x7_019C, 0);
+    display.write32(0x7_1180, 0x9400_0000);
+    display.write32(0x7_1188, 0x40);
+    display.write32(0x7_1190, (599 << 16) | 1023);
+    display.write32(0x7_119C, 0);
+    display.write32(0x7_0080, 0x27);
+    display.write32(0x7_0084, 0x0100_0000);
+    let mut out = [(0, 0); 24];
+    let count = scanned(&mut display, &mut out);
+    assert_eq!(count, 3);
+    assert_eq!(out[0], (0, 0x40 * 64 * 600));
+    assert_eq!(out[1], (0x0100_0000, 0x0100_0000 + (256 << 10)));
+    assert_eq!(out[2], (0, 0x40 * 64 * 600));
 }

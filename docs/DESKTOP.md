@@ -160,12 +160,18 @@ monitors, not mirroring). Under `ferrix.intelgpu.modeset=on`, `card0`
 says HELLO with two scanouts:
 
 * pipe B gets a surface of its own: 1920x1200 at a 7680-byte stride,
-  pages pinned into 00:02.0's domain and entered into the GGTT on the first
-  2 MiB boundary past the firmware's framebuffer (refused if an entry there
-  is present or it would reach the driver's own window at 256 MiB). BAR 2
-  is not lent on the box, so the driver writes the surface through its own
-  cached mapping and flushes every line it writes (`clflush`, as i915's
-  `drm_clflush_virt_range`) (`intel/src/display/surface.rs`);
+  pages pinned into 00:02.0's domain and entered into the GGTT below the
+  driver's own window at 256 MiB, in the first 2 MiB-aligned run the
+  firmware left free -- or, where it left none (the box's firmware keeps
+  entries far past its lit framebuffer: 78559 present below 0x23000), the
+  first run no enabled plane or cursor of pipes A to D scans out, its
+  firmware entries taken over (`light::scanned`, `light::place`); the range
+  chosen is logged. BAR 2 is not lent on the box, so the driver writes the
+  surface through its own cached mapping and flushes every line it writes
+  (`clflush`, as i915's `drm_clflush_virt_range`)
+  (`intel/src/display/surface.rs`). A surface that cannot be made leaves
+  scanout 1 announced but dark, its port watched and its EDID sent, and is
+  tried again at the next plug;
 * the port the firmware left dark is lit onto it -- port B where it lit A,
   port A where it lit B (the box's boot of 2026-10-23: the 1024x600 monitor
   on B lit, the TV on A dark) -- at boot where a monitor is there (h2's
@@ -178,7 +184,10 @@ says HELLO with two scanouts:
   `MODES`, mode list and EDID; SCANOUT, FLUSH and SET_MODE act per
   scanout, so hyprix places two screens side by side.
 
-Host tests place the surface, repoint a cloned pipe, and light the TV on
+Host tests place the surface in a GGTT model with firmware entries past
+the lit framebuffer (a hole found; none, and a range reclaimed past every
+scanned plane), read the planes' scanned ranges, repoint a cloned pipe,
+and light the TV on
 port A when the firmware lit B -- the dump's own layout, every value
 Linux's; the rest runs on the box only.
 

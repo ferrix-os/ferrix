@@ -192,6 +192,9 @@ const PLANE_STRIDE_1_A: u32 = 0x7_0188;
 const PLANE_POS_1_A: u32 = 0x7_018C;
 const PLANE_SIZE_1_A: u32 = 0x7_0190;
 const PLANE_SURF_1_A: u32 = 0x7_019C;
+/// `_CURACNTR`, `_CURABASE`; each pipe 0x1000 on.
+const CURCNTR_A: u32 = 0x7_0080;
+const CURBASE_A: u32 = 0x7_0084;
 /// `_ICL_PHY_MISC_A`; B 4 on.
 const PHY_MISC_A: u32 = 0x6_4C00;
 /// The combo PHYs (`_ICL_COMBOPHY_A`, `_B`).
@@ -737,6 +740,91 @@ pub const fn surface_place(firmware_end: u64, limit: u64) -> Option<u64> {
     } else {
         None
     }
+}
+
+/// The GGTT bytes a display plane may be reading: every enabled universal
+/// plane and cursor of pipes A to D, as `(start, end)`. A plane's extent is
+/// its `PLANE_SURF` to its stride times its height -- the stride read in
+/// 64-byte units for a linear plane and, to be safe, 512-byte tile rows
+/// for a tiled one -- and a cursor's is 256 KiB, the largest one.
+/// `out` takes them; gives how many.
+pub fn scanned<M: Mmio + ?Sized>(mmio: &mut M, out: &mut [(u64, u64)]) -> usize {
+    let mut count = 0;
+    let mut keep = |range: (u64, u64), count: &mut usize| {
+        if let Some(slot) = out.get_mut(*count) {
+            *slot = range;
+            *count += 1;
+        }
+    };
+    for pipe in 0..4_u32 {
+        let at = pipe * 0x1000;
+        for plane in 0..5_u32 {
+            let base = PLANE_CTL_1_A + at + plane * 0x100;
+            let ctl = mmio.read32(base);
+            if ctl & (1 << 31) == 0 {
+                continue;
+            }
+            let stride = u64::from(mmio.read32(base + 0x8) & 0x7FF);
+            let rows = u64::from((mmio.read32(base + 0x10) >> 16) & 0x1FFF) + 1;
+            let unit = if (ctl >> 10) & 0x7 == 0 { 64 } else { 512 };
+            let start = u64::from(mmio.read32(base + 0x1C) & !0xFFF);
+            keep(
+                (start, start + (stride * unit * rows).max(4096)),
+                &mut count,
+            );
+        }
+        if mmio.read32(CURCNTR_A + at) & 0x27 != 0 {
+            let start = u64::from(mmio.read32(CURBASE_A + at) & !0xFFF);
+            keep((start, start + (256 << 10)), &mut count);
+        }
+    }
+    count
+}
+
+/// Where the second surface went in the GGTT.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placed {
+    /// Its GGTT offset.
+    pub at: u64,
+    /// Whether entries the firmware left there, which no plane scans out,
+    /// are taken over.
+    pub reclaimed: bool,
+}
+
+/// Where the second surface goes below `limit`: the first
+/// [`SURFACE_ALIGN`]-aligned run of [`SURFACE_BYTES`] whose entries are
+/// all free (`present` says which GGTT page indices the firmware mapped),
+/// else the first that no range of `busy` ([`scanned`]) touches, whose
+/// firmware entries are reclaimed. The firmware of the box keeps entries
+/// far past its lit framebuffer (2026-10-23: 78559 present below
+/// 0x23000), so the first boundary past the framebuffer was taken.
+pub fn place(
+    present: &mut dyn FnMut(u64) -> bool,
+    busy: &[(u64, u64)],
+    limit: u64,
+) -> Option<Placed> {
+    let pages = SURFACE_BYTES.div_ceil(4096);
+    let starts = || {
+        (0..)
+            .map(|n: u64| n * SURFACE_ALIGN)
+            .take_while(|at| at + SURFACE_BYTES <= limit)
+    };
+    let clear = |at: u64| {
+        busy.iter()
+            .all(|&(start, end)| end <= at || start >= at + SURFACE_BYTES)
+    };
+    for at in starts() {
+        if clear(at) && (0..pages).all(|page| !present(at / 4096 + page)) {
+            return Some(Placed {
+                at,
+                reclaimed: false,
+            });
+        }
+    }
+    starts().find(|&at| clear(at)).map(|at| Placed {
+        at,
+        reclaimed: true,
+    })
 }
 
 /// A pipe the firmware already runs, as read.
