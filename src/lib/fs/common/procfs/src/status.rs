@@ -126,6 +126,28 @@ pub struct Status<'a> {
     pub seccomp_filters: u32,
     /// Processors, all of which the process may run on.
     pub cpus: u32,
+    /// `SigQ` to `SigCgt`.
+    pub signals: SignalMasks,
+}
+
+/// The signal lines of `status`, each mask bit `n - 1` for signal `n`, as
+/// Linux's `task_sig` prints them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SignalMasks {
+    /// `SigQ`'s first number: signals queued for the thread and its process.
+    pub queued: u64,
+    /// `SigQ`'s second: `RLIMIT_SIGPENDING`'s soft limit.
+    pub queue_limit: u64,
+    /// `SigPnd`: pending for this thread alone.
+    pub pending: u64,
+    /// `ShdPnd`: pending for the process, for whichever thread takes them.
+    pub shared_pending: u64,
+    /// `SigBlk`: the thread's blocked mask.
+    pub blocked: u64,
+    /// `SigIgn`: set to `SIG_IGN`.
+    pub ignored: u64,
+    /// `SigCgt`: with a handler.
+    pub caught: u64,
 }
 
 /// Append the whole file.
@@ -170,13 +192,26 @@ pub fn render(out: &mut Vec<u8>, status: &Status<'_>) {
     ] {
         put(out, format_args!("{label}:\t{kib:>8} kB\n"));
     }
-    // `NoNewPrivs`, `Seccomp` and `Seccomp_filters` come after the capability
+    // The signal lines follow `Threads`, as Linux's do. `NoNewPrivs`,
+    // `Seccomp` and `Seccomp_filters` come after the capability
     // sets and before the speculation lines and `Cpus_allowed`
     // (`fs/proc/array.c`), which is where the lines Ferrix has fall.
+    let SignalMasks {
+        queued,
+        queue_limit,
+        pending,
+        shared_pending,
+        blocked,
+        ignored,
+        caught,
+    } = status.signals;
     put(
         out,
         format_args!(
-            "Threads:\t{}\nNoNewPrivs:\t{}\nSeccomp:\t{}\nSeccomp_filters:\t{}\nCpus_allowed:\t",
+            "Threads:\t{}\nSigQ:\t{queued}/{queue_limit}\nSigPnd:\t{pending:016x}\n\
+             ShdPnd:\t{shared_pending:016x}\nSigBlk:\t{blocked:016x}\nSigIgn:\t{ignored:016x}\n\
+             SigCgt:\t{caught:016x}\nNoNewPrivs:\t{}\nSeccomp:\t{}\nSeccomp_filters:\t{}\n\
+             Cpus_allowed:\t",
             status.threads,
             u32::from(status.no_new_privs),
             status.seccomp,

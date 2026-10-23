@@ -21,7 +21,7 @@ use ferrix_procfs::mounts::{self, Mount, MountInfo};
 use ferrix_procfs::net as procfs_net;
 use ferrix_procfs::partitions::{self, Partition};
 use ferrix_procfs::stat::{self, Stat};
-use ferrix_procfs::status::{self, State, Status};
+use ferrix_procfs::status::{self, SignalMasks, State, Status};
 use ferrix_procfs::sysctl;
 use ferrix_vfs::fd::MAX_LIMIT;
 use ferrix_vfs::{Errno, Location, MountFlags, Namespace, OpenFile, Result};
@@ -1254,6 +1254,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     let fd_size = highest
         .and_then(|fd| u32::try_from(fd).ok())
         .map_or(64, |fd| fd.saturating_add(1).next_power_of_two().max(64));
+    let signals = signal_masks(process, tid);
     let status = Status {
         name: &name,
         umask: process.umask(),
@@ -1277,6 +1278,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         seccomp: seccomp.0,
         seccomp_filters: seccomp.1,
         cpus: online_cpus(),
+        signals,
     };
     let mut out = Vec::new();
     status::render(&mut out, &status);
@@ -1293,6 +1295,41 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         .as_bytes(),
     );
     Ok(out)
+}
+
+/// `status`'s signal lines for the thread numbered `tid` of `process`, or
+/// its first live one when that has gone: what is pending for the thread
+/// and for the process, what the thread blocks, and the dispositions. A
+/// process with no thread left shows its dispositions and shared queue only.
+fn signal_masks(process: &Process, tid: u32) -> SignalMasks {
+    const RLIMIT_SIGPENDING: u32 = 11;
+    let queue_limit = crate::syscall::limits::limit_of(process, RLIMIT_SIGPENDING)
+        .map_or(u64::MAX, |limit| limit.soft);
+    let thread = process
+        .thread_by_tid(tid)
+        .or_else(|| process.threads().into_iter().next());
+    let (pending, shared_pending, blocked, (ignored, caught)) = match thread {
+        Some(thread) => thread.with_signals(|shared, own| {
+            (
+                own.pending(),
+                shared.pending(),
+                own.blocked(),
+                shared.ignored_and_caught(),
+            )
+        }),
+        None => {
+            process.with_signals(|shared| (0, shared.pending(), 0, shared.ignored_and_caught()))
+        }
+    };
+    SignalMasks {
+        queued: u64::from((pending | shared_pending).count_ones()),
+        queue_limit,
+        pending,
+        shared_pending,
+        blocked,
+        ignored,
+        caught,
+    }
 }
 
 /// The `Cap*` lines of `status`. In the first namespace an effective uid of 0

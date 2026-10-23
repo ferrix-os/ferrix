@@ -16,7 +16,7 @@ use crate::meminfo::{self, Meminfo};
 use crate::mounts::{self, Mount};
 use crate::partitions::{self, Partition};
 use crate::stat::{self, Stat};
-use crate::status::{self, State, Status};
+use crate::status::{self, SignalMasks, State, Status};
 use crate::sysctl;
 
 fn rendered(render: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
@@ -273,12 +273,21 @@ fn status_is_byte_for_byte_what_linux_printed() {
         seccomp: 0,
         seccomp_filters: 0,
         cpus: 24,
+        signals: SignalMasks {
+            queued: 0,
+            queue_limit: 212141,
+            pending: 0,
+            shared_pending: 0,
+            blocked: 0,
+            ignored: 0x0100_1000,
+            caught: 0x2,
+        },
     };
     let out = rendered(|out| status::render(out, &status));
     // Groups is copied from pid 1, which runs as root with no supplementary
     // groups — and still ends the line with the space `array.c` apologises
     // for.
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nSigQ:\t0/212141\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000000002\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -309,9 +318,20 @@ fn a_threads_status_names_its_process_and_itself() {
         seccomp: 2,
         seccomp_filters: 3,
         cpus: 24,
+        // SIGUSR1 sent to this thread and blocked by it, SIGTERM to the
+        // process: what a stuck Wine SuspendThread needed to be read.
+        signals: SignalMasks {
+            queued: 2,
+            queue_limit: 212141,
+            pending: 0x200,
+            shared_pending: 0x4000,
+            blocked: 0x200,
+            ignored: 0x0100_1000,
+            caught: 0x4202,
+        },
     };
     let out = rendered(|out| status::render(out, &status));
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t3\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nSigQ:\t2/212141\nSigPnd:\t0000000000000200\nShdPnd:\t0000000000004000\nSigBlk:\t0000000000000200\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000004202\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t3\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -339,6 +359,7 @@ fn a_status_name_escapes_newline_and_backslash_only() {
         seccomp: 0,
         seccomp_filters: 0,
         cpus: 1,
+        signals: SignalMasks::default(),
     };
     let out = rendered(|out| status::render(out, &status));
     assert!(
@@ -1098,6 +1119,7 @@ fn a_status_in_a_pid_namespace_lists_every_number_from_the_readers_down() {
         seccomp: 0,
         seccomp_filters: 0,
         cpus: 1,
+        signals: SignalMasks::default(),
     };
     let out = rendered(|out| status::render(out, &status));
     let text = core::str::from_utf8(&out).unwrap_or("");
