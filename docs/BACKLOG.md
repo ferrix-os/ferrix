@@ -424,6 +424,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | `test-net --arch x86_64` hung once (2026-10-01) at its first `wget` for 120 s on net-throughput 931e553; gateway saw one SYN-ACK retransmit, then nothing. Not root-caused: a frame or wake lost between driver and net core. Unowned. [more](backlog/flakes.md#fl-064) | unowned | 4 |
 | `test-auth --arch all` failed once on x86-64 (2026-10-03): init's journal line shared a console line with `passwd`'s output, so the check read neither. Match within a line rather than whole lines, or read the journal. [more](backlog/flakes.md#fl-067) | open | 15 |
 | Stage 10's chardev check stopped an armv7a `--smp 2` TCG boot once (2026-10-19, load 15 to 25) with "the driver's reply was refused" (`interfaces/chardev/check.rs`); split from fl-071, whose refused admit is fixed. [more](backlog/flakes.md#fl-073) | open | 10 |
+| The quota self-check stopped an x86-64 TCG boot once (2026-10-23, linux-abi-off 6064977d5) with "a job with many spinning tasks took more than its share from another job" (`object/quota_check.rs`); passed on rerun. Seen before on armv7a TCG (bsa-lo-st-a32-12, 2026-10-15). [more](backlog/flakes.md#fl-074) | open | 13 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 

@@ -475,3 +475,9 @@ Done; removed from the backlog on 2026-10-20.
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-10-19, split from fl-071 on 2026-10-20).** Stage 10's chardev self-check stopped an armv7a boot at two processors under TCG with "the driver's reply was refused" (`src/kernel/src/interfaces/chardev/check.rs`, `reply`, called by `round_trip`, `answered_drains`, `out_of_order` and `bounded`), on a thread-times row at host load 15 to 25; it passed on a rerun. Log `~/.local/share/ferrix/logs/queue/tt15-boot-a32-2.log` on nazuna. Not the queue-room race fixed under fl-071, which refuses an admit, not a reply. Not looked into: find which step's reply it was, and what `chardev_reply` returned. | chardev owner | 10 |
+
+### fl-074
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-10-23).** The quota self-check stopped a `test-boot --arch x86_64 --accel tcg` of `linux-abi-off` 6064977d5 (a change that leaves the `on` image's code as `main`'s) with FX "quota self-check failed: a job with many spinning tasks took more than its share from another job" (`src/kernel/src/object/quota_check.rs`), at 50 s, while another boot ran beside it in the gate pool; the rerun on the same hash passed (`lao-x86tcg2`). Log kept: `~/.local/share/ferrix/logs/lao-x86tcg-quota-flake-2026-10-23.log`. The same line stopped an armv7a TCG boot on 2026-10-15 (`bsa-lo-st-a32-12`, dbe733179). A share measured over a window TCG's time slicing can stretch: look at the window and the margin the check allows under emulation. | unowned | 13 |

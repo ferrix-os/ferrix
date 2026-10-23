@@ -974,6 +974,32 @@ counts as verified in it (3208 (8)). Stage 1's memory self-checks
 yet keeps the `off` image linking: `check` lints without a link (C2).
 
 **Review.** Ledger line 3257: OK IF (1) to (7); (1) taken as option (ii),
-(3) and (7) written here and in `BUILD-FLAGS.md`. Kernel lines: +277 / -14 in
+(3) and (7) written here and in `BUILD-FLAGS.md`.
+
+**Control** (3257 (2)): `fleet/gate.sh control` on `check`, planting
+`#[allow(unused_imports, reason = "control")] use fs::Report as _;` in
+`main.rs` outside any `cfg`: `control: FIRED (host): error[E0432]:
+unresolved import \`fs\``, from the `linux_abi=off` lint alone, after
+`present`, `desktop` and `checks=off` passed with it
+(`~/.local/share/ferrix/logs/queue/lao-ctl-off4.log`, on 6064977d5).
+
+**Rows** on 6064977d5 (3257 (5)), each `fleet/gate.sh run: PASSED`:
+`lao-check4` (check, with the `off` lint on three architectures, the
+resolver test and the coverage checks), `lao-rel2` (build --arch all
+--release), `lao-x86kvm` [x86_64:kvm], `lao-x86tcg2` [x86_64:tcg],
+`lao-a64` [aarch64:tcg], `lao-a32` [armv7a:tcg], `lao-a32s2` [armv7a:tcg,
+--smp 2], `lao-mcekvm` [x86_64:kvm], `lao-mcetcg` [x86_64:tcg], `lao-flags`
+[x86_64:kvm]. The first x86-64 TCG boot (`lao-x86tcg`) stopped once at the
+quota check's share and passed on rerun: fl-074, filed. **The `on` boot
+lines** (3257 (4)) against `main` a622d2266's rows (`gpu-opaque-*`), with
+numbers and addresses masked: on all five boots the same lines but the
+`build` line's new `linux_abi=on`, `seam-trip`'s timing format and, on
+AArch64, the threads check's hand-off wording, which goes either way.
+**Coverage** (3257 (6)): `carry-coverage.py`, 0 anchors dropped; then
+`gen-coverage-justification.py --check` current; TRACEABILITY's statuses
+unchanged (the `off` functions: three accessors, two named by none).
+`complexity-baseline.json` records `kmain` at 80 lines and
+`bring_up_processors` at 60, the `cfg` attribute lines alone, complexity
+unchanged. Kernel lines: +277 / -14 in
 `src/kernel` (almost all `cfg` attributes and the two `off` functions);
 nothing is added to the `on` image's code.
