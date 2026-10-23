@@ -819,8 +819,8 @@ the reconnecting, writes the stream to the run's log directory, and turns
 
 ### 10.2 Continuous forwarding
 
-(Built in part: see §18, "Store-and-forward, as built". TLS, RFC 5424,
-OTLP and receiving are still to come.)
+(Built in part: see §18, "Store-and-forward, as built" and "TLS and
+lode-receive, as built". RFC 5424 and OTLP are still to come.)
 
 `lode-upload.service`, its own unit, user and sealed job, off unless
 `/etc/ferrix/lode-upload.conf` names a destination (theme 9):
@@ -845,6 +845,10 @@ OTLP and receiving are still to come.)
   and `auth.service` never unless named.
 
 ### 10.3 Receiving
+
+(Built first as `lode-receive` on a Linux host, for the viewer on nazuna:
+§18, "TLS and lode-receive, as built". The Ferrix-side service below is
+still to come.)
 
 `lode-receive.service` (opt-in) takes journal-upload's export, RFC
 3164/5424 and JSON lines, and writes each host into
@@ -1145,10 +1149,13 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 2a, 2b, 3, 4 and 5, and the field-quality fixes from the N150's first
 records, and store-and-forward to a collector (§10.2's first part);
 compression of sealed segments, and the write-budget row (§8.3) as
-below. Next, the customer's order: TLS forwarding and `lode-receive` on a
-Linux host (§10.2, §10.3), for the viewer on nazuna. The viewer is a separate agent's, a Rust desktop app built from
-the customer's design. A follow-up row: the uploader as a native service
-in a sealed job (today a plain Linux service, §18).
+below, and the customer's order after them: TLS forwarding and
+`lode-receive` on a Linux host (§10.2, §10.3), for the viewer on nazuna.
+The viewer is a separate agent's, a Rust desktop app built from the
+customer's design. Follow-up rows: the uploader as a native service in a
+sealed job (today a plain Linux service, §18); a machine id written at
+first boot, so a machine is not filed under its host name; RFC 5424 and
+OTLP outputs.
 
 
 
@@ -1740,6 +1747,77 @@ requires every line stored and none lost (`verify --kernel`).
   row holds the slow load to 50, so it cannot grow, and says it is over
   the design's 40. Meeting 40 is the file system's: an `fsync` through a
   log tree, as Linux's btrfs does, rather than a whole commit.
+
+### TLS and lode-receive, as built (§10.2, §10.3)
+
+The customer's order: a Ferrix machine's log over TLS to nazuna, kept
+there for the viewer. One workspace, `src/user/system/linux/lode-net`, a
+std program against musl as dhcp is, with two programs:
+
+* **`lode-upload`** (`/bin/lode-upload`, `lode-upload.service`), in the
+  desktop's image and `test-log`'s, replaces the native `lode upload`:
+  the same cursor, back-off and reading of the store (std's file system,
+  `ferrix-lode-core`'s formats), and now `https://` to any host. A line is
+  `NAME https://HOST:PORT/upload export ca=FILE [cert=FILE key=FILE]
+  [where EXPR]`; plain `http://` stays limited to this machine. The keys
+  are read as root before it becomes uid 92. Each upload says
+  `X-Lode-Machine-Id` (from `/etc/machine-id`) and `X-Lode-Hostname`.
+  Records gone before they were sent are said in a record of their own
+  (`MESSAGE_ID` e2a6c4b8..., `N_UNSENT`).
+* **`lode-receive`**, on a Linux host as an ordinary user:
+  `pair --machine NAME --server-name HOST [--port P] [--root DIR] [--json]`
+  makes (once) a CA, the server's certificate for HOST, and NAME's client
+  certificate, and prints the files and the line the machine needs;
+  `run [--listen ADDR:PORT] [--allow-unpaired]` takes uploads; `check
+  [--json]` says whether it runs, where, its certificate's fingerprint and
+  the machines it keeps; `install-service` writes and starts a systemd user
+  unit; `show --machine DIR` prints a machine's records as JSON lines. Exit
+  status 0 done, 1 error, 2 usage, 3 not running (`check`), 4 certificates.
+* **The stores**: `~/.local/share/ferrix/lode-receive/<machine-id>/` (or
+  `host-<hostname>/` for a machine with no machine id), each a lode store
+  as lode lays out its own -- `system@<boot>-<seq>.fxj`, `.sum` beside, the
+  sealed ones compressed -- with a `machine` file (`hostname=`,
+  `last_seen=`, `paired=`); `.pki/` and `.receive.lock` beside them. The
+  viewer opens them with `ferrix-lode-core`. A machine directory is bound to
+  the certificate it was first paired with: another is refused.
+* **Once, and only after it is safe.** The receiver answers 200 only after
+  the records are synced; a record whose sequence number it already holds
+  in a boot it holds is dropped, so an upload sent again after a lost
+  answer stores nothing twice; a lower number in a boot never seen (a
+  machine whose store began again) is new.
+* **The TLS** is rustls with a provider of ours (`src/provider.rs`): TLS
+  1.3 only, one cipher suite (ChaCha20-Poly1305 with SHA-256), one key
+  exchange (X25519), one signature scheme (Ed25519), on the RustCrypto
+  crates. Why so few: we make both ends -- `pair` issues Ed25519
+  certificates and the two programs speak only to each other -- so every
+  algorithm more is code that never runs. Why ours: ring and aws-lc need a
+  C compiler for the musl Arm targets, which the tree does not have; the
+  RustCrypto organisation's `rustls-rustcrypto` is an alpha that pins an
+  older `rustls-webpki` and brings RSA (RUSTSEC-2023-0071), so its glue for
+  our three algorithms is copied, with attribution, not the crate.
+  Randomness is the kernel's alone, `getrandom(2)` with no flags (on Ferrix
+  the kernel's ChaCha20 generator seeded from firmware and the processor,
+  `src/kernel/src/random.rs`); no seeding in user space, no fallback, and a
+  failed read fails the handshake or the key. The client must present a
+  certificate from the receiver's CA unless `run --allow-unpaired`.
+* **Keys** are made from the kernel's random numbers, written 0600 through
+  a new file renamed into place (`.pki/` itself 0700), and never printed:
+  `pair` prints paths and fingerprints.
+* **Tests**: the provider against RFC vectors (SHA-256, HMAC, rustls's HKDF
+  on our HMAC per RFC 5869, X25519 per RFC 7748 with a low-order point
+  refused, Ed25519 per RFC 8032, a record sealed and opened, tampering
+  refused); on the host, a paired machine's uploads kept once across a
+  resend, a wrong CA, a foreign client certificate, an expired one and none
+  at all refused, keys 0600 and absent from `pair`'s output, and our
+  provider against rustls's own ring provider both ways (`ring` a
+  test-only dependency). `cargo xtask test-log-remote` boots a guest that
+  sends forty lines over TLS to `lode-receive` on the host through xtask's
+  gateway (10.0.2.2), takes the receiver away after twenty, writes twenty
+  more while the uploader fails and backs off, brings it back, and
+  requires all forty kept once, in order, under the guest's host name.
+* Not yet: a machine id at first boot (today a guest is
+  `host-ferrix/`); RFC 5424 and OTLP; certificate revocation (a paired
+  machine is unpaired by removing its `.pki/clients/NAME.pem`).
 
 ### Known issues
 

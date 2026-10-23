@@ -809,6 +809,10 @@ pub(crate) fn desktop_files(
     files.extend(console_getty(session_user.is_some(), shell));
     // The desktop keeps its log (docs/LOGGING.md): lode with basic.target.
     files.push(crate::lode::enabled());
+    // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
+    // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is
+    // enabled (`lode-receive pair` says how).
+    files.extend(crate::lode_net::carried(arch)?);
     files.extend(session_files(bus, data_nosuid));
     if let Some(pulsed) = pulsed {
         files.push(File {

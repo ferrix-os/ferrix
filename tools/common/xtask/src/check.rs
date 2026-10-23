@@ -947,6 +947,8 @@ const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("dhcp", "src/user/system/linux/dhcp"),
     ("dmesg", "src/user/system/linux/dmesg"),
     ("installer", "src/user/system/linux/installer"),
+    // lode-upload and lode-receive (docs/LOGGING.md §10.2, §10.3).
+    ("lode-net", "src/user/system/linux/lode-net"),
     // tole, the UI framework: a component (components.toml), checked out
     // beside the compositor's workspace.
     ("tole", "src/user/system/linux/tole"),

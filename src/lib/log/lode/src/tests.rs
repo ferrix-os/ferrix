@@ -1345,7 +1345,7 @@ mod uploads {
         .unwrap();
         assert_eq!(destinations.len(), 3);
         assert_eq!(destinations[0].url.path, "/upload");
-        assert_eq!(destinations[1].url.address, [127, 0, 0, 1]);
+        assert_eq!(destinations[1].url.address, Some([127, 0, 0, 1]));
         assert_eq!(destinations[1].url.path, "/");
         assert!(destinations[1].auth && destinations[1].filter.is_some());
         assert_eq!(destinations[2].url.port, upload::DEFAULT_PORT);
@@ -1404,11 +1404,17 @@ mod uploads {
             body.windows(13).filter(|w| *w == b"MESSAGE=line ").count(),
             2
         );
-        let request = upload::request(&url, Format::Export, &body);
+        let request = upload::request(&url, Format::Export, &body, "ab12", "box\r\nX: y");
         let text = String::from_utf8_lossy(&request);
         assert!(text.starts_with("POST /upload HTTP/1.1\r\nHost: localhost:19532\r\n"));
         assert!(text.contains("Content-Type: application/vnd.fdo.journal\r\n"));
         let (start, length) = upload::request_head(&request).unwrap();
+        let head = &request[..start];
+        assert_eq!(upload::header(head, "x-lode-machine-id"), Some("ab12"));
+        // A host name cannot add a header of its own.
+        assert_eq!(upload::header(head, upload::HOST_HEADER), Some("boxX:y"));
+        assert_eq!(upload::header(head, "X"), None);
+        assert_eq!(upload::request_line(head), Some(("POST", "/upload")));
         assert_eq!(length, body.len());
         assert_eq!(&request[start..], &body[..]);
         assert_eq!(upload::status(b"HTTP/1.1 202 Accepted\r\n"), Some(202));
@@ -1585,5 +1591,96 @@ mod field_names {
         let crc = crc32c(&out[8..]);
         out[4..8].copy_from_slice(&crc.to_le_bytes());
         assert!(segment::entry_at(&out, 0).is_none());
+    }
+}
+
+/// TLS destinations, and what a receiver reads (`docs/LOGGING.md` §10.2,
+/// §10.3).
+mod receiving {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use crate::format::{Output, write};
+    use crate::record::{LevelSource, Record, UNSPECIFIED};
+    use crate::time::Zone;
+    use crate::upload::{self, Format};
+
+    #[test]
+    fn https_goes_anywhere_with_a_ca_and_a_pair_of_cert_and_key() {
+        let line = "nazuna https://192.168.9.10:19532/upload export ca=/etc/ca.pem \
+                    cert=/etc/c.pem key=/etc/c.key where priority <= err";
+        let destination = &upload::parse_config(line).unwrap()[0];
+        assert!(destination.url.tls);
+        assert_eq!(destination.url.address, Some([192, 168, 9, 10]));
+        let tls = destination.tls.as_ref().unwrap();
+        assert_eq!(tls.ca, "/etc/ca.pem");
+        assert_eq!(tls.key.as_deref(), Some("/etc/c.key"));
+        assert!(destination.filter.is_some());
+        let named = &upload::parse_config("n https://nazuna.lan json ca=/ca").unwrap()[0];
+        assert_eq!(named.url.address, None);
+        assert_eq!(named.url.host, "nazuna.lan");
+        assert!(named.tls.as_ref().unwrap().cert.is_none());
+        for bad in [
+            "n https://nazuna export",
+            "n https://nazuna export ca=/ca cert=/c",
+            "n http://127.0.0.1 export ca=/ca",
+            "n https://naz_una export ca=/ca",
+            "n https://nazuna export ca=/ca ca=/ca",
+            "n https://nazuna export ca=",
+        ] {
+            assert!(upload::parse_config(bad).is_err(), "{bad}");
+        }
+    }
+
+    fn records() -> Vec<Record> {
+        let mut one = Record::new(3, 1_761_228_062_000_001, 5);
+        one.seqnum = 41;
+        one.boot_id = [7; 16];
+        one.host = alloc::rc::Rc::from("box");
+        one.set_level(3, LevelSource::Derived);
+        one.push("MESSAGE", b"two\nlines");
+        one.push("SYSLOG_IDENTIFIER", b"app");
+        one.push("_TRANSPORT", b"kernel");
+        one.push("BLOB", &[0, 255, 10]);
+        let mut two = Record::new(UNSPECIFIED, 1_761_228_062_000_002, 6);
+        two.seqnum = 42;
+        two.boot_id = [7; 16];
+        two.host = alloc::rc::Rc::from("box");
+        two.set_level(UNSPECIFIED, LevelSource::Unspecified);
+        two.push("MESSAGE", "said \"quoted\" \\ \u{e9} \x07".as_bytes());
+        alloc::vec![one, two]
+    }
+
+    fn written(output: Output) -> Vec<u8> {
+        let mut out = Vec::new();
+        for record in records() {
+            write(&record, output, &Zone::utc(), &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn an_export_body_reads_back_as_the_records_it_was_made_of() {
+        let back = upload::parse_export(&written(Output::Export)).unwrap();
+        assert_eq!(back, records());
+        assert!(upload::parse_export(b"MESSAGE\n\x09\x00").is_err());
+        assert!(upload::parse_export(b"__SEQNUM=x\n").is_err());
+        assert!(upload::parse_export(b"PRIORITY=9\n").is_err());
+    }
+
+    #[test]
+    fn a_json_body_reads_back_as_the_records_it_was_made_of() {
+        let back = upload::parse_json_lines(&written(Output::Json)).unwrap();
+        assert_eq!(back, records());
+        assert!(upload::parse_json_lines(b"{\"A\":1}").is_err());
+        assert!(upload::parse_json_lines(b"{\"A\":\"x\"} trailing").is_err());
+        assert!(upload::parse_json_lines(b"{\"A\":[1,300]}").is_err());
+        assert_eq!(upload::parse_json_lines(b"\n{}\n").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_format_names_its_content_type() {
+        assert_eq!(Format::Json.content_type(), "application/x-ndjson");
+        let _ = String::new();
     }
 }

@@ -1,0 +1,312 @@
+//! A lode store on a file system: its segments read (the uploader) and
+//! written (the receiver), with `ferrix-lode-core`'s formats.
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
+
+use ferrix_lode_core::compress;
+use ferrix_lode_core::record::Record;
+use ferrix_lode_core::segment::{self, Header};
+use ferrix_lode_core::summary::Summary;
+
+/// The size a written segment is sealed at, as lode's.
+pub const SEGMENT_MAX: u64 = 16 * 1024 * 1024;
+
+/// One segment file.
+#[derive(Debug, Clone)]
+pub struct Segment {
+    /// Its path.
+    pub path: PathBuf,
+    /// Its file name.
+    pub name: String,
+    /// The first sequence number its name says.
+    pub first: u64,
+}
+
+impl Segment {
+    /// Its header, compressed or not.
+    #[must_use]
+    pub fn header(&self) -> Option<Header> {
+        let mut buf = [0_u8; 512];
+        let got = File::open(&self.path)
+            .and_then(|mut file| file.read(&mut buf))
+            .ok()?;
+        compress::header(buf.get(..got)?)
+    }
+
+    /// Its summary, if it has one that reads: a sealed segment's.
+    #[must_use]
+    pub fn summary(&self) -> Option<Summary> {
+        let bytes = fs::read(summary_path(&self.path)).ok()?;
+        Summary::decode(&bytes)
+    }
+
+    /// Its bytes from `offset` on as written: a compressed one unpacked.
+    #[must_use]
+    pub fn bytes(&self, offset: usize) -> Option<Vec<u8>> {
+        let whole = compress::expand(fs::read(&self.path).ok()?);
+        Some(whole.get(offset..).map(Vec::from).unwrap_or_default())
+    }
+
+    /// Its size on disk.
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        fs::metadata(&self.path).map_or(0, |meta| meta.len())
+    }
+
+    /// Its records.
+    #[must_use]
+    pub fn records(&self) -> Vec<Record> {
+        self.bytes(0)
+            .and_then(|bytes| segment::scan(&bytes, 0))
+            .map(|scanned| {
+                scanned
+                    .records
+                    .into_iter()
+                    .map(|found| found.record)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// `<segment>.sum`.
+fn summary_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".sum");
+    PathBuf::from(name)
+}
+
+/// Every segment in `dirs`, by first sequence number.
+#[must_use]
+pub fn segments(dirs: &[PathBuf]) -> Vec<Segment> {
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if !segment::is_segment_name(&name) {
+                continue;
+            }
+            let first = segment::seqnum_of_name(&name).unwrap_or(0);
+            out.push(Segment {
+                path: entry.path(),
+                name,
+                first,
+            });
+        }
+    }
+    out.sort_by_key(|segment| segment.first);
+    out
+}
+
+/// A store being written by the receiver: one segment open at a time,
+/// sealed at [`SEGMENT_MAX`] or a new boot -- summarised and compressed, as
+/// lode seals its own.
+#[derive(Debug)]
+pub struct Writer {
+    /// The store's directory.
+    dir: PathBuf,
+    /// The open segment, if there is one.
+    open: Option<Open>,
+    /// The machine's id, for new segments' headers.
+    machine_id: [u8; 16],
+}
+
+/// A segment being appended to.
+#[derive(Debug)]
+struct Open {
+    /// Its path.
+    path: PathBuf,
+    /// The file.
+    file: File,
+    /// Its length.
+    size: u64,
+    /// Its boot.
+    boot_id: [u8; 16],
+    /// Its last sequence number.
+    last: u64,
+}
+
+impl Writer {
+    /// Begin on the store at `dir`, made if it is not there, going on in its
+    /// newest unsealed segment.
+    ///
+    /// # Errors
+    ///
+    /// A directory that cannot be made or read.
+    pub fn open(dir: &Path, machine_id: [u8; 16]) -> std::io::Result<Writer> {
+        fs::create_dir_all(dir)?;
+        let mut writer = Writer {
+            dir: dir.to_owned(),
+            open: None,
+            machine_id,
+        };
+        if let Some(newest) = segments(&[dir.to_owned()]).pop()
+            && newest.summary().is_none()
+            && let Some(bytes) = newest.bytes(0)
+            && !compress::is_compressed(&fs::read(&newest.path)?)
+            && let Some(scanned) = segment::scan(&bytes, 0)
+        {
+            let file = OpenOptions::new().append(true).open(&newest.path)?;
+            // A torn tail from a crash: cut, as lode cuts its own.
+            file.set_len(scanned.good as u64)?;
+            writer.open = Some(Open {
+                path: newest.path.clone(),
+                file,
+                size: scanned.good as u64,
+                boot_id: scanned.header.boot_id,
+                last: scanned
+                    .records
+                    .last()
+                    .map_or(0, |found| found.record.seqnum),
+            });
+        }
+        Ok(writer)
+    }
+
+    /// The highest sequence number stored, and the boots the store holds:
+    /// what makes a retried upload's records known.
+    #[must_use]
+    pub fn known(&self) -> (u64, Vec<[u8; 16]>) {
+        let mut highest = 0;
+        let mut boots: Vec<[u8; 16]> = Vec::new();
+        for each in segments(std::slice::from_ref(&self.dir)) {
+            let (last, boot) = match (each.summary(), each.header()) {
+                (Some(summary), Some(header)) => (summary.seqs.1, header.boot_id),
+                (_, Some(header)) => (
+                    each.records().last().map_or(0, |record| record.seqnum),
+                    header.boot_id,
+                ),
+                _ => continue,
+            };
+            highest = highest.max(last);
+            if !boots.contains(&boot) {
+                boots.push(boot);
+            }
+        }
+        (highest, boots)
+    }
+
+    /// Append `records`, synced before this returns, in segments of their
+    /// boots, the host named `host`.
+    ///
+    /// # Errors
+    ///
+    /// A write or sync that failed: nothing after it is taken as stored.
+    pub fn append(&mut self, records: &[Record], host: &str) -> std::io::Result<()> {
+        for record in records {
+            let stale = self.open.as_ref().is_some_and(|open| {
+                open.boot_id != record.boot_id
+                    || open.size >= SEGMENT_MAX
+                    || record.seqnum <= open.last
+            });
+            if stale {
+                self.seal()?;
+            }
+            if self.open.is_none() {
+                self.begin(record, host)?;
+            }
+            let Some(open) = self.open.as_mut() else {
+                continue;
+            };
+            let mut bytes = Vec::new();
+            segment::encode_record(record, &mut bytes);
+            open.file.write_all(&bytes)?;
+            open.size += bytes.len() as u64;
+            open.last = record.seqnum;
+        }
+        if let Some(open) = &self.open {
+            open.file.sync_data()?;
+        }
+        Ok(())
+    }
+
+    /// A new segment for `record`'s boot, beginning at its sequence number.
+    fn begin(&mut self, record: &Record, host: &str) -> std::io::Result<()> {
+        let header = Header {
+            boot_id: record.boot_id,
+            machine_id: self.machine_id,
+            first_seqnum: record.seqnum,
+            created_us: now_us(),
+            host: host.to_owned(),
+        };
+        let path = self
+            .dir
+            .join(segment::file_name("system", &record.boot_id, record.seqnum));
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&path)?;
+        let bytes = header.encode();
+        file.write_all(&bytes)?;
+        self.open = Some(Open {
+            path,
+            file,
+            size: bytes.len() as u64,
+            boot_id: record.boot_id,
+            last: 0,
+        });
+        Ok(())
+    }
+
+    /// Seal the open segment: synced, summarised, compressed in its place.
+    ///
+    /// # Errors
+    ///
+    /// A sync, read or write that failed.
+    pub fn seal(&mut self) -> std::io::Result<()> {
+        let Some(open) = self.open.take() else {
+            return Ok(());
+        };
+        open.file.sync_data()?;
+        drop(open.file);
+        let raw = fs::read(&open.path)?;
+        if let Some(scanned) = segment::scan(&raw, 0) {
+            let records: Vec<Record> = scanned
+                .records
+                .into_iter()
+                .map(|found| found.record)
+                .collect();
+            replace(&summary_path(&open.path), &Summary::of(&records).encode())?;
+        }
+        if let Some(packed) = compress::compress(raw.clone())
+            && packed.len() < raw.len()
+        {
+            replace(&open.path, &packed)?;
+        }
+        Ok(())
+    }
+}
+
+/// Put `bytes` at `path`: a new file beside it, synced, renamed over it.
+///
+/// # Errors
+///
+/// A write, sync or rename that failed.
+pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut fresh = path.as_os_str().to_owned();
+    fresh.push(".new");
+    let fresh = PathBuf::from(fresh);
+    let mut file = File::create(&fresh)?;
+    file.write_all(bytes)?;
+    file.sync_data()?;
+    drop(file);
+    fs::rename(&fresh, path)
+}
+
+/// The wall clock, in microseconds since 1970.
+#[must_use]
+pub fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
+        })
+}
