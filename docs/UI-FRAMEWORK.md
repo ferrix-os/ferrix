@@ -855,6 +855,20 @@ more.
 * Differences from §3.4 found while building: the generated API takes the
   `Ui` (`page.set(&mut ui, ...)`, `Prop::set`) rather than holding it, so
   a program's state and its tree stay two plain values.
-* Next: U3, input and the window: signals and handlers, `MouseArea`,
-  focus and keys, the Wayland host behind tole's `wayland` feature, and
-  damage tracking.
+* **U3a built** (2026-10-23): signals and handlers, `MouseArea`, the
+  pointer. A signal is an id in the `Ui`; markup handlers are closures
+  connected to it, and every emission is queued for the program, which
+  reads it through an enum the compiler writes per component
+  (`button.signal(&emitted) == Some(ButtonSignal::Clicked)`) -- the
+  program's Rust is not called back, which replaces §3.4's `on_x(|app:
+  &mut App, ..|)` callbacks: pull, as `compositor-toolkit`'s events are,
+  so the program's state needs no `RefCell` and the `Ui` no type
+  parameter. Handler bodies: assignments, emissions, calls, `if`/`else`;
+  a handler emitting the signal it handles is refused at build time. The
+  pointer: topmost enabled area in paint order inside its clips, a press
+  held to its release, hover with entered and exited. Declared properties
+  and signals are freed with their component's root. A `counter` demo.
+  33 host tests in all.
+* Next: U3b, the window: the Wayland host on `compositor-toolkit` behind
+  tole's `wayland` feature, damage tracking, and the toolkit's present of
+  damaged rectangles; then U3c, focus, keys and the Tab order.
