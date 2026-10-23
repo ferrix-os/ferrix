@@ -738,3 +738,65 @@ still has the board glue and F-76's unclassified crates in ring 0, and
 every certified profile sets `linux_abi` explicitly (no default applies to
 a certified profile). Which level an `off` profile claims, and when, is the
 customer's to decide (3208 (7)).
+
+### 11.8 Each foreign ABI is one crate; the switch is its inclusion (the customer, 2026-10-23)
+
+The customer, for DO-178C: "make the surface for the switches small, so
+ideally just move everything in a Linux ABI crate and only make the
+include the switch surface, so that if we want to get certified we just
+remove the lib from the source and we are good".
+
+**The rule.** Everything that exists only for the Linux ABI lives in one
+crate, `ferrix-linux-abi` (under `src/kernel/linux-abi/`, its own package
+in the kernel workspace). Nothing outside it names it except the
+composition root. The switch surface is exactly two places:
+
+1. the kernel binary's `Cargo.toml`: the dependency on
+   `ferrix-linux-abi`, optional, enabled by the `linux_abi` flag;
+2. `main.rs`: one registry line that adds the crate's personality to the
+   core's compile-time registry (§11.7), behind `cfg(ferrix_linux_abi =
+   "on")`.
+
+No other `cfg` on the ABI anywhere in the core, item or native code. A
+later `ferrix-windows-abi` is the same shape: one crate, one dependency
+line, one registry line.
+
+**The certified source tree has no Linux code in it.** For a certified
+configuration the crate directory is removed from the tree, not compiled
+out: an export step (`xtask cert-tree`, a TOOLS.md entry) copies the tree,
+deletes `src/kernel/linux-abi/` and its two switch lines, and proves the
+result: it builds on every certified architecture with `linux_abi=off`,
+the item-boundary gate finds no file and no symbol of the crate, and a
+grep for the crate's name finds nothing. A negative control (one stray
+reference left in the core) must make the export fail. For DO-178C this
+means the certified configuration contains neither dead code nor
+deactivated code from the Linux ABI (DO-178C 6.4.4.3 and its glossary):
+the code is simply not part of the configuration, and the switch points
+themselves are absent from it. The configuration index (SCI) names the
+exported tree's hash, not the development tree's.
+
+**What has to move into the crate** (from §§3-5 of this report):
+
+| Today | Where it goes |
+|---|---|
+| the 52 Linux syscall modules (32,063 lines) | the crate |
+| `fs/` (22,400): the Linux VFS, `/proc`, `/sys`, cgroupfs, file descriptors | the crate; the native loader and devmgr's start stop going through it first (K15, §11.1 rows) |
+| `net/` (5,120): sockets | the crate |
+| `interfaces/**` (16,060): device cores | **split**: the native driver side stays in the item, the Linux device-file side (`/dev` nodes, ioctls such as the i915 uAPI front end's kernel half) moves to the crate |
+| Linux-shaped code in the core: signal frames (1,889), `decode_syscall`'s number tables, the `int 0x80`/compat entries, vDSO and sigpage, POSIX signals on the fault path | the crate, behind the personality trait (§11.7); what the trait cannot carry is a trait change with its own review |
+| the 20 library crates only the load reaches (48,739), btrfs among them | dependencies of the crate only |
+| the 25,536 lines of core/item checks that run a Linux test program | re-homed onto native test programs first (3208 (6)(b)); a check that only works with the crate lives in the crate |
+
+**Relation to `docs/KERNEL-CRATES.md`.** That plan already splits the kernel
+into core, item, load and the binary along the rings. The Linux ABI crate
+is the load crate's Linux part: the load ring splits into
+`ferrix-linux-abi` and whatever load code serves the native side (the
+device cores' native halves move to the item or stay load, as the
+consultant rules). Doing KERNEL-CRATES' steps first makes this a smaller
+step, not a parallel one.
+
+**Cost (a guess, to be measured per step):** the crate extraction itself,
+with the device-core split and the core's Linux-shaped code behind the
+trait, about 20 to 30 points beyond §11's ~100 (some of it overlaps
+§11.3's trait rows and KERNEL-CRATES' S3/S4); the export step with its
+control and TOOLS.md entry about 3.
