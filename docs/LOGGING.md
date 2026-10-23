@@ -1676,6 +1676,32 @@ wrong, fixed in one landing before step 6:
 * Not yet: the field indexes and the sparse time index after the frames
   (§8.4); a sealed segment that may match is unpacked whole.
 
+### The viewer, as built (2026-10-23)
+
+The customer's design of a log viewer (`~/.local/share/ferrix/design/lode-app`
+on nazuna) is the app `lode-viewer`, in every image a
+person runs and "Logs" in the launcher. It reads the store as `lode`
+does, with `ferrix-lode-core` (segments, compressed or not, summaries, the
+filter language, the JSON output), as the person running it, and follows it for Live as `lode -f`
+does. It also opens a JSONL export (`lode -o json`, `cargo xtask box-log`'s
+files) on Ferrix or a Linux host. Its window is the desktop's own
+`compositor-toolkit`, drawn on the CPU; egui and iced were set aside because
+both reach Wayland through winit, which loads libwayland and libxkbcommon at
+run time, which a static Ferrix program cannot.
+
+* **Overview** (a boot's track, lanes, tiles, activity per 10 s, rate
+  against the limiter, top sources, the window's warnings and worse first),
+  **Logs** (the filter language, saved queries, chips, facets with
+  unspecified among the levels, held and folded lines, lode's marks, a
+  record's every field) and lode's state at the sidebar's foot.
+* A record from before the field-quality landing above, stored as info, is
+  shown at the level its words say by `ingest::guess_level`, with a note
+  saying so; the filter language sees that level.
+* `test-compositor --boot lode-viewer` boots it on the desktop, types a
+  query into it and requires the 13 records of 801 it must find (x86-64).
+* Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
+  and dragging the brush's edges.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

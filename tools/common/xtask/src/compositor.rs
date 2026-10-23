@@ -79,6 +79,7 @@ mod lane;
 mod latency;
 mod layout;
 mod locked;
+mod lode_viewer;
 mod machine;
 mod monitors;
 pub(crate) mod n150_box;
@@ -570,6 +571,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["settings"]) {
         settings::build_ahead(arch)?;
     }
+    if asked(&["lode-viewer"]) {
+        lode_viewer::build_ahead(arch)?;
+    }
     if asked(&["locked", "locked-held"]) {
         let _ = build(arch, "compositor-vptr", "vlock")?;
     }
@@ -696,7 +700,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 50] = [
+const BOOTS: [(&str, Boot); 51] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -741,6 +745,7 @@ const BOOTS: [(&str, Boot); 50] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("lode-viewer", lode_viewer::test_lode_viewer),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),
