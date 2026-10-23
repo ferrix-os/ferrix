@@ -189,6 +189,7 @@ name = "ferrix-devmgr"
 version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
+ "ferrix-devmgr-events-proto",
  "ferrix-devmgr-proto",
  "ferrix-drvupdate-proto",
  "ferrix-native-abi",
@@ -196,6 +197,18 @@ dependencies = [
  "ferrix-restart",
  "ferrix-rt",
 ]
+
+[[package]]
+name = "ferrix-devmgr-events"
+version = "0.1.0"
+dependencies = [
+ "ferrix-devmgr-events-proto",
+ "ferrix-rt",
+]
+
+[[package]]
+name = "ferrix-devmgr-events-proto"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-devmgr-proto"

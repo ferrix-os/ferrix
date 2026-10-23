@@ -783,6 +783,79 @@ fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> 
     started
 }
 
+/// The events helper's name among the images: an image that carries it
+/// publishes drivers' deaths and restarts to programs (`docs/DESKTOP.md`
+/// §4.2).
+const EVENTS: &[u8] = b"devmgr-events";
+
+/// `devmgr-events`, running: `devmgr`'s end of its channel, written to and
+/// never read, and its job and process.
+struct Events {
+    channel: Channel<Kernel>,
+    _job: Job<Kernel>,
+    _process: Process<Kernel>,
+}
+
+impl Events {
+    /// Tell the helper what happened to `entry`'s driver. A full channel or
+    /// a helper that has gone loses the event: a death's handling never
+    /// waits on it.
+    fn tell(
+        events: Option<&Self>,
+        what: ferrix_devmgr_events_proto::What,
+        entry: &Started,
+        value: u32,
+        drivers: &Drivers<'_>,
+    ) {
+        let Some(events) = events else {
+            return;
+        };
+        let name = drivers
+            .names
+            .get(usize::from(entry.driver))
+            .map(|name| {
+                let end = name
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .unwrap_or(name.len());
+                name.get(..end).unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let event = ferrix_devmgr_events_proto::Event::new(what, entry.location, value, name);
+        let _ = events.channel.write(&event.encode());
+    }
+}
+
+/// Start `devmgr-events` if the initramfs carries it, in a job of its own.
+/// An image without it publishes nothing, and says nothing.
+fn spawn_events(drivers: &Drivers<'_>) -> Option<Events> {
+    let index = image_index(drivers.names, drivers.count, EVENTS)?;
+    let image = drivers
+        .images
+        .get(usize::from(index))
+        .and_then(Option::as_ref)?;
+    let started = (|| {
+        let job = drivers.job.create_child().ok()?;
+        let process = pending::create_process(&job, image, "devmgr-events").ok()?;
+        let (near, far) = channel::create(Kernel).ok()?;
+        process.start(far.into_owned()).ok()?;
+        Some(Events {
+            channel: near,
+            _job: job,
+            _process: process,
+        })
+    })();
+    say(format_args!(
+        "devmgr   devmgr-events {}",
+        if started.is_some() {
+            "started: drivers' deaths and restarts are published"
+        } else {
+            "could not be started: nothing is published"
+        }
+    ));
+    started
+}
+
 /// How a driver of `kind` is started on the device `info` describes, or
 /// `None` when there are no more disk names.
 ///
@@ -1123,6 +1196,7 @@ fn serve(
     // The helper is started once every driver has reported, so an update
     // never meets a boot still starting drivers.
     let mut updates = spawn_updater(drivers, port);
+    let events = spawn_events(drivers);
     let _ = channel.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_KERNEL);
     loop {
         // What arrived while a driver was being waited for comes first.
@@ -1181,9 +1255,18 @@ fn serve(
             }
             .encode(),
         );
+        Events::tell(
+            events.as_ref(),
+            ferrix_devmgr_events_proto::What::Died,
+            entry,
+            died_status(exit).cast_unsigned(),
+            drivers,
+        );
         // Only a device that was quiesced is handed on: until then the dead
         // driver's core may still hold it, and the new one would be refused.
         // The policy counts the restart it decides on.
+        let restarts =
+            |entry: &Started| u32::try_from(entry.policy.budget.used()).unwrap_or(u32::MAX);
         if entry.quiesced
             && entry.policy.decide(Ended::of(exit), None) == Decision::Now
             && launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never)
@@ -1191,9 +1274,26 @@ fn serve(
             let _ = channel.write(
                 &Message::Restarted {
                     location: entry.location,
-                    restarts: u32::try_from(entry.policy.budget.used()).unwrap_or(u32::MAX),
+                    restarts: restarts(entry),
                 }
                 .encode(),
+            );
+            Events::tell(
+                events.as_ref(),
+                ferrix_devmgr_events_proto::What::Restarted,
+                entry,
+                restarts(entry),
+                drivers,
+            );
+        } else if entry.policy.restart != Restart::No {
+            // A kind that is started again, and was not: its budget is
+            // spent, or its device could not be quiesced, and it stays dark.
+            Events::tell(
+                events.as_ref(),
+                ferrix_devmgr_events_proto::What::GaveUp,
+                entry,
+                restarts(entry),
+                drivers,
             );
         }
     }

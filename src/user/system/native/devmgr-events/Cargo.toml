@@ -1,0 +1,21 @@
+[package]
+name = "ferrix-devmgr-events"
+description = "devmgr-events: devmgr's driver deaths and restarts, as lines on an abstract socket any program may read (docs/DESKTOP.md 4.2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "devmgr-events"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-devmgr-events-proto.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

@@ -153,6 +153,14 @@ pub(crate) const PROGRAMS: &[Program] = &[
         binary: "snd",
         directory: DRIVERS,
     },
+    // Not a driver: the helper `devmgr` publishes drivers' deaths and
+    // restarts through (docs/DESKTOP.md §4.2), handed to it as an image
+    // the way drvupdated is, and named by no table entry.
+    Program {
+        package: "ferrix-devmgr-events",
+        binary: "devmgr-events",
+        directory: DRIVERS,
+    },
 ];
 
 /// Where drivers are unpacked, relative to the root, with a `MANIFEST`

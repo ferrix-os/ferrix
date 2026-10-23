@@ -12,6 +12,7 @@ members = [
     "src/lib/drivers/block/blkserve",
     "src/lib/proto/devmgr-proto",
     "src/lib/proto/drvupdate-proto",
+    "src/lib/proto/devmgr-events",
     "src/lib/init/svc-proto",
     "src/lib/proto/auth-proto",
     "src/lib/proto/displayctl",
@@ -128,6 +129,7 @@ members = [
     "src/user/system/native/drivers/console/vport",
     "src/user/system/native/devmgr",
     "src/user/system/native/drvupdated",
+    "src/user/system/native/devmgr-events",
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/xtask",
@@ -151,6 +153,7 @@ ferrix-blkring = { path = "src/lib/proto/blkring" }
 ferrix-blkserve = { path = "src/lib/drivers/block/blkserve" }
 ferrix-devmgr-proto = { path = "src/lib/proto/devmgr-proto" }
 ferrix-drvupdate-proto = { path = "src/lib/proto/drvupdate-proto" }
+ferrix-devmgr-events-proto = { path = "src/lib/proto/devmgr-events" }
 ferrix-svc-proto = { path = "src/lib/init/svc-proto" }
 ferrix-auth-proto = { path = "src/lib/proto/auth-proto" }
 ferrix-display-modes = { path = "src/lib/drivers/display/modes" }
