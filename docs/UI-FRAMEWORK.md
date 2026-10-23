@@ -836,4 +836,25 @@ more.
   stops at a clip without a layer. 15 host tests.
 * The lode viewer, the first consumer, is being landed by another session;
   its port (U8) starts once it is on `develop`.
-* Next: U2, the compiler.
+* **U2 built** (2026-10-23): `tole-compiler`, in ferrix-os/tole. `.tole`
+  files lexed, parsed, gathered and type-checked, then written out as one
+  Rust module for `tole::include_ui!()` from a `build.rs`; errors with
+  file, line and column. It knows `struct`, `enum`, components on a kind
+  or a component, children, ids, `parent`, declared properties, bindings
+  on any property and grouped ones, anchors, typed functions, and the
+  expression language of §3.2 but for calls into Rust. A constant is set
+  once, anything that reads a property bound. Signals and handlers come
+  with input (U3). Six host tests; and the `tole-examples` crate builds
+  real `.tole` programs and draws them.
+* **Demos** (the customer's ask, 2026-10-23): `examples/` in ferrix-os/tole,
+  each `.tole` program drawn headless at scale 2 into
+  `docs/screenshots/`, shown in its README beside its markup; a test fails
+  when a picture is stale. hello and layouts so far; controls, a 100,000-row
+  list, states, the theme, a chart and the ported viewer follow their
+  steps. The PNG writer deflates with `miniz_oxide`.
+* Differences from §3.4 found while building: the generated API takes the
+  `Ui` (`page.set(&mut ui, ...)`, `Prop::set`) rather than holding it, so
+  a program's state and its tree stay two plain values.
+* Next: U3, input and the window: signals and handlers, `MouseArea`,
+  focus and keys, the Wayland host behind tole's `wayland` feature, and
+  damage tracking.
