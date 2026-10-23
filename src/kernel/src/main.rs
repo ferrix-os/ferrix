@@ -1712,10 +1712,30 @@ fn bring_up_memory(view: &BootView<'_>) -> mm::Stats {
     stats
 }
 
-/// Mirror the log into the region the loader gave, if it passes its checks
+/// Grow the kernel log as `log_buf_len=` asks (`console::log::size_from`),
+/// and say so; a size that is no size, or no memory for it, is said and the
+/// log kept as it was, as Linux keeps its static buffer.
+fn size_log(view: &BootView<'_>) {
+    match console::log::size_from(view) {
+        Ok(Some(bytes)) => println!(
+            "  log      {} KiB, as log_buf_len asked, with what was logged before",
+            bytes / 1024
+        ),
+        Ok(None) => {}
+        Err(problem) => {
+            println!("  log      log_buf_len refused: {problem}; the log stays as it was");
+        }
+    }
+}
+
+/// Grow the log as `log_buf_len=` asks ([`size_log`]); then mirror it into
+/// the region the loader gave, if it passes its checks
 /// (`console::pstore`), and when the checks run, hold the placement rule to
 /// regions made up from the map.
 fn attach_pstore(view: &BootView<'_>) {
+    // The log first, as large as `log_buf_len=` asks, while nothing else
+    // writes.
+    size_log(view);
     console::pstore::attach(view);
     if !checks::run() {
         return;

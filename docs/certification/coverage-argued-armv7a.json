@@ -218,28 +218,28 @@
     },
     {
       "file": "console.rs",
-      "lines": "202, 207",
+      "lines": "205, 210",
       "category": "failure-path",
       "match": "fn write_str(&mut self, text: &str) -> fmt::Result {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "214",
+      "lines": "217",
       "category": "failure-path",
       "match": "}",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "342",
+      "lines": "357",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it."
     },
     {
       "file": "console.rs",
-      "lines": "368",
+      "lines": "383",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock."
@@ -1268,21 +1268,21 @@
     },
     {
       "file": "main.rs",
-      "lines": "1786",
+      "lines": "1806",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1893",
+      "lines": "1913",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1901-1902",
+      "lines": "1921-1922",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."

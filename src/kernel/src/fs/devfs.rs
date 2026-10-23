@@ -21,7 +21,8 @@
 //! # Numbers
 //!
 //! Linux's, from `Documentation/admin-guide/devices.txt`: major 1 is the
-//! memory devices — `null` 3, `zero` 5, `full` 7, `random` 8, `urandom` 9 —
+//! memory devices — `null` 3, `zero` 5, `full` 7, `random` 8, `urandom` 9,
+//! and the kernel log, `kmsg` 11 —
 //! and major 5 the alternate TTY devices, `tty` 0 and `console` 1. Programs
 //! compare them: `ttyname` walks `/dev` matching `st_rdev`, and a careful
 //! daemon checks that what it was handed as `/dev/null` is 1:3 before writing
@@ -161,6 +162,9 @@ enum Behaviour {
     /// The console's own inode: `/dev/console`. Never a devfs node — the name
     /// resolves to [`console_inode`] itself.
     ConsoleItself,
+    /// `/dev/kmsg`: every open reads the kernel log from its own place
+    /// (`fs::kmsg`), so the node, like `ptmx`, is never the object.
+    Kmsg,
 }
 
 /// One node.
@@ -179,7 +183,7 @@ struct Device {
 }
 
 /// Every character node in `/dev`, in the order a listing reports it.
-static DEVICES: [Device; 8] = [
+static DEVICES: [Device; 9] = [
     Device {
         name: b"null",
         major: 1,
@@ -235,6 +239,13 @@ static DEVICES: [Device; 8] = [
         minor: 2,
         permissions: 0o666,
         behaviour: Behaviour::Ptmx,
+    },
+    Device {
+        name: b"kmsg",
+        major: 1,
+        minor: fs::kmsg::MINOR,
+        permissions: 0o644,
+        behaviour: Behaviour::Kmsg,
     },
 ];
 
@@ -1023,6 +1034,14 @@ impl Inode for Node {
             let file: Arc<dyn Inode> = pty::open_slave(number)?;
             return Ok(Some(file));
         }
+        // Every open of `/dev/kmsg` reads from a place of its own.
+        if self
+            .device()
+            .is_some_and(|device| device.behaviour == Behaviour::Kmsg)
+        {
+            let file: Arc<dyn Inode> = fs::kmsg::KmsgFile::open()?;
+            return Ok(Some(file));
+        }
         // Every open of `/dev/ptmx` is a pair of its own, which is the whole
         // point of the multiplexer.
         if self
@@ -1071,7 +1090,7 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => console_inode().read_at(offset, buf),
             // The node is never the object: opening it makes a pair and
             // gives back the master, which is what reads and writes.
-            Behaviour::Ptmx => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg => Err(Errno::ENXIO),
         }
     }
 
@@ -1094,7 +1113,7 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => {
                 console_inode().write_at(offset, data, append)
             }
-            Behaviour::Ptmx => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg => Err(Errno::ENXIO),
         }
     }
 
@@ -1521,6 +1540,13 @@ pub(crate) fn open_char_device(rdev: u64) -> Result<Arc<dyn Inode>> {
 pub(crate) fn attach_device(file: Arc<OpenFile>) -> Result<Arc<OpenFile>> {
     if file.is_path() {
         return Ok(file);
+    }
+    // Reading the kernel log is privileged, wherever its node is.
+    if file.kind() == FileType::CharDevice
+        && file.readable()
+        && file.inode().metadata().rdev == makedev(1, fs::kmsg::MINOR)
+    {
+        fs::kmsg::may_read()?;
     }
     match file.kind() {
         FileType::CharDevice => {}

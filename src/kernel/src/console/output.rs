@@ -364,7 +364,7 @@ fn try_queue(chunk: &[u8], crlf: bool, need: usize) -> Option<bool> {
     }
     // The program's bytes as it wrote them, before the newline translation:
     // recorded once, when they are queued, never for a try that found no room.
-    super::log::record(chunk);
+    super::log::record(chunk, super::Kind::Program.priority());
     for &byte in chunk {
         if crlf && byte == b'\n' {
             port.queue(b'\r');

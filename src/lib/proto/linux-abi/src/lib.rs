@@ -42,6 +42,7 @@ pub mod errno;
 pub mod hwcap;
 pub mod inet;
 pub mod input;
+pub mod kmsg;
 pub mod layout;
 pub mod netlink;
 pub mod nr;

@@ -79,6 +79,15 @@ constants are `ferrix-devmgr-proto`'s, a crate the item does not classify
 this frame. A const assertion in `devmgr.rs` holds the buffer at 1,048
 bytes, so that growing it is a diff to the core file as well.
 
+**The kernel log's size, `log_buf_len=` (2026-10-23, ledger 3366).** The
+log starts as two static arrays, 128 KiB of bytes and 4,096 line slots of
+16 bytes (`console::log::LOG`, `LOG_LINES`). With `log_buf_len=` asking for
+more, `console::log::size_from` takes at most 4 MiB of bytes and 2 MiB of
+line slots from the heap, fallibly, once at boot (`main.rs::size_log`,
+before the second processor, interrupts masked), and never frees them:
+they are the log for the rest of the boot. A size that is no size, or no
+memory for it, is one console line, and the 128 KiB log is kept.
+
 ### 1.2 How failure is reported
 
 The obvious fix is unavailable. `#[alloc_error_handler]` is an unstable
@@ -1654,6 +1663,16 @@ the task's next look, within one second of the condition plus the boot
 processor's scheduling latency, and acted on in that look; the lease itself
 is 5 s. Nothing here bounds the time to a restore if the scheduler stops
 running the task (V-16).
+
+### 2.2x A record written to the kernel log (`console::write_record`, 2026-10-23)
+
+A `/dev/kmsg` write (`fs::kmsg`, load ring) is one record of at most 1,024
+bytes, refused above that. `console::write_record` writes it, and a newline
+after it if it has none, under the console `PORT` lock as a kernel line is
+written: queued for the transmit interrupt or polled, never waiting for
+room, so the lock is held for at most 1,025 bytes' queueing or polling,
+the same bound a kernel line of that length has. Recording it in the log
+is `log::record`'s, which takes no lock (L.console.35). Ledger 3366.
 
 ### 2.3 What is missing, per standard
 

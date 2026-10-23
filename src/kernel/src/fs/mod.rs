@@ -46,6 +46,7 @@ pub(crate) mod exec_check;
 pub(crate) mod home_disk;
 pub(crate) mod inotify;
 pub(crate) mod kmem_check;
+pub(crate) mod kmsg;
 pub(crate) mod memfd_check;
 pub(crate) mod mmap_check;
 pub(crate) mod mount_check;

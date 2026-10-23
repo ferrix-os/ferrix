@@ -1540,6 +1540,28 @@ pub fn option_in<'a>(cmdline: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+/// A size as Linux's `memparse` reads one from the command line: a decimal
+/// number, or hexadecimal after `0x`, with an optional `K`, `M` or `G`
+/// suffix in either case, each a power of 1024. `None` for anything else or
+/// a size that does not fit.
+#[must_use]
+pub fn size_in(value: &str) -> Option<u64> {
+    let (digits, shift) = match value.as_bytes().last()? {
+        b'k' | b'K' => (value.get(..value.len() - 1)?, 10),
+        b'm' | b'M' => (value.get(..value.len() - 1)?, 20),
+        b'g' | b'G' => (value.get(..value.len() - 1)?, 30),
+        _ => (value, 0),
+    };
+    let number = match digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        Some(hex) => u64::from_str_radix(hex, 16).ok()?,
+        None => digits.parse::<u64>().ok()?,
+    };
+    number.checked_mul(1u64 << shift)
+}
+
 /// True if `cmdline` carries `name` as a bare word.
 ///
 /// The companion to [`option_in`], and [`BootView::flag`]'s grammar.
@@ -1557,6 +1579,19 @@ pub type KernelEntry = extern "C" fn(bootinfo: *const BootInfo) -> !;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_size_reads_as_memparse_reads_it() {
+        assert_eq!(size_in("4096"), Some(4096));
+        assert_eq!(size_in("1M"), Some(1 << 20));
+        assert_eq!(size_in("256k"), Some(256 << 10));
+        assert_eq!(size_in("2G"), Some(2 << 30));
+        assert_eq!(size_in("0x10000"), Some(0x10000));
+        for bad in ["", "M", "1T", "x", "-1", "0xzz", "99999999999999999999"] {
+            assert_eq!(size_in(bad), None, "{bad}");
+        }
+        assert_eq!(size_in("18446744073709551615K"), None);
+    }
 
     fn regions() -> [MemRegion; 4] {
         [
