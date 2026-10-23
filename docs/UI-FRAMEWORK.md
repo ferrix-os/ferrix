@@ -990,5 +990,58 @@ more.
   histogram, a sparkline and an area as painters, and three figures as
   shapes. Departure: a `ShapePath` closes by `closed: true`, where Qt
   closes one that ends where it began. 80 host tests.
-* Next: U8, the lode viewer ported, with the window's
-  `test-compositor` row where it first runs on Ferrix.
+* **U8 built** (2026-10-23): the lode viewer is a tole program. Its
+  header, sidebar, menus, Overview, Logs with the record pane, and
+  Machines with Add machine are markup (`ui/*.tole` in the app); the
+  swim lanes, sparklines, activity and rate charts and the table's strip
+  are Rust painters, its old drawing code over tole's `Painter`; the
+  table is a `ListView` over a model of the log that makes a row only
+  when it is shown. Rust hands the tree the state after each change and
+  turns the tree's signals into the viewer's own actions, so the data
+  layer and its tests did not change. Compared with the frames the
+  viewer drew before, from the same records and home: the Overview and
+  Logs with a record open are the same pixels, the forms within one
+  level but for the focused field's caret (tole's is 1 px wide and the
+  line's height, the viewer's was 1.5 px), and Logs shows the row
+  partly scrolled into view at the table's foot, which the old drawing
+  left out. 3.49 MB stripped before, 4.68 MB after (tole 571 KiB, the
+  generated markup 437 KiB: over §4.11's 400 KB, the generated code's
+  closures the larger part); whole frames of 100,000 records within a
+  millisecond of before, and a window draws only the damage. The
+  viewer's `test-compositor` rows run tole's window on Ferrix. What tole
+  took from the port:
+  1. **Painters draw what the viewer drew**: discs (`Path::circle`, as
+     tiny-skia's circle), polygons, polylines with flat ends, mitres and
+     dashes (`LineStyle`), cuts, and `text_in`, a label placed down its
+     line as a `Text` is.
+  2. **Markup**: `ShapePath`'s `capStyle` and `joinStyle`, `PathCircle`,
+     and `border.dash` on a `Rectangle`; a dashed edge keeps its
+     corners' radius.
+  3. **Theme**: the viewer's `amberLine`, `amberEdge`, `idle` and
+     `accentOver`; dark `bg3` is the viewer's `#232429`.
+  4. **The window**: a minimum size, edges that resize a window drawing
+     its own frame (GNOME's mutter), `start_move`, `toggle_maximized`
+     and `minimize` for a program's own title bar, `refresh`, the last
+     key's serial, and `clipboard: false` for a program keeping its own
+     selections -- the viewer pastes through `wl_data_device` and the
+     primary selection, which mutter has and `ext_data_control` is not.
+  5. **Text fields**: `TextField` and `TextArea` alias their font and
+     say `focused`; `TextArea` takes `echoMode`, so a pasted key shows
+     as dots -- every line of it, where the viewer showed its BEGIN and
+     END lines plainly. A one-line field takes the first line of a
+     paste that is not blank.
+  6. **A `ListView` scrolled before its first layout**, over a model
+     that says its heights, starts at the row there: it made every
+     delegate from the top, 17 s for 100,000 records.
+
+  Departures in the viewer: the key file is chosen in tole's
+  `FileDialog` inside the window, not the desktop portal's; the
+  viewer's own line editing gave way to tole's text inputs, with
+  undo, a blinking caret and a TextArea that scrolls to its caret
+  still to come; and the UI is about as many lines as before (5,169
+  of Rust; now 2,552 of markup and 2,982 of Rust), the geometry kept
+  exact and the state handed over property by property. 84 host tests
+  in tole.
+* Next: the customer's items for the viewer (the record pane's names,
+  a Crashes page, saved queries kept by hand), a `test-compositor` row
+  that opens a tole demo, then U9, the new Settings.
