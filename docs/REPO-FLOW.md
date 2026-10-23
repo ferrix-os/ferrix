@@ -416,6 +416,31 @@ refs/archive/2026-10-23/<old-name>:refs/heads/<old-name>`, or `git branch
 lists them. The earlier sweep of 2026-10-10 lives beside them, under
 `refs/archive/2026-10-10/`.
 
+**Second sweep, the same day** (customer: GitHub down to about a hundred
+branches). Map: [`docs/repo-flow/branch-map-2026-10-23b.tsv`](repo-flow/branch-map-2026-10-23b.tsv);
+archive refs under `refs/archive/2026-10-23b/`, all pushed to origin (a
+local branch whose tip differs from origin's under `.../local/<name>`).
+
+* Archived without a backlog line: the 2026-09-24 "before switching PCs"
+  `wip/` snapshots and every branch whose commits say "not for landing",
+  "never lands", "measurement only" or "diag" (50 on origin, 48 local).
+* Archived after one "idea:" line each in `docs/backlog/branches.md`
+  (br-006, landed first as ff517bef8): every `feature/`, `wip/`, `mk/`
+  and `chore/` branch with no commit for seven days that no running agent
+  uses (102 on origin, 89 local).
+* Deleted, all on `develop`: 3 on origin, 2 local.
+* Prefixed: the stragglers (`mk/*`, `xelp-*`, `fs-traits`,
+  `lockup-s4a-wip`, `codex/posix-stdlib`, ...) became `feature/...` (18 on
+  origin, 25 local).
+* Kept: `park/*` (75), `main`, `develop`, `promote/*`, and the active
+  agents' branches and every branch checked out in a worktree.
+
+Origin by prefix, before and after: feature 124 -> 23 (the renamed
+stragglers included), park 75 -> 75, chore 20 -> 6, mk 13 -> 0, wip 11 ->
+0, docs 2 -> 2, promote 2 -> 2, unprefixed 14 -> 2 (`main`, `develop`),
+other groups 3 -> 0; 265 -> 110, of which 75 are parked, not counting
+branches pushed since.
+
 **Left for later.** Of the 116 branches checked out in worktrees, 37 are
 fully landed and 9 are unlanded and older than 14 days. Their worktrees
 can go, with their branches, once their sessions confirm they are done. The
