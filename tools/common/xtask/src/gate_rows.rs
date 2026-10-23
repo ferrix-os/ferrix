@@ -492,7 +492,7 @@ pub(crate) fn run(args: &Args) -> Result<()> {
     let since = args
         .since
         .as_deref()
-        .ok_or_else(|| Error::new("gate-rows needs --since <ref>, the branch's base (main)"))?;
+        .ok_or_else(|| Error::new("gate-rows needs --since <ref>, the branch's base (develop)"))?;
     let branch = changed(since, "HEAD")?;
     // First, since it holds whether the gate stands or not.
     let (members, crates) = ring_members()?;
