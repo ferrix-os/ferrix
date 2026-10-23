@@ -112,8 +112,10 @@ fn garbage_is_no_segment() {
 
 #[test]
 fn segment_names_sort_and_parse() {
-    let name = segment::file_name(&[1; 16], 0x2a);
+    let name = segment::file_name("system", &[1; 16], 0x2a);
     assert!(segment::is_segment_name(&name));
+    assert_eq!(segment::class_of_name(&name), Some("system"));
+    assert!(!segment::is_segment_name(".lode-probe"));
     assert_eq!(segment::seqnum_of_name(&name), Some(0x2a));
     assert_eq!(
         segment::parse_id("01010101-0101-0101-0101-010101010101"),
@@ -461,4 +463,292 @@ fn cursors_round_trip() {
 fn and_with_all_is_the_other() {
     let test = Expr::Test(Test::field("UNIT", Op::Eq, b"a"));
     assert_eq!(Expr::All.and(test.clone()), test);
+}
+
+mod held_back {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use crate::console;
+    use crate::ingest::{self, MESSAGE_ID_CRASH};
+    use crate::kmsg::KernelRecord;
+    use crate::limit::{self, Action, Limiter, WINDOW_US};
+    use crate::record::Record;
+    use crate::retention::{self, DAY_US, Kept};
+    use crate::segment;
+
+    fn line(unit: &str, priority: u8, message: &str, seq: u64, at: u64) -> Record {
+        let mut record = Record::new(priority, at, at);
+        record.push("MESSAGE", message.as_bytes());
+        record.push("UNIT", unit.as_bytes());
+        record.push("_TRANSPORT", b"console");
+        record.push("_KERNEL_SEQNUM", alloc::format!("{seq}").as_bytes());
+        record
+    }
+
+    fn messages(records: &[Record]) -> Vec<String> {
+        records
+            .iter()
+            .map(|record| String::from_utf8_lossy(record.message()).into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_flood_of_chatter_is_held_and_said_and_errors_pass() {
+        let mut limiter = Limiter::new(Vec::new());
+        let mut out = Vec::new();
+        for n in 0..1500_u64 {
+            limiter.admit(
+                line("noisy.service", 6, &alloc::format!("tick {n}"), n, n),
+                n,
+                &mut out,
+            );
+        }
+        limiter.admit(
+            line("noisy.service", 3, "it broke", 1500, 1500),
+            1500,
+            &mut out,
+        );
+        limiter.admit(
+            line("quiet.service", 6, "hello", 1501, 1501),
+            1501,
+            &mut out,
+        );
+        assert_eq!(out.len(), 1002);
+        limiter.tick(WINDOW_US + 10, &mut out);
+        let last = out.last().unwrap();
+        assert_eq!(
+            last.get_str("MESSAGE_ID"),
+            Some(limit::MESSAGE_ID_SUPPRESSED)
+        );
+        assert_eq!(last.get_str("N_SUPPRESSED"), Some("500"));
+        assert_eq!(last.get_str("HELD_FIRST_SEQNUM"), Some("1000"));
+        assert_eq!(last.get_str("HELD_LAST_SEQNUM"), Some("1499"));
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+    }
+
+    #[test]
+    fn ranges_that_meet_cover_a_gap_together() {
+        let mut records: Vec<Record> = Vec::new();
+        for seq in [10_u64, 30] {
+            records.push(line("a", 6, "x", seq, seq));
+        }
+        for (first, last) in [(11_u64, 19_u64), (20, 29)] {
+            let mut said = Record::new(4, 0, 0);
+            said.push("HELD_FIRST_SEQNUM", alloc::format!("{first}").as_bytes());
+            said.push("HELD_LAST_SEQNUM", alloc::format!("{last}").as_bytes());
+            records.push(said);
+        }
+        let refs: Vec<&Record> = records.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+        let _ = records.pop();
+        let refs: Vec<&Record> = records.iter().collect();
+        assert_eq!(ingest::kernel_gaps(&refs).unsaid, [(11, 30)]);
+    }
+
+    #[test]
+    fn repeats_fold_into_one_record() {
+        let mut limiter = Limiter::new(Vec::new());
+        let mut out = Vec::new();
+        for n in 0..5_u64 {
+            limiter.admit(
+                line("gpu", 6, "EAGAIN: a busy binding", n, n * 10),
+                n * 10,
+                &mut out,
+            );
+        }
+        limiter.admit(line("gpu", 6, "something else", 5, 60), 60, &mut out);
+        assert_eq!(
+            messages(&out),
+            [
+                "EAGAIN: a busy binding",
+                "message repeated 4 time(s): EAGAIN: a busy binding",
+                "something else"
+            ]
+        );
+        assert_eq!(out[1].get_str("REPEATED"), Some("4"));
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+    }
+
+    #[test]
+    fn a_flush_says_everything_held_at_once() {
+        let mut limiter = Limiter::new(limit::parse_rules("drop where unit = gone\n").unwrap());
+        let mut out = Vec::new();
+        limiter.admit(line("gone", 6, "x", 1, 1), 1, &mut out);
+        for n in 2..6_u64 {
+            limiter.admit(line("gpu", 6, "same", n, n), n, &mut out);
+        }
+        limiter.flush(10, &mut out);
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(
+            ingest::kernel_gaps(&refs).unsaid.is_empty(),
+            "{:?}",
+            messages(&out)
+        );
+        assert!(
+            out.iter()
+                .any(|record| record.get_str("REPEATED") == Some("3"))
+        );
+        assert!(
+            out.iter()
+                .any(|record| record.get_str("N_DROPPED") == Some("1"))
+        );
+    }
+
+    #[test]
+    fn the_kernels_own_lines_are_never_held() {
+        let mut limiter = Limiter::new(Vec::new());
+        let mut out = Vec::new();
+        for n in 0..3000_u64 {
+            let mut record = Record::new(6, n, n);
+            record.push("MESSAGE", b"same");
+            record.push("_TRANSPORT", b"kernel");
+            limiter.admit(record, n, &mut out);
+        }
+        assert_eq!(out.len(), 3000);
+    }
+
+    #[test]
+    fn rules_read_and_act_and_say_so() {
+        let rules = limit::parse_rules(
+            "# comment\n\
+             drop where unit = \"spam*\"\n\
+             sample 1/10 where id = sampled\n\
+             level warning where unit = loud.service\n\
+             fold 60s where id = chrome\n\
+             limit 5/10s where subsystem = intelgpu\n",
+        )
+        .unwrap();
+        assert_eq!(rules.len(), 5);
+        assert_eq!(rules[1].action, Action::Sample(10));
+        assert_eq!(rules[4].action, Action::Limit(5, 10_000_000));
+        let mut limiter = Limiter::new(rules);
+        let mut out = Vec::new();
+        for n in 0..3_u64 {
+            limiter.admit(
+                line("spam.service", 6, &alloc::format!("x{n}"), n, n),
+                n,
+                &mut out,
+            );
+        }
+        limiter.admit(line("loud.service", 6, "info", 3, 3), 3, &mut out);
+        limiter.admit(line("loud.service", 4, "warn", 4, 4), 4, &mut out);
+        assert_eq!(messages(&out), ["warn"]);
+        limiter.tick(WINDOW_US + 10, &mut out);
+        let said: Vec<String> = messages(&out[1..]);
+        assert!(
+            said.iter()
+                .any(|m| m.contains("drop where unit = \"spam*\"") && m.contains("3 record")),
+            "{said:?}"
+        );
+        assert!(limit::parse_rules("explode where unit = x").is_err());
+        assert!(limit::parse_rules("drop").is_err());
+        assert!(limit::parse_rules("sample 1/0 where unit = x").is_err());
+    }
+
+    #[test]
+    fn retention_classes_read_and_assign() {
+        let classes = retention::parse(
+            "class errors where priority <= err keep 1y max 256M\n\
+             class debug where priority = debug ram-only\n\
+             class system keep 90d max 1G\n",
+        )
+        .unwrap();
+        assert_eq!(classes.len(), 3);
+        assert_eq!(classes[0].keep_us, Some(365 * DAY_US));
+        assert_eq!(classes[0].max_bytes, Some(256 << 20));
+        assert!(classes[1].ram_only);
+        assert_eq!(retention::assign(&classes, &line("a", 2, "", 0, 0)), 0);
+        assert_eq!(retention::assign(&classes, &line("a", 7, "", 0, 0)), 1);
+        assert_eq!(retention::assign(&classes, &line("a", 6, "", 0, 0)), 2);
+        assert_eq!(retention::parse("").unwrap().len(), 2);
+        assert!(retention::parse("class Bad").is_err());
+        assert!(retention::parse("klass x").is_err());
+    }
+
+    fn kept(class: &str, name: &str, day: u64, size: u64, active: bool) -> Kept {
+        Kept {
+            class: String::from(class),
+            name: String::from(name),
+            created_us: day * DAY_US,
+            size,
+            active,
+        }
+    }
+
+    #[test]
+    fn vacuum_by_age_size_and_store() {
+        let classes =
+            retention::parse("class errors where priority <= err keep 10d\nclass system max 100\n")
+                .unwrap();
+        let segments = [
+            kept("errors", "e1", 1, 10, false),
+            kept("errors", "e2", 15, 10, false),
+            kept("errors", "e3", 19, 10, true),
+            kept("system", "s1", 1, 60, false),
+            kept("system", "s2", 2, 60, false),
+            kept("system", "s3", 3, 60, true),
+        ];
+        let removed = retention::vacuum(&classes, &segments, 20 * DAY_US, 1 << 30);
+        assert_eq!(removed, ["e1", "s1", "s2"]);
+        let removed = retention::vacuum(&[], &segments, 0, 100);
+        assert_eq!(removed, ["e1", "s1", "s2"]);
+        let removed = retention::vacuum(&[], &segments, 0, 50);
+        assert_eq!(removed, ["e1", "s1", "s2", "e2"]);
+    }
+
+    #[test]
+    fn crash_lines_become_crash_records() {
+        let crash = console::crash(
+            b"  signal   pid 27 ended by signal 7 at 0x7f00, pc 0x68f150: Trap { kind: Bus }",
+        )
+        .unwrap();
+        assert_eq!(crash.pid, 27);
+        assert_eq!(crash.signal, "SIGBUS");
+        assert_eq!(crash.pc.as_deref(), Some("0x68f150"));
+        assert!(console::crash(b"  signal   ARM and Thumb handlers returned").is_none());
+        let kernel = KernelRecord {
+            facility: 0,
+            level: 6,
+            seq: 3,
+            usec: 1,
+            text: Vec::from(
+                &b"  signal   pid 9 has no room for signal 11's frame; ending it with SIGSEGV"[..],
+            ),
+        };
+        let record = ingest::from_kernel(
+            &kernel,
+            ingest::Now {
+                realtime_us: 10,
+                monotonic_us: 10,
+            },
+        );
+        assert_eq!(record.priority, 3);
+        assert_eq!(record.get_str("MESSAGE_ID"), Some(MESSAGE_ID_CRASH));
+        assert_eq!(record.get_str("CRASH_SIGNAL"), Some("SIGSEGV"));
+    }
+
+    #[test]
+    fn a_rewrite_removes_only_what_matches() {
+        let mut bytes = super::header().encode();
+        for n in 1..=5_u64 {
+            let mut record = Record::new(6, n, n);
+            record.seqnum = n;
+            record.push("MESSAGE", alloc::format!("m{n}").as_bytes());
+            segment::encode_record(&record, &mut bytes);
+        }
+        bytes.extend_from_slice(&[1, 2, 3]);
+        let (out, removed) = segment::rewrite(&bytes, |record| record.message() == b"m3").unwrap();
+        assert_eq!(removed, 1);
+        let scanned = segment::scan(&out, 0).unwrap();
+        assert_eq!(scanned.good, out.len());
+        let seqs: Vec<u64> = scanned
+            .records
+            .iter()
+            .map(|found| found.record.seqnum)
+            .collect();
+        assert_eq!(seqs, [1, 2, 4, 5]);
+    }
 }

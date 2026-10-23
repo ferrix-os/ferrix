@@ -130,3 +130,70 @@ fn trim_start(bytes: &[u8]) -> &[u8] {
         .unwrap_or(bytes.len());
     bytes.get(start..).unwrap_or_default()
 }
+
+/// A program the kernel ended on a fault, as its `signal` line says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Crash {
+    /// The process.
+    pub pid: u32,
+    /// The signal's name (`SIGSEGV`), or its number where it has none.
+    pub signal: String,
+    /// The faulting address, as printed.
+    pub address: Option<String>,
+    /// The program counter, as printed.
+    pub pc: Option<String>,
+    /// The trap, as the kernel names it.
+    pub trap: Option<String>,
+}
+
+/// Read a kernel `signal` line that ends a process:
+/// `  signal   pid P ended by signal S at ADDRESS, pc PC: TRAP`
+/// (`src/kernel/src/trap.rs`), or `pid P has no room for signal S's frame;
+/// ending it with SIGSEGV` and `pid P returned from a handler through a bad
+/// frame; ending it with SIGSEGV` (`syscall/deliver.rs`).
+#[must_use]
+pub fn crash(line: &[u8]) -> Option<Crash> {
+    let (word, rest) = padded_word(line)?;
+    if word != "signal" {
+        return None;
+    }
+    let text = core::str::from_utf8(rest).ok()?;
+    let rest = text.strip_prefix("pid ")?;
+    let (pid, rest) = rest.split_once(' ')?;
+    let pid: u32 = pid.parse().ok()?;
+    if let Some(rest) = rest.strip_prefix("ended by signal ") {
+        let (number, rest) = rest.split_once(" at ")?;
+        let (address, rest) = rest.split_once(", pc ")?;
+        let (pc, trap) = rest.split_once(": ").unwrap_or((rest, ""));
+        return Some(Crash {
+            pid,
+            signal: signal_name(number),
+            address: Some(String::from(address)),
+            pc: Some(String::from(pc)),
+            trap: (!trap.is_empty()).then(|| String::from(trap)),
+        });
+    }
+    rest.ends_with("ending it with SIGSEGV").then(|| Crash {
+        pid,
+        signal: String::from("SIGSEGV"),
+        address: None,
+        pc: None,
+        trap: Some(String::from(rest)),
+    })
+}
+
+/// A signal number's name, Linux's numbering, the same on every
+/// architecture Ferrix builds for for these.
+fn signal_name(number: &str) -> String {
+    let name = match number.trim() {
+        "4" => "SIGILL",
+        "5" => "SIGTRAP",
+        "6" => "SIGABRT",
+        "7" => "SIGBUS",
+        "8" => "SIGFPE",
+        "11" => "SIGSEGV",
+        "31" => "SIGSYS",
+        other => return String::from(other),
+    };
+    String::from(name)
+}

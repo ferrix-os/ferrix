@@ -92,6 +92,20 @@ pub(crate) fn unlinkat(dir: usize, path: &[u8]) -> Result<(), Errno> {
     unsafe { call(numbers::UNLINKAT, [dir, path.as_ptr() as usize, 0, 0, 0, 0]) }.map(|_| ())
 }
 
+/// `renameat(dir, from, dir, to)`.
+pub(crate) fn renameat(dir: usize, from: &[u8], to: &[u8]) -> Result<(), Errno> {
+    let from = c_path(from);
+    let to = c_path(to);
+    // SAFETY: both are NUL-terminated buffers that live for the call.
+    unsafe {
+        call(
+            numbers::RENAMEAT,
+            [dir, from.as_ptr() as usize, dir, to.as_ptr() as usize, 0, 0],
+        )
+    }
+    .map(|_| ())
+}
+
 /// `read(fd, buf)`.
 pub(crate) fn read(fd: usize, buf: &mut [u8]) -> Result<usize, Errno> {
     // SAFETY: `buf` is writable for its whole length for the call.
@@ -376,4 +390,11 @@ pub(crate) fn map(length: usize) -> Option<*mut u8> {
 /// Unmap what [`map`] gave.
 pub(crate) fn unmap(address: *mut u8, length: usize) {
     let _ = ferrix_rt::linux::munmap(address as usize, length);
+}
+
+/// `getuid()`.
+#[must_use]
+pub(crate) fn getuid() -> u32 {
+    // SAFETY: no pointer arguments.
+    unsafe { call(arch::GETUID, [0; 6]) }.map_or(u32::MAX, |uid| uid as u32)
 }

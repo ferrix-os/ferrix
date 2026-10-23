@@ -17,6 +17,9 @@ pub const MESSAGE_ID_RESTARTED: &str = "8e1f4b6d2c3a4e5f8091a2b3c4d5e6f7";
 /// `MESSAGE_ID` of a record saying the service started for this boot.
 pub const MESSAGE_ID_STARTED: &str = "0c7d9e1f2a3b4c5d6e7f8091a2b3c4d5";
 
+/// `MESSAGE_ID` of a kernel record saying a program ended on a fault.
+pub const MESSAGE_ID_CRASH: &str = "c4a8e2f60b1d4c3e9f7a5b3d1e9c7a5f";
+
 /// `MESSAGE_ID` of a record saying a segment's torn tail was cut away.
 pub const MESSAGE_ID_TORN: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
 
@@ -53,6 +56,21 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
     if kernel.facility == 0 {
         record.push("SYSLOG_IDENTIFIER", b"kernel");
         record.push("_TRANSPORT", b"kernel");
+        if let Some(crash) = console::crash(&kernel.text) {
+            record.priority = 3;
+            record.push("MESSAGE_ID", MESSAGE_ID_CRASH.as_bytes());
+            record.push("CRASH_PID", alloc::format!("{}", crash.pid).as_bytes());
+            record.push("CRASH_SIGNAL", crash.signal.as_bytes());
+            if let Some(address) = crash.address {
+                record.push("CRASH_ADDRESS", address.as_bytes());
+            }
+            if let Some(pc) = crash.pc {
+                record.push("CRASH_PC", pc.as_bytes());
+            }
+            if let Some(trap) = crash.trap {
+                record.push("CRASH_TRAP", trap.as_bytes());
+            }
+        }
     } else {
         if let Some(identifier) = &said.identifier {
             record.push("SYSLOG_IDENTIFIER", identifier.as_bytes());
@@ -176,6 +194,11 @@ pub fn kernel_gaps(records: &[&Record]) -> KernelGaps {
             Some((before.saturating_sub(lost), before))
         })
         .collect();
+    said.extend(records.iter().filter_map(|record| {
+        let first: u64 = record.get_str("HELD_FIRST_SEQNUM")?.parse().ok()?;
+        let last: u64 = record.get_str("HELD_LAST_SEQNUM")?.parse().ok()?;
+        Some((first, last + 1))
+    }));
     said.sort_unstable();
     let mut unsaid = Vec::new();
     for pair in seqs.windows(2) {
@@ -183,10 +206,16 @@ pub fn kernel_gaps(records: &[&Record]) -> KernelGaps {
             continue;
         };
         if high > low + 1 {
-            let gap = (low + 1, high);
-            let covered = said.iter().any(|&(from, to)| from <= gap.0 && to >= gap.1);
-            if !covered {
-                unsaid.push(gap);
+            // Every missing number must be in some record's range; ranges
+            // that meet or overlap cover a gap together.
+            let mut next = low + 1;
+            for &(from, to) in &said {
+                if from <= next && to > next {
+                    next = to;
+                }
+            }
+            if next < high {
+                unsaid.push((low + 1, high));
             }
         }
     }
@@ -194,7 +223,11 @@ pub fn kernel_gaps(records: &[&Record]) -> KernelGaps {
         held: seqs.len(),
         first: seqs.first().copied(),
         last: seqs.last().copied(),
-        said_lost: said.iter().map(|&(from, to)| to - from).sum(),
+        said_lost: records
+            .iter()
+            .filter(|record| record.get_str("MESSAGE_ID") == Some(MESSAGE_ID_LOST))
+            .filter_map(|record| record.get_str("N_LOST")?.parse::<u64>().ok())
+            .sum(),
         unsaid,
     }
 }

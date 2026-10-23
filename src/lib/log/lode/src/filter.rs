@@ -16,7 +16,7 @@
 //! value; `~` and `!~` look for it anywhere in the value (a regular
 //! expression's place, which a later step fills). `priority` compares levels
 //! by number or name (`priority <= err`). The short names `unit`, `id`,
-//! `message`, `pid`, `transport`, `subsystem` and `mark` stand for the
+//! `message`, `pid`, `transport`, `subsystem`, `mark`, `crash` and `rule` stand for the
 //! fields they mean; any other name is a field's own, upper case. A test on
 //! a field the record does not have is false for `=`, `<`, `>` and `~`, and
 //! true for `!=` and `!~`.
@@ -190,6 +190,8 @@ fn selector(name: &str) -> Selector {
         "transport" => &["_TRANSPORT"],
         "subsystem" => &["FERRIX_SUBSYSTEM"],
         "mark" => &["MARK"],
+        "crash" => &["CRASH_SIGNAL"],
+        "rule" => &["RULE"],
         "driver" => &["_FERRIX_DRIVER"],
         other => {
             return Selector::Fields(alloc::vec![String::from(other)]);

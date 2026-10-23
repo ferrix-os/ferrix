@@ -20,6 +20,8 @@
 //! * [`format`]: the output formats.
 //! * [`cursor`]: where a reader stopped.
 //! * [`ingest`]: records made from what the service reads, and about itself.
+//! * [`limit`]: floods held -- the rules, the folding of repeats, the limiter.
+//! * [`retention`]: which records are kept how long.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -33,7 +35,9 @@ pub mod filter;
 pub mod format;
 pub mod ingest;
 pub mod kmsg;
+pub mod limit;
 pub mod record;
+pub mod retention;
 pub mod segment;
 pub mod time;
 

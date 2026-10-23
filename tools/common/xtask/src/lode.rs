@@ -26,8 +26,8 @@ pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-log",
     help_at: 401,
     help: &[
-        "test-log      Boot init with lode, flood the kernel log, kill lode mid-flood, and require that",
-        "              no record is lost but the ones a record says were",
+        "test-log      Boot init with lode: fold, limit, drop and delete records, flood the kernel log,",
+        "              kill lode mid-flood, and require that no record is lost but the ones a record says were",
     ],
     run: |_, args| test_log(args),
 }];
@@ -68,6 +68,17 @@ Type=oneshot
 ExecStart=/bin/busybox sh /lib/lode-test.sh
 ";
 
+/// The rules the flood's image carries: `noisy` is limited over two
+/// seconds and `dropme` dropped; every other console line, the flood's
+/// included, is not limited, so the row counts the flood whole -- even a
+/// line the kernel cut short, which no rule naming its text would match.
+const TEST_RULES: &str = "\
+# test-log's rules (tools/common/xtask/src/lode.rs).
+limit 100/2s where id = noisy
+drop where id = dropme
+limit 100000/30s where transport = console
+";
+
 /// The marker the flood's unit ends with.
 const DONE: &str = "lode-test: done";
 
@@ -80,6 +91,22 @@ until [ -n "$($bb pidof lode)" ]; do
   i=$((i+1)); [ $i -gt 200 ] && { say "FAIL lode never ran"; say done; exit 1; }
   $bb usleep 100000
 done
+# Floods held (step 2): a repeat folded, a source over its rule's limit,
+# a dropped source, an error in its own class, a deletion.
+i=0; while [ $i -lt 50 ]; do echo "<14>folder: the same line" > /dev/kmsg; i=$((i+1)); done
+echo "<14>folder: another line" > /dev/kmsg
+i=0; while [ $i -lt 300 ]; do echo "<14>noisy: line $i" > /dev/kmsg; i=$((i+1)); done
+i=0; while [ $i -lt 20 ]; do echo "<14>dropme: line $i" > /dev/kmsg; i=$((i+1)); done
+echo "<11>erring: an error" > /dev/kmsg
+echo "<14>deleteme: one" > /dev/kmsg
+echo "<14>deleteme: two" > /dev/kmsg
+$bb sleep 11
+say "folded: $(/bin/lode -b -t folder -o cat | $bb grep -c '^the same line$') $(/bin/lode -b -t folder -o json | $bb grep -c '"REPEATED":"49"')"
+say "limited: $(/bin/lode -b -t noisy -o cat | $bb grep -c '^line ') $(/bin/lode -b -t lode -o json | $bb grep '"SUPPRESSED_SOURCE":"noisy"' | $bb sed 's/.*"N_SUPPRESSED":"\([0-9]*\)".*/\1/' | $bb head -n 1)"
+say "dropped: $(/bin/lode -b -t dropme -o cat | $bb wc -l) $(/bin/lode -b --where 'rule = "drop*"' -o json | $bb grep -c '"N_DROPPED":"20"')"
+say "classes: $($bb ls /var/log/journal | $bb grep -c '^errors@') $(/bin/lode -b -t erring -o cat | $bb wc -l)"
+say "delete: $(/bin/lode delete --where 'id = deleteme')"
+say "deleted: $(/bin/lode -b -t deleteme -o cat | $bb wc -l) $(/bin/lode -b -t lode-delete -o cat | $bb grep -c 'removed 2 record')"
 first=$($bb pidof lode)
 /bin/lode mark "flood begins" || say "FAIL lode mark"
 n=0
@@ -94,9 +121,11 @@ until /bin/lode -b -g "lode flood 2999" -o cat | $bb grep -q "lode flood 2999"; 
   i=$((i+1)); [ $i -gt 300 ] && { say "FAIL the flood's last line was never stored"; break; }
   $bb usleep 100000
 done
-say "restarted as $($bb pidof lode)"
+say "restarted as $($bb pidof -s lode)"
+/bin/lode rotate
 say "verify: $(/bin/lode verify --kernel -b | $bb tail -n 1)"
-say "stored: $(/bin/lode -b --since-mark "flood begins" --until-mark "flood ends" -g "lode flood " -o cat | $bb grep -c "^lode flood ") of 3000"
+/bin/lode -b --since-mark "flood begins" --until-mark "flood ends" -o cat > /tmp/window
+say "stored: $($bb grep -c "^lode flood " /tmp/window) of 3000"
 /bin/lode -b -g "lode flood " -o cat | $bb awk '/^lode flood /{seen[$3]=1} END{for(i=0;i<3000;i++) if(!(i in seen)) printf "%d ", i}' > /tmp/missing
 [ -s /tmp/missing ] && say "missing: $($bb cat /tmp/missing)"
 for m in $($bb cat /tmp/missing); do /bin/lode -b -g "flood $m" -o json | while read -r l; do say "record: $l"; done; done
@@ -105,7 +134,7 @@ for m in $($bb cat /tmp/missing); do /bin/lode -b -g "flood $m" -o json | while 
 if [ -s /tmp/missing ]; then m=$($bb cat /tmp/missing | $bb awk '{print $1}'); /bin/lode -b -o json | $bb grep -n "lode flood $((m-1))\"" -A3 | while read -r l; do say "near: $l"; done; fi
 say "restart records: $(/bin/lode -b -t lode -g "lode restarted" -o cat | $bb grep -c "lode restarted")"
 say "unit: $(/bin/lode -b -u lode-test -g "killed lode" -o json | $bb grep -c '"UNIT":"lode-test.service"')"
-pid=$($bb pidof lode)
+pid=$($bb pidof -s lode)
 say "uid: $($bb grep '^Uid:' /proc/$pid/status | $bb awk '{print $2}')"
 say "cgroup: $($bb cat /proc/$pid/cgroup)"
 if echo $pid > /sys/fs/cgroup/cgroup.procs 2>/dev/null; then say "sealed: moved"; else say "sealed: refused"; fi
@@ -142,6 +171,11 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         path: "etc/ferrix/units/getty@.service".to_owned(),
         mode: 0o777,
         content: Content::Link("/dev/null".to_owned()),
+    });
+    files.push(File {
+        path: "etc/ferrix/lode.d/test.rules".to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(TEST_RULES.as_bytes().to_vec()),
     });
     files.push(File {
         path: "lib/lode-test.sh".to_owned(),
@@ -222,7 +256,55 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     if said(lines, "lode-test: unit:").is_none_or(|count| count == "0") {
         return Err("the unit's own lines were not stored under lode-test.service".into());
     }
-    isolated(lines)
+    isolated(lines)?;
+    held(lines)
+}
+
+/// Step 2: what the rules, the folding and the limiter held back, each
+/// said; an error in its own class; a deletion that removed and said so.
+fn held(lines: &[String]) -> std::result::Result<(), String> {
+    // 300 lines over `limit 100/2s`: 100 stored and 200 said held.
+    let limited: Vec<u32> = said(lines, "lode-test: limited:")
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|count| count.parse().ok())
+        .collect();
+    match limited.as_slice() {
+        [100, 200] => {}
+        other => {
+            return Err(format!(
+                "300 lines over a 100/2s limit were not 100 stored and 200 said held: {other:?}"
+            ));
+        }
+    }
+    for (what, want, why) in [
+        (
+            "lode-test: folded:",
+            "1 1",
+            "50 repeats were not one line and one `repeated 49` record",
+        ),
+        (
+            "lode-test: dropped:",
+            "0 1",
+            "a dropped source was stored, or its drop not said",
+        ),
+        (
+            "lode-test: classes:",
+            "1 1",
+            "an error did not go to the errors class",
+        ),
+        (
+            "lode-test: deleted:",
+            "0 1",
+            "lode delete did not remove the two records and say so",
+        ),
+    ] {
+        let got = said(lines, what).unwrap_or_default();
+        if got != want {
+            return Err(format!("{why}: `{what} {got}`, wanted `{want}`"));
+        }
+    }
+    Ok(())
 }
 
 /// The service's box: its own user, its job under the sealed
@@ -254,65 +336,78 @@ fn isolated(lines: &[String]) -> std::result::Result<(), String> {
 mod tests {
     use super::judge;
 
-    fn lines(text: &str) -> Vec<String> {
-        text.lines().map(str::to_owned).collect()
+    /// A run that passes, every line as the flood's unit says it.
+    const CLEAN: &str = "lode-test: killed lode 40
+lode-test: verify: kernel seq 0..3500: 3501 held, 0 said lost, 1 restart(s), unsaid gaps: none
+lode-test: stored: 3000 of 3000
+lode-test: restart records: 1
+lode-test: unit: 1
+lode-test: uid: 91
+lode-test: cgroup: 0::/drivers.slice/lode.service
+lode-test: sealed: refused
+lode-test: boots: 1
+lode-test: kernel records: 300
+lode-test: folded: 1 1
+lode-test: limited: 100 200
+lode-test: dropped: 0 1
+lode-test: classes: 1 1
+lode-test: deleted: 0 1";
+
+    /// [`CLEAN`] with the line beginning `what` replaced by `with`.
+    fn run(what: &str, with: &str) -> Vec<String> {
+        CLEAN
+            .lines()
+            .map(|line| {
+                if line.starts_with(what) {
+                    with.to_owned()
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn a_clean_run_passes() {
-        let run = lines(
-            "lode-test: killed lode 40\n\
-             lode-test: verify: kernel seq 0..3500: 3501 held, 0 said lost, 1 restart(s), unsaid gaps: none\n\
-             lode-test: stored: 3000 of 3000\n\
-             lode-test: restart records: 1\n\
-             lode-test: unit: 1\n\
-             lode-test: uid: 91\n\
-             lode-test: cgroup: 0::/drivers.slice/lode.service\n\
-             lode-test: sealed: refused\n\
-             lode-test: boots: 1\n\
-             lode-test: kernel records: 300\n",
-        );
-        assert_eq!(judge(&run), Ok(()));
+        assert_eq!(judge(&run("-", "")), Ok(()));
     }
 
     #[test]
     fn an_unsaid_gap_fails() {
-        let run = lines(
-            "lode-test: killed lode 40\n\
-             lode-test: verify: kernel seq 0..3500: 3400 held, 0 said lost, 1 restart(s), unsaid gaps: [(900, 1001)]\n\
-             lode-test: stored: 2900 of 3000\n\
-             lode-test: restart records: 1\n\
-             lode-test: unit: 1\n",
+        let lines = run(
+            "lode-test: verify:",
+            "lode-test: verify: kernel seq 0..3500: 3400 held, 0 said lost, 1 restart(s), unsaid gaps: [(900, 1001)]",
         );
-        assert!(judge(&run).is_err());
+        assert!(judge(&lines).is_err());
     }
 
     #[test]
     fn missing_lines_said_lost_pass() {
-        let run = lines(
-            "lode-test: killed lode 40\n\
-             lode-test: verify: kernel seq 0..3500: 3400 held, 101 said lost, 1 restart(s), unsaid gaps: none\n\
-             lode-test: stored: 2899 of 3000\n\
-             lode-test: restart records: 1\n\
-             lode-test: unit: 1\n\
-             lode-test: uid: 91\n\
-             lode-test: cgroup: 0::/drivers.slice/lode.service\n\
-             lode-test: sealed: refused\n\
-             lode-test: boots: 1\n\
-             lode-test: kernel records: 300\n",
+        let mut lines = run(
+            "lode-test: verify:",
+            "lode-test: verify: kernel seq 0..3500: 3400 held, 101 said lost, 1 restart(s), unsaid gaps: none",
         );
-        assert_eq!(judge(&run), Ok(()));
+        lines.retain(|line| !line.starts_with("lode-test: stored:"));
+        lines.push("lode-test: stored: 2899 of 3000".to_owned());
+        assert_eq!(judge(&lines), Ok(()));
     }
 
     #[test]
     fn no_restart_fails() {
-        let run = lines(
-            "lode-test: killed lode 40\n\
-             lode-test: verify: kernel seq 0..3500: 3501 held, 0 said lost, 0 restart(s), unsaid gaps: none\n\
-             lode-test: stored: 3000 of 3000\n\
-             lode-test: restart records: 0\n\
-             lode-test: unit: 1\n",
+        let lines = run(
+            "lode-test: restart records:",
+            "lode-test: restart records: 0",
         );
-        assert!(judge(&run).is_err());
+        assert!(judge(&lines).is_err());
+    }
+
+    #[test]
+    fn a_fold_not_said_fails() {
+        assert!(judge(&run("lode-test: folded:", "lode-test: folded: 50 0")).is_err());
+    }
+
+    #[test]
+    fn a_root_lode_fails() {
+        assert!(judge(&run("lode-test: uid:", "lode-test: uid: 0")).is_err());
     }
 }

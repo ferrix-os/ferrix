@@ -96,3 +96,18 @@ pub(crate) fn header(segment: &Segment) -> Option<Header> {
 pub(crate) fn bytes(segment: &Segment, offset: usize) -> Option<Vec<u8>> {
     sys::read_file_from(segment.dir, segment.name.as_bytes(), offset).ok()
 }
+
+/// A segment's size in bytes.
+pub(crate) fn size(segment: &Segment) -> u64 {
+    sys::openat(
+        segment.dir,
+        segment.name.as_bytes(),
+        sys::O_RDONLY | sys::O_CLOEXEC,
+        0,
+    )
+    .map_or(0, |fd| {
+        let size = sys::lseek(fd, 0, sys::SEEK_END).unwrap_or(0);
+        sys::close(fd);
+        size as u64
+    })
+}

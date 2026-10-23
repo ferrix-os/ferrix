@@ -1112,7 +1112,9 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 | 9 | file sources; pstore import | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
 | 10 | the N150 box run (§17.2) | 3 | box |
 | 11 | the write budget (§8.3) | 2 | `test-log` part E |
-| | **Total** | **66** | |
+| 2a | session ids (§19.1): the piece that owns seat0 issues a session id and a random token per session, tells lode on the root-only `/run/lode/seat`, hands the compositor the token beside the card; lode stamps records with `_SESSION_ID`, `lode -s ID` | 5 | host tests; `test-compositor`: a session's records carry its id, a second session a new one |
+| 2b | crash screenshots (§19): the provider protocol crate, lode's side, sessiond's seat token, hyprix as the first provider; off by default | 8 | host tests of the protocol; `test-compositor`: a forced crash with capture on stores an image linked to its record, with capture off none, with no provider a `CAPTURE=none` record, a hung provider times out |
+| | **Total** | **79** | |
 | (opt) | §14's datagram-to-name, if the customer wants it | 3 | stage 7's socket checks; a `sd_journal_send` program from a libsystemd build |
 
 Order: 1 and 2 (one crate family, one agent), then 3 and 4 together (they
@@ -1165,6 +1167,90 @@ records; Proton's and yserver's lines are under their identifiers; the
 write budget's first row holds on the real NVMe and btrfs. What QEMU
 cannot show and the box does: real btrfs latency under `fdatasync`, a real
 power cut, the real driver's rate.
+
+## 19. Crash screenshots (the customer, 2026-10-23; planned as step 2b, after 2a)
+
+When something crashes -- a process killed by a fault, a driver restarted,
+a game's error popup that is gone before anyone looks (Endfield's
+"illegal instruction" on the N150) -- lode keeps a picture of the screen at
+that moment, linked to the crash's record, so `lode --around` shows it
+beside the lines. **Off by default**: `/etc/ferrix/lode.d/capture.conf`
+with `Capture=yes` turns it on.
+
+**An open interface, not a hyprix hookup.** lode never reads `card0` or
+any display device: it stays in its box (§11.2). Instead any desktop --
+hyprix, a future shell, a kiosk, a headless framebuffer grabber -- can
+register with lode as a *screenshot provider* and be asked for a picture.
+X sessions under yserver are hyprix's windows, so hyprix's capture covers
+them.
+
+**The protocol** (`src/lib/proto/lode-capture`, `no_std`, host-tested,
+typed, length-prefixed messages over the stream socket `/run/lode/capture`,
+mode 0666; anyone may connect, only a proven seat holder is accepted):
+
+```
+REGISTER    provider -> lode   name; seat; outputs; formats it can send (QOI, PNG); seat token
+ACCEPTED    lode -> provider   the formats lode takes
+REFUSED     lode -> provider   why (no token, a wrong token, the seat held by another)
+CAPTURE     lode -> provider   request id; the record's sequence number; one line of what crashed
+IMAGE       provider -> lode   request id; format; width; height; the encoded bytes
+DECLINED    provider -> lode   request id; why (locked screen, nothing shown, privacy mode)
+UNREGISTER  provider -> lode   (or the connection closes: the provider is gone)
+```
+
+### 19.1 Session ids first (step 2a, the customer's order)
+
+The seat token the providers prove themselves with is built first, on its
+own, as step 2a, because a session id on every record is useful before any
+picture: which login's programs said what. Before writing it, step 2a
+reads what exists and reuses it rather than adding a second notion of who
+holds the seat: `sessiond` (seat0's owner, `docs/AUTH.md` §6.2), card0's
+DRM-master work (0e3e343a3), `authd`'s console revoke, and the backlog
+rows for sessiond and session switching. Kernel lines: 0 unless a generic
+typed mechanism is truly needed, and then counted and asked for first.
+The order is 2, then 2a, then 2b.
+
+**Proving it owns the display.** `sessiond` already owns seat0 and hands
+the compositor its card (`docs/AUTH.md` §6.2, `compositor_seat`). When it
+starts a session it also draws a random seat token, tells lode on a socket
+only root can reach (`/run/lode/seat`, root's 0600: "seat0 is held by pid
+P of uid U with token T"), and gives T to the compositor beside the card.
+lode accepts a REGISTER only from that pid (`SO_PEERCRED`) with that token;
+a new session's token replaces the old, and the old provider is dropped.
+An untrusted client cannot post a picture: it has neither the pid nor the
+token, and lode only ever stores an IMAGE that answers a CAPTURE it sent.
+
+**Several providers.** One per seat: the one holding the seat's current
+token. A headless grabber may register for a seat no compositor holds
+(`seat: headless`). lode never merges or picks between pictures.
+
+**No provider.** The crash record is stored as always, with
+`CAPTURE=none` and the reason (off, no provider, declined, timed out).
+Logging never waits for a picture.
+
+**Timeouts.** The crash record is written first. A CAPTURE is answered
+within 2 s or recorded `CAPTURE=timed-out`; three time-outs in a row drop
+the provider until it registers again. The image arrives on its own
+connection, read without blocking into a buffer capped at 16 MiB, so a
+hung or slow compositor costs lode a socket and a buffer, never a stalled
+read of the kernel log.
+
+**What triggers it.** Crash records (§18, step 2), `devmgr`'s driver
+deaths and restarts, and a rule action, `capture where EXPR`, for
+anything else (`capture where message ~ "illegal instruction"`). At most
+one picture each 10 s.
+
+**Storage and privacy.** The screen can show secrets, so capture is off
+unless turned on, and a picture is kept like the journal: in
+`/var/log/journal/captures/<boot>-<seqnum>.<qoi|png>`, `lode:adm 0640`,
+readable by exactly those who read the journal (§12). A record
+`CAPTURE_OF=<seqnum>` with `CAPTURE_FILE=` links it to its crash. Kept 7
+days and at most 256 MiB, the oldest removed first, and removed with
+`lode delete` when its crash record is. A provider may decline while the
+screen is locked.
+
+**Certification.** lode, sessiond and hyprix are ring-3 programs outside
+the item; no kernel lines.
 
 ## 18. Where it stands (2026-10-23)
 
@@ -1225,13 +1311,54 @@ every image that boots init). Kernel lines: 0.
 * **The desktop's image** enables it (`basic.target.wants`), so the N150
   keeps its boots once installed from this landing.
 
+### Step 2, as built
+
+Floods held, retention per class, deletion, crashes (§7, §8.5; the
+N150's needs 3a and 5):
+
+* **Rules** in `/etc/ferrix/lode.d/*.rules` (`drop`, `sample 1/N`, `level
+  P`, `fold DURATION`, `limit BURST/DURATION`, each `where` a filter), read
+  at start; a file that does not read is said in an error record and not
+  used. A rule that held records back says how many every 10 s (`RULE`,
+  `N_DROPPED`).
+* **Folding**: a source's message repeating its last, within 30 s (or a
+  `fold` rule's window), is counted; `message repeated N time(s): ...`
+  with `REPEATED=N` follows when another message comes or the window ends.
+* **The limiter**: per source (`UNIT`, else the identifier, else the
+  subsystem, else the transport) and per class -- errors 10,000, warnings
+  2,000, chatter 1,000 a 30 s window, or a `limit` rule's -- never scaled
+  by anything else; `Suppressed N message(s) from SOURCE` with
+  `N_SUPPRESSED`. The kernel's own records and lode's are never held.
+* Every record that says what was held carries `HELD_FIRST_SEQNUM` and
+  `HELD_LAST_SEQNUM`, so `lode verify --kernel` counts those gaps as said.
+  A restart that finds a gap no record accounts for -- a window or fold
+  still open when the earlier instance was killed -- says it in a record
+  of its own, so a crash never leaves a gap unsaid.
+* **Retention classes** (`retention.conf`, §8.5; without it, `errors`
+  (priority err or worse) a year and 256 MiB, `system` 90 days and 1 GiB):
+  one segment series per class, `<class>@<boot>-<seq>.fxj`; `ram-only`
+  classes in `/run/log/journal`; a segment is sealed at 16 MiB or a day,
+  and vacuum removes whole sealed segments by age and size per class, then
+  the oldest past 1 GiB (64 MiB in `/run`).
+* **`lode rotate`** asks the service, through the kernel log, to seal every
+  segment and begin new ones; **`lode delete --where EXPR`** (root's)
+  rotates, then rewrites every sealed segment holding a match without it
+  (a new file synced, then renamed over the old), and writes a
+  `lode-delete` record saying how many it removed and by whom.
+* **Crash records**: the kernel's `signal` lines that end a process
+  become priority err with `MESSAGE_ID` for crashes, `CRASH_PID`,
+  `CRASH_SIGNAL` (by name), `CRASH_ADDRESS`, `CRASH_PC`, `CRASH_TRAP`,
+  and `CRASH_COMM`/`CRASH_PROGRAM` when the process is still there to read
+  them from; `lode --where 'crash = "*"'` lists them.
+* `test-log` adds: 50 repeats become one line and one `REPEATED=49`; 300
+  lines over `limit 100/2s` become 100 and one record of 200 held; a
+  dropped source is absent and its drop said; an error lands in the
+  `errors` class; `lode delete` removes two records and says so.
+
 ### Known issues
 
-* **test-log on AArch64 is blocked by a kernel finding**, not by lode:
-  `/dev/kmsg` sometimes hands out a record cut short on AArch64 SMP (kernel
-  sequence 807 read as `lod` while the serial port shows `lode flood
-  508`), so the flood's count comes out 2999 in about one run of three,
-  with no gap in the sequence. And a `/dev/kmsg` write that follows a
-  program's half-written console line is merged into it. Both are with the
-  kmsg owner (core ring, `console/log.rs`); once fixed, `test-log --arch
-  aarch64` is run again and this note goes. x86-64 and ARMv7-A pass.
+* **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
+  handing out a record cut short on Arm SMP, and a write merged into a
+  half-written console line -- was fixed in the core by 722824a8d; step
+  2's `test-log` then stored 3,000 of 3,000 flood lines on all three
+  architectures, and the row is strict again.

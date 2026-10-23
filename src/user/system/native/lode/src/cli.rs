@@ -24,6 +24,8 @@ const HELP: &str = "\
 lode [OPTIONS...] [FIELD=VALUE...]   read the log (also as journalctl)
 lode mark TEXT...                    write a mark into the log
 lode verify [--kernel] [-b ...]      check the store
+lode rotate                          seal every class's segment, begin new ones
+lode delete --where EXPR [-b ...]    remove the matching records (root's)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
       --list-boots       the boots the store holds
@@ -94,6 +96,13 @@ pub(crate) fn run() -> i32 {
     let mut rest: &[String] = args.get(1..).unwrap_or_default();
     match rest.first().map(String::as_str) {
         Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
+        Some("rotate") => return rotate(),
+        Some("delete") => {
+            return match parse(rest.get(1..).unwrap_or_default()) {
+                Ok(options) => delete(&options),
+                Err(why) => usage(&why),
+            };
+        }
         Some("serve") => {
             complain("lode: `serve` is the service, which init starts (lode.service)");
             return 1;
@@ -659,7 +668,9 @@ fn flush_if_full(buffer: &mut Vec<u8>) {
     }
 }
 
-/// `-f`: every quarter second, print what was stored after `last`.
+/// `-f`: every quarter second, print what was stored after `last`, from
+/// the newest two segments of each class, each read from where the last
+/// look stopped.
 fn follow(
     options: &Options,
     dirs: &[Dir],
@@ -668,31 +679,42 @@ fn follow(
     output: Output,
     last: &mut u64,
 ) {
-    let mut place: Option<(String, Header, usize)> = None;
+    let mut places: Vec<(String, usize)> = Vec::new();
     loop {
         let segments = known(dirs);
         let mut fresh: Vec<Record> = Vec::new();
-        for each in &segments {
-            let newer = segments
-                .iter()
-                .rev()
-                .take(2)
-                .any(|tail| tail.segment.name == each.segment.name);
-            if !newer || boot.is_some_and(|boot| boot != each.header.boot_id) {
+        let mut seen: Vec<(&str, usize)> = Vec::new();
+        for each in segments.iter().rev() {
+            let class = segment::class_of_name(&each.segment.name).unwrap_or_default();
+            let count = match seen.iter_mut().find(|(name, _)| *name == class) {
+                Some((_, count)) => {
+                    *count += 1;
+                    *count
+                }
+                None => {
+                    seen.push((class, 1));
+                    1
+                }
+            };
+            if count > 2 || boot.is_some_and(|boot| boot != each.header.boot_id) {
                 continue;
             }
-            let from = match &place {
-                Some((name, _, offset)) if *name == each.segment.name => *offset,
-                _ => 0,
-            };
-            let Some(bytes) = store::bytes(&each.segment, 0) else {
+            let from = places
+                .iter()
+                .find(|(name, _)| *name == each.segment.name)
+                .map_or_else(|| each.header.encode().len(), |(_, offset)| *offset);
+            let Some(bytes) = store::bytes(&each.segment, from) else {
                 continue;
             };
-            let Some(scanned) = segment::scan(&bytes, from) else {
-                continue;
-            };
-            fresh.extend(scanned.records.into_iter().map(|found| found.record));
-            place = Some((each.segment.name.clone(), each.header.clone(), scanned.good));
+            let (records, used) = segment::entries(&bytes);
+            let host: alloc::rc::Rc<str> = alloc::rc::Rc::from(each.header.host.as_str());
+            fresh.extend(records.into_iter().map(|mut record| {
+                record.boot_id = each.header.boot_id;
+                record.host = alloc::rc::Rc::clone(&host);
+                record
+            }));
+            places.retain(|(name, _)| *name != each.segment.name);
+            places.push((each.segment.name.clone(), from + used));
         }
         fresh.sort_by_key(|record| record.seqnum);
         let mut buffer = Vec::new();
@@ -873,4 +895,131 @@ fn verify(options: &Options) -> i32 {
     }
     out(&buffer);
     status
+}
+
+/// Ask the service to seal every segment, through the kernel log it reads.
+fn ask_rotation() -> Result<(), String> {
+    let mut line = Vec::from(&b"<13>"[..]);
+    line.extend_from_slice(crate::serve::ROTATE);
+    line.extend_from_slice(b": requested");
+    let fd = sys::open(b"/dev/kmsg", sys::O_WRONLY)
+        .map_err(|error| alloc::format!("opening /dev/kmsg: errno {}", error.0))?;
+    let written = sys::write(fd, &line);
+    sys::close(fd);
+    let _ = written.map_err(|error| alloc::format!("writing to /dev/kmsg: errno {}", error.0))?;
+    // The service reads the request within a wakeup: a quarter second.
+    sys::sleep_ms(600);
+    Ok(())
+}
+
+/// `lode rotate`.
+fn rotate() -> i32 {
+    match ask_rotation() {
+        Ok(()) => 0,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            1
+        }
+    }
+}
+
+/// `lode delete`: rotate, then rewrite every sealed segment holding a
+/// record that matches, without it, and say in the log what was removed.
+/// The newest segment of each class is left, since the service may be
+/// writing it; the count of what it held that matched is said.
+fn delete(options: &Options) -> i32 {
+    if options.expr.is_none() && options.matches.is_empty() && options.grep.is_none() {
+        return usage("delete needs --where, a match or -g: it never removes everything");
+    }
+    if let Err(why) = ask_rotation() {
+        complain(&alloc::format!("lode: {why}"));
+        return 1;
+    }
+    let zone = zone::reader();
+    let (since, until) = match window(options, &zone) {
+        Ok(window) => window,
+        Err(why) => return usage(&why),
+    };
+    let dirs = match directories(options) {
+        Ok(dirs) => dirs,
+        Err(why) => {
+            complain(&alloc::format!("lode: {why}"));
+            return 1;
+        }
+    };
+    let segments = known(&dirs);
+    let boot = options
+        .boot
+        .as_ref()
+        .and_then(|word| chosen_boot(word, &boots(&segments)).ok());
+    let mut newest: Vec<&str> = Vec::new();
+    let mut removed = 0;
+    let mut rewritten = 0;
+    let mut left = 0;
+    for each in segments.iter().rev() {
+        let class = segment::class_of_name(&each.segment.name).unwrap_or_default();
+        let open = !newest.contains(&class);
+        if open {
+            newest.push(class);
+        }
+        if boot.is_some_and(|boot| boot != each.header.boot_id) {
+            continue;
+        }
+        let Some(bytes) = store::bytes(&each.segment, 0) else {
+            continue;
+        };
+        let matching = |record: &Record| passes(options, record, since, until);
+        let Some((rest, count)) = segment::rewrite(&bytes, matching) else {
+            continue;
+        };
+        if count == 0 {
+            continue;
+        }
+        if open {
+            left += count;
+            continue;
+        }
+        match replace(&each.segment, &rest) {
+            Ok(()) => {
+                removed += count;
+                rewritten += 1;
+            }
+            Err(why) => {
+                complain(&alloc::format!("lode: {}: {why}", each.segment.name));
+                return 1;
+            }
+        }
+    }
+    let text = alloc::format!(
+        "removed {removed} record(s) from {rewritten} segment(s) by uid {}; {left} in segments still being written left",
+        sys::getuid()
+    );
+    let mut line = Vec::from(&b"<13>lode-delete: "[..]);
+    line.extend_from_slice(text.as_bytes());
+    if let Ok(fd) = sys::open(b"/dev/kmsg", sys::O_WRONLY) {
+        let _ = sys::write(fd, &line);
+        sys::close(fd);
+    }
+    out(alloc::format!("lode: {text}\n").as_bytes());
+    0
+}
+
+/// Put `bytes` in place of `segment`: a new file beside it, synced, then
+/// renamed over it, so a crash leaves the old one or the new one whole.
+fn replace(segment: &Segment, bytes: &[u8]) -> Result<(), String> {
+    let temporary = alloc::format!(".{}.new", segment.name);
+    let _ = sys::unlinkat(segment.dir, temporary.as_bytes());
+    let fd = sys::openat(
+        segment.dir,
+        temporary.as_bytes(),
+        sys::O_WRONLY | sys::O_CREAT | sys::O_EXCL | sys::O_CLOEXEC,
+        0o640,
+    )
+    .map_err(|error| alloc::format!("making its replacement: errno {}", error.0))?;
+    let _ = sys::fchown(fd, crate::serve::UID, crate::serve::GID);
+    let written = sys::write_all(fd, bytes).and_then(|()| sys::fdatasync(fd));
+    sys::close(fd);
+    written.map_err(|error| alloc::format!("writing its replacement: errno {}", error.0))?;
+    sys::renameat(segment.dir, temporary.as_bytes(), segment.name.as_bytes())
+        .map_err(|error| alloc::format!("putting its replacement in place: errno {}", error.0))
 }

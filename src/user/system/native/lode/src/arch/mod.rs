@@ -39,3 +39,10 @@ pub(crate) const MMAP: usize = numbers::MMAP2;
 /// `mmap`.
 #[cfg(not(target_arch = "arm"))]
 pub(crate) const MMAP: usize = numbers::MMAP;
+
+/// `getuid`.
+#[cfg(target_arch = "arm")]
+pub(crate) const GETUID: usize = numbers::GETUID32;
+/// `getuid`.
+#[cfg(not(target_arch = "arm"))]
+pub(crate) const GETUID: usize = numbers::GETUID;

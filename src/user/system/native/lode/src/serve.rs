@@ -3,23 +3,28 @@
 //!
 //! It opens what needs root -- `/dev/kmsg`, and the store's directories,
 //! which it makes and gives to the `lode` user -- then becomes that user
-//! for good, takes up the store where its last instance left it (a torn
-//! tail cut away, the boot's last kernel sequence number found), says READY
-//! and reads the kernel log for as long as init keeps its channel open.
+//! for good, reads its rules and retention classes, takes up the store
+//! where its last instance left it (torn tails cut away, the boot's last
+//! kernel sequence number found), says READY and reads the kernel log for as
+//! long as init keeps its channel open.
 //!
-//! Every record read is written at once, in one `write` a wakeup, so a
-//! crash of lode loses nothing the kernel was given; `fdatasync` follows
-//! every [`SYNC_US`], and at once after a record of priority crit or more
-//! urgent. A restart reads the kernel log from its oldest record and skips
-//! what was stored, so what the ring still held is not lost, and what it
-//! no longer held is said in a record of its own.
+//! Every record read passes the rules, the folding and the limiter
+//! ([`ferrix_lode_core::limit`]) and goes to its retention class's segment
+//! ([`ferrix_lode_core::retention`]): one `write` a class a wakeup, so a
+//! crash of lode loses nothing it had stored; `fdatasync` follows every
+//! [`SYNC_US`], and at once after a record of priority crit or more urgent.
+//! A restart reads the kernel log from its oldest record and skips what was
+//! stored, so what the ring still held is not lost, and what it no longer
+//! held is said in a record of its own.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
 use ferrix_lode_core::kmsg;
+use ferrix_lode_core::limit::{self, Limiter, Rule};
 use ferrix_lode_core::record::Record;
+use ferrix_lode_core::retention::{self, Class, DAY_US, Kept};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::time::Zone;
 use ferrix_native_abi::directory::{MAX_MESSAGE, Message};
@@ -38,14 +43,20 @@ pub(crate) const GID: u32 = 4;
 const RUN: &[u8] = b"/run/lode";
 /// The boot's id, which a restarted lode takes up.
 const BOOT_ID: &[u8] = b"/run/lode/boot_id";
+/// Rules and retention classes.
+pub(crate) const CONFIG: &[u8] = b"/etc/ferrix/lode.d";
 /// How long a write may wait for `fdatasync`, in microseconds.
 pub(crate) const SYNC_US: u64 = 5_000_000;
 /// The size a segment is sealed at, and the next begun.
 const SEGMENT_MAX: usize = 16 * 1024 * 1024;
-/// The most the store may hold; the oldest segments go first.
-const STORE_MAX: usize = 1024 * 1024 * 1024;
+/// The most the persistent store may hold.
+const STORE_MAX: u64 = 1 << 30;
+/// The most the volatile store may hold.
+const RUNTIME_MAX: u64 = 64 << 20;
 /// How long one wait for the kernel log lasts, in milliseconds.
 const WAIT_MS: u64 = 250;
+/// What `lode rotate` writes to the kernel log to ask for a rotation.
+pub(crate) const ROTATE: &[u8] = b"lode-rotate";
 
 /// Why the service stopped, as its exit status.
 #[derive(Debug, Clone, Copy)]
@@ -61,28 +72,43 @@ pub(crate) enum Step {
     Channel = 5,
 }
 
-/// The segment being written.
+/// One class's segment being written.
 struct Writer {
-    /// The store's directory.
-    dir: usize,
     /// The segment, open for appending.
     fd: usize,
+    /// Its name.
+    name: String,
     /// Its length.
     size: usize,
-    /// Its header.
-    header: Header,
-    /// The next record's sequence number.
-    next: u64,
-    /// When the last `fdatasync` was, and whether anything was written since.
-    synced_at: u64,
+    /// When it was begun.
+    created_us: u64,
     /// Whether a write waits for `fdatasync`.
     dirty: bool,
+}
+
+/// The store: its directories, classes and writers.
+struct Store {
+    /// The persistent directory, if `/var` could be written.
+    persistent: Option<usize>,
+    /// The volatile directory.
+    volatile: usize,
+    /// The retention classes.
+    classes: Vec<Class>,
+    /// A writer per class, made when the class first has a record.
+    writers: Vec<Option<Writer>>,
+    /// The next record's sequence number.
+    next: u64,
+    /// The header every new segment gets, but its first sequence number.
+    header: Header,
+    /// When the last `fdatasync` was.
+    synced_at: u64,
 }
 
 /// Run the service on init's channel.
 pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let kmsg = sys::open(b"/dev/kmsg", sys::O_RDONLY | sys::O_NONBLOCK).map_err(|_| Step::Kmsg)?;
-    let dir = store_dir().ok_or(Step::Store)?;
+    let volatile = store_dir(&[b"/run/log"], store::VOLATILE).ok_or(Step::Store)?;
+    let persistent = store_dir(&[b"/var", b"/var/log"], store::PERSISTENT);
     let _ = sys::mkdirat(sys::AT_FDCWD, RUN, 0o755);
     if let Ok(fd) = sys::open(RUN, sys::O_RDONLY) {
         let _ = sys::fchown(fd, UID, GID);
@@ -91,24 +117,33 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let (boot_id, restarted) = boot_id();
     let dropped = sys::become_ids(UID, GID).is_ok();
     let zone = zone::local();
-    let mut said: Vec<Record> = Vec::new();
-    let (mut writer, mut sequence) = take_up(dir.fd, boot_id, &mut said).ok_or(Step::Segment)?;
     let now = clocks();
-    let (id, text) = if restarted {
-        (
-            ingest::MESSAGE_ID_RESTARTED,
-            alloc::format!(
-                "lode restarted: an earlier instance of this boot ended; last stored kernel seq {}",
-                sequence
-                    .last
-                    .map_or_else(|| String::from("none"), |seq| alloc::format!("{seq}"))
-            ),
+    let mut said: Vec<Record> = Vec::new();
+    let (rules, classes) = configuration(&mut said, now);
+    let mut store = Store {
+        persistent: persistent.map(|dir| dir.fd),
+        volatile: volatile.fd,
+        writers: classes.iter().map(|_| None).collect(),
+        classes,
+        next: 1,
+        header: new_header(boot_id),
+        synced_at: 0,
+    };
+    let mut sequence = store.take_up(&mut said);
+    let text = if restarted {
+        alloc::format!(
+            "lode restarted: an earlier instance of this boot ended; last stored kernel seq {}",
+            sequence
+                .last
+                .map_or_else(|| String::from("none"), |seq| alloc::format!("{seq}"))
         )
     } else {
-        (
-            ingest::MESSAGE_ID_STARTED,
-            String::from("lode started for this boot"),
-        )
+        String::from("lode started for this boot")
+    };
+    let id = if restarted {
+        ingest::MESSAGE_ID_RESTARTED
+    } else {
+        ingest::MESSAGE_ID_STARTED
     };
     said.insert(
         0,
@@ -122,19 +157,70 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             now,
         ));
     }
-    writer
-        .append(&mut said, &zone)
-        .map_err(|()| Step::Segment)?;
+    store.append(said, &zone).map_err(|()| Step::Segment)?;
     say_ready(channel)?;
-    serve(channel, kmsg, &mut writer, &mut sequence, &zone, restarted)
+    let mut limiter = Limiter::new(rules);
+    serve(
+        channel,
+        kmsg,
+        &mut store,
+        &mut sequence,
+        &mut limiter,
+        &zone,
+        restarted,
+    )
+}
+
+/// The rules and the retention classes, with a record for each file that
+/// did not read.
+fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>) {
+    let mut rules = Vec::new();
+    let mut classes = retention::defaults();
+    let Ok(dir) = Dir::open(CONFIG) else {
+        return (rules, classes);
+    };
+    let mut names = sys::list_dir(dir.fd).unwrap_or_default();
+    names.sort();
+    for name in names {
+        let Ok(bytes) = sys::read_file_from(dir.fd, &name, 0) else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let shown = String::from_utf8_lossy(&name);
+        let failed = if name.ends_with(b".rules") {
+            limit::parse_rules(&text)
+                .map(|more| rules.extend(more))
+                .err()
+        } else if name == b"retention.conf" {
+            retention::parse(&text).map(|read| classes = read).err()
+        } else {
+            None
+        };
+        if let Some(error) = failed {
+            said.push(ingest::own(
+                3,
+                ingest::MESSAGE_ID_STARTED,
+                &alloc::format!(
+                    "{}/{shown}:{}: {}; the file is not used",
+                    String::from_utf8_lossy(CONFIG),
+                    error.line,
+                    error.why
+                ),
+                now,
+            ));
+        }
+    }
+    sys::close(dir.fd);
+    (rules, classes)
 }
 
 /// The loop: read the kernel log, store it, until init lets go.
 fn serve(
     channel: &Channel<Kernel>,
     kmsg: usize,
-    writer: &mut Writer,
+    store: &mut Store,
     sequence: &mut KernelSequence,
+    limiter: &mut Limiter,
     zone: &Zone,
     restarted: bool,
 ) -> Result<(), Step> {
@@ -143,10 +229,13 @@ fn serve(
     loop {
         let mut batch: Vec<Record> = Vec::new();
         let now = clocks();
-        loop {
+        let mut read = 0;
+        let mut rotate = false;
+        while read < 512 {
             match sys::read(kmsg, &mut buf) {
                 Ok(0) => break,
                 Ok(got) => {
+                    read += 1;
                     let Some(kernel) = kmsg::parse(buf.get(..got).unwrap_or_default()) else {
                         continue;
                     };
@@ -159,33 +248,66 @@ fn serve(
                         }
                     }
                     first_start = false;
-                    batch.push(record);
-                    if batch.len() >= 512 {
-                        break;
+                    rotate |= record.get("SYSLOG_IDENTIFIER") == Some(ROTATE)
+                        && record.get("_TRANSPORT") == Some(b"console");
+                    if record.get("_TRANSPORT") == Some(b"kernel")
+                        && record.get("CRASH_PID").is_some()
+                    {
+                        batch.push(with_program(record));
+                    } else {
+                        limiter.admit(record, now.monotonic_us, &mut batch);
                     }
                 }
                 // Records went past this reader; the next read goes on from
                 // the first kept, and the sequence numbers say how many.
-                Err(error) if error.0 == sys::EPIPE || error.0 == sys::EINVAL => {}
-                Err(error) if error.0 == sys::EINTR => {}
+                Err(error)
+                    if error.0 == sys::EPIPE || error.0 == sys::EINVAL || error.0 == sys::EINTR => {
+                }
                 Err(_) => break,
             }
         }
-        let urgent = batch.iter().any(|record| record.priority <= 2);
-        if !batch.is_empty() {
-            writer
-                .append(&mut batch, zone)
-                .map_err(|()| Step::Segment)?;
+        if rotate {
+            limiter.flush(now.monotonic_us, &mut batch);
         }
-        writer.sync_if(urgent, now.monotonic_us);
+        limiter.tick(now.monotonic_us, &mut batch);
+        let urgent = batch.iter().any(|record| record.priority <= 2);
+        let idle = batch.is_empty();
+        for record in &mut batch {
+            if record.realtime_us == 0 {
+                record.realtime_us = now.realtime_of(record.monotonic_us);
+            }
+        }
+        store.append(batch, zone).map_err(|()| Step::Segment)?;
+        if rotate {
+            store.rotate_all();
+        }
+        store.sync_if(urgent, now.monotonic_us);
         if closed(channel) {
-            writer.sync_if(true, now.monotonic_us);
+            store.sync_if(true, now.monotonic_us);
             return Ok(());
         }
-        if batch.is_empty() {
+        if idle {
             let _ = sys::wait_readable(kmsg, WAIT_MS);
         }
     }
+}
+
+/// A crash record with the program's name and file, read while the ended
+/// process may still be there to read them from.
+fn with_program(mut record: Record) -> Record {
+    let Some(pid) = record.get_str("CRASH_PID").map(String::from) else {
+        return record;
+    };
+    if let Some(comm) = sys::read_small(alloc::format!("/proc/{pid}/comm").as_bytes()) {
+        record.push("CRASH_COMM", comm.strip_suffix(b"\n").unwrap_or(&comm));
+    }
+    if let Some(cmdline) = sys::read_small(alloc::format!("/proc/{pid}/cmdline").as_bytes()) {
+        let program = cmdline.split(|&byte| byte == 0).next().unwrap_or_default();
+        if !program.is_empty() {
+            record.push("CRASH_PROGRAM", program);
+        }
+    }
+    record
 }
 
 /// Whether init has closed the channel: the service is being stopped.
@@ -213,40 +335,33 @@ pub(crate) fn clocks() -> Now {
     }
 }
 
-/// The persistent store, made and given to lode's user, or the volatile one.
-fn store_dir() -> Option<Dir> {
-    for (parents, path) in [
-        (&[&b"/var"[..], b"/var/log"][..], store::PERSISTENT),
-        (&[&b"/run/log"[..]][..], store::VOLATILE),
-    ] {
-        for parent in parents {
-            let _ = sys::mkdirat(sys::AT_FDCWD, parent, 0o755);
+/// A store directory, made and given to lode's user, if it can be written.
+fn store_dir(parents: &[&[u8]], path: &[u8]) -> Option<Dir> {
+    for parent in parents {
+        let _ = sys::mkdirat(sys::AT_FDCWD, parent, 0o755);
+    }
+    sys::mkdirat(sys::AT_FDCWD, path, 0o2750).ok()?;
+    let dir = Dir::open(path).ok()?;
+    let _ = sys::fchown(dir.fd, UID, GID);
+    let _ = sys::fchmod(dir.fd, 0o2750);
+    // A store that cannot be written to is no store: try a file.
+    let probe = b".lode-probe";
+    match sys::openat(
+        dir.fd,
+        probe,
+        sys::O_WRONLY | sys::O_CREAT | sys::O_CLOEXEC,
+        0o600,
+    ) {
+        Ok(fd) => {
+            sys::close(fd);
+            let _ = sys::unlinkat(dir.fd, probe);
+            Some(dir)
         }
-        if sys::mkdirat(sys::AT_FDCWD, path, 0o2750).is_err() {
-            continue;
-        }
-        let Ok(dir) = Dir::open(path) else {
-            continue;
-        };
-        let _ = sys::fchown(dir.fd, UID, GID);
-        let _ = sys::fchmod(dir.fd, 0o2750);
-        // A store that cannot be written to is no store: try a file.
-        let probe = b".lode-probe";
-        match sys::openat(
-            dir.fd,
-            probe,
-            sys::O_WRONLY | sys::O_CREAT | sys::O_CLOEXEC,
-            0o600,
-        ) {
-            Ok(fd) => {
-                sys::close(fd);
-                let _ = sys::unlinkat(dir.fd, probe);
-                return Some(dir);
-            }
-            Err(_) => sys::close(dir.fd),
+        Err(_) => {
+            sys::close(dir.fd);
+            None
         }
     }
-    None
 }
 
 /// This boot's id, and whether an earlier lode of this boot drew it.
@@ -277,207 +392,331 @@ fn boot_id() -> ([u8; 16], bool) {
     (id, false)
 }
 
-/// Take up the store: cut a torn tail off the newest segment, find the
-/// next sequence number and this boot's last kernel record, and open the
-/// segment to write -- the newest, if it is this boot's, else a new one.
-/// What lode has to say about it goes into `said`.
-fn take_up(
-    dir: usize,
-    boot_id: [u8; 16],
-    said: &mut Vec<Record>,
-) -> Option<(Writer, KernelSequence)> {
-    let dirs = [Dir { fd: dir }];
-    let segments = store::all_segments(&dirs);
-    let mut next = 1;
-    let mut sequence = KernelSequence::default();
-    let mut current: Option<(String, Header, usize)> = None;
-    if let Some(newest) = segments.last()
-        && let Some(bytes) = store::bytes(newest, 0)
-        && let Some(scanned) = segment::scan(&bytes, 0)
-    {
-        if scanned.good < bytes.len() {
-            if let Ok(fd) = sys::openat(
-                dir,
-                newest.name.as_bytes(),
-                sys::O_WRONLY | sys::O_CLOEXEC,
-                0,
-            ) {
-                let _ = sys::ftruncate(fd, scanned.good);
-                let _ = sys::fdatasync(fd);
-                sys::close(fd);
-            }
-            said.push(ingest::own(
-                4,
-                ingest::MESSAGE_ID_TORN,
-                &alloc::format!(
-                    "segment {}: {} byte(s) of a torn record cut away",
-                    newest.name,
-                    bytes.len() - scanned.good
-                ),
-                clocks(),
-            ));
-        }
-        next = scanned
-            .records
-            .last()
-            .map_or(scanned.header.first_seqnum, |found| found.record.seqnum + 1);
-        if scanned.header.boot_id == boot_id {
-            current = Some((newest.name.clone(), scanned.header.clone(), scanned.good));
-        }
-    }
-    for each in segments.iter().rev() {
-        let Some(bytes) = store::bytes(each, 0) else {
-            continue;
-        };
-        let Some(scanned) = segment::scan(&bytes, 0) else {
-            continue;
-        };
-        if scanned.header.boot_id != boot_id {
-            break;
-        }
-        sequence.last = scanned
-            .records
-            .iter()
-            .filter_map(|found| ingest::kernel_seq(&found.record))
-            .max();
-        if sequence.last.is_some() {
-            break;
-        }
-    }
-    let writer = match current {
-        Some((name, header, size)) => {
-            let fd = sys::openat(
-                dir,
-                name.as_bytes(),
-                sys::O_WRONLY | sys::O_APPEND | sys::O_CLOEXEC,
-                0,
-            )
-            .ok()?;
-            Writer::with(dir, fd, size, header, next)
-        }
-        None => Writer::create(dir, new_header(boot_id, next))?,
-    };
-    Some((writer, sequence))
-}
-
-/// A header for a new segment of `boot_id` beginning at `first`.
-fn new_header(boot_id: [u8; 16], first: u64) -> Header {
+/// The header a new segment of `boot_id` gets.
+fn new_header(boot_id: [u8; 16]) -> Header {
     let machine_id = sys::read_small(b"/etc/machine-id")
         .and_then(|text| core::str::from_utf8(&text).ok().and_then(segment::parse_id))
         .unwrap_or([0; 16]);
     Header {
         boot_id,
         machine_id,
-        first_seqnum: first,
-        created_us: sys::clock_us(sys::CLOCK_REALTIME),
+        first_seqnum: 0,
+        created_us: 0,
         host: String::from_utf8_lossy(&sys::hostname()).into_owned(),
     }
 }
 
-impl Writer {
-    /// A writer for a segment already open.
-    fn with(dir: usize, fd: usize, size: usize, header: Header, next: u64) -> Writer {
-        Writer {
-            dir,
-            fd,
-            size,
-            header,
-            next,
-            synced_at: 0,
-            dirty: false,
+impl Store {
+    /// The directory class `index` is kept in.
+    fn dir_of(&self, index: usize) -> usize {
+        match (
+            self.classes.get(index).is_some_and(|class| class.ram_only),
+            self.persistent,
+        ) {
+            (false, Some(persistent)) => persistent,
+            _ => self.volatile,
         }
     }
 
-    /// A new segment with `header`, made and its header written.
-    fn create(dir: usize, header: Header) -> Option<Writer> {
-        let name = segment::file_name(&header.boot_id, header.first_seqnum);
+    /// Every segment in both directories, oldest first.
+    fn segments(&self) -> Vec<store::Segment> {
+        let mut dirs = alloc::vec![Dir { fd: self.volatile }];
+        if let Some(fd) = self.persistent {
+            dirs.push(Dir { fd });
+        }
+        store::all_segments(&dirs)
+    }
+
+    /// Take up the store: cut torn tails off each class's newest segment,
+    /// find the next sequence number and this boot's last kernel record,
+    /// and reopen each class's newest segment that is this boot's. What
+    /// lode has to say about it goes into `said`.
+    fn take_up(&mut self, said: &mut Vec<Record>) -> KernelSequence {
+        let segments = self.segments();
+        let mut sequence = KernelSequence::default();
+        let mut newest: Vec<&store::Segment> = Vec::new();
+        for each in segments.iter().rev() {
+            let class = segment::class_of_name(&each.name).unwrap_or_default();
+            if !newest
+                .iter()
+                .any(|seen| segment::class_of_name(&seen.name) == Some(class))
+            {
+                newest.push(each);
+            }
+        }
+        for each in &newest {
+            let Some(bytes) = store::bytes(each, 0) else {
+                continue;
+            };
+            let Some(scanned) = segment::scan(&bytes, 0) else {
+                continue;
+            };
+            if scanned.good < bytes.len() {
+                cut(each, scanned.good, bytes.len(), said);
+            }
+            if let Some(found) = scanned.records.last() {
+                self.next = self.next.max(found.record.seqnum + 1);
+            }
+            self.next = self.next.max(scanned.header.first_seqnum);
+            let class = segment::class_of_name(&each.name).unwrap_or_default();
+            if scanned.header.boot_id == self.header.boot_id
+                && let Some(index) = self.classes.iter().position(|known| known.name == class)
+                && let Ok(fd) = sys::openat(
+                    each.dir,
+                    each.name.as_bytes(),
+                    sys::O_WRONLY | sys::O_APPEND | sys::O_CLOEXEC,
+                    0,
+                )
+                && let Some(slot) = self.writers.get_mut(index)
+            {
+                *slot = Some(Writer {
+                    fd,
+                    name: each.name.clone(),
+                    size: scanned.good,
+                    created_us: scanned.header.created_us,
+                    dirty: false,
+                });
+            }
+        }
+        sequence.last = self.last_kernel_seq(&segments);
+        self.unsaid(&segments, said);
+        sequence
+    }
+
+    /// Kernel records an earlier instance of this boot held back and ended
+    /// before saying so -- a fold or a window still open when it was
+    /// killed: one record a gap, so `lode verify --kernel` finds none unsaid.
+    fn unsaid(&self, segments: &[store::Segment], said: &mut Vec<Record>) {
+        let mut records: Vec<Record> = Vec::new();
+        for each in segments {
+            if let Some(bytes) = store::bytes(each, 0)
+                && let Some(scanned) = segment::scan(&bytes, 0)
+                && scanned.header.boot_id == self.header.boot_id
+            {
+                records.extend(scanned.records.into_iter().map(|found| found.record));
+            }
+        }
+        let refs: Vec<&Record> = records.iter().collect();
+        for (from, to) in ingest::kernel_gaps(&refs).unsaid {
+            let mut record = ingest::own(
+                4,
+                limit::MESSAGE_ID_SUPPRESSED,
+                &alloc::format!(
+                    "kernel records {from} to {} were held back by an instance of lode that ended before saying so",
+                    to - 1
+                ),
+                clocks(),
+            );
+            record.push("N_SUPPRESSED", alloc::format!("{}", to - from).as_bytes());
+            record.push("HELD_FIRST_SEQNUM", alloc::format!("{from}").as_bytes());
+            record.push("HELD_LAST_SEQNUM", alloc::format!("{}", to - 1).as_bytes());
+            said.push(record);
+        }
+    }
+
+    /// The last kernel sequence number this boot's segments hold.
+    fn last_kernel_seq(&self, segments: &[store::Segment]) -> Option<u64> {
+        let mut last: Option<u64> = None;
+        let mut done: Vec<String> = Vec::new();
+        for each in segments.iter().rev() {
+            let class = String::from(segment::class_of_name(&each.name).unwrap_or_default());
+            if done.contains(&class) {
+                continue;
+            }
+            let Some(bytes) = store::bytes(each, 0) else {
+                continue;
+            };
+            let Some(scanned) = segment::scan(&bytes, 0) else {
+                continue;
+            };
+            if scanned.header.boot_id != self.header.boot_id {
+                done.push(class);
+                continue;
+            }
+            let found = scanned
+                .records
+                .iter()
+                .filter_map(|found| ingest::kernel_seq(&found.record))
+                .max();
+            if found.is_some() {
+                last = last.max(found);
+                done.push(class);
+            }
+        }
+        last
+    }
+
+    /// Number, stamp and write `records`, each to its class's segment.
+    fn append(&mut self, records: Vec<Record>, zone: &Zone) -> Result<(), ()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let mut bytes: Vec<Vec<u8>> = self.classes.iter().map(|_| Vec::new()).collect();
+        for mut record in records {
+            record.seqnum = self.next;
+            record.utc_offset_s = zone.offset_at(record.realtime_us);
+            self.next += 1;
+            let class = retention::assign(&self.classes, &record);
+            if let Some(out) = bytes.get_mut(class) {
+                segment::encode_record(&record, out);
+            }
+        }
+        let first = self.next;
+        for (index, out) in bytes.iter().enumerate() {
+            if out.is_empty() {
+                continue;
+            }
+            self.ready(index, first)?;
+            let Some(Some(writer)) = self.writers.get_mut(index) else {
+                return Err(());
+            };
+            sys::write_all(writer.fd, out).map_err(|_| ())?;
+            writer.size += out.len();
+            writer.dirty = true;
+        }
+        Ok(())
+    }
+
+    /// Make sure class `index` has a segment with room, begun at `first`
+    /// if a new one is needed; a full or day-old one is sealed first.
+    fn ready(&mut self, index: usize, first: u64) -> Result<(), ()> {
+        let now = sys::clock_us(sys::CLOCK_REALTIME);
+        let stale = self
+            .writers
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some_and(|writer| {
+                writer.size >= SEGMENT_MAX || now.saturating_sub(writer.created_us) >= DAY_US
+            });
+        if stale {
+            self.seal(index);
+        }
+        if self.writers.get(index).is_some_and(Option::is_some) {
+            return Ok(());
+        }
+        let class = self
+            .classes
+            .get(index)
+            .map(|class| class.name.clone())
+            .ok_or(())?;
+        let dir = self.dir_of(index);
+        let mut header = self.header.clone();
+        header.first_seqnum = first;
+        header.created_us = now;
+        let name = segment::file_name(&class, &header.boot_id, first);
         let fd = sys::openat(
             dir,
             name.as_bytes(),
             sys::O_WRONLY | sys::O_CREAT | sys::O_APPEND | sys::O_CLOEXEC,
             0o640,
         )
-        .ok()?;
+        .map_err(|_| ())?;
         let bytes = header.encode();
-        sys::ftruncate(fd, 0).ok()?;
-        sys::write_all(fd, &bytes).ok()?;
-        let next = header.first_seqnum;
-        Some(Writer::with(dir, fd, bytes.len(), header, next))
-    }
-
-    /// Number, stamp and write `records`, and empty the list.
-    fn append(&mut self, records: &mut Vec<Record>, zone: &Zone) -> Result<(), ()> {
-        if self.size >= SEGMENT_MAX {
-            self.rotate()?;
+        sys::ftruncate(fd, 0).map_err(|_| ())?;
+        sys::write_all(fd, &bytes).map_err(|_| ())?;
+        if let Some(slot) = self.writers.get_mut(index) {
+            *slot = Some(Writer {
+                fd,
+                name,
+                size: bytes.len(),
+                created_us: now,
+                dirty: true,
+            });
         }
-        let mut bytes = Vec::new();
-        for record in records.iter_mut() {
-            record.seqnum = self.next;
-            record.utc_offset_s = zone.offset_at(record.realtime_us);
-            self.next += 1;
-            segment::encode_record(record, &mut bytes);
-        }
-        records.clear();
-        sys::write_all(self.fd, &bytes).map_err(|_| ())?;
-        self.size += bytes.len();
-        self.dirty = true;
+        self.vacuum();
         Ok(())
     }
 
-    /// `fdatasync` when `now` is far enough past the last, or `urgent`.
+    /// Seal class `index`'s segment: synced and closed, the next record
+    /// begins another.
+    fn seal(&mut self, index: usize) {
+        if let Some(slot) = self.writers.get_mut(index)
+            && let Some(writer) = slot.take()
+        {
+            let _ = sys::fdatasync(writer.fd);
+            sys::close(writer.fd);
+        }
+    }
+
+    /// Seal every class's segment and begin the next at once (`lode
+    /// rotate`), so a segment `lode delete` may rewrite is never the one
+    /// being written.
+    fn rotate_all(&mut self) {
+        for index in 0..self.writers.len() {
+            if self.writers.get(index).is_some_and(Option::is_some) {
+                self.seal(index);
+                let _ = self.ready(index, self.next);
+            }
+        }
+    }
+
+    /// `fdatasync` every written segment when `now` is far enough past the
+    /// last, or `urgent`.
     fn sync_if(&mut self, urgent: bool, now: u64) {
-        if self.dirty && (urgent || now.saturating_sub(self.synced_at) >= SYNC_US) {
-            let _ = sys::fdatasync(self.fd);
-            self.synced_at = now;
-            self.dirty = false;
+        if !urgent && now.saturating_sub(self.synced_at) < SYNC_US {
+            return;
         }
+        for writer in self.writers.iter_mut().flatten() {
+            if writer.dirty {
+                let _ = sys::fdatasync(writer.fd);
+                writer.dirty = false;
+            }
+        }
+        self.synced_at = now;
     }
 
-    /// Seal this segment and begin the next, then trim the store.
-    fn rotate(&mut self) -> Result<(), ()> {
-        let _ = sys::fdatasync(self.fd);
-        sys::close(self.fd);
-        let mut header = self.header.clone();
-        header.first_seqnum = self.next;
-        header.created_us = sys::clock_us(sys::CLOCK_REALTIME);
-        let next = Writer::create(self.dir, header).ok_or(())?;
-        *self = next;
-        vacuum(
-            self.dir,
-            &segment::file_name(&self.header.boot_id, self.header.first_seqnum),
-        );
-        Ok(())
+    /// Remove what the classes and the stores' limits no longer keep.
+    fn vacuum(&self) {
+        let now = sys::clock_us(sys::CLOCK_REALTIME);
+        let active: Vec<&str> = self
+            .writers
+            .iter()
+            .flatten()
+            .map(|writer| writer.name.as_str())
+            .collect();
+        let mut dirs = alloc::vec![(self.volatile, RUNTIME_MAX)];
+        if let Some(fd) = self.persistent {
+            dirs.push((fd, STORE_MAX));
+        }
+        for (dir, limit) in dirs {
+            let segments = store::all_segments(&[Dir { fd: dir }]);
+            let kept: Vec<Kept> = segments
+                .iter()
+                .map(|each| Kept {
+                    class: String::from(segment::class_of_name(&each.name).unwrap_or_default()),
+                    name: each.name.clone(),
+                    created_us: store::header(each).map_or(0, |header| header.created_us),
+                    size: store::size(each),
+                    active: active.contains(&each.name.as_str()),
+                })
+                .collect();
+            for name in retention::vacuum(&self.classes, &kept, now, limit) {
+                let _ = sys::unlinkat(dir, name.as_bytes());
+            }
+        }
     }
 }
 
-/// Remove the oldest segments while the store holds more than [`STORE_MAX`],
-/// never `keep`, the one being written.
-fn vacuum(dir: usize, keep: &str) {
-    let dirs = [Dir { fd: dir }];
-    let segments = store::all_segments(&dirs);
-    let sizes: Vec<usize> = segments
-        .iter()
-        .map(|each| {
-            sys::openat(dir, each.name.as_bytes(), sys::O_RDONLY | sys::O_CLOEXEC, 0).map_or(
-                0,
-                |fd| {
-                    let size = sys::lseek(fd, 0, sys::SEEK_END).unwrap_or(0);
-                    sys::close(fd);
-                    size
-                },
-            )
-        })
-        .collect();
-    let mut total: usize = sizes.iter().sum();
-    for (each, size) in segments.iter().zip(sizes) {
-        if total <= STORE_MAX {
-            break;
-        }
-        if each.name == keep {
-            continue;
-        }
-        if sys::unlinkat(dir, each.name.as_bytes()).is_ok() {
-            total -= size;
-        }
+/// Cut a torn tail off `segment` at `good`, and say so.
+fn cut(segment: &store::Segment, good: usize, length: usize, said: &mut Vec<Record>) {
+    if let Ok(fd) = sys::openat(
+        segment.dir,
+        segment.name.as_bytes(),
+        sys::O_WRONLY | sys::O_CLOEXEC,
+        0,
+    ) {
+        let _ = sys::ftruncate(fd, good);
+        let _ = sys::fdatasync(fd);
+        sys::close(fd);
     }
+    said.push(ingest::own(
+        4,
+        ingest::MESSAGE_ID_TORN,
+        &alloc::format!(
+            "segment {}: {} byte(s) of a torn record cut away",
+            segment.name,
+            length - good
+        ),
+        clocks(),
+    ));
 }

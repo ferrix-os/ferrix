@@ -201,6 +201,21 @@ pub fn scan(bytes: &[u8], from: usize) -> Option<Scanned> {
     })
 }
 
+/// The whole entries at the start of `bytes`, a segment's bytes from some
+/// entry's first byte on (what a follower reads past the last it saw), and
+/// how many bytes they take. The records have no boot or host: the caller
+/// knows the segment's header.
+#[must_use]
+pub fn entries(bytes: &[u8]) -> (Vec<Record>, usize) {
+    let mut records = Vec::new();
+    let mut at = 0;
+    while let Some((record, length)) = entry_at(bytes, at) {
+        records.push(record);
+        at += length;
+    }
+    (records, at)
+}
+
 /// The entry at `at`, and its length, if it is whole and its checksum holds.
 #[must_use]
 pub fn entry_at(bytes: &[u8], at: usize) -> Option<(Record, usize)> {
@@ -254,11 +269,13 @@ fn u64_at(bytes: &[u8], at: usize) -> Option<u64> {
     array(bytes, at).map(u64::from_le_bytes)
 }
 
-/// A segment's file name: `system@<boot>-<first seqnum>.fxj`, both in hex,
-/// so names sort by boot and then by sequence within it.
+/// A segment's file name: `<class>@<boot>-<first seqnum>.fxj`, the boot
+/// and the number in hex, so a class's names sort by boot and then by
+/// sequence within it.
 #[must_use]
-pub fn file_name(boot_id: &[u8; 16], first_seqnum: u64) -> String {
-    let mut name = String::from("system@");
+pub fn file_name(class: &str, boot_id: &[u8; 16], first_seqnum: u64) -> String {
+    let mut name = String::from(class);
+    name.push('@');
     push_hex(&mut name, boot_id);
     name.push('-');
     name.push_str(&alloc::format!("{first_seqnum:016x}"));
@@ -269,7 +286,15 @@ pub fn file_name(boot_id: &[u8; 16], first_seqnum: u64) -> String {
 /// Whether `name` is a segment's file name.
 #[must_use]
 pub fn is_segment_name(name: &str) -> bool {
-    name.starts_with("system@") && name.ends_with(".fxj")
+    class_of_name(name).is_some() && name.ends_with(".fxj")
+}
+
+/// The class a segment's file name says.
+#[must_use]
+pub fn class_of_name(name: &str) -> Option<&str> {
+    name.split_once('@')
+        .map(|(class, _)| class)
+        .filter(|class| !class.is_empty() && !class.starts_with('.'))
 }
 
 /// The first sequence number a segment's file name says, for ordering
@@ -279,6 +304,24 @@ pub fn seqnum_of_name(name: &str) -> Option<u64> {
     let stem = name.strip_suffix(".fxj")?;
     let (_, hex) = stem.rsplit_once('-')?;
     u64::from_str_radix(hex, 16).ok()
+}
+
+/// A segment's bytes again without the records `remove` picks: its header
+/// and every other good record, re-encoded, and how many were removed. A
+/// torn tail is not carried over. `None` for bytes with no header.
+#[must_use]
+pub fn rewrite(bytes: &[u8], remove: impl Fn(&Record) -> bool) -> Option<(Vec<u8>, usize)> {
+    let scanned = scan(bytes, 0)?;
+    let mut out = scanned.header.encode();
+    let mut removed = 0;
+    for found in &scanned.records {
+        if remove(&found.record) {
+            removed += 1;
+        } else {
+            encode_record(&found.record, &mut out);
+        }
+    }
+    Some((out, removed))
 }
 
 /// `bytes` in lower-case hex, appended to `out`.
