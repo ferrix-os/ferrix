@@ -177,3 +177,20 @@ fn a_zone_of_zero_moves_for_a_bar_that_came_later() {
     assert_eq!(placed[1].rect, Rect::new(0, 0, 1024, 30));
     assert_eq!(reserved.top, 30);
 }
+
+/// A zone of −1 is not moved for a bar: a wallpaper anchored to every edge
+/// is the whole monitor under the bar, as swaybg's is on wlroots.
+#[test]
+fn a_zone_of_minus_one_covers_the_monitor_whatever_came_first() {
+    let wallpaper = Request {
+        top: true,
+        bottom: true,
+        left: true,
+        right: true,
+        exclusive_zone: -1,
+        ..Request::default()
+    };
+    let (placed, reserved) = place(MONITOR, &[bar(30, 30), wallpaper]);
+    assert_eq!(placed[1].rect, MONITOR);
+    assert_eq!(reserved.top, 30);
+}

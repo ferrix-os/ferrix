@@ -60,7 +60,8 @@ pub struct Placement {
 ///
 /// A surface with a zone of 0 is placed after all the others, in what every
 /// zone left, as wlroots' arrangement does in its second pass: a
-/// notification banner that came before the bar still sits under it.
+/// notification banner that came before the bar still sits under it. One
+/// with a zone of −1 is placed on the whole monitor.
 #[must_use]
 pub fn place(monitor: Rect, requests: &[Request]) -> (Vec<Placement>, Gaps) {
     let mut usable = monitor;
@@ -70,9 +71,13 @@ pub fn place(monitor: Rect, requests: &[Request]) -> (Vec<Placement>, Gaps) {
         if request.exclusive_zone == 0 {
             continue;
         }
-        let placement = one(usable, *request);
-        // A zone of −1 asks to be left out: the surface is placed in the
-        // area that is left and takes nothing away from it.
+        // A zone of −1 asks not to be moved for anybody's zone: the
+        // protocol's "will not be moved to accommodate for other surfaces'
+        // exclusive zones". It is placed on the whole monitor -- a
+        // wallpaper goes under the bar, not below it -- and takes nothing
+        // away from anybody.
+        let within = if request.exclusive_zone < 0 { monitor } else { usable };
+        let placement = one(within, *request);
         usable = shrink(usable, placement.reserved);
         total = add(total, placement.reserved);
         *slot = Some(placement);
