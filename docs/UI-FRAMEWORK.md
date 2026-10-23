@@ -981,6 +981,14 @@ more.
   it scrolls by its user and says `moved`, rather than Qt's attached
   `ScrollBar.vertical`; a `SplitView`'s `orientation` is chosen once,
   when it is made. 77 host tests.
-* Next: U7, `Shape` and `Canvas` with Rust painters and a chart demo;
-  then U8, the lode viewer ported, with the window's `test-compositor`
-  row where it first runs on Ferrix.
+* **U7 built** (2026-10-23): `Canvas`, painted by a Rust function given
+  through its `painter` property and handed a `Painter` in the canvas's
+  own coordinates (rectangles, paths, lines, text), painted again at the
+  next frame after a change or `Ui::update_canvas`; and `Shape`, of
+  `ShapePath`s written in the markup (`PathMove`, `PathLine`,
+  `PathQuad`, `PathCubic`), bound like any property. A `charts` demo: a
+  histogram, a sparkline and an area as painters, and three figures as
+  shapes. Departure: a `ShapePath` closes by `closed: true`, where Qt
+  closes one that ends where it began. 80 host tests.
+* Next: U8, the lode viewer ported, with the window's
+  `test-compositor` row where it first runs on Ferrix.
