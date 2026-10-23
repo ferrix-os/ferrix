@@ -567,12 +567,13 @@ pub struct ReturnPath {
     /// `rt_sigreturn` when the flag is set.
     pub sigreturn: fn(&mut arch::UserContext, bool),
     /// Force a signal on the running program for a fault it took: the
-    /// signal number, its `si_code`, and the faulting address.
+    /// signal number, its `si_code`, the faulting address, and the program
+    /// counter it faulted at, which the personality names the module of.
     ///
     /// The second upcall the core owed an interface for. A fault becoming a
     /// `SIGSEGV` is the personality's policy, but deciding that a fault *is*
     /// the program's problem is the trap path's, and the trap path is core.
-    pub fault_signal: fn(u32, i32, u64) -> FaultOutcome,
+    pub fault_signal: fn(u32, i32, u64, u64) -> FaultOutcome,
 }
 
 /// The registered return path, or null until the personality registers one.
@@ -652,7 +653,7 @@ fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): 
     // the personality's return path open them from this same dispatch; they
     // are masked again before anything else here runs.
     arch::enable_interrupts();
-    let outcome = (path.fault_signal)(signal, code, address);
+    let outcome = (path.fault_signal)(signal, code, address, frame.instruction_pointer());
     arch::disable_interrupts();
     match outcome {
         FaultOutcome::NoProcess => fatal(

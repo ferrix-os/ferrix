@@ -36,6 +36,7 @@ COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
 lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
 lode upload-stub PORT FILE           a collector on 127.0.0.1:PORT that keeps what it is sent (a test peer)
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
+lode fault-stub                      read address 0 and be ended by the kernel (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 lode levels [-b ...] [filters]       records with no level, and with a guessed one, per source
 lode top [-b ...] [-n ROWS] [filters]
@@ -187,6 +188,7 @@ pub(crate) fn run() -> i32 {
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
         Some("alerts") => return crate::top::alerts(),
+        Some("fault-stub") => sys::fault_now(),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("upload-stub") => return crate::upload::stub(rest.get(1..).unwrap_or_default()),
         Some("levels") => {

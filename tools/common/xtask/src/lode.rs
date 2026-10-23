@@ -312,6 +312,11 @@ say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
 # on a generated store and on this one.
 say "bench: $(/bin/lode bench 200000 /tmp/lode-bench)"
 say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
+# A crash names its process (the kernel's identity line): its name, the
+# path it was started from, where its pc was, its command line.
+/bin/lode fault-stub > /dev/null 2>&1
+$bb sleep 1
+say "crash: $(/bin/lode -b --where 'crash = "*"' -o json | $bb grep '"CRASH_CMDLINE":"/bin/lode fault-stub"' | $bb grep '"CRASH_EXE":"/sbin/lode"' | $bb grep -c '"CRASH_MODULE":"/sbin/lode+0x')"
 # Alerts and top (step 3): the noisy flood above fired `flood` once, to
 # `lode alerts`; a crit line started a unit that lets lode start it; a unit
 # that does not was refused, and said so.
@@ -610,6 +615,12 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
             "--sync, --flush, --rotate or --disk-usage did not answer as journalctl does",
         ),
         (
+            "lode-test: crash:",
+            "1",
+            "a crash record did not name its process: CRASH_EXE, CRASH_MODULE and CRASH_CMDLINE \
+             from the kernel's identity line",
+        ),
+        (
             "lode-test: alerts:",
             "1 1 1 1",
             "a flood alert was not said once to `lode alerts` and in the log, a start alert did not \
@@ -799,6 +810,7 @@ lode-test: jctl: 1 1 2 0 2 2 1 1
 lode-test: jctl admin: synced flushed rotated 1
 lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
+lode-test: crash: 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1
 lode-test: live: 2

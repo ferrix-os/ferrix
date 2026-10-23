@@ -788,6 +788,57 @@ pub(super) fn cmdline(process: &Process) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Who a process that a fault ended was, for the line the kernel log says
+/// beside the core's `ended by signal` (`docs/LOGGING.md` §18, crash
+/// records): its name, the path it was started from (` (deleted)` as
+/// `/proc/<pid>/exe` shows it), the file mapping `pc` is in with `pc`'s
+/// offset into that file, and its command line, arguments joined by spaces
+/// and cut at 512 bytes, each field with its control bytes as spaces. Read
+/// while the faulting thread still runs in the process, so its address
+/// space is all there: after the end, nothing is.
+pub(super) fn crash_identity(process: &Process, pc: u64) -> Vec<u8> {
+    // Every field is said with its control bytes as spaces: a name or a
+    // path can hold a newline, and the line must stay one line.
+    let clean = |out: &mut Vec<u8>, bytes: &[u8]| {
+        out.extend(bytes.iter().map(|&byte| {
+            if byte < 0x20 || byte == 0x7f {
+                b' '
+            } else {
+                byte
+            }
+        }));
+    };
+    let mut out = Vec::new();
+    clean(
+        &mut out,
+        &attributes::name_bytes(&attributes::name_of(process)),
+    );
+    out.extend_from_slice(b" exe ");
+    clean(
+        &mut out,
+        &exe(process).unwrap_or_else(|_| Vec::from(&b"?"[..])),
+    );
+    out.extend_from_slice(b" at ");
+    let root = process.fs_context().lock().root.clone();
+    let module = process.space().regions().ok().and_then(|regions| {
+        let region = regions.into_iter().find(|region| holds(region, pc))?;
+        let (id, offset) = region.file?;
+        let file = process
+            .space()
+            .mapped_file(id)?
+            .downcast::<OpenFile>()
+            .ok()?;
+        let mut name = located(file.location(), &root);
+        let into = pc.saturating_sub(region.start).saturating_add(offset);
+        name.extend_from_slice(alloc::format!("+{into:#x}").as_bytes());
+        Some(name)
+    });
+    clean(&mut out, module.as_deref().unwrap_or(b"?"));
+    out.extend_from_slice(b" cmdline ");
+    clean(&mut out, &process.args_prefix(512));
+    out
+}
+
 /// `/proc/<pid>/cgroup`: the one line of the unified hierarchy, `0::/path`,
 /// naming the cgroup -- the job -- the process is in, as the reader's cgroup
 /// namespace sees it: relative to that namespace's root, and climbing out of

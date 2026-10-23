@@ -103,14 +103,31 @@ static RETURN_PATH: crate::trap::ReturnPath = crate::trap::ReturnPath {
 ///
 /// The core decides a fault is the program's problem; this decides what that
 /// means. `Posted` and `Origin` stay on this side of the interface.
-fn fault_signal(signal: u32, code: i32, address: u64) -> crate::trap::FaultOutcome {
+///
+/// A fault that ends the process is said in the kernel log first with who
+/// the process was -- `  signal   pid N is NAME exe PATH at FILE+OFFSET
+/// cmdline ...` -- read while this thread still runs in it, since the core's
+/// `ended by signal` line follows the end, when the pid may be gone and its
+/// name with it (`docs/LOGGING.md` §18, crash records).
+fn fault_signal(signal: u32, code: i32, address: u64, pc: u64) -> crate::trap::FaultOutcome {
     use crate::trap::FaultOutcome;
 
     match force(signal, Origin::Fault { code, address }) {
         None => FaultOutcome::NoProcess,
-        Some(Posted::Fatal) => FaultOutcome::Ended {
-            pid: process::current().map_or(0, |process| process.pid()),
-        },
+        Some(Posted::Fatal) => {
+            let current = process::current();
+            if let Some(process) = &current {
+                let who = crate::fs::procfs::crash_identity(process, pc);
+                crate::println!(
+                    "  signal   pid {} is {}",
+                    process.pid(),
+                    alloc::string::String::from_utf8_lossy(&who)
+                );
+            }
+            FaultOutcome::Ended {
+                pid: current.map_or(0, |process| process.pid()),
+            }
+        }
         Some(Posted::Discarded | Posted::Pending) => FaultOutcome::Delivered,
     }
 }

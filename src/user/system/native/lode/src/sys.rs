@@ -792,3 +792,12 @@ pub(crate) fn tcp_listen(port: u16) -> Result<usize, Errno> {
 pub(crate) fn accept_blocking(listener: usize) -> Result<usize, Errno> {
     ferrix_rt::linux::accept4(listener, O_CLOEXEC)
 }
+
+/// Take a fault on purpose: a read of address 0, which no program maps.
+/// For `lode fault-stub`, the crash `test-log` names.
+pub(crate) fn fault_now() -> ! {
+    // SAFETY: deliberately unsound: the read faults, and the kernel ends
+    // the process with SIGSEGV before anything reads the value.
+    let _ = unsafe { core::ptr::read_volatile(core::ptr::null::<u8>()) };
+    ferrix_rt::exit(1)
+}

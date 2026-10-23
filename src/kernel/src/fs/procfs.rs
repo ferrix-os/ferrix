@@ -83,6 +83,11 @@ pub(crate) fn status_text(process: &Process) -> Option<Vec<u8>> {
     render::status(process).ok()
 }
 
+/// Who `process`, ended by a fault at `pc`, was: `render::crash_identity`.
+pub(crate) fn crash_identity(process: &Process, pc: u64) -> Vec<u8> {
+    render::crash_identity(process, pc)
+}
+
 mod debug;
 pub(crate) mod loadavg;
 mod render;

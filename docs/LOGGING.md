@@ -1996,6 +1996,45 @@ The third of the three steps the customer approved after §20's audit
 * Not yet: `capture` as an alert action; alerts from summaries rather than
   arriving records. Kernel lines: 0.
 
+### Crash records name their process, as built (2026-10-23)
+
+The first of the customer's gap items: the N150's crash records said only
+a pid and a pc (`signal pid 27915 ended by signal 5 at 0x0, pc
+0x7ffff57601a1: Breakpoint`), because lode read `/proc/<pid>` after the
+process was gone and its pid could be reused.
+
+* **The kernel says who it was, while it still is.** When a fault ends a
+  process, the Linux personality (`syscall/deliver.rs`, load ring) writes
+  a line just before the core's `ended by signal`: `  signal   pid N is
+  NAME exe PATH at FILE+OFFSET cmdline ARGS` -- the name, the path it was
+  started from as `/proc/<pid>/exe` gives it (` (deleted)` kept), the file
+  mapping the program counter is in with the pc's offset into that file
+  (`libcef.so+0x1a01a1`, `?` for anonymous memory), and the arguments
+  joined by spaces, at most 512 bytes copied (`procfs::crash_identity`).
+  Every field has its control bytes as spaces, so a name or path cannot
+  split the line. The core passes the faulting pc to the personality's
+  `fault_signal` (`trap.rs`, its one call). Kernel lines: 66 added and 7
+  changed in the first form (3 of them in the core), plus a bounded
+  argument copy (`Process::args_prefix`) after the consultant's review,
+  ledger line 3460.
+* **lode joins the two lines**: it keeps the identity line per pid and
+  gives the crash record that follows `CRASH_COMM`, `CRASH_EXE`,
+  `CRASH_MODULE`, `CRASH_CMDLINE` and `CRASH_PROGRAM`. `/proc` stays the
+  fallback for a kernel without the line.
+* **Privacy.** A command line can carry a secret (a token, a password on
+  the command line). It now sits in the kernel log, which only privileged
+  readers may read (`dmesg_restrict`), on the serial console (physical
+  access), and in lode's system segments (`lode:adm 0640`), as
+  systemd-coredump keeps `COREDUMP_CMDLINE` for the same readers. §12.3's
+  rule that `_CMDLINE` is not recorded is the customer's to change for
+  ordinary records (the name-and-path item); for crashes it is changed
+  here, at the customer's order of 2026-10-23.
+* `test-log`: `lode fault-stub`, a read of address 0, is recorded with
+  `CRASH_EXE=/sbin/lode`, `CRASH_MODULE=/sbin/lode+0x...` and its command
+  line ("crash" row). Boots on every architecture show the line for the
+  kernel's own fault checks (`pid 258 is mprotect exe /mprotect at ?
+  cmdline /mprotect`, AArch64).
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

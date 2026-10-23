@@ -2158,3 +2158,26 @@ fn every_named_field_is_named_once_and_the_rest_are_other() {
     assert_eq!(named("SOMETHING_ELSE"), None);
     assert_eq!(order_of("SOMETHING_ELSE"), NAMES.len());
 }
+
+#[test]
+fn the_kernels_identity_line_names_a_crashed_process() {
+    let who = console::identity(
+        b"  signal   pid 4284 is steamwebhelper exe /home/ferrix/steam/steamwebhelper (deleted) at /home/ferrix/steam/libcef.so+0x1a01a1 cmdline ./steamwebhelper --type=gpu-process",
+    )
+    .unwrap();
+    assert_eq!(who.pid, 4284);
+    assert_eq!(who.comm, "steamwebhelper");
+    assert_eq!(who.exe, "/home/ferrix/steam/steamwebhelper (deleted)");
+    assert_eq!(
+        who.module.as_deref(),
+        Some("/home/ferrix/steam/libcef.so+0x1a01a1")
+    );
+    assert_eq!(who.cmdline, "./steamwebhelper --type=gpu-process");
+    let anonymous = console::identity(b"  signal   pid 9 is a.out exe ? at ? cmdline ").unwrap();
+    assert_eq!(anonymous.module, None);
+    assert!(
+        console::identity(b"  signal   pid 9 ended by signal 11 at 0x0, pc 0x1: Fault").is_none()
+    );
+    // Neither is it a crash line.
+    assert!(console::crash(b"  signal   pid 9 is a.out exe ? at ? cmdline ").is_none());
+}

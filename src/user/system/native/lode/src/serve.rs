@@ -23,13 +23,13 @@ use alloc::vec::Vec;
 use ferrix_lode_core::alert::{self, Alert, Alerts};
 use ferrix_lode_core::compress::{self, Compressor};
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
-use ferrix_lode_core::kmsg;
 use ferrix_lode_core::limit::{self, Limiter, Rule};
 use ferrix_lode_core::record::Record;
 use ferrix_lode_core::retention::{self, Class, DAY_US, Kept};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::time::Zone;
 use ferrix_lode_core::{access, units};
+use ferrix_lode_core::{console, kmsg};
 use ferrix_native_abi::directory::{MAX_MESSAGE, Message};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
@@ -237,6 +237,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         control,
         alerts: Alerts::new(alerts),
         alerting,
+        identities: alloc::collections::VecDeque::new(),
     };
     service.serve(channel, restarted)
 }
@@ -269,6 +270,9 @@ struct Service {
     alerts: Alerts,
     /// Their actions.
     alerting: Alerting,
+    /// Who the processes a fault ended were, as the kernel said, until
+    /// their crash records come.
+    identities: alloc::collections::VecDeque<console::Identity>,
 }
 
 /// The rules and the retention classes, with a record for each file that
@@ -459,6 +463,25 @@ impl Service {
         self.limiter.admit(record, now.monotonic_us, batch);
     }
 
+    /// Keep the kernel's identity line in `text`, if it is one, for the
+    /// crash record that follows it.
+    fn remember_identity(&mut self, text: &[u8]) {
+        let Some(who) = console::identity(text) else {
+            return;
+        };
+        if self.identities.len() >= 64 {
+            let _ = self.identities.pop_front();
+        }
+        self.identities.push_back(who);
+    }
+
+    /// The identity kept for the crash record `record`, taken.
+    fn identity_of(&mut self, record: &Record) -> Option<console::Identity> {
+        let pid: u32 = record.get_str("CRASH_PID")?.parse().ok()?;
+        let at = self.identities.iter().rposition(|who| who.pid == pid)?;
+        self.identities.remove(at)
+    }
+
     /// Stamp and admit records that did not come from the kernel log.
     fn admit_all(&mut self, records: Vec<Record>, now: Now, batch: &mut Vec<Record>) {
         for mut record in records {
@@ -527,6 +550,11 @@ impl Service {
                     *first_start = false;
                     rotate |= record.get("SYSLOG_IDENTIFIER") == Some(ROTATE)
                         && record.get("_TRANSPORT") == Some(b"console");
+                    // Who a fault ended, said just before its end: kept for
+                    // the crash record that follows.
+                    if record.get("_TRANSPORT") == Some(b"kernel") {
+                        self.remember_identity(&kernel.text);
+                    }
                     if units::is_unit_copy(&record) {
                         let mut paired = self.pair(record, now, batch);
                         self.seat.stamp(&mut paired);
@@ -537,7 +565,8 @@ impl Service {
                     if record.get("_TRANSPORT") == Some(b"kernel")
                         && record.get("CRASH_PID").is_some()
                     {
-                        batch.push(with_program(record));
+                        let known = self.identity_of(&record);
+                        batch.push(with_program(record, known));
                     } else {
                         self.admit(record, now, batch);
                     }
@@ -557,9 +586,24 @@ impl Service {
     }
 }
 
-/// A crash record with the program's name and file, read while the ended
-/// process may still be there to read them from.
-fn with_program(mut record: Record) -> Record {
+/// A crash record with who the process was: from the kernel's identity
+/// line, read while the process still ran (its name, the path it was
+/// started from, the file and offset of the program counter, its command
+/// line), else from `/proc` if the process is still there to read.
+fn with_program(mut record: Record, known: Option<console::Identity>) -> Record {
+    if let Some(who) = known {
+        record.push("CRASH_COMM", who.comm.as_bytes());
+        record.push("CRASH_EXE", who.exe.as_bytes());
+        if let Some(module) = &who.module {
+            record.push("CRASH_MODULE", module.as_bytes());
+        }
+        if !who.cmdline.is_empty() {
+            record.push("CRASH_CMDLINE", who.cmdline.as_bytes());
+        }
+        let program = who.exe.split(" (deleted)").next().unwrap_or_default();
+        record.push("CRASH_PROGRAM", program.as_bytes());
+        return record;
+    }
     let Some(pid) = record.get_str("CRASH_PID").map(String::from) else {
         return record;
     };

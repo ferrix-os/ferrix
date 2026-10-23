@@ -280,6 +280,46 @@ pub fn crash(line: &[u8]) -> Option<Crash> {
     })
 }
 
+/// Who a process a fault ended was, as the kernel says it just before the
+/// `ended by signal` line (`syscall/deliver.rs`): `  signal   pid P is NAME
+/// exe PATH at FILE+OFFSET cmdline ARGS`, each `?` when unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// The pid.
+    pub pid: u32,
+    /// Its name (`comm`).
+    pub comm: String,
+    /// The path it was started from, `(deleted)` kept.
+    pub exe: String,
+    /// The file the program counter was in, and the offset into it.
+    pub module: Option<String>,
+    /// The command line, arguments joined by spaces.
+    pub cmdline: String,
+}
+
+/// Read the kernel's identity line for a process a fault ended.
+#[must_use]
+pub fn identity(line: &[u8]) -> Option<Identity> {
+    let (word, rest) = padded_word(line)?;
+    if word != "signal" {
+        return None;
+    }
+    let text = core::str::from_utf8(rest).ok()?;
+    let rest = text.strip_prefix("pid ")?;
+    let (pid, rest) = rest.split_once(" is ")?;
+    let pid: u32 = pid.parse().ok()?;
+    let (head, cmdline) = rest.rsplit_once(" cmdline ").unwrap_or((rest, ""));
+    let (head, module) = head.rsplit_once(" at ")?;
+    let (comm, exe) = head.split_once(" exe ")?;
+    Some(Identity {
+        pid,
+        comm: String::from(comm),
+        exe: String::from(exe),
+        module: (module != "?").then(|| String::from(module)),
+        cmdline: String::from(cmdline.trim_end()),
+    })
+}
+
 /// A signal number's name, Linux's numbering, the same on every
 /// architecture Ferrix builds for for these.
 fn signal_name(number: &str) -> String {

@@ -693,6 +693,34 @@ impl Process {
         self.identity.lock().args.clone()
     }
 
+    /// Its arguments joined by spaces, at most `limit` bytes, copied under
+    /// the lock without copying the rest: what a crash's line in the kernel
+    /// log says of it (`fs::procfs::crash_identity`).
+    pub(crate) fn args_prefix(&self, limit: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        // All the room it can need, asked for before the lock and allowed to
+        // fail: a crash's line then says no arguments rather than stopping.
+        if out.try_reserve_exact(limit).is_err() {
+            return out;
+        }
+        let identity = self.identity.lock();
+        for (index, arg) in identity.args.iter().enumerate() {
+            if out.len() >= limit {
+                break;
+            }
+            if index > 0 {
+                // NOALLOC: into the room reserved above; `out` never grows
+                // past `limit`, checked before each push.
+                out.push(b' ');
+            }
+            let room = limit.saturating_sub(out.len());
+            // NOALLOC: into the room reserved above, at most `room` bytes.
+            out.extend_from_slice(arg.get(..arg.len().min(room)).unwrap_or_default());
+        }
+        out.truncate(limit);
+        out
+    }
+
     /// Where its environment strings are in its memory: the first byte and
     /// one past the last, empty for none.
     pub(crate) fn env_range(&self) -> (u64, u64) {
