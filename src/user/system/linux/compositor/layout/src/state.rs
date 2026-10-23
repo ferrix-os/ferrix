@@ -171,7 +171,9 @@ enum Tiling {
 impl Tiling {
     fn new(layout: Layout) -> Self {
         match layout {
-            Layout::Dwindle => Self::Dwindle(Dwindle::default()),
+            // A floating workspace's windows tiled by hand go in a dwindle
+            // tree, the default layout's.
+            Layout::Dwindle | Layout::Floating => Self::Dwindle(Dwindle::default()),
             Layout::Master => Self::Master(Master::default()),
             Layout::Monocle => Self::Monocle(Monocle::default()),
             Layout::Scrolling => Self::Scrolling(Scrolling::default()),
@@ -539,6 +541,11 @@ impl Group {
 /// −2.
 const SPECIAL_START: i64 = -99;
 
+/// How far down and right [`State::new_floating_place`] moves a new floating
+/// window off another's top-left corner: about a title bar's height, as
+/// mutter cascades.
+pub const CASCADE: i64 = 32;
+
 impl State {
     /// No monitors and no windows.
     #[must_use]
@@ -622,10 +629,12 @@ impl State {
             settings.border_size = size.max(0);
         }
         if let Some(layout) = &rule.layout {
-            settings.layout = if layout.eq_ignore_ascii_case("master") {
-                Layout::Master
-            } else {
-                Layout::Dwindle
+            // Master and floating per workspace; monocle and scrolling stay
+            // dwindle there as before, since their messages and directions
+            // are read from `general:layout` and not per workspace yet.
+            settings.layout = match Layout::named(layout) {
+                Layout::Monocle | Layout::Scrolling => Layout::Dwindle,
+                named => named,
             };
         }
         // `layoutopt:<name>:<value>`: one of the layout's own options for
@@ -813,6 +822,88 @@ impl State {
         self.workspace_of(window)
             .and_then(|workspace| self.workspaces.get(&workspace))
             .is_some_and(|ws| ws.floating.contains(&window))
+    }
+
+    /// Whether `window`'s workspace is one whose new windows float: its
+    /// layout, `general:layout` or its own `layout:`, is `floating`.
+    #[must_use]
+    pub fn floats_new_windows(&self, window: WindowId) -> bool {
+        self.workspace_of(window)
+            .is_some_and(|workspace| self.settings_at(workspace).layout.floats_new_windows())
+    }
+
+    /// The area a floating window on `window`'s workspace is kept in: its
+    /// monitor less the bars' strips and `general:float_gaps`, in layout
+    /// coordinates.
+    #[must_use]
+    pub fn float_area(&self, window: WindowId) -> Option<Rect> {
+        self.workspace_of(window)
+            .map(|workspace| self.float_work_area_of(workspace))
+            .filter(|area| area.width > 0 && area.height > 0)
+    }
+
+    /// Where a new floating window of `size` goes on `window`'s workspace,
+    /// as a floating window manager places one (mutter's `center` and
+    /// cascade): the size kept inside [`State::float_area`], centred over
+    /// `over` -- its parent -- or over that area, and moved down and right
+    /// by [`CASCADE`] while another floating window of the workspace already
+    /// has that top-left corner, so that two windows of one program do not
+    /// open exactly over each other. Kept inside the area throughout.
+    #[must_use]
+    pub fn new_floating_place(
+        &self,
+        window: WindowId,
+        size: (i64, i64),
+        over: Option<Rect>,
+    ) -> Option<Rect> {
+        let area = self.float_area(window)?;
+        let workspace = self.workspace_of(window)?;
+        let width = size.0.clamp(1, area.width);
+        let height = size.1.clamp(1, area.height);
+        let centre = over.unwrap_or(area);
+        let fit = |x: i64, y: i64| {
+            (
+                x.clamp(area.x, area.right().saturating_sub(width)),
+                y.clamp(area.y, area.bottom().saturating_sub(height)),
+            )
+        };
+        let (mut x, mut y) = fit(
+            centre
+                .x
+                .saturating_add(centre.width.saturating_sub(width) / 2),
+            centre
+                .y
+                .saturating_add(centre.height.saturating_sub(height) / 2),
+        );
+        let (ox, oy) = self.origin(workspace);
+        let taken: Vec<(i64, i64)> = self
+            .workspaces
+            .get(&workspace)
+            .map(|ws| {
+                ws.floating
+                    .iter()
+                    .filter(|id| **id != window)
+                    .filter_map(|id| self.floating_rects.get(id))
+                    .map(|rect| (rect.x.saturating_add(ox), rect.y.saturating_add(oy)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // At most one step a window, so a full screen of them ends.
+        for _ in 0..=taken.len() {
+            if !taken.contains(&(x, y)) {
+                break;
+            }
+            let (next_x, next_y) = (x.saturating_add(CASCADE), y.saturating_add(CASCADE));
+            (x, y) = if next_x.saturating_add(width) > area.right()
+                || next_y.saturating_add(height) > area.bottom()
+            {
+                // Off the area's corner: start again at its top left.
+                (area.x, area.y)
+            } else {
+                (next_x, next_y)
+            };
+        }
+        Some(Rect::new(x, y, width, height))
     }
 
     /// A workspace's fullscreen window and its mode.
@@ -3334,7 +3425,7 @@ impl State {
         };
         let rest: Vec<&str> = words.collect();
         match self.settings.layout {
-            Layout::Dwindle => self.dwindle_message(word, &rest),
+            Layout::Dwindle | Layout::Floating => self.dwindle_message(word, &rest),
             Layout::Master => self.master_message(word, &rest),
             // Monocle's own messages are `cyclenext` and `cycleprev`,
             // which are the dispatcher of the same name and belong to no

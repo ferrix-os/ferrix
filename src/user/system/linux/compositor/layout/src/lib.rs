@@ -59,7 +59,7 @@ pub use settings::{
     DwindleSettings, ForceSplit, Layout, MasterSettings, NewStatus, Orientation, Settings,
     SnapSettings,
 };
-pub use state::{Change, Group, Listed, MonitorLayout, Placed, State};
+pub use state::{CASCADE, Change, Group, Listed, MonitorLayout, Placed, State};
 
 /// A window, by the id the protocol server gave it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

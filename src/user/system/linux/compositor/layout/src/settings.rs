@@ -19,6 +19,38 @@ pub enum Layout {
     Monocle,
     /// `scrolling`: a tape of columns wider than the screen.
     Scrolling,
+    /// `floating`, hyprix's own: every new window floats, as in a floating
+    /// window manager (`docs/DESKTOP.md` §1). A window tiled by hand
+    /// (`settiled`, `togglefloating`) tiles in a dwindle tree, so tiling
+    /// stays available on the same workspace.
+    Floating,
+}
+
+impl Layout {
+    /// The layout a `general:layout` or a workspace's `layout:` names, by
+    /// the name Hyprland's are written with; an unknown name is dwindle,
+    /// as Hyprland falls back to it.
+    #[must_use]
+    pub fn named(name: &str) -> Self {
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("master") {
+            Self::Master
+        } else if name.eq_ignore_ascii_case("monocle") {
+            Self::Monocle
+        } else if name.eq_ignore_ascii_case("scrolling") {
+            Self::Scrolling
+        } else if name.eq_ignore_ascii_case("floating") {
+            Self::Floating
+        } else {
+            Self::Dwindle
+        }
+    }
+
+    /// Whether a new window on a workspace in this layout floats.
+    #[must_use]
+    pub const fn floats_new_windows(self) -> bool {
+        matches!(self, Self::Floating)
+    }
 }
 
 /// How a column is brought into view: `scrolling:focus_fit_method`.
@@ -366,12 +398,9 @@ impl Settings {
     /// Read the options from `config`.
     #[must_use]
     pub fn from_config(config: &Config) -> Self {
-        let layout = match config.str("general:layout") {
-            Some(name) if name.eq_ignore_ascii_case("master") => Layout::Master,
-            Some(name) if name.eq_ignore_ascii_case("monocle") => Layout::Monocle,
-            Some(name) if name.eq_ignore_ascii_case("scrolling") => Layout::Scrolling,
-            _ => Layout::Dwindle,
-        };
+        let layout = config
+            .str("general:layout")
+            .map_or(Layout::Dwindle, Layout::named);
         let force_split = match config.int("dwindle:force_split") {
             Some(1) => ForceSplit::First,
             Some(2) => ForceSplit::Second,
@@ -437,7 +466,7 @@ impl Settings {
                     // Monocle has no scale factor of its own, and
                     // `dwindle`'s is the one Hyprland reads for a window
                     // whose layout does not offer one.
-                    Layout::Dwindle | Layout::Monocle | Layout::Scrolling => {
+                    Layout::Dwindle | Layout::Monocle | Layout::Scrolling | Layout::Floating => {
                         "dwindle:special_scale_factor"
                     }
                 }),

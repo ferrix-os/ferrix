@@ -2231,7 +2231,7 @@ fn configure_first(
     if floated {
         let _ = unsized_dialogs.insert(window);
         let focused = state.focused_window() == Some(window);
-        client.configure_toplevel(toplevel, 0, 0, &states(focused));
+        client.configure_toplevel(toplevel, 0, 0, &states(focused, true));
     } else {
         configure(client, state, toplevel, window);
     }
@@ -2253,7 +2253,11 @@ fn float_dialog(
     over: bool,
     state: &mut State,
 ) -> bool {
+    // On a workspace whose layout is `floating` every window is placed as a
+    // dialog is: it chooses its own size and is placed once it has drawn
+    // it (`docs/DESKTOP.md` §1.2).
     let dialog = over
+        || state.floats_new_windows(window)
         || client.toplevel(toplevel).is_some_and(|top| {
             let (min, max) = (top.min_size, top.max_size);
             top.parent.is_some() || (min.0 != 0 && min.1 != 0 && (min.0 == max.0 || min.1 == max.1))
@@ -2303,12 +2307,19 @@ fn fit_dialog(
     let Some((width, height)) = drawn_size(client, top.surface) else {
         return;
     };
-    let over = top
+    let parent = top
         .parent
         .and_then(|parent| windows.iter().find(|(object, _)| *object == parent))
-        .and_then(|(_, parent)| placed_rect(state, *parent))
-        .or_else(|| monitor_rect(state, window));
-    let Some(over) = over else {
+        .and_then(|(_, parent)| placed_rect(state, *parent));
+    // A floating workspace's window is placed as a floating window manager
+    // places one: inside the work area, centred, cascaded off the others.
+    if state.floats_new_windows(window) {
+        if let Some(rect) = state.new_floating_place(window, (width, height), parent) {
+            let _ = state.float_window(window, rect);
+        }
+        return;
+    }
+    let Some(over) = parent.or_else(|| monitor_rect(state, window)) else {
         return;
     };
     let rect = Rect::new(
@@ -6276,7 +6287,7 @@ fn place_layers(
 /// again: an unchanged size is a round trip a client does not need, and
 /// Hyprland does not send one either.
 fn reconfigure(slots: &mut [Slot], state: &State) {
-    let mut sizes: BTreeMap<WindowId, (i32, i32, bool)> = BTreeMap::new();
+    let mut sizes: BTreeMap<WindowId, (i32, i32, bool, bool)> = BTreeMap::new();
     for output in state.layout() {
         for placed in &output.windows {
             let _ = sizes.insert(
@@ -6285,6 +6296,7 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
                     i32::try_from(placed.rect.width).unwrap_or(0),
                     i32::try_from(placed.rect.height).unwrap_or(0),
                     placed.focused,
+                    placed.floating && !placed.fullscreen,
                 ),
             );
         }
@@ -6292,7 +6304,8 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
     for slot in slots.iter_mut() {
         let windows = slot.windows.clone();
         for (toplevel, window) in windows {
-            let Some((mut width, mut height, focused)) = sizes.get(&window).copied() else {
+            let Some((mut width, mut height, focused, floating)) = sizes.get(&window).copied()
+            else {
                 continue;
             };
             // A dialog still choosing its own size (`float_dialog`) is not
@@ -6304,7 +6317,7 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
             // The states as well as the size: a window that has just been
             // focused is the same size and a different state, and a client
             // that is not told has a title bar that never lights up.
-            let wanted = states(focused);
+            let wanted = states(focused, floating);
             let already = slot
                 .client
                 .toplevel(toplevel)
@@ -6318,14 +6331,22 @@ fn reconfigure(slots: &mut [Slot], state: &State) {
     }
 }
 
-/// The `xdg_toplevel` states a tiled window is in.
-fn states(focused: bool) -> Vec<u32> {
-    let mut states = vec![
-        xdg_shell::xdg_toplevel::state::TILED_LEFT,
-        xdg_shell::xdg_toplevel::state::TILED_RIGHT,
-        xdg_shell::xdg_toplevel::state::TILED_TOP,
-        xdg_shell::xdg_toplevel::state::TILED_BOTTOM,
-    ];
+/// The `xdg_toplevel` states a window is in: a tiled one is tiled on
+/// every edge, which tells a toolkit to square its corners and drop its
+/// shadow; a floating one is told no edge, so a client that draws its own
+/// frame draws it whole, rounded corners and shadow, as under a floating
+/// window manager (Hyprland's `setTiled(!floating)` says the same).
+fn states(focused: bool, floating: bool) -> Vec<u32> {
+    let mut states = if floating {
+        Vec::new()
+    } else {
+        vec![
+            xdg_shell::xdg_toplevel::state::TILED_LEFT,
+            xdg_shell::xdg_toplevel::state::TILED_RIGHT,
+            xdg_shell::xdg_toplevel::state::TILED_TOP,
+            xdg_shell::xdg_toplevel::state::TILED_BOTTOM,
+        ]
+    };
     if focused {
         states.push(xdg_shell::xdg_toplevel::state::ACTIVATED);
     }
@@ -6336,16 +6357,18 @@ fn states(focused: bool) -> Vec<u32> {
 fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: WindowId) {
     let mut width = 0;
     let mut height = 0;
+    let mut floating = false;
     for output in state.layout() {
         for placed in &output.windows {
             if placed.window == window {
                 width = i32::try_from(placed.rect.width).unwrap_or(0);
                 height = i32::try_from(placed.rect.height).unwrap_or(0);
+                floating = placed.floating && !placed.fullscreen;
             }
         }
     }
     let focused = state.focused_window() == Some(window);
-    client.configure_toplevel(toplevel, width, height, &states(focused));
+    client.configure_toplevel(toplevel, width, height, &states(focused, floating));
 }
 
 /// The globals the compositor offers. `dmabuf` is whether a client's GPU

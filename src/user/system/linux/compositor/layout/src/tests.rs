@@ -4346,3 +4346,105 @@ fn a_window_raised_over_a_fullscreen_one_is_drawn_over_it() {
     assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
     assert_eq!(focused(&state), Some(1));
 }
+
+// -- The floating layout (docs/DESKTOP.md §1) ---------------------------------
+
+/// `general:layout = floating` is read, and an unknown name is still
+/// dwindle.
+#[test]
+fn the_floating_layout_is_named_floating() {
+    assert_eq!(Layout::named("floating"), Layout::Floating);
+    assert_eq!(Layout::named(" Floating "), Layout::Floating);
+    assert_eq!(Layout::named("master"), Layout::Master);
+    assert_eq!(Layout::named("nonsense"), Layout::Dwindle);
+    let settings = Settings::from_config(&config("general:layout = floating\n"));
+    assert_eq!(settings.layout, Layout::Floating);
+    assert!(Layout::Floating.floats_new_windows());
+    assert!(!Layout::Dwindle.floats_new_windows());
+}
+
+/// A floating workspace says its windows float, a tiled one does not, and
+/// `layout:floating` makes one workspace floating among tiled ones.
+#[test]
+fn a_workspace_rule_makes_one_workspace_floating() {
+    let mut state = setup(BARE);
+    let rules = ["2, layout:floating"]
+        .iter()
+        .map(|line| compositor_config::WorkspaceRule::parse(line).expect("a rule"))
+        .collect();
+    let _changes = state.set_workspace_rules(rules);
+    open(&mut state, &[1]);
+    assert!(!state.floats_new_windows(WindowId(1)), "workspace 1 tiles");
+    let _moved = dispatch(&mut state, "movetoworkspace", "2");
+    assert!(state.floats_new_windows(WindowId(1)), "workspace 2 floats");
+}
+
+/// A window tiled by hand on a floating workspace tiles in a dwindle tree.
+#[test]
+fn a_window_tiled_by_hand_on_a_floating_workspace_tiles() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1, 2]);
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 960, 1080)), (2, r(960, 0, 960, 1080))],
+        "windows the layout itself is asked to tile are dwindle's"
+    );
+}
+
+/// A new floating window is centred in the work area, kept inside it, and
+/// cascaded off a window already at that corner.
+#[test]
+fn a_new_floating_window_is_centred_and_cascaded() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1, 2, 3]);
+    let first = state
+        .new_floating_place(WindowId(1), (800, 600), None)
+        .expect("a place");
+    assert_eq!(first, r(560, 240, 800, 600), "centred");
+    let _floated = state.float_window(WindowId(1), first).unwrap();
+
+    let second = state
+        .new_floating_place(WindowId(2), (800, 600), None)
+        .expect("a place");
+    assert_eq!(second, r(592, 272, 800, 600), "one step down and right");
+    let _floated = state.float_window(WindowId(2), second).unwrap();
+
+    let third = state
+        .new_floating_place(WindowId(3), (800, 600), None)
+        .expect("a place");
+    assert_eq!(third, r(624, 304, 800, 600), "and the next off that");
+
+    // Larger than the work area: clamped to it, at its corner.
+    let huge = state
+        .new_floating_place(WindowId(3), (4000, 3000), None)
+        .expect("a place");
+    assert_eq!(huge, r(0, 0, 1920, 1080));
+
+    // Over a parent: centred over it, still inside the area.
+    let over = state
+        .new_floating_place(WindowId(3), (400, 300), Some(r(1700, 900, 200, 100)))
+        .expect("a place");
+    assert_eq!(over, r(1520, 780, 400, 300), "pulled back inside the area");
+}
+
+/// The floating area leaves out what a bar reserved and `float_gaps`.
+#[test]
+fn a_new_floating_window_stays_out_of_a_bars_strip() {
+    let mut bar = monitor(M1, 0, 0, 1920, 1080);
+    bar.reserved = Gaps {
+        top: 40,
+        right: 0,
+        bottom: 0,
+        left: 0,
+    };
+    let mut state = state_on(
+        &format!("{BARE}general:layout = floating\ngeneral:float_gaps = 10\n"),
+        bar,
+    );
+    open(&mut state, &[1]);
+    assert_eq!(state.float_area(WindowId(1)), Some(r(10, 50, 1900, 1020)));
+    let huge = state
+        .new_floating_place(WindowId(1), (4000, 3000), None)
+        .expect("a place");
+    assert_eq!(huge, r(10, 50, 1900, 1020));
+}

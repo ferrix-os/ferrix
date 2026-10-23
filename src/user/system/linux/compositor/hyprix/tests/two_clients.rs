@@ -748,17 +748,28 @@ fn an_unknown_request_is_answered_rather_than_hanging_hyprctl() {
 /// control socket, one after another, once both windows are up; give back
 /// each answer.
 fn answers_after(name: &str, requests: &[&str]) -> Vec<String> {
+    answers_configured(name, "", requests)
+}
+
+/// The same, with `lines` added to the configuration.
+fn answers_configured(name: &str, lines: &str, requests: &[&str]) -> Vec<String> {
     let work = workspace(name);
     let socket = work.join("wayland");
     let runtime = work.join("runtime");
     let instance = runtime.join("hypr").join("ferrix-test");
     std::fs::create_dir_all(&instance).expect("an instance directory");
     let control = instance.join(compositor_ipc::REQUEST_SOCKET);
+    let config = undithered(&work);
+    if !lines.is_empty() {
+        let mut text = std::fs::read_to_string(&config).expect("the configuration");
+        text.push_str(lines);
+        std::fs::write(&config, text).expect("the configuration");
+    }
     let options = Options {
         display: socket.to_string_lossy().into_owned(),
         headless: Some((WIDTH, HEIGHT)),
         instance: Some(instance.to_string_lossy().into_owned()),
-        config: Some(undithered(&work)),
+        config: Some(config),
         deadline: Some(4000),
         ..Options::default()
     };
@@ -793,6 +804,36 @@ fn answers_after(name: &str, requests: &[&str]) -> Vec<String> {
     });
     let _ = hyprix::run(&options).expect("the compositor ran");
     clients.join().expect("the clients finished")
+}
+
+/// `general:layout = floating` (`docs/DESKTOP.md` §1): both windows float
+/// at the size they chose -- a pattern client answers "you choose" with
+/// 640x480 -- the first centred on the screen and the second cascaded one
+/// step down and right off it, rather than both tiled.
+#[test]
+fn a_floating_workspace_floats_and_cascades_new_windows() {
+    let answers = answers_configured(
+        "floating-layout",
+        "general:layout = floating\n",
+        &["clients"],
+    );
+    let [readable] = answers.as_slice() else {
+        panic!("one answer: {answers:?}");
+    };
+    let window = |title: &str| {
+        readable
+            .split("\n\n")
+            .find(|window| window.contains(&format!("\ttitle: {title}\n")))
+            .unwrap_or_else(|| panic!("`{title}` is not listed:\n{readable}"))
+            .to_owned()
+    };
+    let (one, two) = (window("one"), window("two"));
+    for wanted in ["\tfloating: 1\n", "\tsize: 640,480\n", "\tat: 192,144\n"] {
+        assert!(one.contains(wanted), "`one` lacks {wanted:?}:\n{one}");
+    }
+    for wanted in ["\tfloating: 1\n", "\tsize: 640,480\n", "\tat: 224,176\n"] {
+        assert!(two.contains(wanted), "`two` lacks {wanted:?}:\n{two}");
+    }
 }
 
 /// A window behind a fullscreen one is still a window: `hyprctl clients`
