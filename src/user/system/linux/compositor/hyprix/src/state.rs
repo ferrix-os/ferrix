@@ -13,7 +13,7 @@ use compositor_server::{Client, ForeignRequest, Globals, PoolKey, Rect as Server
 use compositor_socket::{Connection, Listener};
 use compositor_wire::{Fd, ObjectId};
 
-use crate::backend::{Backend, Headless};
+use crate::backend::{Backend, Headless, ParkedCard};
 use crate::deliver::Focus;
 use crate::devices::Devices;
 use crate::frame::Source;
@@ -25,6 +25,8 @@ use crate::seat::Seat;
 mod draw;
 #[cfg(test)]
 mod grant_tests;
+#[cfg(test)]
+mod hotplug_tests;
 mod serve;
 #[cfg(test)]
 mod tests;
@@ -355,6 +357,9 @@ struct Compositor<'r> {
     sources: BTreeMap<WindowId, Source>,
     /// Where the layer surfaces were last placed.
     placed_layers: Vec<crate::frame::Placed>,
+    /// The cards whose last monitor was unplugged, kept open and listened
+    /// to so that one plugged back in is found.
+    parked: Vec<ParkedCard>,
     /// The placed surfaces with no pixels to draw, by connection serial
     /// and surface: since when, and whether that has been said. Each is said
     /// once, and again only after it has had some.
@@ -663,6 +668,7 @@ impl<'r> Compositor<'r> {
             connections: 0,
             sources: BTreeMap::new(),
             placed_layers: Vec::new(),
+            parked: Vec::new(),
             bare: BTreeMap::new(),
             settling: false,
             owed: false,
@@ -839,6 +845,10 @@ impl<'r> Compositor<'r> {
     /// A card whose driver died: the screen is lost until the card is
     /// back, and the frames that look for it are owed from now on.
     fn notice_lost_cards(&mut self) {
+        let ready = self.ready.as_ref();
+        self.parked.retain_mut(|parked| {
+            !ready.is_some_and(|fds| fds.contains(&parked.raw_fd())) || parked.check()
+        });
         for screen in &mut self.screens {
             let Some(fd) = screen.backend.raw_fd() else {
                 continue;
@@ -857,6 +867,10 @@ impl<'r> Compositor<'r> {
         let changed = self.screens.iter_mut().fold(false, |changed, screen| {
             screen.backend.modes_changed() | changed
         });
+        let changed = self
+            .parked
+            .iter_mut()
+            .fold(changed, |changed, parked| parked.changed() | changed);
         // A monitor plugged in or unplugged is a connector change too.
         if changed && self.hotplug() {
             self.owed = true;
@@ -1795,9 +1809,25 @@ impl<'r> Compositor<'r> {
                 .collect();
             found.extend(screen.backend.plugged_in(&held, &self.fixed.monitor_rules));
         }
+        // The cards no screen runs on any more.
+        #[cfg(target_os = "linux")]
+        for parked in &self.parked {
+            if !cards.contains(&parked.card()) {
+                found.extend(parked.plugged_in(&self.fixed.monitor_rules));
+            }
+        }
         for backend in found {
             changed |= self.add_screen(backend);
         }
+        // A card a screen runs on again is that screen's to listen to.
+        let running: Vec<i32> = self
+            .screens
+            .iter()
+            .filter_map(|screen| screen.backend.card_place())
+            .map(|(card, _)| card)
+            .collect();
+        self.parked
+            .retain(|parked| !running.contains(&parked.card()));
         changed
     }
 
@@ -1807,12 +1837,19 @@ impl<'r> Compositor<'r> {
     /// client, and `monitoradded` on the event socket (`docs/DESKTOP.md`
     /// §3.2). Gives whether it was added.
     pub(crate) fn add_screen(&mut self, backend: Box<dyn Backend>) -> bool {
-        let x = self
+        // Right of the others, the stand-in for an unplugged monitor not
+        // counted: the monitor plugged back in takes the place it had.
+        let placed: Vec<(&str, i64)> = self
             .screens
             .iter()
-            .map(|screen| screen.rect.right())
-            .max()
-            .unwrap_or(0);
+            .map(|screen| (screen.name.as_str(), screen.rect.right()))
+            .collect();
+        let x = next_x(&placed);
+        self.add_screen_at(backend, x)
+    }
+
+    /// [`State::add_screen`] with its default place `x`.
+    fn add_screen_at(&mut self, backend: Box<dyn Backend>, x: i64) -> bool {
         let id = MonitorId(
             self.screens
                 .iter()
@@ -1884,14 +1921,30 @@ impl<'r> Compositor<'r> {
         let Some(going) = self.screens.get(which) else {
             return false;
         };
+        // A card whose last screen this is stays open, to hear a monitor
+        // plugged back in.
+        let cards: Vec<Option<i32>> = self
+            .screens
+            .iter()
+            .map(|screen| screen.backend.card_place().map(|(card, _)| card))
+            .collect();
+        let parked_cards: Vec<i32> = self.parked.iter().map(ParkedCard::card).collect();
+        let parked = going
+            .backend
+            .park()
+            .filter(|parked| last_on_card(&cards, which, &parked_cards) == Some(parked.card()));
         if self.screens.len() == 1 {
+            // In the place the monitor had, so that what was on it stays
+            // where it was.
             let (width, height) = going.backend.size();
+            let x = going.rect.x;
             let mut backend = Headless::new(width, height);
             backend.call(STAND_IN);
-            if !self.add_screen(Box::new(backend)) {
+            if !self.add_screen_at(Box::new(backend), x) {
                 return false;
             }
         }
+        self.parked.extend(parked);
         let screen = self.screens.remove(which);
         let _ = self.state.remove_monitor(screen.monitor);
         for slot in &mut self.slots {
@@ -2407,6 +2460,8 @@ impl<'r> Compositor<'r> {
                 .iter()
                 .filter_map(|screen| screen.backend.raw_fd()),
         );
+        // A card with no screen on it, for the monitor plugged back in.
+        fds.extend(self.parked.iter().map(ParkedCard::raw_fd));
         fds.extend(
             self.children
                 .as_ref()
@@ -6982,6 +7037,30 @@ fn configure(client: &mut Client, state: &State, toplevel: ObjectId, window: Win
 /// What the headless screen kept while no monitor is plugged in is called
 /// (`Compositor::remove_screen`).
 const STAND_IN: &str = "FALLBACK";
+
+/// Where a screen added goes across: right of the others, the stand-in for
+/// an unplugged monitor not counted, so that the monitor plugged back in
+/// takes the place it had. `placed` is each screen's name and right edge.
+fn next_x(placed: &[(&str, i64)]) -> i64 {
+    placed
+        .iter()
+        .filter(|(name, _)| *name != STAND_IN)
+        .map(|(_, right)| *right)
+        .max()
+        .unwrap_or(0)
+}
+
+/// The card screen `which` is on, when it is the last screen on it and the
+/// card is not parked already: the card to keep open when the screen goes.
+/// `cards` is each screen's card, `parked` the cards already kept.
+fn last_on_card(cards: &[Option<i32>], which: usize, parked: &[i32]) -> Option<i32> {
+    let card = (*cards.get(which)?)?;
+    let shared = cards
+        .iter()
+        .enumerate()
+        .any(|(at, other)| at != which && *other == Some(card));
+    (!shared && !parked.contains(&card)).then_some(card)
+}
 
 /// The globals the compositor offers. `dmabuf` is whether a client's GPU
 /// buffer can be imported and drawn where it lies, which is only where the

@@ -283,6 +283,59 @@ pub trait Backend: core::fmt::Debug {
         let _ = (held, rules);
         Vec::new()
     }
+
+    /// The card this screen is on, kept open after the screen goes: what
+    /// hears the monitor plugged back in when its screen was the card's
+    /// last. `None` for a screen on no card, or on one that is lost.
+    fn park(&self) -> Option<ParkedCard> {
+        None
+    }
+}
+
+/// A card with no screen running on it: its last monitor was unplugged.
+/// It stays open, and is listened to, so that a monitor plugged back in is
+/// found -- with no screen on the card nothing else read its events, and
+/// the N150's TV plugged back in stayed dark.
+#[derive(Debug)]
+pub struct ParkedCard {
+    card: std::rc::Rc<compositor_drm::Card>,
+    /// Whether its connectors changed since this was last asked.
+    changed: bool,
+}
+
+impl ParkedCard {
+    /// The card's number, as [`Backend::card_place`] gives it.
+    #[must_use]
+    pub fn card(&self) -> i32 {
+        self.card.raw_fd()
+    }
+
+    /// Its descriptor, for the compositor's wait.
+    #[must_use]
+    pub fn raw_fd(&self) -> std::os::fd::RawFd {
+        self.card.raw_fd()
+    }
+
+    /// Read what the card said. `false` once the card is gone (its driver
+    /// went), when it is no longer worth keeping.
+    pub fn check(&mut self) -> bool {
+        let news = self.card.news();
+        self.changed |= news.connectors;
+        !news.gone
+    }
+
+    /// Whether its connectors changed since this was last asked.
+    pub fn changed(&mut self) -> bool {
+        core::mem::take(&mut self.changed)
+    }
+
+    /// Screens for the monitors plugged into it now, as
+    /// [`Backend::plugged_in`] makes them.
+    #[cfg(target_os = "linux")]
+    #[must_use]
+    pub fn plugged_in(&self, rules: &[compositor_config::MonitorRule]) -> Vec<Box<dyn Backend>> {
+        Drm::plugged_in_on(&self.card, &[], rules)
+    }
 }
 
 /// A screen that is only memory: the everyday one, and the one a test reads.
@@ -605,6 +658,46 @@ impl Drm {
             }
             if let Ok(screen) = Self::on(card, plan) {
                 screens.push(screen);
+            }
+        }
+        screens
+    }
+
+    /// Screens for the monitors plugged into `card` beside `held`, its
+    /// running screens' connectors and CRTCs, each at the mode its
+    /// `monitor =` line in `rules` asks where the connector lists it.
+    fn plugged_in_on(
+        card: &std::rc::Rc<compositor_drm::Card>,
+        held: &[(u32, u32)],
+        rules: &[compositor_config::MonitorRule],
+    ) -> Vec<Box<dyn Backend>> {
+        let Ok(plans) = compositor_drm::plans_beside(card, held) else {
+            return Vec::new();
+        };
+        let mut screens: Vec<Box<dyn Backend>> = Vec::new();
+        for mut plan in plans {
+            let description = plan
+                .edid
+                .as_ref()
+                .map(|edid| edid.describe(compositor_drm::registered))
+                .unwrap_or_default();
+            let rule = compositor_config::MonitorRule::for_monitor(rules, &plan.name, &description);
+            let listed: Vec<(u32, u32, i32)> = plan
+                .modes
+                .iter()
+                .map(|mode| {
+                    (
+                        u32::from(mode.hdisplay),
+                        u32::from(mode.vdisplay),
+                        compositor_drm::modeset::refresh_mhz(mode),
+                    )
+                })
+                .collect();
+            if let Some((size, refresh)) = rule.and_then(|rule| pick_mode(rule.mode, &listed)) {
+                let _ = plan.take(size, refresh);
+            }
+            if let Ok(screen) = Self::on(std::rc::Rc::clone(card), plan) {
+                screens.push(Box::new(screen));
             }
         }
         screens
@@ -1258,36 +1351,14 @@ impl Backend for Drm {
         if self.lost.is_some() {
             return Vec::new();
         }
-        let Ok(plans) = compositor_drm::plans_beside(&self.card, held) else {
-            return Vec::new();
-        };
-        let mut screens: Vec<Box<dyn Backend>> = Vec::new();
-        for mut plan in plans {
-            let description = plan
-                .edid
-                .as_ref()
-                .map(|edid| edid.describe(compositor_drm::registered))
-                .unwrap_or_default();
-            let rule = compositor_config::MonitorRule::for_monitor(rules, &plan.name, &description);
-            let listed: Vec<(u32, u32, i32)> = plan
-                .modes
-                .iter()
-                .map(|mode| {
-                    (
-                        u32::from(mode.hdisplay),
-                        u32::from(mode.vdisplay),
-                        compositor_drm::modeset::refresh_mhz(mode),
-                    )
-                })
-                .collect();
-            if let Some((size, refresh)) = rule.and_then(|rule| pick_mode(rule.mode, &listed)) {
-                let _ = plan.take(size, refresh);
-            }
-            if let Ok(screen) = Self::on(std::rc::Rc::clone(&self.card), plan) {
-                screens.push(Box::new(screen));
-            }
-        }
-        screens
+        Self::plugged_in_on(&self.card, held, rules)
+    }
+
+    fn park(&self) -> Option<ParkedCard> {
+        self.lost.is_none().then(|| ParkedCard {
+            card: std::rc::Rc::clone(&self.card),
+            changed: false,
+        })
     }
 
     fn description(&self) -> String {
