@@ -943,8 +943,16 @@ Init then:
    is `getty-generator`, which writes a `getty@<name>.service` link into
    `multi-user.target.wants` for every terminal the kernel command line names
    in `console=`, and for `/dev/console` otherwise.
-4. Loads the units and starts `default.target`, or `ferrix.target=`.
-5. Prints one boot-log line per unit that becomes active or fails, in the
+4. Once `/` is settled (the root volume, or memory), makes
+   `/etc/machine-id` when there is none, as systemd does on a first boot:
+   128 bits of the kernel's random marked as a version 4 UUID, 32 hex
+   digits, mode 0444 (`init/src/machine_id.rs`). lode stamps it on every
+   record and lode-upload sends it, so a receiver keeps each machine in a
+   store named by it, not by a host name two machines may share. A root on
+   a disk keeps it; a root in memory gets a new one each boot. Then each
+   account's missing home is made.
+5. Loads the units and starts `default.target`, or `ferrix.target=`.
+6. Prints one boot-log line per unit that becomes active or fails, in the
    `  init     …` format `xtask` reads.
 
 If `default.target`'s transaction fails, init starts `rescue.target`, a shell

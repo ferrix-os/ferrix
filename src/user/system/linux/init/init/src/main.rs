@@ -33,6 +33,7 @@ mod devices;
 mod directory;
 mod lode;
 mod logs;
+mod machine_id;
 mod probe;
 mod readiness;
 mod sandbox;
@@ -358,6 +359,7 @@ impl Init {
         // `/` is settled already when the kernel started devmgr itself: the
         // audit record's reader starts now, and otherwise once it is.
         if !awaiting_root {
+            machine_id::ensure(&say);
             make_homes();
             init.start_audit();
         }
@@ -1021,6 +1023,7 @@ impl Init {
         } else {
             say("/ stays in memory");
         }
+        machine_id::ensure(&say);
         make_homes();
         self.start_audit();
         if std::mem::take(&mut self.awaiting_root) {
