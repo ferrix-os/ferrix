@@ -57,6 +57,7 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::signals::Signals as ObjectSignals;
 use ferrix_sync::{SleepLock, SleepLockGuard};
 use ferrix_vfs::fd::FdTable;
+use ferrix_vfs::writers::{DenyWrite, deny_write_access};
 use ferrix_vfs::{Context, Location, OpenFile};
 use ferrix_vma::VmaFlags;
 
@@ -333,6 +334,11 @@ struct Identity {
     /// The file it was started from, when there was one: where
     /// `/proc/<pid>/exe` leads, as a magic link, whatever became of the path.
     exe_at: Option<Location>,
+    /// Its word that nobody may write that file while it runs (`ETXTBSY`,
+    /// `ferrix_vfs::writers`): Linux's denial held by `mm->exe_file`. Taken
+    /// again by a fork child's copy, and given back at the next `execve` and
+    /// when the process is released, not when it is reaped.
+    exe_denied: Option<DenyWrite>,
     /// Its argument vector: `/proc/<pid>/cmdline`.
     args: Vec<Vec<u8>>,
     /// Where its program's environment strings are in its memory, from the
@@ -651,6 +657,13 @@ impl Process {
     ) {
         let exe = exe.to_vec();
         let args = args.iter().map(|arg| arg.to_vec()).collect();
+        // `execve` denied writes on the file before its point of no return,
+        // and still holds that denial, so this one is never refused; a file
+        // something else started without one is held where it can be.
+        let denied = exe_at
+            .as_ref()
+            .and_then(|at| at.inode().ok())
+            .and_then(|inode| deny_write_access(&inode).ok().flatten());
         let mut identity = self.identity.lock();
         identity.exe = exe;
         identity.args = args;
@@ -659,8 +672,10 @@ impl Process {
         // The old file goes after the lock: its dentry's last reference may be
         // this one.
         let old = core::mem::replace(&mut identity.exe_at, exe_at);
+        let old_denied = core::mem::replace(&mut identity.exe_denied, denied);
         drop(identity);
         drop(old);
+        drop(old_denied);
     }
 
     /// The path it was started from, empty if nothing was.
@@ -1247,6 +1262,10 @@ impl Process {
         // and dropped after it.
         let state = self.state.lock().take();
         drop(state);
+        // Its program's file may be written again, as Linux's `exit_mm`
+        // lets it be before the parent reaps anything.
+        let denied = self.identity.lock().exe_denied.take();
+        drop(denied);
         // The handles too, and outside every lock: an object's drop can free
         // memory and drain other objects, which is `object::dispose`'s job,
         // and must not run under this process's table lock or state lock.

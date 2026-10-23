@@ -94,6 +94,7 @@ pub mod socket;
 pub mod statfs;
 pub mod tmpfs;
 mod walk;
+pub mod writers;
 
 #[cfg(test)]
 mod tests;

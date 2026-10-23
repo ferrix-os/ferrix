@@ -585,6 +585,13 @@ pub trait Inode: Send + Sync + fmt::Debug {
         Ok(None)
     }
 
+    /// The count of who may write this inode and who denies that anyone may,
+    /// for a regular file a program can run from: see [`crate::writers`].
+    /// `None`, the default, keeps no count, and nothing is refused either way.
+    fn writers(&self) -> Option<&core::sync::atomic::AtomicIsize> {
+        None
+    }
+
     /// Whether the VFS may remember what [`Inode::lookup`] answers in this
     /// directory.
     ///

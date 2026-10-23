@@ -519,6 +519,10 @@ struct Node<D> {
     /// leaves; see "Clean pages may be reclaimed". Taken after `dirty`, never
     /// around it.
     still: Arc<SpinLock<Still>>,
+    /// Who writes it and who runs it: `ferrix_vfs::writers`. One per file
+    /// while anyone holds it, because [`Node::get`] hands out the node alive
+    /// already before it builds another.
+    writers: core::sync::atomic::AtomicIsize,
 }
 
 /// What a writable file holds still against reclaim.
@@ -606,6 +610,7 @@ impl<D: WriteHandle> Node<D> {
             pages: SpinLock::new(None),
             dirty: Arc::new(SpinLock::new(BTreeSet::new())),
             still: Arc::new(SpinLock::new(Still::default())),
+            writers: ferrix_vfs::writers::new_count(),
         });
         let mut nodes = shared.nodes.lock();
         if let Some(alive) = nodes.get(&ino).and_then(Weak::upgrade) {
@@ -1086,6 +1091,10 @@ impl<D: WriteHandle> FileSystem for RwBtrfs<D> {
 }
 
 impl<D: WriteHandle> Inode for Node<D> {
+    fn writers(&self) -> Option<&core::sync::atomic::AtomicIsize> {
+        (self.kind == FileType::Regular).then_some(&self.writers)
+    }
+
     /// A regular file with a name whose page cache holds pages: the dentry
     /// cache keeps its dentry until reclaim has taken them (`ferrix_vfs`'s
     /// `DEFAULT_CACHE`). A file with no name left is never kept, so that its
