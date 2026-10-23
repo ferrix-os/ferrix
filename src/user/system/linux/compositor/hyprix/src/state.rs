@@ -1825,7 +1825,7 @@ impl<'r> Compositor<'r> {
                 }
             }
             if watched {
-                let windows = crate::control::toplevels(&snapshot);
+                let windows = crate::control::toplevels(&snapshot, &self.state);
                 for slot in &mut self.slots {
                     // The newer list as well as the wlroots one: a taskbar
                     // written this year binds `ext-foreign-toplevel-list-v1`
@@ -2231,13 +2231,14 @@ fn configure_first(
     own: &[(ObjectId, WindowId)],
     toplevel: ObjectId,
     window: WindowId,
+    ruled: bool,
     state: &mut State,
 ) {
     // A window a fullscreen program opens -- a dialog, a login page --
     // floats over the program and takes the focus, rather than tiling
     // behind it where nobody can see it while the program waits for it.
     let over = over_own_fullscreen(own, window, state);
-    let floated = float_dialog(client, toplevel, window, over, state);
+    let floated = float_dialog(client, toplevel, window, over, ruled, state);
     if over {
         let _ = state.raise_over_fullscreen(window);
     }
@@ -2264,6 +2265,7 @@ fn float_dialog(
     toplevel: ObjectId,
     window: WindowId,
     over: bool,
+    ruled: bool,
     state: &mut State,
 ) -> bool {
     // On a workspace whose layout is `floating` every window is placed as a
@@ -2275,7 +2277,11 @@ fn float_dialog(
             let (min, max) = (top.min_size, top.max_size);
             top.parent.is_some() || (min.0 != 0 && min.1 != 0 && (min.0 == max.0 || min.1 == max.1))
         });
-    if !dialog || state.is_floating(window) {
+    // A floating workspace's window already floats, at a provisional place
+    // (`State::open_new_window`); it is still placed here unless a rule
+    // placed it.
+    let placed_already = state.is_floating(window) && (ruled || !state.floats_new_windows(window));
+    if !dialog || placed_already {
         return false;
     }
     let Some(monitor) = monitor_rect(state, window) else {

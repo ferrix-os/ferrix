@@ -60,10 +60,6 @@ pub struct Output<'a> {
     /// surface's own, because a drag icon is whatever the client drew and
     /// not something the compositor sizes.
     pub drag_icon: Option<Placed>,
-    /// Where a window being dragged would snap if it were dropped now, in
-    /// this screen's own pixels: drawn as a translucent rectangle, the tile
-    /// preview of a floating window manager (`docs/DESKTOP.md` §1.2).
-    pub tile_preview: Option<Rect>,
     /// What to copy from the canvas to the screen, which is not always what
     /// was drawn on the canvas: a backend with two buffers is drawing into
     /// the one that holds the frame before last, so it is owed that frame's
@@ -359,7 +355,6 @@ struct Scene<'a> {
     styles: &'a BTreeMap<WindowId, compositor_render::WindowStyle>,
     cursor: Option<Cursor>,
     drag_icon: Option<Placed>,
-    tile_preview: Option<Rect>,
     overlay: Option<&'a crate::overlay::Picture>,
 }
 
@@ -398,7 +393,6 @@ fn draw_windows(
         styles: target.styles,
         cursor: target.cursor,
         drag_icon: target.drag_icon,
-        tile_preview: target.tile_preview,
         overlay: target.overlay,
     };
     // The same frame on whichever painter there is: what differs is where
@@ -439,8 +433,6 @@ fn direct(
         Some("debug:overlay is drawn")
     } else if target.drag_icon.is_some() {
         Some("a drag is carried")
-    } else if target.tile_preview.is_some() {
-        Some("a tile preview is drawn")
     } else {
         None
     };
@@ -460,7 +452,6 @@ fn direct(
         styles: target.styles,
         cursor: target.cursor,
         drag_icon: target.drag_icon,
-        tile_preview: target.tile_preview,
         overlay: target.overlay,
     };
     let (surfaces, drawn) = gathered(&scene, output);
@@ -727,14 +718,6 @@ fn gathered<'a>(
     (surfaces, drawn)
 }
 
-/// The tile preview's colour, `0xAARRGGBB` as a configuration's colours
-/// are: a light blue at 30% -- Ferrix light's own accent, not any
-/// toolkit's.
-const PREVIEW_COLOR: compositor_render::Color = compositor_render::Color(0x4d4a_90d9);
-
-/// The tile preview's corner radius, in logical pixels.
-const PREVIEW_RADIUS: f64 = 12.0;
-
 /// What is drawn over the windows and the layer surfaces: what a drag
 /// carries, `debug:overlay`'s counter and the pointer. How long the counter
 /// took.
@@ -742,20 +725,6 @@ fn over_everything<P: Painter>(painter: &mut P, scene: &Scene<'_>) -> Duration {
     let (origin, scale, clients, damage) = (scene.origin, scene.scale, scene.clients, scene.damage);
     let style = &scene.style.at_scale(scale);
     let _over = Timer::start(Phase::Over);
-    // Where a dragged window would snap, under what a drag carries and the
-    // pointer.
-    if let Some(rect) = scene.tile_preview {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "a corner's radius is a few dozen pixels"
-        )]
-        let radius = (PREVIEW_RADIUS * scale).round() as i64;
-        let rounding = compositor_render::Rounding {
-            radius,
-            power: compositor_render::Rounding::POWER,
-        };
-        painter.fill_rounded(rect, rounding, PREVIEW_COLOR, damage);
-    }
     // The drag icon under the pointer and over everything else: what a
     // drag looks like is a thing following the pointer, and a compositor
     // that drew it under a window would have a drag nobody can see.

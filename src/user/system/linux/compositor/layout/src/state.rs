@@ -1351,6 +1351,39 @@ impl State {
         self.open(window, None)
     }
 
+    /// A new window, placed as the workspace the focused monitor shows
+    /// places new windows: tiled, or on a `floating` workspace floating,
+    /// for now centred at half the floating area until its client says what
+    /// size it wants -- so a floating workspace's tiled windows are not
+    /// reflowed for the moment before (`docs/DESKTOP.md` §1.2).
+    ///
+    /// # Errors
+    ///
+    /// As [`State::open_window`].
+    pub fn open_new_window(&mut self, window: WindowId) -> Result<Vec<Change>, Error> {
+        let floats = self
+            .current_workspace()
+            .is_some_and(|workspace| self.settings_at(workspace).layout.floats_new_windows());
+        let area = self
+            .current_workspace()
+            .map(|workspace| self.float_work_area_of(workspace))
+            .filter(|area| area.width > 0 && area.height > 0);
+        match area.filter(|_| floats) {
+            Some(area) => {
+                let (width, height) = ((area.width / 2).max(1), (area.height / 2).max(1));
+                let rect = Rect::new(
+                    area.x.saturating_add(area.width.saturating_sub(width) / 2),
+                    area.y
+                        .saturating_add(area.height.saturating_sub(height) / 2),
+                    width,
+                    height,
+                );
+                self.open(window, Some(rect))
+            }
+            None => self.open(window, None),
+        }
+    }
+
     /// A new window, floating at `rect` on the workspace the focused monitor
     /// shows, and focused as [`State::open_window`] would.
     pub fn open_floating(&mut self, window: WindowId, rect: Rect) -> Result<Vec<Change>, Error> {

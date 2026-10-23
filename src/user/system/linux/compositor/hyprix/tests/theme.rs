@@ -15,6 +15,13 @@ fn ferrix_light_parses_and_floats() {
     let settings = compositor_layout::Settings::from_config(&config);
     assert_eq!(settings.layout, compositor_layout::Layout::Floating);
     for bind in &config.binds {
+        // A key the keymap does not have is a bind the seat drops.
+        if let compositor_config::Key::Sym(name) = &bind.key {
+            assert!(
+                compositor_xkb::code_of(name).is_some(),
+                "{name} is a key of the default keymap"
+            );
+        }
         assert!(
             compositor_layout::Dispatcher::parse(&bind.dispatcher, &bind.arg).is_ok()
                 || ["mouse", "overview"].contains(&bind.dispatcher.as_str()),

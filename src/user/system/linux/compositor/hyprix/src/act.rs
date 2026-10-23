@@ -620,6 +620,71 @@ pub fn dragged(drag: &mut Drag, state: &mut State, (x, y): (i64, i64)) -> bool {
     moved.is_ok_and(|changes| !changes.is_empty()) || unsnapped
 }
 
+/// The window id the tile preview is drawn as: no client's window is ever
+/// numbered this high.
+pub const PREVIEW: WindowId = WindowId(u64::MAX);
+
+/// The tile preview's colour, `0xAARRGGBB` as a configuration's colours
+/// are: a light blue at 30% -- Ferrix light's own accent, not any
+/// toolkit's.
+const PREVIEW_COLOR: u32 = 0x4d4a_90d9;
+
+/// Where a window being dragged would snap if it were dropped now, drawn
+/// as a translucent rounded rectangle just under the dragged window -- the
+/// tile preview of a floating window manager (`docs/DESKTOP.md` §1.2).
+///
+/// It goes into the frame as one more window with no buffer, which the
+/// renderer draws as its border and nothing inside: a rounded border is a
+/// filled rounded rectangle, so `style` gives it the preview's colour as
+/// its border, a radius, and no shadow or blur. Being in the layout it is
+/// damaged where it appears, moves and goes as any window is.
+pub fn with_preview(
+    outputs: &mut [compositor_layout::MonitorLayout],
+    styles: &mut BTreeMap<WindowId, compositor_render::WindowStyle>,
+    state: &State,
+    drag: Option<&Drag>,
+) {
+    let Some((window, edge)) = drag.and_then(|held| Some((held.window, held.edge?))) else {
+        return;
+    };
+    let Some(rect) = state.snap_rect(window, edge) else {
+        return;
+    };
+    for output in outputs.iter_mut() {
+        let Some(at) = output
+            .windows
+            .iter()
+            .position(|placed| placed.window == window)
+        else {
+            continue;
+        };
+        output.windows.insert(
+            at,
+            compositor_layout::Placed {
+                window: PREVIEW,
+                rect,
+                border: 1,
+                focused: false,
+                floating: true,
+                fullscreen: false,
+            },
+        );
+        let _ = styles.insert(
+            PREVIEW,
+            compositor_render::WindowStyle {
+                border_color: Some(compositor_render::Gradient::from(
+                    &compositor_config::Gradient::solid(compositor_config::Color(PREVIEW_COLOR)),
+                )),
+                rounding: Some(12),
+                shadow: false,
+                blur: false,
+                dim: false,
+                ..compositor_render::WindowStyle::default()
+            },
+        );
+    }
+}
+
 /// A drag is over, the pointer at `pointer`: a window lifted out of the
 /// tiling goes back in where it was let go of, which is Hyprland's
 /// `dragEnd`, and a floating window dropped at a monitor's edge snaps
@@ -901,7 +966,9 @@ mod tests {
     use compositor_config::NoSources;
     use compositor_layout::{Corner, Monitor, MonitorId, Rect, Snap, State, WindowId};
 
-    use super::{Action, Began, Drag, Seat, client_drag, dragged, grab_border};
+    use super::{
+        Action, Began, Drag, PREVIEW, Seat, client_drag, dragged, grab_border, with_preview,
+    };
     use crate::seat::Input;
 
     /// `BTN_LEFT`, as the seat reports it.
@@ -1080,6 +1147,47 @@ mod tests {
         assert!(dragged(drag.as_mut().unwrap(), &mut state, (300, 40)));
         assert_eq!(state.snap_of(WindowId(2)), None);
         assert_eq!(placed(&state), Rect::new(100, 30, 400, 300));
+    }
+
+    /// While a dragged window is at an edge, the frame holds the tile
+    /// preview just under it, at the rectangle it would snap to, drawn as a
+    /// filled rounded border with no shadow.
+    #[test]
+    fn the_tile_preview_is_drawn_just_under_the_dragged_window() {
+        let (mut state, _seat) = ready(ON);
+        let _ = state.focus_window(WindowId(2)).unwrap();
+        let _ = state.dispatch_str("setfloating", "").unwrap();
+        let mut held = Drag {
+            window: WindowId(2),
+            resizing: false,
+            corner: Corner::NONE,
+            began: Began::Client,
+            from: (0, 0),
+            lifted: false,
+            edge: None,
+        };
+        let mut outputs = state.layout();
+        let mut styles = std::collections::BTreeMap::new();
+        with_preview(&mut outputs, &mut styles, &state, Some(&held));
+        assert!(
+            outputs[0]
+                .windows
+                .iter()
+                .all(|placed| placed.window != PREVIEW)
+        );
+
+        held.edge = Some(Snap::Maximized);
+        with_preview(&mut outputs, &mut styles, &state, Some(&held));
+        let order: Vec<WindowId> = outputs[0]
+            .windows
+            .iter()
+            .map(|placed| placed.window)
+            .collect();
+        let at = order.iter().position(|id| *id == PREVIEW).unwrap();
+        assert_eq!(order.get(at + 1), Some(&WindowId(2)), "{order:?}");
+        assert_eq!(outputs[0].windows[at].rect, Rect::new(0, 0, 1024, 768));
+        let style = styles.get(&PREVIEW).unwrap();
+        assert!(!style.shadow && style.border_color.is_some());
     }
 
     /// A `resize` pulls the edges it names.

@@ -20,8 +20,8 @@ use crate::pool::Mapping;
 use super::{
     Arrangement, Compositor, Drag, ScreenAsks, Shot, activate, apply_rules, as_input, captured,
     configure, configure_first, exported, fit_dialog, follow_own_size, for_the_bar,
-    input_method_turn, lock_changed, named, painted, place_popup, rect_of, release_retired_pools,
-    remember_size, showing_from, whole_of,
+    input_method_turn, lock_changed, named, painted, place_popup, placed_rect, rect_of,
+    release_retired_pools, remember_size, showing_from, whole_of,
 };
 
 /// What reading one client's messages asked for that reaches past its own
@@ -649,7 +649,7 @@ impl Compositor<'_> {
                 // is coming back -- is that window's trouble, not every
                 // other client's: it stays out of the layout, and its
                 // client goes on.
-                match self.state.open_window(window) {
+                match self.state.open_new_window(window) {
                     Ok(_) => slot.windows.push((toplevel, window)),
                     Err(error) => (self.report)(&format!(
                         "hyprix: a client's window could not be placed: {error:?}"
@@ -705,6 +705,10 @@ impl Compositor<'_> {
                 |top| (top.app_id.clone(), top.title.clone()),
             );
             let _ = slot.firsts.insert(window, called);
+            // Where it was before the rules: a rule that moved or sized it
+            // placed it, and a floating workspace's own placement then
+            // leaves it there.
+            let before = placed_rect(&self.state, window);
             let _ = apply_rules(
                 &mut self.window_rules,
                 &slot.client,
@@ -713,12 +717,14 @@ impl Compositor<'_> {
                 &mut self.state,
                 self.report,
             );
+            let ruled = placed_rect(&self.state, window) != before;
             configure_first(
                 &mut slot.client,
                 &mut slot.unsized_dialogs,
                 &slot.windows,
                 toplevel,
                 window,
+                ruled,
                 &mut self.state,
             );
             let _ = self.sources.insert(
@@ -951,13 +957,16 @@ impl Compositor<'_> {
     /// after the bind is how every such client knows it has the whole list,
     /// and an answer that arrives after the callback is a list it never sees.
     fn list_windows_for(&mut self, index: usize) {
-        let windows = crate::control::toplevels(&crate::control::describe_all(
+        let windows = crate::control::toplevels(
+            &crate::control::describe_all(
+                &self.state,
+                &self.slots,
+                &self.sources,
+                &BTreeMap::new(),
+                "",
+            ),
             &self.state,
-            &self.slots,
-            &self.sources,
-            &BTreeMap::new(),
-            "",
-        ));
+        );
         if let Some(slot) = self.slots.get_mut(index) {
             slot.client_mut().show_toplevels(&windows);
         }

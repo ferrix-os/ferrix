@@ -4582,3 +4582,25 @@ fn a_minimized_window_comes_back_when_it_is_focused() {
     );
     assert_eq!(focused(&state), Some(2));
 }
+
+/// On a floating workspace a new window opens floating at once, so a
+/// window tiled there by hand is not reflowed for it; elsewhere it tiles.
+#[test]
+fn a_new_window_on_a_floating_workspace_never_tiles() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    let _opened = state.open_new_window(WindowId(1)).unwrap();
+    assert!(state.is_floating(WindowId(1)));
+    let _tiled = dispatch(&mut state, "settiled", "");
+    assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
+    let _opened = state.open_new_window(WindowId(2)).unwrap();
+    assert!(state.is_floating(WindowId(2)));
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 1920, 1080)), (2, r(480, 270, 960, 540))],
+        "the tiled window keeps the whole screen"
+    );
+
+    let mut tiled = setup(BARE);
+    let _opened = tiled.open_new_window(WindowId(1)).unwrap();
+    assert!(!tiled.is_floating(WindowId(1)));
+}

@@ -694,14 +694,13 @@ fn monitor_id(monitor: compositor_layout::MonitorId) -> i32 {
 /// What every window in `snapshot` looks like to a bar.
 ///
 /// The same description `hyprctl clients` prints, narrowed to the six things
-/// `zwlr_foreign_toplevel_handle_v1` carries. `maximized` is always false:
-/// this layout has one fullscreen state and no separate maximised one, and
-/// saying a window is maximised when the compositor cannot tell would put a
-/// wrong tick in every taskbar's menu. `minimized` is false for the same
-/// reason -- nothing here is minimised; a window a group does not draw is
-/// still on its workspace, and a bar that hid it would hide half a group.
+/// `zwlr_foreign_toplevel_handle_v1` carries. `maximized` is a floating
+/// window snapped to its whole work area and `minimized` one on the
+/// minimized workspace (`docs/DESKTOP.md` §1.2); a tiled window is neither,
+/// since the tiling has no such state, and a window a group does not draw
+/// is still on its workspace and not minimized.
 #[must_use]
-pub fn toplevels(snapshot: &Snapshot) -> Vec<ForeignToplevel> {
+pub fn toplevels(snapshot: &Snapshot, state: &State) -> Vec<ForeignToplevel> {
     snapshot
         .windows
         .iter()
@@ -711,8 +710,9 @@ pub fn toplevels(snapshot: &Snapshot) -> Vec<ForeignToplevel> {
             app_id: window.class.clone(),
             activated: snapshot.active_window == Some(window.address),
             fullscreen: window.fullscreen,
-            maximized: false,
-            minimized: false,
+            maximized: state.snap_of(WindowId(window.address))
+                == Some(compositor_layout::Snap::Maximized),
+            minimized: state.is_minimized(WindowId(window.address)),
         })
         .collect()
 }
