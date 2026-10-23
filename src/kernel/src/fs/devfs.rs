@@ -317,12 +317,16 @@ const SHM: &[u8] = b"shm";
 /// udev, systemd, an initramfs's `init` -- after mounting devtmpfs; this
 /// `/dev` cannot be written, so it carries them, as it carries `shm`. Bash
 /// opens `/dev/fd/63` for a process substitution, `<(...)` and `>(...)`,
-/// and a script writes to `/dev/stderr` by name.
-static LINKS: [(&[u8], &[u8]); 4] = [
+/// and a script writes to `/dev/stderr` by name. `log` is systemd's own
+/// link to the syslog socket (lode's, `docs/LOGGING.md` §5): musl's and
+/// glibc's `syslog()` reach `/dev/log` alone; nothing listening there leaves
+/// it dangling, as on Linux without journald.
+static LINKS: [(&[u8], &[u8]); 5] = [
     (b"fd", b"/proc/self/fd"),
     (b"stdin", b"/proc/self/fd/0"),
     (b"stdout", b"/proc/self/fd/1"),
     (b"stderr", b"/proc/self/fd/2"),
+    (b"log", b"/run/systemd/journal/dev-log"),
 ];
 
 /// `LINKS[index]`'s inode number is this plus its index.

@@ -27,6 +27,8 @@ lode verify [--kernel] [-b ...]      check the store
 lode rotate                          seal every class's segment, begin new ones
 lode session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX
 lode session end ID                  what a seat's owner tells lode (root's)
+COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
+                                     its lines into the log, as systemd-cat's
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 
@@ -102,6 +104,7 @@ pub(crate) fn run() -> i32 {
         Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
         Some("rotate") => return rotate(),
         Some("session") => return announce(rest.get(1..).unwrap_or_default()),
+        Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("delete") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
@@ -1181,4 +1184,147 @@ fn provide_stub(words: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// `COMMAND | lode cat [-t ID] [-p PRIO] [--journal]`: standard input into
+/// the log, a line a record -- through a stdout stream, as `systemd-cat`
+/// sends it, or with `--journal` a native-protocol datagram a line.
+fn cat(words: &[String]) -> i32 {
+    let mut identifier = String::from("lode-cat");
+    let mut priority = 6_u8;
+    let mut journal = false;
+    let mut at = 0;
+    while let Some(word) = words.get(at) {
+        at += 1;
+        match word.as_str() {
+            "-t" | "--identifier" => match words.get(at) {
+                Some(value) => {
+                    identifier.clone_from(value);
+                    at += 1;
+                }
+                None => return usage("cat -t needs an identifier"),
+            },
+            "-p" | "--priority" => match words.get(at).and_then(|value| level(value)) {
+                Some(value) => {
+                    priority = value;
+                    at += 1;
+                }
+                None => return usage("cat -p needs a priority"),
+            },
+            "--journal" => journal = true,
+            other => {
+                return usage(&alloc::format!(
+                    "cat: {other}: pipe a command's output into `lode cat`"
+                ));
+            }
+        }
+    }
+    let path: &[u8] = if journal {
+        b"/run/systemd/journal/socket"
+    } else {
+        b"/run/systemd/journal/stdout"
+    };
+    let connected = if journal {
+        connect_datagram(path)
+    } else {
+        connect(path)
+    };
+    let fd = match connected {
+        Ok(fd) => fd,
+        Err(error) => {
+            complain(&alloc::format!(
+                "lode: cat: {}: errno {}",
+                String::from_utf8_lossy(path),
+                error.0
+            ));
+            return 1;
+        }
+    };
+    if !journal {
+        let header = alloc::format!("{identifier}\n\n{priority}\n1\n0\n0\n0\n");
+        if sys::write_all(fd, header.as_bytes()).is_err() {
+            return 1;
+        }
+    }
+    let mut held: Vec<u8> = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let got = match sys::read(0, &mut chunk) {
+            Ok(0) | Err(_) => 0,
+            Ok(got) => got,
+        };
+        held.extend_from_slice(chunk.get(..got).unwrap_or_default());
+        let finished = got == 0;
+        if !journal {
+            let take = if finished {
+                held.len()
+            } else {
+                held.iter()
+                    .rposition(|&byte| byte == b'\n')
+                    .map_or(0, |end| end + 1)
+            };
+            let send: Vec<u8> = held.drain(..take).collect();
+            if !send.is_empty() && sys::write_all(fd, &send).is_err() {
+                return 1;
+            }
+        } else {
+            while let Some(end) = held.iter().position(|&byte| byte == b'\n') {
+                let line: Vec<u8> = held.drain(..=end).collect();
+                send_native(
+                    fd,
+                    &identifier,
+                    priority,
+                    line.strip_suffix(b"\n").unwrap_or(&line),
+                );
+            }
+            if finished && !held.is_empty() {
+                let line = core::mem::take(&mut held);
+                send_native(fd, &identifier, priority, &line);
+            }
+        }
+        if finished {
+            break;
+        }
+    }
+    sys::close(fd);
+    0
+}
+
+/// One line as a native-protocol datagram on the connected `fd`.
+fn send_native(fd: usize, identifier: &str, priority: u8, line: &[u8]) {
+    let mut datagram =
+        alloc::format!("PRIORITY={priority}\nSYSLOG_IDENTIFIER={identifier}\n").into_bytes();
+    if line.contains(&b'\n') {
+        datagram.extend_from_slice(b"MESSAGE\n");
+        datagram.extend_from_slice(&u64::try_from(line.len()).unwrap_or(0).to_le_bytes());
+    } else {
+        datagram.extend_from_slice(b"MESSAGE=");
+    }
+    datagram.extend_from_slice(line);
+    datagram.push(b'\n');
+    let _ = sys::write(fd, &datagram);
+}
+
+/// A datagram socket connected to `path`.
+fn connect_datagram(path: &[u8]) -> Result<usize, sys::Errno> {
+    use ferrix_rt::linux as rt;
+    let fd = rt::socket(rt::AF_UNIX, 2, 0)?;
+    let Some((address, length)) = rt::sockaddr_un(path) else {
+        sys::close(fd);
+        return Err(sys::Errno(22));
+    };
+    // SAFETY: `address` is a `sockaddr_un` of `length` bytes, read for the call.
+    let connected = unsafe {
+        rt::call(
+            rt::numbers::CONNECT,
+            [fd, address.as_ptr() as usize, length, 0, 0, 0],
+        )
+    };
+    match connected {
+        Ok(_) => Ok(fd),
+        Err(error) => {
+            sys::close(fd);
+            Err(error)
+        }
+    }
 }

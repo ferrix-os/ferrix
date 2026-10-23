@@ -96,8 +96,10 @@ const STATIC_NODES: [&[u8]; 9] = [
 /// there unconditionally, and the one this filesystem does not publish a
 /// device for.
 const SHM: &[u8] = b"shm";
-/// The links every Linux `/dev` has, listed after `shm`, in this order.
-const LINKS: [&[u8]; 4] = [b"fd", b"stdin", b"stdout", b"stderr"];
+/// The links every Linux `/dev` has, listed after `shm`, in this order;
+/// `log` is systemd's, to the syslog socket lode serves (`docs/LOGGING.md`
+/// §5), dangling while nothing does.
+const LINKS: [&[u8]; 5] = [b"fd", b"stdin", b"stdout", b"stderr", b"log"];
 
 /// Where `/dev` is staged in the check's page.
 const AT_DEV: u64 = 0;

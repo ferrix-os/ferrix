@@ -107,6 +107,14 @@ say "dropped: $(/bin/lode -b -t dropme -o cat | $bb wc -l) $(/bin/lode -b --wher
 say "classes: $($bb ls /var/log/journal | $bb grep -c '^errors@') $(/bin/lode -b -t erring -o cat | $bb wc -l)"
 say "delete: $(/bin/lode delete --where 'id = deleteme')"
 say "deleted: $(/bin/lode -b -t deleteme -o cat | $bb wc -l) $(/bin/lode -b -t lode-delete -o cat | $bb grep -c 'removed 2 record')"
+# The Linux front (step 3): busybox logger through /dev/log, a stdout stream
+# and a native-protocol datagram, each with the kernel's word on the sender.
+$bb logger -t sysloggy "from logger" || say "FAIL logger"
+echo "from a stream" | /bin/lode cat -t streamy -p warning || say "FAIL lode cat"
+echo "from the journal socket" | /bin/lode cat --journal -t nativey -p err || say "FAIL lode cat --journal"
+$bb sleep 1
+say "devlog: $($bb readlink /dev/log)"
+say "front: $(/bin/lode -b -t sysloggy -o json | $bb grep -c '"_TRANSPORT":"syslog"') $(/bin/lode -b -t streamy -p warning -o json | $bb grep -c '"_TRANSPORT":"stdout"') $(/bin/lode -b -t nativey -p err -o json | $bb grep -c '"_TRANSPORT":"journal"') $(/bin/lode -b -t sysloggy -o json | $bb grep -c '"_PID":"[0-9]') $(/bin/lode -b -t sysloggy -o json | $bb grep '"_SYSTEMD_UNIT"' | $bb grep -vc '"_SYSTEMD_UNIT":"lode-test.service"')"
 # Sessions (step 2a): what a seat's owner tells lode, kept across lode's restart.
 /bin/lode session begin 7 seat=seat0 uid=0 pid=$$ scope=session-7.scope unit=lode-test.service token=00112233445566778899aabbccddeeff || say "FAIL lode session begin"
 say "in session"
@@ -168,6 +176,11 @@ say "cgroup: $($bb cat /proc/$pid/cgroup)"
 if echo $pid > /sys/fs/cgroup/cgroup.procs 2>/dev/null; then say "sealed: moved"; else say "sealed: refused"; fi
 say "boots: $(/bin/lode --list-boots | $bb tail -n +2 | $bb wc -l)"
 say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
+# Without lode, syslog() is refused at once, not left waiting.
+/bin/svc stop lode.service > /dev/null 2>&1
+$bb timeout 5 $bb logger -t gone "with no lode" ; said=$?
+say "no lode: $([ $said -eq 124 ] && echo hung || echo returned)"
+/bin/svc start lode.service > /dev/null 2>&1
 say done
 "#;
 
@@ -318,6 +331,21 @@ fn held(lines: &[String]) -> std::result::Result<(), String> {
              provider, and a refusal for an unproven one",
         ),
         (
+            "lode-test: devlog:",
+            "/run/systemd/journal/dev-log",
+            "/dev/log is not the link to lode's syslog socket",
+        ),
+        (
+            "lode-test: no lode:",
+            "returned",
+            "logger hung with no lode to take its line",
+        ),
+        (
+            "lode-test: front:",
+            "1 1 1 1 0",
+            "logger, a stdout stream and a native datagram did not each come in once, with the sender's pid and never a wrong unit",
+        ),
+        (
             "lode-test: session:",
             "2 0 1",
             "a session's lines were not stamped with its id, across lode's restart, and only while it lasted",
@@ -397,7 +425,10 @@ lode-test: dropped: 0 1
 lode-test: classes: 1 1
 lode-test: deleted: 0 1
 lode-test: session: 2 0 1
-lode-test: capture: 1 1 1 qoif provide-stub: refused";
+lode-test: capture: 1 1 1 qoif provide-stub: refused
+lode-test: front: 1 1 1 1 0
+lode-test: devlog: /run/systemd/journal/dev-log
+lode-test: no lode: returned";
 
     /// [`CLEAN`] with the line beginning `what` replaced by `with`.
     fn run(what: &str, with: &str) -> Vec<String> {

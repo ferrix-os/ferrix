@@ -1415,6 +1415,44 @@ Crash screenshots (§19), on the session token of step 2a.
 * Not yet: `lode delete` removing a deleted crash's picture; PNG.
 * Kernel lines: 0; ring-3 only (lode, sessiond, hyprix), none in the item.
 
+### Step 3, as built
+
+The Linux front (§5; `front.rs`), made while lode is still root:
+
+* `/run/systemd/journal/dev-log`, syslog datagrams, and `/dev/log`, a link
+  to it in devfs's fixed table beside `fd`, `stdin`, `stdout` and `stderr`
+  -- the one kernel change of the log so far, two lines in
+  `src/kernel/src/fs/devfs.rs` (load ring; `fs` exists only under
+  `linux_abi=on`) and the devfs boot check's expected names. Without lode
+  the link dangles and `syslog()` is refused at once, as on Linux without
+  journald. RFC 5424 when a datagram says `1 `, RFC 3164 read leniently.
+* `/run/systemd/journal/` is made by lode as root, root's 0755, so while
+  lode is stopped nobody else can bind the syslog socket there and take
+  other programs' records (the consultant's C2, ledger line 3404).
+* `/run/systemd/journal/socket`, systemd's native protocol, a large record
+  in a passed memfd. libsystemd's `sd_journal_send` sends to the name on an
+  unconnected socket, which the kernel refuses (§14's optional item, not
+  built): a program that connects first gets through (`lode cat
+  --journal`).
+* `/run/systemd/journal/stdout`, stdout streams: the seven-line header,
+  then lines, `<N>` prefixes read when the header says so.
+* Each datagram's pid, uid and gid are the kernel's (`SO_PASSCRED`), a
+  stream's are `SO_PEERCRED` at accept; `_COMM`, `_SYSTEMD_CGROUP`,
+  `_SYSTEMD_UNIT` and `_SYSTEMD_SLICE` come from `/proc` at once and are
+  kept 10 s for a sender that has exited since. A session's scope stamps
+  its programs' records with its id. A one-shot sender that has exited
+  before lode reads its datagram keeps the kernel's `_PID`, `_UID` and
+  `_GID` but has no `_COMM` or unit (§4.2's residual; seen on AArch64 with
+  busybox `logger`), never a wrong one.
+* `COMMAND | lode cat [-t ID] [-p PRIO] [--journal]`: standard input into
+  the log, as `systemd-cat` sends it (no program to start: pipe into it).
+* Not yet: streams parked in init's descriptor store across a restart of
+  lode (a stream open while lode restarts is lost and its writer sees
+  `EPIPE`); the sockets owned by init rather than lode.
+* `test-log`: busybox `logger`, a stream and a native datagram each arrive
+  once with the trusted fields; `/dev/log` is the link; with lode stopped,
+  `logger` returns at once.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

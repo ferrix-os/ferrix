@@ -810,3 +810,86 @@ mod sessions {
         assert!(sessions.on_seat("seat0").is_none());
     }
 }
+
+mod protocols {
+    use crate::protocols::{self, StreamHeader};
+
+    #[test]
+    fn rfc3164_as_musl_and_glibc_send_it() {
+        let record = protocols::syslog(b"<30>Oct 23 14:01:02 sshd[812]: accepted key\n", 1, 2);
+        assert_eq!(record.priority, 6);
+        assert_eq!(record.get_str("SYSLOG_FACILITY"), Some("3"));
+        assert_eq!(record.get_str("SYSLOG_IDENTIFIER"), Some("sshd"));
+        assert_eq!(record.get_str("SYSLOG_PID"), Some("812"));
+        assert_eq!(record.get_str("SYSLOG_TIMESTAMP"), Some("Oct 23 14:01:02"));
+        assert_eq!(record.message(), b"accepted key");
+        assert_eq!(record.get_str("_TRANSPORT"), Some("syslog"));
+        let bare = protocols::syslog(b"<11>logger: no time", 1, 2);
+        assert_eq!(bare.priority, 3);
+        assert_eq!(bare.get_str("SYSLOG_IDENTIFIER"), Some("logger"));
+        assert_eq!(bare.message(), b"no time");
+        let plain = protocols::syslog(b"just text, no tag", 1, 2);
+        assert_eq!(plain.priority, 5);
+        assert_eq!(plain.get("SYSLOG_IDENTIFIER"), None);
+        assert_eq!(plain.message(), b"just text, no tag");
+    }
+
+    #[test]
+    fn rfc5424_with_structured_data() {
+        let record = protocols::syslog(
+            b"<165>1 2026-10-23T14:01:02.003Z box app 4242 ID47 [exampleSDID@32473 iut=\"3\" eventSource=\"App\"] \xEF\xBB\xBFAn application event",
+            1,
+            2,
+        );
+        assert_eq!(record.priority, 5);
+        assert_eq!(record.get_str("SYSLOG_FACILITY"), Some("20"));
+        assert_eq!(record.get_str("SYSLOG_IDENTIFIER"), Some("app"));
+        assert_eq!(record.get_str("SYSLOG_PID"), Some("4242"));
+        assert_eq!(record.get_str("SYSLOG_MSGID"), Some("ID47"));
+        assert_eq!(
+            record.get_str("SYSLOG_STRUCTURED_DATA"),
+            Some("[exampleSDID@32473 iut=\"3\" eventSource=\"App\"]")
+        );
+        assert_eq!(record.message(), b"An application event");
+        let nil = protocols::syslog(b"<14>1 - - - - - - hello", 1, 2);
+        assert_eq!(nil.message(), b"hello");
+        assert_eq!(nil.get("SYSLOG_IDENTIFIER"), None);
+    }
+
+    #[test]
+    fn the_native_protocol_with_a_binary_value() {
+        let mut datagram =
+            alloc::vec::Vec::from(&b"MESSAGE=hello\nPRIORITY=3\n_PID=1\nCODE_LINE=12\nBLOB\n"[..]);
+        datagram.extend_from_slice(&5_u64.to_le_bytes());
+        datagram.extend_from_slice(b"a\nb\0c\n");
+        let record = protocols::native(&datagram, 1, 2).unwrap();
+        assert_eq!(record.priority, 3);
+        assert_eq!(record.message(), b"hello");
+        assert_eq!(record.get("_PID"), None);
+        assert_eq!(record.get_str("CODE_LINE"), Some("12"));
+        assert_eq!(record.get("BLOB"), Some(&b"a\nb\0c"[..]));
+        assert_eq!(record.get_str("_TRANSPORT"), Some("journal"));
+        assert!(protocols::native(b"BLOB\n\x05\x00", 1, 2).is_none());
+    }
+
+    #[test]
+    fn a_stream_header_and_its_lines() {
+        let bytes = b"myapp\nmy.service\n6\n1\n0\n0\n0\n<3>broke\nfine\n";
+        let (header, used) = protocols::stream_header(bytes).unwrap();
+        assert_eq!(
+            header,
+            StreamHeader {
+                identifier: "myapp".into(),
+                unit: "my.service".into(),
+                priority: 6,
+                level_prefix: true
+            }
+        );
+        let broke = protocols::stream_line(&header, b"<3>broke", 1, 2);
+        assert_eq!(broke.priority, 3);
+        assert_eq!(broke.message(), b"broke");
+        assert_eq!(broke.get_str("SYSLOG_IDENTIFIER"), Some("myapp"));
+        assert_eq!(&bytes[used..used + 8], b"<3>broke");
+        assert!(protocols::stream_header(b"half\nheader\n").is_none());
+    }
+}

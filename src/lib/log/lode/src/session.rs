@@ -163,7 +163,9 @@ impl Sessions {
             .or_else(|| record.get_str("SYSLOG_PID"))
             .and_then(|pid| pid.parse::<u32>().ok());
         let found = self.open.iter().find(|session| {
-            unit == Some(session.unit.as_bytes()) || pid.is_some_and(|pid| pid == session.pid)
+            unit == Some(session.unit.as_bytes())
+                || unit == Some(session.scope.as_bytes())
+                || pid.is_some_and(|pid| pid == session.pid)
         });
         if let Some(session) = found {
             record.push("SESSION_ID", alloc::format!("{}", session.id).as_bytes());

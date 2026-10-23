@@ -498,3 +498,180 @@ pub(crate) fn peer(fd: usize) -> Option<(u32, u32)> {
 pub(crate) fn write_some(fd: usize, buf: &[u8]) -> usize {
     write(fd, buf).unwrap_or(0)
 }
+
+/// `SOL_SOCKET`.
+const SOL_SOCKET: usize = 1;
+/// `SO_PASSCRED`.
+const SO_PASSCRED: usize = 16;
+/// `SCM_RIGHTS`.
+const SCM_RIGHTS: i32 = 1;
+/// `SCM_CREDENTIALS`.
+const SCM_CREDENTIALS: i32 = 2;
+/// `SOCK_DGRAM`.
+const SOCK_DGRAM: usize = 2;
+
+/// A datagram socket bound at `path`, made afresh, non-blocking, its
+/// receives stamped with their senders' credentials (`SO_PASSCRED`).
+pub(crate) fn datagram_at(path: &[u8]) -> Result<usize, Errno> {
+    use ferrix_rt::linux as rt;
+    let _ = unlinkat(AT_FDCWD, path);
+    let fd = rt::socket(rt::AF_UNIX, SOCK_DGRAM | rt::SOCK_NONBLOCK | O_CLOEXEC, 0)?;
+    let one: i32 = 1;
+    // SAFETY: `one` is an `int`, read for the call.
+    let passed = unsafe {
+        call(
+            numbers::SETSOCKOPT,
+            [fd, SOL_SOCKET, SO_PASSCRED, (&raw const one) as usize, 4, 0],
+        )
+    };
+    let Some((address, length)) = rt::sockaddr_un(path) else {
+        close(fd);
+        return Err(Errno(22));
+    };
+    let bound = passed.and_then(|_| rt::bind(fd, &address, length));
+    if let Err(error) = bound {
+        close(fd);
+        return Err(error);
+    }
+    Ok(fd)
+}
+
+/// One datagram received.
+pub(crate) struct Received {
+    /// Its length.
+    pub(crate) length: usize,
+    /// Its sender's pid, uid and gid, as the kernel stamped them.
+    pub(crate) sender: Option<(u32, u32, u32)>,
+    /// A descriptor it carried, a memfd for a large record.
+    pub(crate) passed: Option<usize>,
+}
+
+/// Receive one datagram into `buf` without waiting, with its credentials
+/// and at most one passed descriptor (any more are closed).
+pub(crate) fn receive(fd: usize, buf: &mut [u8]) -> Option<Received> {
+    let word = size_of::<usize>();
+    let mut control = [0_usize; 16];
+    let iov = [buf.as_mut_ptr() as usize, buf.len()];
+    // struct msghdr as machine words: name, namelen, iov, iovlen, control,
+    // controllen, flags -- the 32-bit fields in the low half of a word on
+    // the 64-bit targets, which are little-endian.
+    let mut header = [
+        0,
+        0,
+        iov.as_ptr() as usize,
+        1,
+        control.as_mut_ptr() as usize,
+        control.len() * word,
+        0,
+    ];
+    const MSG_DONTWAIT: usize = 0x40;
+    const MSG_CMSG_CLOEXEC: usize = 0x4000_0000;
+    // SAFETY: `header` is a `struct msghdr` laid out in words, whose iovec
+    // and control buffer live for the call; the kernel writes the lengths
+    // back into it.
+    let length = unsafe {
+        call(
+            numbers::RECVMSG,
+            [
+                fd,
+                header.as_mut_ptr() as usize,
+                MSG_DONTWAIT | MSG_CMSG_CLOEXEC,
+                0,
+                0,
+                0,
+            ],
+        )
+    }
+    .ok()?;
+    let used = header
+        .get(5)
+        .copied()
+        .unwrap_or(0)
+        .min(control.len() * word);
+    let bytes: Vec<u8> = control
+        .iter()
+        .flat_map(|w| w.to_ne_bytes())
+        .take(used)
+        .collect();
+    let mut received = Received {
+        length,
+        sender: None,
+        passed: None,
+    };
+    let mut at = 0;
+    while at + word + 8 <= bytes.len() {
+        let size = usize::from_ne_bytes(bytes.get(at..at + word)?.try_into().ok()?);
+        let level = i32::from_ne_bytes(bytes.get(at + word..at + word + 4)?.try_into().ok()?);
+        let kind = i32::from_ne_bytes(bytes.get(at + word + 4..at + word + 8)?.try_into().ok()?);
+        let data = bytes.get(at + word + 8..at + size.max(word + 8))?;
+        if level == SOL_SOCKET as i32 && kind == SCM_CREDENTIALS && data.len() >= 12 {
+            let field = |n: usize| {
+                u32::from_ne_bytes(
+                    data.get(n * 4..n * 4 + 4)
+                        .and_then(|b| b.try_into().ok())
+                        .unwrap_or([0; 4]),
+                )
+            };
+            received.sender = Some((field(0), field(1), field(2)));
+        } else if level == SOL_SOCKET as i32 && kind == SCM_RIGHTS {
+            for chunk in data.chunks_exact(4) {
+                let passed = usize::try_from(i32::from_ne_bytes(chunk.try_into().ok()?)).ok()?;
+                if received.passed.is_none() {
+                    received.passed = Some(passed);
+                } else {
+                    close(passed);
+                }
+            }
+        }
+        if size == 0 {
+            break;
+        }
+        at += size.next_multiple_of(word);
+    }
+    Some(received)
+}
+
+/// The pid, uid and gid at the other end of a connected socket.
+pub(crate) fn peer_all(fd: usize) -> Option<(u32, u32, u32)> {
+    let (pid, uid) = peer(fd)?;
+    let mut credentials = [0_u32; 3];
+    let mut length: u32 = 12;
+    const SO_PEERCRED: usize = 17;
+    // SAFETY: as in `peer`: 12 bytes, and the length says so.
+    let _ = unsafe {
+        call(
+            numbers::GETSOCKOPT,
+            [
+                fd,
+                SOL_SOCKET,
+                SO_PEERCRED,
+                credentials.as_mut_ptr() as usize,
+                (&raw mut length) as usize,
+                0,
+            ],
+        )
+    };
+    let [_, _, gid] = credentials;
+    Some((pid, uid, gid))
+}
+
+/// `symlinkat(target, AT_FDCWD, link)`.
+pub(crate) fn symlink(target: &[u8], link: &[u8]) -> Result<(), Errno> {
+    let target = c_path(target);
+    let link = c_path(link);
+    // SAFETY: both are NUL-terminated buffers that live for the call.
+    unsafe {
+        call(
+            numbers::SYMLINKAT,
+            [
+                target.as_ptr() as usize,
+                AT_FDCWD,
+                link.as_ptr() as usize,
+                0,
+                0,
+                0,
+            ],
+        )
+    }
+    .map(|_| ())
+}

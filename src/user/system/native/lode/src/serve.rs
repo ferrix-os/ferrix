@@ -33,6 +33,7 @@ use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
 
 use crate::capture::Capture;
+use crate::front::Front;
 use crate::seat::Seat;
 use crate::store::{self, Dir};
 use crate::{sys, zone};
@@ -118,6 +119,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     }
     let (boot_id, restarted) = boot_id();
     let seat = Seat::open();
+    let front = Front::open();
     let journal = if persistent.is_some() {
         store::PERSISTENT
     } else {
@@ -175,6 +177,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         sequence,
         limiter,
         seat,
+        front,
         capture,
         zone,
     };
@@ -193,6 +196,8 @@ struct Service {
     limiter: Limiter,
     /// The seat's owner's socket and the sessions.
     seat: Seat,
+    /// The Linux front: `/dev/log`, the journal's sockets.
+    front: Front,
     /// Crash screenshots, when they are on.
     capture: Capture,
     /// The local zone, for the offsets records carry.
@@ -250,8 +255,16 @@ impl Service {
         loop {
             let mut batch: Vec<Record> = Vec::new();
             let now = clocks();
-            let rotate = self.read_kmsg(now, &mut first_start, &mut batch);
+            // The seat's owner first: a session it announced is open before
+            // the lines its programs wrote after the announcement are read.
             self.seat.serve(now, &mut batch);
+            let rotate = self.read_kmsg(now, &mut first_start, &mut batch);
+            let mut heard = Vec::new();
+            self.front.serve(now, &mut heard);
+            for mut record in heard {
+                self.seat.stamp(&mut record);
+                self.limiter.admit(record, now.monotonic_us, &mut batch);
+            }
             if rotate {
                 self.limiter.flush(now.monotonic_us, &mut batch);
             }
@@ -298,6 +311,7 @@ impl Service {
             if idle {
                 let mut fds = alloc::vec![self.kmsg];
                 fds.extend(self.seat.fds());
+                fds.extend(self.front.fds());
                 fds.extend(self.capture.fds());
                 sys::wait_any(&fds, WAIT_MS);
             }
