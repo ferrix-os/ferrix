@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::apps::VKGEARS_PATH;
 use super::run::{with_layout, with_network};
-use super::{CLIENT_PATH, CONFIG_PATH, Carried, steam_window};
+use super::{CLIENT_PATH, CONFIG_PATH, Carried, WALLPAPER_CLIENT_PATH, steam_window};
 use crate::args::Args;
 use crate::paths::Arch;
 use crate::{Error, Result};
@@ -37,6 +37,10 @@ const WALLPAPER_PATH: &str = "etc/wallpaper.fxwall";
 /// flag rather than the same name holding either: a boot that carried the
 /// wrong one would say nothing until the screen was grey.
 pub(super) const MOVIE_PATH: &str = "etc/wallpaper.ivf";
+
+/// Where the shipped wallpaper goes, which `/bin/wallpaper` shows: where a
+/// Linux distribution keeps its backgrounds.
+pub(super) const BRAND_PATH: &str = "usr/share/backgrounds/ferrix/ferrix-wallpaper.png";
 
 /// A desktop a person uses, from `config`: the layout and network lines,
 /// the ssh server when asked for, the screen's size as a `monitor =` line,
@@ -266,33 +270,50 @@ pub(super) fn desktop(
         Backdrop::Any => crate::wallpaper::file(args, size)?,
         Backdrop::Board(screen) => crate::wallpaper::for_board(args, screen)?,
     };
-    let config = match chosen {
+    let config = with_wallpaper(config, chosen, &mut carried);
+    Ok((config, carried))
+}
+
+/// `config` with the line that starts `chosen`'s wallpaper before it, and
+/// the file carried: the shipped one by `/bin/wallpaper` on every screen,
+/// a kept one by `pattern --wallpaper`, a moving one by `pattern --video`.
+fn with_wallpaper(
+    config: String,
+    chosen: Option<crate::wallpaper::Chosen>,
+    carried: &mut Carried,
+) -> String {
+    match chosen {
         Some(chosen) => {
             // A moving one is started the way `mpvpaper` is on a desktop,
             // down to the words: `-o no-audio` and `ALL` mean here what they
             // mean there, so a line copied either way says the same thing.
-            let (path, how) = match chosen {
-                crate::wallpaper::Chosen::Still(_) => {
-                    (WALLPAPER_PATH, format!("--wallpaper /{WALLPAPER_PATH}"))
-                }
+            let (path, line) = match chosen {
+                crate::wallpaper::Chosen::Brand(_) => (
+                    BRAND_PATH,
+                    format!("exec-once = /{WALLPAPER_CLIENT_PATH} /{BRAND_PATH}"),
+                ),
+                crate::wallpaper::Chosen::Still(_) => (
+                    WALLPAPER_PATH,
+                    format!("exec-once = /{CLIENT_PATH} --wallpaper /{WALLPAPER_PATH}"),
+                ),
                 // One word after `-o`, as mpvpaper's own examples write it.
                 // A quoted string would arrive whole too: the compositor
                 // splits `exec-once` as a shell would for its quoting
                 // (`hyprix::command`).
-                crate::wallpaper::Chosen::Moving(_) => {
-                    (MOVIE_PATH, format!("--video -o no-audio ALL /{MOVIE_PATH}"))
-                }
+                crate::wallpaper::Chosen::Moving(_) => (
+                    MOVIE_PATH,
+                    format!("exec-once = /{CLIENT_PATH} --video -o no-audio ALL /{MOVIE_PATH}"),
+                ),
             };
             carried.ports.push(crate::ports::File {
                 path: path.to_owned(),
                 mode: 0o644,
                 content: crate::ports::Content::Bytes(chosen.bytes()),
             });
-            format!("exec-once = /{CLIENT_PATH} {how}\n{config}")
+            format!("{line}\n{config}")
         }
         None => config,
-    };
-    Ok((config, carried))
+    }
 }
 
 /// The sound server for Chrome with a sound card, which Chrome takes over

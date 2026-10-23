@@ -47,6 +47,9 @@ def main():
     print(f"Boot it: `git checkout {tag} && cargo xtask run --arch x86_64`. "
           f"Everything else is in the [README]({REPO}/blob/{tag}/README.md) "
           f"and on the [website](https://ferrix-os.org/).")
+    print()
+    print("The desktop's wallpaper is attached at 1920x1080, 2560x1440 and 3840x2160 "
+          "(`ferrix-wallpaper-<size>.png`), for your own desktop too.")
 
 
 if __name__ == "__main__":

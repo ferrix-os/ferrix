@@ -111,7 +111,7 @@ use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::{Error, Result};
 use drawing::{test_animation, test_decorations, test_gpu, test_terminal};
-use drawn_here::{test_caption, test_waybar, test_waybar_volume};
+use drawn_here::{test_caption, test_wallpaper, test_waybar, test_waybar_volume};
 use effects::{test_bar_menu, test_drag, test_drag_precise, test_screenshot_unshared};
 use layout::{test_dispatchers, test_groups, test_plugins, test_rules, test_submap, test_twin};
 use machine::{test_desktop, test_driver_restart};
@@ -348,6 +348,8 @@ const LOCK_PATH: &str = "bin/lock";
 const VKBD_PATH: &str = "bin/vkbd";
 const VDAGENT_PATH: &str = "bin/vdagent";
 const NOTIFYD_PATH: &str = "bin/notifyd";
+/// `wallpaper`, which shows the shipped wallpaper on every screen.
+pub(crate) const WALLPAPER_CLIENT_PATH: &str = "bin/wallpaper";
 
 /// Where `sessiond` goes: seat0's owner, which starts the `--everything`
 /// desktop as its user (`crate::session`).
@@ -397,6 +399,8 @@ struct Programs {
     /// `notifyd`, the notifications and devmgr's driver events
     /// (docs/DESKTOP.md §4), which the Ferrix light theme starts.
     notifyd: PathBuf,
+    /// `wallpaper`, a picture behind everything on every screen.
+    wallpaper: PathBuf,
 }
 
 impl Programs {
@@ -419,11 +423,12 @@ impl Programs {
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
             sessiond: build(arch, "compositor-sessiond", "sessiond")?,
             notifyd: build(arch, "compositor-notifyd", "notifyd")?,
+            wallpaper: build(arch, "compositor-wallpaper", "wallpaper")?,
         })
     }
 
     /// The ones the initramfs carries, each with the path it goes at.
-    fn carried(&self) -> [(&'static str, &Path); 15] {
+    fn carried(&self) -> [(&'static str, &Path); 16] {
         [
             (CLIENT_PATH, self.client.as_path()),
             (CTL_PATH, self.ctl.as_path()),
@@ -440,6 +445,7 @@ impl Programs {
             (VDAGENT_PATH, self.vdagent.as_path()),
             (SESSIOND_PATH, self.sessiond.as_path()),
             (NOTIFYD_PATH, self.notifyd.as_path()),
+            (WALLPAPER_CLIENT_PATH, self.wallpaper.as_path()),
         ]
     }
 }
@@ -690,7 +696,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 49] = [
+const BOOTS: [(&str, Boot); 50] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -728,6 +734,7 @@ const BOOTS: [(&str, Boot); 49] = [
     ("idle", idle::test_idle),
     ("idle-user", idle::test_idle_user),
     ("caption", test_caption),
+    ("wallpaper", test_wallpaper),
     ("waybar", test_waybar),
     ("waybar-volume", test_waybar_volume),
     ("fuzzel", test_fuzzel),

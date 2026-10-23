@@ -236,6 +236,9 @@ jobs:
             "$RUNNER_TEMP/desktop/ferrix-$TAG-THIRD-PARTY-LICENSES.md" \
             "$RUNNER_TEMP/sources/ferrix-$TAG-sources.tar.gz" \
             "$RUNNER_TEMP/assets/"
+          # The desktop's wallpaper, the one the image shows, at three
+          # sizes (docs/brand/wallpaper/; our own artwork, MIT).
+          cp docs/brand/wallpaper/ferrix-wallpaper-*.png "$RUNNER_TEMP/assets/"
           ls -l "$RUNNER_TEMP"/assets
 
       - name: Attach it to the release

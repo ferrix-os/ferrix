@@ -1,0 +1,23 @@
+[package]
+name = "compositor-wallpaper"
+description = "wallpaper: a picture behind everything on every screen, scaled to cover it, a layer surface per screen that follows screens coming and going"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "wallpaper"
+path = "src/main.rs"
+
+[lib]
+name = "compositor_wallpaper"
+path = "src/lib.rs"
+
+[dependencies]
+compositor-image = { path = "../image" }
+compositor-toolkit = { path = "../toolkit" }
+
+[lints]
+workspace = true

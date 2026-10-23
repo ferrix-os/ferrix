@@ -11,7 +11,12 @@ the app updates the phone from ([tools/vendor/google/pixel7/README.md](../tools/
 and the x86-64 desktop for plain QEMU, `ferrix-x86_64-desktop.zip`, which
 [`tools/common/release/package-desktop.py`](../tools/common/release/package-desktop.py)
 builds, with each image's licence inventory and the corresponding sources of
-every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)).
+every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)). Every
+release also carries the desktop's wallpaper, `ferrix-wallpaper-1920x1080.png`,
+`-2560x1440.png` and `-3840x2160.png`, which the desktop images show
+(`/bin/wallpaper` on every screen) and
+[`gen-brand-images.py wallpaper`](../tools/common/gen/gen-brand-images.py)
+draws into [`docs/brand/wallpaper/`](brand/wallpaper/).
 
 Before a release tag is pushed, the workflow runs once as a dry run for the
 commit to be tagged: `gh workflow run release.yml -f dry_run=true -f

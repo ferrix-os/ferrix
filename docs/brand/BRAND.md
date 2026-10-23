@@ -28,6 +28,7 @@ mark in ASCII.
 | `favicon.svg`, `favicon-32.png`, `apple-touch-icon.png`, `icon-512.png` | the mark on a dark rounded tile, for icons |
 | `banner-dark.png`, `banner-light.png` | the README header, chosen by the reader's theme |
 | `social-preview.png` | 1280×640: GitHub's social preview, and the website's `og:image` |
+| `wallpaper/ferrix-wallpaper-{1920x1080,2560x1440,3840x2160}.png` | the desktop's wallpaper: a dark blue-grey gradient with a soft light right of centre and the mark at 55% opacity; every desktop image shows it and every release attaches it (`gen-brand-images.py wallpaper`) |
 | `screenshots/` | real captures of Ferrix, each described in `screenshots/CAPTIONS.md` |
 
 Change the copy and the logo in the generator's sources, not in an image

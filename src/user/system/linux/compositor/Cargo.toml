@@ -16,7 +16,7 @@ members = [
     "gbm", "hyprix", "hyprlang", "image", "ipc", "layout",
     "lock", "lswt", "notifyd", "pattern", "plug", "protocol", "reboot", "regex", "render",
     "server", "sessiond", "shm", "shot", "socket", "seat", "text", "tone", "toolkit", "vdagent", "virgl",
-    "vkbd", "vptr", "wire", "xkb", "xlatency", "xmoveresize",
+    "vkbd", "vptr", "wallpaper", "wire", "xkb", "xlatency", "xmoveresize",
 ]
 
 [workspace.package]

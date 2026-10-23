@@ -196,6 +196,11 @@ names the part of Hyprland or hyprlang it follows.
   requests a click on a taskbar entry makes. Named after Leon Henrik
   Plickat's program of the same name, and there for the same reason `clip`
   is: it is the part of a bar that can be tested with no screen.
+* **`wallpaper FILE`** is `swaybg -m fill`: a background layer surface on
+  every screen, one more when a screen is plugged in and one fewer when it
+  goes, with the PNG, JPEG or SVG scaled to cover it. Desktop images start
+  it with the shipped wallpaper (`docs/brand/wallpaper/`), and
+  `test-compositor`'s `wallpaper` boot checks the screen shows it.
 * **`notifyd`** is the desktop's notification server
   (`docs/DESKTOP.md` §4): `org.freedesktop.Notifications` on the session
   bus through **`dbus`**, the crate's own D-Bus subset, and `devmgr`'s

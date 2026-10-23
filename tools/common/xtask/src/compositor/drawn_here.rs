@@ -1,6 +1,7 @@
 //! The boots held to a picture this machine draws rather than one the tree
 //! blesses: `caption`, a line in the user's own font, and `waybar` and
-//! `waybar-volume`, the user's own bar.
+//! `waybar-volume`, the user's own bar; and `wallpaper`, the shipped
+//! wallpaper (`docs/brand/wallpaper/`), held to what it is made of.
 //!
 //! Nothing about the user's files is committed, so the expected picture is
 //! made while the boot is built, by the `x86_64` build of the same client run
@@ -121,6 +122,123 @@ pub(super) fn test_caption(arch: Arch, programs: &Programs, args: &Args) -> Resu
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, MARKER, hook)?;
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
+}
+
+/// The screen the `wallpaper` boot lays out: 4:3, so the 16:9 picture is
+/// cut at the sides and a client that stretched it would be seen to.
+const WALLPAPER_SCREEN: (usize, usize) = (1024, 768);
+
+/// `cargo xtask test-compositor`'s `wallpaper` boot: `/bin/wallpaper`
+/// (`src/user/system/linux/compositor/wallpaper`) started by `exec-once`
+/// with the shipped wallpaper, as every desktop image starts it, and the
+/// screen held to the picture: dark blue-grey everywhere, the mark's light
+/// grey where covering a 4:3 screen puts it and nowhere else.
+pub(super) fn test_wallpaper(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let png = crate::wallpaper::brand((1920, 1080))?;
+    let mut carried = Carried::none();
+    carried.ports.push(crate::ports::File {
+        path: super::desktop::BRAND_PATH.to_owned(),
+        mode: 0o644,
+        content: crate::ports::Content::Bytes(png),
+    });
+    let config = format!(
+        "# Written into the initramfs by `cargo xtask test-compositor`'s wallpaper boot.\n\
+         monitor = , {}x{}@60, auto, 1\n\
+         exec-once = /{} /{}\n",
+        WALLPAPER_SCREEN.0,
+        WALLPAPER_SCREEN.1,
+        super::WALLPAPER_CLIENT_PATH,
+        super::desktop::BRAND_PATH
+    );
+    let (image, kernel) = build_image(arch, programs, &undithered(&config), carried, args)?;
+    let port = free_port()?;
+    let mut qemu_args = args.clone();
+    qemu_args.display = true;
+    qemu_args.qmp_port = Some(port);
+    let dump = paths::build_dir(arch).join("wallpaper.ppm");
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        watching.stop_when_done();
+        let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+        let drawn = watching.read_more(Instant::now() + SETTLE, |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("wallpaper: ") && line.contains(" drawn at "))
+        })?;
+        if !drawn {
+            return Err(with_the_transcript(
+                &Error::new(format!("{arch}: the wallpaper never said it was drawn")),
+                watching,
+            ));
+        }
+        let deadline = Instant::now() + SETTLE;
+        loop {
+            qmp.screendump(Some(DEVICE_ID), &dump)?;
+            let bytes = std::fs::read(&dump)
+                .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
+            let screen = parse_ppm(&bytes)?;
+            match judge_wallpaper(&screen) {
+                Ok(said) => {
+                    println!("  {arch}: {said}");
+                    return Ok(());
+                }
+                Err(why) if Instant::now() >= deadline => {
+                    return Err(with_the_transcript(
+                        &Error::new(format!(
+                            "{arch}: the wallpaper is not on the screen: {why}; the screen is {}",
+                            dump.display()
+                        )),
+                        watching,
+                    ));
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(250)),
+            }
+        }
+    };
+    let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, MARKER, hook)?;
+    Ok(())
+}
+
+/// Whether `screen` shows the shipped wallpaper covering a
+/// [`WALLPAPER_SCREEN`]: every pixel the picture's dark blue-grey or the
+/// mark's grey, the grey only inside the box covering puts the mark in
+/// (the picture's 1031..1348 by 465..723, scaled by 768/1080 and moved
+/// 170 left), and enough of it there to be the mark.
+fn judge_wallpaper(screen: &Image) -> core::result::Result<String, String> {
+    if (screen.width, screen.height) != WALLPAPER_SCREEN {
+        return Err(format!("a {}x{} screen", screen.width, screen.height));
+    }
+    // The mark's box on this screen, with two pixels round it for the
+    // filter's edge.
+    let (left, top, right, bottom) = (558, 328, 791, 517);
+    let mut marked = 0usize;
+    for (at, pixel) in screen.pixels.chunks_exact(3).enumerate() {
+        let (x, y) = (at % screen.width, at / screen.width);
+        let Ok([r, g, b]) = <[u8; 3]>::try_from(pixel).map(|pixel| pixel.map(u32::from)) else {
+            continue;
+        };
+        let grey = r > 90 && g > 90 && b > 100;
+        let inside = (left..right).contains(&x) && (top..bottom).contains(&y);
+        if grey {
+            if !inside {
+                return Err(format!("the mark's grey at {x},{y}, outside where it goes"));
+            }
+            marked += 1;
+        } else if !(b >= r && b >= g && b > 20 && r < 60 && g < 70 && b < 110) && !inside {
+            // Outside the mark everything is the dark blue-grey gradient: no
+            // black, nothing bright, nothing not blue-tinted.
+            return Err(format!(
+                "{r},{g},{b} at {x},{y}, which is not the picture's"
+            ));
+        }
+    }
+    // The mark at this scale is some 20,000 pixels of grey.
+    if marked < 10_000 {
+        return Err(format!("only {marked} pixels of the mark's grey"));
+    }
+    Ok(format!(
+        "the shipped wallpaper covers the {}x{} screen, the mark's {marked} grey pixels where covering puts them",
+        WALLPAPER_SCREEN.0, WALLPAPER_SCREEN.1
+    ))
 }
 
 /// The picture the caption boot's screen must show: the `x86_64` build of
@@ -593,3 +711,38 @@ fn picture_differences(
 /// Where `src/user/system/linux/compositor/caption` holds its surface from the top-left corner:
 /// its `MARGIN`.
 const CAPTION_MARGIN: i32 = 40;
+
+#[cfg(test)]
+mod tests {
+    use super::{WALLPAPER_SCREEN, judge_wallpaper};
+    use crate::display::Image;
+
+    /// The picture's blue-grey with a block of the mark's grey: `at` its
+    /// top-left corner.
+    fn screen(at: (usize, usize)) -> Image {
+        let (width, height) = WALLPAPER_SCREEN;
+        let mut pixels = Vec::with_capacity(width * height * 3);
+        for y in 0..height {
+            for x in 0..width {
+                let grey = (at.0..at.0 + 200).contains(&x) && (at.1..at.1 + 100).contains(&y);
+                pixels.extend_from_slice(if grey { &[127, 135, 150] } else { &[20, 26, 43] });
+            }
+        }
+        Image {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// The mark where covering puts it passes; the same grey elsewhere, or
+    /// a screen of another colour, does not.
+    #[test]
+    fn the_wallpaper_is_judged_by_where_its_mark_is() {
+        assert!(judge_wallpaper(&screen((580, 360))).is_ok());
+        assert!(judge_wallpaper(&screen((100, 100))).is_err(), "the mark moved");
+        let mut black = screen((580, 360));
+        black.pixels.iter_mut().take(3 * 1024).for_each(|byte| *byte = 0);
+        assert!(judge_wallpaper(&black).is_err(), "a black row");
+    }
+}

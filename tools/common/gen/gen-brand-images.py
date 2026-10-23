@@ -11,6 +11,11 @@ of it can be regenerated after the logo or the copy changes:
 
     python3 tools/common/gen/gen-brand-images.py            # all of them
     python3 tools/common/gen/gen-brand-images.py social     # one of them
+    python3 tools/common/gen/gen-brand-images.py wallpaper  # the desktop's
+
+The wallpaper is drawn at 1920x1080 and written at three sizes into
+docs/brand/wallpaper/ (1920x1080, 2560x1440, 3840x2160); images and
+releases carry it (docs/RELEASES.md).
 
 Needs `google-chrome` (or `chromium`) on PATH. Output lands in docs/brand/.
 The terminal lines on the social preview are copied from real gate logs
@@ -241,12 +246,30 @@ def banner(theme):
     return base(t, 1280, 330, body), (1280, 330), f"banner-{theme}.png"
 
 
+# The wallpaper's sizes: the page is drawn at 1920x1080 and scaled.
+WALLPAPER_SIZES = [(1920, 1080), (2560, 1440), (3840, 2160)]
+
+
+def wallpaper():
+    """The desktop's wallpaper: a dark blue-grey gradient, a soft light right
+    of centre, and the mark at 55% opacity on it."""
+    t = THEMES["dark"]
+    body = f"""
+<div style="position:absolute;inset:0;background:linear-gradient(120deg,#0d111c 0%,#161b2c 45%,#1f2740 100%)"></div>
+<div style="position:absolute;inset:0;background:radial-gradient(circle 980px at 1230px 600px,
+  rgba(38,56,92,.95) 0%,rgba(38,56,92,.55) 35%,rgba(38,56,92,.18) 70%,rgba(38,56,92,0) 100%)"></div>
+<div class="mark" style="position:absolute;left:1031px;top:465px;width:317px;height:258px;opacity:.55">{logo_svg(MARK, MARK_BOX)}</div>
+"""
+    return base(t, 1920, 1080, body), (1920, 1080), "wallpaper/ferrix-wallpaper.png"
+
+
 JOBS = {
     "svg": svgs,
     "icons": icons,
     "social": social,
     "banner-dark": lambda: banner("dark"),
     "banner-light": lambda: banner("light"),
+    "wallpaper": wallpaper,
 }
 
 
@@ -276,6 +299,13 @@ def main():
             JOBS[key]()
             continue
         html, size, name = JOBS[key]()
+        if key == "wallpaper":
+            (BRAND / "wallpaper").mkdir(exist_ok=True)
+            for width, height in WALLPAPER_SIZES:
+                out = BRAND / "wallpaper" / f"ferrix-wallpaper-{width}x{height}.png"
+                render(html, size, out, width / size[0])
+                print(f"{out.relative_to(ROOT)}  {width}x{height}")
+            continue
         # The social preview is uploaded at its native size; banners are drawn
         # at 2x so they stay sharp on high-density screens.
         scale = 1 if key == "social" else 2

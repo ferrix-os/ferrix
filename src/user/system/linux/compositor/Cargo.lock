@@ -413,6 +413,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-wallpaper"
+version = "0.1.0"
+dependencies = [
+ "compositor-image",
+ "compositor-toolkit",
+]
+
+[[package]]
 name = "compositor-wire"
 version = "0.1.0"
 

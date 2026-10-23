@@ -450,7 +450,7 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
         layout: Some("us".to_owned()),
         variant: None,
         edid: Some("none".to_owned()),
-        wallpaper: Some(crate::wallpaper::EMBER.to_owned()),
+        wallpaper: Some(crate::wallpaper::BRAND.to_owned()),
         net: true,
         ..args.clone()
     };

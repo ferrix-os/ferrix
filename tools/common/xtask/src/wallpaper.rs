@@ -67,6 +67,34 @@ pub(crate) const SCREEN: (u32, u32) = (1920, 1080);
 /// what `release-image` shows, since a kept picture is somebody else's art.
 pub(crate) const EMBER: &str = "ember";
 
+/// The name of Ferrix's shipped wallpaper, the brand's
+/// (`docs/brand/wallpaper/`): what a desktop shows with nothing kept and
+/// nothing asked for, and what `release-image` shows.
+pub(crate) const BRAND: &str = "ferrix";
+
+/// The shipped wallpaper's renders, each `ferrix-wallpaper-WxH.png`, as
+/// `tools/common/gen/gen-brand-images.py wallpaper` writes them.
+pub(crate) const BRAND_SIZES: [(u32, u32); 3] = [(1920, 1080), (2560, 1440), (3840, 2160)];
+
+/// The shipped wallpaper's render for a screen of `size`: the smallest
+/// that is at least as large both ways, else the largest. The client
+/// scales it to cover each screen it finds.
+///
+/// # Errors
+///
+/// The file missing from the tree.
+pub(crate) fn brand(size: (u32, u32)) -> Result<Vec<u8>> {
+    let (width, height) = BRAND_SIZES
+        .iter()
+        .copied()
+        .find(|&(width, height)| width >= size.0 && height >= size.1)
+        .unwrap_or((3840, 2160));
+    let path = crate::paths::workspace_root()
+        .join("docs/brand/wallpaper")
+        .join(format!("ferrix-wallpaper-{width}x{height}.png"));
+    std::fs::read(&path).map_err(|error| Error::new(format!("{}: {error}", path.display())))
+}
+
 /// What a picture's file begins with: `compositor_pattern::Picture::MAGIC`.
 const MAGIC: &[u8; 8] = b"FXWALL1\n";
 
@@ -179,6 +207,10 @@ fn pick(args: &Args, size: (u32, u32), stills_only: bool) -> Result<Option<Chose
     if asked.is_some_and(|asked| asked.name == "none") {
         return Ok(None);
     }
+    if asked.is_some_and(|asked| asked.name == BRAND) {
+        println!("  wallpaper ferrix, the shipped one, as asked");
+        return Ok(Some(Chosen::Brand(brand(size)?)));
+    }
     if asked.is_some_and(|asked| asked.name == EMBER) {
         println!("  wallpaper ember, Ferrix's own, as asked");
         return Ok(Some(Chosen::Still(ember(size))));
@@ -217,7 +249,7 @@ fn pick(args: &Args, size: (u32, u32), stills_only: bool) -> Result<Option<Chose
     };
     let chosen = read_kept(&dir.join(&name));
     match &chosen {
-        Some(Chosen::Still(_)) => println!("  wallpaper {name}"),
+        Some(Chosen::Still(_) | Chosen::Brand(_)) => println!("  wallpaper {name}"),
         Some(Chosen::Moving(_)) => println!("  wallpaper {name}, which moves"),
         None => {
             return refuse_or_none(
@@ -316,13 +348,16 @@ pub(crate) enum Chosen {
     /// A video's frames, which `src/user/system/linux/compositor/pattern --video` plays, and which
     /// is what `mpvpaper` is started for on a Linux desktop.
     Moving(Vec<u8>),
+    /// The shipped wallpaper, a PNG, which `src/user/system/linux/compositor/wallpaper`
+    /// shows on every screen.
+    Brand(Vec<u8>),
 }
 
 impl Chosen {
     /// The file's bytes, whichever it is.
     pub(crate) fn bytes(self) -> Vec<u8> {
         match self {
-            Self::Still(bytes) | Self::Moving(bytes) => bytes,
+            Self::Still(bytes) | Self::Moving(bytes) | Self::Brand(bytes) => bytes,
         }
     }
 }
@@ -468,17 +503,23 @@ struct Asked<'a> {
 }
 
 /// What a run with no kept wallpaper to show does: stop when one was asked
-/// for by name, and show [`ember`] cut for `size`, having said `why`, when
-/// none was.
+/// for by name, and show the shipped one ([`BRAND`]) when none was, having
+/// said `why` -- [`ember`] cut for `size` if the tree lacks it.
 fn refuse_or_none(asked: Option<Asked<'_>>, size: (u32, u32), why: &str) -> Result<Option<Chosen>> {
     match asked {
         Some(Asked { name, source }) => Err(Error::new(format!(
             "{source} {name}: no wallpaper is called anything like it, and {why}"
         ))),
-        None => {
-            println!("  wallpaper ember, Ferrix's own: {why}");
-            Ok(Some(Chosen::Still(ember(size))))
-        }
+        None => match brand(size) {
+            Ok(png) => {
+                println!("  wallpaper ferrix, the shipped one: {why}");
+                Ok(Some(Chosen::Brand(png)))
+            }
+            Err(error) => {
+                println!("  wallpaper ember, Ferrix's own ({error}): {why}");
+                Ok(Some(Chosen::Still(ember(size))))
+            }
+        },
     }
 }
 
@@ -912,8 +953,8 @@ mod tests {
 
         let quiet = refuse_or_none(None, (64, 36), "nothing is kept");
         assert!(
-            matches!(&quiet, Ok(Some(Chosen::Still(bytes))) if picture_size(bytes) == Some((64, 36))),
-            "asked for nothing, an empty directory shows ember at the screen's size"
+            matches!(&quiet, Ok(Some(Chosen::Brand(bytes))) if bytes.starts_with(b"\x89PNG")),
+            "asked for nothing, an empty directory shows the shipped wallpaper"
         );
     }
 

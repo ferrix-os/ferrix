@@ -123,7 +123,8 @@ paths = ["bin/zinc"]
 
 # Ferrix's own files in the image: its programs, drivers and services, and
 # what xtask writes into the image (configuration, units, accounts, the
-# desktop's entries and icons, Ferrix's own wallpaper `ember`, the zshrc
+# desktop's entries and icons, Ferrix's own wallpapers -- the shipped one
+# from docs/brand/wallpaper/ and `ember` --, the zshrc
 # that sources oh-my-zsh). MIT, as the repository is.
 [components.ferrix]
 licence = "MIT"
@@ -135,6 +136,7 @@ paths = [
     "etc/**",
     "usr/share/udhcpc/default.script",
     "usr/share/applications/*",
+    "usr/share/backgrounds/ferrix/*",
     # What xtask writes beside Chrome (chrome.rs, start_page.rs): the
     # fontconfig file naming the fonts below, the xdg-open that opens a
     # link in Chrome, and Chrome's start page.
@@ -157,6 +159,8 @@ paths = [
     "bin/reboot",
     "bin/vdagent",
     "bin/sessiond",
+    "bin/notifyd",
+    "bin/wallpaper",
     "bin/pkg",
     "bin/dhcpc",
     "bin/svc",
