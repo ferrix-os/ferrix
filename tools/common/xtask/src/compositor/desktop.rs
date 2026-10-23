@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::apps::VKGEARS_PATH;
 use super::run::{with_layout, with_network};
-use super::{CLIENT_PATH, CONFIG_PATH, Carried, WALLPAPER_CLIENT_PATH, steam_window};
+use super::{CLIENT_PATH, CONFIG_PATH, Carried, steam_window};
 use crate::args::Args;
 use crate::paths::Arch;
 use crate::{Error, Result};
@@ -280,7 +280,8 @@ pub(super) fn desktop(
 }
 
 /// `config` with the line that starts `chosen`'s wallpaper before it, and
-/// the file carried: the shipped one by `/bin/wallpaper` on every screen,
+/// the file carried: the shipped one by a `wallpaper` line, which hyprix
+/// hands `/bin/wallpaper`, on every screen,
 /// a kept one by `pattern --wallpaper`, a moving one by `pattern --video`.
 fn with_wallpaper(
     config: String,
@@ -293,10 +294,12 @@ fn with_wallpaper(
             // down to the words: `-o no-audio` and `ALL` mean here what they
             // mean there, so a line copied either way says the same thing.
             let (path, line) = match chosen {
-                crate::wallpaper::Chosen::Brand(_) => (
-                    BRAND_PATH,
-                    format!("exec-once = /{WALLPAPER_CLIENT_PATH} /{BRAND_PATH}"),
-                ),
+                // A `wallpaper` line rather than an `exec-once`: hyprix
+                // runs the client, and a choice made in Settings
+                // (`settings.conf`'s line for every screen) takes its place.
+                crate::wallpaper::Chosen::Brand(_) => {
+                    (BRAND_PATH, format!("wallpaper = , picture /{BRAND_PATH}"))
+                }
                 crate::wallpaper::Chosen::Still(_) => (
                     WALLPAPER_PATH,
                     format!("exec-once = /{CLIENT_PATH} --wallpaper /{WALLPAPER_PATH}"),

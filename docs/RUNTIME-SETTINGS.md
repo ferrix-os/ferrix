@@ -270,7 +270,50 @@ monitors stay in `monitors.conf`. The Settings pages' keys:
 | Windows | `general:layout`, `hyprix:titlebars`, `input:follow_mouse` |
 | Keyboard | `input:kb_layout` (comma list, the first the default), `input:kb_variant`, `input:repeat_rate` (keys a second), `input:repeat_delay` (ms) |
 | Idle and lock | `misc:lock_grace` (s); the lock and screen-off timeouts stay `hypridle.conf`'s listeners (§3.4) |
-| Wallpaper | `wallpaper` lines (`compositor/config/src/wallpaper.rs`: `wallpaper = OUTPUT, picture PATH, fit fill, colour 1d2027`, …) and `hyprix:wallpaper_lock`; kept and checked now, hyprix starting the wallpaper client from them is the next landing |
+| Wallpaper | `wallpaper` lines and `hyprix:wallpaper_lock` (below) |
+
+**The wallpaper** (`compositor/config/src/wallpaper.rs`,
+`hyprix/src/wallpaper.rs`, `compositor/wallpaper`; 2026-10-24) is a Ferrix
+keyword, one line for each output, the last written winning and `off`
+taking one away:
+
+```
+wallpaper = , picture /usr/share/ferrix/wallpapers/ferrix.png, fit fill, colour 1d2027
+wallpaper = DP-1, slideshow ~/Pictures/Wallpapers, every 30m, shuffle 1
+wallpaper = HDMI-A-1, colour rgb(203040)
+wallpaper = , video ~/Videos/rain.ivf
+wallpaper = DP-1, off
+```
+
+The first field is the output (empty: every screen without a line of its
+own); then fields, each a word and a value (a path may hold spaces, not a
+comma): one of `picture PATH` (PNG, JPEG, SVG), `slideshow DIR` (its
+PNG/JPEG/SVG files by name), `video PATH` or a `colour` alone; `fit`
+`fill` (default, cover), `fit`, `stretch`, `tile`, `centre`; `colour`
+(`rgb()`, `rgba()`, `0xAARRGGBB`, `rrggbb`, and `#rrggbb` through hyprctl
+only, `#` being a comment in a file; default `1d2027`), shown alone and
+around a picture that does not cover; `every` (seconds, or `30m`, `1h`,
+`1d`; default 30 min) and `shuffle` (default 1) for a slideshow; `span 1`
+(the empty output's line only): one picture across every screen as they
+are placed; `pause_covered`, `pause_battery` (default 1): a slideshow does
+not move on while a fullscreen window covers every screen it is on
+(`hyprctl monitors`/`workspaces`), or while a `Battery` power supply says
+`Discharging`. hyprix starts `wallpaper --line LINE…` (the program beside
+`/bin/hyprix`) with the lines in force at start, and again whenever a
+keyword, a setting or a reload changes them, ending the one before 2 s
+later so no bare background shows; with no line it starts none, so an
+`exec-once` wallpaper keeps working. Desktop images now carry the shipped
+picture as `wallpaper = , picture …` in `/etc/hyprland.conf`, which a
+Settings choice replaces. **Video, not yet in full**: the client hands an
+AV1-in-IVF file (what `cargo xtask wallpapers` makes) to `pattern --video`,
+which plays it on one screen, ignoring `fit` and both pauses; any other
+file shows the colour and says so. `hyprix:wallpaper_lock` (Ferrix's,
+default 1): hyprix draws that client's background surfaces -- and no other
+client's -- under the lock screen's surfaces, where the lock leaves them
+see-through; 0 leaves it dark. hyprlock's own `background` widget, when
+`hyprlock.conf` has an opaque one, still covers it: a lock screen that
+shows the wallpaper is one with no background or a transparent
+one (`color = rgba(0, 0, 0, 0)`).
 
 | Option or keyword | Values | Default | Live? | Class |
 |---|---|---|---|---|
@@ -386,7 +429,7 @@ and were not audited here. Class: admin.
 | `authctl status\|try\|reset ACCOUNT\|unlock-seat` | login throttling, the seat lock | `auth/authctl` | admin |
 | `passwd` | a password, through authd | `auth/passwd` | **user-facing** (Users) |
 | `notifyd --toggle-list`, `notify-send` | notification list | `compositor/notifyd` | user-facing |
-| `wallpaper FILE` | background picture, one per output | `compositor/wallpaper` | **user-facing** (Wallpaper; the command persists nothing, so a choice has to be kept as an `exec-once` line) |
+| `wallpaper FILE`, `wallpaper --line LINE…` | the background, as `wallpaper =` lines say (§3.3) | `compositor/wallpaper` | started by hyprix from `wallpaper =` lines; **the Settings app sets `hyprctl setting wallpaper '<line>'`**, which is kept |
 | `drvupdate DRIVER IMAGE` | hot-swaps a driver through devmgr | `init/drvupdate` | admin |
 | `dmesg -C\|-c` | clears the kernel log's read start; `-n`, `-D`, `-E` succeed and change nothing | `dmesg/src/args.rs`, `kernel syscall/system.rs` | admin |
 | `settings --list` | prints the game-mode list; no switch from the command line | `apps/settings/src/cli.rs` | — |
@@ -512,8 +555,10 @@ can be applied without a reboot:
    setting`, `switchxkblayout` to switch.
 3. **Keyboard repeat**: `input:repeat_rate`, `repeat_delay`, live and
    kept through `hyprctl setting`.
-4. **Wallpaper**: `wallpaper FILE`; to survive a restart it has to be
-   written as an `exec-once` line, since the command keeps nothing.
+4. **Wallpaper**: `hyprctl setting wallpaper '<output>, picture PATH,
+   fit fill, colour 1d2027'` (or `colour`, `slideshow DIR, every 30m,
+   shuffle 1`, `video FILE.ivf`), live and kept; `hyprix:wallpaper_lock`
+   for the lock screen (§3.3).
 5. **Appearance**: gaps, borders and their colours, rounding, opacity,
    blur, shadow, animations on/off, title bars (`hyprix:titlebars`), all
    live and kept through `hyprctl setting` (§3.3).

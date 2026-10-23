@@ -3493,3 +3493,136 @@ fn a_setting_is_kept_across_a_restart() {
     );
     assert_eq!(listed, "input:repeat_rate = 40\n");
 }
+
+/// Whether process `pid` has ended: gone, or a zombie nobody reaped yet.
+fn ended(pid: &str) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+        stat.rsplit_once(')')
+            .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'))
+    })
+}
+
+/// `wallpaper =` lines (`crate::wallpaper`): the compositor starts the
+/// wallpaper client with the lines in force, starts it again when
+/// `hyprctl setting wallpaper` changes them and ends the one before, ends
+/// it as it ends itself -- and a compositor started again starts it with
+/// the line the Settings app's file kept. A script stands in for the
+/// client and writes down what it was given.
+#[test]
+fn the_wallpaper_follows_its_lines_and_is_kept() {
+    let kept = workspace("wallpaper-kept");
+    let settings = kept.join("hypr").join("settings.conf");
+    let started = kept.join("started");
+    let program = kept.join("fake-wallpaper");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s ' \"$$\" >> {0}\nfor a in \"$@\"; do printf '[%s]' \"$a\" >> {0}; done\necho >> {0}\nexec sleep 60\n",
+            started.display()
+        ),
+    )
+    .expect("the stand-in");
+    let mut permissions = std::fs::metadata(&program).expect("there").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+    std::fs::set_permissions(&program, permissions).expect("executable");
+
+    let starts = |at_least: usize| {
+        until("the wallpaper started", || {
+            let text = std::fs::read_to_string(&started).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= at_least {
+                Ok(lines)
+            } else {
+                Err(format!("{} starts", lines.len()))
+            }
+        })
+    };
+
+    // Each run waits until the stand-in has written down as many starts
+    // as it expects before it ends the compositor, which ends the client:
+    // a client ended before it wrote would be no start at all.
+    let run = |name: &str, lines: &str, requests: Vec<String>, expected: usize| {
+        let desk = Desk::new(name, lines);
+        let options = Options {
+            settings: Some(settings.clone()),
+            wallpaper: Some(program.clone()),
+            ..desk.options()
+        };
+        let written = started.clone();
+        let (_, answers) = running(&desk, &options, move |ends| {
+            let answers: Vec<String> = requests
+                .iter()
+                .map(|request| {
+                    let answer = ends.ask(request);
+                    std::thread::sleep(Duration::from_millis(100));
+                    answer
+                })
+                .collect();
+            until("the stand-in's starts", || {
+                let text = std::fs::read_to_string(&written).unwrap_or_default();
+                let whole = text.matches('\n').count();
+                if whole >= expected {
+                    Ok(())
+                } else {
+                    Err(format!("{whole} starts"))
+                }
+            });
+            ends.stop();
+            answers
+        })
+        .expect("the compositor ran");
+        answers
+    };
+
+    // The file's line starts the client; a setting starts it again.
+    let answers = run(
+        "wallpaper-first",
+        "wallpaper = , colour 102030\n",
+        vec![
+            "setting wallpaper , picture /pictures/tide.png, fit centre".to_owned(),
+            "setting wallpaper DP-1, slideshow /pictures, every 1h".to_owned(),
+        ],
+        3,
+    );
+    assert!(
+        answers.iter().all(|answer| answer.trim() == "ok"),
+        "{answers:?}"
+    );
+    let first = starts(3);
+    assert!(
+        first[0].ends_with("[--line][, colour ff102030]"),
+        "the file's line: {first:?}"
+    );
+    assert!(
+        first[1].ends_with("[--line][, picture /pictures/tide.png, fit centre, colour ff1d2027]"),
+        "the setting's line: {first:?}"
+    );
+    assert!(
+        first[2].contains("[DP-1, slideshow /pictures, every 3600, shuffle 1, fit fill"),
+        "a second line, for one output: {first:?}"
+    );
+    // Every one of them has ended: replaced, or with the compositor.
+    for line in &first {
+        let pid = line.split_whitespace().next().expect("a pid");
+        until("the client ended", || {
+            if ended(pid) {
+                Ok(())
+            } else {
+                Err(format!("{pid} still runs"))
+            }
+        });
+    }
+
+    // Started again with no line of its own, the compositor starts the
+    // client with the lines the Settings app's file kept.
+    let _ = run("wallpaper-second", "", Vec::new(), 4);
+    let second = starts(4);
+    assert!(
+        second[3].ends_with(
+            "[--line][, picture /pictures/tide.png, fit centre, colour ff1d2027]\
+             [--line][DP-1, slideshow /pictures, every 3600, shuffle 1, fit fill, \
+             colour ff1d2027, pause_covered 1, pause_battery 1]"
+        ),
+        "the kept lines: {second:?}"
+    );
+}

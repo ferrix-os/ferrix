@@ -1,6 +1,6 @@
 [package]
 name = "compositor-wallpaper"
-description = "wallpaper: a picture behind everything on every screen, scaled to cover it, a layer surface per screen that follows screens coming and going"
+description = "wallpaper: a picture, a colour, a slideshow or a video behind everything on every screen, fitted as a wallpaper line says, a layer surface per screen that follows screens coming and going"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,8 @@ name = "compositor_wallpaper"
 path = "src/lib.rs"
 
 [dependencies]
+compositor-config = { path = "../config" }
+compositor-ctl = { path = "../ctl" }
 compositor-image = { path = "../image" }
 compositor-toolkit = { path = "../toolkit" }
 

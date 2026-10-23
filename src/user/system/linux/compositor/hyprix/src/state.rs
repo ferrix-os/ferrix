@@ -253,6 +253,7 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
     };
     let mut compositor = Compositor::new(options, &rolling, &mut report)?;
     while compositor.pass()? {}
+    compositor.wallpapers.end_now();
     run_at_exit(
         &compositor.config,
         compositor.listener.path(),
@@ -441,6 +442,8 @@ struct Compositor<'r> {
     /// What ends among the programs started here -- and, as pid 1, among
     /// everybody's orphans -- is reaped on every pass, and its end wakes one.
     children: Option<crate::children::Children>,
+    /// The wallpaper client the `wallpaper =` lines ask for.
+    wallpapers: crate::wallpaper::Wallpapers,
 }
 
 /// What the compositor settled on as it started, which nothing changes
@@ -614,6 +617,8 @@ impl<'r> Compositor<'r> {
         let (control, events) = bind_control(options)?;
         let plugins = crate::plugins::Plugins::new();
         start_programs(&config, options, &listener, report);
+        let mut wallpapers = crate::wallpaper::Wallpapers::default();
+        let _ = wallpapers.follow(&config, options, listener.path(), report);
 
         let started = Instant::now();
         let deadline = options.deadline.map(Duration::from_millis);
@@ -711,6 +716,7 @@ impl<'r> Compositor<'r> {
             injected: Vec::new(),
             ready: None,
             children,
+            wallpapers,
         })
     }
 
@@ -723,6 +729,7 @@ impl<'r> Compositor<'r> {
         if let Some(children) = self.children.as_ref() {
             let _ = children.reap();
         }
+        self.wallpapers.retire(Instant::now());
         if self.stopping() {
             return Ok(false);
         }
@@ -1735,6 +1742,14 @@ impl<'r> Compositor<'r> {
                 if read && let Some(action) = self.refresh_input(true, true) {
                     pending.push(action);
                 }
+                if read {
+                    let _ = self.wallpapers.follow(
+                        &self.config,
+                        self.options,
+                        self.listener.path(),
+                        self.report,
+                    );
+                }
                 continue;
             }
             // `hyprctl keyword monitor <rule>`: a line added to the file's,
@@ -1763,6 +1778,10 @@ impl<'r> Compositor<'r> {
                 _ => (false, false),
             };
             let keyword = matches!(&reply, compositor_ipc::Reply::Keyword { .. });
+            let wallpaper = matches!(
+                &reply,
+                compositor_ipc::Reply::Keyword { name, .. } if name == "wallpaper"
+            );
             let mut around = crate::act::Around {
                 slots: &mut self.slots,
                 sources: &self.sources,
@@ -1806,6 +1825,14 @@ impl<'r> Compositor<'r> {
             }
             if keyword && let Some(action) = self.refresh_input(binds, keymap) {
                 pending.push(action);
+            }
+            if wallpaper {
+                changed |= self.wallpapers.follow(
+                    &self.config,
+                    self.options,
+                    self.listener.path(),
+                    self.report,
+                );
             }
         }
         // `forceidle` changed how long the seat has been idle after the
@@ -2572,6 +2599,9 @@ impl<'r> Compositor<'r> {
             injected_wait,
             request_wait,
             unlock_wait,
+            self.wallpapers
+                .next_retirement()
+                .map(|at| at.saturating_duration_since(Instant::now())),
         ]
         .into_iter()
         .flatten()

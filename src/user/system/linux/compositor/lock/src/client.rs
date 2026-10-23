@@ -56,10 +56,26 @@ pub struct Locked {
 /// A sentence saying what could not be done, including the compositor not
 /// offering the protocol and never saying the screen was covered.
 pub fn lock(socket: &std::path::Path, held: Duration) -> Result<Locked, String> {
+    lock_drawing(socket, held, false)
+}
+
+/// [`lock`], with the lock's surfaces see-through rather than the
+/// checkerboard when `clear`: what shows the compositor's wallpaper under
+/// the lock (`hyprix:wallpaper_lock`), as a lock screen with no background
+/// of its own does.
+///
+/// # Errors
+///
+/// As [`lock`].
+pub fn lock_drawing(
+    socket: &std::path::Path,
+    held: Duration,
+    clear: bool,
+) -> Result<Locked, String> {
     // From the moment the screen is covered, which is when `release` is
     // first asked.
     let until = std::cell::Cell::new(None::<Instant>);
-    lock_until(socket, &|| {
+    lock_while(socket, clear, &|| {
         let at = until.get().unwrap_or_else(|| Instant::now() + held);
         until.set(Some(at));
         Instant::now() >= at
@@ -77,7 +93,17 @@ pub fn lock(socket: &std::path::Path, held: Duration) -> Result<Locked, String> 
 ///
 /// As [`lock`].
 pub fn lock_until(socket: &std::path::Path, release: &dyn Fn() -> bool) -> Result<Locked, String> {
+    lock_while(socket, false, release)
+}
+
+/// [`lock_until`], see-through when `clear`.
+fn lock_while(
+    socket: &std::path::Path,
+    clear: bool,
+    release: &dyn Fn() -> bool,
+) -> Result<Locked, String> {
     let mut session = Session::connect(socket)?;
+    session.clear = clear;
     session.run(PATIENCE)?;
     if !session.told {
         return Err("the compositor never said the screen was covered".to_owned());
@@ -108,6 +134,8 @@ struct Session {
     screens: Vec<Option<Shared>>,
     /// Whether the compositor said every screen is covered.
     told: bool,
+    /// Whether the surfaces are drawn see-through.
+    clear: bool,
 }
 
 impl Session {
@@ -140,6 +168,7 @@ impl Session {
             bound: false,
             screens: Vec::new(),
             told: false,
+            clear: false,
         })
     }
 
@@ -362,12 +391,22 @@ impl Session {
         // The checkerboard, because `src/user/system/linux/compositor/render` draws it and the
         // expected image is made from the same code: a locked screen is a
         // picture a test can compare, and this is the picture.
-        let pixels = Pattern::Checkerboard.draw(width, height);
+        // See-through is every byte zero in ARGB8888: no colour, no alpha.
         let room = shared.bytes_mut();
-        let take = pixels.len().min(room.len());
-        if let (Some(to), Some(from)) = (room.get_mut(..take), pixels.get(..take)) {
-            to.copy_from_slice(from);
+        if self.clear {
+            room.fill(0);
+        } else {
+            let pixels = Pattern::Checkerboard.draw(width, height);
+            let take = pixels.len().min(room.len());
+            if let (Some(to), Some(from)) = (room.get_mut(..take), pixels.get(..take)) {
+                to.copy_from_slice(from);
+            }
         }
+        let format = if self.clear {
+            Format::Argb8888
+        } else {
+            Format::Xrgb8888
+        };
         let (pool, buffer) = (self.pool_of(which), self.buffer_of(which));
         let surface = self.surface_of(which);
         request_with_fd(
@@ -400,7 +439,7 @@ impl Session {
                 int(width),
                 int(height),
                 int(stride),
-                Arg::Uint(Format::Xrgb8888.wl_shm()),
+                Arg::Uint(format.wl_shm()),
             ],
         );
         request(

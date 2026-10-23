@@ -379,6 +379,18 @@ impl Compositor<'_> {
                         .copied()
                         .filter(|placed| placed.rules.above_lock),
                 )
+                // The wallpaper the compositor runs, under the lock's
+                // surface, where `hyprix:wallpaper_lock` asks for it: its
+                // background surfaces only, and no other client's, since
+                // nothing but the lock may be shown while it holds.
+                .chain(self.placed_layers.iter().copied().filter(|placed| {
+                    !placed.above
+                        && self.config.bool("hyprix:wallpaper_lock").unwrap_or(true)
+                        && self
+                            .slots
+                            .get(placed.client)
+                            .is_some_and(|slot| self.wallpapers.is_ours(slot.pid()))
+                }))
                 .collect()
         } else {
             self.placed_layers

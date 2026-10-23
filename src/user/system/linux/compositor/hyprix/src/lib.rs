@@ -57,6 +57,7 @@ pub mod settings;
 pub mod state;
 pub mod titlebar;
 pub(crate) mod wait;
+pub mod wallpaper;
 
 pub use options::{Options, Renderer};
 pub use state::{run, run_with};

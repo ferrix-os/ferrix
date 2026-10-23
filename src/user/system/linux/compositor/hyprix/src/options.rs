@@ -53,6 +53,10 @@ pub struct Options {
     /// `$XDG_CONFIG_HOME/hypr/settings.conf` when started from the command
     /// line, nowhere for a compositor made in a test unless it says.
     pub settings: Option<PathBuf>,
+    /// The wallpaper client `wallpaper =` lines start
+    /// (`crate::wallpaper`); `None` is `wallpaper` beside the compositor's
+    /// program. Not a command-line option: what a test puts in its place.
+    pub wallpaper: Option<PathBuf>,
 }
 
 /// What draws the frame: `--renderer`.
@@ -89,6 +93,7 @@ impl Default for Options {
             animation_step: None,
             state_dir: None,
             settings: None,
+            wallpaper: None,
         }
     }
 }

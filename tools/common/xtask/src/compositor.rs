@@ -75,6 +75,7 @@ pub(crate) mod frames;
 mod gnome_apps;
 mod hyprlock;
 mod idle;
+mod kept_settings;
 mod lane;
 mod latency;
 mod layout;
@@ -704,7 +705,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 53] = [
+const BOOTS: [(&str, Boot); 54] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -749,6 +750,7 @@ const BOOTS: [(&str, Boot); 53] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),
     ("tole-demo", tole_demo::test_tole_demo),
