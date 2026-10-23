@@ -704,10 +704,27 @@ easily". So the Linux ABI is the first of a kind, not a special case:
   server**, which is a large undertaking (Wine's approach, NT syscalls
   translated in user space on top of the Linux ABI, already runs Windows
   programs on Ferrix). The design only keeps the door open; nothing is
-  planned. As with Linux, `personality = kernel | user` says where a
-  foreign ABI runs, and the consultant's line 3208 holds for any of them:
-  one in ring 0 keeps the certified levels at today's, one in ring 3
-  (like `linuxd`) does not.
+  planned.
+* **Where each ABI runs** (ledger 3219 (11)): one placement flag per
+  foreign ABI, `<name>_abi_ring = kernel | user` (Linux's is today's
+  `personality`, renamed with its next touch), required when that ABI is
+  `on` and refused when it is `off`. The levels follow the placement: a
+  foreign ABI in ring 0 allows only `none`; Linux alone also allows
+  `present` under BF1's dated exception, which ends at M5; a Windows ABI
+  in ring 0 gets no exception. In ring 3 it allows what its user-space
+  value allows.
+* **The trait is an item interface** (3219 (12)) and gets its own design
+  review before code, with 3208 (4) and (5): it lives in the core and
+  names no ABI; the registry is a compile-time constant built from the
+  cfgs, not a run-time registration; every process has an explicit
+  personality from creation (none means native); exec picks the loader by
+  image format and refuses an unknown or disabled one; exec never changes
+  the native-call right. "Nothing in the core changes" holds only while
+  the trait suffices; a change to the trait is an item change.
+* **Evidence** (3219 (13)): only named profiles carry a claim; `xtask
+  check` builds each foreign-ABI flag both ways on all three
+  architectures, not every combination; the item boundary is reported per
+  named profile.
 * **Cost:** the trait and registry are what §11.3 already costs (~10
   points on top of `off`); generality adds ~2 to 3 points (naming, a
   registry instead of one hook, the flag rows' shared rule). A Windows
