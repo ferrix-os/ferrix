@@ -224,7 +224,8 @@ monitors (`State::add_monitor`, `remove_monitor`).
 | 3e | NVIDIA hotplug in `nvrm` (hardware) | 3 |
 | 3f | Intel hotplug on the lit port, §3.4 | 3 |
 | 3g | Intel EDID over GMBUS (mode list and description from the monitor) | 3 |
-| | **Part 3** | **28** |
+| 3h | Intel display-engine modeset: a monitor on a port the firmware did not light, §3.5 | 21 |
+| | **Part 3** | **49** |
 
 Kernel lines: 0.
 
@@ -278,11 +279,8 @@ registers the keeper maps, so it never depends on a worker being alive.
 Until the split lands it is in `display.rs`, beside the code that names the
 connector; the split moves it with `card0`.
 
-**Not in 3f: a monitor on a port the firmware did not light.** Lighting a
-second output means programming the display engine -- power wells, a DPLL,
-the DDI, a transcoder and pipe, a plane, HDMI or DP link training -- the
-i915 `display/` subset left out so far: about 21 points, a row of its
-own, and the step that gives the N150 two monitors at once.
+**Not in 3f: a monitor on a port the firmware did not light.** That is
+3h, §3.5.
 
 **The box test (the customer runs it).** On the N150 with one monitor on
 the HDMI port the firmware lights, `--everything` desktop running:
@@ -299,6 +297,53 @@ the HDMI port the firmware lights, `--everything` desktop running:
 4. If the box has a second output, plug a monitor into it: 3f says nothing
    about it (the line `intel: card0: a sink on DDI <x>, not lit: no
    modeset yet` is the expected answer).
+
+### 3.5 Intel display-engine modeset (3h; the customer, 2026-10-23: "yes add that as well")
+
+The step that gives the N150 a second monitor, and a DisplayPort replug on
+the lit port: the driver lights a port itself rather than inheriting what
+the firmware lit. Alder Lake-N is display version 13 (Gen12 display); the
+work follows i915 file by file, as the GT side does (INTEL-GPU.md §3.6),
+with every register offset and field taken from the Linux v7.0 sources
+(`i915_reg.h`, `display/intel_display_regs.h`, `intel_dpll_mgr.c`'s ADL-P
+tables), never from memory:
+
+| i915 (v7.0) | What is kept | Points |
+|---|---|---|
+| `display/intel_display_power*.c`, `intel_display_power_well.c` | the ADL-P power-well table: PW1 (already on), PW2, the DDI and AUX wells of the port, with their request/ack | 3 |
+| `display/intel_dpll_mgr.c` (`adlp_*`, combo PHY DPLLs), `intel_cdclk.c` (check only) | a combo-PHY DPLL for the mode's clock, from i915's HDMI and DP divider tables; CDCLK left as the firmware set it, a mode it cannot carry refused | 4 |
+| `display/intel_ddi.c`, `intel_combo_phy.c`, `intel_hdmi.c` | DDI buffer translations, `DDI_BUF_CTL`, `TRANS_DDI_FUNC_CTL`, HDMI's TMDS and infoframes off | 4 |
+| `display/intel_dp.c`, `intel_dp_link_training.c`, `intel_dp_aux.c` | AUX channel, DPCD read, clock recovery and channel equalization at the sink's rates and lane counts | 5 |
+| `display/intel_display.c` (`hsw_crtc_enable` order), `skl_universal_plane.c`, `intel_crtc.c` | a transcoder and pipe with its timings, one universal plane scanning out a GGTT surface the driver owns, the enable and disable order | 4 |
+| Driver | a second scanout in HELLO (`scanouts: 2`), MODES/MODE_LIST per scanout, `SET_MODE` driving a real modeset rather than scaling | 1 |
+| | **3h** | **21** |
+
+* **Kernel lines: 0.** Every register is in the GPU's MMIO BAR the driver
+  maps already; the second scanout is a HELLO field the core has had since
+  displayctl v1 (`MAX_SCANOUTS`); the plane's surface is driver memory in
+  the GGTT as the first one is. Anything new in the kernel stops the step
+  with a figure.
+* **Where it lives.** A module tree of its own in the driver,
+  `intel/src/display/` (`power.rs`, `dpll.rs`, `ddi.rs`, `dp.rs`,
+  `pipe.rs`, `hotplug.rs` for 3f), with the pure tables and arithmetic in
+  `src/lib/drivers/gpu/intel-xelp/src/display/` (host-tested, translated
+  with i915's copyright and MIT notice as the GT tables are). It belongs to
+  the **keeper** of INTEL-GPU.md §12.3 (branch `gpu-opaque`, being built):
+  `card0` is the keeper's, so the display engine is too, and nothing of it
+  goes in the worker. The overlap with that branch is the place `card0` is
+  served from: today `display.rs` and `main.rs`'s start-up, after the split
+  the keeper's `card0` code. 3f to 3h keep to the new `display/` modules and
+  touch `display.rs`/`main.rs` only where `card0` hands them the
+  connector, so a rebase onto the split moves a few calls and no logic.
+* **Hardware writes.** Display registers of the Intel GPU only (power-well
+  requests, DPLL, DDI, transcoder, pipe, plane, AUX), on the N150 alone and
+  through the coordinator; nothing to the PMIC, firmware or flash. Every
+  write sequence runs first against the host model, as the GT's do.
+* **Order.** After 3f and 3g, which it builds on (hotplug tells it a sink
+  arrived; GMBUS or AUX gives the EDID it picks a mode from).
+* **The box test** (written when it is built): a monitor on the port the
+  firmware does not light, with the cable that port needs (HDMI or a
+  DisplayPort/USB-C cable), plugged in while the desktop runs.
 
 ## 4. Driver crashes as notifications
 
@@ -377,12 +422,12 @@ nothing in parts 1 to 3.
 |---|---|---|
 | 1 Floating mode | 18 | 0 |
 | 2 Theme | 13 | 0 |
-| 3 Multi-monitor | 28 | 0 |
+| 3 Multi-monitor | 49 | 0 |
 | 4 Notifications | 18 | 0 |
-| **All** | **77** | **0** |
+| **All** | **98** | **0** |
 
 Order: 1a, 1b, 2b (the theme makes the result visible), 1d, 2a, 2c, 3b,
-3a, 3f, 3g, 3c, 3d, 1c, 4a to 4d, 3e on the 3060 when the box is free.
+3a, 3f, 3g, 3h, 3c, 3d, 1c, 4a to 4d, 3e on the 3060 when the box is free.
 
 **Certification.** No part touches a file in the `core` or `item` ring:
 the compositor, its clients, `devmgr` and the drivers are outside the item.
