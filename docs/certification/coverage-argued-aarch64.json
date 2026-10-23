@@ -253,42 +253,42 @@
     },
     {
       "file": "console.rs",
-      "lines": "202",
+      "lines": "205",
       "category": "failure-path",
       "match": "fn write_str(&mut self, text: &str) -> fmt::Result {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "207",
+      "lines": "210",
       "category": "failure-path",
       "match": "if byte == b'\\n' {",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "214",
+      "lines": "217",
       "category": "failure-path",
       "match": "}",
       "why": "The writer a failure report uses when the port's lock cannot be had in PANIC_SPINS tries -- held by a processor that stopped part way through a line. Reached only while the kernel is reporting a failure."
     },
     {
       "file": "console.rs",
-      "lines": "342",
+      "lines": "357",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of write: a failure report takes the port's lock with a bounded wait and falls back to Unlocked. Only a failure report sets PANICKING, so a passing boot never runs it."
     },
     {
       "file": "console.rs",
-      "lines": "368",
+      "lines": "383",
       "category": "failure-path",
       "match": "for _ in 0..PANIC_SPINS {",
       "why": "The panicking arm of drain: the last flush before a failure report stops the machine, with a bounded wait for the port's lock."
     },
     {
       "file": "console.rs",
-      "lines": "378",
+      "lines": "393",
       "category": "absent-hardware",
       "match": "output::wake_writers();",
       "why": "A power-off's flush that found writers waiting for room in the transmit ring. An emulated port sends instantly and is never full (console/output.rs's BURST says so), so the ring never holds a writer back on a QEMU machine; a real UART's baud rate does."
@@ -890,14 +890,14 @@
     },
     {
       "file": "main.rs",
-      "lines": "1775",
+      "lines": "1795",
       "category": "absent-hardware",
       "match": "mebibytes(unreachable)",
       "why": "Reached only on a machine with RAM above the highest address the direct map covers; every QEMU machine the suite boots has less RAM than the direct map spans, so nothing is unreachable to report."
     },
     {
       "file": "main.rs",
-      "lines": "1893",
+      "lines": "1913",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."

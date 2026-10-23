@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "ec518d59f3c3471b37c02be8c87e2aebe60bfbee8615885c5f66ec85ca74029e",
+  "digest": "c7bf35e836a67883065c93050d75294fec177d113f81984d9104d854ff5591c4",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 142,
-    "elements": 7427,
+    "elements": 7467,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -76861,10 +76861,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Log::theCountIsExact",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"console::log::Ring::record\", \"console::log::Ring::record_byte\", \"console::log::Ring::slot\")",
+                  "value": "(\"console::log::Ring::record\", \"console::log::Ring::record_byte\", \"console::log::slot_of\", \"console::log::record_at\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 362
+                    "line": 363
                   }
                 }
               ]
@@ -76877,7 +76877,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 364
+                "line": 365
               },
               "children": [
                 {
@@ -76888,7 +76888,7 @@
                   "value": "\"A ring of N bytes written past its length shall keep its last N - 1 bytes in order, and unread shall count exactly those for a reader at its start.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 367
+                    "line": 368
                   }
                 },
                 {
@@ -76899,7 +76899,7 @@
                   "value": "\"A 64-byte ring given 100 bytes answers unread 63 for a cursor at 0, and its reads from there give the last 63 bytes in order.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 370
+                    "line": 371
                   }
                 },
                 {
@@ -76910,7 +76910,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 371
+                    "line": 372
                   }
                 },
                 {
@@ -76918,10 +76918,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Log::aWrappedRingKeepsItsLast",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"console::log::Ring::read\", \"console::log::Ring::copy_from\", \"console::log::Ring::slot\", \"console::log::Ring::unread\", \"console::log::Ring::oldest_at\")",
+                  "value": "(\"console::log::Ring::read\", \"console::log::copy_from\", \"console::log::slot_of\", \"console::log::Ring::unread\", \"console::log::Ring::oldest_at\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 374
+                    "line": 375
                   }
                 }
               ]
@@ -76934,7 +76934,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 376
+                "line": 377
               },
               "children": [
                 {
@@ -76945,7 +76945,7 @@
                   "value": "\"read shall move a cursor behind the oldest byte kept up to it and report exactly the bytes it skipped as lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 378
+                    "line": 379
                   }
                 },
                 {
@@ -76956,7 +76956,7 @@
                   "value": "\"A reader at 0 of a 64-byte ring given 100 bytes is told 37 lost; caught up and then 200 bytes behind, it is told 137 lost and given the 63 kept.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 381
+                    "line": 382
                   }
                 },
                 {
@@ -76967,7 +76967,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 382
+                    "line": 383
                   }
                 },
                 {
@@ -76978,7 +76978,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::oldest_at\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 384
+                    "line": 385
                   }
                 }
               ]
@@ -76991,7 +76991,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 386
+                "line": 387
               },
               "children": [
                 {
@@ -77002,7 +77002,7 @@
                   "value": "\"read shall copy no more than the reader's buffer holds and move the cursor past exactly what it copied, so that the next read goes on from there.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 389
+                    "line": 390
                   }
                 },
                 {
@@ -77013,7 +77013,7 @@
                   "value": "\"A 10-byte read with 63 unread leaves 53 unread, and the next read gives those 53 in order with 0 lost and 0 left unread.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 392
+                    "line": 393
                   }
                 },
                 {
@@ -77024,7 +77024,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 393
+                    "line": 394
                   }
                 },
                 {
@@ -77035,7 +77035,7 @@
                   "value": "(\"console::log::Ring::read\", \"console::log::Ring::unread\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 394
+                    "line": 395
                   }
                 }
               ]
@@ -77048,7 +77048,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 396
+                "line": 397
               },
               "children": [
                 {
@@ -77059,7 +77059,7 @@
                   "value": "\"read shall hand a reader only bytes writers recorded, dropping and counting as lost any a writer replaced while they were being copied, so that every byte recorded is either read or counted lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 400
+                    "line": 401
                   }
                 },
                 {
@@ -77070,7 +77070,7 @@
                   "value": "\"While two writers record 20,000 bytes each into a 256-byte ring, a reader reading 97 bytes at a time reads only bytes they wrote, and the bytes it read and was told it lost come to exactly 40,000.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 404
+                    "line": 405
                   }
                 },
                 {
@@ -77081,7 +77081,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 405
+                    "line": 406
                   }
                 },
                 {
@@ -77089,10 +77089,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Log::racingWritersNeverMix",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"console::log::Ring::read\", \"console::log::Ring::copy_from\", \"console::log::Ring::record_byte\")",
+                  "value": "(\"console::log::Ring::read\", \"console::log::copy_from\", \"console::log::Ring::record_byte\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 407
+                    "line": 408
                   }
                 }
               ]
@@ -77105,7 +77105,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 409
+                "line": 410
               },
               "children": [
                 {
@@ -77116,7 +77116,7 @@
                   "value": "\"read shall bring a cursor ahead of the newest byte back to it, copying nothing and reporting nothing lost.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 411
+                    "line": 412
                   }
                 },
                 {
@@ -77127,7 +77127,7 @@
                   "value": "\"A read at a cursor 1,000 past the ring's count copies 0 bytes, reports 0 lost and leaves the cursor at the count.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 413
+                    "line": 414
                   }
                 },
                 {
@@ -77138,7 +77138,7 @@
                   "value": "\"H.TRAP.13\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 414
+                    "line": 415
                   }
                 },
                 {
@@ -77149,7 +77149,7 @@
                   "value": "\"console::log::Ring::read\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 415
+                    "line": 416
                   }
                 }
               ]
@@ -77162,7 +77162,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 417
+                "line": 418
               },
               "children": [
                 {
@@ -77173,7 +77173,7 @@
                   "value": "\"A task's write to the console shall be recorded in the kernel log as the task wrote it, without the CR the port is sent.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 420
+                    "line": 421
                   }
                 },
                 {
@@ -77184,7 +77184,7 @@
                   "value": "\"A task's write of a line is found, byte for byte and with no CR, in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 422
+                    "line": 423
                   }
                 },
                 {
@@ -77195,7 +77195,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 423
+                    "line": 424
                   }
                 },
                 {
@@ -77206,7 +77206,7 @@
                   "value": "(\"console::output::try_queue\", \"console::Writer::bytes\", \"console::Kind::logged\", \"console::log::record\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 425
+                    "line": 426
                   }
                 }
               ]
@@ -77219,7 +77219,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 427
+                "line": 428
               },
               "children": [
                 {
@@ -77230,7 +77230,7 @@
                   "value": "\"write_panicking, asked to log, shall record the line in the kernel log when it writes it under the port's lock.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 429
+                    "line": 430
                   }
                 },
                 {
@@ -77241,7 +77241,7 @@
                   "value": "\"A line written through write_panicking with logging asked for, the panicking flag not set, is found in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 432
+                    "line": 433
                   }
                 },
                 {
@@ -77252,7 +77252,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 433
+                    "line": 434
                   }
                 },
                 {
@@ -77263,7 +77263,7 @@
                   "value": "(\"console::write_panicking\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 434
+                    "line": 435
                   }
                 }
               ]
@@ -77276,7 +77276,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 436
+                "line": 437
               },
               "children": [
                 {
@@ -77287,7 +77287,7 @@
                   "value": "\"write shall record a kernel line in the kernel log as printed, before its newline becomes CRLF.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 438
+                    "line": 439
                   }
                 },
                 {
@@ -77298,7 +77298,7 @@
                   "value": "\"A line printed with println! is found, without a CR, in the last 4,096 bytes of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 440
+                    "line": 441
                   }
                 },
                 {
@@ -77309,7 +77309,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 441
+                    "line": 442
                   }
                 },
                 {
@@ -77320,7 +77320,7 @@
                   "value": "(\"console::write\", \"console::write_as\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 443
+                    "line": 444
                   }
                 }
               ]
@@ -77333,7 +77333,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 445
+                "line": 446
               },
               "children": [
                 {
@@ -77344,7 +77344,7 @@
                   "value": "\"write_unlogged shall keep its line out of the kernel log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 447
+                    "line": 448
                   }
                 },
                 {
@@ -77355,7 +77355,7 @@
                   "value": "\"A line sent with println_unlogged! is not in the last 4,096 bytes of the kernel log, read after it was sent.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 449
+                    "line": 450
                   }
                 },
                 {
@@ -77366,7 +77366,7 @@
                   "value": "\"H.BOOT.9\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 450
+                    "line": 451
                   }
                 },
                 {
@@ -77377,7 +77377,7 @@
                   "value": "(\"console::write_unlogged\", \"console::Kind::logged\", \"console::Writer::bytes\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 452
+                    "line": 453
                   }
                 }
               ]
@@ -77390,7 +77390,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 454
+                "line": 455
               },
               "children": [
                 {
@@ -77401,7 +77401,7 @@
                   "value": "\"record shall take no lock, allocate nothing and wake no reader, so that a writer recording in any context, a panic's included, is never held up by the log.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 457
+                    "line": 458
                   }
                 },
                 {
@@ -77412,7 +77412,7 @@
                   "value": "\"A byte recorded from an interrupt handler, from the idle task and from a failure report written while another processor holds every lock the kernel has is recorded, with 0 heap allocations and 0 wakes.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 461
+                    "line": 462
                   }
                 },
                 {
@@ -77423,7 +77423,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 462
+                    "line": 463
                   }
                 },
                 {
@@ -77434,7 +77434,463 @@
                   "value": "(\"console::log::record\", \"console::log::Ring::record\", \"console::log::Ring::record_byte\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 464
+                    "line": 465
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aLineBeginsAfterANewlineOrAPriority",
+              "qualifiedName": "FerrixConsoleRequirements::Log::aLineBeginsAfterANewlineOrAPriority",
+              "kind": "requirement",
+              "shortName": "L.console.50",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 467
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineBeginsAfterANewlineOrAPriority",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"record shall note that a line of the log begins at the first byte after a newline and at a byte whose priority is not the priority of the line it would continue, stamped with the time taken once for the call and with that byte's priority.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 471
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineBeginsAfterANewlineOrAPriority",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On a ring and lines of the log check's own, 'one' and a newline at the kernel's priority, 'tw' then 'o' and a newline then 'pro' at a program's, and 'k' and a newline at the kernel's begin lines at bytes 0, 4, 8 and 11, stamped 100, 200, 400 and 500 -- the stamps of the calls that began them -- each at its own priority.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 477
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineBeginsAfterANewlineOrAPriority",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.15\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 478
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineBeginsAfterANewlineOrAPriority",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::record\", \"console::log::record_lines\", \"console::log::Lines::note\", \"console::log::Lines::begin\", \"console::log::Stamp::usec\", \"console::log::Ring::record_byte_at\", \"console::log::record_at\", \"console::log::slot_in\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 482
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aLineIsHandedOutWhole",
+              "qualifiedName": "FerrixConsoleRequirements::Log::aLineIsHandedOutWhole",
+              "kind": "requirement",
+              "shortName": "L.console.51",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 484
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineIsHandedOutWhole",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"line shall hand a reader a line of the log only once it is whole -- a later line has begun, or its last byte was a newline -- with its first byte's place, the place past its last, its stamp and its priority.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 488
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineIsHandedOutWhole",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On the log check's lines, a line of 'half' with no newline is not handed out, and after its newline it is, from byte 13 to 18, stamped 600.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 491
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineIsHandedOutWhole",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.13\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 492
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aLineIsHandedOutWhole",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::Lines::line\", \"console::log::Lines::kept\", \"console::log::slot_in\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 494
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aReaderIsGivenTheFirstLineKept",
+              "qualifiedName": "FerrixConsoleRequirements::Log::aReaderIsGivenTheFirstLineKept",
+              "kind": "requirement",
+              "shortName": "L.console.52",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 496
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aReaderIsGivenTheFirstLineKept",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"first shall answer the first line whose slot is still kept and whose first byte the ring still keeps, and line shall hand out no line before it.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 499
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aReaderIsGivenTheFirstLineKept",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On the log check's lines, after more lines than its 8 slots the first answered is the one 7 before the next, and line 0 is not handed out; after a line that pushes the ring's oldest byte past the start of the line two before it, the first answered is the line one before it, and the line before that is not handed out.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 504
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aReaderIsGivenTheFirstLineKept",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.13\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 505
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aReaderIsGivenTheFirstLineKept",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::Lines::first\", \"console::log::Lines::line\", \"console::log::Lines::kept\", \"console::log::Ring::oldest\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 507
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aRecordBeginsALineOfItsOwn",
+              "qualifiedName": "FerrixConsoleRequirements::Log::aRecordBeginsALineOfItsOwn",
+              "kind": "requirement",
+              "shortName": "L.console.53",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 509
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aRecordBeginsALineOfItsOwn",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"write_record shall log a record at the priority it is given as a line of its own ending in its newline, even after a task's half-written line.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 512
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aRecordBeginsALineOfItsOwn",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"After a task's write with no newline, a record written at priority 13 is found through line_from as a line that begins with the record, at priority 13, its last byte a newline.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 515
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aRecordBeginsALineOfItsOwn",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.15\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 516
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aRecordBeginsALineOfItsOwn",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::write_record\", \"console::log::break_line\", \"console::log::Lines::break_line\", \"console::Kind::priority\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 518
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aGrownRingKeepsWhatItHeld",
+              "qualifiedName": "FerrixConsoleRequirements::Log::aGrownRingKeepsWhatItHeld",
+              "kind": "requirement",
+              "shortName": "L.console.55",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 520
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aGrownRingKeepsWhatItHeld",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Ring::grow shall move a log ring into longer slots, a power of two, once, copying every byte it kept to the same place there, so that a reader is handed the same bytes at the same places, none from before what it kept, and more kept after; it shall refuse slots no longer or not a power of two, and a second grow.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 525
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aGrownRingKeepsWhatItHeld",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A 16-byte ring of the log check's own given 30 bytes refuses 48 and 16 slots, grows into 64, hands out the 15 bytes it kept from place 15 as before, keeps all 60 after 30 more from place 15 on, and refuses 128 slots.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 529
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aGrownRingKeepsWhatItHeld",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.13\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 530
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::aGrownRingKeepsWhatItHeld",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::Ring::grow\", \"console::log::Ring::slots\", \"console::log::Ring::capacity\", \"console::log::Ring::oldest_at\", \"console::log::Ring::oldest\", \"console::log::Ring::new\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 533
+                  }
+                }
+              ]
+            },
+            {
+              "name": "grownLinesKeepWhatTheyHeld",
+              "qualifiedName": "FerrixConsoleRequirements::Log::grownLinesKeepWhatTheyHeld",
+              "kind": "requirement",
+              "shortName": "L.console.56",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 535
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::grownLinesKeepWhatTheyHeld",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Lines::grow shall move a ring of lines into longer slots, a power of two, once, copying every line it kept to its slot there, so that a reader is handed the same lines under the same numbers and none it never held.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 539
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::grownLinesKeepWhatTheyHeld",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"The log check's 4 lines, after 6 lines begun, refuse 5 slots, grow into 16, hand out lines 0 to 5 exactly as before, and after 6 more hand out lines 3 and 11 and not line 2.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 542
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::grownLinesKeepWhatTheyHeld",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.13\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 543
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::grownLinesKeepWhatTheyHeld",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::Lines::grow\", \"console::log::Lines::slots\", \"console::log::Lines::length\", \"console::log::Lines::kept\", \"console::log::slot_in\", \"console::log::Lines::new\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 546
+                  }
+                }
+              ]
+            },
+            {
+              "name": "logBufLenSizesTheLog",
+              "qualifiedName": "FerrixConsoleRequirements::Log::logBufLenSizesTheLog",
+              "kind": "requirement",
+              "shortName": "L.console.57",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 548
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::logBufLenSizesTheLog",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"size_asked shall read log_buf_len's value as Linux's memparse does and answer it rounded up to a power of two, at most 4 MiB, when that is more than the log holds, and nothing when it is not; a value that is not a size is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 552
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::logBufLenSizesTheLog",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Against a 128 KiB log, 1M and 0x100000 answer 1 MiB, 300k 512 KiB, 1G 4 MiB, 64K nothing, and lots is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 554
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::logBufLenSizesTheLog",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.13\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 555
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::logBufLenSizesTheLog",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::log::size_asked\", \"console::log::size_from\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 556
+                  }
+                }
+              ]
+            },
+            {
+              "name": "eachWriterLogsAtItsPriority",
+              "qualifiedName": "FerrixConsoleRequirements::Log::eachWriterLogsAtItsPriority",
+              "kind": "requirement",
+              "shortName": "L.console.54",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 558
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::eachWriterLogsAtItsPriority",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The console shall log a task's write at a program's priority, LOG_USER's info, and a kernel line at the kernel's, KERN_INFO, so that a reader of the kernel log can tell the two apart.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 561
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::eachWriterLogsAtItsPriority",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Read back through line_from, the line of the kernel log holding a task's write has priority 14, and the line written as a failure report has priority 6.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 564
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::eachWriterLogsAtItsPriority",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.TRAP.15\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 565
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Log::eachWriterLogsAtItsPriority",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::Kind::priority\", \"console::log::line_from\", \"console::log::record\", \"console::output::try_queue\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 567
                   }
                 }
               ]
@@ -77448,7 +77904,7 @@
           "doc": "The boot console drawn on the framebuffer firmware left, which a machine whose port is out of reach -- the Pixel 7 -- shows until a panic draws its own screen over it.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 468
+            "line": 571
           },
           "children": [
             {
@@ -77459,7 +77915,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 473
+                "line": 576
               },
               "children": [
                 {
@@ -77470,7 +77926,7 @@
                   "value": "\"screen::start shall draw the console only when the command line holds ferrix.fbcon and there is a framebuffer, and only the first time it is called: clear it, and draw what recent keeps of the lines printed before, from the first whole one; and milestone shall paint stripe n, for n below 12, only while the console is drawn, and not when it finds the board taken.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 479
+                    "line": 582
                   }
                 },
                 {
@@ -77481,7 +77937,7 @@
                   "value": "\"A boot without ferrix.fbcon leaves the framebuffer as firmware left it; one with it shows the boot's earlier lines from a line's start, and every later kernel line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 482
+                    "line": 585
                   }
                 },
                 {
@@ -77492,7 +77948,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 483
+                    "line": 586
                   }
                 },
                 {
@@ -77503,7 +77959,7 @@
                   "value": "(\"console::screen::start\", \"console::screen::put\", \"console::screen::milestone\", \"console::screen::Board::stripe\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 485
+                    "line": 588
                   }
                 }
               ]
@@ -77516,7 +77972,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 487
+                "line": 590
               },
               "children": [
                 {
@@ -77527,7 +77983,7 @@
                   "value": "\"Board::new shall pick the largest glyph scale up to 4, or up to 1 under ferrix.fbcon.small, that leaves at least 60 columns, inside the margins, the top inset and the 12 milestone stripes, and refuse a surface with room for no column or fewer than 2 rows.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 492
+                    "line": 595
                   }
                 },
                 {
@@ -77538,7 +77994,7 @@
                   "value": "\"A 1080-pixel-wide surface gets scale 2 and 65 columns; a 640-pixel one, scale 1; a surface 20 pixels high is refused.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 495
+                    "line": 598
                   }
                 },
                 {
@@ -77549,7 +78005,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 496
+                    "line": 599
                   }
                 },
                 {
@@ -77560,7 +78016,7 @@
                   "value": "\"console::screen::Board::new\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 497
+                    "line": 600
                   }
                 }
               ]
@@ -77573,7 +78029,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 499
+                "line": 602
               },
               "children": [
                 {
@@ -77584,7 +78040,7 @@
                   "value": "\"Board::put shall ignore a CR, start a new row at a newline, advance a tab to the next stop of eight, draw a printable byte and draw anything else as the replacement character, wrapping at the last column and from the bottom row to the top, and keep the row after the newest line blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 504
+                    "line": 607
                   }
                 },
                 {
@@ -77595,7 +78051,7 @@
                   "value": "\"Drawn on a board of 3 rows, a line with a tab, a CR and a byte 0x01 puts its glyphs at the columns the rule gives, the replacement glyph for 0x01, and after a fourth newline the text is on row 1 with row 2 blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 508
+                    "line": 611
                   }
                 },
                 {
@@ -77606,7 +78062,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 509
+                    "line": 612
                   }
                 },
                 {
@@ -77617,7 +78073,7 @@
                   "value": "(\"console::screen::Board::put\", \"console::screen::Board::glyph\", \"console::screen::Board::newline\", \"console::screen::Board::clear_row\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 512
+                    "line": 615
                   }
                 }
               ]
@@ -77630,7 +78086,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 514
+                "line": 617
               },
               "children": [
                 {
@@ -77641,7 +78097,7 @@
                   "value": "\"screen::stop shall stop the screen console for good and wait a bounded time for a draw in flight to finish, and a byte that finds the board taken shall not be drawn; and every draw shall make its stores globally visible before the board is released.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 518
+                    "line": 621
                   }
                 },
                 {
@@ -77652,7 +78108,7 @@
                   "value": "\"After stop, 0 bytes are drawn; stop called by a processor part way through a draw returns after at most 1,000,000 attempts at the board. The drain is build evidence and an argument: every draw of start, put and milestone ends with arch::drain_write_combining (SFENCE on x86-64, nothing on the Arm kernels) under the board, on every boot's path; no emulator models write-combining fill buffers, so no control can show it fired, and the photographed hardware evidence is owed by a docs/BACKLOG.md row.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 526
+                    "line": 629
                   }
                 },
                 {
@@ -77663,7 +78119,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 527
+                    "line": 630
                   }
                 },
                 {
@@ -77674,7 +78130,7 @@
                   "value": "(\"console::screen::stop\", \"console::screen::put\", \"console::screen::start\", \"console::screen::milestone\", \"arch::x86_64::framebuffer::drain_write_combining\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 530
+                    "line": 633
                   }
                 }
               ]
@@ -77688,7 +78144,7 @@
           "doc": "Which console the kernel writes to, where firmware or the loader says. The ports' drivers are the arch slices'.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 534
+            "line": 637
           },
           "children": [
             {
@@ -77699,7 +78155,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 538
+                "line": 641
               },
               "children": [
                 {
@@ -77710,7 +78166,7 @@
                   "value": "\"ramoops_zone shall read the loader's `console=ramoops,<base>,<size>` as a zone only when both numbers are hexadecimal with a 0x prefix, no third field follows, the base is a page's and the size is more than the record's 12-byte header.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 542
+                    "line": 645
                   }
                 },
                 {
@@ -77721,7 +78177,7 @@
                   "value": "\"`ramoops,0x9ff00000,0x40000` is read as the zone at 0x9ff00000 of 0x40000 bytes; a base not a page's, a 12-byte zone, a missing size, a third field, a number without 0x and `ttyAMA0` are each refused: 0 of 6 taken (the AArch64 `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 546
+                    "line": 649
                   }
                 },
                 {
@@ -77732,7 +78188,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 547
+                    "line": 650
                   }
                 },
                 {
@@ -77743,7 +78199,7 @@
                   "value": "\"arch::aarch64::console::ramoops_zone\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 548
+                    "line": 651
                   }
                 }
               ]
@@ -77756,7 +78212,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 550
+                "line": 653
               },
               "children": [
                 {
@@ -77767,7 +78223,7 @@
                   "value": "\"chosen shall take the port a `console=` in the device tree's bootargs names, where the tree has that port with registers; else the port stdout-path names; else the first port the kernel drives that the tree has not turned off.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 554
+                    "line": 657
                   }
                 },
                 {
@@ -77778,7 +78234,7 @@
                   "value": "\"Of 4 trees built for the check, `console=pl011` against a stdout-path naming the USART gives the PL011; a `console=ttyS0` falls through to stdout-path's PL011; no stdout-path gives the first port not disabled; a lone STM32 USART gives it: 4 of 4 (the ARMv7-A `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 559
+                    "line": 662
                   }
                 },
                 {
@@ -77789,7 +78245,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 560
+                    "line": 663
                   }
                 },
                 {
@@ -77800,7 +78256,7 @@
                   "value": "(\"arch::armv7a::console::chosen\", \"arch::armv7a::console::forced\", \"arch::armv7a::console::first_enabled\", \"arch::armv7a::console::Port::of\", \"arch::armv7a::console::Port::named\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 563
+                    "line": 666
                   }
                 }
               ]
@@ -77814,7 +78270,7 @@
           "doc": "src/kernel/src/console/pstore.rs: the kernel log kept across a reset in a region of RAM the loader gives, which the next boot's loader reports (docs/POSTMORTEM.md section 3; the consultant's OK IF Q1-Q16, ledger line 1238). The region's format is ferrix-bootinfo's pstore module, unclassified, host-tested; the decisions below are the kernel's.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 567
+            "line": 670
           },
           "children": [
             {
@@ -77825,7 +78281,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 575
+                "line": 678
               },
               "children": [
                 {
@@ -77836,7 +78292,7 @@
                   "value": "\"The pstore mirror shall hold in the region's ring what the kernel log records, from the boot's first logged byte, in order, with nothing the log does not record: the lines sent unlogged are in neither.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 579
+                    "line": 682
                   }
                 },
                 {
@@ -77847,7 +78303,7 @@
                   "value": "\"In test-postmortem's boot 1, the region saved over QMP after the report validates as boot 1's, and its text, line for line, is boot 1's serial log from the kernel's first line with only the unlogged lines missing, and holds none of them (x86-64 and AArch64).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 584
+                    "line": 687
                   }
                 },
                 {
@@ -77858,7 +78314,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 585
+                    "line": 688
                   }
                 },
                 {
@@ -77869,7 +78325,7 @@
                   "value": "(\"console::pstore::record\", \"console::pstore::adopt\", \"console::log::record_into\", \"console::log::slot_of\", \"console::log::record\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 587
+                    "line": 690
                   }
                 }
               ]
@@ -77882,7 +78338,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 589
+                "line": 692
               },
               "children": [
                 {
@@ -77893,7 +78349,7 @@
                   "value": "\"attach shall mirror the log into the loader's region only when it is whole pages, a header page and a ring of a power of two from 4 KiB to 16 MiB, wholly inside one Pstore entry of the memory map, RAM the direct map covers at both ends, and its header is valid with nothing recorded; else it shall say why in one line and write nothing there.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 595
+                    "line": 698
                   }
                 },
                 {
@@ -77904,7 +78360,7 @@
                   "value": "\"At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. The kernel takes the header through ferrix-bootinfo's fresh, whose host test the_kernel_takes_only_a_fresh_version_2_header refuses a version-1 header, a count other than 0 and every stop word other than 0. By inspection of check: nothing is written to the region before every clause passes (adopt is its only writer).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 609
+                    "line": 712
                   }
                 },
                 {
@@ -77915,7 +78371,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 610
+                    "line": 713
                   }
                 },
                 {
@@ -77926,7 +78382,7 @@
                   "value": "(\"console::pstore::attach\", \"console::pstore::check\", \"console::pstore::placement\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 612
+                    "line": 715
                   }
                 }
               ]
@@ -77939,7 +78395,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 614
+                "line": 717
               },
               "children": [
                 {
@@ -77950,7 +78406,7 @@
                   "value": "\"conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back, through stop, after its last line and before the reset ferrix.onexit=reset asks for or the power-off of its default.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 620
+                    "line": 723
                   }
                 },
                 {
@@ -77961,7 +78417,7 @@
                   "value": "\"In test-postmortem's boot 1, the unlogged `written back for the next boot` line comes straight after the report's explanation, and the region saved after it holds that explanation (x86-64 and AArch64); in test-boot --reset, the loader that comes back quotes the kernel's resetting line as the log's last (x86-64 and AArch64). Neither write-back is observable under QEMU, whose caches are the host's: the hardware run is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 627
+                    "line": 730
                   }
                 },
                 {
@@ -77972,7 +78428,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 628
+                    "line": 731
                   }
                 },
                 {
@@ -77983,7 +78439,7 @@
                   "value": "(\"console::pstore::write_back\", \"panic::conclude\", \"power::finish\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 630
+                    "line": 733
                   }
                 }
               ]
@@ -77997,7 +78453,7 @@
               "doc": "docs/POSTMORTEM.md section 5 (S1); the consultant's OK IF C1-C12, ledger line 2749.",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 632
+                "line": 735
               },
               "children": [
                 {
@@ -78008,7 +78464,7 @@
                   "value": "\"On a path that does not return, each stop on purpose shall record its code in the attached region's stop word, as one atomic update after its caller's last line and before the architecture's stop: reboot(2)'s RESTART and RESTART2 a restart, POWER_OFF a power-off, HALT a halt, finish a reset under ferrix.onexit=reset and a power-off by default; begin_report shall record a panic when it admits the first report, and an abridged report nothing. No stop shall replace a panic's word.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 642
+                    "line": 745
                   }
                 },
                 {
@@ -78019,7 +78475,7 @@
                   "value": "\"In test-postmortem's stop cases (x86-64 and AArch64), boot 2's loader says boot 1 ended in a restart after reboot -f and after a RESTART2 word, a power-off after poweroff -f, a halt after halt -f, a reset after init exited under ferrix.onexit=reset, and a power-off after init exited by default; no stop recorded after a reset from outside while a program sleeps; and in its record case, the saved region's word and boot 2's loader both say a panic. By inspection: an abridged report stores nothing, and stop's update leaves a panic's word as it is.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 651
+                    "line": 754
                   }
                 },
                 {
@@ -78030,7 +78486,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 652
+                    "line": 755
                   }
                 },
                 {
@@ -78041,7 +78497,7 @@
                   "value": "(\"console::pstore::stop\", \"console::pstore::panicked\", \"panic::begin_report\", \"power::finish\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 654
+                    "line": 757
                   }
                 }
               ]
@@ -78055,7 +78511,7 @@
               "doc": "reboot(2) itself, syscall/system.rs's sys_reboot, is load-ring code and cannot be a unit here: its four calls are argued by inspection, and the unit is what they call.",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 656
+                "line": 759
               },
               "children": [
                 {
@@ -78066,7 +78522,7 @@
                   "value": "\"reboot(2) shall write the pstore region back from the caches, through stop, in each of its four stopping arms (RESTART, RESTART2, POWER_OFF, HALT), after its last line and before the architecture's reset or power-off, taking no lock and allocating nothing.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 664
+                    "line": 767
                   }
                 },
                 {
@@ -78077,7 +78533,7 @@
                   "value": "\"In test-postmortem's stop cases (x86-64 and AArch64), boot 2's loader reads the word each of the RESTART, RESTART2, POWER_OFF and HALT arms' stop call stored. By inspection: stop writes the region back in the same body after the store, and nothing in each arm can return after it. The write-back itself is not observable under QEMU, whose caches are the host's: the N150 run is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 671
+                    "line": 774
                   }
                 },
                 {
@@ -78088,7 +78544,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 672
+                    "line": 775
                   }
                 },
                 {
@@ -78099,7 +78555,7 @@
                   "value": "\"console::pstore::stop\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 673
+                    "line": 776
                   }
                 }
               ]
@@ -78113,7 +78569,7 @@
               "doc": "The word's format is ferrix-bootinfo's pstore module, which the loader and the kernel compile and which is unclassified (the consultant's L3, ledger line 2749): its units are named here by the kernel functions that store it.",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 675
+                "line": 778
               },
               "children": [
                 {
@@ -78124,7 +78580,7 @@
                   "value": "\"The stop word the kernel stores shall be ferrix-bootinfo's Stop::word: a stop's code in its low half and the code's complement in its high half, so that a word of 0 reads as no stop recorded, a word whose halves do not match or whose code is 0 as damaged, and a whole word with a code the list does not name as unknown; validate shall read version 1, with no stop word whatever its bytes hold, and version 2, and refuse any other.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 686
+                    "line": 789
                   }
                 },
                 {
@@ -78135,7 +78591,7 @@
                   "value": "\"Host tests of ferrix-bootinfo's pstore: every_stop_round_trips_and_none_is_zero, a_changed_bit_is_damaged (every single-bit change of every stop's word), an_unassigned_code_is_a_newer_kernels, and version_1_reads_with_no_stop_word_and_version_3_is_refused. By inspection: stop and panicked store Stop::word and nothing else.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 692
+                    "line": 795
                   }
                 },
                 {
@@ -78146,7 +78602,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 693
+                    "line": 796
                   }
                 },
                 {
@@ -78157,7 +78613,7 @@
                   "value": "(\"console::pstore::stop\", \"console::pstore::panicked\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 694
+                    "line": 797
                   }
                 }
               ]
@@ -78171,7 +78627,7 @@
           "doc": "`ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150 stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a failure report ends in when asked. Its own family, L.panic, since panic.rs had no low-level ids; here beside the pstore it exists for. The device-tree read of the option gets an id when it is built.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 698
+            "line": 801
           },
           "children": [
             {
@@ -78182,7 +78638,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 706
+                "line": 809
               },
               "children": [
                 {
@@ -78193,7 +78649,7 @@
                   "value": "\"read_option shall arm the reset once, for exactly the value reset of ferrix.panic; no option or halt shall leave it unarmed, and any other value shall be said as not understood and leave it unarmed.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 710
+                    "line": 813
                   }
                 },
                 {
@@ -78204,7 +78660,7 @@
                   "value": "\"In test-postmortem, a boot with ferrix.panic=reset says it resets after the report; one with ferrix.panic=Reset says the value is not understood, its report says it halts and holds no reset line; one with no option holds no reset line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 715
+                    "line": 818
                   }
                 },
                 {
@@ -78215,7 +78671,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 716
+                    "line": 819
                   }
                 },
                 {
@@ -78226,7 +78682,7 @@
                   "value": "(\"panic::reset::read_option\", \"panic::reset::armed\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 717
+                    "line": 820
                   }
                 }
               ]
@@ -78239,7 +78695,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 719
+                "line": 822
               },
               "children": [
                 {
@@ -78250,7 +78706,7 @@
                   "value": "\"When armed, conclude shall say in its stopped line that the processor resets the machine, print and drain the reset line before the pstore write-back and the screen, and after the screen wait and reset instead of halting.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 723
+                    "line": 826
                   }
                 },
                 {
@@ -78261,7 +78717,7 @@
                   "value": "\"In test-postmortem's reset case boot 1's report says the processor resets the machine after the report, holds the reset line, and the machine starts again by itself.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 726
+                    "line": 829
                   }
                 },
                 {
@@ -78272,7 +78728,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 727
+                    "line": 830
                   }
                 },
                 {
@@ -78283,7 +78739,7 @@
                   "value": "(\"panic::conclude\", \"panic::reset::announce\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 728
+                    "line": 831
                   }
                 }
               ]
@@ -78296,7 +78752,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 730
+                "line": 833
               },
               "children": [
                 {
@@ -78307,7 +78763,7 @@
                   "value": "\"wait_then_reset shall wait 10 seconds on the free-running counter, reading nothing but counter_hz and counter_now, taking no lock and allocating nothing, wait not at all when the rate is 0, and then call arch::reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 734
+                    "line": 837
                   }
                 },
                 {
@@ -78318,7 +78774,7 @@
                   "value": "\"In test-postmortem's reset case the loader's banner comes again at least 9.5 s and at most 60 s after the reset line. By inspection: the function's body is the counter loop and the reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 738
+                    "line": 841
                   }
                 },
                 {
@@ -78329,7 +78785,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 739
+                    "line": 842
                   }
                 },
                 {
@@ -78340,7 +78796,7 @@
                   "value": "\"panic::reset::wait_then_reset\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 740
+                    "line": 843
                   }
                 }
               ]
@@ -78353,7 +78809,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 742
+                "line": 845
               },
               "children": [
                 {
@@ -78364,7 +78820,7 @@
                   "value": "\"When armed and the reset announced, abridged on the processor that announced it shall go on to wait_then_reset; on any other processor it shall halt. (On x86-64 a fault taken before the kernel's GS base is installed reads another register value and may halt: the fail-safe direction.)\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 747
+                    "line": 850
                   }
                 },
                 {
@@ -78375,7 +78831,7 @@
                   "value": "\"A fault forced inside screen::draw under ferrix.panic=reset still ends in the reset in test-postmortem's reset case, and fails it with abridged's reset removed (gate.sh control, the commit names both runs). By inspection: resetting_here compares this processor's per-CPU register with the announcer's.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 752
+                    "line": 855
                   }
                 },
                 {
@@ -78386,7 +78842,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 753
+                    "line": 856
                   }
                 },
                 {
@@ -78397,7 +78853,7 @@
                   "value": "(\"panic::abridged\", \"panic::reset::resetting_here\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 754
+                    "line": 857
                   }
                 }
               ]

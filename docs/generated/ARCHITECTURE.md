@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 142 packages, 7427 elements, 217 relations. Model digest `ec518d59f3c3471b`.
+26 files, 142 packages, 7467 elements, 217 relations. Model digest `c7bf35e836a67883`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4784,6 +4784,14 @@ flowchart LR
 | `L.console.33` | `kernelLinesAreLogged` | — | — | — |
 | `L.console.34` | `anUnloggedLineIsKeptOut` | — | — | — |
 | `L.console.35` | `recordingNeverWaits` | — | — | — |
+| `L.console.50` | `aLineBeginsAfterANewlineOrAPriority` | — | — | — |
+| `L.console.51` | `aLineIsHandedOutWhole` | — | — | — |
+| `L.console.52` | `aReaderIsGivenTheFirstLineKept` | — | — | — |
+| `L.console.53` | `aRecordBeginsALineOfItsOwn` | — | — | — |
+| `L.console.55` | `aGrownRingKeepsWhatItHeld` | — | — | — |
+| `L.console.56` | `grownLinesKeepWhatTheyHeld` | — | — | — |
+| `L.console.57` | `logBufLenSizesTheLog` | — | — | — |
+| `L.console.54` | `eachWriterLogsAtItsPriority` | — | — | — |
 | `L.console.36` | `theScreenStartsWhenAsked` | — | — | — |
 | `L.console.37` | `theBoardFitsTheScreen` | — | — | — |
 | `L.console.38` | `glyphsGoWhereTheCursorIs` | — | — | — |

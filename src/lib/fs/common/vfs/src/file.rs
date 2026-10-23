@@ -514,6 +514,9 @@ impl OpenFile {
             return Err(Errno::EBADF);
         }
         if self.io.is_stream() {
+            if let Some(answer) = self.io.seek_stream(offset, whence) {
+                return answer;
+            }
             if self.io.seek_is_noop() {
                 return Ok(0);
             }

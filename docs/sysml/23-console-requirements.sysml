@@ -359,7 +359,8 @@ package FerrixConsoleRequirements {
                 at exactly 40,000.";
             attribute :>> parent = "H.TRAP.15";
             attribute :>> unit = ("console::log::Ring::record",
-                "console::log::Ring::record_byte", "console::log::Ring::slot");
+                "console::log::Ring::record_byte", "console::log::slot_of",
+                "console::log::record_at");
         }
         requirement <'L.console.26'> aWrappedRingKeepsItsLast : ItemLowLevel {
             attribute :>> statement = "A ring of N bytes written past its length shall
@@ -370,7 +371,7 @@ package FerrixConsoleRequirements {
                 in order.";
             attribute :>> parent = "H.TRAP.13";
             attribute :>> unit = ("console::log::Ring::read",
-                "console::log::Ring::copy_from", "console::log::Ring::slot",
+                "console::log::copy_from", "console::log::slot_of",
                 "console::log::Ring::unread", "console::log::Ring::oldest_at");
         }
         requirement <'L.console.27'> aLateReaderIsToldWhatItLost : ItemLowLevel {
@@ -404,7 +405,7 @@ package FerrixConsoleRequirements {
                 40,000.";
             attribute :>> parent = "H.TRAP.13";
             attribute :>> unit = ("console::log::Ring::read",
-                "console::log::Ring::copy_from", "console::log::Ring::record_byte");
+                "console::log::copy_from", "console::log::Ring::record_byte");
         }
         requirement <'L.console.30'> aCursorAheadIsBroughtBack : ItemLowLevel {
             attribute :>> statement = "read shall bring a cursor ahead of the newest
@@ -462,6 +463,108 @@ package FerrixConsoleRequirements {
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = ("console::log::record", "console::log::Ring::record",
                 "console::log::Ring::record_byte");
+        }
+        requirement <'L.console.50'> aLineBeginsAfterANewlineOrAPriority : ItemLowLevel {
+            attribute :>> statement = "record shall note that a line of the log begins
+                at the first byte after a newline and at a byte whose priority is not
+                the priority of the line it would continue, stamped with the time
+                taken once for the call and with that byte's priority.";
+            attribute :>> criterion = "On a ring and lines of the log check's own,
+                'one' and a newline at the kernel's priority, 'tw' then 'o' and a
+                newline then 'pro' at a program's, and 'k' and a newline at the
+                kernel's begin lines at bytes 0, 4, 8 and 11, stamped 100, 200, 400
+                and 500 -- the stamps of the calls that began them -- each at its
+                own priority.";
+            attribute :>> parent = "H.TRAP.15";
+            attribute :>> unit = ("console::log::record", "console::log::record_lines",
+                "console::log::Lines::note", "console::log::Lines::begin",
+                "console::log::Stamp::usec", "console::log::Ring::record_byte_at",
+                "console::log::record_at", "console::log::slot_in");
+        }
+        requirement <'L.console.51'> aLineIsHandedOutWhole : ItemLowLevel {
+            attribute :>> statement = "line shall hand a reader a line of the log only
+                once it is whole -- a later line has begun, or its last byte was a
+                newline -- with its first byte's place, the place past its last, its
+                stamp and its priority.";
+            attribute :>> criterion = "On the log check's lines, a line of 'half' with
+                no newline is not handed out, and after its newline it is, from byte
+                13 to 18, stamped 600.";
+            attribute :>> parent = "H.TRAP.13";
+            attribute :>> unit = ("console::log::Lines::line", "console::log::Lines::kept",
+                "console::log::slot_in");
+        }
+        requirement <'L.console.52'> aReaderIsGivenTheFirstLineKept : ItemLowLevel {
+            attribute :>> statement = "first shall answer the first line whose slot is
+                still kept and whose first byte the ring still keeps, and line shall
+                hand out no line before it.";
+            attribute :>> criterion = "On the log check's lines, after more lines than
+                its 8 slots the first answered is the one 7 before the next, and line
+                0 is not handed out; after a line that pushes the ring's oldest byte
+                past the start of the line two before it, the first answered is the
+                line one before it, and the line before that is not handed out.";
+            attribute :>> parent = "H.TRAP.13";
+            attribute :>> unit = ("console::log::Lines::first", "console::log::Lines::line",
+                "console::log::Lines::kept", "console::log::Ring::oldest");
+        }
+        requirement <'L.console.53'> aRecordBeginsALineOfItsOwn : ItemLowLevel {
+            attribute :>> statement = "write_record shall log a record at the priority
+                it is given as a line of its own ending in its newline, even after a
+                task's half-written line.";
+            attribute :>> criterion = "After a task's write with no newline, a record
+                written at priority 13 is found through line_from as a line that
+                begins with the record, at priority 13, its last byte a newline.";
+            attribute :>> parent = "H.TRAP.15";
+            attribute :>> unit = ("console::write_record", "console::log::break_line",
+                "console::log::Lines::break_line", "console::Kind::priority");
+        }
+        requirement <'L.console.55'> aGrownRingKeepsWhatItHeld : ItemLowLevel {
+            attribute :>> statement = "Ring::grow shall move a log ring into longer
+                slots, a power of two, once, copying every byte it kept to the same
+                place there, so that a reader is handed the same bytes at the same
+                places, none from before what it kept, and more kept after; it shall
+                refuse slots no longer or not a power of two, and a second grow.";
+            attribute :>> criterion = "A 16-byte ring of the log check's own given 30
+                bytes refuses 48 and 16 slots, grows into 64, hands out the 15 bytes
+                it kept from place 15 as before, keeps all 60 after 30 more from place
+                15 on, and refuses 128 slots.";
+            attribute :>> parent = "H.TRAP.13";
+            attribute :>> unit = ("console::log::Ring::grow", "console::log::Ring::slots",
+                "console::log::Ring::capacity", "console::log::Ring::oldest_at",
+                "console::log::Ring::oldest", "console::log::Ring::new");
+        }
+        requirement <'L.console.56'> grownLinesKeepWhatTheyHeld : ItemLowLevel {
+            attribute :>> statement = "Lines::grow shall move a ring of lines into
+                longer slots, a power of two, once, copying every line it kept to its
+                slot there, so that a reader is handed the same lines under the same
+                numbers and none it never held.";
+            attribute :>> criterion = "The log check's 4 lines, after 6 lines begun,
+                refuse 5 slots, grow into 16, hand out lines 0 to 5 exactly as before,
+                and after 6 more hand out lines 3 and 11 and not line 2.";
+            attribute :>> parent = "H.TRAP.13";
+            attribute :>> unit = ("console::log::Lines::grow", "console::log::Lines::slots",
+                "console::log::Lines::length", "console::log::Lines::kept",
+                "console::log::slot_in", "console::log::Lines::new");
+        }
+        requirement <'L.console.57'> logBufLenSizesTheLog : ItemLowLevel {
+            attribute :>> statement = "size_asked shall read log_buf_len's value as
+                Linux's memparse does and answer it rounded up to a power of two, at
+                most 4 MiB, when that is more than the log holds, and nothing when it
+                is not; a value that is not a size is refused.";
+            attribute :>> criterion = "Against a 128 KiB log, 1M and 0x100000 answer 1
+                MiB, 300k 512 KiB, 1G 4 MiB, 64K nothing, and lots is refused.";
+            attribute :>> parent = "H.TRAP.13";
+            attribute :>> unit = ("console::log::size_asked", "console::log::size_from");
+        }
+        requirement <'L.console.54'> eachWriterLogsAtItsPriority : ItemLowLevel {
+            attribute :>> statement = "The console shall log a task's write at a
+                program's priority, LOG_USER's info, and a kernel line at the kernel's,
+                KERN_INFO, so that a reader of the kernel log can tell the two apart.";
+            attribute :>> criterion = "Read back through line_from, the line of the
+                kernel log holding a task's write has priority 14, and the line
+                written as a failure report has priority 6.";
+            attribute :>> parent = "H.TRAP.15";
+            attribute :>> unit = ("console::Kind::priority", "console::log::line_from",
+                "console::log::record", "console::output::try_queue");
         }
     }
 

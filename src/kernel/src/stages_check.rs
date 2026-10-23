@@ -1927,8 +1927,14 @@ pub(super) fn check_console_log() {
         Ok(report) => println!(
             "  log      {} bytes kept of a wrapped ring and {} reported lost, resumed after \
              a partial read; {} bytes from two writers on {} processor(s) counted, {} read \
-             while they wrote; a task's write and a failure report recorded, an unlogged line not",
-            report.kept, report.lost, report.raced, report.processors, report.read_racing,
+             while they wrote; a task's write and a failure report recorded, an unlogged line not; \
+             {} lines begun where a newline or a priority ended the last, found whole",
+            report.kept,
+            report.lost,
+            report.raced,
+            report.processors,
+            report.read_racing,
+            report.lines,
         ),
         Err(problem) => fatal!(
             catalog::CONSOLE_LOG,
