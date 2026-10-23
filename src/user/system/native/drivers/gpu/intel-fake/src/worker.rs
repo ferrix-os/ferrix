@@ -7,7 +7,8 @@
 //! each batch of the keeper's calls on the fake through
 //! `ferrix-intel-xelp`'s [`Worker`], answering with what finished. A bind's
 //! address VMO is closed once the call is done: the fake binds nothing.
-//! It holds its bootstrap channel and nothing else.
+//! It holds its bootstrap channel and nothing else. When its keeper's end
+//! closes it parks rather than exits, so only its job's kill ends it.
 
 #![no_std]
 #![no_main]
@@ -90,12 +91,25 @@ fn main(bootstrap: Bootstrap) -> i32 {
     };
     match run(&keeper) {
         Ok(never) => match never {},
+        Err(Step::Keeper) => park(),
         Err(step) => {
-            if !matches!(step, Step::Keeper) {
-                say(format_args!("intel-fake: the worker stopped at {step:?}"));
-            }
+            say(format_args!("intel-fake: the worker stopped at {step:?}"));
             step as i32
         }
+    }
+}
+
+/// Its keeper is gone: wait for ever, so that only a kill of the job it
+/// was started in ends it. A worker that left on its own would make
+/// `test-restart --boot intel-keeper`'s check that devmgr ends the dead
+/// keeper's whole job tree pass whether devmgr did or not (the
+/// consultant's condition 1, ledger 3198).
+fn park() -> i32 {
+    let Ok(idle) = port::create(Kernel) else {
+        return Step::Keeper as i32;
+    };
+    loop {
+        let _ = idle.wait(Deadline::Never);
     }
 }
 

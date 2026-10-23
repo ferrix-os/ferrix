@@ -418,7 +418,9 @@ seconds, until no process of that job tree is left -- the worker included
 -- before it quiesces the device and before it starts the next keeper
 (`devmgr   the driver of 0x… and every process in its job have ended`); a
 tree that does not empty leaves the device unquiesced and nothing is
-started on it. An update of `intel` alone is refused while it runs as a
+started on it. The wait blocks devmgr's loop, so another device's death
+or update waits behind it for those seconds at most. An update of
+`intel` alone is refused while it runs as a
 keeper: keeper and worker are one driver and are replaced together
 (`cargo xtask test-restart --boot intel` kills the worker, `--boot
 intel-keeper` the keeper). Every other kind is not started again: the serial port (`vport`) has no core to wait for, and a

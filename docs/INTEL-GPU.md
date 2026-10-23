@@ -1681,12 +1681,33 @@ Built:
   of 0x… and every process in its job have ended`; an update of `intel`
   alone is refused (§12.10 (5)). Without `intel-gt` nothing changes.
 * **The fake worker** (`intel-fake-gt`, `intel-gt` in the gate's image).
+  When its keeper's end closes it parks rather than exits, so only its
+  job's kill ends it and `--boot intel-keeper`'s check that no dead
+  keeper's worker outlives it judges devmgr's kill and wait (ledger 3198
+  (1)).
 * **The gates**: `test-restart --boot intel` kills `intel-gt` twice under
   `vk-survive`, which must end `survived` (exit 0), the keeper saying each
   replacement and the new worker up with what it replayed (1 ms after its
   start on QEMU), and devmgr never seeing a death; `test-restart --boot
   intel-keeper` kills the keeper twice and wants §11: DIED, the job tree
   ended, the restart, a new keeper and worker, `DEVICE_LOST`.
+
+**The consultant's code review of step 1** (2026-10-23, ledger line 3198):
+OK IF (1) the fake worker parks (done above), (2) two negative controls
+on `--boot intel-keeper` fire -- the worker started outside the dying
+tree, and `end_job_tree` doing nothing --, (3) the rows pass on the
+landing hash, (4) this section records it. Against 3156: (6) and (7) met
+(no GT reset code, no item file or kernel line); (1) met by devmgr's kill
+and `EMPTY` wait with (2)'s controls; (5) met for step 1 (the lone update
+refused, DEVMGR.md's keeper paragraph); (4) accepted for step 1 (the
+worker's address VMOs carry `READ | MAP | TRANSFER`, what mapping and
+receiving them need); (2), (3), (4)'s BAR 0 and handle-table check, (5)'s
+V-03, D4 and SAFETY-MANUAL paragraphs, (8)'s box run and (9) deferred to
+step 2, which no product image reaches yet. Step 2 comes back for code
+review before any `IoMapping` leaves the keeper, and must first state,
+with a check or a kernel citation, that a process in a devmgr driver job
+cannot leave it (a `cgroup.procs` move), since `EMPTY` on the keeper's
+job proves nothing about a process moved out (3198 S1).
 
 Not yet, in §12.8's order:
 
