@@ -298,6 +298,9 @@ pub enum Dispatcher {
     /// area or tiled to one half of it, keeping the rectangle it had to go
     /// back to.
     SnapWindow(SnapTarget),
+    /// `minimize`, hyprix's own: the focused window to the special
+    /// workspace minimized windows wait on until they are focused again.
+    Minimize,
     /// `centerwindow`: put a floating window in the middle of its monitor.
     /// `1` centres it on the monitor including the reserved strips, which
     /// is what Hyprland's argument means.
@@ -549,6 +552,7 @@ impl Dispatcher {
             "setfloating" => Ok(Self::SetFloating),
             "settiled" => Ok(Self::SetTiled),
             "centerwindow" => Ok(Self::CenterWindow { whole: arg == "1" }),
+            "minimize" => Ok(Self::Minimize),
             "snapwindow" => SnapTarget::parse(arg).map(Self::SnapWindow).ok_or_else(bad),
             "pin" => Ok(Self::Pin),
             "pseudo" => Ok(Self::Pseudo),

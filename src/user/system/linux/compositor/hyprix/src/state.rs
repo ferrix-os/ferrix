@@ -6126,11 +6126,15 @@ fn for_the_bar(
                 .snap_window(window, target)
                 .is_ok_and(|made| !made.is_empty())
         }
-        // Minimised is a state this compositor does not have yet, and a
-        // bar is told so: the window is never reported in it, so a request
-        // to leave it is already true and a request to enter it is refused
-        // by doing nothing rather than by doing the wrong thing.
-        ForeignRequest::Maximized(_) | ForeignRequest::Minimized(_) => false,
+        // Minimized: to the special workspace minimized windows wait on;
+        // back by focusing it, as `activate` does.
+        ForeignRequest::Minimized(true) => {
+            state.minimize(window).is_ok_and(|made| !made.is_empty())
+        }
+        ForeignRequest::Minimized(false) => {
+            state.is_minimized(window) && state.focus_window(window).is_ok()
+        }
+        ForeignRequest::Maximized(_) => false,
     }
 }
 

@@ -4552,3 +4552,33 @@ fn a_drag_to_a_monitor_edge_says_where_it_would_snap() {
     assert_eq!(state.edge_snap_at((1920, 500)), None, "M1 continues past");
     assert_eq!(state.edge_snap_at((900, 500)), None);
 }
+
+/// A minimized window leaves its workspace and the focus falls back;
+/// focusing it brings it back where it was.
+#[test]
+fn a_minimized_window_comes_back_when_it_is_focused() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1, 2]);
+    let _floated = state
+        .float_window(WindowId(1), r(100, 100, 640, 480))
+        .unwrap();
+    let _floated = state
+        .float_window(WindowId(2), r(200, 200, 640, 480))
+        .unwrap();
+    focus(&mut state, 2);
+    let _minimized = state.minimize(WindowId(2)).unwrap();
+    assert!(state.is_minimized(WindowId(2)));
+    assert_eq!(rects(&state), [(1, r(100, 100, 640, 480))], "only 1 shows");
+    assert_eq!(focused(&state), Some(1), "the focus fell back");
+    // Minimizing again does nothing.
+    assert!(state.minimize(WindowId(2)).unwrap().is_empty());
+
+    focus(&mut state, 2);
+    assert!(!state.is_minimized(WindowId(2)));
+    assert_eq!(
+        rects(&state),
+        [(1, r(100, 100, 640, 480)), (2, r(200, 200, 640, 480))],
+        "back where it floated"
+    );
+    assert_eq!(focused(&state), Some(2));
+}

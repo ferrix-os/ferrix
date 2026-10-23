@@ -601,6 +601,15 @@ impl Compositor<'_> {
                     effects.asked_states.push((*window, maximized, fullscreen));
                 }
             }
+            // A window's own minimize button: what a taskbar's request
+            // does, so it goes the same way.
+            Event::ToplevelMinimizeAsked { toplevel } => {
+                if let Some((_, window)) = slot.windows.iter().find(|(top, _)| *top == toplevel) {
+                    effects
+                        .asked
+                        .push((*window, ForeignRequest::Minimized(true)));
+                }
+            }
             // A press on a window's own title bar or edge, handed to the
             // compositor to drag with.
             Event::ToplevelDragAsked { toplevel, edges } => {

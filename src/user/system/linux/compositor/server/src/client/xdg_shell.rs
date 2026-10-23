@@ -356,9 +356,15 @@ impl Client {
                     });
                 }
             }
-            // `show_window_menu` and `set_minimized` ask for things a tiling
-            // compositor does not do. The protocol says a compositor may
-            // ignore each, and Hyprland ignores both.
+            // `set_minimized`: the compositor decides; a floating desktop
+            // minimizes (`docs/DESKTOP.md` §1.2).
+            xdg_toplevel::request::SET_MINIMIZED if self.toplevels.contains_key(&sender) => {
+                self.events
+                    .push(Event::ToplevelMinimizeAsked { toplevel: sender });
+            }
+            // `show_window_menu` asks for a thing this compositor does not
+            // do. The protocol says a compositor may ignore it, and
+            // Hyprland does.
             _ => {}
         }
     }

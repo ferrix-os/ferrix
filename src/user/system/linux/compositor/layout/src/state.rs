@@ -472,6 +472,9 @@ pub struct State {
     /// workspace's coordinates as `floating_rects` are. Any other change of
     /// the window's floating rectangle forgets it ([`State::hold_floating`]).
     snapped: BTreeMap<WindowId, (Snap, Rect)>,
+    /// Minimized windows, each on the special workspace
+    /// [`MINIMIZED`], with the workspace it goes back to.
+    minimized: BTreeMap<WindowId, WorkspaceId>,
     /// Each window the focus went to since [`State::take_focus_trail`] was
     /// last asked, in order: `None` where nothing was focused.
     focus_trail: Vec<Option<WindowId>>,
@@ -546,6 +549,10 @@ impl Group {
 /// −2.
 const SPECIAL_START: i64 = -99;
 
+/// The special workspace minimized windows are kept on: never shown by
+/// itself, left by activating a window on it.
+pub const MINIMIZED: &str = "minimized";
+
 /// How far down and right [`State::new_floating_place`] moves a new floating
 /// window off another's top-left corner: about a title bar's height, as
 /// mutter cascades.
@@ -567,6 +574,7 @@ impl State {
             history: Vec::new(),
             over_fullscreen: BTreeSet::new(),
             snapped: BTreeMap::new(),
+            minimized: BTreeMap::new(),
             focus_trail: Vec::new(),
             names: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -1490,6 +1498,7 @@ impl State {
             let _lifted = state.lifted.remove(&window);
             let _over = state.over_fullscreen.remove(&window);
             let _snapped = state.snapped.remove(&window);
+            let _minimized = state.minimized.remove(&window);
             // `master:focus_master_on_close`: the focus goes to the master
             // rather than to whatever the history has next, which is what
             // `getNextCandidate` does with the option on.
@@ -1528,9 +1537,82 @@ impl State {
             return Err(Error::UnknownWindow(window));
         }
         Ok(self.run(|state| {
+            // A minimized window focused -- from a taskbar, the overview or
+            // `focuswindow` -- comes back first.
+            let changes = state.unminimize_now(window);
             state.focus(window);
-            Vec::new()
+            changes
         }))
+    }
+
+    /// Minimize `window` (`xdg_toplevel.set_minimized`, a taskbar's
+    /// request): it goes to the special workspace [`MINIMIZED`], which is
+    /// never shown by itself, and the focus falls back as if it had closed.
+    /// Focusing it brings it back to the workspace it was on
+    /// (`docs/DESKTOP.md` §1.2).
+    ///
+    /// # Errors
+    ///
+    /// A window this state does not have.
+    pub fn minimize(&mut self, window: WindowId) -> Result<Vec<Change>, Error> {
+        if !self.windows.contains_key(&window) {
+            return Err(Error::UnknownWindow(window));
+        }
+        Ok(self.run(|state| state.minimize_now(window)))
+    }
+
+    /// [`State::minimize`], inside a [`State::run`].
+    fn minimize_now(&mut self, window: WindowId) -> Vec<Change> {
+        if self.is_minimized(window) {
+            return Vec::new();
+        }
+        let Some(from) = self.workspace_of(window) else {
+            return Vec::new();
+        };
+        let Some(monitor) = self.workspace_monitor(from).or(self.focused_monitor) else {
+            return Vec::new();
+        };
+        let to = self.special_id(MINIMIZED);
+        self.ensure_workspace(to, monitor);
+        let _ = self.names.insert(to, format!("special:{MINIMIZED}"));
+        let _ = self.minimized.insert(window, from);
+        self.move_window_to(window, to);
+        vec![Change::MoveToWorkspace {
+            window,
+            workspace: to,
+        }]
+    }
+
+    /// Whether `window` is minimized.
+    #[must_use]
+    pub fn is_minimized(&self, window: WindowId) -> bool {
+        // A window moved off the workspace by other means since is not.
+        self.minimized.contains_key(&window)
+            && self.workspace_of(window) == Some(self.special_id(MINIMIZED))
+    }
+
+    /// Bring a minimized window back to the workspace it was on, inside a
+    /// [`State::run`]. The workspace is made again on the focused monitor
+    /// if it went while the window was away.
+    fn unminimize_now(&mut self, window: WindowId) -> Vec<Change> {
+        let on = self.is_minimized(window);
+        let Some(back) = self.minimized.remove(&window).filter(|_| on) else {
+            return Vec::new();
+        };
+        let monitor = self
+            .workspaces
+            .get(&back)
+            .map(|ws| ws.monitor)
+            .or(self.focused_monitor);
+        let Some(monitor) = monitor else {
+            return Vec::new();
+        };
+        self.ensure_workspace(back, monitor);
+        self.move_window_to(window, back);
+        vec![Change::MoveToWorkspace {
+            window,
+            workspace: back,
+        }]
     }
 
     /// Change the options. A different `general:layout` lays every
@@ -1586,6 +1668,10 @@ impl State {
             Dispatcher::SetFloating => state.set_floating(true),
             Dispatcher::SetTiled => state.set_floating(false),
             Dispatcher::CenterWindow { whole } => state.center_window(whole),
+            Dispatcher::Minimize => state
+                .focused_window()
+                .map(|window| state.minimize_now(window))
+                .unwrap_or_default(),
             Dispatcher::SnapWindow(target) => state
                 .focused_window()
                 .map(|window| state.snap_by(window, target))
