@@ -1,0 +1,43 @@
+/* Ferrix light's top bar: a black strip, white text, flat pills that
+   light up under the pointer. Ferrix's own values. */
+* {
+    font-family: "Inter", sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background-color: #000000;
+    color: #f2f2f2;
+}
+
+#custom-activities,
+#clock,
+#network,
+#pulseaudio,
+#custom-power {
+    padding: 0 12px;
+    margin: 3px 2px;
+    border-radius: 13px;
+    color: #f2f2f2;
+    background-color: transparent;
+}
+
+#custom-activities {
+    margin-left: 6px;
+}
+
+#custom-power {
+    margin-right: 6px;
+}
+
+#custom-activities:hover,
+#clock:hover,
+#network:hover,
+#pulseaudio:hover,
+#custom-power:hover {
+    background-color: #2e2e33;
+}

@@ -1,0 +1,39 @@
+// Ferrix light's top bar (docs/DESKTOP.md §2.2, step 2c), for waybar:
+// `waybar -c <this file> -s style.css`. Activities on the left opens the
+// overview; the date and time in the middle; sound, network and the
+// session's menu on the right.
+{
+    "layer": "top",
+    "position": "top",
+    "height": 32,
+    "spacing": 0,
+    "modules-left": ["custom/activities"],
+    "modules-center": ["clock"],
+    "modules-right": ["network", "pulseaudio", "custom/power"],
+    "custom/activities": {
+        "format": "Activities",
+        "tooltip": false,
+        "on-click": "hyprctl dispatch overview toggle"
+    },
+    "clock": {
+        "format": "{:%a %e %b  %H:%M}",
+        "tooltip-format": "{:%A, %e %B %Y}",
+        "interval": 30
+    },
+    "network": {
+        "format-wifi": "wifi {essid}",
+        "format-ethernet": "wired",
+        "format-disconnected": "offline",
+        "tooltip-format": "{ifname} {ipaddr}"
+    },
+    "pulseaudio": {
+        "format": "vol {volume}%",
+        "format-muted": "muted",
+        "on-click": "hyprctl dispatch exec pavucontrol"
+    },
+    "custom/power": {
+        "format": "power",
+        "tooltip-format": "End the session",
+        "on-click": "hyprctl dispatch exit"
+    }
+}
