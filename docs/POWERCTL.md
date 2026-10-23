@@ -243,7 +243,10 @@ power: restored Done { value: c8, taken: true, back: Some(c8) }: power-off
 
 Under `ferrix.powerctl.fake` every kernel line says `power (fake):`. The
 driver prints `ferrix.vrcurrent`'s shapes, so the box's scripts keep
-working:
+working. It writes them to `/dev/kmsg`, a record a line at info, which the
+kernel writes without ever waiting for the console's room
+(`console::write_record`); standard error only if `/dev/kmsg` will not
+open:
 
 ```
 power: claimed: firmware 25.000 A, ceiling 32.000 A, back off at 85 C
@@ -255,7 +258,7 @@ power: backing off to 37 A: 86 C
 ## 9. The driver
 
 `src/lib/drivers/power/x86-power` (crate `ferrix-x86-power`, host-tested:
-13 tests) and `src/user/system/native/drivers/power/x86` (image `power`),
+15 tests) and `src/user/system/native/drivers/power/x86` (image `power`),
 outside the item. It reads its words from `/proc/cmdline`:
 
 * `ferrix.power.vr=A1,...,An@S`: the plan, one to eight ascending steps of
@@ -272,6 +275,30 @@ Its loop: a `power_read` once a second -- the only thing that renews its
 lease, so a policy loop that stops is a lapsed lease (C2) -- the policy's
 action, and a report line every 5 s. 40 A to 44 A is a boot word, inside
 the kernel's ceiling.
+
+**A lapse it lives through** (2026-10-23, after the N150's lapse of that
+day: the driver went 13 s without running under an Endfield relaunch, the
+kernel put 25 A back, and the driver stopped at the claim's end, so the
+GT sat at 450 MHz until reboot). All in ring 3; the kernel is unchanged:
+
+* It asks for nice -20 at the start (`power: running at nice -20`), the
+  fair class's heaviest weight; there is no real-time class to ask for.
+* It says a second that came more than 1.5 s late: `power: the loop ran
+  N ms late (the kernel's lease is 5000 ms)`.
+* When `power_read` finds the claim ended, it says so (`power: the kernel
+  ended the claim (..)`, `power: lost the claim: firmware's limit is back;
+  claiming again (n of 4)`), claims again, and says `power: regained the
+  claim: firmware .. A, now .. A; the plan again from its first step`. The
+  plan climbs again a step a period from its first step; a back-off's cap,
+  its count and a give-up are kept. At most four times a boot, so at most
+  five claims end, below the eight that latch the core (`201`). A latch --
+  the backstop, a write that did not read back -- refuses the claim, and
+  the driver stops as before (`power: the kernel refused the claim again`).
+
+The kernel's guarantees do not move: a lapse is still firmware's value
+back within a second of the lease, every later raise is bounded, rate-limited
+and backstopped as the first was, and a hung driver -- one that never runs
+again -- keeps firmware's value.
 
 ## 10. Verification
 
@@ -293,9 +320,14 @@ refusal, no node; (3) the fake with `ferrix.power.vr=27,29@1` and
 `hang@3`: the driver's refusal checks, 27 then 29 A on the fake, the lease
 restore, every kernel line `(fake)`; (4) the same with `exit@3`: the
 holder-gone restore, devmgr's `ended with status 4`, one start only; (5)
-TCG answering as Intel 6/0xBE: the probe refuses 0x601's 0. Its judge has
-host tests. It verifies `H.DEV.5`, `H.DEV.6`, `L.device.51`-`53` and
-`L.x86_64.207`.
+TCG answering as Intel 6/0xBE: the probe refuses 0x601's 0; (6) the fake
+with `ferrix.power.vr=27,29@1`, the driver stopped from the shell with
+`kill -STOP` for 8 s after its second write -- starved of every processor
+-- and let go: the lease restore, the driver's late loop, lost and regained
+claim, 27 then 29 A again, no latch, one start.
+
+Its judge has host tests. It verifies `H.DEV.5`, `H.DEV.6`,
+`L.device.51`-`53` and `L.x86_64.207`.
 
 **`check-device-access.py`**: outside `cpu.rs`, `write_msr_checked` only
 in `powerctl.rs` with `VR_CURRENT_CONFIG` (defined once, 0x601) and in
@@ -392,3 +424,23 @@ carried, 0 dropped (vrcurrent's files held none); the justification is
 current. (6) V-16 and §7 name the unacknowledged stop. Still open: the
 N150 run (with the warm reset, 3130 (14)) and suspend, as the flakes.md
 rows they are.
+2026-10-23, the N150's lapse (image main-bca894271, an Endfield relaunch
+at load about 12): the driver's last call was at about 1442.3 s, the
+kernel's lease restore at 1447.9 s, and the driver ran again at 1456.2 s,
+found the claim ended and stopped, so 25 A stayed until reboot. It was not
+waiting on its own console line (none was due in the gap, and none was
+written late) nor on a sensor read (`power_read` reads the claim's MSRs
+and returns). Nor is the fair class the cause: in QEMU, twelve spinning
+loops on four processors, with memory churn, `/proc` walkers and a
+console flood, made no second late, at nice 0 or -20. On the box, from
+the game's exit (1420 s) the driver's seconds came off their grid (1.3 s
+late at 1422 s), yt6801 found its interrupts missing at 1431 s and fell
+back to polling, and then the 13 s gap came while the kernel's own task and
+yt6801 ran on time: the signs of one processor held without interrupts
+or preemption, with the driver queued on it. That is a kernel lead, filed
+in flakes.md. The driver now lives through it (§9): nice -20, lines to
+`/dev/kmsg`, the late second said, and the claim taken again; `test-power`
+row 6 shows it. This change does not fix the kernel lead. The
+consultant's review: OK IF (1)-(3), ledger line 3451 -- `test-power` and
+`check` PASSED through `fleet/gate.sh`, the lead kept a lead (a finding
+number if it is confirmed), and the verdict recorded here.

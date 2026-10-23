@@ -22,11 +22,39 @@
 //! after its first write, for `cargo xtask test-power`; with either it first
 //! checks the claim's own refusals (a second claim, a copy of the claim, the
 //! node's memory, mapping and interrupt, a quiesce under it) and says each.
+//!
+//! # A lease that must not lapse
+//!
+//! A policy loop that stops calling for five seconds is a hung driver to the
+//! kernel, which puts firmware's value back (`docs/POWERCTL.md` §7). On the
+//! N150 box under a game the loop once went thirteen seconds without
+//! running, and the raise never came back: the driver stopped at the claim's
+//! end. So, all in ring 3:
+//!
+//! * **Its weight.** It asks for nice -20 at the start, the fair class's
+//!   heaviest weight, so the game's threads and Wine's cannot crowd out its
+//!   millisecond a second. The scheduler has no real-time class
+//!   (`sched_setscheduler` refuses one), and the driver needs none.
+//! * **Its lines never wait for the console.** They go to `/dev/kmsg`, a
+//!   record a line, which the kernel writes without ever waiting for room
+//!   (`console::write_record`), where a write to standard error from a task
+//!   that may sleep waits for the transmit ring to drain. Standard error
+//!   only when `/dev/kmsg` cannot be opened.
+//! * **It says when it ran late**, by more than [`LATE_NANOS`], so a box log
+//!   shows the stall itself rather than only its consequence.
+//! * **It claims again after a lapse.** A lease the kernel ended is
+//!   firmware's value back and the claim gone, not a latch: the driver says
+//!   it lost the claim, claims again (at most [`MOST_RECLAIMS`] times, well
+//!   inside the kernel's eight ended claims a boot), says it regained it, and
+//!   climbs its plan again from the first step. A latch -- the backstop, a
+//!   write that did not read back -- refuses the claim, and the driver stops
+//!   as before.
 
 #![no_std]
 #![no_main]
 
 use core::fmt::{self, Write as _};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_native_abi::handle::Handle;
@@ -59,6 +87,15 @@ const WORDS: Words<'static> = Words {
 const SECOND: u64 = 1_000_000_000;
 /// Seconds between temperature lines.
 const LOG_EVERY: u64 = 5;
+/// How late a second's reading may come before the driver says so: one and
+/// a half seconds, a third of the kernel's five-second lease.
+const LATE_NANOS: u64 = 1_500_000_000;
+/// The most times the driver claims again after the kernel ended its claim:
+/// four, so that with the first claim five end at most, below the kernel's
+/// eight ended claims a boot that latch the core off (`L.x86_64.201`).
+const MOST_RECLAIMS: u32 = 4;
+/// The nice value the driver asks for: the fair class's heaviest weight.
+const NICE: i32 = -20;
 
 /// Where a run stopped, as the exit status.
 #[derive(Clone, Copy, Debug)]
@@ -111,6 +148,8 @@ fn started(boot: &Channel<Kernel>) -> Result<Device<Kernel>, Step> {
 
 fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let device = started(boot)?;
+    open_log();
+    weigh();
     let options = read_options();
     let claim = device.power_control().map_err(|error| {
         say(format_args!(
@@ -134,14 +173,14 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         say(format_args!(
             "power: no ferrix.power.vr plan: writing nothing"
         ));
-        return watch(&claim, &idle, None, &options);
+        return watch(&device, claim, &idle, None, &options);
     };
     let Some((plan, dropped)) = plan.below(u32::try_from(reading.ceiling_eighths / 8).unwrap_or(0))
     else {
         say(format_args!(
             "power: every step of the plan is above the kernel's ceiling: writing nothing"
         ));
-        return watch(&claim, &idle, None, &options);
+        return watch(&device, claim, &idle, None, &options);
     };
     if dropped > 0 {
         say(format_args!(
@@ -149,7 +188,8 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         ));
     }
     watch(
-        &claim,
+        &device,
+        claim,
         &idle,
         Some(Policy::new(plan, options.hot)),
         &options,
@@ -178,9 +218,11 @@ fn read_options() -> Options {
     }
 }
 
-/// The loop: a reading a second, the policy's action, a line every five.
+/// The loop: a reading a second, the policy's action, a line every five;
+/// a claim the kernel ended claimed again (the module's note).
 fn watch(
-    claim: &Channel<Kernel>,
+    device: &Device<Kernel>,
+    mut claim: Channel<Kernel>,
     idle: &Port<Kernel>,
     mut policy: Option<Policy>,
     options: &Options,
@@ -188,12 +230,37 @@ fn watch(
     let start = now();
     let mut energy: Option<((u32, u32), u64)> = None;
     let mut first_write: Option<u64> = None;
-    let mut elapsed = 0_u64;
+    let mut next_report = 0_u64;
+    let mut reclaims = 0_u32;
+    let mut due = start;
     loop {
-        let words = read(claim)?;
+        // The second it is, by the clock: a loop that ran late does not
+        // catch up with a burst of readings.
+        let at = now();
+        let late = at.saturating_sub(due);
+        if late > LATE_NANOS {
+            say(format_args!(
+                "power: the loop ran {} ms late (the kernel's lease is 5000 ms)",
+                late / 1_000_000
+            ));
+        }
+        let elapsed = at.saturating_sub(start) / SECOND;
+        let words = match read(&claim) {
+            Ok(words) => words,
+            Err(step) => {
+                let (again, words) = reclaim(device, &mut reclaims, step)?;
+                claim = again;
+                if let Some(policy) = policy.as_mut() {
+                    policy.restart(elapsed);
+                }
+                words
+            }
+        };
         let reading = decode::reading(&words);
         if let Some(policy) = policy.as_mut() {
-            act(claim, policy, elapsed, &reading)?;
+            // A claim that ended under the write is claimed again by the
+            // next second's reading, as one that ended between seconds.
+            let _ = act(&claim, policy, elapsed, &reading);
             if first_write.is_none() && policy.current().is_some() {
                 first_write = Some(elapsed);
             }
@@ -214,12 +281,48 @@ fn watch(
                 }
             }
         }
-        if elapsed.is_multiple_of(LOG_EVERY) {
+        if elapsed >= next_report {
             energy = report(&reading, energy);
+            next_report = (elapsed / LOG_EVERY + 1) * LOG_EVERY;
         }
-        elapsed += 1;
-        let _ = idle.wait(Deadline::At(start.saturating_add(elapsed * SECOND)));
+        due = start.saturating_add((elapsed + 1) * SECOND);
+        let _ = idle.wait(Deadline::At(due));
     }
+}
+
+/// The kernel ended the claim (`step`, already said by [`read`]): claim
+/// again, unless that has been done [`MOST_RECLAIMS`] times, and say how it
+/// went. The new claim and its first reading.
+fn reclaim(
+    device: &Device<Kernel>,
+    reclaims: &mut u32,
+    step: Step,
+) -> Result<(Channel<Kernel>, [u64; POWER_READ_WORDS]), Step> {
+    if *reclaims >= MOST_RECLAIMS {
+        say(format_args!(
+            "power: lost the claim, and claimed again {MOST_RECLAIMS} times already: firmware's limit for good"
+        ));
+        return Err(step);
+    }
+    *reclaims += 1;
+    say(format_args!(
+        "power: lost the claim: firmware's limit is back; claiming again ({} of {MOST_RECLAIMS})",
+        *reclaims
+    ));
+    let claim = device.power_control().map_err(|error| {
+        say(format_args!(
+            "power: the kernel refused the claim again: {error:?}; firmware's limit for good"
+        ));
+        step
+    })?;
+    let words = read(&claim)?;
+    let reading = decode::reading(&words);
+    say(format_args!(
+        "power: regained the claim: firmware {} A, now {} A; the plan again from its first step",
+        Amps(reading.firmware_eighths),
+        Amps(reading.vr_eighths.unwrap_or(0))
+    ));
+    Ok((claim, words))
 }
 
 /// `power_read`, or the claim's end said.
@@ -279,6 +382,7 @@ fn act(
             say(format_args!(
                 "power: the kernel ended the claim at {amps} A ({error:?})"
             ));
+            policy.refused(was);
             Err(Step::Ended)
         }
     }
@@ -395,16 +499,75 @@ fn read_file(path: &[u8], buf: &mut [u8]) -> Result<usize, ferrix_linux_abi::err
     Ok(len)
 }
 
-/// A line on standard error, which a native process has open on the
-/// console.
+/// Where the driver's lines go: `/dev/kmsg`'s descriptor, or 2 (standard
+/// error, the console) when it could not be opened.
+static LOG_FD: AtomicUsize = AtomicUsize::new(2);
+
+/// Send the driver's lines to `/dev/kmsg`, whose writes never wait for the
+/// console's room (the module's note); keep standard error if it cannot be
+/// opened, and say so there.
+fn open_log() {
+    use ferrix_rt::linux::{self, numbers};
+    const AT_FDCWD: usize = (-100_isize) as usize;
+    const O_WRONLY: usize = 1;
+    const O_CLOEXEC: usize = 0o2_000_000;
+    let path = b"/dev/kmsg\0";
+    // SAFETY: `path` is NUL-terminated and borrowed for the call.
+    let opened = unsafe {
+        linux::call(
+            numbers::OPENAT,
+            [
+                AT_FDCWD,
+                path.as_ptr().addr(),
+                O_WRONLY | O_CLOEXEC,
+                0,
+                0,
+                0,
+            ],
+        )
+    };
+    match opened {
+        Ok(fd) => LOG_FD.store(fd, Ordering::Relaxed),
+        Err(errno) => say(format_args!(
+            "power: /dev/kmsg unopened ({errno:?}): lines to standard error, which may wait for the console"
+        )),
+    }
+}
+
+/// Ask for the fair class's heaviest weight (the module's note), and say
+/// what the kernel answered.
+fn weigh() {
+    use ferrix_rt::linux::{self, numbers};
+    const PRIO_PROCESS: usize = 0;
+    // SAFETY: no pointer: which, who and the value.
+    let answer = unsafe {
+        linux::call(
+            numbers::SETPRIORITY,
+            [PRIO_PROCESS, 0, NICE as isize as usize, 0, 0, 0],
+        )
+    };
+    match answer {
+        Ok(_) => say(format_args!("power: running at nice {NICE}")),
+        Err(errno) => say(format_args!(
+            "power: nice {NICE} refused ({errno:?}): running at nice 0"
+        )),
+    }
+}
+
+/// A line: a record of its own on `/dev/kmsg` at info, or a line on
+/// standard error.
 fn say(arguments: fmt::Arguments<'_>) {
     let mut line = Line {
         bytes: [0; 200],
         len: 0,
     };
+    let fd = LOG_FD.load(Ordering::Relaxed);
+    if fd != 2 {
+        let _ = line.write_str("<6>");
+    }
     let _ = line.write_fmt(arguments);
     let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.bytes.get(..line.len).unwrap_or_default());
+    let _ = ferrix_rt::linux::write(fd, line.bytes.get(..line.len).unwrap_or_default());
 }
 
 /// A line, formatted into a fixed buffer and cut at its end.
