@@ -820,3 +820,54 @@ control and TOOLS.md entry about 3.
   the crate is an ordinary dependency in the development tree, only the
   export removes it, and the `off` image's symbols show it is not linked
   (the bit-identity of (16) proves it again).
+
+### 11.10 Is `sc4` within about 30 more points? No (2026-10-23)
+
+**What earlier build-profile work already did** (surveyed on `main`
+a622d2266 and the branches §11.9 names):
+
+| Work | Where | State |
+|---|---|---|
+| M0 part A: `build-flags.toml`, the four profiles (`tools/common/data/profiles/`), the resolver, `--check-cfg`, the `build` boot line from `cfg!` and its gate (`check-boot-line.py`), the profile rule, `check-build-flags.py`, the load ratchet | `m0-flags` → landed as d98ab2314 and b91a85311 (`m0-flags-land` has nothing beyond `main`) | **on `main`**; the `linux_abi` row is added to it, nothing is rebuilt |
+| `MICROKERNEL.md` (M0-M8, K1-K17), `BUILD-FLAGS.md` | `microkernel-plan` | on `main` (nothing beyond it) |
+| KERNEL-CRATES S1, S2, S3a; the dev and coverage profiles | `bs-a-s1`, `bs-a-s2`, `bs-a-s3`, `bs-a-dev-profile`, `bs-a-coverage-profile` | on `main` |
+| KERNEL-CRATES S3, the kernel as four crates (2,609 `pub`, 26 raised checks, F-76) | `bs-a-s3b` (also on origin) | code review OK IF (S3.1)-(S3.8), ledger 1777 and 1795, S3.2a/b built; **stopped mid-rebase** on 2026-10-15 (WIP 166cdb0e5 does not build), 440 commits behind `main`, 83 of its kernel files changed on `main` since. Not usable as a rebase; usable as a recipe: its scripts (`~/ferrix-logs/bs-a/s3b/split.py`, `raise.py`, `bodies.py`, `span_check.py`, `floor_proof.py`) redo it on a new base, and then (S3.1)'s full row set is owed again |
+| `os7s/k1-flags-after-program` | origin | not build-profile work: a seccomp negative control of stage 7 (2026-10-01), never for landing |
+| M1's K5, K6, K7, K10, K12; K2, K3, K4; smt=off; F-73, F-64 | `mk/*`, `mk-m0rest/*` (and origin) | designs on `main` with OK IF; code WIP and unlanded, 98 to 130 commits behind |
+
+**What `sc4` asks of an `off` profile beyond this document's work.** The
+profile rule passes a profile at a level only when every flag value and
+every ring-0 component allows that level (BUILD-FLAGS §4). An `off`
+profile with today's other values fails `sc4` on three flags, and the level's
+claim needs §6.5's streams of `MICROKERNEL.md`. None of these is in §7's
+rows, §11's ~100 points or §11.8's 20 to 30:
+
+| Owed for `sc4` | Why | Points (*guess*) | Done already |
+|---|---|---:|---|
+| `kernel_memory=retyped`: K12 (a job's reserved kernel memory) then K16 (no kernel heap after boot) | `heap` allows `present`, `sc2`, `none` only | K12 ~9 left; K16 25 to 40 (no design yet; part of M6's 70) | K12's design (OK IF 2550) on `main`, K12a/b code WIP on `mk/k12`, `mk/k12b` |
+| `schedule=windows`: K9's static windows with EDF inside, a server's time charged to its client, interrupt time bounded, on stage 14's HardRt | `fair` allows `present`, `none` only | stage 14 ≈ 40 (not started) + K9 15 to 25 | nothing |
+| `smt=off`: the kernel parks sibling threads | `stibp` does not allow `sc4` | 4 to 6 (with F-73, which it lands after) | design on `main` (OK IF 2563); code on `mk-m0rest/smt-off` and `smt-wip`, unlanded |
+| Ring-0 components at `sc4`: F-76's ~25 unclassified libraries the core links, the board glue, the device cores' native halves with item evidence at `sc4` (3220 (18)) | the profile rule reads each component's level | 15 to 30 | F-76's register (on `bs-a-s3b`) |
+| **Subtotal: the profile rule passes** | | **~110 to 150** | |
+| V1, MC/DC on the whole kernel, with a tool found or built and qualified | ISO 26262 ASIL D, IEC 61508 SC 4, DO-178C Level A | 60 to 120 | object-code decision coverage only (`decision-coverage.py`; "no MC/DC", F-13) |
+| V2, object-code verification | DO-178C 6.4.4.2b at Level A | 30 to 80 | none |
+| T1, timing: the method on the Pixel 7's A78 cores, the evidence on a Lock-mode Cortex-A78AE platform not owned | IEC 61508 SC 4, ISO 26262 ASIL D, AoU-4/F-24 | 60 to 100 | none |
+| F1, the formal model of the whole TSF | CC EAL6's ADV_SPM.1 (required), formal methods HR at SC 4 | 150 to 300 | none |
+| F2, refinement proofs in Verus (`max`'s plan) | HR at SC 4 / ASIL D; EAL7's step | 300 to 700 | none |
+| Outside the repository: a SIL 4 compiler route (F-17; Ferrocene is SIL 3, `aarch64` only), an independent assessor (F-27), a QMS (F-28), F-29, the pre-assessment (CLAIM M2) | | not points | none |
+
+**The figure.** Beyond §11's ~120 to 130 points, `sc4` needs about
+**110 to 150 points for the build to pass the profile rule at `sc4`**, and
+about **300 to 600 more for the evidence the level's claim rests on
+(V1, V2, T1, F1)**, 600 to 1,300 with F2: in all **about 410 to 750
+points without F2**. Even the first part alone is four to five times the
+customer's ~30 points. `sc4` is also an AArch64-only claim (`max`'s
+`claim_architectures`), and T1's evidence needs hardware that is not owned.
+
+**So, by the customer's rule (§11.9): `present` without the dated
+exception first.** An `off` profile at `present` needs no flag work beyond
+this document: `heap`, `fair` and `stibp` all allow `present`, and with no
+Linux layer in ring 0 the profile needs no exception. That claim waits on
+§11's rows, (16)'s equivalence and its own evidence (3208 (1), (6)(g)). The
+`sc4` rows above stay `max`'s path (MICROKERNEL M1, M3, M6, M7 and the
+streams), and an `off` kernel reaches `sc4` with them, not before.
