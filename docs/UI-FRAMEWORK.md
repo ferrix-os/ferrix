@@ -895,6 +895,20 @@ more.
   (`event.key == "Return"`), not by Qt's `Key_` enum, since the toolkit
   hands keysym names over. `enabled` became every item's and is
   inherited. A `focus` demo. 42 host tests.
-* Next: U4, the views and layouts the lode viewer's table needs. The
-  window gets a `test-compositor` row with the viewer's port (U8), where
-  it first runs on Ferrix.
+* **U4a built** (2026-10-23): `RowLayout`, `ColumnLayout` and
+  `GridLayout` with `Layout.*`, sharing room as Qt Quick Layouts do;
+  `Grid` and `Flow`; `Repeater` with `modelData` and `index`; models: a
+  count, a `list<T>`, or a program's `model<T>` (`tole::Model` and its
+  `ModelTracker`, `VecModel`). A departure from §4.3: there is no layout
+  pass. Each container's places are a binding per axis that its
+  children's geometry reads, so a `Flow` can take its height from the
+  width a layout gives it, as Qt's height-for-width does, without a
+  loop. Making and dropping delegates is work a binding cannot do, so
+  the `Ui` has *effects*, run by `Ui::update` before a frame or an input
+  event, which poll the models' trackers. The compiler knows lists and
+  indexing, `Layout.*`, `Qt.Align*` and `|`, and writes a `Repeater`'s
+  child as a delegate factory. A `form` demo. 48 host tests.
+* Next: U4b, `Flickable`, `ListView` with virtualization and recycling,
+  `DelegateChooser` and a 100,000-row demo. The window gets a
+  `test-compositor` row with the viewer's port (U8), where it first runs
+  on Ferrix.
