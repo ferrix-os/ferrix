@@ -83,19 +83,23 @@ jobs:
                    --jq '[.[] | select(.headRefName | startswith("promote/"))][0] // empty | "\(.number) \(.headRefOid) \(.headRefName)"')
           if [ -n "$open" ]; then
             read -r onum osha obranch <<<"$open"
-            # A promotion whose CI went red, or whose verdict is NOT-YET, is
-            # replaced as soon as develop moves past it, so the fix that lands
-            # next is promoted instead of waiting behind it.
-            red=$(gh api "repos/$GITHUB_REPOSITORY/commits/$osha/check-runs?check_name=CI%20result" \
-                    --jq '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "cancelled")] | length')
-            notyet=$(gh api "repos/$GITHUB_REPOSITORY/commits/$osha/status" \
-                    --jq '[.statuses[] | select(.context == "certification/verdict" and .state == "failure")] | length')
-            if { [ "$red" != 0 ] || [ "$notyet" != 0 ]; } && [ "$(git rev-parse origin/develop)" != "$osha" ]; then
-              gh pr close "$onum" --repo "$GITHUB_REPOSITORY" --delete-branch \
-                 --comment "Replaced: this promotion went red and develop has moved on."
-            else
-              echo "promotion #$onum is open; the next one takes what lands meanwhile"; exit 0
+            # While the open promotion's CI runs, it is left alone: replacing
+            # it on every landing would cancel each run before it ended, and
+            # no promotion would ever merge. Once that run has ended and the
+            # promotion is still open -- red, its verdict waiting or NOT-YET,
+            # or blocked for any other reason -- a develop that has moved past
+            # it supersedes it: close it and promote the new tip, so a
+            # promotion never holds back what landed after it (#4 sat green
+            # and BLOCKED while six landings waited, 2026-10-23).
+            running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$obranch" \
+                        --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$(git rev-parse origin/develop)" = "$osha" ]; then
+              echo "promotion #$onum already carries develop's tip"; exit 0
+            elif [ "$running" != 0 ]; then
+              echo "promotion #$onum is running CI; the next one takes what lands meanwhile"; exit 0
             fi
+            gh pr close "$onum" --repo "$GITHUB_REPOSITORY" --delete-branch \
+               --comment "Superseded by a promotion of develop's newer tip: this one's CI has ended and it did not merge."
           fi
           ahead=$(git rev-list --count origin/main..origin/develop)
           if [ "$ahead" = 0 ]; then echo "develop has nothing main lacks"; exit 0; fi

@@ -860,8 +860,14 @@ jobs:
     needs: [authorship, assembly, audits, model, layering, check, test, ferrousli,
             build, boot, rustc, deny, miri, fuzz, dependencies]
     runs-on: ubuntu-latest
+    # statuses: the dispatched run reports itself to the promotion (below).
+    # A fork's pull request gets a read-only token whatever this says.
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - name: Every job passed
+        id: verdict
         env:
           NEEDS: ${{ toJSON(needs) }}
           ADVISORY: rustc
@@ -877,3 +883,21 @@ jobs:
           if bad:
               raise SystemExit(f"failed: {', '.join(sorted(bad))}")
           PY
+
+      # A run the Promote workflow dispatches is not counted by its pull
+      # request: GitHub leaves check suites of workflow_dispatch out of a pull
+      # request's checks, so the ruleset never saw this job's check run on
+      # the promoted commit and promotion #4 stayed BLOCKED with every job
+      # green (2026-10-23). So the run also posts its verdict as a commit
+      # status of the same name. The workflow's token is the GitHub Actions
+      # app's, the source the rulesets require for "CI result"; only someone
+      # with write access can dispatch a run.
+      - name: Report the verdict to the promoted commit
+        if: always() && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.verdict.outcome == 'success' && 'success' || 'failure' }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f "state=$STATE" \
+            -f "context=CI result" -f "description=CI run ${GITHUB_RUN_ID}: $STATE" -f "target_url=$URL"
