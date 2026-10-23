@@ -1506,7 +1506,11 @@ Two checks fail only here, both real and neither papered over:
    and read 0x411fd440 later. The record each processor's speculation
    plan was decided from goes stale when the host moves the vCPU, so a
    vCPU that started on an A55 (no branch-history loop) can later run on
-   an X1, which needs one.
+   an X1, which needs one. Fixed on `bugfix/fx0307-midr-plan`: under a
+   hypervisor (PSCI through `hvc`) every core takes the most branches any
+   listed core needs, and the check holds the loop in force to every
+   record and to the core it reads now, not the register to the record
+   (`docs/certification/SPECULATION.md` §4).
 2. **FX-1011, W3, every boot:** crosvm's `VIRTIO_PCI_CAP_PCI_CFG` (cap
    0x84) ignores the driver's write to `cap.offset`: 0x1230 written, 0
    read back. The virtio specification makes the field driver-writable;

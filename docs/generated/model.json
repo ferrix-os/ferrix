@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "2809ea6f4f96c939022d3c68164fc777497fed0e6604bb3c709ee449129d07ec",
+  "digest": "b2b7f18d423886aff39aed98b2f689d8821d36c9d23e654f8d34b62b02b27ab0",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -67790,10 +67790,10 @@
                   "qualifiedName": "FerrixAarch64Requirements::Speculation::theEntryLoopMatchesTheRecords",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"Each processor shall decide its defences from its core and firmware's answers, apply them, record what it saw and applied, and the vector entry's branch history loop shall run exactly when some processor recorded that it needs it.\"",
+                  "value": "\"Each processor shall decide its defences from its core and firmware's answers, apply them, record what it saw and applied, and the vector entry's branch history loop shall run exactly when some processor recorded that it needs it. Where PSCI is reached through hvc, so that a processor's MIDR_EL1 may change under it, a core without ECBHB shall need the most branches any core Arm lists needs, and Arm's Spectre v2 list shall excuse no core.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 735
+                    "line": 739
                   }
                 },
                 {
@@ -67801,10 +67801,10 @@
                   "qualifiedName": "FerrixAarch64Requirements::Speculation::theEntryLoopMatchesTheRecords",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"After every processor has started, the loop's count is non-zero exactly when a processor's record holds the loop.\"",
+                  "value": "\"After every processor has started, the loop's count is non-zero exactly when a processor's record holds the loop; and a vCPU that recorded a Cortex-A55 under a hypervisor is given a count that covers the Cortex-X1 it later reads and a switch barrier firmware asks for, while without a hypervisor the A55 needs neither and the X1 32 branches, and an ECBHB core needs no loop on either.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 738
+                    "line": 746
                   }
                 },
                 {
@@ -67815,7 +67815,7 @@
                   "value": "\"H.TRAP.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 739
+                    "line": 747
                   }
                 },
                 {
@@ -67823,10 +67823,10 @@
                   "qualifiedName": "FerrixAarch64Requirements::Speculation::theEntryLoopMatchesTheRecords",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"arch::aarch64::speculation::init\", \"arch::aarch64::speculation::apply_this_cpu\", \"arch::aarch64::speculation::decide_and_apply\", \"arch::aarch64::speculation::plan_for\", \"arch::aarch64::speculation::Seen::pack\", \"arch::aarch64::speculation::Seen::unpack\", \"arch::aarch64::speculation::kind_of\", \"arch::aarch64::init_speculation\")",
+                  "value": "(\"arch::aarch64::speculation::init\", \"arch::aarch64::speculation::apply_this_cpu\", \"arch::aarch64::speculation::decide_and_apply\", \"arch::aarch64::speculation::plan_for\", \"arch::aarch64::speculation::Seen::pack\", \"arch::aarch64::speculation::Seen::unpack\", \"arch::aarch64::speculation::kind_of\", \"arch::aarch64::init_speculation\", \"arch::aarch64::speculation::Core::bhb_loops_needed\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 746
+                    "line": 755
                   }
                 }
               ]
@@ -67839,7 +67839,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 748
+                "line": 757
               },
               "children": [
                 {
@@ -67850,7 +67850,7 @@
                   "value": "\"midr_of shall answer the MIDR_EL1 that processor <logical> recorded while starting, and None for a processor that has not recorded, for one at or beyond MAX_CPUS, and for every processor of a kernel built without its side-channel defences, which records nothing.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 753
+                    "line": 762
                   }
                 },
                 {
@@ -67858,10 +67858,10 @@
                   "qualifiedName": "FerrixAarch64Requirements::Speculation::eachProcessorsIdentityIsReadBack",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"After every processor has started, midr_of answers each one's record, which for the processor running the check is its own MIDR_EL1, and None for every logical number from the processor count to MAX_CPUS.\"",
+                  "value": "\"After every processor has started, midr_of answers each one's record, the entry loop in force is at least what each recorded core needs and what the core the check runs on needs by the MIDR_EL1 it reads now, which under a hypervisor need not be its record, and midr_of answers None for every logical number from the processor count to MAX_CPUS.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 757
+                    "line": 768
                   }
                 },
                 {
@@ -67872,7 +67872,7 @@
                   "value": "\"H.TRAP.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 758
+                    "line": 769
                   }
                 },
                 {
@@ -67883,7 +67883,7 @@
                   "value": "(\"arch::aarch64::speculation::midr_of\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 759
+                    "line": 770
                   }
                 }
               ]
@@ -67896,7 +67896,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 761
+                "line": 772
               },
               "children": [
                 {
@@ -67907,7 +67907,7 @@
                   "value": "\"apply shall clear SCTLR_EL1.DSSBS and PSTATE.SSBS on a core that needs the store bypass defence and has them, read back what can be read, and say what took; firmware's workaround 1 shall be asked on each switch only by a core whose plan holds it.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 766
+                    "line": 777
                   }
                 },
                 {
@@ -67918,7 +67918,7 @@
                   "value": "\"The speculation report names each kind of core and what was applied; QEMU's max CPU needs none of them, and a check that a cleared DSSBS reads back cleared on a core that has it is not written.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 770
+                    "line": 781
                   }
                 },
                 {
@@ -67929,7 +67929,7 @@
                   "value": "\"H.TRAP.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 771
+                    "line": 782
                   }
                 },
                 {
@@ -67940,7 +67940,7 @@
                   "value": "(\"arch::aarch64::speculation::apply\", \"arch::aarch64::speculation::write_sctlr\", \"arch::aarch64::speculation::clear_ssbs\", \"arch::aarch64::speculation::switch_barrier\", \"arch::aarch64::speculation::answers_arch_features\", \"arch::aarch64::speculation::ask_about_this_core\", \"arch::aarch64::speculation::firmware_call\", \"arch::aarch64::speculation::report_once_started\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 779
+                    "line": 790
                   }
                 }
               ]
@@ -67953,7 +67953,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 781
+                "line": 792
               },
               "children": [
                 {
@@ -67964,7 +67964,7 @@
                   "value": "\"switch_barrier_in_domain shall issue nothing: this architecture's switch barrier is ARCH_WORKAROUND_1, the predictor invalidation a speculation domain leaves out, and the Spectre-BHB loop on entry from EL0 is not on the switch path.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 785
+                    "line": 796
                   }
                 },
                 {
@@ -67975,7 +67975,7 @@
                   "value": "\"Switches between two members of one marked job decide no barrier and switches out of the domain decide one each way (the `domain` line on an AArch64 boot).\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 788
+                    "line": 799
                   }
                 },
                 {
@@ -67986,7 +67986,7 @@
                   "value": "\"H.TRAP.17\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 789
+                    "line": 800
                   }
                 },
                 {
@@ -67997,7 +67997,7 @@
                   "value": "\"arch::aarch64::speculation::switch_barrier_in_domain\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 790
+                    "line": 801
                   }
                 }
               ]
@@ -68010,7 +68010,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 792
+                "line": 803
               },
               "children": [
                 {
@@ -68021,7 +68021,7 @@
                   "value": "\"clamp_index and clamp_below shall answer an index below its bound unchanged and any other as zero, with a csel and a csdb so that no later instruction uses a predicted result.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 796
+                    "line": 807
                   }
                 },
                 {
@@ -68032,7 +68032,7 @@
                   "value": "\"The generic speculation check requires the clamp on every architecture (arch/speculation_check.rs), whose criterion is the clamp's result, not this instruction sequence.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 799
+                    "line": 810
                   }
                 },
                 {
@@ -68043,7 +68043,7 @@
                   "value": "\"H.TRAP.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 800
+                    "line": 811
                   }
                 },
                 {
@@ -68054,7 +68054,7 @@
                   "value": "(\"arch::aarch64::speculation::clamp_index\", \"arch::aarch64::speculation::clamp_below\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 802
+                    "line": 813
                   }
                 }
               ]
@@ -68068,7 +68068,7 @@
           "doc": "What firmware is asked for: power off and reset through PSCI, the Pixel 7's watchdogs fed, and entropy from its TRNG through SMCCC (trng.rs) or the core's RNDR.",
           "source": {
             "file": "docs/sysml/19-aarch64-requirements.sysml",
-            "line": 806
+            "line": 817
           },
           "children": [
             {
@@ -68079,7 +68079,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 811
+                "line": 822
               },
               "children": [
                 {
@@ -68090,7 +68090,7 @@
                   "value": "\"fill_from shall fill its buffer from TRNG_RND64 192 bits at a time, each call's x3 then x2 then x1 as little-endian bytes, asking again at most ATTEMPTS times while firmware reports none ready, and shall stop at the bytes already taken when a call fails.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 816
+                    "line": 827
                   }
                 },
                 {
@@ -68101,7 +68101,7 @@
                   "value": "\"Against scripted firmware: 40 bytes are taken over three calls, the first finding nothing ready, in that order; a failure on the second call leaves 24 bytes taken and the rest untouched; a firmware never ready is asked 8 times and gives 0 bytes.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 821
+                    "line": 832
                   }
                 },
                 {
@@ -68112,7 +68112,7 @@
                   "value": "\"H.BOOT.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 822
+                    "line": 833
                   }
                 },
                 {
@@ -68123,7 +68123,7 @@
                   "value": "(\"arch::aarch64::trng::fill_from\", \"arch::aarch64::trng::rnd64\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 823
+                    "line": 834
                   }
                 }
               ]
@@ -68136,7 +68136,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 825
+                "line": 836
               },
               "children": [
                 {
@@ -68147,7 +68147,7 @@
                   "value": "\"offers_rnd64 shall ask TRNG_RND64 only of firmware that reports PSCI 1.0 or later, answers SMCCC_VERSION through PSCI_FEATURES, reports SMCCC 1.1 or later and TRNG 1.0 or later, and offers TRNG_RND64 through TRNG_FEATURES.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 829
+                    "line": 840
                   }
                 },
                 {
@@ -68158,7 +68158,7 @@
                   "value": "\"Five scripted firmwares -- PSCI 0.2, no SMCCC, SMCCC 1.0, no TRNG, no TRNG_RND64 -- each give 0 bytes and are asked no TRNG_RND64.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 832
+                    "line": 843
                   }
                 },
                 {
@@ -68169,7 +68169,7 @@
                   "value": "\"H.BOOT.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 833
+                    "line": 844
                   }
                 },
                 {
@@ -68180,7 +68180,7 @@
                   "value": "\"arch::aarch64::trng::offers_rnd64\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 834
+                    "line": 845
                   }
                 }
               ]
@@ -68193,7 +68193,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 836
+                "line": 847
               },
               "children": [
                 {
@@ -68204,7 +68204,7 @@
                   "value": "\"firmware_entropy shall ask the TRNG through the conduit the machine describes PSCI on, and give 0 bytes where it describes none; hardware_random shall give a word only from a core ID_AA64ISAR0_EL1 says has RNDR, and only one RNDR reports valid within ten tries.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 841
+                    "line": 852
                   }
                 },
                 {
@@ -68215,7 +68215,7 @@
                   "value": "\"The crosvm guest's boot seeds 48 bytes from its TRNG (~/.local/share/ferrix/pixel7/vm-20260926-140648) and QEMU's 0; neither is a check, and RNDR is not asserted.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 844
+                    "line": 855
                   }
                 },
                 {
@@ -68226,7 +68226,7 @@
                   "value": "\"H.BOOT.3\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 845
+                    "line": 856
                   }
                 },
                 {
@@ -68237,7 +68237,7 @@
                   "value": "(\"arch::aarch64::firmware_entropy\", \"arch::aarch64::trng::fill\", \"arch::aarch64::trng::call\", \"arch::aarch64::cpu::hvc_call_x0_x3\", \"arch::aarch64::cpu::smc_call_x0_x3\", \"arch::aarch64::cpu::hardware_random\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 848
+                    "line": 859
                   }
                 }
               ]
@@ -68250,7 +68250,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 850
+                "line": 861
               },
               "children": [
                 {
@@ -68261,7 +68261,7 @@
                   "value": "\"shutdown and reset shall drain the console and then ask PSCI for SYSTEM_OFF or SYSTEM_RESET, shutdown announcing the power-off first, powering off where reset returns, and saying so and halting where power-off returns.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 854
+                    "line": 865
                   }
                 },
                 {
@@ -68272,7 +68272,7 @@
                   "value": "\"Every gate's QEMU exits when the boot powers off, and boot-reset's ferrix.onexit=reset is x86-64's; a reset on this architecture is not asserted.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 857
+                    "line": 868
                   }
                 },
                 {
@@ -68283,7 +68283,7 @@
                   "value": "(\"H.BOOT.6\", \"H.BOOT.7\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 858
+                    "line": 869
                   }
                 },
                 {
@@ -68294,7 +68294,7 @@
                   "value": "(\"arch::aarch64::shutdown\", \"arch::aarch64::reset\", \"arch::aarch64::cpu::psci_system_off\", \"arch::aarch64::cpu::psci_system_reset\", \"arch::aarch64::cpu::psci_system\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 861
+                    "line": 872
                   }
                 }
               ]
@@ -68307,7 +68307,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 863
+                "line": 874
               },
               "children": [
                 {
@@ -68318,7 +68318,7 @@
                   "value": "\"init_watchdogs shall feed once every watchdog the device tree lists that firmware left running, and start_watchdogs shall start the task that keeps feeding them, and nothing where the tree lists none.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 867
+                    "line": 878
                   }
                 },
                 {
@@ -68329,7 +68329,7 @@
                   "value": "\"The Pixel 7 runs past its watchdogs' timeout; QEMU's tree lists none. Not a check.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 869
+                    "line": 880
                   }
                 },
                 {
@@ -68340,7 +68340,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 870
+                    "line": 881
                   }
                 },
                 {
@@ -68351,7 +68351,7 @@
                   "value": "(\"arch::aarch64::init_watchdogs\", \"arch::aarch64::start_watchdogs\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 871
+                    "line": 882
                   }
                 }
               ]
@@ -68364,7 +68364,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 873
+                "line": 884
               },
               "children": [
                 {
@@ -68375,7 +68375,7 @@
                   "value": "\"mmio's read8, read16 and read32 shall each be one ldrb, ldrh or ldr, and write8, write16 and write32 one strb, strh or str, with a bare base register and no writeback, so that a hypervisor can emulate the access from its fault's syndrome.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 877
+                    "line": 888
                   }
                 },
                 {
@@ -68386,7 +68386,7 @@
                   "value": "\"No check can fail without it on the machines the suite boots: QEMU's TCG emulates any load or store. The Pixel 7's crosvm guest is the evidence: with read_volatile, LLVM made stage 10's DMA switch check a pre-indexed ldrh, KVM_RUN failed with ENOSYS and the guest stopped with neither boot marker; with these, it boots to init.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 883
+                    "line": 894
                   }
                 },
                 {
@@ -68397,7 +68397,7 @@
                   "value": "\"H.BOOT.2\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 884
+                    "line": 895
                   }
                 },
                 {
@@ -68408,7 +68408,7 @@
                   "value": "(\"arch::aarch64::mmio::read8\", \"arch::aarch64::mmio::write8\", \"arch::aarch64::mmio::read16\", \"arch::aarch64::mmio::write16\", \"arch::aarch64::mmio::read32\", \"arch::aarch64::mmio::write32\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 887
+                    "line": 898
                   }
                 }
               ]
@@ -68421,7 +68421,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/19-aarch64-requirements.sysml",
-                "line": 889
+                "line": 900
               },
               "children": [
                 {
@@ -68432,7 +68432,7 @@
                   "value": "\"system_call shall ask the registered filter about a call before rt_sigreturn is answered and before the dispatcher is, with x8's low 32 bits, ELR as the instruction after the svc and AArch64's token, apply the filter's errno as the dispatcher's answer, and syscall_rollback_value shall give x0 the call's first argument so that a call that did not run reads as it did at the call.\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 895
+                    "line": 906
                   }
                 },
                 {
@@ -68443,7 +68443,7 @@
                   "value": "\"A test-only filter is shown rt_sigreturn once, before its answer, and its value comes back in x0 (the `seccomp` line).\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 898
+                    "line": 909
                   }
                 },
                 {
@@ -68454,7 +68454,7 @@
                   "value": "\"H.TRAP.16\"",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 899
+                    "line": 910
                   }
                 },
                 {
@@ -68465,7 +68465,7 @@
                   "value": "(\"arch::aarch64::audit_arch\", \"arch::aarch64::syscall_rollback_value\")",
                   "source": {
                     "file": "docs/sysml/19-aarch64-requirements.sysml",
-                    "line": 901
+                    "line": 912
                   }
                 }
               ]

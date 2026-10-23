@@ -7,7 +7,7 @@ The statements in the certified item that the measured suite did not reach, on e
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1932 | 402 | 264 | **1266** |
-| aarch64 | debug | 647 | 313 | 158 | **176** |
+| aarch64 | debug | 646 | 313 | 157 | **176** |
 | armv7a | debug | 999 | 416 | 352 | **231** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
@@ -363,7 +363,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**647** unreached statements, debug profile.
+**646** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -371,7 +371,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | Reached only when the kernel is stopping | 120 | 19% |
 | Reached only when something has already failed | 79 | 12% |
 | Run, and credited to another line | 10 | 2% |
-| Hardware the measured machine does not have | 158 | 24% |
+| Hardware the measured machine does not have | 157 | 24% |
 | Needs a test | 176 | 27% |
 
 ### aarch64: Unreachable on the measured architecture — 104 statements
@@ -450,7 +450,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### aarch64: Hardware the measured machine does not have — 158 statements
+### aarch64: Hardware the measured machine does not have — 157 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -463,11 +463,11 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 5 | `core` | `iommu.rs` |
 | 4 | `core` | `console/output.rs` |
 | 3 | `core` | `arch/aarch64/smp.rs` |
-| 3 | `core` | `arch/aarch64/speculation.rs` |
 | 3 | `core` | `arch/arm_common/pl011.rs` |
 | 3 | `item` | `init.rs` |
 | 3 | `item` | `main.rs` |
 | 2 | `core` | `arch/aarch64/gic/gicv3.rs` |
+| 2 | `core` | `arch/aarch64/speculation.rs` |
 | 2 | `core` | `arch/arm_common/gicv2.rs` |
 | 1 | `core` | `arch/aarch64/cpu.rs` |
 | 1 | `core` | `arch/aarch64/trng.rs` |
@@ -504,7 +504,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 282 statements
+### aarch64: argued line by line — 281 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -541,8 +541,8 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `arch/aarch64/smp.rs` | 122 | Hardware the measured machine does not have | A `/cpus` node with no `enable-method`, taken to mean PSCI where the tree has a `/psci` node, as Linux does. QEMU's tree names `psci` on every processor, and so does the Pixel 7's; the STM32MP157's does not, and ARMv7-A runs the same rule there. |
 | `arch/aarch64/smp.rs` | 404 | Hardware the measured machine does not have | A device tree with no `/psci` node: a machine whose secondaries are started by spin table, which this kernel does not speak, so it stays on one processor. QEMU and the Pixel 7 both describe PSCI. |
 | `arch/aarch64/smp.rs` | 417 | Hardware the measured machine does not have | An FADT whose ARM boot flags do not say PSCI: a machine using the ACPI parking protocol, which this kernel does not speak. QEMU's FADT says PSCI. |
-| `arch/aarch64/speculation.rs` | 286 | Hardware the measured machine does not have | Asking firmware its SMCCC version, which happens only after PSCI said `SMCCC_VERSION` exists. QEMU's built-in PSCI answers `PSCI_FEATURES(SMCCC_VERSION)` as not supported, so the kernel never asks further, as it must not on a machine where an unimplemented SMCCC call is an undefined instruction. The Pixel 7's firmware answers: `firmware offers no ARCH_WORKAROUND_1` in ~/.local/share/ferrix/pixel7/run10-bhb/run.log, and every core's exposure in ~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree). |
-| `arch/aarch64/speculation.rs` | 301, 306 | Hardware the measured machine does not have | Asking firmware about `ARCH_WORKAROUND_1` and `_2` for this core, which runs only where firmware answers `SMCCC_ARCH_FEATURES` (line 283). What each answer means is held to the SMC Calling Convention by the speculation check; the questions are asked on the Pixel 7 (~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree)). |
+| `arch/aarch64/speculation.rs` | 313 | Hardware the measured machine does not have | Asking firmware its SMCCC version, which happens only after PSCI said `SMCCC_VERSION` exists. QEMU's built-in PSCI answers `PSCI_FEATURES(SMCCC_VERSION)` as not supported, so the kernel never asks further, as it must not on a machine where an unimplemented SMCCC call is an undefined instruction. The Pixel 7's firmware answers: `firmware offers no ARCH_WORKAROUND_1` in ~/.local/share/ferrix/pixel7/run10-bhb/run.log, and every core's exposure in ~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree). |
+| `arch/aarch64/speculation.rs` | 333 | Hardware the measured machine does not have | Asking firmware about `ARCH_WORKAROUND_1` and `_2` for this core, which runs only where firmware answers `SMCCC_ARCH_FEATURES` (line 283). What each answer means is held to the SMC Calling Convention by the speculation check; the questions are asked on the Pixel 7 (~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree)). |
 | `arch/aarch64/trap.rs` | 612, 618-619, 625-626, 630, 632, 639, 645 | Reached only when the kernel is stopping | The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it. |
 | `arch/aarch64/trap.rs` | 636 | Reached only when the kernel is stopping | The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it. |
 | `arch/aarch64/trng.rs` | 49 | Hardware the measured machine does not have | A machine whose firmware description names no way to reach PSCI, so no SMCCC call can be made. Every machine the suite boots describes PSCI -- its secondaries start through it -- and the TRNG's decisions past this point are run against scripted firmware by the machine check (check_trng). |

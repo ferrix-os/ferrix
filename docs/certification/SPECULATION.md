@@ -254,8 +254,8 @@ unimplemented `hvc` on a machine with no EL2 is an undefined instruction.
 | Hazard | `on` does | Condition, per core |
 |---|---|---|
 | Spectre v1 | clamps with `csdb` (§2) | always |
-| Spectre v2 | `SMCCC_ARCH_WORKAROUND_1` when that core switches address space | the core lacks `CSV2`, is not a Cortex-A35, A53 or A55, and firmware answers that *this core* needs the workaround |
-| Spectre-BHB | a loop of taken branches on every vector entry from EL0 — 8 on Cortex-A57/A72, 24 on A76/A77/N1, 32 on A78/X1/X1C/A710/X2/N2/V1, 38 on A715/A720, 132 on X3/V2 (Linux's figures); one count for the machine, the largest any core needs | the core is on Arm's list and lacks `ECBHB` |
+| Spectre v2 | `SMCCC_ARCH_WORKAROUND_1` when that core switches address space | the core lacks `CSV2`, is not a Cortex-A35, A53 or A55 (a list not trusted under a hypervisor, below), and firmware answers that *this core* needs the workaround |
+| Spectre-BHB | a loop of taken branches on every vector entry from EL0 — 8 on Cortex-A57/A72, 24 on A76/A77/N1, 32 on A78/X1/X1C/A710/X2/N2/V1, 38 on A715/A720, 132 on X3/V2 (Linux's figures); one count for the machine, the largest any core needs; 132 under a hypervisor | the core is on Arm's list, or PSCI is reached through `hvc`; and lacks `ECBHB` |
 | Speculative store bypass | `SCTLR_EL1.DSSBS` cleared, so EL1 runs with `PSTATE.SSBS` clear from every exception on, and `MSR SSBS` where the core has it; a program starts with it clear. Without `SSBS`, `SMCCC_ARCH_WORKAROUND_2` | the core has `SSBS`, or firmware answers that this core needs workaround 2 |
 | Meltdown | **none** — reported | §6 |
 
@@ -277,6 +277,34 @@ an X1C would have been reported "not on Arm's list" and run without the loop.
 Linux's lists also hold other implementers' cores — Qualcomm's Kryo 4xx gold
 and HiSilicon's HIP09 at 24, Ampere's Ampere-1 at 11 — which are not built,
 so such a core is reported not on the list.
+
+**Under a hypervisor the part number decides nothing** (FX-0307,
+2026-10-23). KVM shows a vCPU the `MIDR_EL1` of the physical core it was
+last loaded on, unless the VMM pins one: in the Pixel 7's crosvm one vCPU
+recorded a Cortex-A78 while starting and later read an X1, and others read
+an A55. A vCPU that started on an A55 (no loop, Spectre v2 safe by the list)
+may run on an X1 a moment later. Linux has the same exposure as a guest and
+answers it, where the VMM offers it, with KVM's `DISCOVER_IMPL_CPUS` service
+(`cpu_errata.c`'s `target_impl_cpus`: a listed part counts if *any* core the
+guest may run on is that part); crosvm offers none. So where PSCI is reached
+through `hvc` -- the kernel runs below an EL2 that serves its firmware
+calls, which is KVM's, crosvm's and QEMU's `virt` without EL3 -- every core
+without `ECBHB` takes the most any listed core needs, 132 branches, and
+Arm's Spectre v2 list excuses no core, leaving `CSV2` and firmware's answer
+(KVM answers both for the whole host). `ECBHB` and `CSV2` stay trusted: KVM
+gives a guest the sanitised ID registers, set only where every host core
+has the feature. A machine whose firmware is reached through `smc` keeps the
+per-part figures, as Linux does on bare metal. Not detected: a hypervisor that
+serves PSCI through `smc`, or serves none, without pinning the `MIDR_EL1`
+its vCPUs see. Such a machine is decided by the parts its vCPUs read while
+starting, and keeping it out is the integrator's under AoU-11. The cost is 132 branches in
+place of a part's 8 to 32 on every entry from EL0 under a hypervisor; QEMU's
+reference boot is one, and its exposure line says so. The boot check
+(`check_moving_midr`, L.aarch64.41) holds the decision to a vCPU that
+recorded an A55 and later reads an X1; `check_midr_records`
+(L.aarch64.67) requires the count in force to cover every record and the
+core the check reads now, no longer that the register still equals the
+record.
 
 **Firmware is asked per core.** The SMC Calling Convention (ARM DEN 0028D,
 issue 1.3, §7.5.2 and §7.6.2) defines `SMCCC_ARCH_FEATURES`' answer about each workaround
@@ -320,7 +348,7 @@ workaround, so its boot log reads:
 
 ```
   cpu      speculation defences: clamped indices, BHB loop on entry
-  cpu      speculation exposure: 4 x Cortex-A72: Spectre v2 NOT covered: no CSV2, and firmware offers no ARCH_WORKAROUND_1 (AoU-11); Spectre-BHB covered (8 branches); store bypass NOT covered: no SSBS, and firmware offers no ARCH_WORKAROUND_2 (AoU-11); Meltdown not affected
+  cpu      speculation exposure: 4 x Cortex-A72: Spectre v2 NOT covered: no CSV2, and firmware offers no ARCH_WORKAROUND_1 (AoU-11); Spectre-BHB covered (132 branches), the most any listed core needs: under a hypervisor MIDR_EL1 may change; store bypass NOT covered: no SSBS, and firmware offers no ARCH_WORKAROUND_2 (AoU-11); Meltdown not affected
 ```
 
 A machine of mixed cores gets a line per kind. Simulated under QEMU's `max`

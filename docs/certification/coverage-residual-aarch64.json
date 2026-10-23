@@ -8,7 +8,7 @@
   ],
   "arch": "aarch64",
   "profile": "debug",
-  "unreached": 647,
+  "unreached": 646,
   "files": {
     "iommu/vtd.rs": {
       "ring": "core",
@@ -778,9 +778,8 @@
     "arch/aarch64/speculation.rs": {
       "ring": "core",
       "lines": [
-        286,
-        301,
-        306
+        313,
+        333
       ]
     },
     "arch/aarch64/smp.rs": {

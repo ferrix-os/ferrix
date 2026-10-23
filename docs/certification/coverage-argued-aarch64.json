@@ -190,16 +190,16 @@
     },
     {
       "file": "arch/aarch64/speculation.rs",
-      "lines": "286",
+      "lines": "313",
       "category": "absent-hardware",
       "match": "call(smccc::VERSION, 0) >= 0x1_0001",
       "why": "Asking firmware its SMCCC version, which happens only after PSCI said `SMCCC_VERSION` exists. QEMU's built-in PSCI answers `PSCI_FEATURES(SMCCC_VERSION)` as not supported, so the kernel never asks further, as it must not on a machine where an unimplemented SMCCC call is an undefined instruction. The Pixel 7's firmware answers: `firmware offers no ARCH_WORKAROUND_1` in ~/.local/share/ferrix/pixel7/run10-bhb/run.log, and every core's exposure in ~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree)."
     },
     {
       "file": "arch/aarch64/speculation.rs",
-      "lines": "301, 306",
+      "lines": "333",
       "category": "absent-hardware",
-      "match": "workaround_1: if core.v2_unaffected() {",
+      "match": "workaround_2: if core.ssbs > 0 {",
       "why": "Asking firmware about `ARCH_WORKAROUND_1` and `_2` for this core, which runs only where firmware answers `SMCCC_ARCH_FEATURES` (line 283). What each answer means is held to the SMC Calling Convention by the speculation check; the questions are asked on the Pixel 7 (~/.local/share/ferrix/pixel7/run13-sealed/run.log (main at 47934c84, an ancestor of this tree))."
     },
     {
