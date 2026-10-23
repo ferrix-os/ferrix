@@ -135,6 +135,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-dbus"
+version = "0.1.0"
+
+[[package]]
 name = "compositor-desktop"
 version = "0.1.0"
 
