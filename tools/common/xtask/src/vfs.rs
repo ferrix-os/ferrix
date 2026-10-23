@@ -417,8 +417,78 @@ pub(crate) const APPLETS: &[Command] = &[
             "ran once closed",
         ]),
     },
+    // The kernel log as records (`fs::kmsg`, `syscall::system::sys_syslog`)
+    // and Ferrix's own `dmesg` over them (`src/user/system/linux/dmesg`):
+    // a line written to `/dev/kmsg` comes back stamped, at its priority,
+    // through both readers and busybox's applet, and `-w` follows the log.
+    Command {
+        argv: &["sh", "-c", DMESG_SCRIPT],
+        status: 6,
+        expect: Expect::Lines(&[
+            "kmsg: record format",
+            "dmesg: stamped",
+            "dmesg -x: user notice",
+            "dmesg -r: raw",
+            "dmesg -k: kernel only",
+            "dmesg -l: level",
+            "dmesg -T: wall clock",
+            "dmesg -S: through syslog",
+            "busybox dmesg: stamped",
+            "dmesg -w: followed",
+            "dmesg -C: cleared",
+            "dmesg: drops said",
+            "busybox dmesg: drops said",
+            "dmesg: the flood's last line kept",
+        ]),
+    },
     // `mount -t proc` and `mount -t devtmpfs` go here once mount takes them.
 ];
+
+/// `/bin/dmesg` is Ferrix's own; a line written to `/dev/kmsg` at
+/// `user.notice` is read back through `/dev/kmsg` itself in Linux's record
+/// format, and through `dmesg` with its time in brackets, decoded, raw,
+/// left out by `-k`, kept by `-l notice`, on the wall clock with `-T`,
+/// through `syslog(2)` with `-S`, and through busybox's applet with its
+/// time. `dmesg -w` shows a line written after it has shown the one before
+/// (a wait on its output with a five-second deadline), and after `dmesg -C`
+/// the line is gone. Then 1,600 lines of 90 bytes overrun the 128 KiB log,
+/// and both `dmesg`s say first how many lines were dropped, Linux's
+/// `** N printk messages dropped **`, and keep the last. Every `dmesg` here writes to a pipe, so none of what it
+/// shows is logged again as a program's output.
+const DMESG_SCRIPT: &str = r#"[ "$(readlink /bin/dmesg)" = "" ] || exit 1
+echo "<13>dmesg row: from kmsg" > /dev/kmsg || exit 2
+head -n1 /dev/kmsg | grep -qE "^[0-9]+,[0-9]+,[0-9]+,-;" && echo "kmsg: record format"
+dmesg | grep -qE "^\[ *[0-9]+\.[0-9]{6}\] dmesg row: from kmsg$" && echo "dmesg: stamped"
+dmesg -x | grep "dmesg row: from kmsg" | grep -q "^user  :notice: \[" && echo "dmesg -x: user notice"
+dmesg -r | grep -qE "^<13>\[ *[0-9]+\.[0-9]{6}\] dmesg row: from kmsg$" && echo "dmesg -r: raw"
+dmesg -k | grep -q "dmesg row" || echo "dmesg -k: kernel only"
+dmesg -l notice | grep -q "dmesg row: from kmsg" && echo "dmesg -l: level"
+dmesg -T | grep "dmesg row" | grep -qE "^\[[A-Z][a-z]{2} [A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} [0-9]{4}\] " && echo "dmesg -T: wall clock"
+dmesg -S | grep -q "dmesg row: from kmsg" && echo "dmesg -S: through syslog"
+/bin/busybox dmesg | grep -qE "^\[ *[0-9]+\.[0-9]+\] dmesg row: from kmsg" && echo "busybox dmesg: stamped"
+timeout 10 dmesg -w > /tmp/follow &
+i=0
+until grep -q "dmesg row: from kmsg" /tmp/follow; do
+  i=$((i+1)); [ $i -gt 100 ] && exit 3; usleep 50000
+done
+echo "<14>dmesg row: followed" > /dev/kmsg || exit 4
+i=0
+until grep -q "dmesg row: followed" /tmp/follow; do
+  i=$((i+1)); [ $i -gt 100 ] && exit 5; usleep 50000
+done
+echo "dmesg -w: followed"
+dmesg -C && { dmesg | grep -q "dmesg row" || echo "dmesg -C: cleared"; }
+i=0
+while [ $i -lt 1600 ]; do
+  echo "<6>dmesg flood $i: a chatty driver's line, long enough that 1600 of them overrun the log" > /dev/kmsg
+  i=$((i+1))
+done
+dmesg | head -n1 | grep -qE "^\[ *[0-9]+\.[0-9]{6}\] \*\* [0-9]+ printk messages dropped \*\*$" && echo "dmesg: drops said"
+/bin/busybox dmesg | head -n1 | grep -qE "\*\* [0-9]+ printk messages dropped \*\*$" && echo "busybox dmesg: drops said"
+dmesg | grep -q "dmesg flood 1599:" && echo "dmesg: the flood's last line kept"
+dmesg -C
+exit 6
+"#;
 
 /// A copy of busybox runs `sleep` from `/tmp`; while it runs, a shell's
 /// `>` and busybox's `truncate` are refused with `ETXTBSY` and leave it

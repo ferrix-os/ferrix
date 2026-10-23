@@ -119,6 +119,7 @@ mod devloop;
 mod dhcp;
 mod display;
 mod dma_faults;
+mod dmesg;
 mod dotfiles;
 mod dxvk;
 mod edid;
@@ -831,12 +832,15 @@ fn test_vfs(args: &Args) -> Result<()> {
         // zinc too: the permissions commands run a set-user-id copy of it,
         // which is the one program in the image that shows an effective id.
         let shell = zinc::build(arch)?;
+        // `dmesg` too, which its rows run.
+        let mut ports = apps::ported(arch, args)?;
+        ports.extend(dmesg::carried(arch)?);
         let initramfs = initramfs::build_with_utilities(
             Some(&program),
             &natives,
             shell.as_deref(),
             &utilities,
-            &apps::ported(arch, args)?,
+            &ports,
         )?;
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
         if let Err(error) = qemu::test_vfs(arch, carried, &image, &kernel, args) {
@@ -982,6 +986,8 @@ pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)>
     ports.extend(service);
     // The DHCP client `/etc/profile` takes the shell's lease with.
     ports.extend(dhcp::carried(arch)?);
+    // `dmesg`, in busybox's place.
+    ports.extend(dmesg::carried(arch)?);
     let initramfs = initramfs::build_with_utilities(
         Some(&program),
         &natives,
@@ -1016,6 +1022,8 @@ fn build_init_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
     carried.extend(auth::with_seeds(arch, args)?);
     // The apps, each installed from its package (`docs/APPS.md` §5).
     carried.extend(apps::installed(arch, args)?);
+    // `dmesg`, in busybox's place.
+    carried.extend(dmesg::carried(arch)?);
     let initramfs =
         initramfs::build_with_utilities(None, &natives, shell.as_deref(), &utilities, &carried)?;
     let mut cmdline = init::command_line();
