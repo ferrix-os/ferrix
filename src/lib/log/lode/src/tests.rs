@@ -1071,11 +1071,46 @@ mod field_quality {
         assert_eq!(record.priority, 3);
         assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), None);
         assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
-        // And a level the kernel was given stands.
+        // A level a program wrote to `/dev/kmsg` is its own: `LOG_USER` at
+        // another level than the console's info.
         let mut quiet = kernel(1, b"x: failed on purpose");
         quiet.level = 7;
         let record = ingest::from_kernel(&quiet, NOW);
         assert_eq!(record.priority, 7);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), None);
+    }
+
+    #[test]
+    fn a_level_a_program_wrote_to_kmsg_is_stated() {
+        // A driver's `<30>`: LOG_DAEMON at info, a facility no console line
+        // has, stated even at info; and at debug, words or none.
+        let mut daemon = kernel(3, b"intel: render node published (1 node)");
+        let record = ingest::from_kernel(&daemon, NOW);
+        assert_eq!(record.priority, 6);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        assert_eq!(record.get_str("SYSLOG_IDENTIFIER"), Some("intel"));
+        assert_eq!(record.get_str("SYSLOG_FACILITY"), Some("3"));
+        daemon.text =
+            Vec::from(&b"intel: uapi refused EXECBUFFER2 EIO - (0 not said before it)"[..]);
+        daemon.level = 3;
+        let record = ingest::from_kernel(&daemon, NOW);
+        assert_eq!(record.priority, 3);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), None);
+        daemon.level = 7;
+        daemon.text = Vec::from(&b"intel: freqlog: asked 300 MHz, failed nothing"[..]);
+        let record = ingest::from_kernel(&daemon, NOW);
+        assert_eq!(record.priority, 7);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        // LOG_USER at info is a console line or a `<6>` write: not stated.
+        let record = ingest::from_kernel(&kernel(1, b"usbhid: keyboard on port 3"), NOW);
+        assert_eq!(record.priority, UNSPECIFIED);
+        // The kernel's own facility at another level is the kernel's.
+        let mut own = kernel(0, b"pci: a bridge with no window");
+        own.level = 4;
+        let record = ingest::from_kernel(&own, NOW);
+        assert_eq!(record.priority, 4);
         assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("kernel"));
     }
 
@@ -1649,7 +1684,15 @@ mod receiving {
         two.host = alloc::rc::Rc::from("box");
         two.set_level(UNSPECIFIED, LevelSource::Unspecified);
         two.push("MESSAGE", "said \"quoted\" \\ \u{e9} \x07".as_bytes());
-        alloc::vec![one, two]
+        // A driver's stated level crosses to the collector as stated.
+        let mut three = Record::new(7, 1_761_228_062_000_003, 7);
+        three.seqnum = 43;
+        three.boot_id = [7; 16];
+        three.host = alloc::rc::Rc::from("box");
+        three.set_level(7, LevelSource::Stated);
+        three.push("MESSAGE", b"freqlog: asked 300 MHz");
+        three.push("SYSLOG_IDENTIFIER", b"intel");
+        alloc::vec![one, two, three]
     }
 
     fn written(output: Output) -> Vec<u8> {

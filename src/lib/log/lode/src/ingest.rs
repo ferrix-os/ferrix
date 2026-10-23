@@ -54,11 +54,16 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
     let usec = alloc::format!("{}", kernel.usec);
     record.push("MESSAGE", &said.message);
     // The kernel's own lines and programs' console output all come at
-    // info, which says nothing: a level the kernel was handed (a
-    // `/dev/kmsg` write's `<3>`) is the kernel's; otherwise the level the
-    // line says (a `tracing` WARN), else the one its wording says, marked
-    // derived with the words; else none (`docs/LOGGING.md` §4.1).
-    if kernel.level != 6 {
+    // info, which says nothing. A program's `/dev/kmsg` write that named
+    // its level is stated: of a facility no console line has (a driver's
+    // `<30>`, `LOG_DAEMON`), or `LOG_USER` at another level than the
+    // console's info (`<3>`). Any other level the kernel was handed is the
+    // kernel's; otherwise the level the line says (a `tracing` WARN), else
+    // the one its wording says, marked derived with the words; else none
+    // (`docs/LOGGING.md` §4.1).
+    if written_with_level(kernel) {
+        record.set_level(kernel.level, LevelSource::Stated);
+    } else if kernel.level != 6 {
         record.set_level(kernel.level, LevelSource::Kernel);
     } else if let Some(level) = said.level {
         record.set_level(level, LevelSource::Stated);
@@ -119,6 +124,16 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
     record.push("_KERNEL_SEQNUM", seq.as_bytes());
     record.push("_SOURCE_MONOTONIC_TIMESTAMP", usec.as_bytes());
     record
+}
+
+/// Whether a kernel log record is a program's `/dev/kmsg` write that named
+/// its level: the kernel gives its own lines facility 0, and a program's
+/// console output `LOG_USER` at info, so a record of any other facility, or
+/// of `LOG_USER` at another level, carries the level its writer wrote. A
+/// `<6>` write of `LOG_USER` cannot be told from console output, and is not.
+#[must_use]
+pub fn written_with_level(kernel: &KernelRecord) -> bool {
+    kernel.facility >= 2 || (kernel.facility == 1 && kernel.level != 6)
 }
 
 /// A record lode makes about itself, at `priority`.
