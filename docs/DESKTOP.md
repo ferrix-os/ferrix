@@ -67,8 +67,7 @@ the same folder. Left of part 2: pointer motion over a title bar still
 reaches the window under it, buttons have no hover state, tiled windows get
 no bar, and images do not yet carry the bar's configuration or start it.
 
-**Part 3's compositor half is built** (3a 0ca015f28 with 3b; 3c and 3d
-d772db2ae):
+**Part 3 to 3g is built** (landing together):
 
 | Step | What |
 |---|---|
@@ -76,13 +75,29 @@ d772db2ae):
 | 3a | screens added and removed at runtime: `wl_output` globals for running clients, per-output objects renumbered, workspaces moved with floating windows pulled inside, a `FALLBACK` stand-in for the last screen; DRM hotplug from the existing connector event, never taking a running screen's CRTC |
 | 3c | output management lists every mode and applies `set_mode` |
 | 3d | `$XDG_STATE_HOME/hyprix/monitors.conf`: each set of monitors' arrangement, saved when a person arranges them and put back when the set is connected |
+| 3f | the Intel driver follows the lit port's hot-plug state (SDEISR bit, polled every 500 ms, 100 ms settle) and tells the core with `MODES` and the mode list; hooks inside `display.rs` and `display/`, one wake-up term in `serve.rs` (`WAKE_AT`, key 0x4850), one line in `main.rs` |
+| 3g | the monitor's own EDID over GMBUS, sent to the core as `EDID` at publish and on each plug |
 
-The DRM hotplug path is reviewed, not run: QEMU cannot unplug a
-virtio-gpu head from outside. The N150's box test (§3.4) runs it once 3f
-is in.
+Gates on b92b0467a (3a to 3g on main 3a4a45e88), all `run: PASSED`:
+`check` (`hg-p3f-check`), `test-compositor` (`hg-p3f-compositor`),
+`build --arch all --release` (`hg-p3f-release`), `test-boot` x86_64 KVM
+and TCG, aarch64, armv7a and armv7a `--smp 2` (`hg-p3f-boot-*`), and
+`test-restart --boot intel` (`hg-p3f-restart-intel`); rebased onto main
+1b2040006 with no conflict. An earlier tip's `test-compositor` failed once
+on the Settings step at host load 35 and passed on the next: fl-075.
 
-Next in order: 3f, 3g, 3h (the Intel driver, hooks inside `display.rs`
-only, as agreed with the GPU restart work), 4a to 4d; 3e on the 3060.
+Neither DRM hotplug nor the Intel steps can be run in QEMU (no device
+unplugs a virtio-gpu head from outside, and none has the Intel display
+registers); the N150 box test of §3.4 is what shows them.
+
+**3h is under way as agreed with the coordinator**: h1, the planner,
+printed under `ferrix.intelgpu.modeset=dry` and writing nothing; then a
+read-only register dump of the same registers while Linux drives the
+second HDMI port, the ground truth; then h2, the writes, behind
+`ferrix.intelgpu.modeset=on`.
+
+Next: h1 and h2 of 3h, part 4 (4a and 4b built on the branch), 3e on the
+3060.
 
 ## 1. Floating mode
 

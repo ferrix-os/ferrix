@@ -481,3 +481,9 @@ Done; removed from the backlog on 2026-10-20.
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-10-23).** The quota self-check stopped a `test-boot --arch x86_64 --accel tcg` of `linux-abi-off` 6064977d5 (a change that leaves the `on` image's code as `main`'s) with FX "quota self-check failed: a job with many spinning tasks took more than its share from another job" (`src/kernel/src/object/quota_check.rs`), at 50 s, while another boot ran beside it in the gate pool; the rerun on the same hash passed (`lao-x86tcg2`). Log kept: `~/.local/share/ferrix/logs/lao-x86tcg-quota-flake-2026-10-23.log`. The same line stopped an armv7a TCG boot on 2026-10-15 (`bsa-lo-st-a32-12`, dbe733179). A share measured over a window TCG's time slicing can stretch: look at the window and the margin the check allows under emulation. | unowned | 13 |
+
+### fl-075
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-10-23, hyprix-gnome).** `test-compositor`'s Settings step failed again despite fl-001's wait: after the launcher's scope stopped, both Returns (the first 2 s after, the retry 8 s later) reached nobody, and `settings: game mode off` never came (`x86_64: Return in Settings did not turn Game Probe's switch off`). Host load 35 at the start. The same hash (cad58e30c) passed the step on a local run, and the next tip passed `test-compositor` whole (`hg-p3f-compositor`, b92b0467a). Log kept: `~/.local/share/ferrix/hyprix-gnome/flakes/hg-p3-compositor-settings-return.log`. Two misses ten seconds apart is more than a race on the hand-back: look at whether the keyboard focus goes back to Settings at all when fuzzel's layer surface closes under load (hyprix's `follow_keyboard`). | flake owner | 18 |
