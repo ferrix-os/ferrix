@@ -16,8 +16,13 @@
 //! 24 u64 first realtime  32 u64 last realtime  40 u64 records
 //! 48 u8 lowest level    49 u8 highest level  50 u16 values
 //! 52 values: u8 field, u16 length, bytes, u64 count
+//!    then, since `lode top`: "SRC1", u32 sources, each u16 length, the
+//!    source's name, u64 records, u64 bytes of MESSAGE
 //! end u32 CRC-32C of everything before it
 //! ```
+//!
+//! A reader that predates a section after the values ignores it: the CRC
+//! covers it, and nothing is read past the values.
 
 use alloc::vec::Vec;
 
@@ -59,6 +64,11 @@ pub struct Summary {
     /// Each field's values and how many records hold each; `None` when
     /// there were too many to keep.
     pub values: Option<Vec<(u8, Vec<u8>, u64)>>,
+    /// Each source -- the limiter's: unit, else identifier, else
+    /// subsystem, else transport -- with its records and the bytes of their
+    /// messages, for `lode top`; `None` in a summary written before it, or
+    /// with too many sources.
+    pub sources: Option<Vec<(Vec<u8>, u64, u64)>>,
 }
 
 impl Summary {
@@ -68,6 +78,7 @@ impl Summary {
         let mut summary = Summary {
             levels: (7, 0),
             values: Some(Vec::new()),
+            sources: Some(Vec::new()),
             ..Summary::default()
         };
         let mut times = (u64::MAX, 0);
@@ -85,6 +96,18 @@ impl Summary {
                 summary.levels.0.min(record.priority),
                 summary.levels.1.max(record.priority),
             );
+            if let Some(sources) = summary.sources.as_mut() {
+                let source = crate::limit::source(record);
+                let bytes = record.message().len() as u64;
+                if let Some(entry) = sources.iter_mut().find(|(name, _, _)| *name == source) {
+                    entry.1 += 1;
+                    entry.2 += bytes;
+                } else if sources.len() < VALUES_MAX {
+                    sources.push((source, 1, bytes));
+                } else {
+                    summary.sources = None;
+                }
+            }
             for (index, name) in FIELDS.iter().enumerate() {
                 let Some(value) = record.get(name) else {
                     continue;
@@ -138,6 +161,17 @@ impl Summary {
             out.extend_from_slice(value);
             out.extend_from_slice(&count.to_le_bytes());
         }
+        if let Some(sources) = &self.sources {
+            out.extend_from_slice(b"SRC1");
+            out.extend_from_slice(&u32::try_from(sources.len()).unwrap_or(0).to_le_bytes());
+            for (name, records, bytes) in sources {
+                let name = name.get(..usize::from(u16::MAX)).unwrap_or(name);
+                out.extend_from_slice(&u16::try_from(name.len()).unwrap_or(0).to_le_bytes());
+                out.extend_from_slice(name);
+                out.extend_from_slice(&records.to_le_bytes());
+                out.extend_from_slice(&bytes.to_le_bytes());
+            }
+        }
         let crc = crc32c(&out);
         out.extend_from_slice(&crc.to_le_bytes());
         out
@@ -162,10 +196,11 @@ impl Summary {
             records: u64_at(40)?,
             levels: (*body.get(48)?, *body.get(49)?),
             values: None,
+            sources: None,
         };
+        let mut at = 52;
         if kept != u16::MAX {
             let mut values = Vec::new();
-            let mut at = 52;
             for _ in 0..kept {
                 let field = *body.get(at)?;
                 let length = usize::from(u16::from_le_bytes(
@@ -181,6 +216,9 @@ impl Summary {
                 at += 11 + length;
             }
             summary.values = Some(values);
+        }
+        if body.get(at..at + 4) == Some(b"SRC1") {
+            summary.sources = sources_at(body, at + 4);
         }
         Some(summary)
     }
@@ -243,4 +281,22 @@ impl Summary {
         since.is_none_or(|since| self.times.1 >= since)
             && until.is_none_or(|until| self.times.0 <= until)
     }
+}
+
+/// The sources section's entries in `body` from `at`, after its tag;
+/// `None` for one cut short.
+fn sources_at(body: &[u8], mut at: usize) -> Option<Vec<(Vec<u8>, u64, u64)>> {
+    let count = u32::from_le_bytes(body.get(at..at + 4)?.try_into().ok()?);
+    at += 4;
+    let mut sources = Vec::new();
+    for _ in 0..count {
+        let length = usize::from(u16::from_le_bytes(body.get(at..at + 2)?.try_into().ok()?));
+        let name = Vec::from(body.get(at + 2..at + 2 + length)?);
+        at += 2 + length;
+        let records = u64::from_le_bytes(body.get(at..at + 8)?.try_into().ok()?);
+        let bytes = u64::from_le_bytes(body.get(at + 8..at + 16)?.try_into().ok()?);
+        at += 16;
+        sources.push((name, records, bytes));
+    }
+    Some(sources)
 }

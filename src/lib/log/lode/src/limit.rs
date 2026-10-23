@@ -130,7 +130,8 @@ pub fn parse_rules(text: &str) -> Result<Vec<Rule>, RuleError> {
     let mut rules = Vec::new();
     for (index, raw) in text.lines().enumerate() {
         let line = raw.split_once('#').map_or(raw, |(before, _)| before).trim();
-        if line.is_empty() {
+        // An alert is a rule too, the alerts' own (`crate::alert`).
+        if line.is_empty() || crate::alert::is_alert(raw.trim()) {
             continue;
         }
         let error = |why: &str| RuleError {

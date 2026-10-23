@@ -2018,3 +2018,113 @@ fn sizes_and_spans_read_and_print_as_systemd_does() {
     assert_eq!(bytes_text((2 << 20) - 10_000), "1.9M");
     assert_eq!(bytes_text(3 << 30), "3.0G");
 }
+
+#[test]
+fn alerts_read_and_fire_once_a_flood() {
+    use crate::alert::{self, Action, Alerts};
+    let text = "\
+# a comment
+limit 100/2s where id = noisy
+alert flood rate > 3/s where id = \"chrome*\" notify \"%s is flooding the log (%c in a second)\"
+alert where priority <= crit start crit-notify@%n.service
+alert named-badly rate > x/s notify \"t\"
+";
+    // The limiter's parser leaves alert lines to the alerts', and the
+    // alerts' leaves the limiter's.
+    assert_eq!(
+        crate::limit::parse_rules(&text.replace("alert named-badly rate > x/s notify \"t\"\n", ""))
+            .unwrap()
+            .len(),
+        1
+    );
+    let error = alert::parse(text).unwrap_err();
+    assert_eq!(error.line, 5);
+    let alerts =
+        alert::parse(&text.replace("alert named-badly rate > x/s notify \"t\"\n", "")).unwrap();
+    assert_eq!(alerts.len(), 2);
+    assert_eq!(alerts[0].name, "flood");
+    assert_eq!(alerts[0].rate, Some((3, 1_000_000)));
+    assert_eq!(alerts[1].name, "alert-4");
+    assert_eq!(
+        alerts[1].action,
+        Action::Start(String::from("crit-notify@%n.service"))
+    );
+    let mut watching = Alerts::new(alerts);
+    let mut fired = Vec::new();
+    let chrome = |n: u64| {
+        let mut record = record(n, "frame");
+        record
+            .fields
+            .retain(|field| field.name != "SYSLOG_IDENTIFIER");
+        record.push("SYSLOG_IDENTIFIER", b"chrome");
+        record
+    };
+    // Three a second is not over three; the fourth is, once.
+    for n in 0..3 {
+        watching.observe(&chrome(n), 1_000_000 + n, &mut fired);
+    }
+    assert!(fired.is_empty());
+    for n in 3..50 {
+        watching.observe(&chrome(n), 1_000_000 + n, &mut fired);
+    }
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].source, "chrome");
+    assert_eq!(
+        fired[0].action,
+        Action::Notify(String::from("chrome is flooding the log (4 in a second)"))
+    );
+    assert_eq!(
+        fired[0].line().unwrap(),
+        "alert flood chrome chrome is flooding the log (4 in a second)\n"
+    );
+    let said = fired[0].record(1_700_000_000_000_000, 5);
+    assert_eq!(said.get("ALERT"), Some(&b"flood"[..]));
+    // Quiet for ten minutes for that source, then again.
+    fired.clear();
+    for n in 0..10 {
+        watching.observe(&chrome(n), 300_000_000 + n, &mut fired);
+    }
+    assert!(fired.is_empty());
+    for n in 0..10 {
+        watching.observe(&chrome(n), 1_000_000 + alert::DEDUPE_US + n, &mut fired);
+    }
+    assert_eq!(fired.len(), 1);
+    // A crit record starts the unit, `%n` expanded; the alert's own record
+    // never feeds an alert.
+    fired.clear();
+    let mut crit = record(1, "disk on fire");
+    crit.priority = 2;
+    watching.observe(&crit, 5, &mut fired);
+    assert_eq!(
+        fired[0].action,
+        Action::Start(String::from("crit-notify@alert-4.service"))
+    );
+    assert_eq!(fired[0].line(), None);
+    let mut own = fired[0].record(0, 5);
+    own.priority = 2;
+    fired.clear();
+    watching.observe(&own, 6, &mut fired);
+    assert!(fired.is_empty());
+}
+
+#[test]
+fn a_summary_counts_each_sources_lines_and_bytes() {
+    use crate::summary::Summary;
+    let mut records = Vec::new();
+    for n in 1..=3 {
+        records.push(record(n, "abcd"));
+    }
+    let mut other = record(4, "xy");
+    other.push("UNIT", b"web.service");
+    records.push(other);
+    let summary = Summary::decode(&Summary::of(&records).encode()).unwrap();
+    let sources = summary.sources.unwrap();
+    assert!(sources.contains(&(Vec::from(&b"test"[..]), 3, 12)));
+    assert!(sources.contains(&(Vec::from(&b"web.service"[..]), 1, 2)));
+    // A summary written before the section reads, with no sources.
+    let older = Summary {
+        sources: None,
+        ..Summary::of(&records)
+    };
+    assert_eq!(Summary::decode(&older.encode()).unwrap().sources, None);
+}

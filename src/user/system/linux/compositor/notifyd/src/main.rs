@@ -3,8 +3,9 @@
 //!
 //! Run bare, it is the daemon: it owns `org.freedesktop.Notifications` on
 //! the session bus when there is one, reads `devmgr`'s driver events from
-//! `\0ferrix.devmgr.events`, and shows both as banners at the top centre of
-//! the focused screen. `SIGUSR1` opens and closes the list of recent ones.
+//! `\0ferrix.devmgr.events` and the log's alerts from lode's
+//! `/run/lode/alerts` (`docs/LOGGING.md` §7.4), and shows them as banners
+//! at the top centre of the focused screen. `SIGUSR1` opens and closes the list of recent ones.
 //! `--toggle-list` sends that signal to the running daemon, which is what
 //! the top bar's clock runs when clicked.
 
@@ -20,7 +21,7 @@ use compositor_dbus::{Connection, Message, session_path};
 use compositor_notifyd::bridge::{Lines, SOCKET};
 use compositor_notifyd::bus::{self, NAME, closed, invoked};
 use compositor_notifyd::paint::{self, Area, Hit};
-use compositor_notifyd::store::{Reason, Store, from_driver_line};
+use compositor_notifyd::store::{Reason, Store, from_alert_line, from_driver_line};
 use compositor_text::Fonts;
 use compositor_text::tiny_skia::{Pixmap, PixmapPaint, Transform};
 use compositor_toolkit::{
@@ -89,6 +90,9 @@ struct Daemon {
     bus: Option<(Connection, WatchId)>,
     events: Option<(UnixStream, WatchId)>,
     lines: Lines,
+    /// lode's alerts, and their lines.
+    alerts: Option<(UnixStream, WatchId)>,
+    alert_lines: Lines,
     ever_connected: bool,
     expiry: Option<TimerId>,
     retry: TimerId,
@@ -111,12 +115,15 @@ fn run() -> Result<(), String> {
         bus: None,
         events: None,
         lines: Lines::default(),
+        alerts: None,
+        alert_lines: Lines::default(),
         ever_connected: false,
         expiry: None,
         retry,
     };
     daemon.connect_bus();
     daemon.connect_events();
+    daemon.connect_alerts();
     loop {
         let events = daemon
             .client
@@ -186,6 +193,9 @@ impl Daemon {
                 if self.events.is_none() {
                     self.connect_events();
                 }
+                if self.alerts.is_none() {
+                    self.connect_alerts();
+                }
             }
             Event::Signal(SIGUSR1) => {
                 self.list_open = !self.list_open;
@@ -196,6 +206,8 @@ impl Daemon {
                     self.read_bus();
                 } else if self.events.as_ref().is_some_and(|(_, ours)| *ours == watch) {
                     self.read_events();
+                } else if self.alerts.as_ref().is_some_and(|(_, ours)| *ours == watch) {
+                    self.read_alerts();
                 }
             }
             _ => {}
@@ -444,6 +456,44 @@ impl Daemon {
         self.read_events();
     }
 
+    /// lode's alerts: a stream that says each alert once, as it fires.
+    fn connect_alerts(&mut self) {
+        let Ok(stream) = UnixStream::connect(ALERTS) else {
+            return;
+        };
+        if stream.set_nonblocking(true).is_err() {
+            return;
+        }
+        let watch = self.client.watch_fd(stream.as_raw_fd());
+        say("notifyd: reading lode's alerts");
+        self.alerts = Some((stream, watch));
+    }
+
+    fn read_alerts(&mut self) {
+        let (got, gone) = match &mut self.alerts {
+            Some((stream, _)) => drain(stream),
+            None => return,
+        };
+        if gone && let Some((_, watch)) = self.alerts.take() {
+            self.client.unwatch_fd(watch);
+        }
+        let now = self.now_ms();
+        let mut changed = false;
+        for line in self.alert_lines.take(&got) {
+            if let Some((key, summary, body, urgency)) = from_alert_line(&line) {
+                say(&format!("notifyd: {summary}: {body}"));
+                let (_, pushed) = self.store.notify_keyed(&key, summary, body, urgency, now);
+                for id in pushed {
+                    self.send(&closed(id, Reason::Expired));
+                }
+                changed = true;
+            }
+        }
+        if changed {
+            self.changed();
+        }
+    }
+
     fn read_events(&mut self) {
         let mut got = Vec::new();
         let mut gone = false;
@@ -481,6 +531,23 @@ impl Daemon {
         }
         if changed {
             self.changed();
+        }
+    }
+}
+
+/// Where lode says its alerts.
+const ALERTS: &str = "/run/lode/alerts";
+
+/// What `stream` holds now, and whether it has closed.
+fn drain(stream: &mut UnixStream) -> (Vec<u8>, bool) {
+    let mut got = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => return (got, true),
+            Ok(count) => got.extend_from_slice(chunk.get(..count).unwrap_or_default()),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return (got, false),
+            Err(_) => return (got, true),
         }
     }
 }

@@ -17,6 +17,7 @@
 extern crate alloc;
 
 mod admin;
+mod alerting;
 mod arch;
 mod capture;
 mod cli;
@@ -28,6 +29,7 @@ mod seat;
 mod serve;
 mod store;
 mod sys;
+mod top;
 mod units;
 mod upload;
 mod zone;

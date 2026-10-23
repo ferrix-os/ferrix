@@ -38,6 +38,10 @@ lode upload-stub PORT FILE           a collector on 127.0.0.1:PORT that keeps wh
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 lode levels [-b ...] [filters]       records with no level, and with a guessed one, per source
+lode top [-b ...] [-n ROWS] [filters]
+                                     who wrote most this boot: records, bytes, share per source
+lode top --live [SECONDS]            who writes most now, per second, every SECONDS (2)
+lode alerts                          follow the alerts lode says (`alert` rules)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
       --list-boots       the boots the store holds
@@ -181,6 +185,8 @@ pub(crate) fn run() -> i32 {
         Some("session") => return announce(rest.get(1..).unwrap_or_default()),
         Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
+        Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
+        Some("alerts") => return crate::top::alerts(),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("upload-stub") => return crate::upload::stub(rest.get(1..).unwrap_or_default()),
         Some("levels") => {
@@ -306,7 +312,7 @@ fn value(
 }
 
 /// Read the arguments. `Err("")` asks for the help text.
-fn parse(args: &[String]) -> Result<Options, String> {
+pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
     let mut options = Options::default();
     let mut words = Words { args, at: 0 };
     let mut group: Vec<(String, Vec<u8>)> = Vec::new();

@@ -20,6 +20,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use ferrix_lode_core::alert::{self, Alert, Alerts};
 use ferrix_lode_core::compress::{self, Compressor};
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
 use ferrix_lode_core::kmsg;
@@ -34,6 +35,7 @@ use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
 
+use crate::alerting::Alerting;
 use crate::capture::Capture;
 use crate::control::{self, Control, Request};
 use crate::front::Front;
@@ -165,6 +167,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let units = Units::open();
     let handout = Handout::open();
     let control = Control::open();
+    let alerting = Alerting::open();
     let journal = if persistent.is_some() {
         store::PERSISTENT
     } else {
@@ -175,7 +178,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let zone = zone::local();
     let now = clocks();
     let mut said: Vec<Record> = Vec::new();
-    let (rules, classes) = configuration(&mut said, now);
+    let (rules, classes, alerts) = configuration(&mut said, now);
     let mut store = Store {
         persistent: persistent.map(|dir| dir.fd),
         volatile: volatile.fd,
@@ -232,6 +235,8 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         units,
         handout,
         control,
+        alerts: Alerts::new(alerts),
+        alerting,
     };
     service.serve(channel, restarted)
 }
@@ -260,15 +265,20 @@ struct Service {
     handout: Handout,
     /// What root asks: sync, flush, rotate.
     control: Control,
+    /// The alerts, and what each has counted.
+    alerts: Alerts,
+    /// Their actions.
+    alerting: Alerting,
 }
 
 /// The rules and the retention classes, with a record for each file that
 /// did not read.
-fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>) {
+fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>, Vec<Alert>) {
     let mut rules = Vec::new();
+    let mut alerts = Vec::new();
     let mut classes = retention::defaults();
     let Ok(dir) = Dir::open(CONFIG) else {
-        return (rules, classes);
+        return (rules, classes, alerts);
     };
     let mut names = sys::list_dir(dir.fd).unwrap_or_default();
     names.sort();
@@ -280,7 +290,11 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>) {
         let shown = String::from_utf8_lossy(&name);
         let failed = if name.ends_with(b".rules") {
             limit::parse_rules(&text)
-                .map(|more| rules.extend(more))
+                .and_then(|more| alert::parse(&text).map(|found| (more, found)))
+                .map(|(more, found)| {
+                    rules.extend(more);
+                    alerts.extend(found);
+                })
                 .err()
         } else if name == b"retention.conf" {
             retention::parse(&text).map(|read| classes = read).err()
@@ -302,7 +316,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>) {
         }
     }
     sys::close(dir.fd);
-    (rules, classes)
+    (rules, classes, alerts)
 }
 
 impl Service {
@@ -334,7 +348,7 @@ impl Service {
             self.front.serve(now, &mut heard);
             for mut record in heard {
                 self.seat.stamp(&mut record);
-                self.limiter.admit(record, now.monotonic_us, &mut batch);
+                self.admit(record, now, &mut batch);
             }
             if rotate {
                 self.limiter.flush(now.monotonic_us, &mut batch);
@@ -376,6 +390,12 @@ impl Service {
             }
             self.store.sync_if(urgent, now.monotonic_us);
             self.requests(now)?;
+            let mut answered = Vec::new();
+            self.alerting.serve(now, &mut answered);
+            let _ = self
+                .store
+                .append(answered, &self.zone)
+                .map_err(|()| Step::Segment)?;
             let compressing = self.store.compress_some();
             if closed(channel) {
                 self.store.sync_if(true, now.monotonic_us);
@@ -390,6 +410,7 @@ impl Service {
                 fds.extend(self.units.fds());
                 fds.extend(self.handout.fds());
                 fds.extend(self.control.fds());
+                fds.extend(self.alerting.fds());
                 fds.extend(self.front.fds());
                 fds.extend(self.capture.fds());
                 sys::wait_any(&fds, WAIT_MS);
@@ -423,11 +444,26 @@ impl Service {
         Ok(())
     }
 
+    /// A record that arrived: counted by the alerts before the limiter, so
+    /// a flood it holds back is still seen; then the limiter's. An alert
+    /// that fires is said in a record of its own and carried out.
+    fn admit(&mut self, record: Record, now: Now, batch: &mut Vec<Record>) {
+        if !self.alerts.is_empty() {
+            let mut fired = Vec::new();
+            self.alerts.observe(&record, now.monotonic_us, &mut fired);
+            for each in fired {
+                batch.push(each.record(now.realtime_us, now.monotonic_us));
+                self.alerting.act(&each, now, batch);
+            }
+        }
+        self.limiter.admit(record, now.monotonic_us, batch);
+    }
+
     /// Stamp and admit records that did not come from the kernel log.
     fn admit_all(&mut self, records: Vec<Record>, now: Now, batch: &mut Vec<Record>) {
         for mut record in records {
             self.seat.stamp(&mut record);
-            self.limiter.admit(record, now.monotonic_us, batch);
+            self.admit(record, now, batch);
         }
     }
 
@@ -494,7 +530,7 @@ impl Service {
                     if units::is_unit_copy(&record) {
                         let mut paired = self.pair(record, now, batch);
                         self.seat.stamp(&mut paired);
-                        self.limiter.admit(paired, now.monotonic_us, batch);
+                        self.admit(paired, now, batch);
                         continue;
                     }
                     self.seat.stamp(&mut record);
@@ -503,7 +539,7 @@ impl Service {
                     {
                         batch.push(with_program(record));
                     } else {
-                        self.limiter.admit(record, now.monotonic_us, batch);
+                        self.admit(record, now, batch);
                     }
                 }
                 // Records went past this reader; the next read goes on from

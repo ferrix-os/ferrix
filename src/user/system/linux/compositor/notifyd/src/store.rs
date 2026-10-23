@@ -258,6 +258,25 @@ pub fn driver_kind(driver: &str) -> &'static str {
     }
 }
 
+/// A line of lode's alerts (`/run/lode/alerts`, `docs/LOGGING.md` §7.4):
+/// `alert NAME SOURCE TEXT` as a notification, keyed by alert and source
+/// so a repeat replaces the banner rather than stacking.
+#[must_use]
+pub fn from_alert_line(line: &str) -> Option<(String, String, String, Urgency)> {
+    let rest = line.strip_prefix("alert ")?;
+    let (name, rest) = rest.split_once(' ')?;
+    let (source, text) = rest.split_once(' ')?;
+    if name.is_empty() || source.is_empty() {
+        return None;
+    }
+    Some((
+        format!("lode:{name}:{source}"),
+        format!("Log alert: {name}"),
+        text.to_owned(),
+        Urgency::Normal,
+    ))
+}
+
 /// A line of `devmgr-events` as a notification: its key (the device),
 /// summary, body and urgency. `None` for a line that is not one.
 #[must_use]

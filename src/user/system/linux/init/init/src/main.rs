@@ -1237,7 +1237,8 @@ impl Init {
 
     /// A call from `svc`, made by `uid`.
     fn call(&mut self, id: u64, uid: u32, call: Call) {
-        if let Some(why) = refusal(uid, &call) {
+        let startable = matches!(&call, Call::Start(unit) if self.startable_by(unit, uid));
+        if let Some(why) = refusal(uid, &call).filter(|_| !startable) {
             self.answer(id, &Answer::Refused(why));
             return;
         }
@@ -1387,6 +1388,31 @@ impl Init {
             invocation: self.invocations.get(&status.unit).cloned(),
         }
     }
+}
+
+impl Init {
+    /// Whether `unit`'s file lets `uid` start it: `StartableBy=` names the
+    /// user, by name or number (lode's alerts, `docs/LOGGING.md` §7.4).
+    fn startable_by(&self, unit: &str, uid: u32) -> bool {
+        let Ok(loaded) = self.source.load(unit) else {
+            return false;
+        };
+        loaded
+            .unit
+            .startable_by
+            .iter()
+            .any(|who| who.parse::<u32>().ok().or_else(|| user_uid(who)) == Some(uid))
+    }
+}
+
+/// The uid `/etc/passwd` gives the user `name`.
+fn user_uid(name: &str) -> Option<u32> {
+    let text = fs::read_to_string("/etc/passwd").ok()?;
+    text.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        (fields.next()? == name).then_some(())?;
+        fields.nth(1)?.parse().ok()
+    })
 }
 
 /// Why `uid` may not make `call`, if it may not (§10): anyone may read,

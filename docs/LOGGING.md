@@ -1157,8 +1157,8 @@ below, and the customer's order after them: TLS forwarding and
 then the first of the three steps the customer approved after §20's audit:
 units' own streams with their runs, and users' own records (§18 "Users'
 own records and units' runs"), then the second, the journalctl
-compatibility pack (§18 "journalctl's options"). Next: `lode top` and
-alerts.
+compatibility pack (§18 "journalctl's options"), then the third, `lode
+top` and alerts (§18 "Top talkers and alerts").
 The viewer is a separate agent's, a Rust desktop app built from the
 customer's design. Follow-up rows: the uploader as a native service in a
 sealed job (today a plain Linux service, §18); a machine id written at
@@ -1950,6 +1950,52 @@ The second of the three steps the customer approved after §20's audit.
 * Not yet: `-o short-delta`, `--relinquish-var`, `--user`, `-M`, the
   journald.conf keys. Kernel lines: 0.
 
+### Top talkers and alerts, as built (2026-10-23)
+
+The third of the three steps the customer approved after §20's audit
+(§7.4, theme 22): a way for box runs to flag floods.
+
+* **Summaries count sources.** Each sealed segment's summary now also
+  holds every source -- the limiter's: unit, else identifier, else
+  subsystem, else transport -- with its records and the bytes of their
+  messages, in a section after the values that a reader written before it
+  ignores (the CRC covers it). The viewer reads them as before.
+* **`lode top [-b ...] [-n ROWS] [filters]`**: per source, records, bytes
+  and share, most first, for this boot unless `-b` says; a sealed segment
+  wholly in the window with no filter is counted from its summary alone,
+  the rest from their records. **`lode top --live [SECONDS]`** prints every
+  few seconds who wrote what since the last look, per second.
+* **Alerts** (`ferrix-lode-core` `alert`): `alert [NAME] [rate > N/DURATION]
+  [where EXPR] notify "TEXT"` or `... start UNIT` in any `*.rules` file.
+  Records are counted as they arrive, before the limiter, so a flood it
+  holds back is still seen; per source, more than N in a window fires, and
+  an alert fires at most once a source in 10 minutes. Each firing is a
+  record (`MESSAGE_ID` a1e47f1e..., `ALERT`, `ALERT_SOURCE`,
+  `ALERT_ACTION`, `N_RECORDS`). `%n`, `%s` and `%c` are the name, the
+  source and the count.
+* **`notify`** is a line, `alert NAME SOURCE TEXT`, to every reader of
+  `/run/lode/alerts` (made by lode as root, 0666: the text is root's).
+  notifyd reads it beside devmgr's events and shows a banner keyed by
+  alert and source; `lode alerts` prints the lines, for a box run over ssh.
+* **`start`** asks init on its control socket as lode's own user; init
+  starts a unit for a user other than root only when its file says
+  `StartableBy=` that user, by name or number (a new `[Unit]` key in
+  `src/lib/init/svc`). init's answer is read without waiting and said in a
+  record, a refusal included. Images that run lode need `lode` (uid 91) in
+  `/etc/passwd` for `StartableBy=lode`; `StartableBy=91` needs nothing.
+* `test-log` on all three architectures: a flood over `rate > 50/s` said
+  once to `lode alerts` and in the log; a crit line starting a unit that
+  allows it; a unit that does not refused and said; `lode top` listing the
+  sources; `--live` showing a source writing now. Host tests: the alert
+  rules, rates, the ten-minute quiet and the `%` forms; summaries' sources
+  and a summary from before them; notifyd's alert lines.
+* Found on the way: `lode delete` leaves the deleted records' kernel
+  sequence numbers unsaid, so `verify --kernel` reports them as a gap
+  unless a restart's record covers them, as it did in every `test-log` run
+  until now. The deletion record should carry the numbers it removed.
+* Not yet: `capture` as an alert action; alerts from summaries rather than
+  arriving records. Kernel lines: 0.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
@@ -1973,7 +2019,7 @@ architectures.
 | 1 | Writes that cost about what the line costs | partly | append-only, no `mmap`, compressed when sealed (`compress.rs`), field names as indexes; `test-log-budget`: fast load 2.67 (budget 3), slow load 45.7 against 40 | 0 in lode (the slow load is btrfs's `fsync`, a kernel item); 2 for per-source metadata written once (§8.2's SOURCE entries) |
 | 2 | Queries fast as the store grows | partly | segment summaries skip whole segments, newest-first `-n` (`lode bench`, `test-log` part F) | 4: field indexes and a sparse time index inside sealed segments (§8.4); the 1 GB / 100 GB benchmark |
 | 3 | A real filter language | built | `--where` with and/or/not, globs, `~`; rules, retention, capture and upload use it (`filter.rs`, host tests) | 1: `~` is a substring, not a regular expression |
-| 4 | Noise controlled at ingest, never silent | partly | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `test-log` held/folded rows | 2: `lode top` (§7.4) |
+| 4 | Noise controlled at ingest, never silent | built | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `lode top` and `--live`, flood alerts (`test-log` held/folded, "top", "live" and "alerts" rows) | 0 |
 | 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row); journalctl's `--vacuum-size/-time/-files` and `--disk-usage` (`test-log` "vacuum" row) | 0 |
 | 6 | Every entry attributed; stdout vs stderr | built | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' lines handed over by init with `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID`, `_GID` (§18 "Users' own records and units' runs"; `test-log` "stream" row) | 0.5: `_EXE` |
 | 7 | Output usable without flags | partly | `-o human` with year, zone and level letter (`?` for none), never truncated; 11 journald formats | 2: `--format` templates; colour on a terminal; a pager |
@@ -1996,7 +2042,7 @@ architectures.
 | 19 The collector's own security | built | lode in a sealed job, its own user (`test-log`: uid 91, cgroup, move refused); uploader uid 92 | 1: the uploader as a native service in a sealed job |
 | 20 A viewer | partly | `lode-viewer` (the viewer agent's), on Ferrix and on nazuna, over `lode-receive`'s stores | the viewer agent's |
 | 21 Runtime log levels per service | missing | no `INTEREST` or `lode level` | 3 (with drivers, plan step 7) |
-| 22 Alerts and actions | missing | no `alert` rules, no `notify`/`start` | 3 |
+| 22 Alerts and actions | built | `alert` rules with a rate, `notify` to `/run/lode/alerts` (notifyd's banners, `lode alerts`), `start` through init with `StartableBy=` (`test-log` "alerts" row) | 0 |
 | 23 Privacy and redaction | missing | no `redact` rule; `_CMDLINE` is not recorded | 1 |
 | 24 Multi-line messages | partly | a value with a newline is stored whole (native protocol, export) | 1: `LogMultiline=` for units' stdout (§5) |
 | 25 Containers and namespaces | missing | no `_NAMESPACE` | 1 |
@@ -2013,7 +2059,7 @@ architectures.
 | 6 | One filter language everywhere | built | §20.1 #3 | 0 |
 | 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
 | 7.3 | Bounded memory | partly | per-source state is bounded by sources, not capped | 1 |
-| 7.4 | `lode top`, alerts | missing | | 5 |
+| 7.4 | `lode top`, alerts | built | §18 "Top talkers and alerts" | 0 |
 | 8.1 | RAM and disk tiers, `/var` taken when it comes | partly | both tiers; `lode --flush` moves the RAM tier to `/var/log/journal` and writes there from then on (`test-log` "flush" row) | 0.5: `--relinquish-var`, and a `lode-flush.service` that asks at boot |
 | 8.2 | Format, CRC, torn tail, sealing, compression | built | `segment.rs`, `compress.rs`, `test-log` | 2: SOURCE entries (§20.1 #1) |
 | 8.3 | Write budget row | built | `test-log-budget` | 0 (btrfs's part is the kernel's) |

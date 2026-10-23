@@ -550,6 +550,7 @@ dependencies = [
  "ferrix-lode-core",
  "ferrix-native-abi",
  "ferrix-rt",
+ "ferrix-svc-proto",
 ]
 
 [[package]]

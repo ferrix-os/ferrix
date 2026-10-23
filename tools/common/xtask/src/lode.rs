@@ -93,6 +93,9 @@ fold 0s where id = uploadme
 fold 0s where message ~ \"lode flood\"
 drop where id = dropme
 limit 100000/30s where transport = console
+alert flood rate > 50/s where id = noisy notify \"%s is flooding the log\"
+alert crit where id = alerty and priority <= crit start alert-handler.service
+alert nostart where id = alertn start twice.service
 ";
 
 /// A unit that runs as the user `ferrix` (uid 1000): its lines go to that
@@ -132,6 +135,18 @@ Type=oneshot
 ExecStart=/bin/busybox sh -c \"echo run $INVOCATION_ID\"
 ";
 
+/// The unit an alert starts: its file lets lode start it.
+const HANDLER_UNIT: &str = "\
+# test-log's alert handler (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Say that an alert started this
+StartableBy=lode
+
+[Service]
+Type=oneshot
+ExecStart=/bin/busybox echo handled
+";
+
 /// The marker the flood's unit ends with.
 const DONE: &str = "lode-test: done";
 
@@ -144,11 +159,13 @@ until [ -n "$($bb pidof lode)" ]; do
   i=$((i+1)); [ $i -gt 200 ] && { say "FAIL lode never ran"; say done; exit 1; }
   $bb usleep 100000
 done
+# Alerts (step 3): follow what lode says from the start.
+( exec /bin/lode alerts ) > /tmp/alerts 2>&1 &
 # Store-and-forward (step 6): a collector that comes up after the
 # uploader, so its first tries fail and back off.
 up=/tmp/uploaded
-# The service: the lode that is neither the uploader nor the collector.
-lode_pid() { for p in $($bb pidof lode); do $bb grep -q upload-stub /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
+# The service: the lode that is neither the collector nor `lode alerts`.
+lode_pid() { for p in $($bb pidof lode); do $bb grep -q 'upload-stub\|alerts' /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
 ( exec /bin/lode upload-stub 19532 $up ) > /tmp/upload-stub 2>&1 &
 upload_count() { n=$($bb grep -c '^MESSAGE=upload ' $up 2>/dev/null); echo ${n:-0}; }
 upload_wait() { i=0; until [ "$(upload_count)" -ge "$1" ]; do i=$((i+1)); [ $i -gt 400 ] && break; $bb usleep 100000; done; }
@@ -295,6 +312,19 @@ say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
 # on a generated store and on this one.
 say "bench: $(/bin/lode bench 200000 /tmp/lode-bench)"
 say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
+# Alerts and top (step 3): the noisy flood above fired `flood` once, to
+# `lode alerts`; a crit line started a unit that lets lode start it; a unit
+# that does not was refused, and said so.
+echo "<10>alerty: on fire" > /dev/kmsg
+echo "<14>alertn: please" > /dev/kmsg
+$bb sleep 2
+say "alerts: $($bb grep -c '^alert flood noisy noisy is flooding the log$' /tmp/alerts) $(/bin/lode -b -t lode -o json | $bb grep '"ALERT":"flood"' | $bb grep -c '"ALERT_SOURCE":"noisy"') $(/bin/lode -b -u alert-handler -g handled -o cat | $bb wc -l) $(/bin/lode -b -t lode -o cat | $bb grep -c 'init refused to start twice.service')"
+say "top: $(/bin/lode top -n 100 | $bb head -n 1 | $bb awk '{print $1, $2, $3, $4}') $(/bin/lode top -n 100 | $bb grep -c '^lode-test.service ')"
+( $bb timeout 5 /bin/lode top --live 1 > /tmp/live 2>&1 ) &
+$bb sleep 2
+i=0; while [ $i -lt 100 ]; do echo "<14>livey: line $i" > /dev/kmsg; i=$((i+1)); done
+$bb sleep 4
+say "live: $($bb grep -c '^livey ' /tmp/live)"
 # Vacuuming (step 2), last: it removes what the rows above read.
 vac=$(/bin/lode --vacuum-time=1s 2>&1)
 $bb sleep 1
@@ -329,10 +359,11 @@ fn test_units() -> Vec<File> {
     for (path, text) in [
         ("etc/ferrix/units/lode-user.service", USER_UNIT),
         ("etc/ferrix/units/twice.service", TWICE_UNIT),
+        ("etc/ferrix/units/alert-handler.service", HANDLER_UNIT),
         ("lib/lode-user.sh", USER_SCRIPT),
         (
             "etc/passwd",
-            "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/:/bin/sh\n",
+            "root:x:0:0:root:/:/bin/sh\nlode:x:91:4:lode:/:/sbin/nologin\nferrix:x:1000:1000:ferrix:/:/bin/sh\n",
         ),
         ("etc/group", "root:x:0:\nferrix:x:1000:\n"),
     ] {
@@ -483,6 +514,10 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     held(lines)?;
     attributed(lines)?;
     vacuumed(lines)?;
+    match said(lines, "lode-test: live:").and_then(|count| count.parse::<u32>().ok()) {
+        Some(count) if count > 0 => {}
+        _ => return Err("lode top --live did not show a source writing now".into()),
+    }
     forwarded(lines)?;
     fast(lines)
 }
@@ -573,6 +608,17 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
             "lode-test: jctl admin:",
             "synced flushed rotated 1",
             "--sync, --flush, --rotate or --disk-usage did not answer as journalctl does",
+        ),
+        (
+            "lode-test: alerts:",
+            "1 1 1 1",
+            "a flood alert was not said once to `lode alerts` and in the log, a start alert did not \
+             start a unit that allows it, or one that does not was not refused and said",
+        ),
+        (
+            "lode-test: top:",
+            "SOURCE RECORDS BYTES SHARE 1",
+            "lode top did not list the sources",
         ),
         (
             "lode-test: flush:",
@@ -753,6 +799,9 @@ lode-test: jctl: 1 1 2 0 2 2 1 1
 lode-test: jctl admin: synced flushed rotated 1
 lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
+lode-test: alerts: 1 1 1 1
+lode-test: top: SOURCE RECORDS BYTES SHARE 1
+lode-test: live: 2
 lode-test: devlog: /run/systemd/journal/dev-log
 lode-test: no lode: returned
 lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes

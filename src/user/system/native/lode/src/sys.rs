@@ -385,6 +385,16 @@ pub(crate) fn chmod(path: &[u8], mode: usize) -> Result<(), Errno> {
 /// `SOCK_SEQPACKET`: a connection that keeps each write a message.
 pub(crate) const SOCK_SEQPACKET: usize = 5;
 
+/// Make `fd` non-blocking.
+pub(crate) fn set_nonblocking(fd: usize) -> Result<(), Errno> {
+    const F_GETFL: usize = 3;
+    const F_SETFL: usize = 4;
+    // SAFETY: `fcntl` with integer arguments only.
+    let flags = unsafe { call(numbers::FCNTL, [fd, F_GETFL, 0, 0, 0, 0]) }?;
+    // SAFETY: as above.
+    unsafe { call(numbers::FCNTL, [fd, F_SETFL, flags | O_NONBLOCK, 0, 0, 0]) }.map(|_| ())
+}
+
 /// A listening stream socket at `path`, made afresh, non-blocking.
 pub(crate) fn listen_at(path: &[u8]) -> Result<usize, Errno> {
     listen_kind(path, ferrix_rt::linux::SOCK_STREAM)

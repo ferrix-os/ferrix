@@ -27,6 +27,7 @@
 //! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
 //! * [`upload`]: store-and-forward to a collector.
+//! * [`alert`]: rules with an action: a notification, a unit started.
 //! * [`regex`]: `-g`'s regular expressions, in linear time.
 //! * [`units`]: units' output as init hands it over, paired with its
 //!   console copy.
@@ -39,6 +40,7 @@
 extern crate alloc;
 
 pub mod access;
+pub mod alert;
 pub mod compress;
 pub mod console;
 pub mod crc;
