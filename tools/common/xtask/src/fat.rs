@@ -86,7 +86,15 @@ impl Fat32 {
             next_free: ROOT_CLUSTER + 1,
         };
 
-        fs.write_boot_sector(total_sectors);
+        // A driver counts the clusters from the boot sector's sector count,
+        // not from the FAT's size, and the search above can leave the tail a
+        // few sectors short of a FAT sector's worth: on a 512 MiB ESP 226
+        // sectors more than the table has entries for, which fsck.fat and
+        // mtools refuse (Linux clamps it). So the volume says it ends where
+        // its last cluster does; the tail past that is unused.
+        let used_sectors =
+            RESERVED_SECTORS + NUM_FATS * fat_sectors + cluster_count * sectors_per_cluster;
+        fs.write_boot_sector(used_sectors);
         fs.write_fs_info();
 
         // FAT[0] is the media descriptor, FAT[1] the end-of-chain marker; both
