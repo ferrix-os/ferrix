@@ -366,6 +366,11 @@ recorded: nothing was asked and nothing changed.
   | N3 | `proto/src/request.rs`: the unit list skipped | `settingsd did not refuse a unit off its list` |
   | N4 | `auth/authd/src/policy.rs`: `Methods=none`'s bound removed | `Methods=none loosened gate-mechanism` |
 
+  All four **FIRED** (`control: FIRED (line, no panic)`) on d549d2e92,
+  2026-10-24, logs `~/.local/share/ferrix/logs/queue/settings-b1-n{1,2,3,4}.log`
+  on the gate host; the same commit's `test-settings --arch x86_64`
+  passed unedited.
+
   No sabotaged build of `settingsd` exists: a control is a source edit
   that `gate.sh` makes and undoes, so there is nothing for xtask to refuse
   to package.
