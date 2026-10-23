@@ -2942,6 +2942,7 @@ fn desktop_client() -> Client {
         transform: 0,
         name: "DP-3".to_owned(),
         description: "Dell Inc. DELL P2418D MY3ND91J09CT (DP-3)".to_owned(),
+        modes: Vec::new(),
     }]);
     let mut bytes = get_registry(2);
     bytes.extend(bind(2, 1, "wl_compositor", 6, 4));
@@ -3019,6 +3020,7 @@ fn a_turned_output_says_so_and_is_laid_out_tall() {
         transform: core::wl_output::transform::N90.cast_signed(),
         name: "DP-3".to_owned(),
         description: "Dell Inc. DELL P2418D MY3ND91J09CT (DP-3)".to_owned(),
+        modes: Vec::new(),
     }]);
     // A second `wl_output`, bound now, so that what it is told is the
     // turned monitor's.
@@ -3646,6 +3648,7 @@ fn watching_client() -> Client {
         transform: 0,
         name: "DP-1".to_owned(),
         description: "Dell Inc. DELL U2415 XKV0P9BE2GLU (DP-1)".to_owned(),
+        modes: Vec::new(),
     }]);
     let mut bytes = get_registry(2);
     bytes.extend(bind(2, 1, "wl_compositor", 6, 4));
@@ -5489,4 +5492,104 @@ fn outputs_come_and_go_while_a_client_runs() {
     let late = bind(2, 1, "wl_output", 4, 5);
     let _ = client.read(&late, &[]);
     assert_eq!(client.output_of(ObjectId(5)), None);
+}
+
+/// A screen's every mode is published, the first preferred and the running
+/// one current, and `set_mode` on one asks for its size and refresh: what
+/// `wlr-randr --mode` sends (docs/DESKTOP.md §3.2).
+#[test]
+fn output_management_lists_every_mode_and_set_mode_names_one() {
+    use compositor_protocol::output_management::{
+        zwlr_output_configuration_head_v1, zwlr_output_configuration_v1, zwlr_output_head_v1,
+        zwlr_output_manager_v1, zwlr_output_mode_v1,
+    };
+    let mut client = watching_client();
+    client.set_outputs(vec![crate::Output {
+        width: 1920,
+        height: 1080,
+        refresh: 60_000,
+        name: "DP-1".to_owned(),
+        modes: vec![
+            (2560, 1440, 59_951),
+            (1920, 1080, 60_000),
+            (1280, 720, 60_000),
+        ],
+        ..crate::Output::default()
+    }]);
+    let bytes = bind(2, 10, "zwlr_output_manager_v1", 4, 21);
+    assert_eq!(client.read(&bytes, &[]), bytes.len());
+    let told = sent(&mut client);
+    let sizes: Vec<&Sent> = told
+        .iter()
+        .filter(|event| event.opcode == zwlr_output_mode_v1::event::SIZE && event.args.len() == 2)
+        .collect();
+    assert_eq!(sizes.len(), 3, "every mode: {told:?}");
+    let preferred = told
+        .iter()
+        .filter(|event| {
+            event.opcode == zwlr_output_mode_v1::event::PREFERRED && event.args.is_empty()
+        })
+        .count();
+    assert!(preferred >= 1);
+    let head = told
+        .iter()
+        .find(|event| event.opcode == zwlr_output_head_v1::event::CURRENT_MODE)
+        .map(|event| event.sender)
+        .expect("a current mode");
+    // The mode of 1280x720: its object is the sender of that SIZE.
+    let small = sizes
+        .iter()
+        .find(|event| event.args == ["Int(1280)", "Int(720)"])
+        .map(|event| event.sender)
+        .expect("the 1280x720 mode");
+    let serial = told
+        .iter()
+        .rev()
+        .find(|event| {
+            event.sender == ObjectId(21) && event.opcode == zwlr_output_manager_v1::event::DONE
+        })
+        .and_then(|event| event.args.first().cloned())
+        .expect("a serial");
+    let serial: u32 = serial
+        .trim_start_matches("Uint(")
+        .trim_end_matches(')')
+        .parse()
+        .expect("a number");
+    let mut bytes = request(
+        21,
+        zwlr_output_manager_v1::request::CREATE_CONFIGURATION,
+        &[ArgType::NewId, ArgType::Uint],
+        &[Arg::NewId(ObjectId(40)), Arg::Uint(serial)],
+    );
+    bytes.extend(request(
+        40,
+        zwlr_output_configuration_v1::request::ENABLE_HEAD,
+        &[ArgType::NewId, ArgType::Object { nullable: false }],
+        &[Arg::NewId(ObjectId(41)), Arg::Object(head)],
+    ));
+    bytes.extend(request(
+        41,
+        zwlr_output_configuration_head_v1::request::SET_MODE,
+        &[ArgType::Object { nullable: false }],
+        &[Arg::Object(small)],
+    ));
+    bytes.extend(request(
+        40,
+        zwlr_output_configuration_v1::request::APPLY,
+        &[],
+        &[],
+    ));
+    assert_eq!(client.read(&bytes, &[]), bytes.len());
+    assert_eq!(client.fatal(), None);
+    let asked = client
+        .take_events()
+        .into_iter()
+        .find_map(|event| match event {
+            Event::OutputConfigured { heads, .. } => Some(heads),
+            _ => None,
+        })
+        .expect("a configuration");
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].1.size, Some((1280, 720)));
+    assert_eq!(asked[0].1.refresh, Some(60_000));
 }

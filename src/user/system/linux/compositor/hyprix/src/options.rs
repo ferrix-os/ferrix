@@ -31,6 +31,10 @@ pub struct Options {
     /// a card whose driver timed out does: what a test of the compositor
     /// riding a stalled driver out asks for. Not a command-line option.
     pub refuse_flips: u32,
+    /// Where the arrangement of each set of monitors is saved
+    /// (`crate::layouts`): `$XDG_STATE_HOME/hyprix` when started from the
+    /// command line, nowhere for a compositor made in a test.
+    pub state_dir: Option<PathBuf>,
 }
 
 /// What draws the frame: `--renderer`.
@@ -63,6 +67,7 @@ impl Default for Options {
             instance: None,
             renderer: Renderer::Auto,
             refuse_flips: 0,
+            state_dir: None,
         }
     }
 }
@@ -88,7 +93,10 @@ usage: hyprix [options]
     ///
     /// A message naming the argument that was wrong.
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, String> {
-        let mut options = Self::default();
+        let mut options = Self {
+            state_dir: crate::layouts::default_dir(),
+            ..Self::default()
+        };
         let mut args = compositor_evecho::init::unshell(args.into_iter().collect()).into_iter();
         while let Some(argument) = args.next() {
             let mut value = || {
@@ -229,7 +237,13 @@ mod tests {
         // `src/kernel/src/init.rs` starts the first program as `sh -i` or as
         // `sh -c <script>`, and the compositor is that program when it runs
         // as init.
-        assert_eq!(parse(&["-i"]).expect("valid"), Options::default());
+        assert_eq!(
+            parse(&["-i"]).expect("valid"),
+            Options {
+                state_dir: crate::layouts::default_dir(),
+                ..Options::default()
+            }
+        );
         let options = parse(&["-c", "--headless 800x600 --frames 2"]).expect("valid");
         assert_eq!(options.headless, Some((800, 600)));
         assert_eq!(options.frames, Some(2));

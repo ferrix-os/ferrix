@@ -753,6 +753,12 @@ fn answers_after(name: &str, requests: &[&str]) -> Vec<String> {
 
 /// The same, with `lines` added to the configuration.
 fn answers_configured(name: &str, lines: &str, requests: &[&str]) -> Vec<String> {
+    answers_saving(name, lines, false, requests)
+}
+
+/// The same, with the saved arrangements kept under the test's own
+/// directory when `saving`.
+fn answers_saving(name: &str, lines: &str, saving: bool, requests: &[&str]) -> Vec<String> {
     let work = workspace(name);
     let socket = work.join("wayland");
     let runtime = work.join("runtime");
@@ -771,6 +777,7 @@ fn answers_configured(name: &str, lines: &str, requests: &[&str]) -> Vec<String>
         instance: Some(instance.to_string_lossy().into_owned()),
         config: Some(config),
         deadline: Some(4000),
+        state_dir: saving.then(|| work.join("state")),
         ..Options::default()
     };
     let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
@@ -878,6 +885,38 @@ fn screens_are_added_and_removed_while_the_compositor_runs() {
     );
     // Both windows are still there, on the monitor left.
     assert_eq!(clients.matches("Window ").count(), 2, "{clients}");
+}
+
+/// The arrangement a person makes of a set of monitors is saved, and put
+/// back in force when that set is connected again (`docs/DESKTOP.md`
+/// §3.2): SIDE placed below the first screen by hand, taken away, and made
+/// again, is below it again.
+#[test]
+fn a_set_of_monitors_gets_its_saved_arrangement_back() {
+    let answers = answers_saving(
+        "saved-arrangement",
+        "",
+        true,
+        &[
+            "output create headless SIDE",
+            "keyword monitor SIDE, preferred, 0x768, 1",
+            "monitors",
+            "output remove SIDE",
+            // A reload drops the keyword, so only the saved arrangement
+            // can put SIDE back below.
+            "reload",
+            "output create headless SIDE",
+            "monitors",
+        ],
+    );
+    let [_, _, placed, _, _, _, again] = answers.as_slice() else {
+        panic!("seven answers: {answers:?}");
+    };
+    assert!(placed.contains("at 0x768"), "placed by hand: {placed}");
+    assert!(
+        again.contains("at 0x768"),
+        "and back where it was put: {again}"
+    );
 }
 
 /// A window behind a fullscreen one is still a window: `hyprctl clients`

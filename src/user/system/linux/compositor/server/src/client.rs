@@ -339,6 +339,9 @@ pub struct Client {
     output_managers: Vec<ObjectId>,
     /// The head it holds for each screen.
     heads: BTreeMap<usize, ObjectId>,
+    /// Each published `zwlr_output_mode_v1`: its size and refresh, which
+    /// `set_mode` names.
+    output_modes: BTreeMap<ObjectId, (i32, i32, i32)>,
     /// The arrangements it is building.
     configurations: BTreeMap<ObjectId, Configuration>,
     /// Which configuration and screen each configuration head is for.
@@ -472,6 +475,7 @@ impl Client {
             control_sources: BTreeMap::new(),
             output_managers: Vec::new(),
             heads: BTreeMap::new(),
+            output_modes: BTreeMap::new(),
             configurations: BTreeMap::new(),
             configuration_heads: BTreeMap::new(),
             output_serial: 0,

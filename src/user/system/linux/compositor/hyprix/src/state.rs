@@ -390,6 +390,9 @@ struct Compositor<'r> {
     drag: Option<crate::act::Drag>,
     /// The activities overview (`docs/DESKTOP.md` §1.2).
     overview: crate::overview::Overview,
+    /// Whether the arrangement saved for the monitors there at start has
+    /// been looked for.
+    restored: bool,
     /// The highest monitor id handed out, so that a monitor plugged in
     /// after another was unplugged is never given its id again.
     last_monitor: u32,
@@ -669,6 +672,7 @@ impl<'r> Compositor<'r> {
             drag: None,
             overview: crate::overview::Overview::default(),
             last_monitor: 0,
+            restored: false,
             bars: crate::titlebar::Bars::default(),
             carried: None,
             quit: false,
@@ -694,6 +698,13 @@ impl<'r> Compositor<'r> {
             return Ok(false);
         }
         self.notice_lost_cards();
+        // The arrangement saved for the monitors there at start, once.
+        if !self.restored {
+            self.restored = true;
+            if self.restore_layout() {
+                self.owed = true;
+            }
+        }
         self.follow_card_modes();
         let first_new = self.accept();
         // `hyprctl`: one request a connection, answered and closed -- unless
@@ -1400,8 +1411,12 @@ impl<'r> Compositor<'r> {
             &mut self.state,
             &mut self.gammas,
             &mut self.dpms,
+            self.options.renderer,
             self.report,
         );
+        if std::mem::take(&mut asks.rearranged) {
+            self.remember_layout();
+        }
 
         // `wp_pointer_warp_v1`: a client put the pointer inside its own
         // window. The last one wins, which is what a client sending two in
@@ -1540,6 +1555,7 @@ impl<'r> Compositor<'r> {
         let mut pending = Vec::new();
         let forced_before = self.forced;
         let mut monitors = false;
+        let mut arranged_by_hand = false;
         let mut screens_asked = Vec::new();
         for reply in asked {
             // `hyprctl output create headless` and `output remove`: a
@@ -1563,10 +1579,12 @@ impl<'r> Compositor<'r> {
             }
             // `hyprctl keyword monitor <rule>`: a line added to the file's,
             // put in force with them once the requests are done.
-            monitors |= matches!(
+            let monitor_keyword = matches!(
                 &reply,
                 compositor_ipc::Reply::Keyword { name, .. } if name == "monitor"
             );
+            monitors |= monitor_keyword;
+            arranged_by_hand |= monitor_keyword;
             let animated = matches!(
                 &reply,
                 compositor_ipc::Reply::Keyword { name, .. } if name.starts_with("animations")
@@ -1629,6 +1647,11 @@ impl<'r> Compositor<'r> {
             self.apply_monitor_rules();
             changed = true;
         }
+        // `hyprctl keyword monitor` is a person arranging the screens: kept
+        // for this set of monitors.
+        if arranged_by_hand {
+            self.remember_layout();
+        }
         for reply in screens_asked {
             match reply {
                 compositor_ipc::Reply::OutputCreate { name } => {
@@ -1649,6 +1672,73 @@ impl<'r> Compositor<'r> {
                 }
                 _ => {}
             }
+        }
+        changed
+    }
+
+    /// The screens as the saved arrangements see them.
+    fn placed_screens(&self) -> Vec<crate::layouts::Placed> {
+        self.screens
+            .iter()
+            .map(|screen| crate::layouts::Placed {
+                name: screen.name.clone(),
+                description: screen.description.clone(),
+                size: screen.backend.size(),
+                refresh_mhz: screen.backend.refresh_mhz(),
+                at: (screen.rect.x, screen.rect.y),
+                scale: screen.scale,
+            })
+            .collect()
+    }
+
+    /// Save the screens' arrangement under the set of monitors connected
+    /// (`crate::layouts`, `docs/DESKTOP.md` §3.2). The stand-in kept while
+    /// no monitor is connected is no arrangement.
+    fn remember_layout(&mut self) {
+        let Some(dir) = self.options.state_dir.as_deref() else {
+            return;
+        };
+        if self.screens.iter().any(|screen| screen.name == STAND_IN) {
+            return;
+        }
+        let placed = self.placed_screens();
+        let sets = crate::layouts::remember(crate::layouts::load(dir), &placed);
+        match crate::layouts::save(dir, &sets) {
+            Ok(()) => (self.report)(&format!(
+                "hyprix: the arrangement of {} is saved",
+                crate::layouts::key(&placed)
+            )),
+            Err(why) => (self.report)(&format!("hyprix: the arrangement was not saved: {why}")),
+        }
+    }
+
+    /// Put in force the arrangement saved for the set of monitors
+    /// connected, if one was, under the configuration's own `monitor =`
+    /// lines, which win where they name a monitor. Gives whether a screen
+    /// changed.
+    fn restore_layout(&mut self) -> bool {
+        let Some(dir) = self.options.state_dir.as_deref() else {
+            return false;
+        };
+        let placed = self.placed_screens();
+        let Some(saved) = crate::layouts::recall(&crate::layouts::load(dir), &placed) else {
+            return false;
+        };
+        let (mut rules, _) = MonitorRule::read_all(saved.iter().map(String::as_str));
+        rules.extend(self.fixed.monitor_rules.iter().cloned());
+        let changed = apply_monitor_rules(
+            &mut self.screens,
+            &rules,
+            self.options.renderer,
+            &mut self.state,
+            self.report,
+        );
+        if changed {
+            (self.report)(&format!(
+                "hyprix: the saved arrangement of {} is in force",
+                crate::layouts::key(&placed)
+            ));
+            self.screens_moved();
         }
         changed
     }
@@ -1775,6 +1865,7 @@ impl<'r> Compositor<'r> {
         if let Some(which) = stand_in {
             let _ = self.remove_screen(which);
         }
+        let _ = self.restore_layout();
         true
     }
 
@@ -1819,6 +1910,7 @@ impl<'r> Compositor<'r> {
         }
         (self.report)(&format!("hyprix: screen {} removed", screen.name));
         self.screens_moved();
+        let _ = self.restore_layout();
         true
     }
 
@@ -3734,6 +3826,18 @@ impl Screen {
             } else {
                 format!("{} ({})", self.description, self.name)
             },
+            modes: self
+                .backend
+                .modes()
+                .into_iter()
+                .filter_map(|(width, height, refresh)| {
+                    Some((
+                        i32::try_from(width).ok()?,
+                        i32::try_from(height).ok()?,
+                        refresh,
+                    ))
+                })
+                .collect(),
         }
     }
 }
@@ -5224,6 +5328,10 @@ fn cursor_shown(slots: &[Slot], focus: &Focus) -> bool {
 /// Each of these reaches the screens or the layout, and a client's own
 /// borrow holds both -- so they are queued while the clients are read and
 /// done here. Gives whether the screen has to be drawn again.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a separate part of the compositor a client's borrow holds"
+)]
 fn carry_out(
     asks: &mut ScreenAsks,
     slots: &mut [Slot],
@@ -5231,6 +5339,7 @@ fn carry_out(
     state: &mut State,
     gammas: &mut BTreeMap<usize, crate::frame::Gamma>,
     dpms: &mut BTreeMap<String, bool>,
+    renderer: crate::options::Renderer,
     report: &mut dyn FnMut(&str),
 ) -> bool {
     let mut changed = false;
@@ -5268,13 +5377,14 @@ fn carry_out(
     }
     let mut arranged = false;
     for (client, arrangement) in asks.arranged.drain(..) {
-        let done = arrange(&arrangement, screens, state, report);
+        let done = arrange(&arrangement, screens, state, renderer, report);
         if let Some(slot) = slots.get_mut(client) {
             slot.client_mut()
                 .output_configured(arrangement.configuration, done);
         }
         arranged |= done && !arrangement.testing;
     }
+    asks.rearranged |= arranged;
     if arranged {
         // The screens moved, so every client's `wl_output` and every
         // `zwlr_output_head_v1` is stale. Both are the compositor's to
@@ -5482,6 +5592,7 @@ fn arrange(
     arrangement: &Arrangement,
     screens: &mut [Screen],
     state: &mut State,
+    renderer: crate::options::Renderer,
     report: &mut dyn FnMut(&str),
 ) -> bool {
     for (which, wanted) in &arrangement.heads {
@@ -5492,14 +5603,20 @@ fn arrange(
             report("hyprix: a program asked for a screen to be turned off, which `dpms` does");
             return false;
         }
-        // The mode published is the connector's, never turned or scaled,
-        // so that is what a program naming it names.
+        // The modes published are the connector's, never turned or
+        // scaled, so that is what a program naming one names: one of them,
+        // or the one running (`docs/DESKTOP.md` §3.2, wlr-randr --mode).
         let (width, height) = screen.backend.size();
-        if let Some(size) = wanted.size
-            && (i64::from(size.0), i64::from(size.1)) != (i64::from(width), i64::from(height))
-        {
-            report("hyprix: a program asked for a mode this screen does not have");
-            return false;
+        if let Some(size) = wanted.size {
+            let running =
+                (i64::from(size.0), i64::from(size.1)) == (i64::from(width), i64::from(height));
+            let listed = screen.backend.modes().iter().any(|&(w, h, _)| {
+                (i64::from(w), i64::from(h)) == (i64::from(size.0), i64::from(size.1))
+            });
+            if !running && !listed {
+                report("hyprix: a program asked for a mode this screen does not have");
+                return false;
+            }
         }
         // A monitor is turned by its `monitor =` line, once, when its
         // canvas is made at the turned size; turning it while it runs would
@@ -5521,6 +5638,29 @@ fn arrange(
         let Some(screen) = screens.get_mut(*which) else {
             continue;
         };
+        // A mode: the connector runs it, and the logical size follows.
+        if let Some((width, height)) = wanted.size
+            && let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height))
+        {
+            let refresh = wanted.refresh.map(|mhz| f64::from(mhz) / 1000.0);
+            let other = (width, height) != screen.backend.size()
+                || wanted
+                    .refresh
+                    .is_some_and(|mhz| (mhz - screen.backend.refresh_mhz()).abs() > 500);
+            if other {
+                match screen.resize((width, height), refresh, renderer, report) {
+                    Ok(()) => report(&format!(
+                        "hyprix: screen {which} runs {width}x{height} now, as a program asked"
+                    )),
+                    Err(why) => {
+                        report(&format!(
+                            "hyprix: screen {which} cannot run {width}x{height}: {why}"
+                        ));
+                        return false;
+                    }
+                }
+            }
+        }
         if let Some((x, y)) = wanted.at {
             screen.rect = Rect::new(
                 i64::from(x),
@@ -5556,6 +5696,9 @@ struct ScreenAsks {
     powered: Vec<(usize, usize, bool)>,
     /// `wlr-randr`: which client, and what it asked for.
     arranged: Vec<(usize, Arrangement)>,
+    /// Whether an arrangement was put in force this pass, which is saved
+    /// for the set of monitors connected (`crate::layouts`).
+    rearranged: bool,
     /// A bar clicking a workspace number.
     workspaces: Vec<(i64, compositor_server::WorkspaceRequest)>,
     /// What the drag protocol asked for this pass.

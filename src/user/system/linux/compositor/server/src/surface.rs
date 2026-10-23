@@ -340,6 +340,10 @@ pub struct Output {
     /// `"output"` is a description, not a connector -- so a compositor that
     /// sent a fixed sentence here is one whose person's bar never appears.
     pub description: String,
+    /// Every mode the screen can run, `(width, height, refresh in
+    /// millihertz)`, which output management lists so that a settings
+    /// program can choose one; empty for the running mode alone.
+    pub modes: Vec<(i32, i32, i32)>,
 }
 
 impl Default for Output {
@@ -354,6 +358,7 @@ impl Default for Output {
             transform: 0,
             name: "HEADLESS-1".to_owned(),
             description: "Headless output 1 (HEADLESS-1)".to_owned(),
+            modes: Vec::new(),
         }
     }
 }

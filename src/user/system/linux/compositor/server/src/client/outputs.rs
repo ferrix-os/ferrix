@@ -255,8 +255,16 @@ impl Client {
                     wanted.transform = Some(transform);
                 }
             }
-            // `set_mode` names a mode object; this compositor publishes one
-            // mode a screen, so naming it asks for what is already there.
+            // `set_mode` names a mode object this compositor published:
+            // its size and refresh are what is asked for.
+            zwlr_output_configuration_head_v1::request::SET_MODE => {
+                if let Some(mode) = args.first().and_then(Arg::as_object)
+                    && let Some(&(width, height, refresh)) = self.output_modes.get(&mode)
+                {
+                    wanted.size = Some((width, height));
+                    wanted.refresh = Some(refresh);
+                }
+            }
             // `set_adaptive_sync` is the GPU path's.
             _ => {}
         }
@@ -300,6 +308,7 @@ impl Client {
             let _ = self.objects.remove(head);
         }
         self.heads.clear();
+        self.output_modes.clear();
         for (which, output) in outputs.iter().enumerate() {
             self.publish_head(which, output);
         }
@@ -355,7 +364,21 @@ impl Client {
                 &[Arg::Str(Some(&text))],
             );
         }
-        let mode = self.publish_mode(head, output);
+        // Every mode the screen lists, the running one current; a screen
+        // that lists none has its running one alone.
+        let running = (output.width, output.height, output.refresh);
+        let listed: Vec<(i32, i32, i32)> = if output.modes.is_empty() {
+            vec![running]
+        } else {
+            output.modes.clone()
+        };
+        let mut mode = None;
+        for (index, &one) in listed.iter().enumerate() {
+            let made = self.publish_mode(head, one, index == 0);
+            if one == running || (mode.is_none() && one.0 == running.0 && one.1 == running.1) {
+                mode = made.or(mode);
+            }
+        }
         let _ = self.out.write(
             head,
             zwlr_output_head_v1::event::ENABLED,
@@ -391,8 +414,13 @@ impl Client {
         let _ = self.heads.insert(which, head);
     }
 
-    /// The one mode a screen has here, which is the one it is in.
-    fn publish_mode(&mut self, head: ObjectId, output: &Output) -> Option<ObjectId> {
+    /// One mode of a screen, `preferred` for the first it lists.
+    fn publish_mode(
+        &mut self,
+        head: ObjectId,
+        (width, height, refresh): (i32, i32, i32),
+        preferred: bool,
+    ) -> Option<ObjectId> {
         // At the interface's own version, not the head's: a mode stops at
         // 3 where a head goes to 4, and an object made above what its
         // interface offers is no object at all.
@@ -414,17 +442,20 @@ impl Client {
             mode,
             zwlr_output_mode_v1::event::SIZE,
             &[ArgType::Int, ArgType::Int],
-            &[Arg::Int(output.width), Arg::Int(output.height)],
+            &[Arg::Int(width), Arg::Int(height)],
         );
         let _ = self.out.write(
             mode,
             zwlr_output_mode_v1::event::REFRESH,
             &[ArgType::Int],
-            &[Arg::Int(output.refresh)],
+            &[Arg::Int(refresh)],
         );
-        let _ = self
-            .out
-            .write(mode, zwlr_output_mode_v1::event::PREFERRED, &[], &[]);
+        if preferred {
+            let _ = self
+                .out
+                .write(mode, zwlr_output_mode_v1::event::PREFERRED, &[], &[]);
+        }
+        let _ = self.output_modes.insert(mode, (width, height, refresh));
         Some(mode)
     }
 }

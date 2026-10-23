@@ -39,6 +39,7 @@ pub mod front;
 pub mod grants;
 pub mod keymap;
 mod knobs;
+pub mod layouts;
 pub mod options;
 pub mod overlay;
 pub mod overview;
