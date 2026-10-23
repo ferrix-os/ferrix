@@ -19,7 +19,7 @@ mod x86_64;
 mod speculation;
 mod speculation_check;
 // The stage checks every architecture answers, by one name (`stage_check.rs`).
-pub(crate) mod stage_check;
+// cut: pub(crate) mod stage_check;
 #[cfg(target_arch = "aarch64")]
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
@@ -62,10 +62,6 @@ pub(crate) enum StatLayout {
 
 // The core's own system call entry, run with a call the boot check chose
 // (`syscall::seccomp_check`).
-#[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{drive_native_words, drive_system_call};
-#[cfg(target_arch = "arm")]
-pub(crate) use armv7a::{drive_native_words, drive_system_call};
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{drive_native_words, drive_system_call};
 

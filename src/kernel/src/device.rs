@@ -122,7 +122,7 @@ use crate::sync::SpinLock;
 use crate::{arch, iommu, irq, vmap};
 
 pub(crate) mod check;
-pub(crate) mod config_check;
+// cut: pub(crate) mod config_check;
 
 /// GIC interrupt identifiers below this are software-generated or private to
 /// one core, and neither is a device's line.

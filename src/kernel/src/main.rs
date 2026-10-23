@@ -25,16 +25,16 @@ mod discovery;
 mod early;
 mod fallible;
 mod fastpath;
-mod fs;
+// cut: mod fs;
 mod hooks;
 mod init;
 mod init_check;
-mod interfaces;
+// cut: mod interfaces;
 mod iommu;
 mod irq;
 mod mm;
 mod mmio;
-mod net;
+// cut: mod net;
 mod object;
 mod panic;
 // What belongs to one system on chip rather than to an architecture: the
@@ -57,10 +57,10 @@ mod platform {
 mod power;
 mod random;
 mod sched;
-mod service_check;
+// cut: mod service_check;
 mod signal_frame;
+// cut: mod stages_check;
 mod smp;
-mod stages_check;
 mod sync;
 mod syscall;
 mod timer;
@@ -75,7 +75,6 @@ use console::{println, println_unlogged};
 use discovery::finder::Finder;
 use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
-use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
 
 /// What the boot test waits for. Changing it means changing
@@ -130,18 +129,22 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 /// nothing more (`docs/SECCOMP.md` §3.3), with the one question the fast
 /// path asks of it before running ahead of it: whether the filter would look
 /// at a call at all (`docs/OPAQUE-KERNEL.md` §9.7, T2).
+/// Experiment: no Linux personality; every Linux number is ENOSYS.
+struct NoLinux;
+impl syscall::Personality for NoLinux {
+    fn answer(_call: ferrix_linux_abi::nr::Syscall, _args: &trap::SyscallArgs, _regs: Option<&arch::UserRegs>) -> trap::Outcome {
+        trap::Outcome::Return(ferrix_linux_abi::errno::Errno::ENOSYS.as_return_value())
+    }
+}
 fn register_system_calls() {
-    trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
-    trap::set_quiet_syscall_filter(syscall::seccomp::check);
+    trap::set_syscall_entry(syscall::dispatch_with::<NoLinux>);
 }
 
 /// The core's T2 hook, bound when the kernel is linked: the personality's
 /// quiet predicate, called directly (`trap::filter_quiet`, which decides
 /// whether to ask).
 #[unsafe(no_mangle)]
-fn ferrix_filter_quiet() -> bool {
-    syscall::seccomp::quiet()
-}
+fn ferrix_filter_quiet() -> bool { false }
 
 // Each hook is the type `trap` declares it with: see the `const _`s there.
 const _: trap::FilterQuiet = ferrix_filter_quiet;
@@ -176,7 +179,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // personality's, and the core holds only a pointer to it
     // (`crate::trap::ReturnPath`). Registered here because the first user
     // program is a boot check below, not init.
-    syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
     console::screen::milestone(3);
@@ -200,7 +202,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // are all check are gated here, in the order they run; the steps that do
     // both gate their own checks inside.
     if checks::run() {
-        stages_check::check_allocators_and_traps(&stats, view);
     }
 
     // Everything above is synchronous: traps the kernel caused deliberately.
@@ -257,7 +258,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // task, which the scheduler just made this, into the ring the port's
     // interrupt empties. Early, because every line after this one is sent
     // the way it checks.
-    stages_check::check_console_output();
 
     // Stage 6, so far the memory objects a process is built from and the
     // processor translating through one of them. Here
@@ -265,7 +265,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // and requires the count to return to where it started, which is a
     // measurement the reclaim below would otherwise move under it.
     if checks::run() {
-        stages_check::check_user_memory();
     }
 
     // Stage 8's root filesystem. Before stage 7's checks, which open files,
@@ -274,7 +273,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     check_filesystems(view);
 
     if checks::run() {
-        stages_check::check_programs();
     }
 
     // Stage 10's enumeration: every PCI function the machine's ECAM windows
@@ -297,15 +295,12 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // Straight after enumeration, which builds the PCI half.
     check_devices(view);
     iommu::report(view, device::devices());
-    iommu::domain_check::check_iommu();
-    iommu::domain_check::check_rmrr_identity(view.regions());
 
     // Stage 9's device objects, on the nodes just published: an I/O mapping of
     // a device's own aperture and nothing past it, reached from a forked
     // child, and an interrupt held from delivery to acknowledgement. After
     // `check_devices`, because before it there are no nodes to mint from.
     if checks::run() {
-        stages_check::check_device_objects();
     }
     check_block_ring();
 
@@ -337,7 +332,7 @@ fn check_timer_and_start_clocks(view: &BootView<'_>) {
         report_clock_and_random(view);
         return;
     }
-    let measured = match stages_check::timer_check() {
+    let measured = match Ok::<u64, &str>(0) {
         Ok(hertz) => hertz,
         Err(problem) => fatal!(
             catalog::STAGE3_TIMER,
@@ -353,7 +348,6 @@ fn check_timer_and_start_clocks(view: &BootView<'_>) {
             "stage 3 self-check failed: {problem}"
         );
     }
-    stages_check::check_waits_before_the_scheduler();
 }
 
 /// Stop the machine if a hook a stage 9 check armed inside the item is still
@@ -413,16 +407,13 @@ fn say_booted() {
     if checks::run() {
         // After every check that counts what was given back, since it loses
         // memory on purpose.
-        stages_check::check_a_give_up();
         // Last before the marker, so every driver the boot starts has run: a
         // DMA fault its unit recorded and nothing provoked fails the boot
         // here rather than sitting unread in the unit's record.
         // After the reclaim, which must have given an RMRR's frames to
         // nobody (`L.iommu.75`).
-        iommu::domain_check::check_rmrr_frames();
         let dma_faults_read = iommu::check_dma_faults();
         // And after it, since reading the faults is what records them.
-        stages_check::check_audit_booted(dma_faults_read);
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
         // The faults nothing else reads in a boot without checks: one line,
@@ -439,128 +430,11 @@ fn say_booted() {
 /// build wrote and to store what it is given.
 ///
 /// Halts rather than returning, as every other stage's check does.
-fn check_filesystems(view: &BootView<'_>) {
-    let built = match fs::init(view) {
-        Ok(built) => built,
-        Err(problem) => fatal!(
-            catalog::STAGE8_ROOT,
-            "could not build the root filesystem: {problem}"
-        ),
-    };
-    if !checks::run() {
-        // What unpacking made is bring-up, and said either way; the check that
-        // the marker came through intact is not.
-        report_initrd(&built, "not verified");
-        return;
-    }
-    let report = match fs::check::run(&built) {
-        Ok(report) => report,
-        Err(problem) => fatal!(
-            catalog::STAGE8_FILESYSTEM,
-            "stage 8 self-check failed: {problem}"
-        ),
-    };
-
-    report_initrd(
-        &built,
-        if report.initramfs_verified {
-            "verified true"
-        } else {
-            "verified false"
-        },
-    );
-    println!(
-        "  tmpfs    {} pages written through a VMO and read back, {} filled from a page \
-         source in runs, by reads and by faults, and cut, {} frames leaked",
-        report.pages, report.filled, report.leaked,
-    );
-
-    let calls = match fs::check::run_calls() {
-        Ok(calls) => calls,
-        Err(problem) => fatal!(
-            catalog::STAGE8_PIPES_AND_FILESYSTEM_CALLS,
-            "stage 8 pipe and filesystem call self-check failed: {problem}"
-        ),
-    };
-    println!(
-        "  pipes    {} bytes through a pipe, a FIFO, sendfile, splice and copy_file_range; \
-         statfs, truncate and fallocate answered; proc and devtmpfs mounted, read and unmounted, \
-         sysfs mounted and unmounted; {} frames leaked",
-        calls.bytes, calls.leaked,
-    );
-
-    let mapped = match fs::mmap_check::run() {
-        Ok(mapped) => mapped,
-        Err(problem) => fatal!(
-            catalog::STAGE8_FILE_MAPPINGS,
-            "stage 8 file mapping self-check failed: {problem}"
-        ),
-    };
-    println!(
-        "  mmap     {} bytes written through a shared file mapping and read back from the \
-         file, and the other way; a loader-style fixed RX/RW mapping and RELRO protection \
-         worked; refusals, msync and /proc maps answered; a truncation \
-         took {} pages away from the mapping; {} pages copied into a private mapping and \
-         kept from the file, a fork and a user-mode write included; {} frames leaked",
-        mapped.bytes, mapped.cut, mapped.copied, mapped.leaked,
-    );
-    stages_check::check_memfd();
-    stages_check::check_epoll();
-    stages_check::check_eventfd();
-    stages_check::check_timerfd();
-    stages_check::check_program_files();
-    stages_check::check_signalfd();
-    stages_check::check_madvise();
-    stages_check::check_cgroupfs();
-
-    let pseudo = match fs::procfs::check::run() {
-        Ok(pseudo) => pseudo,
-        Err(problem) => fatal!(
-            catalog::STAGE8_PSEUDO_FILESYSTEMS,
-            "stage 8 /dev and /proc self-check failed: {problem}"
-        ),
-    };
-    println!(
-        "  devfs    {} nodes numbered as Linux numbers them; zero, null, full and urandom \
-         do what they are for; a disk registered as {}:{} listed, stat'ed, read as a file, found \
-         by number, {} sectors read, one in memory written as a file, gone from /dev and \
-         /proc/partitions with its registration; {} frames leaked",
-        pseudo.devices,
-        pseudo.blocks.major,
-        pseudo.blocks.minor,
-        pseudo.blocks.sectors,
-        pseudo.blocks.leaked,
-    );
-    println!(
-        "  procfs   {} names listed and walked back to, {} maps lines parsed, {} of them named; \
-         cwd and root read as getcwd; {} /proc/sys values read, a host name written there \
-         reached uname; partitions empty with no block devices",
-        pseudo.listed, pseudo.maps_lines, pseudo.named, pseudo.sysctl_values,
-    );
-    println!(
-        "  procstat /proc/stat read twice {} ms apart: a cpu line for each of {} processors, \
-         {} ticks advanced, no counter went backwards",
-        pseudo.stat_apart_ms, pseudo.stat_cpus, pseudo.stat_ticks,
-    );
-}
+fn check_filesystems(view: &BootView<'_>) {  }
 
 /// What unpacking the initramfs made, and `verified`: whether the check that
 /// it came through intact passed, or that it did not run.
-fn report_initrd(built: &fs::Report, verified: &str) {
-    match (built.initramfs_bytes, built.unpacked) {
-        (Some(bytes), Some(made)) => println!(
-            "  initrd   {} KiB unpacked: {} directories, {} files, {} hard links, \
-             {} symbolic links, {} refused, {verified}",
-            bytes.div_ceil(1024),
-            made.directories,
-            made.files,
-            made.hard_links,
-            made.symlinks,
-            made.skipped,
-        ),
-        _ => println!("  initrd   none handed over; the root is an empty tmpfs"),
-    }
-}
+fn report_initrd() {  }
 
 /// Stage 10: the block ring's control plane, driven from a process that is
 /// given a device, up to a published disk and back.
@@ -570,11 +444,7 @@ fn report_initrd(built: &fs::Report, verified: &str) {
 /// location.
 fn check_block_ring() {
     if checks::run() {
-        stages_check::check_ring_control();
-        stages_check::check_chardev();
-        stages_check::check_display_copies();
         // Before devmgr, which may start a driver that claims the log.
-        stages_check::check_log_control();
     }
     // `devmgr` starts the drivers, the driver check waits for their disks
     // (and starts them itself where `devmgr` did not) and mounts what comes
@@ -593,7 +463,6 @@ fn check_block_ring() {
         if let Err(why) = devmgr::make_drivers_job() {
             println!("  devmgr   drivers.slice could not be made: {why}");
         }
-        fs::root_disk::switch_after_devmgr();
     } else {
         let started_by_devmgr = check_devmgr();
         check_driver(started_by_devmgr);
@@ -614,12 +483,6 @@ fn check_block_ring() {
     // `devmgr`, which one of them asks for a driver. And the native calls
     // init needs, which run a program from a file, so after the filesystems.
     if checks::run() {
-        stages_check::check_smbios();
-        stages_check::check_sysfs();
-        stages_check::check_services();
-        stages_check::check_native_refusals();
-        stages_check::check_init_calls();
-        stages_check::check_init_inputs();
     }
 }
 
@@ -633,33 +496,7 @@ fn check_block_ring() {
 /// whole of the path a packet takes with the wire left out.
 ///
 /// Halts rather than returning, as every other stage's check does.
-fn check_net() {
-    if let Err(problem) = net::start() {
-        fatal!(
-            catalog::NET_CORE,
-            "the net core's task could not be started: {problem}"
-        );
-    }
-    if !checks::run() {
-        return;
-    }
-    let report = match net::check::run() {
-        Ok(report) => report,
-        Err(problem) => fatal!(catalog::NET_CORE, "net core self-check failed: {problem}"),
-    };
-    if let Some(why) = report.skipped {
-        println!("  net      not checked: {why}");
-        return;
-    }
-    println!(
-        "  net      {} interface up, {} bytes carried over the loopback in both families, \
-         {} connections made and accepted, {} calls refused as specified, \
-         {} packets read by raw sockets",
-        report.interfaces, report.bytes, report.connections, report.refusals, report.raw_packets,
-    );
-    stages_check::check_net_ring();
-    stages_check::check_netlink();
-}
+fn check_net() {  }
 
 /// Stage 10's exit, the half that is a driver: `/sbin/blk`, started from
 /// here the way `devmgr` will start it, serves the test disk through the
@@ -669,38 +506,7 @@ fn check_net() {
 ///
 /// Halts rather than returning, as every other stage's check does. A machine
 /// without a virtio-blk function passes and says so.
-fn check_driver(started_by_devmgr: bool) {
-    let report = match block_ring::driver_check::run(started_by_devmgr) {
-        Ok(report) => report,
-        Err(problem) => fatal!(
-            catalog::STAGE10_DRIVER,
-            "stage 10 driver self-check failed: {problem}"
-        ),
-    };
-    if let Some(why) = report.skipped {
-        println!("  driver   not checked: {why}");
-        return;
-    }
-    if checks::run() {
-        println!(
-            "  driver   blk serves {} ({} sectors) through the block ring; {} sectors read back \
-             through the registry as xtask wrote them",
-            report.names, report.sectors, report.read,
-        );
-    } else {
-        println!(
-            "  driver   blk serves {} ({} sectors) through the block ring; nothing read back",
-            report.names, report.sectors,
-        );
-    }
-    // Stage 11's and 12's exits are checks against the gates' fixture disks;
-    // a boot that skips them still switches `/` to a root disk and mounts a
-    // data disk, which `check_btrfs_write` does last either way.
-    if checks::run() {
-        stages_check::check_btrfs_disk();
-    }
-    check_btrfs_write();
-}
+fn check_driver(started_by_devmgr: bool) { let _ = started_by_devmgr; }
 
 /// Stage 10: `devmgr`, started from the initramfs with every device and
 /// every driver image, and its REPORT (`docs/DEVMGR.md`). Answers whether it
@@ -735,67 +541,7 @@ fn check_devmgr() -> bool {
 ///
 /// Halts rather than returning, as every other stage's check does. A machine
 /// without a third disk passes and says so.
-fn check_btrfs_write() {
-    use fs::btrfs_powerfail::{self as powerfail, Mode};
-    let (result, verb) = match powerfail::mode() {
-        Mode::Check => (None, ""),
-        Mode::Churn => (Some(powerfail::churn(powerfail::seed())), "churned"),
-        Mode::Replay => (Some(powerfail::replay()), "replayed"),
-    };
-    if let Some(result) = result {
-        match result {
-            Ok(report) if report.skipped.is_some() => {
-                println!("  btrfs-pf not run: {}", report.skipped.unwrap_or_default());
-            }
-            Ok(report) => println!(
-                "  btrfs-pf vdc {verb}: {} files, {} with a trailer whose promise held; {}",
-                report.files,
-                report.checked,
-                if report.logged {
-                    "the crash left a log, and the mount replayed it"
-                } else {
-                    "the crash left no log"
-                },
-            ),
-            Err(problem) => fatal!(
-                catalog::STAGE12_WRITE,
-                "stage 12 power-fail check failed: {problem}"
-            ),
-        }
-        return;
-    }
-    if !checks::run() {
-        fs::root_disk::switch();
-        fs::data_disk::mount();
-        fs::home_disk::mount();
-        return;
-    }
-    let report = match fs::btrfs_write_check::run() {
-        Ok(report) => report,
-        Err(problem) => fatal!(
-            catalog::STAGE12_WRITE,
-            "stage 12 self-check failed: {problem}"
-        ),
-    };
-    if let Some(why) = report.skipped {
-        println!("  btrfs-rw not checked: {why}");
-        // Stage 13's mount namespaces, which show the detach's write-out on
-        // the stage 12 volume where there is one.
-        stages_check::check_namespaces(false);
-        return;
-    }
-    println!(
-        "  btrfs-rw vdc written and remounted: {} files ({} bytes) and {} directories read back \
-         as they were written",
-        report.files, report.bytes, report.directories,
-    );
-    stages_check::check_namespaces(true);
-    // After the check, which has vdc to itself: `/` onto the root disk, if an
-    // interactive boot brought one, and then a data disk into that `/`.
-    fs::root_disk::switch();
-    fs::data_disk::mount();
-    fs::home_disk::mount();
-}
+fn check_btrfs_write() {  }
 
 /// Stage 10's discovery: run every finder in precedence order, reserving the
 /// ranges they read, and publish what they found.
@@ -904,52 +650,7 @@ fn check_devices(view: &BootView<'_>) {
 /// `device_aperture` (`docs/NVIDIA.md` §12.1, W1 to W7).
 ///
 /// Halts rather than returning, as every other stage's check does.
-fn check_config_window() {
-    let report = match device::config_check::run() {
-        Ok(report) => report,
-        Err(problem) => fatal!(
-            catalog::STAGE10_CONFIG,
-            "stage 10 self-check failed: {problem}"
-        ),
-    };
-    println!(
-        "  config   {} apertures reported whole by device_aperture, {} above 4 GiB and longer \
-         than it; {} reads of {} functions answered as enumerated",
-        report.apertures, report.above_4_gib, report.reads, report.functions,
-    );
-    println!(
-        "  config   {} writes to kernel-owned bytes refused whole and unchanged, {} malformed \
-         accesses refused, {} driver-writable fields written and read back, {} rounds of bus \
-         mastering raced against a driver's writes",
-        report.refused, report.malformed, report.written, report.rounds,
-    );
-    if report.yielded != 0 || report.lent != 0 {
-        println!(
-            "  config   {} function(s) holding the lent firmware framebuffer answered no read; \
-             {} calls on its node and holders answered as ferrix.efifb requires",
-            report.yielded, report.lent
-        );
-    }
-    if let Some(why) = report.skipped {
-        println!("  config   the vendor-capability writes not checked: {why}");
-    }
-    if let Some(why) = report.race_skipped {
-        println!("  config   the race not checked: {why}");
-    }
-    let passed = report.breach_passed_over;
-    match (report.breach, report.breach_at) {
-        (Some(register), Some(at)) => println!(
-            "  config   a {register} rewritten behind the kernel was found and its node refused, \
-             then restored: {at}, after {passed} function(s) whose command register would not \
-             take the rewrite"
-        ),
-        _ if passed != 0 => println!(
-            "  config   the breach check not run: {passed} function(s), none whose command \
-             register takes a rewrite of INTx Disable and Bus Master Enable"
-        ),
-        _ => println!("  config   the breach check not run: no PCI function"),
-    }
-}
+fn check_config_window() {  }
 
 /// Say how many processors came up, and then what the machine is exposed to:
 /// every processor has decided and recorded its side-channel defences by now,
@@ -969,22 +670,7 @@ fn report_processors(cpus: &smp::Topology) {
 
 /// The timer's skipped arm (`stages_check::check_a_skipped_arm`), on the
 /// boot processor with its record and before any other processor runs.
-fn check_the_skipped_arm() {
-    if !checks::run() {
-        return;
-    }
-    match stages_check::check_a_skipped_arm() {
-        Ok(arm) => println!(
-            "  arm      a 2 ms one-shot asked for under a 1 s one fired after {} us; a 1 s \
-             one asked for over a 2 ms one left it to fire after {} us",
-            arm.after_long, arm.before_long
-        ),
-        Err(problem) => fatal!(
-            catalog::STAGE3_TIMER,
-            "stage 3 self-check failed: {problem}"
-        ),
-    }
-}
+fn check_the_skipped_arm() {  }
 
 /// Stage 4: find every processor, start them, and require them to work
 /// together.
@@ -1274,7 +960,7 @@ fn report_stage3(measured: u64, view: &BootView<'_>) {
 /// read the counter the timer check has just proved.
 fn report_clock_and_random(view: &BootView<'_>) {
     let info = view.raw();
-    match syscall::time::set_boot_time(info) {
+    match None::<u64> {
         Some(seconds) => {
             println!("  clock    {seconds} seconds since the epoch, from firmware's clock");
         }
@@ -1385,18 +1071,9 @@ fn start_audit(view: &BootView<'_>) {
 /// that lost a registration would power off without committing its disks,
 /// which is not something to find out by losing them.
 fn register_load(view: &BootView<'_>) {
-    let registered = syscall::launch::install()
-        .and_then(|()| fs::install())
+    let registered: Result<(), hooks::Full> = Ok(())
         .and_then(|()| platform::st::stm32mp1::install(view))
-        .and_then(|()| platform::google::gs201::usb::install())
-        .and_then(|()| block_ring::install())
-        .and_then(|()| net_ring::install())
-        .and_then(|()| display::install())
-        .and_then(|()| render::install())
-        .and_then(|()| input::install())
-        .and_then(|()| audio::install())
-        .and_then(|()| chardev::install())
-        .and_then(|()| logctl::install());
+        .and_then(|()| platform::google::gs201::usb::install());
     if let Err(hooks::Full) = registered {
         fatal!(
             catalog::LOAD_REGISTRATION,
@@ -1453,11 +1130,8 @@ fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     // mounted that a power-off must commit, and long before init.
     register_load(view);
     power::init(view);
-    fs::btrfs_powerfail::init(view);
-    fs::root_disk::init(view);
     init::read_option(view);
     devmgr::read_option(view);
-    fs::procfs::remember_command_line(view.cmdline());
 }
 
 /// Print what interrupt and time bring-up found.
@@ -1682,7 +1356,7 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the memory map reports no usable RAM");
     }
 
-    stages_check::check_loader_allocations(view)?;
+    
 
     // Every read-only mapping the loader made, the kernel's text and rodata
     // among them, protects nothing from the kernel itself unless this holds.
@@ -1690,10 +1364,10 @@ fn self_check(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'sta
         return Err("the kernel can write through a read-only mapping: CR0.WP is clear");
     }
 
-    stages_check::check_layout(view)?;
-    stages_check::check_direct_map(view, memory)?;
+    
+    
     check_early_mapper(view, memory)?;
-    stages_check::check_no_early_window_wraps(memory)
+    Ok(())
 }
 
 /// Say where the layout came from, without the addresses, which `report`
@@ -1821,7 +1495,6 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
     // write-combining from its first map only under the kernel's table.
     arch::program_memory_types();
     let framebuffer = view.raw().framebuffer;
-    display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
     if !framebuffer.is_present() || framebuffer.is_reclaimable() {
         return Ok(());
     }

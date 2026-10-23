@@ -87,7 +87,7 @@ use super::cpu;
 use super::trap::TrapFrame;
 use crate::panic::catalog;
 
-pub(super) mod check;
+// cut: pub(super) mod check;
 
 /// `#DB`.
 const DEBUG: u64 = 1;

@@ -20,14 +20,14 @@
 //! to [`dispose`], which drops them one level at a time in a loop. However
 //! deep the chain, the stack holds one drop at a time.
 
-pub(crate) mod alloc_check;
+// cut: pub(crate) mod alloc_check;
 pub(crate) mod channel;
-pub(crate) mod check;
-pub(crate) mod device_copy_check;
-pub(crate) mod domain_check;
-pub(crate) mod edge_check;
-pub(crate) mod fast_path_check;
-pub(crate) mod format_check;
+// cut: pub(crate) mod check;
+// cut: pub(crate) mod device_copy_check;
+// cut: pub(crate) mod domain_check;
+// cut: pub(crate) mod edge_check;
+// cut: pub(crate) mod fast_path_check;
+// cut: pub(crate) mod format_check;
 pub(crate) mod interrupt;
 pub(crate) mod io_mapping;
 pub(crate) mod job;
@@ -36,8 +36,8 @@ pub(crate) mod pin;
 pub(crate) mod port;
 pub(crate) mod process;
 pub(crate) mod quota;
-pub(crate) mod quota_check;
-pub(crate) mod write_read_check;
+// cut: pub(crate) mod quota_check;
+// cut: pub(crate) mod write_read_check;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

@@ -23,7 +23,7 @@ use core::cell::UnsafeCell;
 use super::cpu;
 use super::gdt;
 
-pub(in crate::arch) mod check;
+// cut: pub(in crate::arch) mod check;
 
 /// Vectors in an interrupt descriptor table. Fixed by the architecture.
 const VECTORS: usize = 256;

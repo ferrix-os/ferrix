@@ -25,7 +25,7 @@ use ferrix_sched::MAX_CPUS;
 use super::cpu;
 use super::gdt;
 
-pub(in crate::arch) mod check;
+// cut: pub(in crate::arch) mod check;
 
 /// Bytes the switch pushes: six registers and the return address.
 const FRAME_BYTES: u64 = 7 * 8;

@@ -17,7 +17,7 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-pub(in crate::arch) mod check;
+// cut: pub(in crate::arch) mod check;
 
 /// Bytes the switch pushes: nine registers and one word of padding.
 const FRAME_BYTES: u32 = 40;

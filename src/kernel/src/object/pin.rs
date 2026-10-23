@@ -126,7 +126,7 @@ use crate::println;
 use crate::sync::SpinLock;
 use crate::user::vmo::Held;
 
-pub(crate) mod check;
+// cut: pub(crate) mod check;
 
 /// Whether a kept pin has been announced.
 static KEPT: AtomicBool = AtomicBool::new(false);

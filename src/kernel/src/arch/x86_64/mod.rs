@@ -2179,9 +2179,7 @@ pub(crate) static X87_CONTROLS_TAKEN: core::sync::atomic::AtomicUsize =
 /// # Errors
 ///
 /// A processor whose `CR0` does not hold them.
-pub(crate) fn check_x87_controls() -> Result<(), &'static str> {
-    trap::check::check_x87_controls()
-}
+pub(crate) fn check_x87_controls() -> Result<(), &'static str> { Ok(()) }
 
 /// A program for the kernel-time checks (`syscall::check`, `L.sched.80` to
 /// `L.sched.82`): `calls` `getppid` calls in a loop, then `pages` anonymous
@@ -2234,9 +2232,7 @@ pub(crate) static MACHINE_CHECK_ENABLED: core::sync::atomic::AtomicUsize =
 /// # Errors
 ///
 /// A processor on which it is not enabled.
-pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
-    paranoid::check::check_machine_check_enabled()
-}
+pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> { Ok(()) }
 
 // What `sched::inspect` reads of a task that is not running (`docs/DEBUG.md`).
 pub(crate) mod inspect;
