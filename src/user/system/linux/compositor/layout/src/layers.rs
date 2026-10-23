@@ -57,19 +57,31 @@ pub struct Placement {
 /// the area the next is placed in, which is what makes two bars on one edge
 /// stack. The `Gaps` returned is every zone added up, which is what a
 /// monitor's `reserved` is.
+///
+/// A surface with a zone of 0 is placed after all the others, in what every
+/// zone left, as wlroots' arrangement does in its second pass: a
+/// notification banner that came before the bar still sits under it.
 #[must_use]
 pub fn place(monitor: Rect, requests: &[Request]) -> (Vec<Placement>, Gaps) {
     let mut usable = monitor;
     let mut total = Gaps::all(0);
-    let mut out = Vec::with_capacity(requests.len());
-    for request in requests {
+    let mut out: Vec<Option<Placement>> = vec![None; requests.len()];
+    for (slot, request) in out.iter_mut().zip(requests) {
+        if request.exclusive_zone == 0 {
+            continue;
+        }
         let placement = one(usable, *request);
         // A zone of −1 asks to be left out: the surface is placed in the
         // area that is left and takes nothing away from it.
         usable = shrink(usable, placement.reserved);
         total = add(total, placement.reserved);
-        out.push(placement);
+        *slot = Some(placement);
     }
+    let out = out
+        .into_iter()
+        .zip(requests)
+        .map(|(placed, request)| placed.unwrap_or_else(|| one(usable, *request)))
+        .collect();
     (out, total)
 }
 

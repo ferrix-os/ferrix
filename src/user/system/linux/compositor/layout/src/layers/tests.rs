@@ -160,3 +160,20 @@ fn nothing_is_placed_outside_the_monitor_or_with_a_negative_size() {
     assert_eq!(placed[1].rect.height, 0);
     assert!(reserved.top >= 768);
 }
+
+/// A surface that moves for others' zones (zone 0) is placed in what they
+/// left even when it came first: a banner that started before the bar.
+#[test]
+fn a_zone_of_zero_moves_for_a_bar_that_came_later() {
+    let banner = Request {
+        top: true,
+        size: (400, 100),
+        margin: (4, 0, 0, 0),
+        exclusive_zone: 0,
+        ..Request::default()
+    };
+    let (placed, reserved) = place(MONITOR, &[banner, bar(30, 30)]);
+    assert_eq!(placed[0].rect, Rect::new(312, 34, 400, 100));
+    assert_eq!(placed[1].rect, Rect::new(0, 0, 1024, 30));
+    assert_eq!(reserved.top, 30);
+}
