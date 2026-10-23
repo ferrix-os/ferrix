@@ -206,6 +206,10 @@ say "capture: $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s1
 $bb kill $stub
 /bin/lode session end 8
 /bin/lode rotate
+# Sealed segments compressed (§8.2), a few frames a turn of lode's loop.
+packed() { n=0; for f in /var/log/journal/*.fxj /run/log/journal/*.fxj; do [ "$($bb head -c 8 $f 2>/dev/null)" = FXJZSTD1 ] && n=$((n+1)); done; echo $n; }
+i=0; until [ "$(packed)" -ge 1 ]; do i=$((i+1)); [ $i -gt 300 ] && break; $bb usleep 100000; done
+say "compressed: $(packed)"
 say "verify: $(/bin/lode verify --kernel -b | $bb tail -n 1)"
 /bin/lode -b --since-mark "flood begins" --until-mark "flood ends" -o cat > /tmp/window
 say "stored: $($bb grep -c "^lode flood " /tmp/window) of 3000"
@@ -364,6 +368,10 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         return Err("the unit's own lines were not stored under lode-test.service".into());
     }
     isolated(lines)?;
+    match said(lines, "lode-test: compressed:").and_then(|count| count.parse::<u32>().ok()) {
+        Some(count) if count > 0 => {}
+        _ => return Err("no sealed segment was compressed".into()),
+    }
     held(lines)?;
     forwarded(lines)?;
     fast(lines)
@@ -562,6 +570,7 @@ lode-test: devlog: /run/systemd/journal/dev-log
 lode-test: no lode: returned
 lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes
 lode-test: newest: 3
+lode-test: compressed: 3
 lode-test: uploaded: 5
 lode-test: while down: 5
 lode-test: killed the uploader

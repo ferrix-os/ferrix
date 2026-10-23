@@ -9,6 +9,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use ferrix_lode_core::compress;
 use ferrix_lode_core::segment::{self, Header};
 
 use crate::sys;
@@ -77,7 +78,7 @@ pub(crate) fn all_segments(dirs: &[Dir]) -> Vec<Segment> {
     all
 }
 
-/// A segment's header, read from its first bytes.
+/// A segment's header, read from its first bytes, compressed or not.
 pub(crate) fn header(segment: &Segment) -> Option<Header> {
     let fd = sys::openat(
         segment.dir,
@@ -89,12 +90,33 @@ pub(crate) fn header(segment: &Segment) -> Option<Header> {
     let mut buf = [0_u8; 512];
     let got = sys::read(fd, &mut buf).unwrap_or(0);
     sys::close(fd);
-    Header::decode(buf.get(..got)?).map(|(header, _)| header)
+    compress::header(buf.get(..got)?)
 }
 
-/// A segment's bytes from `offset` on.
+/// Whether the file `name` in `dir` is a compressed segment.
+pub(crate) fn is_compressed(dir: usize, name: &str) -> bool {
+    let Ok(fd) = sys::openat(dir, name.as_bytes(), sys::O_RDONLY | sys::O_CLOEXEC, 0) else {
+        return false;
+    };
+    let mut buf = [0_u8; 8];
+    let got = sys::read(fd, &mut buf).unwrap_or(0);
+    sys::close(fd);
+    compress::is_compressed(buf.get(..got).unwrap_or_default())
+}
+
+/// A segment's bytes from `offset` on, as written: a compressed one
+/// unpacked first, which gives the same bytes at the same offsets.
 pub(crate) fn bytes(segment: &Segment, offset: usize) -> Option<Vec<u8>> {
-    sys::read_file_from(segment.dir, segment.name.as_bytes(), offset).ok()
+    bytes_in(segment.dir, &segment.name, offset)
+}
+
+/// [`bytes`] by directory and name.
+pub(crate) fn bytes_in(dir: usize, name: &str, offset: usize) -> Option<Vec<u8>> {
+    if is_compressed(dir, name) {
+        let whole = compress::expand(sys::read_file_from(dir, name.as_bytes(), 0).ok()?);
+        return Some(whole.get(offset..).map(Vec::from).unwrap_or_default());
+    }
+    sys::read_file_from(dir, name.as_bytes(), offset).ok()
 }
 
 /// A segment's size in bytes.
@@ -117,7 +139,7 @@ pub(crate) fn size(segment: &Segment) -> u64 {
 /// old one, so a reader sees one summary or the other, whole.
 pub(crate) fn write_summary(dir: usize, name: &str) {
     use ferrix_lode_core::summary::Summary;
-    let Ok(bytes) = sys::read_file_from(dir, name.as_bytes(), 0) else {
+    let Some(bytes) = bytes_in(dir, name, 0) else {
         return;
     };
     let Some(scanned) = segment::scan(&bytes, 0) else {

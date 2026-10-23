@@ -1129,6 +1129,12 @@ fn delete(options: &Options) -> i32 {
             left += count;
             continue;
         }
+        // A compressed segment stays compressed.
+        let rest = if store::is_compressed(each.segment.dir, &each.segment.name) {
+            ferrix_lode_core::compress::compress(rest.clone()).unwrap_or(rest)
+        } else {
+            rest
+        };
         match replace(&each.segment, &rest) {
             Ok(()) => {
                 store::write_summary(each.segment.dir, &each.segment.name);

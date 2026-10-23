@@ -23,6 +23,7 @@
 //! * [`protocols`]: syslog, systemd's native protocol and stdout streams, read.
 //! * [`limit`]: floods held -- the rules, the folding of repeats, the limiter.
 //! * [`retention`]: which records are kept how long.
+//! * [`compress`]: sealed segments in zstd frames.
 //! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
 //! * [`upload`]: store-and-forward to a collector.
@@ -32,6 +33,7 @@
 
 extern crate alloc;
 
+pub mod compress;
 pub mod console;
 pub mod crc;
 pub mod cursor;

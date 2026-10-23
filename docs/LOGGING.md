@@ -591,7 +591,8 @@ theme 1, systemd #31358), the field indexes and the sparse time index
 (§8.4) after them, a footer with their offsets and checksum -- then
 renames it over the online file. The online file is never modified; a
 crash during sealing leaves either the old online file or the new sealed
-one. Sealed segments are immutable.
+one. Sealed segments are immutable. (Built so far: the compression,
+§18 "Compression, as built"; the indexes are still to come.)
 
 **Crash safety** (theme 8). A reader stops at the first entry whose length
 runs past the file, whose checksum does not match, or whose offsets are
@@ -1140,10 +1141,11 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 
 **Where it stands (2026-10-23).** Landed: the design and steps 1, 2,
 2a, 2b, 3, 4 and 5, and the field-quality fixes from the N150's first
-records; store-and-forward to a collector (§10.2's first part) as below.
-Next, one step at a time: compression of sealed segments, the
-write-budget row (§8.3), then the TUI viewer, whose design the customer
-is drawing from the box data.
+records, and store-and-forward to a collector (§10.2's first part);
+compression of sealed segments as below. Next: the write-budget row
+(§8.3). The viewer is a separate agent's, a Rust desktop app built from
+the customer's design. A follow-up row: the uploader as a native service
+in a sealed job (today a plain Linux service, §18).
 
 
 
@@ -1642,6 +1644,37 @@ wrong, fixed in one landing before step 6:
   `systemd-journal-remote` (nazuna has none installed; the body is the
   same `-o export` that the format tests cover); a cursor past a store that was
   wiped and begun again, which today waits for the new store to pass it.
+
+### Compression, as built (§8.2)
+
+* When a segment is sealed (16 MiB, a day, `lode rotate`), the service
+  compresses it: its entries in zstd frames of about 64 KiB of whole
+  entries (`ruzstd`'s fastest level, the crate the btrfs code already
+  uses), each frame with its unpacked and packed length and a CRC-32C, and
+  the segment's header kept whole in front (`ferrix-lode-core`
+  `compress`, magic `FXJZSTD1`). Written to a new file, synced, renamed
+  over the sealed one: a crash leaves one or the other.
+* **Unpacked, it is the segment it was made from, byte for byte** (cut at
+  its last good entry): the same header, the same entries at the same
+  offsets. So every reader -- `lode`, `-f` holding an offset, the
+  uploader, `verify`, `delete` -- reads it through one function
+  (`store::bytes`) and nothing else changed. A frame whose checksum or
+  length is wrong ends the unpacking there, as a torn entry ends a scan.
+* **No stall**: the service packs four frames (256 KiB) a turn of its
+  loop and reads the kernel log in between, so sealing a full segment
+  never holds the log back; it does not sleep while a segment waits.
+  Segments sealed but not compressed -- by an older lode, or one stopped
+  midway -- are queued at start. A segment that changed meanwhile
+  (`lode delete` rewrote it) or did not get smaller is left as it is;
+  `lode delete` compresses again what it rewrites of a compressed one. A
+  compressed segment is never cut as torn nor reopened for writing.
+* The N150's first 1,907 records pack 5.6 to 1 (682 KB to 123 KB), at
+  about 110 MB/s on nazuna. `test-log` requires a compressed segment
+  after `lode rotate`, and then reads all 3,000 flood lines and `verify
+  --kernel` through it on all three architectures; host tests cover the
+  round trip, a torn tail, a flipped bit and frame-at-a-time packing.
+* Not yet: the field indexes and the sparse time index after the frames
+  (§8.4); a sealed segment that may match is unpacked whole.
 
 ### Known issues
 

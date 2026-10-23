@@ -20,6 +20,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use ferrix_lode_core::compress::Compressor;
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
 use ferrix_lode_core::kmsg;
 use ferrix_lode_core::limit::{self, Limiter, Rule};
@@ -105,7 +106,28 @@ struct Store {
     header: Header,
     /// When the last `fdatasync` was.
     synced_at: u64,
+    /// Sealed segments waiting to be compressed: directory and name.
+    to_compress: Vec<(usize, String)>,
+    /// The one being compressed.
+    compressing: Option<Sealing>,
 }
+
+/// A sealed segment being compressed, a few frames each turn of the loop.
+struct Sealing {
+    /// Its directory.
+    dir: usize,
+    /// Its name.
+    name: String,
+    /// The work.
+    compressor: Compressor,
+    /// Its size when begun: one that changed (`lode delete` rewrote it) is
+    /// left as it is.
+    size: u64,
+}
+
+/// Frames compressed a turn: 256 KiB of records, so the kernel log is read
+/// again soon whatever a segment's size.
+const FRAMES_A_TURN: usize = 4;
 
 /// Run the service on init's channel.
 pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
@@ -139,9 +161,12 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         next: 1,
         header: new_header(boot_id),
         synced_at: 0,
+        to_compress: Vec::new(),
+        compressing: None,
     };
     let sequence = store.take_up(&mut said);
     store.summarise_old();
+    store.compress_old();
     let text = if restarted {
         alloc::format!(
             "lode restarted: an earlier instance of this boot ended; last stored kernel seq {}",
@@ -305,11 +330,12 @@ impl Service {
                 self.store.rotate_all();
             }
             self.store.sync_if(urgent, now.monotonic_us);
+            let compressing = self.store.compress_some();
             if closed(channel) {
                 self.store.sync_if(true, now.monotonic_us);
                 return Ok(());
             }
-            if idle {
+            if idle && !compressing {
                 let mut fds = alloc::vec![self.kmsg];
                 fds.extend(self.seat.fds());
                 fds.extend(self.front.fds());
@@ -527,7 +553,9 @@ impl Store {
             let Some(scanned) = segment::scan(&bytes, 0) else {
                 continue;
             };
-            if scanned.good < bytes.len() {
+            // A compressed segment is sealed: never cut, never written to.
+            let sealed = store::is_compressed(each.dir, &each.name);
+            if scanned.good < bytes.len() && !sealed {
                 cut(each, scanned.good, bytes.len(), said);
             }
             if let Some(found) = scanned.records.last() {
@@ -536,6 +564,7 @@ impl Store {
             self.next = self.next.max(scanned.header.first_seqnum);
             let class = segment::class_of_name(&each.name).unwrap_or_default();
             if scanned.header.boot_id == self.header.boot_id
+                && !sealed
                 && let Some(index) = self.classes.iter().position(|known| known.name == class)
                 && let Ok(fd) = sys::openat(
                     each.dir,
@@ -720,7 +749,56 @@ impl Store {
             let _ = sys::fdatasync(writer.fd);
             sys::close(writer.fd);
             store::write_summary(dir, &writer.name);
+            self.to_compress.push((dir, writer.name));
         }
+    }
+
+    /// Queue every sealed segment not yet compressed -- sealed by an older
+    /// lode, or by one stopped before it compressed it.
+    fn compress_old(&mut self) {
+        let active: Vec<String> = self
+            .writers
+            .iter()
+            .flatten()
+            .map(|writer| writer.name.clone())
+            .collect();
+        for each in self.segments() {
+            if !active.contains(&each.name) && !store::is_compressed(each.dir, &each.name) {
+                self.to_compress.push((each.dir, each.name.clone()));
+            }
+        }
+    }
+
+    /// Compress a few frames of the segment being compressed, beginning the
+    /// next queued one when there is none. Answers whether work is left.
+    fn compress_some(&mut self) -> bool {
+        while self.compressing.is_none() && !self.to_compress.is_empty() {
+            let (dir, name) = self.to_compress.remove(0);
+            let Ok(raw) = sys::read_file_from(dir, name.as_bytes(), 0) else {
+                continue;
+            };
+            let size = raw.len() as u64;
+            if let Some(compressor) = Compressor::new(raw) {
+                self.compressing = Some(Sealing {
+                    dir,
+                    name,
+                    compressor,
+                    size,
+                });
+            }
+        }
+        let Some(job) = self.compressing.as_mut() else {
+            return false;
+        };
+        for _ in 0..FRAMES_A_TURN {
+            if job.compressor.step() {
+                if let Some(job) = self.compressing.take() {
+                    finish_compressing(job);
+                }
+                return !self.to_compress.is_empty();
+            }
+        }
+        true
     }
 
     /// Summarise sealed segments that have no summary -- sealed by an older
@@ -803,6 +881,41 @@ impl Store {
             }
         }
     }
+}
+
+/// Put a compressed segment in place of the sealed one it was made from:
+/// a new file, synced, renamed over it, so a crash leaves one or the
+/// other whole. Not when the segment changed meanwhile, nor when
+/// compressing did not make it smaller.
+fn finish_compressing(job: Sealing) {
+    let segment = store::Segment {
+        dir: job.dir,
+        name: job.name.clone(),
+        first: 0,
+    };
+    if store::size(&segment) != job.size {
+        return;
+    }
+    let packed = job.compressor.finish();
+    if packed.len() as u64 >= job.size {
+        return;
+    }
+    let fresh = alloc::format!(".{}.z.new", job.name);
+    let Ok(fd) = sys::openat(
+        job.dir,
+        fresh.as_bytes(),
+        sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
+        0o640,
+    ) else {
+        return;
+    };
+    let written = sys::write_all(fd, &packed).and_then(|()| sys::fdatasync(fd));
+    sys::close(fd);
+    if written.is_err() || store::size(&segment) != job.size {
+        let _ = sys::unlinkat(job.dir, fresh.as_bytes());
+        return;
+    }
+    let _ = sys::renameat(job.dir, fresh.as_bytes(), job.name.as_bytes());
 }
 
 /// Cut a torn tail off `segment` at `good`, and say so.

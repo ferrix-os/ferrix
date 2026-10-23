@@ -1450,3 +1450,97 @@ mod uploads {
         assert_eq!(upload::read_cursor(b"x"), None);
     }
 }
+
+/// Sealed segments, compressed (`docs/LOGGING.md` §8.2).
+mod compressed {
+    use alloc::vec::Vec;
+
+    use crate::compress::{self, Compressor};
+    use crate::record::Record;
+    use crate::segment;
+
+    fn segment_bytes(count: u64) -> Vec<u8> {
+        let mut out = super::header().encode();
+        for n in 0..count {
+            let mut record = Record::new(6, 1_761_228_062_000_000 + n, n);
+            record.seqnum = 100 + n;
+            record.push(
+                "MESSAGE",
+                alloc::format!("frame {n} took {} ms on DVI-D-1", n % 17).as_bytes(),
+            );
+            record.push("SYSLOG_IDENTIFIER", b"hyprix");
+            segment::encode_record(&record, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn a_segment_packs_smaller_and_unpacks_to_itself() {
+        let raw = segment_bytes(5000);
+        let packed = compress::compress(raw.clone()).unwrap();
+        assert!(compress::is_compressed(&packed));
+        assert!(
+            packed.len() * 4 < raw.len(),
+            "{} of {}",
+            packed.len(),
+            raw.len()
+        );
+        assert_eq!(compress::unpack(&packed).unwrap(), raw);
+        assert_eq!(compress::expand(packed.clone()), raw);
+        assert_eq!(compress::expand(raw.clone()), raw);
+        assert_eq!(
+            compress::header(&packed).unwrap(),
+            compress::header(&raw).unwrap()
+        );
+        assert_eq!(
+            segment::scan(&compress::expand(packed), 0)
+                .unwrap()
+                .records
+                .len(),
+            5000
+        );
+    }
+
+    #[test]
+    fn a_torn_tail_is_left_out_and_a_damaged_frame_ends_the_unpacking() {
+        let mut raw = segment_bytes(3000);
+        let good = raw.len();
+        raw.extend_from_slice(&[7, 0, 0, 0, 1, 2]);
+        let packed = compress::compress(raw.clone()).unwrap();
+        assert_eq!(compress::unpack(&packed).unwrap(), &raw[..good]);
+        // A bit flipped in the last frame: everything before it still reads.
+        let mut damaged = packed.clone();
+        let last = damaged.len() - 3;
+        damaged[last] ^= 1;
+        let partial = compress::unpack(&damaged).unwrap();
+        assert!(partial.len() < good && raw.starts_with(&partial));
+        let scanned = segment::scan(&partial, 0).unwrap();
+        assert!(!scanned.records.is_empty());
+        assert_eq!(scanned.good, partial.len());
+        // A damaged prefix is no segment.
+        let mut prefix = packed;
+        prefix[20] ^= 1;
+        assert!(compress::unpack(&prefix).is_none());
+        assert!(compress::expand(prefix).is_empty());
+    }
+
+    #[test]
+    fn a_frame_at_a_time_gives_the_same() {
+        let raw = segment_bytes(4000);
+        let mut compressor = Compressor::new(raw.clone()).unwrap();
+        let mut steps = 1;
+        while !compressor.step() {
+            steps += 1;
+        }
+        assert!(steps > 2, "{steps}");
+        assert_eq!(compressor.raw_len(), raw.len());
+        assert_eq!(compress::unpack(&compressor.finish()).unwrap(), raw);
+        assert!(Compressor::new(compress::compress(raw).unwrap()).is_none());
+        assert!(Compressor::new(b"not a segment".to_vec()).is_none());
+        let empty = super::header().encode();
+        assert_eq!(
+            compress::unpack(&compress::compress(empty.clone()).unwrap()).unwrap(),
+            empty
+        );
+    }
+}

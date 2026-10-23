@@ -559,6 +559,9 @@ version = "0.1.0"
 [[package]]
 name = "ferrix-lode-core"
 version = "0.1.0"
+dependencies = [
+ "ruzstd",
+]
 
 [[package]]
 name = "ferrix-logctl"
