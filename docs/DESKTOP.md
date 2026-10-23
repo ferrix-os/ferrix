@@ -39,17 +39,35 @@ against the compositor printed no missing protocol. Screenshots, headless
 runs with zenity (GTK 4) and pattern clients:
 `~/.local/share/ferrix/hyprix-gnome/shots/`.
 
-What part 1 leaves, each small: the tile preview is drawn over the
-dragged window rather than under it; the overview has no box behind each
-workspace miniature, no search and no drag onto a miniature; the
-foreign-toplevel `maximized`/`minimized` flags a bar reads are still
-always false; a window opens tiled for the moment before its first commit
-floats it, which on a floating workspace with tiled windows reflows them
-once. Seen on the way, not this branch's: on this host foot's text did not
-reach the headless dumps in the tiled layout either.
+Part 1's leftovers were fixed after it landed (995f8012f): the tile
+preview is drawn under the dragged window, taskbars are told `maximized`
+and `minimized`, a new window on a floating workspace floats from its
+first frame, and the theme's page and SUPER binds use the keymap's names.
+The overview still has no box behind each workspace miniature, no search
+and no drag onto a miniature. Seen on the way, not this branch's: on this
+host foot's text did not reach the headless dumps in the tiled layout
+either.
 
-Next in order: 2a (title bars), 2c (top bar), 3b, 3a, 3f, 3g, 3h, 3c, 3d,
-4a to 4d; 3e on the 3060.
+**Part 2 is built** (13 points estimated):
+
+| Step | Commit | What |
+|---|---|---|
+| 2a | aa3ba1296 | `hyprix:titlebars = 1`: a header bar above each floating window that asked for the compositor's frame -- title, minimize, maximize, close drawn in code; press to move, double click to maximize; the layout keeps the bar inside the work area |
+| 2b | 521897720 | (with part 1) the theme file and `hyprix:own_frames` |
+| 2c | 0d1a18248 | `hyprix/themes/ferrix-light-bar/`: the top bar as a waybar `config.jsonc` and `style.css` |
+
+Gates on 537c767f1: `check`, `test-compositor`, `build --arch all --release`
+and `test-boot` on x86_64 KVM and TCG, aarch64, armv7a and armv7a
+`--smp 2`, all PASSED (`hg-p2-*`, logs in
+`~/.local/share/ferrix/logs/queue/`).
+
+Screenshots of the whole look: `2-ferrix-light-desktop.png`,
+`2-ferrix-light-snapped-right.png` and `2-ferrix-light-overview.png` in
+the same folder. Left of part 2: pointer motion over a title bar still
+reaches the window under it, buttons have no hover state, tiled windows get
+no bar, and images do not yet carry the bar's configuration or start it.
+
+Next in order: 3b, 3a, 3f, 3g, 3h, 3c, 3d, 4a to 4d; 3e on the 3060.
 
 ## 1. Floating mode
 
