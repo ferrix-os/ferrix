@@ -1040,11 +1040,22 @@ pub(crate) fn local(rect: Rect, origin: (i64, i64), scale: f64) -> Rect {
 pub(crate) fn window_crop(client: &compositor_server::Client, surface: ObjectId) -> Option<Crop> {
     let (x, y, width, height) = client.window_geometry(surface)?;
     let state = &client.surface(surface)?.current;
-    if state.viewport_size.is_some() || state.viewport_source.is_some() || state.transform != 0 {
+    if state.viewport_source.is_some() || state.transform != 0 {
         return None;
     }
     let buffer = client.buffer(state.buffer?)?;
     let scale = state.scale.max(1);
+    // A viewport that only says the surface is its buffer's size -- what a
+    // toolkit using fractional scaling sends at a scale of 1, GTK 4 among
+    // them -- is no scaling at all; any other one is.
+    if let Some((width, height)) = state.viewport_size
+        && (
+            i64::from(width).saturating_mul(i64::from(scale)),
+            i64::from(height).saturating_mul(i64::from(scale)),
+        ) != (i64::from(buffer.width), i64::from(buffer.height))
+    {
+        return None;
+    }
     let crop = Crop {
         x: u32::try_from(x.checked_mul(scale)?).ok()?,
         y: u32::try_from(y.checked_mul(scale)?).ok()?,

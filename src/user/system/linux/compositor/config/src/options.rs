@@ -292,6 +292,11 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     ("group:merge_floated_into_tiled_on_groupbar", Int(0)),
     ("group:merge_groups_on_drag", Int(1)),
     ("group:merge_groups_on_groupbar", Int(1)),
+    // hyprix's own (docs/DESKTOP.md §2.2), not Hyprland's: a floating
+    // window that draws its own frame -- client-side decorations, a window
+    // geometry inside its buffer -- is drawn with no border, shadow or
+    // rounding of the compositor's, as a floating window manager leaves it.
+    ("hyprix:own_frames", Int(0)),
     ("input-capture:capture_modifiers", Int(0)),
     ("input-capture:enforce_barriers", Int(1)),
     ("input:accel_profile", Str("")),

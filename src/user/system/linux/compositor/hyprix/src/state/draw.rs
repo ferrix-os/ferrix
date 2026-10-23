@@ -134,7 +134,13 @@ impl Compositor<'_> {
         // and over that whatever `wp_alpha_modifier_v1` asked for. The
         // protocol's multiplier is the client's own word about how much
         // of its surface shows, so it wins over a rule's opacity.
-        let drawn_with = drawn_with(self.window_rules.styles(), &self.slots, &self.sources);
+        let own_frames = self.config.int("hyprix:own_frames").unwrap_or(0) != 0;
+        let drawn_with = drawn_with(
+            self.window_rules.styles(),
+            &self.slots,
+            &self.sources,
+            own_frames.then_some(&self.state),
+        );
         let began = Instant::now();
         let mut drew = Drew::default();
         let with = Drawing {

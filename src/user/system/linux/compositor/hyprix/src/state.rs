@@ -2616,16 +2616,41 @@ fn as_input(what: compositor_server::Injected) -> Option<crate::seat::Input> {
 
 /// What each window is drawn with: its rule's style, with the alpha a
 /// client set through `wp_alpha_modifier_v1` over the top.
+///
+/// `own_frames` is the layout when `hyprix:own_frames` is on: a floating
+/// window that draws its own frame -- its window geometry inside its
+/// buffer, the shadow round it its own -- is drawn with no border of the
+/// compositor's, which would be a second frame round the client's, and a
+/// maximized window with no border, shadow or rounding at all
+/// (`docs/DESKTOP.md` §2.2).
 fn drawn_with(
     styled: &BTreeMap<WindowId, compositor_render::WindowStyle>,
     slots: &[Slot],
     sources: &BTreeMap<WindowId, Source>,
+    own_frames: Option<&State>,
 ) -> BTreeMap<WindowId, compositor_render::WindowStyle> {
     let mut out = styled.clone();
     for (&window, source) in sources {
         let Some(slot) = slots.get(source.client) else {
             continue;
         };
+        // And a maximized one fills its work area edge to edge, with square
+        // corners and nothing round it, whoever draws its frame.
+        if own_frames
+            .is_some_and(|state| state.snap_of(window) == Some(compositor_layout::Snap::Maximized))
+        {
+            let style = out.entry(window).or_default();
+            style.decorate = false;
+            style.rounding = Some(0);
+        } else if own_frames.is_some_and(|state| state.is_floating(window))
+            && crate::frame::window_crop(slot.client(), source.surface).is_some()
+        {
+            // The client's frame is its own: no border round it. The
+            // shadow and the rounding stay, standing in for the shadow the
+            // client drew outside its window geometry, which is cropped
+            // away as Hyprland crops it.
+            out.entry(window).or_default().border = Some(0);
+        }
         if let Some(alpha) = slot.client().surface_alpha(source.surface) {
             out.entry(window).or_default().opacity = Some(alpha);
         }
