@@ -171,6 +171,13 @@
       "branch": "powerctl",
       "date": "2026-10-22",
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
+    },
+    {
+      "ids": ["L.aarch64.67"],
+      "owner": "cpuinfo-model",
+      "branch": "cpuinfo-model",
+      "date": "2026-10-23",
+      "purpose": "/proc/cpuinfo's MIDR fields (consultant OK IF (1), ledger 3353-3354): arch::aarch64::speculation::midr_of returns the MIDR_EL1 each processor recorded while starting, and None for a processor that has not recorded or is beyond MAX_CPUS"
     }
   ]
 }
