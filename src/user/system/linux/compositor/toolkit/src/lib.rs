@@ -71,7 +71,7 @@ pub use output::{Output, OutputId, Transform};
 pub use spawn::spawn;
 pub use surface::{
     Anchor, CursorShape, IdleId, KeyboardInteractivity, Layer, LayerOptions, Margin, PopupOptions,
-    Rect, SurfaceId, ToplevelOptions,
+    Rect, SurfaceId, ToplevelOptions, WindowState,
 };
 
 /// The protocol tables, for a program that binds something of its own.

@@ -219,6 +219,17 @@ impl Default for PopupOptions {
     }
 }
 
+/// What a window asks to be ([`crate::Client::set_window_state`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WindowState {
+    /// As large as the screen allows.
+    Maximized,
+    /// Its own size again.
+    Restored,
+    /// Out of sight until it is asked for.
+    Minimized,
+}
+
 /// `wp_cursor_shape_device_v1.shape`: a pointer drawn by the compositor, by
 /// name. The numbers are the protocol's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

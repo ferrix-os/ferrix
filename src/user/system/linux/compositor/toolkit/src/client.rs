@@ -32,7 +32,7 @@ use crate::sources::{Children, Sources};
 use crate::{
     ChildId, CursorShape, Event, IdleId, Key, KeyboardEvent, LayerOptions, Output, OutputId,
     PointerEvent, PopupOptions, Rect, SurfaceId, TimerId, ToplevelOptions, Transform, Value,
-    WatchId,
+    WatchId, WindowState,
 };
 
 /// Why something could not be done.
@@ -789,6 +789,28 @@ impl Client {
                 &[Arg::Object(seat), Arg::Uint(serial), Arg::Uint(edges)],
             )
         };
+        self.defer(result);
+    }
+
+    /// Ask the compositor to maximize a window, give it back its own size,
+    /// or minimize it (`xdg_toplevel.set_maximized`, `unset_maximized`,
+    /// `set_minimized`): what a window's own title bar buttons do where the
+    /// compositor draws none. The compositor may decline; a maximized
+    /// window hears its new size as a configure. Anything but a window is
+    /// left alone.
+    pub fn set_window_state(&mut self, window: SurfaceId, state: WindowState) {
+        let Some(Kind::Toplevel { toplevel, .. }) =
+            self.surfaces.get(&window).map(|state| &state.kind)
+        else {
+            return;
+        };
+        let toplevel = *toplevel;
+        let opcode = match state {
+            WindowState::Maximized => xdg_toplevel::request::SET_MAXIMIZED,
+            WindowState::Restored => xdg_toplevel::request::UNSET_MAXIMIZED,
+            WindowState::Minimized => xdg_toplevel::request::SET_MINIMIZED,
+        };
+        let result = self.send(toplevel, opcode, &[]);
         self.defer(result);
     }
 
