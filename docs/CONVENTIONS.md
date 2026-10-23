@@ -265,19 +265,22 @@ findings: those keep the review above.
 
 On 2026-10-01 three unlanded branches each took "the next free id on
 `main`" and wrote the same requirement ids. So a new `H.*` or `L.*` id is
-written only inside a range reserved on `main` first:
+written only inside a range reserved on the landing branch first (`develop`
+since 2026-10-23):
 
 1. **Reserve.** Before writing the ids, add an entry to
    `tools/common/data/requirement-reservations.json`: the ids or ranges
    (`L.object.106-112`), your session, your branch, the date and one line of
-   purpose. Take the numbers above the highest on `main` *and* in the file.
+   purpose. Take the numbers above the highest on `develop` *and* in the file.
    Land it as a docs-only landing under the lock, then rebase onto it.
 2. **Release.** In the commit that writes the ids, delete the entry, or
    shrink it to the ids still unwritten. The release lands with the ids.
 
 `check-traceability.py`, which `cargo xtask check` runs, holds both ends.
-It refuses an id that is not defined at the merge-base with `main` and that
-`main`'s copy of the file did not reserve there, so a branch cannot reserve
+It refuses an id that is not defined at the merge-base with the landing
+branch and that branch's copy of the file did not reserve there (`develop`
+on the gate host, read from `fleet/land-branch`; `FERRIX_MAIN_REF` names
+another), so a branch cannot reserve
 for itself. It also refuses a range that overlaps another, or that holds an
 id the model already defines, so an entry nobody released fails the
 landing that forgot it. Send the reservation to the certification

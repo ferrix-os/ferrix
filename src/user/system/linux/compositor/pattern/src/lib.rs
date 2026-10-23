@@ -21,5 +21,5 @@ mod i915;
 
 pub use client::{
     Movie, Picture, Shape, announce_when_drawn, draw_every_frame, present_through_dmabuf, run,
-    run_announced_on, run_on, run_shaped, run_shaped_on, run_video, run_wallpaper,
+    run_announced_on, run_on, run_shaped, run_shaped_on, run_twin_on, run_video, run_wallpaper,
 };

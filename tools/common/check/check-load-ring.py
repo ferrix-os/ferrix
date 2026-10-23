@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -113,10 +114,43 @@ def totals(ring: dict[str, tuple[int, str]]) -> dict[str, int]:
     return out
 
 
+def landing_refs() -> tuple[str, list[str]]:
+    """The branch a landing goes to, and the refs that may hold it.
+
+    Since 2026-10-23 landings go to `develop` and `main` moves only when a
+    promotion merges (docs/REPO-FLOW.md), so a branch is compared with the
+    landing branch, not with a `main` that lags it: a reservation landed on
+    develop counts at once. In order: `FERRIX_MAIN_REF` when set; a pull
+    request's base in CI; on the gate host, the branch `fleet/land-branch`
+    names; in any clone that has it, `origin/develop`; else `main`. Not
+    `main` for a promotion: its ids were written and their reservations
+    released on develop, so against `main` every one would be refused;
+    against develop, which the promotion is, nothing is new. (CI's shallow
+    checkout has neither, and says so.)
+    """
+    if os.environ.get("FERRIX_MAIN_REF"):
+        return os.environ["FERRIX_MAIN_REF"], [os.environ["FERRIX_MAIN_REF"]]
+    if os.environ.get("GITHUB_BASE_REF"):
+        name = os.environ["GITHUB_BASE_REF"]
+        return name, [name, f"origin/{name}"]
+    fleet = Path(os.environ.get("FERRIX_FLEET_DIR", Path.home() / ".local/share/ferrix/fleet"))
+    try:
+        name = (fleet / "land-branch").read_text(encoding="utf-8").strip()
+    except OSError:
+        name = ""
+    if not name and subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet", "origin/develop^{commit}"],
+        capture_output=True,
+    ).returncode == 0:
+        name = "develop"
+    name = name or "main"
+    return name, [name, f"origin/{name}"]
+
+
 def base_ref(given: str | None) -> str | None:
     if given:
         return (git("rev-parse", "--verify", "-q", f"{given}^{{commit}}") or "").strip() or None
-    for candidate in ("main", "origin/main"):
+    for candidate in landing_refs()[1]:
         base = git("merge-base", "HEAD", candidate)
         if base:
             return base.strip()
@@ -125,7 +159,7 @@ def base_ref(given: str | None) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base", help="compare with this commit [default: the merge base with main]")
+    parser.add_argument("--base", help="compare with this commit [default: the merge base with the landing branch, develop on the gate host]")
     parser.add_argument("--fail-on-growth", action="store_true", help="the negative control's mode: fail when the ring grew")
     args = parser.parse_args()
 

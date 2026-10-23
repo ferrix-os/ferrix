@@ -102,6 +102,10 @@ struct Effects {
     covered: Vec<(ObjectId, ObjectId, usize)>,
     /// The lock given up, and whether it was asked for.
     unlocking: Option<(ObjectId, bool)>,
+    /// For each surface, how many more of its commits are still to be
+    /// taken from what arrived in this read: a commit with one after it
+    /// no longer has its own damage to read (`surface_committed`).
+    commits_left: BTreeMap<ObjectId, usize>,
 }
 
 impl Compositor<'_> {
@@ -138,6 +142,11 @@ impl Compositor<'_> {
         let consumed = slot.client.read(slot.connection.bytes(), &arrived);
         if consumed > 0 {
             let events = slot.client.take_events();
+            for event in &events {
+                if let Event::SurfaceCommitted { surface, .. } = event {
+                    *effects.commits_left.entry(*surface).or_default() += 1;
+                }
+            }
             for event in events {
                 self.take_event(index, event, asks, &mut effects)?;
             }
@@ -657,7 +666,10 @@ impl Compositor<'_> {
                 effects.changed = true;
             }
             Event::SurfaceCommitted { surface, change } => {
-                self.surface_committed(index, surface, change);
+                let left = effects.commits_left.entry(surface).or_default();
+                *left = left.saturating_sub(1);
+                let superseded = *left > 0;
+                self.surface_committed(index, surface, change, superseded);
                 effects.changed = true;
             }
             _ => {}
@@ -668,12 +680,14 @@ impl Compositor<'_> {
     /// A surface of the connection at `index` committed: a window's first
     /// commit maps it, a dialog's first buffer sizes it, a floating window
     /// that draws a size of its own after that takes it, and what the client
-    /// drew is owed to the next frame.
+    /// drew is owed to the next frame. `superseded` is a commit with
+    /// another of the same surface after it in the same read.
     fn surface_committed(
         &mut self,
         index: usize,
         surface: ObjectId,
         change: compositor_server::Committed,
+        superseded: bool,
     ) {
         let Some(slot) = self.slots.get_mut(index) else {
             return;
@@ -786,7 +800,20 @@ impl Compositor<'_> {
         // that lands on a screen is worked out when the frame
         // is drawn, because only then is it known where the
         // surface is.
-        self.commits.painted(painted(&slot.client, index, surface));
+        //
+        // The damage is read from the surface's current state, which by
+        // now is the *last* commit's when one read carried several: a
+        // client that drew its whole window and then a small square of
+        // it, both before the compositor read either, had the window's
+        // damage replaced by the square's, and the window was never drawn
+        // but where the square was (seen in `two_clients`'s damage test on
+        // a starved host, 2026-10-23). A commit with another after it is
+        // owed its whole surface, then: too much is only slow.
+        if superseded {
+            self.commits.painted(whole_of(index, surface));
+        } else {
+            self.commits.painted(painted(&slot.client, index, surface));
+        }
         if let Some(old) = change.released {
             slot.client.release_buffer(old);
         }
@@ -821,6 +848,7 @@ impl Compositor<'_> {
             locking,
             covered,
             unlocking,
+            commits_left: _,
         } = effects;
         let mut changed = changed;
         // Now that the client's own borrow is over: what it copied goes to

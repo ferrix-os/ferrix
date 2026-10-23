@@ -819,6 +819,13 @@ impl<'r> Compositor<'r> {
             return Ok(true);
         }
 
+        // An `exit` asked for in this pass -- a key bound to it, `hyprctl
+        // dispatch exit` -- ends the run here, not after whatever next wakes
+        // the wait: on an idle desktop nothing may, and the compositor that
+        // answered `ok` ran on until something did.
+        if self.quit {
+            return Ok(false);
+        }
         self.wait(animating)?;
         Ok(true)
     }

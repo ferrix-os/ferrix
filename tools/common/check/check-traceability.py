@@ -64,8 +64,9 @@ The gate fails when
     re-recording fails, so an allowance cannot outlive its reason;
   * docs/certification/TRACEABILITY.md is not what this script writes
     (`--check`);
-  * a high- or low-level id that is not defined at the merge-base with
-    `main` lies in no range main's tools/common/data/requirement-reservations.json
+  * a high- or low-level id that is not defined at the merge-base with the
+    landing branch (`develop` since 2026-10-23; `landing_refs`) lies in no
+    range that branch's tools/common/data/requirement-reservations.json
     held there, or that file has a malformed entry, a range overlapping
     another, or a range holding an id the model defines (a reservation is
     released in the commit that writes its ids; docs/CONVENTIONS.md).
@@ -935,7 +936,7 @@ def check_reservations(reserved: list[Reservation], defined: set[str], where: st
 def unreserved(new: dict[str, str], reserved: list[Reservation]) -> list[str]:
     """New ids (id -> where it is written) that no reservation on main holds."""
     return [
-        f"{where}: {rid} is new on this branch, and no range in main's "
+        f"{where}: {rid} is new on this branch, and no range in {landing_refs()[0]}'s "
         f"{RESERVATIONS.relative_to(ROOT).as_posix()} holds it: reserve it there in a "
         f"docs-only landing first, then rebase (docs/CONVENTIONS.md)"
         for rid, where in sorted(new.items(), key=lambda item: _id_key(item[0]))
@@ -953,15 +954,48 @@ def _git(*args: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def main_bases() -> list[str]:
-    """The merge-bases of HEAD with `main`, newest only.
+def landing_refs() -> tuple[str, list[str]]:
+    """The branch a landing goes to, and the refs that may hold it.
 
-    `FERRIX_MAIN_REF` names the ref when set; otherwise both `main` and
-    `origin/main` are asked, and a base that is an ancestor of the other is
-    dropped, so a stale one of the two does not count. On `main` itself the
-    base is HEAD and nothing is new.
+    Since 2026-10-23 landings go to `develop` and `main` moves only when a
+    promotion merges (docs/REPO-FLOW.md), so a branch is compared with the
+    landing branch, not with a `main` that lags it: a reservation landed on
+    develop counts at once. In order: `FERRIX_MAIN_REF` when set; a pull
+    request's base in CI; on the gate host, the branch `fleet/land-branch`
+    names; in any clone that has it, `origin/develop`; else `main`. Not
+    `main` for a promotion: its ids were written and their reservations
+    released on develop, so against `main` every one would be refused;
+    against develop, which the promotion is, nothing is new. (CI's shallow
+    checkout has neither, and says so.)
     """
-    refs = [os.environ["FERRIX_MAIN_REF"]] if os.environ.get("FERRIX_MAIN_REF") else ["main", "origin/main"]
+    if os.environ.get("FERRIX_MAIN_REF"):
+        return os.environ["FERRIX_MAIN_REF"], [os.environ["FERRIX_MAIN_REF"]]
+    if os.environ.get("GITHUB_BASE_REF"):
+        name = os.environ["GITHUB_BASE_REF"]
+        return name, [name, f"origin/{name}"]
+    fleet = Path(os.environ.get("FERRIX_FLEET_DIR", Path.home() / ".local/share/ferrix/fleet"))
+    try:
+        name = (fleet / "land-branch").read_text(encoding="utf-8").strip()
+    except OSError:
+        name = ""
+    if not name and subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet", "origin/develop^{commit}"],
+        capture_output=True,
+    ).returncode == 0:
+        name = "develop"
+    name = name or "main"
+    return name, [name, f"origin/{name}"]
+
+
+def main_bases() -> list[str]:
+    """The merge-bases of HEAD with the landing branch, newest only.
+
+    `landing_refs` names the refs (`develop` and `origin/develop` on the
+    gate host since 2026-10-23); both are asked, and a base that is an
+    ancestor of the other is dropped, so a stale one of the two does not
+    count. On the landing branch itself the base is HEAD and nothing is new.
+    """
+    refs = landing_refs()[1]
     bases: set[str] = set()
     for ref in refs:
         if _git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
@@ -1009,8 +1043,8 @@ def reservation_problems(requirements: list[Requirement], model_ids: set[str]) -
     bases = main_bases()
     if not bases:
         return problems, (
-            f"{len(reserved)} range(s) reserved; no `main` to compare with (FERRIX_MAIN_REF, main, "
-            f"origin/main), so new ids were not checked against them"
+            f"{len(reserved)} range(s) reserved; no `{landing_refs()[0]}` to compare with "
+            f"({', '.join(landing_refs()[1])}), so new ids were not checked against them"
         )
     model = MODEL_DIR.relative_to(ROOT).as_posix()
     unchanged = all(_git("diff", "--quiet", base, "--", model) is not None for base in bases) and not _git(
@@ -1024,7 +1058,7 @@ def reservation_problems(requirements: list[Requirement], model_ids: set[str]) -
     }
     problems += unreserved(new, [r for base in bases for r in reservations_at(base)])
     return problems, (
-        f"{len(reserved)} range(s) reserved; {len(new)} id(s) new against main at "
+        f"{len(reserved)} range(s) reserved; {len(new)} id(s) new against {landing_refs()[0]} at "
         f"{', '.join(base[:9] for base in bases)}"
     )
 
