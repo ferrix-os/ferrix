@@ -67,7 +67,22 @@ the same folder. Left of part 2: pointer motion over a title bar still
 reaches the window under it, buttons have no hover state, tiled windows get
 no bar, and images do not yet carry the bar's configuration or start it.
 
-Next in order: 3b, 3a, 3f, 3g, 3h, 3c, 3d, 4a to 4d; 3e on the 3060.
+**Part 3's compositor half is built** (3a 0ca015f28 with 3b; 3c and 3d
+d772db2ae):
+
+| Step | What |
+|---|---|
+| 3b | `hyprctl output create headless [NAME]` / `output remove NAME` |
+| 3a | screens added and removed at runtime: `wl_output` globals for running clients, per-output objects renumbered, workspaces moved with floating windows pulled inside, a `FALLBACK` stand-in for the last screen; DRM hotplug from the existing connector event, never taking a running screen's CRTC |
+| 3c | output management lists every mode and applies `set_mode` |
+| 3d | `$XDG_STATE_HOME/hyprix/monitors.conf`: each set of monitors' arrangement, saved when a person arranges them and put back when the set is connected |
+
+The DRM hotplug path is reviewed, not run: QEMU cannot unplug a
+virtio-gpu head from outside. The N150's box test (§3.4) runs it once 3f
+is in.
+
+Next in order: 3f, 3g, 3h (the Intel driver, hooks inside `display.rs`
+only, as agreed with the GPU restart work), 4a to 4d; 3e on the 3060.
 
 ## 1. Floating mode
 
