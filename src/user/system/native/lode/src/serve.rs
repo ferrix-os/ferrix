@@ -459,7 +459,7 @@ impl Service {
             let result = match request {
                 Request::Sync => {
                     self.store.sync_if(true, now.monotonic_us);
-                    Ok(())
+                    Ok(String::new())
                 }
                 Request::Rotate => {
                     let mut held = Vec::new();
@@ -469,13 +469,10 @@ impl Service {
                         .append(held, &self.zone)
                         .map_err(|()| Step::Segment)?;
                     self.store.rotate_all();
-                    Ok(())
+                    Ok(String::new())
                 }
-                Request::Flush => self.store.flush(),
-                Request::Reload => {
-                    self.reload(now);
-                    Ok(())
-                }
+                Request::Flush => self.store.flush().map(|()| String::new()),
+                Request::Reload => Ok(self.reload(now)),
             };
             control::answer(fd, result);
         }
@@ -665,20 +662,51 @@ impl Service {
     /// `lode reload`: the rules, the alerts and the events read again; what
     /// the old rules held is said first. Retention classes take a restart,
     /// since segments are being written per class.
-    fn reload(&mut self, now: Now) {
+    fn reload(&mut self, now: Now) -> String {
         let mut said = Vec::new();
         self.limiter.flush(now.monotonic_us, &mut said);
         let configuration = configuration(&mut said, now);
+        let rules = configuration.rules.len();
+        let alerts = configuration.alerts.len();
         self.limiter = Limiter::new(configuration.rules);
         self.alerts = Alerts::new(configuration.alerts);
+        // The kinds whose switch, level or count changed.
+        let changed: Vec<String> = configuration
+            .events
+            .settings
+            .iter()
+            .filter(|new| !self.events.settings.contains(new))
+            .map(|new| {
+                alloc::format!("{} {}", new.name, if new.on { "on" } else { "off" })
+            })
+            .collect();
         self.events = configuration.events;
+        // Retention classes: what is being written is sealed under the old
+        // classes, and new segments begin under the new.
+        // Compared as written out: a class's filter has no equality of its own.
+        let classes_changed = alloc::format!("{:?}", self.store.classes)
+            != alloc::format!("{:?}", configuration.classes);
+        if classes_changed {
+            self.store.replace_classes(configuration.classes);
+        }
+        let capture = self.capture.reload();
+        let text = alloc::format!(
+            "reloaded: {rules} rule(s), {alerts} alert(s); retention {}; capture {capture}; events {}",
+            if classes_changed { "changed, segments sealed" } else { "unchanged" },
+            if changed.is_empty() {
+                String::from("unchanged")
+            } else {
+                changed.join(", ")
+            }
+        );
         said.push(ingest::own(
             5,
             ingest::MESSAGE_ID_STARTED,
-            "lode reloaded its rules, alerts and events",
+            &alloc::format!("lode {text}"),
             now,
         ));
         let _ = self.store.append(said, &self.zone);
+        text
     }
 
     /// Keep the kernel's identity line in `text`, if it is one, for the
@@ -1364,6 +1392,15 @@ impl Store {
     /// Seal every class's segment and begin the next at once (`lode
     /// rotate`), so a segment `lode delete` may rewrite is never the one
     /// being written.
+    /// Take new retention classes: every segment being written is sealed
+    /// first, so no segment holds records of two sets of classes.
+    fn replace_classes(&mut self, classes: Vec<Class>) {
+        while !self.writers.is_empty() {
+            self.seal(0);
+        }
+        self.classes = classes;
+    }
+
     fn rotate_all(&mut self) {
         let keys: Vec<Key> = self
             .writers

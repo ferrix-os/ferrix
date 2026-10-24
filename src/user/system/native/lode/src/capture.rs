@@ -85,23 +85,7 @@ pub(crate) struct Capture {
 impl Capture {
     /// Read the switch, and when on make the socket, as root.
     pub(crate) fn open() -> Capture {
-        let mut on = false;
-        let mut rules = Vec::new();
-        if let Some(bytes) = sys::read_small(CONFIG) {
-            for line in String::from_utf8_lossy(&bytes).lines() {
-                let line = line
-                    .split_once('#')
-                    .map_or(line, |(before, _)| before)
-                    .trim();
-                if let Some(value) = line.strip_prefix("Capture=") {
-                    on = matches!(value.trim(), "yes" | "true" | "on" | "1");
-                } else if let Some(expr) = line.strip_prefix("capture where ")
-                    && let Ok(expr) = filter::parse(expr)
-                {
-                    rules.push(expr);
-                }
-            }
-        }
+        let (on, rules) = read_config();
         let mut capture = Capture {
             on,
             listener: None,
@@ -119,6 +103,28 @@ impl Capture {
             let _ = sys::chmod(SOCKET, 0o666);
         }
         capture
+    }
+
+    /// Read `capture.conf` again (`lode reload`): the switch and the
+    /// rules. The socket is made as root at start, so a capture turned on
+    /// that was off then takes a restart; said so.
+    pub(crate) fn reload(&mut self) -> &'static str {
+        let (on, rules) = read_config();
+        let was = self.on;
+        self.rules = rules;
+        match (was, on, self.listener.is_some()) {
+            (_, true, false) => "on in the file, but lode must restart to listen",
+            (true, false, _) => {
+                self.on = false;
+                "turned off"
+            }
+            (false, true, true) => {
+                self.on = true;
+                "turned on"
+            }
+            (_, true, true) => "on",
+            (_, false, _) => "off",
+        }
     }
 
     /// Every descriptor to wait on.
@@ -407,4 +413,26 @@ fn said(now: Now, seqnum: u64, outcome: &str, why: &str, provider: Option<&str>)
         record.push("CAPTURE_PROVIDER", provider.as_bytes());
     }
     record
+}
+
+/// `capture.conf`: the switch and the `capture where` rules.
+fn read_config() -> (bool, Vec<Expr>) {
+    let mut on = false;
+    let mut rules = Vec::new();
+    if let Some(bytes) = sys::read_small(CONFIG) {
+        for line in String::from_utf8_lossy(&bytes).lines() {
+            let line = line
+                .split_once('#')
+                .map_or(line, |(before, _)| before)
+                .trim();
+            if let Some(value) = line.strip_prefix("Capture=") {
+                on = matches!(value.trim(), "yes" | "true" | "on" | "1");
+            } else if let Some(expr) = line.strip_prefix("capture where ")
+                && let Ok(expr) = filter::parse(expr)
+            {
+                rules.push(expr);
+            }
+        }
+    }
+    (on, rules)
 }

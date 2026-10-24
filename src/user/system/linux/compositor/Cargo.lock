@@ -504,6 +504,7 @@ version = "0.1.0"
 name = "ferrix-lode-core"
 version = "0.1.0"
 dependencies = [
+ "ferrix-slots",
  "ruzstd",
 ]
 
@@ -521,6 +522,10 @@ version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
 ]
+
+[[package]]
+name = "ferrix-slots"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-svc-proto"

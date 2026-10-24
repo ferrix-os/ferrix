@@ -208,9 +208,10 @@ run is a user-facing choice only for `sshd` ("remote login") and
 
 | Path | Keys and values | Default | Reader | When | Class |
 |---|---|---|---|---|---|
-| `/etc/ferrix/lode.d/*.rules` | one rule a line: `drop`, `sample 1/N`, `level P`, `fold DURATION`, `limit BURST/DURATION`, each `where FILTER` (`src/lib/log/lode/src/limit.rs`); a file that fails to parse is ignored whole | none; fold 30 s; limiter 10000/2000/1000 per 30 s for err/warn/chatter | lode (`native/lode/src/serve.rs:235`) | start | admin |
-| `/etc/ferrix/lode.d/retention.conf` | `class NAME [where FILTER] [keep AGE] [max SIZE] [ram-only]` (`retention.rs`) | `errors` (priority ≤ err, 1 y, 256 MiB), `system` (90 d, 1 GiB) | lode | start | admin ("keep logs for …" is a user-facing candidate) |
-| `/etc/ferrix/lode.d/capture.conf` | `Capture=yes\|true\|on\|1`; `capture where EXPR` triggers | off | lode (`capture.rs:30`) | start | admin / user-facing ("capture a screenshot with error reports") |
+| `/etc/ferrix/lode.d/*.rules` | one rule a line: `drop`, `sample 1/N`, `level P`, `fold DURATION`, `limit BURST/DURATION`, each `where FILTER` (`src/lib/log/lode/src/limit.rs`); a file that fails to parse is ignored whole | none; fold 30 s; limiter 10000/2000/1000 per 30 s for err/warn/chatter | lode (`native/lode/src/serve.rs:235`) | start, `lode reload` | admin |
+| `/etc/ferrix/lode.d/retention.conf` | `class NAME [where FILTER] [keep AGE] [max SIZE] [ram-only]` (`retention.rs`) | `errors` (priority ≤ err, 1 y, 256 MiB), `system` (90 d, 1 GiB) | lode | start, `lode reload` (the segments being written are sealed first) | admin ("keep logs for …" is a user-facing candidate) |
+| `/etc/ferrix/lode.d/capture.conf` | `Capture=yes\|true\|on\|1`; `capture where EXPR` triggers | off | lode (`capture.rs:30`) | start; `lode reload` for the switch and triggers, but turning it on when lode started with it off takes a restart (the socket is made as root) | admin / user-facing ("capture a screenshot with error reports") |
+| `/etc/ferrix/lode.d/events.conf`, then `~/.config/ferrix/lode/events.conf` | `KIND on\|off [LEVEL [COUNT]]` for `window-opened`, `app-error`, `session-streams`, `crash-names`, `process-names`, `snapshot`, `tombstone`, `capture` (`src/lib/log/lode/src/events.rs`); `lode events` lists them | window-opened and session-streams off, the rest on; tombstone 5 a signature | lode at start and `lode reload`; hyprix at each event | admin; the user's file for their session's kinds |
 | `/etc/ferrix/lode-upload.conf` (or `--config`) | `NAME URL FORMAT [auth] [ca=F [cert=F key=F]] [where EXPR]`; FORMAT `export`/`json`; plain http to localhost only; https needs `ca=` | none: the program exits 0 | lode-upload (`lode-net/src/upload.rs`, `src/lib/log/lode/src/upload.rs`) | start | admin |
 | `/etc/TZ`, else `/etc/localtime`'s POSIX footer | POSIX TZ | UTC | lode, both the service and the reader | start | **user-facing** (time zone; no other Ferrix program reads it) |
 | `/etc/machine-id` | 32 hex | — | lode, lode-upload | start | read-only |
@@ -424,7 +425,7 @@ and were not audited here. Class: admin.
 | `svc set-property UNIT Key=V… [--persistent]` | MemoryMax, MemoryHigh, TasksMax, CPUWeight, CPUQuota, IOWeight as a drop-in in `/run` or `/etc` | `admin.rs:150` | admin |
 | `svc poweroff\|reboot`, `poweroff`, `reboot`, `shutdown` | power | | user-facing |
 | `bootctl status\|try IMAGE [--tries N] [--cmdline "…"]\|verify\|good\|rollback\|init` | A/B slots and a slot's command line | `installer/src/bootctl.rs` | admin (updates) |
-| `lode mark\|rotate\|delete --where\|session` | journal | `native/lode/src/cli.rs` | admin |
+| `lode mark\|rotate\|delete --where\|session\|reload\|events` | journal; `lode reload` (root's) rereads the rules, alerts, events, retention and capture and prints what changed | `native/lode/src/cli.rs` | admin |
 | `lode-receive pair\|run\|check\|install-service\|show`, lode viewer `--pair` | log collection from other machines | `lode-net/src/bin/lode-receive.rs` | user-facing (Logs) |
 | `authctl status\|try\|reset ACCOUNT\|unlock-seat` | login throttling, the seat lock | `auth/authctl` | admin |
 | `passwd` | a password, through authd | `auth/passwd` | **user-facing** (Users) |

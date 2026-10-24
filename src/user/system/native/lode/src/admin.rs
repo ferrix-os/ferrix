@@ -53,7 +53,12 @@ pub(crate) fn ask(options: &Options) -> i32 {
         }
     }
     match ask_lode(request) {
-        Ok(()) => 0,
+        Ok(said) => {
+            if !said.is_empty() {
+                out(alloc::format!("{said}\n").as_bytes());
+            }
+            0
+        }
         Err(why) => {
             complain(&alloc::format!("lode: {why}"));
             1
@@ -62,7 +67,7 @@ pub(crate) fn ask(options: &Options) -> i32 {
 }
 
 /// Send `request` on the control socket and wait for lode's answer.
-pub(crate) fn ask_lode(request: Request) -> Result<(), String> {
+pub(crate) fn ask_lode(request: Request) -> Result<String, String> {
     let fd = cli::connect(control::SOCKET).map_err(|error| {
         alloc::format!(
             "{}: errno {} (is lode running?)",
@@ -82,7 +87,8 @@ pub(crate) fn ask_lode(request: Request) -> Result<(), String> {
     sys::close(fd);
     let text = String::from_utf8_lossy(&answer);
     match text.trim_end() {
-        "OK" => Ok(()),
+        "OK" => Ok(String::new()),
+        said if said.starts_with("OK ") => Ok(String::from(said.get(3..).unwrap_or_default())),
         other => Err(String::from(
             other.strip_prefix("ERR ").unwrap_or("lode did not answer"),
         )),

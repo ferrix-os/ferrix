@@ -383,7 +383,14 @@ say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
 ( echo "teed line"; $bb sleep 1 ) | /bin/lode cat -t teey --tee /tmp/teey.log
 echo "echoed line" | /bin/lode cat -t echoey --echo
 $bb sleep 2
-say "streams: $($bb cat /tmp/teey.log) $(/bin/lode -b -t teey -o cat | $bb wc -l) $(/bin/lode -b -g '^echoed line$' -o cat | $bb wc -l) $(/bin/lode -b -t echoey -o json | $bb grep -c '"_KERNEL_SEQNUM"') $(/bin/lode events | $bb grep -c '^app-error  *on ') $(/bin/lode reload && echo reloaded)"
+say "streams: $($bb cat /tmp/teey.log) $(/bin/lode -b -t teey -o cat | $bb wc -l) $(/bin/lode -b -g '^echoed line$' -o cat | $bb wc -l) $(/bin/lode -b -t echoey -o json | $bb grep -c '"_KERNEL_SEQNUM"') $(/bin/lode events | $bb grep -c '^app-error  *on ') $(/bin/lode reload > /dev/null && echo reloaded)"
+# lode reload says what changed: an event kind switched, retention given
+# a class (its segments sealed first), capture as it was.
+echo 'window-opened on' > /etc/ferrix/lode.d/events.conf
+echo 'class all keep 7d' > /etc/ferrix/lode.d/retention.conf
+say "reload: $(/bin/lode reload | $bb grep -c 'retention changed, segments sealed; capture on; events window-opened on$')"
+$bb rm /etc/ferrix/lode.d/events.conf /etc/ferrix/lode.d/retention.conf
+/bin/lode reload > /dev/null
 say "names: $(/bin/lode -b -t teey -o json | $bb grep -c '"_CMDLINE":"/bin/lode cat -t teey --tee /tmp/teey.log"') $(/bin/lode -b -u lode-test -g 'to stderr once' -o json | $bb grep -c '"_EXE":"/bin/busybox"')"
 # For a box run (the customer's acceptance case): what a hung process is
 # doing, a file a program writes followed, the boot's image and command line.
@@ -719,6 +726,12 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
              lode reload failed",
         ),
         (
+            "lode-test: reload:",
+            "1",
+            "lode reload did not say that the retention classes changed and an event kind was \
+             switched",
+        ),
+        (
             "lode-test: names:",
             "1 1",
             "a stream's record did not carry its writer's _CMDLINE, or a unit's line its \
@@ -933,6 +946,7 @@ lode-test: jctl admin: synced flushed rotated 1
 lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
 lode-test: streams: teed line 1 1 1 1 reloaded
+lode-test: reload: 1
 lode-test: names: 1 1
 lode-test: box: 1 1 3 1
 lode-test: crash: 1

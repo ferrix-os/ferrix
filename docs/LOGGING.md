@@ -2288,7 +2288,7 @@ architectures.
 | Session programs' output under their names | built, landing | §18 "Session programs, names and event kinds"; `test-log` "streams" row |
 | Names and paths on every record | built, landing | `_COMM`, `_CMDLINE`, `_EXE` (from init for units); `test-log` "names" row |
 | App-error events with a screenshot | built, landing | hyprix `lode_events.rs`; `Capture=yes` on desktop images |
-| Event kinds configurable and reloadable | partly | `events.conf`, `lode events`, `lode reload` (rules, alerts, events; not yet retention or capture) |
+| Event kinds configurable and reloadable | built | `events.conf`, `lode events`, `lode reload` (rules, alerts, events, retention, capture), which says what changed; `test-log` "reload" row |
 | Hang snapshot (`lode snapshot PID`) | built, landing | §18 "Hang snapshots"; `test-log` "box" row |
 | The image and command line on the boot record | built, landing | `BOOT_IMAGE`, `BOOT_CMDLINE`, `BOOT_DEPLOY` |
 
@@ -2543,3 +2543,18 @@ the blob references `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
   `test-log-budget` (there is nothing to measure before the collector
   writes blobs; the screenshot rate limit stands); the tombstone retention
   class and `BlobMaxUse=`; `--blobs` on JSON output.
+
+### `lode reload`, whole (2026-10-24; Settings plan B8, RUNTIME-SETTINGS finding 2)
+
+`lode reload` (root's, on the control socket) has lode read every file of
+`/etc/ferrix/lode.d` again and answers with what changed, which `lode
+reload` prints and a record keeps: `reloaded: N rule(s), M alert(s);
+retention changed, segments sealed|unchanged; capture on|off|turned
+on|turned off|on in the file, but lode must restart to listen; events
+KIND on|off, ...|unchanged`. The limiter's held counts are said before
+the new rules take over; new retention classes seal every segment being
+written first, so no segment mixes two sets of classes; capture's switch
+and triggers change at once, except that a capture off at start needs a
+restart to be turned on (its socket is made as root). `test-log`'s
+"reload" row switches an event kind and the classes and reads the
+answer. SIGHUP is not used: lode's control socket is root's and answers.

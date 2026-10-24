@@ -120,10 +120,12 @@ impl Control {
     }
 }
 
-/// Say how a request ended, and close its connection.
-pub(crate) fn answer(fd: usize, result: Result<(), String>) {
+/// Say how a request ended -- `OK`, with what was done when there is
+/// something to say, or `ERR` and why -- and close its connection.
+pub(crate) fn answer(fd: usize, result: Result<String, String>) {
     let line = match result {
-        Ok(()) => String::from("OK\n"),
+        Ok(said) if said.is_empty() => String::from("OK\n"),
+        Ok(said) => alloc::format!("OK {}\n", said.replace('\n', "; ")),
         Err(why) => alloc::format!("ERR {why}\n"),
     };
     let _ = sys::write_all(fd, line.as_bytes());
