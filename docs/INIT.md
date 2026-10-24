@@ -642,6 +642,10 @@ begins at a start, holds while no more than the interval has passed since,
 and the first start after that begins the next, counting from one. Each restart doubles the delay, up to
 `RestartSec=` times 32. A restart always begins with an empty cgroup: a
 service's leftovers from its last run are killed before it starts again.
+While `lode crashd` holds `/dev/ferrix-crashes` open, a unit or a driver
+that ends by a fault of its own ends up to 2 s later, so its restart, by
+init or by `devmgr` (T0's driver restart included), can start up to 2 s
+later too (`docs/LOGGING.md` §21.7, MEMORY-AND-TIMING §2.2y).
 
 `devmgr` has the same problem with no clock. It restarts a display driver at
 most eight times, counted (`docs/DEVMGR.md` §4), through the same `Policy`
@@ -943,8 +947,16 @@ Init then:
    is `getty-generator`, which writes a `getty@<name>.service` link into
    `multi-user.target.wants` for every terminal the kernel command line names
    in `console=`, and for `/dev/console` otherwise.
-4. Loads the units and starts `default.target`, or `ferrix.target=`.
-5. Prints one boot-log line per unit that becomes active or fails, in the
+4. Once `/` is settled (the root volume, or memory), makes
+   `/etc/machine-id` when there is none, as systemd does on a first boot:
+   128 bits of the kernel's random marked as a version 4 UUID, 32 hex
+   digits, mode 0444 (`init/src/machine_id.rs`). lode stamps it on every
+   record and lode-upload sends it, so a receiver keeps each machine in a
+   store named by it, not by a host name two machines may share. A root on
+   a disk keeps it; a root in memory gets a new one each boot. Then each
+   account's missing home is made.
+5. Loads the units and starts `default.target`, or `ferrix.target=`.
+6. Prints one boot-log line per unit that becomes active or fails, in the
    `  init     …` format `xtask` reads.
 
 If `default.target`'s transaction fails, init starts `rescue.target`, a shell
@@ -1041,11 +1053,19 @@ svc scope …            svc set-property unit Key=value [--persistent]
 svc top                (cgroup usage per unit, from the controller files)
 ```
 
-There is no journal. A service's standard output and error default to `log`:
-a pipe init reads, prefixes each line with the unit's name, writes to the
-console, and keeps in a ring of the last 256 lines per unit for
-`svc log unit`. A journal, if one is ever wanted, is a service that takes
-`Uses=ferrix.log`, and nothing here needs to be written differently for it.
+A service's standard output and error default to `log`: a pipe init
+reads -- one for standard output and one for standard error -- prefixes
+each line with the unit's name, writes to the console, and keeps in a ring
+of the last 256 lines per unit. Since 2026-10-23 each line also goes to the
+log manager, lode, on its root-only `/run/lode/units`, with the unit, its
+run, the process, its ids and the stream (`docs/LOGGING.md` §4.2, §18
+"Users' own records and units' runs"); nothing waits for lode, and the
+console copy is how a line reaches the log while lode is not there. Each
+start of a unit -- each time its cgroup is made -- draws a run id, which its
+processes get as `INVOCATION_ID` and `svc status` shows. `svc status` ends
+with the run's last ten lines and `svc log unit` shows the current or last
+run, both from lode (`lode -u UNIT@last`), falling back to init's ring when
+lode keeps nothing the caller may read.
 
 ## 11. What the kernel needs, besides stage 13
 

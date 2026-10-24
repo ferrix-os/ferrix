@@ -338,6 +338,18 @@ impl<A> SocketBuffer<A> {
         self.capacity.saturating_sub(self.charged)
     }
 
+    /// How much of a stream write of `len` bytes must find room at once:
+    /// all of it up to half the capacity, which is what one of Linux's
+    /// socket buffers holds (`unix_stream_sendmsg` sizes each at most
+    /// `sk_sndbuf / 2`, and queues it whole or waits). So a small write is
+    /// never cut short and never torn by another writer's: a non-blocking
+    /// one is whole or `EAGAIN`, and a blocking one waits until it fits.
+    /// Wine's server and X servers send small messages and treat a short
+    /// count as a broken peer.
+    fn stream_unit(&self, len: usize) -> usize {
+        len.min((self.capacity / 2).max(1))
+    }
+
     /// Whether [`SocketBuffer::read`] would not answer
     /// [`ReadOutcome::WouldBlock`]: the condition a blocked reader waits for.
     ///
@@ -352,8 +364,8 @@ impl<A> SocketBuffer<A> {
     /// [`WriteOutcome::WouldBlock`]: the condition a blocked writer waits for.
     ///
     /// The write's own rules, so a writer woken by this never finds it still
-    /// cannot write: a stream needs room for one byte, a record room for all
-    /// of it. With the reader gone, or a record too big to ever fit, it is
+    /// cannot write: a stream needs room for all of a write up to half its
+    /// capacity, a record room for all of it. With the reader gone, or a record too big to ever fit, it is
     /// true, because the write then answers [`WriteOutcome::Broken`] or
     /// [`WriteOutcome::TooBig`] rather than waiting for room nobody will make.
     #[must_use]
@@ -362,8 +374,20 @@ impl<A> SocketBuffer<A> {
             return true;
         }
         match self.kind {
-            Kind::Stream => len == 0 || self.free() > 0,
+            Kind::Stream => len == 0 || self.free() >= self.stream_unit(len),
             Kind::Record => len > self.capacity || self.free() >= len.max(1),
+        }
+    }
+
+    /// Whether a writer polling for room is told it has some: for a stream,
+    /// room for any write up to half the capacity, so a small write after
+    /// `POLLOUT` never answers `EAGAIN` (Linux says writable only with three
+    /// quarters free); for a record, room for one byte, as before.
+    #[must_use]
+    pub fn writable(&self) -> bool {
+        match self.kind {
+            Kind::Stream => self.can_write(usize::MAX),
+            Kind::Record => self.can_write(1),
         }
     }
 
@@ -376,7 +400,8 @@ impl<A> SocketBuffer<A> {
     /// where it was, so a writer that waits for room retries with it, and one
     /// that gives up drops it after releasing the lock.
     ///
-    /// A stream takes whatever room there is. Bytes without ancillary data
+    /// A stream takes whatever room there is once a whole
+    /// write of up to half the capacity fits, and otherwise nothing. Bytes without ancillary data
     /// join the last segment if that has none either; bytes with it start a
     /// segment of their own, which is the boundary a read stops at. A record
     /// goes in whole or not at all.
@@ -395,7 +420,7 @@ impl<A> SocketBuffer<A> {
             return WriteOutcome::Wrote(0);
         }
         let count = data.len().min(self.free());
-        if count == 0 {
+        if count == 0 || self.free() < self.stream_unit(data.len()) {
             return WriteOutcome::WouldBlock;
         }
         let accepted = data.get(..count).unwrap_or_default();

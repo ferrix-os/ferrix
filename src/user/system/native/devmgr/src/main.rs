@@ -15,8 +15,9 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
+use core::fmt;
 use core::time::Duration;
+use ferrix_rt::log::Level;
 
 use ferrix_blkring::control::{Block, CONTROL_RIGHTS, DEVICE_RIGHTS, Message as Ring, Start};
 use ferrix_blkring::identity::DiskName;
@@ -533,9 +534,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         };
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let Ok(info) = device.info() else {
-            say(format_args!(
-                "devmgr   device {index}: no info; not started"
-            ));
+            ferrix_rt::warn!("devmgr   device {index}: no info; not started");
             failed += 1;
             continue;
         };
@@ -547,12 +546,12 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         };
         let name = driver_name(&given.names, driver);
         let Some(plan) = plan_for(kind, &info, &mut disks) else {
-            say_unstarted(name, info.location, "no plan for the device; not started");
+            say_unstarted(Level::Notice, name, info.location, UNPLANNED);
             failed += 1;
             continue;
         };
         let Some(slot) = started.get_mut(count as usize) else {
-            say_unstarted(name, info.location, "no slot left; not started");
+            say_unstarted(Level::Warning, name, info.location, NO_SLOT);
             failed += 1;
             continue;
         };
@@ -672,25 +671,33 @@ fn say_started(
     idle: bool,
     process: &Process<Kernel>,
 ) {
-    say(format_args!(
-        "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
-        info.location,
-        info.vendor_id,
-        info.device_id,
-        if published {
-            "started"
-        } else if idle {
-            "nothing to serve; stopped"
-        } else {
-            "ended before it published"
-        }
-    ));
+    let level = if published || idle {
+        Level::Info
+    } else {
+        Level::Err
+    };
+    say(
+        level,
+        format_args!(
+            "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
+            info.location,
+            info.vendor_id,
+            info.device_id,
+            if published {
+                "started"
+            } else if idle {
+                "nothing to serve; stopped"
+            } else {
+                "ended before it published"
+            }
+        ),
+    );
     if !published && !idle {
-        say(format_args!(
+        ferrix_rt::err!(
             "devmgr   {name} {:#010x}: exit status {}",
             info.location,
             died_status(exit_of(process))
-        ));
+        );
     }
 }
 
@@ -708,18 +715,27 @@ fn bound(channel: &Channel<Kernel>, index: u32, driver: u16) {
 /// The console lines for a driver that could not be started, a GPU's own
 /// line besides.
 fn say_start_failed(name: &str, location: u32, plan: &Plan) {
-    say_unstarted(name, location, "could not be started");
+    say_unstarted(Level::Err, name, location, "could not be started");
     if let Plan::Gpu(program) = plan {
-        say(format_args!(
+        ferrix_rt::err!(
             "devmgr   gpu {} not started: {program} could not be started",
             gpu::Place(location)
-        ));
+        );
     }
 }
 
+/// Why a device's driver was not started: no plan names it.
+const UNPLANNED: &str = "no plan for the device; not started";
+
+/// Why a device's driver was not started: every slot is taken.
+const NO_SLOT: &str = "no slot left; not started";
+
 /// The console line for a device whose driver was not started, and `why`.
-fn say_unstarted(name: &str, location: u32, why: &str) {
-    say(format_args!("devmgr   {name} {location:#010x}: {why}"));
+fn say_unstarted(level: Level, name: &str, location: u32, why: &str) {
+    say(
+        level,
+        format_args!("devmgr   {name} {location:#010x}: {why}"),
+    );
 }
 
 /// [`await_published`] for a driver started at boot, which has no deadline.
@@ -772,13 +788,9 @@ fn spawn_updater(drivers: &Drivers<'_>, port: &Port<Kernel>) -> Option<Updater> 
         })
     })();
     if started.is_none() {
-        say(format_args!(
-            "devmgr   drvupdated could not be started: no driver updates"
-        ));
+        ferrix_rt::warn!("devmgr   drvupdated could not be started: no driver updates");
     } else {
-        say(format_args!(
-            "devmgr   drvupdated started: driver updates are taken"
-        ));
+        ferrix_rt::info!("devmgr   drvupdated started: driver updates are taken");
     }
     started
 }
@@ -845,14 +857,22 @@ fn spawn_events(drivers: &Drivers<'_>) -> Option<Events> {
             _process: process,
         })
     })();
-    say(format_args!(
-        "devmgr   devmgr-events {}",
-        if started.is_some() {
-            "started: drivers' deaths and restarts are published"
-        } else {
-            "could not be started: nothing is published"
-        }
-    ));
+    let level = if started.is_some() {
+        Level::Info
+    } else {
+        Level::Warning
+    };
+    say(
+        level,
+        format_args!(
+            "devmgr   devmgr-events {}",
+            if started.is_some() {
+                "started: drivers' deaths and restarts are published"
+            } else {
+                "could not be started: nothing is published"
+            }
+        ),
+    );
     started
 }
 
@@ -1471,9 +1491,7 @@ fn take_updates(
         }
     };
     if gone {
-        say(format_args!(
-            "devmgr   drvupdated has ended: no more driver updates"
-        ));
+        ferrix_rt::warn!("devmgr   drvupdated has ended: no more driver updates");
         *updates = None;
     } else if let Some(updater) = updates.as_ref() {
         let _ =
@@ -1520,9 +1538,9 @@ fn update_driver(
         // the updater carries both.
         let keeper = worker_image(entry.plan, drivers).is_some();
         if keeper {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "devmgr   an update of {program} alone is refused: it runs as a keeper over {WORKER_NAME}, and the two are replaced together or not at all"
-            ));
+            );
         }
         let refused = if keeper || !restarted(entry.kind, entry.location) {
             Outcome::NotRestarted
@@ -1548,10 +1566,11 @@ fn update_driver(
         };
     };
     if !loads(drivers.job, &image.vmo, program) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "devmgr   update of {program} refused: the kernel's loader did not take {} bytes, fnv64 {:016x}, or its trial did not end",
-            image.length, image.fingerprint
-        ));
+            image.length,
+            image.fingerprint
+        );
         return Answer {
             outcome: Outcome::Refused,
             updated: 0,
@@ -1679,18 +1698,17 @@ fn swap(
         .encode(),
     );
     if !entry.quiesced {
-        say(format_args!(
-            "devmgr   {program} {place} update failed: the device would not quiesce"
-        ));
+        ferrix_rt::err!("devmgr   {program} {place} update failed: the device would not quiesce");
         return Outcome::Failed;
     }
     let previous = entry.image.replace(mine);
     let deadline = Deadline::At(now.saturating_add(UPDATE_PATIENCE_NANOS));
     if launch_again(channel, port, slot, entry, drivers, inbox, deadline) {
-        say(format_args!(
+        ferrix_rt::notice!(
             "devmgr   {program} {place} updated: {} bytes, fnv64 {:016x} (was {was})",
-            image.length, image.fingerprint
-        ));
+            image.length,
+            image.fingerprint
+        );
         return Outcome::Updated;
     }
     // Back to the image it had, kept until now for this. A new driver that
@@ -1702,15 +1720,16 @@ fn swap(
     take_requests(channel, inbox);
     entry.image = previous;
     if entry.quiesced && launch_again(channel, port, slot, entry, drivers, inbox, Deadline::Never) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "devmgr   {program} {place} rolled back: {} bytes, fnv64 {:016x} did not publish; {was} drives it again",
-            image.length, image.fingerprint
-        ));
+            image.length,
+            image.fingerprint
+        );
         return Outcome::RolledBack;
     }
-    say(format_args!(
+    ferrix_rt::err!(
         "devmgr   {program} {place} update failed: neither image published; the device stays quiesced"
-    ));
+    );
     Outcome::Failed
 }
 
@@ -1957,14 +1976,14 @@ fn end_job_tree(job: &Job<Kernel>, location: u32) -> bool {
         .wait_one(Signals::EMPTY, Deadline::At(now.saturating_add(TREE_NANOS)))
         .is_ok();
     if ended {
-        say(format_args!(
+        ferrix_rt::info!(
             "devmgr   the driver of {location:#010x} and every process in its job have ended"
-        ));
+        );
     } else {
-        say(format_args!(
+        ferrix_rt::err!(
             "devmgr   the driver of {location:#010x} left a process in its job {} s after the kill; the device is not handed on",
             TREE_NANOS / 1_000_000_000
-        ));
+        );
     }
     ended
 }
@@ -2072,55 +2091,24 @@ impl gpu::Node for GpuNode<'_> {
 /// `true` when the driver may be started.
 fn hand_over_gpu(keep: &Device<Kernel>, info: &DeviceInfo) -> bool {
     let outcome = gpu::hand_over(&GpuNode(keep));
-    say(format_args!("{}", outcome.line(info.location)));
+    let level = if outcome.starts() {
+        Level::Info
+    } else {
+        Level::Warning
+    };
+    say(level, format_args!("{}", outcome.line(info.location)));
     if let HandOver::Start { budget, .. } = outcome {
-        say(format_args!("{}", budget.line(info.location)));
+        ferrix_rt::info!("{}", budget.line(info.location));
     }
     outcome.starts()
 }
 
-/// A line on standard error, which a native process has open on the
-/// console: how devmgr's own decisions reach the boot log, since the kernel
-/// prints only what the bootstrap protocol carries.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-/// A line of devmgr's, cut at its buffer's end.
-struct Line {
-    bytes: [u8; 256],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Line {
-        Line {
-            bytes: [0; 256],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or_default()
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            let Some(slot) = self.bytes.get_mut(self.len) else {
-                return Err(fmt::Error);
-            };
-            *slot = byte;
-            self.len += 1;
-        }
-        Ok(())
-    }
+/// A line of devmgr's log at `level`: a record of its own on `/dev/kmsg`
+/// (`ferrix_rt::log`), which the console prints and lode stores with its
+/// level as stated -- how devmgr's own decisions reach the boot log, since
+/// the kernel prints only what the bootstrap protocol carries.
+fn say(level: Level, arguments: fmt::Arguments<'_>) {
+    ferrix_rt::log::line(level, arguments);
 }
 
 /// A disk's driver -- virtio-blk's, an NVMe or AHCI controller's, or an

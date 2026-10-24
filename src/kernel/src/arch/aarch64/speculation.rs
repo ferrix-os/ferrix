@@ -4,15 +4,18 @@
 //! Each processor decides for itself, as it starts, from its own ID registers
 //! and what firmware says about it through SMCCC: the cores of one machine need
 //! not be alike. Only how firmware is reached, and whether it answers SMCCC at
-//! all, is found once, on the boot processor. Once every processor has
+//! all, is found once, on the boot processor. Under a hypervisor, where a
+//! vCPU's `MIDR_EL1` is whichever physical core it last ran on, the part
+//! number decides nothing: every processor takes the most any listed core
+//! needs (FX-0307). Once every processor has
 //! started, [`report_once_started`] says what the machine is exposed to, a
 //! line per kind of core.
 //!
 //! | Hazard | Defence here | When |
 //! |---|---|---|
 //! | Spectre v1 | indices clamped with `csel` and `csdb` | always |
-//! | Spectre v2 | firmware's `ARCH_WORKAROUND_1` when the processor switches address space | the core lacks `CSV2`, is not on Arm's list of unaffected cores, and firmware says this core needs it |
-//! | Spectre-BHB | the branch history overwritten by a loop on every entry from EL0 | the core is on Arm's list, and lacks `ECBHB` |
+//! | Spectre v2 | firmware's `ARCH_WORKAROUND_1` when the processor switches address space | the core lacks `CSV2`, is not on Arm's list of unaffected cores (a list not trusted under a hypervisor), and firmware says this core needs it |
+//! | Spectre-BHB | the branch history overwritten by a loop on every entry from EL0 | the core is on Arm's list, or PSCI is reached through `hvc`; and lacks `ECBHB` |
 //! | Speculative store bypass | `PSTATE.SSBS` clear in EL1 (`SCTLR_EL1.DSSBS`) and for a program's first instruction; firmware's `ARCH_WORKAROUND_2` without `SSBS` | the core has `SSBS`, or firmware says this core needs the workaround |
 //! | Meltdown | none: KPTI is not built | reported, and excluded by AoU-11 |
 //!
@@ -65,6 +68,17 @@ const CONDUIT_SMC: u8 = 2;
 /// Whether firmware answers `SMCCC_ARCH_FEATURES`, which the boot processor
 /// finds out once: whether a core may ask it about the workarounds.
 static ARCH_FEATURES_ANSWERED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the `MIDR_EL1` a processor reads may change under it: PSCI is
+/// reached through `hvc`, so a hypervisor runs this kernel, and KVM shows a
+/// vCPU the `MIDR_EL1` of whichever physical core it was last loaded on
+/// (FX-0307: a Pixel 7's crosvm read an A78's, then an X1's, on one vCPU).
+/// The boot processor finds it once, with the conduit.
+static MIDR_UNSTABLE: AtomicBool = AtomicBool::new(false);
+
+/// The most branches the entry loop needs on any core Arm lists: the
+/// Cortex-X3's and Neoverse V2's 132, Linux's `spectre_bhb_k132_list`.
+const BHB_LOOPS_MOST: u64 = 132;
 
 /// Whether a switch of address space calls `ARCH_WORKAROUND_1`, by logical
 /// processor: each core's own decision, read by the core that switches.
@@ -163,9 +177,10 @@ impl Core {
     }
 
     /// Whether the core's own hardware keeps it from Spectre v2: `CSV2`, or
-    /// Arm's list. Only a core without either needs firmware's workaround.
-    fn v2_unaffected(self) -> bool {
-        self.csv2 || self.v2_listed_safe()
+    /// Arm's list, which says nothing where the `MIDR_EL1` may change under
+    /// the processor. Only a core without either needs firmware's workaround.
+    fn v2_unaffected(self, midr_unstable: bool) -> bool {
+        self.csv2 || (!midr_unstable && self.v2_listed_safe())
     }
 
     /// The branches the BHB loop must take on this core: Arm's figures for
@@ -187,6 +202,18 @@ impl Core {
             // Cortex-A57, A72.
             Some(0xD07 | 0xD08) => 8,
             _ => 0,
+        }
+    }
+
+    /// The branches the BHB loop must take for this core on a processor
+    /// whose `MIDR_EL1` may change under it: the most any listed core needs
+    /// unless `ECBHB`, which KVM shows a guest only where every host core has
+    /// it, says the history is not shared; [`Core::bhb_loops`] otherwise.
+    fn bhb_loops_needed(self, midr_unstable: bool) -> u64 {
+        if midr_unstable && !self.ecbhb {
+            BHB_LOOPS_MOST
+        } else {
+            self.bhb_loops()
         }
     }
 
@@ -289,7 +316,7 @@ fn answers_arch_features(conduit: u8) -> bool {
 /// Ask firmware what it says about the running core, for what the core's own
 /// hardware does not already settle: workaround 1 only on a core Spectre v2
 /// affects, workaround 2 only on one without `SSBS`.
-fn ask_about_this_core(core: Core) -> Firmware {
+fn ask_about_this_core(core: Core, midr_unstable: bool) -> Firmware {
     if !ARCH_FEATURES_ANSWERED.load(Ordering::Acquire) {
         return Firmware::default();
     }
@@ -298,7 +325,7 @@ fn ask_about_this_core(core: Core) -> Firmware {
         Answer::from_status(firmware_call(conduit, smccc::ARCH_FEATURES, workaround) as u32 as i32)
     };
     Firmware {
-        workaround_1: if core.v2_unaffected() {
+        workaround_1: if core.v2_unaffected(midr_unstable) {
             Answer::NotSupported
         } else {
             ask(smccc::WORKAROUND_1)
@@ -338,6 +365,7 @@ pub(crate) fn init(view: &BootView<'_>) {
         Err(_) => CONDUIT_NONE,
     };
     CONDUIT.store(conduit, Ordering::Relaxed);
+    MIDR_UNSTABLE.store(conduit == CONDUIT_HVC, Ordering::Relaxed);
     ARCH_FEATURES_ANSWERED.store(answers_arch_features(conduit), Ordering::Release);
     let applied = decide_and_apply();
     println!("  cpu      speculation defences: {}", applied.names());
@@ -363,24 +391,26 @@ pub(crate) fn apply_this_cpu() {
 /// applied, and answer what it applied.
 fn decide_and_apply() -> Defences {
     let core = Core::read();
-    let firmware = ask_about_this_core(core);
-    let plan = plan_for(core, firmware);
+    let midr_unstable = MIDR_UNSTABLE.load(Ordering::Relaxed);
+    let firmware = ask_about_this_core(core, midr_unstable);
+    let plan = plan_for(core, firmware, midr_unstable);
     let cpu = this_cpu();
     if let Some(slot) = SEEN.get(cpu) {
         slot.store(Seen { core, firmware }.pack(), Ordering::Release);
     }
-    let applied = apply(plan, core, cpu);
+    let applied = apply(plan, core, cpu, midr_unstable);
     record_this_cpu(applied);
     applied
 }
 
-/// What `core` needs, given what firmware said about it.
-fn plan_for(core: Core, firmware: Firmware) -> Defences {
+/// What `core` needs, given what firmware said about it and whether its
+/// `MIDR_EL1` may change under the processor.
+fn plan_for(core: Core, firmware: Firmware, midr_unstable: bool) -> Defences {
     let mut plan = Defences::CLAMPED_INDICES;
-    if !core.v2_unaffected() && firmware.workaround_1 == Answer::Required {
+    if !core.v2_unaffected(midr_unstable) && firmware.workaround_1 == Answer::Required {
         plan = plan.with(Defences::SWITCH_BARRIER);
     }
-    if core.bhb_loops() > 0 {
+    if core.bhb_loops_needed(midr_unstable) > 0 {
         plan = plan.with(Defences::BHB_LOOP);
     }
     if core.ssbs > 0 || firmware.workaround_2 == Answer::Required {
@@ -391,9 +421,9 @@ fn plan_for(core: Core, firmware: Firmware) -> Defences {
 
 /// Apply `plan` on this core, logical processor `cpu`, read back what can
 /// be, and say what took.
-fn apply(plan: Defences, core: Core, cpu: usize) -> Defences {
+fn apply(plan: Defences, core: Core, cpu: usize, midr_unstable: bool) -> Defences {
     let mut held = true;
-    let _ = BHB_LOOPS.fetch_max(core.bhb_loops(), Ordering::Relaxed);
+    let _ = BHB_LOOPS.fetch_max(core.bhb_loops_needed(midr_unstable), Ordering::Relaxed);
     if plan.contains(Defences::SSBD) && core.ssbs > 0 {
         let sctlr = cpu::read_sctlr();
         // SAFETY: (PROTECT) clearing DSSBS changes only the value `PSTATE.SSBS` takes
@@ -477,7 +507,7 @@ fn kind_of(logical: usize) -> Option<(u64, Defences)> {
 /// designed the core and which part it is, for `/proc/cpuinfo`. `None` for a
 /// processor that has not recorded, and in a kernel built without its
 /// side-channel defences, which records nothing.
-pub(crate) fn midr_of(logical: usize) -> Option<u32> {
+pub fn midr_of(logical: usize) -> Option<u32> {
     let seen = Seen::unpack(SEEN.get(logical)?.load(Ordering::Acquire))?;
     u32::try_from(seen.core.midr).ok()
 }
@@ -544,7 +574,7 @@ impl Exposure {
         let Exposure(Seen { core, firmware }, plan) = self;
         if core.csv2 {
             "not affected (CSV2)"
-        } else if core.v2_listed_safe() {
+        } else if core.v2_unaffected(MIDR_UNSTABLE.load(Ordering::Relaxed)) {
             "not affected (Arm lists this core as unaffected)"
         } else if plan.contains(Defences::SWITCH_BARRIER) {
             "covered between programs"
@@ -576,7 +606,16 @@ impl core::fmt::Display for Exposure {
         let Exposure(Seen { core, .. }, plan) = *self;
         write!(f, "Spectre v2 {}; Spectre-BHB ", self.v2())?;
         if plan.contains(Defences::BHB_LOOP) {
-            write!(f, "covered ({} branches)", core.bhb_loops())?;
+            write!(
+                f,
+                "covered ({} branches)",
+                BHB_LOOPS.load(Ordering::Relaxed)
+            )?;
+            if MIDR_UNSTABLE.load(Ordering::Relaxed) {
+                f.write_str(
+                    ", the most any listed core needs: under a hypervisor MIDR_EL1 may change",
+                )?;
+            }
         } else if core.ecbhb {
             f.write_str("not affected (ECBHB)")?;
         } else {

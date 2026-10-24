@@ -21,7 +21,7 @@ use ferrix_procfs::mounts::{self, Mount, MountInfo};
 use ferrix_procfs::net as procfs_net;
 use ferrix_procfs::partitions::{self, Partition};
 use ferrix_procfs::stat::{self, Stat};
-use ferrix_procfs::status::{self, State, Status};
+use ferrix_procfs::status::{self, SignalMasks, State, Status};
 use ferrix_procfs::sysctl;
 use ferrix_vfs::fd::MAX_LIMIT;
 use ferrix_vfs::{Errno, Location, MountFlags, Namespace, OpenFile, Result};
@@ -788,6 +788,57 @@ pub(super) fn cmdline(process: &Process) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Who a process that a fault ended was, for the line the kernel log says
+/// beside the core's `ended by signal` (`docs/LOGGING.md` §18, crash
+/// records): its name, the path it was started from (` (deleted)` as
+/// `/proc/<pid>/exe` shows it), the file mapping `pc` is in with `pc`'s
+/// offset into that file, and its command line, arguments joined by spaces
+/// and cut at 512 bytes, each field with its control bytes as spaces. Read
+/// while the faulting thread still runs in the process, so its address
+/// space is all there: after the end, nothing is.
+pub(super) fn crash_identity(process: &Process, pc: u64) -> Vec<u8> {
+    // Every field is said with its control bytes as spaces: a name or a
+    // path can hold a newline, and the line must stay one line.
+    let clean = |out: &mut Vec<u8>, bytes: &[u8]| {
+        out.extend(bytes.iter().map(|&byte| {
+            if byte < 0x20 || byte == 0x7f {
+                b' '
+            } else {
+                byte
+            }
+        }));
+    };
+    let mut out = Vec::new();
+    clean(
+        &mut out,
+        &attributes::name_bytes(&attributes::name_of(process)),
+    );
+    out.extend_from_slice(b" exe ");
+    clean(
+        &mut out,
+        &exe(process).unwrap_or_else(|_| Vec::from(&b"?"[..])),
+    );
+    out.extend_from_slice(b" at ");
+    let root = process.fs_context().lock().root.clone();
+    let module = process.space().regions().ok().and_then(|regions| {
+        let region = regions.into_iter().find(|region| holds(region, pc))?;
+        let (id, offset) = region.file?;
+        let file = process
+            .space()
+            .mapped_file(id)?
+            .downcast::<OpenFile>()
+            .ok()?;
+        let mut name = located(file.location(), &root);
+        let into = pc.saturating_sub(region.start).saturating_add(offset);
+        name.extend_from_slice(alloc::format!("+{into:#x}").as_bytes());
+        Some(name)
+    });
+    clean(&mut out, module.as_deref().unwrap_or(b"?"));
+    out.extend_from_slice(b" cmdline ");
+    clean(&mut out, &process.args_prefix(512));
+    out
+}
+
 /// `/proc/<pid>/cgroup`: the one line of the unified hierarchy, `0::/path`,
 /// naming the cgroup -- the job -- the process is in, as the reader's cgroup
 /// namespace sees it: relative to that namespace's root, and climbing out of
@@ -1074,17 +1125,23 @@ impl Memory {
 ///   exited, was killed, or was killed while stopped; and for a leader that
 ///   has ended while other threads of its process run.
 /// * `T` while it is stopped by a signal, whatever its threads were doing.
+/// * `t` while a fault of it is held for `/dev/ferrix-crashes`.
 /// * `D` while the thread waits in `vfork` for its child to let go.
 /// * `R` for a thread that is running or waiting its turn, and `S` for one
 ///   waiting for something.
 ///
-/// `t` is a tracer's stop, and nothing traces a process here.
+/// `t` is otherwise a tracer's stop, and nothing traces a process here.
 fn state_of(process: &Process, tid: u32) -> State {
     if process.is_released() {
         return State::Zombie;
     }
     if process.is_stopped() {
         return State::Stopped;
+    }
+    // Held for a crash reader (`fs::crashes`): stopped as a tracer stops
+    // it, which no parent is told of.
+    if process.is_held() {
+        return State::TracingStop;
     }
     // The reader is running, whether or not its process lists it: one the
     // kernel runs for a check lists neither its thread nor its task.
@@ -1254,6 +1311,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     let fd_size = highest
         .and_then(|fd| u32::try_from(fd).ok())
         .map_or(64, |fd| fd.saturating_add(1).next_power_of_two().max(64));
+    let signals = signal_masks(process, tid);
     let status = Status {
         name: &name,
         umask: process.umask(),
@@ -1277,6 +1335,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         seccomp: seccomp.0,
         seccomp_filters: seccomp.1,
         cpus: online_cpus(),
+        signals,
     };
     let mut out = Vec::new();
     status::render(&mut out, &status);
@@ -1293,6 +1352,41 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         .as_bytes(),
     );
     Ok(out)
+}
+
+/// `status`'s signal lines for the thread numbered `tid` of `process`, or
+/// its first live one when that has gone: what is pending for the thread
+/// and for the process, what the thread blocks, and the dispositions. A
+/// process with no thread left shows its dispositions and shared queue only.
+fn signal_masks(process: &Process, tid: u32) -> SignalMasks {
+    const RLIMIT_SIGPENDING: u32 = 11;
+    let queue_limit = crate::syscall::limits::limit_of(process, RLIMIT_SIGPENDING)
+        .map_or(u64::MAX, |limit| limit.soft);
+    let thread = process
+        .thread_by_tid(tid)
+        .or_else(|| process.threads().into_iter().next());
+    let (pending, shared_pending, blocked, (ignored, caught)) = match thread {
+        Some(thread) => thread.with_signals(|shared, own| {
+            (
+                own.pending(),
+                shared.pending(),
+                own.blocked(),
+                shared.ignored_and_caught(),
+            )
+        }),
+        None => {
+            process.with_signals(|shared| (0, shared.pending(), 0, shared.ignored_and_caught()))
+        }
+    };
+    SignalMasks {
+        queued: u64::from((pending | shared_pending).count_ones()),
+        queue_limit,
+        pending,
+        shared_pending,
+        blocked,
+        ignored,
+        caught,
+    }
 }
 
 /// The `Cap*` lines of `status`. In the first namespace an effective uid of 0

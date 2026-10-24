@@ -91,7 +91,7 @@ pub(crate) fn write_back() -> bool {
 /// A panic's word is never replaced: a stop racing a failure report on
 /// another processor is not how the boot ended. Takes no lock and allocates
 /// nothing.
-pub(crate) fn stop(stop: Stop) -> bool {
+pub fn stop(stop: Stop) -> bool {
     REGION.get().is_some_and(|region| {
         let word = stop.word();
         let panic = Stop::Panic.word();
@@ -117,7 +117,7 @@ pub(crate) fn panicked() {
 
 /// The attached region's physical address and length: for the boot check
 /// that no frame of it is free.
-pub(crate) fn attached() -> Option<(u64, u64)> {
+pub fn attached() -> Option<(u64, u64)> {
     REGION.get().map(|region| (region.phys, region.len))
 }
 
@@ -127,7 +127,7 @@ pub(crate) fn attached() -> Option<(u64, u64)> {
 /// Once, on the boot processor, after the direct map's RAM is recorded and
 /// before interrupts are on, so that nothing else records while the log so
 /// far is copied in.
-pub(crate) fn attach(view: &BootView<'_>) {
+pub fn attach(view: &BootView<'_>) {
     let Some((phys, len)) = view.pstore() else {
         println!("  pstore   none (the loader gave no region)");
         return;

@@ -48,7 +48,12 @@ Only `src/boot/*` and `src/kernel/` are freestanding;
 
 ## `src/kernel/`
 
-The kernel crate. Its source paths are load-bearing: the certification
+The kernel, as four crates along the certified item's rings
+(`docs/KERNEL-CRATES.md`): `ferrix-kernel-core`, `ferrix-kernel-item` and
+`ferrix-kernel-load`, whose manifests are in `core/`, `item/` and `load/` and
+whose roots are `src/kernel_core.rs`, `src/kernel_item.rs` and
+`src/kernel_load.rs`, beside the binary's `src/main.rs`; every file is in
+`src/` whichever crate builds it. Its source paths are load-bearing: the certification
 evidence (`docs/certification/coverage-*.json`) and the baselines in
 `tools/common/data/` anchor to `src/kernel/src/**` by file and line, so a file moved
 inside `src/kernel/src` means regenerating that evidence, and every file has a
@@ -58,7 +63,7 @@ ring in `tools/common/data/certification-item.json`.
 |---|---|
 | `src/kernel/src/arch/<isa>/` | What one instruction set architecture defines: entry and traps, context switch, signal frames, bringing up the other processors, speculation defences, the architected timer, and the interrupt controller a core reaches through system registers (`aarch64/gic/`, x86's APIC) |
 | `src/kernel/src/arch/arm_common/` | Drivers for Arm peripherals both Arm architectures can have: the GICv2, the PL011 and the STM32MP1's USART |
-| `src/kernel/src/platform/<vendor>/<soc>/` | The kernel's part in one system on chip's devices, found in the device tree at boot: `google/gs201` (the Pixel 7) and `st/stm32mp1` (the DK1), the vendor being the prefix of the chip's device-tree `compatible`. Declared inline in `main.rs`, and each file has its own ring |
+| `src/kernel/src/platform/<vendor>/<soc>/` | The kernel's part in one system on chip's devices, found in the device tree at boot: `google/gs201` (the Pixel 7) and `st/stm32mp1` (the DK1), the vendor being the prefix of the chip's device-tree `compatible`. Declared inline in the root of the crate that holds each file (`kernel_core.rs`, `kernel_load.rs`), and each file has its own ring |
 | `src/kernel/src/discovery/` | Finding what the machine has and handing it to ring 3: `acpi` and `fdt` reach the firmware's description of the machine, `pci` walks the buses it describes, and `devmgr` starts `devmgr` with what was found. The parsers are the host-testable crates in `src/lib/platform/`; what the kernel does for a running driver (device nodes, IOMMU domains, interrupts) stays outside |
 | `src/kernel/src/interfaces/` | The kernel's end of each ring-3 driver's protocol, not a driver: `block_ring`, `net_ring`, `display`, `render`, `input`, `audio`, `logctl`. Each checks its channel against the protocol crate in `src/lib/proto/` and publishes what the driver serves (a disk, a card, an event node). The drivers themselves are processes under `src/user/system/native/drivers/` |
 | `src/kernel/src/` otherwise | Everything the architecture does not change: memory, scheduling, objects, system calls, filesystems |
@@ -85,6 +90,7 @@ kernel or a loader. Each crate sits in exactly one group:
 | `src/lib/network/` | The network stack | `net` `netwire` `nettcp` `netlink` |
 | `src/lib/drivers/` | Device logic over an abstract transport, and the serve loops ring-3 drivers run, grouped by function (see below) | `virtio` and one directory per function |
 | `src/lib/init/` | The service manager's pure core, the restart policy it shares with `devmgr`, and its wire formats | `svc` `restart` `svc-proto` |
+| `src/lib/log/` | The log manager's pure core: records, the segment format, the kernel log's records read, the filter language, the output formats (`docs/LOGGING.md`). The program is `src/user/system/native/lode` | `lode` (`ferrix-lode-core`) |
 | `src/lib/crypto/` | Cryptography user space checks secrets with: the password hash `authd` stores credentials under (`docs/AUTH.md` §5.1). The kernel's random number generator is not here but in `src/lib/kernel/` | `argon2` |
 
 **Drivers by function.** A driver is two crates: its logic in
@@ -137,6 +143,7 @@ initramfs by xtask:
 | `src/user/system/native/devmgr/` | Matches devices to drivers and starts each in a job of its own. |
 | `src/user/system/native/drvupdated/` | Takes a new driver image from root over an abstract socket and hands it to `devmgr` (`docs/DEVMGR.md` §4.1). Only the images `test-restart --update` boots carry it. |
 | `src/user/system/native/drivers/<function>/<name>/` | One process per driver, grouped by function as in the table above. The logic lives in `src/lib/drivers/`; the program is the thin shell around it. |
+| `src/user/system/native/lode/` | lode, the log manager: the service init starts in a sealed job, and the reader `/bin/lode` and `/bin/journalctl` link to (`docs/LOGGING.md`). |
 | `src/user/system/native/pong/`, `src/user/system/native/channel-echo/` | Small native test programs the boot gates start. |
 
 `tools/common/xtask/src/native.rs` lists which of these go into the image.
@@ -153,8 +160,10 @@ directory:
 | `src/user/system/linux/init/` | `/sbin/init`, getty and the unit files. |
 | `src/user/system/linux/installer/` | `/sbin/ferrix-install`, which puts the live system on a disk (`docs/INSTALLER.md`), and `/sbin/bootctl`, which writes the idle system slot and arms a trial boot (`docs/AB-BOOT.md`); a library of what both share: GPT reading, the A/B layout, the control record's and a slot's file I/O over `ferrix-slots`. |
 | `src/user/system/linux/dhcp/` | `/bin/dhcpc`, the DHCPv4 client: a lease over an `AF_PACKET` socket, applied itself over rtnetlink (address, default route, `/etc/resolv.conf`), renewed at T1 and rebound at T2. In place of busybox's `udhcpc` and its lease script; `udhcpc`'s command line as far as Ferrix's callers use it. |
+| `src/user/system/linux/settingsd/` | `/sbin/settingsd`, the settings writer: the root helper that makes the typed system-wide changes a Settings app asks for once `authd` allows them (`docs/SETTINGS-WRITER.md`); `/bin/settingsctl`; the records they speak (`proto`) and the client crate the Settings app reaches by path (`client`). |
 | `src/user/system/linux/dmesg/` | `/bin/dmesg`, the kernel log as util-linux's `dmesg` shows it -- `[    1.234567] text`, `-T`, `-x`, `-l`, `-f`, `-k`, `-u`, `-w`, `-H`, `-c`, `-C` -- from `/dev/kmsg`, or `syslog(2)` where there is none. In place of busybox's applet. |
 | `src/user/system/linux/pkg/` | `/bin/pkg`, the package manager: lists, installs and removes the apps' packages (`docs/APPS.md` §7). |
+| `src/user/system/linux/tole/` | tole, the UI framework (`docs/UI-FRAMEWORK.md`): its runtime and its markup compiler, a workspace reaching the compositor's `text` and `toolkit` by path. Its own repository, ferrix-os/tole, checked out here at its pin (`components.toml`); apps that draw with it reach it by path. |
 | `src/user/system/linux/zinc/` | The zsh-compatible shell. Its own repository, ferrix-os/zinc, checked out here at its pin (`components.toml`). |
 | `src/user/system/linux/media/` | The resampler and the playback through `/dev/snd` that the sound server and the `badapple` app share (`docs/MEDIA.md`), and the PulseAudio-protocol server and its client (`docs/AUDIO.md`, U2). ferrix-90's since 2026-09-27. Bad Apple!!'s player and its video format are the `badapple` app since 2026-10-01. |
 | `src/user/system/linux/ferrousli/` | The C library written in Rust, its dynamic linker, and the toolkit programs are ported against it with (`tools/ports/`), with the libraries they link; the ported programs themselves are apps (`src/user/apps/` below). Its own repository, ferrix-os/ferrousli, checked out here at its pin (`components.toml`). |

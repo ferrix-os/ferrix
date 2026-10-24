@@ -4061,24 +4061,61 @@ fn a_stream_joins_plain_writes_into_one_read() {
 }
 
 #[test]
-fn a_stream_write_takes_what_fits_and_a_full_one_would_block() {
+fn a_small_stream_write_is_whole_or_waits_and_a_large_one_takes_what_fits() {
     let mut buf = SocketBuffer::<u32>::new(Kind::Stream, SOCKET_CAP);
     let most = vec![1_u8; SOCKET_CAP - 3];
     assert_eq!(
         buf.write(&most, &mut None),
         SocketWrite::Wrote(SOCKET_CAP - 3)
     );
-    assert!(buf.can_write(10), "a stream needs room for one byte");
-    assert_eq!(buf.write(b"0123456789", &mut None), SocketWrite::Wrote(3));
+    // Linux queues a write of up to half the buffer whole or not at all: a
+    // short count here tore Wine's and the X server's small messages.
+    assert!(!buf.can_write(10), "ten bytes need room for ten");
+    assert!(buf.can_write(3));
+    assert_eq!(buf.write(b"0123456789", &mut None), SocketWrite::WouldBlock);
+    assert_eq!(buf.write(b"abc", &mut None), SocketWrite::Wrote(3));
     assert!(!buf.can_write(1));
     assert!(buf.can_write(0));
     assert_eq!(buf.write(b"x", &mut None), SocketWrite::WouldBlock);
     assert_eq!(buf.write(b"", &mut None), SocketWrite::Wrote(0));
     let mut two = [0_u8; 2];
     assert_eq!(buf.read(&mut two, false), got(2, 2, None));
-    assert!(buf.can_write(1));
-    assert_eq!(buf.write(b"xyz", &mut None), SocketWrite::Wrote(2));
+    assert!(buf.can_write(2) && !buf.can_write(3));
+    assert_eq!(buf.write(b"xyz", &mut None), SocketWrite::WouldBlock);
+    assert_eq!(buf.write(b"xy", &mut None), SocketWrite::Wrote(2));
     assert_eq!(buf.queued(), SOCKET_CAP);
+
+    // A write larger than half the buffer goes in pieces, each at least half
+    // of it, and polls writable only with that much room.
+    let mut buf = SocketBuffer::<u32>::new(Kind::Stream, SOCKET_CAP);
+    let quarter = vec![2_u8; SOCKET_CAP / 4];
+    assert_eq!(
+        buf.write(&quarter, &mut None),
+        SocketWrite::Wrote(SOCKET_CAP / 4)
+    );
+    assert!(buf.writable());
+    let whole = vec![3_u8; SOCKET_CAP];
+    assert_eq!(
+        buf.write(&whole, &mut None),
+        SocketWrite::Wrote(SOCKET_CAP - SOCKET_CAP / 4)
+    );
+    let mut out = vec![0_u8; SOCKET_CAP / 4];
+    assert_eq!(
+        buf.read(&mut out, false),
+        got(SOCKET_CAP / 4, SOCKET_CAP / 4, None)
+    );
+    assert!(!buf.writable(), "a quarter free is not room for half");
+    assert_eq!(buf.write(&whole, &mut None), SocketWrite::WouldBlock);
+    assert!(buf.can_write(SOCKET_CAP / 4));
+    assert_eq!(
+        buf.read(&mut out, false),
+        got(SOCKET_CAP / 4, SOCKET_CAP / 4, None)
+    );
+    assert!(buf.writable());
+    assert_eq!(
+        buf.write(&whole, &mut None),
+        SocketWrite::Wrote(SOCKET_CAP / 2)
+    );
 }
 
 #[test]
@@ -4093,7 +4130,8 @@ fn shrinking_a_socket_buffer_blocks_writes_until_it_drains() {
     assert_eq!(buf.read(&mut ten, false), got(10, 10, None));
     assert_eq!(buf.write(b"x", &mut None), SocketWrite::WouldBlock);
     assert_eq!(buf.read(&mut ten[..1], false), got(1, 1, None));
-    assert_eq!(buf.write(b"xy", &mut None), SocketWrite::Wrote(1));
+    assert_eq!(buf.write(b"xy", &mut None), SocketWrite::WouldBlock);
+    assert_eq!(buf.write(b"x", &mut None), SocketWrite::Wrote(1));
     buf.set_capacity(1);
     assert_eq!(buf.capacity(), SOCKET_BUFFER_MIN, "the floor holds");
     assert_eq!(
@@ -4299,7 +4337,9 @@ fn ancillary_data_stays_with_the_writer_unless_it_is_queued() {
     assert_eq!(stream.write(b"", &mut rights), SocketWrite::Wrote(0));
     assert_eq!(rights, Some(7), "lost on an empty stream write");
     assert_eq!(stream.read(&mut [0_u8; 1], false), got(1, 1, None));
-    assert_eq!(stream.write(b"xy", &mut rights), SocketWrite::Wrote(1));
+    assert_eq!(stream.write(b"xy", &mut rights), SocketWrite::WouldBlock);
+    assert_eq!(rights, Some(7), "lost on a small write that must wait");
+    assert_eq!(stream.write(b"x", &mut rights), SocketWrite::Wrote(1));
     assert_eq!(rights, None, "one byte accepted takes it");
     assert_eq!(stream.close_reader(), [7], "and it is handed back on close");
     let mut rights = Some(8);
@@ -4518,13 +4558,17 @@ fn a_stream_delivers_bytes_and_ancillary_data_in_order_against_a_model() {
             match buf.write(&data, &mut ancillary) {
                 SocketWrite::Wrote(n) => {
                     assert!(n == data.len() || model.len() + n == SOCKET_CAP);
+                    assert!(
+                        n == data.len() || data.len() > SOCKET_CAP / 2,
+                        "a write of half the buffer or less was cut short"
+                    );
                     assert_eq!(ancillary, if n > 0 { None } else { offered });
                     for (i, &byte) in data[..n].iter().enumerate() {
                         model.push_back((byte, step, offered.filter(|_| i == 0)));
                     }
                 }
                 SocketWrite::WouldBlock => {
-                    assert_eq!(model.len(), SOCKET_CAP);
+                    assert!(SOCKET_CAP - model.len() < data.len().min(SOCKET_CAP / 2));
                     assert_eq!(ancillary, offered, "ancillary data was lost");
                 }
                 other => panic!("a reader is open: {other:?}"),

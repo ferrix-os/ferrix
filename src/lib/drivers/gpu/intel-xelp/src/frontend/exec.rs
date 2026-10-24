@@ -8,16 +8,23 @@
 //! fences, the dmabuf slots of shared objects (K5, ledger 2360: for every
 //! execbuffer that reads or writes one), and the out fence.
 //!
-//! Departures from i915, each because Mesa never needs it: an object not
-//! `EXEC_OBJECT_PINNED` is refused (i915 would choose its address), and a
-//! binding that would overlap another still in use answers `EAGAIN`, which
-//! `intel_ioctl` retries, where i915 would sleep until it is idle and evict it.
+//! A binding that would overlap another still in use, or a full request
+//! ring, holds the call until the request in the way finishes, and then
+//! runs it again from the start ([`WaitKind::Retry`]): i915 sleeps in the
+//! ioctl until the binding is idle and evicts it (`i915_gem_evict_for_node`,
+//! `i915_vma_unbind`), and never fails a valid submit there. Answering
+//! `EAGAIN` instead, which `intel_ioctl` retries at once, spun the program
+//! on the render node and left the GPU idle between its tries.
+//!
+//! Departure from i915, because Mesa never needs it: an object not
+//! `EXEC_OBJECT_PINNED` is refused (i915 would choose its address).
 
 use ferrix_linux_abi::errno::Errno;
+use ferrix_linux_abi::kmsg::Level;
 
 use super::backend::Engine;
-use super::drm::{Call, put, unserved};
-use super::fence;
+use super::drm::{Call, Outcome, put, unserved};
+use super::fence::{self, Hold, WaitKind};
 use super::objects::{Binding, FenceRef, Request, RequestState, SyncFence, Tables};
 use super::{Backend, Frontend, Host, gem, limits, syncobj, vm};
 use crate::uapi::{ExecFence, ExecObject2, Execbuffer2, ExecbufferExtTimelineFences, exec, query};
@@ -86,19 +93,31 @@ pub fn execbuffer2<B: Backend, H: Host<B::Memory>>(
     host: &mut H,
     call: &Call,
     data: &mut [u8],
-) -> Result<(), Errno> {
+) -> Outcome {
     let mut args = Execbuffer2::from_bytes(data).ok_or(Errno::EFAULT)?;
-    let result = execute(frontend, host, call, &mut args);
+    let mut retry = None;
+    let result = execute(frontend, host, call, &mut args, &mut retry);
+    if let (Err(_), Some(fence)) = (result, retry) {
+        // Nothing of it was done but bindings made and idle ones evicted,
+        // which running it again finds made: hold it, unanswered.
+        return Ok(Some(Hold {
+            deadline: None,
+            kind: WaitKind::Retry { fence },
+        }));
+    }
     args.flags &= !exec::UNKNOWN_FLAGS;
     put(data, &args.to_bytes());
-    result
+    result.map(|()| None)
 }
 
+/// The execbuffer; `retry` is set, with an `Err`, when it is to be held
+/// until that fence signals and run again.
 fn execute<B: Backend, H: Host<B::Memory>>(
     frontend: &mut Frontend<B>,
     host: &mut H,
     call: &Call,
     args: &mut Execbuffer2,
+    retry: &mut Option<FenceRef>,
 ) -> Result<(), Errno> {
     let count = check(args)?;
     let mut fences = Fences {
@@ -131,11 +150,13 @@ fn execute<B: Backend, H: Host<B::Memory>>(
             .refuse("kernel fence table full", Errno::ENOMEM));
     }
     if !frontend.state.requests.has_room() {
-        return Err(frontend.state.refuse("request ring full", Errno::EAGAIN));
+        // The oldest request's retirement makes room.
+        *retry = Some(FenceRef::Request(frontend.state.requests.retired + 1));
+        return Err(Errno::EAGAIN);
     }
     each_object(host, call, args.buffers_ptr, count, &mut |_, _, entry| {
         let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
-        bind(frontend, vm_slot, entry, object)
+        bind(frontend, vm_slot, entry, object, retry)
     })?;
     let mut request = Request {
         id: 0,
@@ -179,7 +200,11 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     if let Some(entry) = frontend.state.contexts.get_mut(usize::from(context_slot)) {
         entry.in_flight += 1;
     }
-    each_object(
+    // From here the request runs whatever fails: its signals are made even
+    // so, so that no point it was to signal is left without a fence while a
+    // `WAIT_FOR_SUBMIT` waiter waits for it, as i915 signals the fence
+    // array of every request it added.
+    let marked = each_object(
         host,
         call,
         args.buffers_ptr,
@@ -188,8 +213,11 @@ fn execute<B: Backend, H: Host<B::Memory>>(
             let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
             mark_used(frontend, host, vm_slot, entry, object, id)
         },
-    )?;
-    signal(frontend, host, call, args, &fences, id)
+    );
+    let signalled = signal(frontend, host, call, args, &fences, id);
+    marked
+        .and(signalled)
+        .map_err(|errno| frontend.state.refuse("after its request was queued", errno))
 }
 
 /// `check_buffer_count` and `i915_gem_check_execbuffer`: the object count.
@@ -495,13 +523,15 @@ fn validate<B: Backend, H: Host<B::Memory>>(
 }
 
 /// Bind `object` at its pinned address in VM `vm_slot`, unless it is bound
-/// there already: idle bindings in the way are unbound (i915 evicts them),
-/// busy ones answer `EAGAIN`.
+/// there already: idle bindings in the way are unbound (i915 evicts them);
+/// for a busy one, `retry` is set to its last request and the call is held
+/// until that finishes.
 fn bind<B: Backend>(
     frontend: &mut Frontend<B>,
     vm_slot: u16,
     entry: &ExecObject2,
     object: u16,
+    retry: &mut Option<FenceRef>,
 ) -> Result<(), Errno> {
     let address = entry.offset & ((1 << 48) - 1);
     let state = &mut frontend.state;
@@ -538,7 +568,8 @@ fn bind<B: Backend>(
                 .status(FenceRef::Request(other.last_use))
                 .is_none()
         {
-            return Err(state.refuse("a busy binding in the way", Errno::EAGAIN));
+            *retry = Some(FenceRef::Request(other.last_use));
+            return Err(Errno::EAGAIN);
         }
         if let Some(vm) = state
             .vms
@@ -612,7 +643,7 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
             Ok(()) => fence::track_kernel_fence(state, fence_cookie, done)?,
             Err(errno) => {
                 if state.say_once(63) {
-                    host.say(format_args!(
+                    host.say(Level::Warning, format_args!(
                         "intel: a shared object's dmabuf slot could not be set (errno {}): implicit sync with other programs is lost for this request",
                         errno.0
                     ));

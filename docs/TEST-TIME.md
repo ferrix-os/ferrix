@@ -1446,6 +1446,76 @@ The certification consultant's design review of D2 and D3: OK IF (1)-(9),
 ledger line 1684; the amendments after the code reviews, lines 1715 and
 1722.
 
+### The split: four crates (S3, redone 2026-10-23, `kernel-split-s3`)
+
+The kernel as four crates along the rings (`docs/KERNEL-CRATES.md` §5.1):
+an edit recompiles its crate and those above it. Measured against `main`
+3a4a45e88, each in a worktree and target directory of its own, turn about
+per edit: a one-line `black_box` in a load file (`syscall/eventfd.rs`), an
+item file (`random.rs`) and a core file (`smp.rs`), each measured build
+followed by an unmeasured one after the edit is undone. Host load 1 to 3
+(clippy's second round; its first ran at 10 to 22). User CPU seconds:
+
+| After an edit in | Kernel build (x86-64 dev), main | the split | `cargo clippy` of the kernel (x86-64), main | the split |
+|---|---|---|---|---|
+| a load file | 2.3-2.4 | **1.6** | 5.6-6.2 | **4.0-4.3** |
+| an item file | 2.6-3.4 | **1.5** | 5.6-6.0 | **4.2-4.6** |
+| a core file | 2.0-3.0 | 2.2-4.5 | 5.7-6.0 | 5.7-5.8 |
+
+An edit in the load or the item costs about a third less CPU to build and a
+quarter less to lint; one in the core costs what it did, since every crate
+above it rebuilds. The gates' release builds link the four crates with fat
+LTO and gain nothing.
+
+## AArch64 on the Pixel 7's KVM: `phone-boot` (2026-10-23)
+
+`cargo xtask phone-boot --arch aarch64` builds `test-boot`'s image, wraps
+its kernel and initramfs in the Pixel 7 loader as crosvm's `Image`, pushes
+it and `test-boot`'s three disks (only what changed) to
+`/data/local/tmp/ferrix-gate`, boots it in the phone's own crosvm as root,
+and judges the serial log with `test-boot`'s `qemu::judge`, less what
+crosvm's machine lacks: KASLR's layout (no TRNG for the loader: it must
+say so), completions by MSI-X (INTx only), an IOMMU and SMBIOS. It
+refuses under 30% battery, over 45 C, or with any crosvm already running,
+and the script on the phone kills only its own crosvm, by PID.
+
+Same tree, warm build, 4 processors and 512 MiB each:
+
+| | build | push | boot to `FERRIX-BOOT-OK` | total |
+|---|---:|---:|---:|---:|
+| `test-boot`, TCG, load 2 | | | 23.4 s | 24.4 s |
+| `test-boot`, TCG, load 17-20 | | | 24.5 s | 31.2 s |
+| `phone-boot`, KVM | 1.8-4.8 s | 1.6-4.1 s | 22.6-22.7 s | 27.6-31.4 s |
+
+No speedup: the self-check suite waits on the clock, not on the CPU.
+cgroups' check alone holds a program to `cpu.max` for about 6 s on both,
+and stage 10 starts at about 18 s on both. What the phone saves is the
+four host processors TCG keeps busy for those 25 s; it adds about 2.8 s
+before the kernel's first line (crosvm's start and the loader's copy of
+the payload). The rows to move are those whose guest computes rather than
+waits -- the long x86-64-only desktop rows have no Arm twin, so the
+candidates are `test-shell`, `test-vfs` and `test-selfhost` on AArch64,
+each needing its disks in the same `vda`-`vdd` order.
+
+Two checks fail only here, both real and neither papered over:
+
+1. **FX-0307, L.aarch64.67, intermittent (3 of 5 boots):** `midr_of does
+   not answer this processor's own MIDR_EL1`. The Pixel's KVM shows a vCPU
+   the `MIDR_EL1` of the physical core it runs on at the moment (0xd05
+   A55, 0xd41 A78, 0xd44 X1 seen); one boot recorded cpu0 as 0x411fd411
+   and read 0x411fd440 later. The record each processor's speculation
+   plan was decided from goes stale when the host moves the vCPU, so a
+   vCPU that started on an A55 (no branch-history loop) can later run on
+   an X1, which needs one. Fixed on `bugfix/fx0307-midr-plan`: under a
+   hypervisor (PSCI through `hvc`) every core takes the most branches any
+   listed core needs, and the check holds the loop in force to every
+   record and to the core it reads now, not the register to the record
+   (`docs/certification/SPECULATION.md` §4).
+2. **FX-1011, W3, every boot:** crosvm's `VIRTIO_PCI_CAP_PCI_CFG` (cap
+   0x84) ignores the driver's write to `cap.offset`: 0x1230 written, 0
+   read back. The virtio specification makes the field driver-writable;
+   crosvm does not keep it.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

@@ -310,6 +310,7 @@ dependencies = [
  "compositor-socket",
  "compositor-wire",
  "ferrix-auth-proto",
+ "ferrix-lode-core",
  "ferrix-native",
  "ferrix-native-abi",
  "ferrix-svc-proto",
@@ -416,6 +417,8 @@ dependencies = [
 name = "compositor-wallpaper"
 version = "0.1.0"
 dependencies = [
+ "compositor-config",
+ "compositor-ctl",
  "compositor-image",
  "compositor-toolkit",
 ]
@@ -494,6 +497,18 @@ name = "ferrix-linux-abi"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-lode-capture"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-lode-core"
+version = "0.1.0"
+dependencies = [
+ "ferrix-slots",
+ "ruzstd",
+]
+
+[[package]]
 name = "ferrix-native"
 version = "0.1.0"
 dependencies = [
@@ -507,6 +522,10 @@ version = "0.1.0"
 dependencies = [
  "ferrix-linux-abi",
 ]
+
+[[package]]
+name = "ferrix-slots"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-svc-proto"
@@ -585,6 +604,7 @@ dependencies = [
  "compositor-xkb",
  "ferrix-fbtext",
  "ferrix-linux-abi",
+ "ferrix-lode-capture",
  "ferrix-svc-proto",
  "libc",
 ]
@@ -865,6 +885,12 @@ dependencies = [
  "unicode-properties",
  "unicode-script",
 ]
+
+[[package]]
+name = "ruzstd"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
 
 [[package]]
 name = "scopeguard"

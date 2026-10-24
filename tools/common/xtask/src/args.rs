@@ -38,9 +38,10 @@ pub(crate) struct Args {
     pub(crate) gdb: bool,
     /// `--fast`: skip the slow half of `check`.
     pub(crate) fast: bool,
-    /// `--strip-kernel`: images carry the kernel without its debug
-    /// information, as `flash` writes it to a card, so that the loader's copy
-    /// of the file fits a small machine's memory. Off unless asked for.
+    /// `--strip-kernel`: images carry the kernel and the initramfs's programs
+    /// without their debug information, as `flash` writes them to a card, so
+    /// that the loader's copies fit a small machine's memory. Off unless
+    /// asked for.
     pub(crate) strip_kernel: bool,
     /// `--ferrousli`: `check` also runs ferrousli's gates, its own workspace.
     pub(crate) ferrousli: bool,

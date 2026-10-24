@@ -17,9 +17,9 @@ use super::smbios::{Direct, Refusal, decode, range};
 
 /// What the check counted, for the boot line.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Forged inputs refused by the name they had to be.
-    pub(crate) refused: u32,
+    pub refused: u32,
 }
 
 /// The forged machine: one SMBIOS region of two pages at 1 MiB, a usable one
@@ -106,7 +106,7 @@ fn refused<T>(
 /// Run every forged case.
 ///
 /// Verifies: L.discovery.5
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let good = u64::try_from(copy(0).len()).unwrap_or(0);
     let accepted = range(Some((REGION.base, good)), region_of, DIRECT);

@@ -71,7 +71,7 @@ use crate::user::space::AddressSpace;
 
 /// A process, as the core enforces and reports it.
 #[derive(Debug)]
-pub(crate) struct Process {
+pub struct Process {
     /// What it can see.
     space: Arc<AddressSpace>,
     /// Its number, from [`allocate`]: what the pid table finds it by. Zero
@@ -178,7 +178,7 @@ pub(crate) struct TaskList {
 /// personality, because what the slot holds is an object, which is the
 /// core's to keep and to close.
 #[derive(Debug)]
-pub(crate) enum Bootstrap {
+pub enum Bootstrap {
     /// Nothing given yet, and one may be: the process has not completed an
     /// `execve`.
     Open,
@@ -193,7 +193,7 @@ pub(crate) enum Bootstrap {
 
 /// Why a bootstrap could not be given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GiveRefused {
+pub enum GiveRefused {
     /// It was given one before.
     Given,
     /// It has completed an `execve`, or ended.
@@ -202,7 +202,7 @@ pub(crate) enum GiveRefused {
 
 impl Bootstrap {
     /// Why nothing may be given now, or `None` if something may.
-    pub(crate) fn refusal(&self) -> Option<GiveRefused> {
+    pub fn refusal(&self) -> Option<GiveRefused> {
         match self {
             Bootstrap::Open => None,
             Bootstrap::Held(..) | Bootstrap::Taken => Some(GiveRefused::Given),
@@ -216,11 +216,7 @@ impl Bootstrap {
     /// # Errors
     ///
     /// [`GiveRefused`], with the object.
-    pub(crate) fn give(
-        &mut self,
-        object: Object,
-        rights: Rights,
-    ) -> Result<(), (GiveRefused, Object)> {
+    pub fn give(&mut self, object: Object, rights: Rights) -> Result<(), (GiveRefused, Object)> {
         if let Some(why) = self.refusal() {
             return Err((why, object));
         }
@@ -229,7 +225,7 @@ impl Bootstrap {
     }
 
     /// The bootstrap, taken, if it is waiting.
-    pub(crate) fn take(&mut self) -> Option<(Object, Rights)> {
+    pub fn take(&mut self) -> Option<(Object, Rights)> {
         if !matches!(self, Bootstrap::Held(..)) {
             return None;
         }
@@ -245,7 +241,7 @@ impl Bootstrap {
     /// # Errors
     ///
     /// The object, for the caller to dispose of.
-    pub(crate) fn put_back(&mut self, object: Object, rights: Rights) -> Result<(), Object> {
+    pub fn put_back(&mut self, object: Object, rights: Rights) -> Result<(), Object> {
         if matches!(self, Bootstrap::Taken) {
             *self = Bootstrap::Held(object, rights);
             Ok(())
@@ -267,11 +263,7 @@ impl Process {
     /// # Errors
     ///
     /// [`AllocError`], before it is counted anywhere.
-    pub(crate) fn new(
-        space: Arc<AddressSpace>,
-        pid: u32,
-        job: Arc<Job>,
-    ) -> Result<Process, AllocError> {
+    pub fn new(space: Arc<AddressSpace>, pid: u32, job: Arc<Job>) -> Result<Process, AllocError> {
         let exit = fallible::try_arc(Exit::new())?;
         let slot = job.quota_index();
         // Charged before it is counted, and never started if refused: the
@@ -308,7 +300,7 @@ impl Process {
 
     /// The speculation domain it is in: zero for none, which a process that
     /// has left one is in for good.
-    pub(crate) fn speculation_domain(&self) -> u64 {
+    pub fn speculation_domain(&self) -> u64 {
         match self.domain.load(Ordering::Acquire) {
             LEFT => 0,
             domain => domain,
@@ -341,7 +333,7 @@ impl Process {
     /// moved into the job it was made for (the consultant's F2: `inherit` of
     /// a parent that is not dumpable, before `process_create` moves the
     /// child) is never a member.
-    pub(crate) fn leave_speculation_domain(&self) {
+    pub fn leave_speculation_domain(&self) {
         let was = self.domain.swap(LEFT, Ordering::AcqRel);
         self.space.leave_domain();
         if was != 0 && was != LEFT {
@@ -370,26 +362,26 @@ impl Process {
     /// [`Process::leave_speculation_domain`] for a process that has never
     /// run, whose space no processor has run in its name: out for good, with
     /// no barrier to ask for. A fork's child, as `fork` makes it.
-    pub(crate) fn leave_speculation_domain_unstarted(&self) {
+    pub fn leave_speculation_domain_unstarted(&self) {
         let _ = self.domain.swap(LEFT, Ordering::AcqRel);
         self.space.leave_domain();
     }
 
     /// Whether its job's task limit refused it as it was made: a process
     /// that must not be started.
-    pub(crate) fn over_quota(&self) -> bool {
+    pub fn over_quota(&self) -> bool {
         self.over_quota
     }
 
     /// Whether its job, or one above, is frozen: the answer is read on every
     /// way back to user mode, and is a load.
-    pub(crate) fn is_frozen(&self) -> bool {
+    pub fn is_frozen(&self) -> bool {
         self.frozen.load(Ordering::Acquire)
     }
 
     /// Look at its job again, and answer whether it is to be frozen and
     /// whether that changed. Under `membership`, which a move also holds.
-    pub(crate) fn sync_freeze(&self) -> (bool, bool) {
+    pub fn sync_freeze(&self) -> (bool, bool) {
         let membership = self.membership.lock();
         let now = membership.freezing();
         let before = self.frozen.swap(now, Ordering::SeqCst);
@@ -408,7 +400,7 @@ impl Process {
     ///
     /// [`quota::Exceeded`] when the job, or one above it, is at its task
     /// limit.
-    pub(crate) fn charge_thread(&self) -> Result<(), quota::Exceeded> {
+    pub fn charge_thread(&self) -> Result<(), quota::Exceeded> {
         let membership = self.membership.lock();
         quota::charge(membership.quota_index(), Resource::Tasks, 1)?;
         let _ = self.tasks.fetch_add(1, Ordering::AcqRel);
@@ -421,7 +413,7 @@ impl Process {
     /// a reaped one gives it back at once, not when the last reference to it
     /// goes, which a task not yet freed may still hold. Nothing on a second
     /// call, nor for a thread's charge let go after.
-    pub(crate) fn uncharge_tasks(&self) {
+    pub fn uncharge_tasks(&self) {
         let membership = self.membership.lock();
         let charged = self.tasks.swap(0, Ordering::AcqRel);
         quota::uncharge(membership.quota_index(), Resource::Tasks, charged);
@@ -429,7 +421,7 @@ impl Process {
 
     /// Take back what [`Process::charge_thread`] charged, as the thread's id
     /// is given back.
-    pub(crate) fn uncharge_thread(&self) {
+    pub fn uncharge_thread(&self) {
         let membership = self.membership.lock();
         let charged = self
             .tasks
@@ -442,17 +434,17 @@ impl Process {
     }
 
     /// What it can see.
-    pub(crate) fn space(&self) -> &Arc<AddressSpace> {
+    pub fn space(&self) -> &Arc<AddressSpace> {
         &self.space
     }
 
     /// Its process id; zero if it was made with every pid in use.
-    pub(crate) fn pid(&self) -> u32 {
+    pub fn pid(&self) -> u32 {
         self.pid
     }
 
     /// When it was made, in nanoseconds on the counter.
-    pub(crate) fn started(&self) -> u64 {
+    pub fn started(&self) -> u64 {
         self.started
     }
 
@@ -462,7 +454,7 @@ impl Process {
     /// than drop, so that the object dies after the lock is released: an
     /// object's drop can free memory and drain other objects, and
     /// `crate::object::dispose` is where that belongs.
-    pub(crate) fn with_handles<R>(&self, change: impl FnOnce(&mut HandleTable) -> R) -> R {
+    pub fn with_handles<R>(&self, change: impl FnOnce(&mut HandleTable) -> R) -> R {
         change(&mut self.handles.lock())
     }
 
@@ -476,7 +468,7 @@ impl Process {
     ///
     /// (CONTEXT) Interrupts are masked on this processor across the call,
     /// and `look` neither blocks nor switches.
-    pub(crate) unsafe fn try_with_handles_masked<R>(
+    pub unsafe fn try_with_handles_masked<R>(
         &self,
         look: impl FnOnce(&HandleTable) -> R,
     ) -> Option<R> {
@@ -487,7 +479,7 @@ impl Process {
     }
 
     /// The job it is in: its cgroup.
-    pub(crate) fn job(&self) -> Arc<Job> {
+    pub fn job(&self) -> Arc<Job> {
         Arc::clone(&self.membership.lock())
     }
 
@@ -499,7 +491,7 @@ impl Process {
     /// [`JobError::Killed`] if `to`, or a job above it, has been killed;
     /// [`JobError::Removed`] if `rmdir` took it; [`JobError::Internal`] if
     /// the no-internal-process rule keeps processes out of it.
-    pub(crate) fn move_to(&self, to: &Arc<Job>) -> Result<(), JobError> {
+    pub fn move_to(&self, to: &Arc<Job>) -> Result<(), JobError> {
         self.move_charged(to, false)
     }
 
@@ -512,7 +504,7 @@ impl Process {
     /// # Errors
     ///
     /// As [`Process::move_to`], and [`JobError::Limited`] for the limit.
-    pub(crate) fn move_new_to(&self, to: &Arc<Job>) -> Result<(), JobError> {
+    pub fn move_new_to(&self, to: &Arc<Job>) -> Result<(), JobError> {
         self.move_charged(to, true)
     }
 
@@ -587,7 +579,7 @@ impl Process {
     /// Stop counting it among its job's live members, once. What makes its
     /// job empty when it was the last: called as the process lets go of what
     /// it holds, and as it is dropped if it never did.
-    pub(crate) fn leave_job(&self) {
+    pub fn leave_job(&self) {
         let mut flipped = job::Flipped::new();
         {
             let membership = self.membership.lock();
@@ -599,7 +591,7 @@ impl Process {
     }
 
     /// How it ended, and who is waiting to hear.
-    pub(crate) fn exit(&self) -> &Exit {
+    pub fn exit(&self) -> &Exit {
         &self.exit
     }
 
@@ -618,7 +610,7 @@ impl Process {
     /// The fence pairs with `WaitQueue::wait_trusting`'s, after the waiter
     /// stores `BLOCKED`: of the two the second sees the other side's store,
     /// so a waiter that looked before the end is woken here.
-    pub(crate) fn end_record(&self, status: i32, signal: u32) {
+    pub fn end_record(&self, status: i32, signal: u32) {
         let _posting = crate::sched::work::posting();
         self.exit.record(status, signal);
         core::sync::atomic::fence(Ordering::SeqCst);
@@ -633,7 +625,7 @@ impl Process {
     ///
     /// [`AllocError`] when the list cannot grow: the start that asked fails,
     /// before its task runs.
-    pub(crate) fn list_task(&self, task: &Arc<Task>) -> Result<(), AllocError> {
+    pub fn list_task(&self, task: &Arc<Task>) -> Result<(), AllocError> {
         let mut list = self.task_list.lock();
         list.tasks.retain(|listed| listed.strong_count() > 0);
         fallible::try_push(&mut list.tasks, Arc::downgrade(task))?;
@@ -644,7 +636,7 @@ impl Process {
     /// Look at the tasks listed, under the list's lock. `look` must not drop
     /// a task it upgrades there: the last reference to a task gives back an
     /// address space, which no lock may be held across.
-    pub(crate) fn with_tasks<R>(&self, look: impl FnOnce(&[Weak<Task>]) -> R) -> R {
+    pub fn with_tasks<R>(&self, look: impl FnOnce(&[Weak<Task>]) -> R) -> R {
         look(&self.task_list.lock().tasks)
     }
 
@@ -657,7 +649,7 @@ impl Process {
     /// changed since the last starts again from the top; posting twice is
     /// harmless, and the list changes only as a start lists a task, which
     /// reads what was posted for after it lists its own.
-    pub(crate) fn post_to_tasks(&self, bits: u32, except: Option<&Task>) {
+    pub fn post_to_tasks(&self, bits: u32, except: Option<&Task>) {
         const BATCH: usize = 8;
         let is_except = |task: &Arc<Task>| {
             except.is_some_and(|except| core::ptr::eq(except, Arc::as_ptr(task)))
@@ -703,13 +695,13 @@ impl Process {
     /// Do something with its bootstrap slot, under its lock. What `change`
     /// takes out it hands back, for the reason [`Process::with_handles`]
     /// gives.
-    pub(crate) fn with_bootstrap<R>(&self, change: impl FnOnce(&mut Bootstrap) -> R) -> R {
+    pub fn with_bootstrap<R>(&self, change: impl FnOnce(&mut Bootstrap) -> R) -> R {
         change(&mut self.bootstrap.lock())
     }
 
     /// It has completed an `execve`: a bootstrap not yet given never will be.
     /// One already given stays for the new program to take.
-    pub(crate) fn seal_bootstrap(&self) {
+    pub fn seal_bootstrap(&self) {
         let mut slot = self.bootstrap.lock();
         if slot.refusal().is_none() {
             *slot = Bootstrap::Sealed;
@@ -718,7 +710,7 @@ impl Process {
 
     /// It has ended: seal the slot, and answer what it still held, for the
     /// caller to dispose of with no lock held.
-    pub(crate) fn close_bootstrap(&self) -> Option<Object> {
+    pub fn close_bootstrap(&self) -> Option<Object> {
         match core::mem::replace(&mut *self.bootstrap.lock(), Bootstrap::Sealed) {
             Bootstrap::Held(object, _) => Some(object),
             _ => None,
@@ -726,23 +718,23 @@ impl Process {
     }
 
     /// A reference to how it ends, which outlives it.
-    pub(crate) fn exit_record(&self) -> Arc<Exit> {
+    pub fn exit_record(&self) -> Arc<Exit> {
         Arc::clone(&self.exit)
     }
 
     /// Whether it has terminated, by exiting or by being killed.
-    pub(crate) fn is_terminated(&self) -> bool {
+    pub fn is_terminated(&self) -> bool {
         self.exit.is_terminated()
     }
 
     /// How it ended, once it has.
-    pub(crate) fn exit_status(&self) -> Option<i32> {
+    pub fn exit_status(&self) -> Option<i32> {
         self.exit.status()
     }
 
     /// The queue woken as it lets go of what it held: once its handles and
     /// descriptors are closed, and again once it is released.
-    pub(crate) fn exited(&self) -> &WaitQueue {
+    pub fn exited(&self) -> &WaitQueue {
         self.exit.exited()
     }
 }
@@ -779,7 +771,7 @@ impl Drop for Process {
 /// does not know what that is.
 ///
 /// `Any`, so that the personality can have its own type back ([`downcast`]).
-pub(crate) trait Host: Any + Send + Sync + fmt::Debug {
+pub trait Host: Any + Send + Sync + fmt::Debug {
     /// The core process inside it.
     fn core(&self) -> &Process;
 
@@ -811,7 +803,7 @@ pub(crate) trait Host: Any + Send + Sync + fmt::Debug {
 
 /// The personality's own type back from a [`Host`], or `None` if `host` is
 /// not a `T`.
-pub(crate) fn downcast<T: Host>(host: Arc<dyn Host>) -> Option<Arc<T>> {
+pub fn downcast<T: Host>(host: Arc<dyn Host>) -> Option<Arc<T>> {
     let any: Arc<dyn Any + Send + Sync> = host;
     any.downcast::<T>().ok()
 }
@@ -824,7 +816,7 @@ pub(crate) fn downcast<T: Host>(host: Arc<dyn Host>) -> Option<Arc<T>> {
 /// records how it ended ([`Exit::record`]) and closes it once the process has
 /// let go of what it held ([`Exit::close`]); nothing else writes it.
 #[derive(Debug)]
-pub(crate) struct Exit {
+pub struct Exit {
     /// Its exit status, valid once `terminated` is.
     status: AtomicI32,
     /// The signal that ended it, or zero.
@@ -864,7 +856,7 @@ impl Exit {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn for_check(ended: bool) -> Result<Arc<Exit>, AllocError> {
+    pub fn for_check(ended: bool) -> Result<Arc<Exit>, AllocError> {
         let exit = fallible::try_arc(Exit::new())?;
         if ended {
             exit.record(0, 0);
@@ -881,18 +873,18 @@ impl Exit {
     /// Whether it has ended and closed its handles and descriptors: what a
     /// handle's `TERMINATED` signal reports, a little after
     /// [`Exit::is_terminated`] is true.
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 
     /// Its exit status, once it has terminated.
-    pub(crate) fn status(&self) -> Option<i32> {
+    pub fn status(&self) -> Option<i32> {
         self.is_terminated()
             .then(|| self.status.load(Ordering::Acquire))
     }
 
     /// The signal that ended it, if one did.
-    pub(crate) fn signal(&self) -> Option<u32> {
+    pub fn signal(&self) -> Option<u32> {
         let signal = self.ended_by.load(Ordering::Acquire);
         (self.is_terminated() && signal != 0).then_some(signal)
     }
@@ -909,7 +901,7 @@ impl Exit {
     ///
     /// [`PortError::Full`] at [`port::MAX_OBSERVERS`] registrations;
     /// [`PortError::NoMemory`].
-    pub(crate) fn observe(&self, observer: Observer) -> Result<(), PortError> {
+    pub fn observe(&self, observer: Observer) -> Result<(), PortError> {
         debug_assert!(
             crate::arch::interrupts_enabled(),
             "a process's watchers were reached with interrupts off, which its plain lock may not be"
@@ -934,7 +926,7 @@ impl Exit {
 
     /// Take the registrations waiting for it, for the caller to fire once it
     /// holds no lock, and refuse to keep any more.
-    pub(crate) fn close(&self) -> Vec<Observer> {
+    pub fn close(&self) -> Vec<Observer> {
         debug_assert!(
             crate::arch::interrupts_enabled(),
             "a process's watchers were reached with interrupts off, which its plain lock may not be"
@@ -954,7 +946,7 @@ impl Exit {
 /// made also holds the process's [`Control`], shared by every duplicate of
 /// that handle: the weak way back to the process that `process_start` needs.
 #[derive(Debug, Clone)]
-pub(crate) struct ProcessRef {
+pub struct ProcessRef {
     /// How it ended.
     exit: Arc<Exit>,
     /// The way back to it, for a process made through the native ABI.
@@ -968,7 +960,7 @@ pub(crate) struct ProcessRef {
 /// task runs, so its handles have to, and a start hands that reference over to
 /// the process's task.
 #[derive(Debug)]
-pub(crate) struct Control {
+pub struct Control {
     /// The process, while anything else holds it.
     process: Weak<dyn Host>,
     /// The only strong reference to a process nobody has started.
@@ -977,7 +969,7 @@ pub(crate) struct Control {
 
 impl ProcessRef {
     /// A handle's view of `process`, with no way back to it.
-    pub(crate) fn new(process: &Process) -> ProcessRef {
+    pub fn new(process: &Process) -> ProcessRef {
         ProcessRef {
             exit: Arc::clone(&process.exit),
             control: None,
@@ -991,7 +983,7 @@ impl ProcessRef {
     ///
     /// [`AllocError`]. `host` has been dropped, unstarted -- and so, by
     /// [`Control`]'s rule, killed first.
-    pub(crate) fn created(host: Arc<dyn Host>) -> Result<ProcessRef, AllocError> {
+    pub fn created(host: Arc<dyn Host>) -> Result<ProcessRef, AllocError> {
         let exit = Arc::clone(&host.core().exit);
         let process = Arc::downgrade(&host);
         let control = match fallible::try_arc(Control {
@@ -1012,17 +1004,17 @@ impl ProcessRef {
     }
 
     /// How it ended, and who is waiting to hear.
-    pub(crate) fn exit(&self) -> &Exit {
+    pub fn exit(&self) -> &Exit {
         &self.exit
     }
 
     /// Its exit status, once it has terminated.
-    pub(crate) fn exit_status(&self) -> Option<i32> {
+    pub fn exit_status(&self) -> Option<i32> {
         self.exit.status()
     }
 
     /// The way back to the process, if this handle was made with one.
-    pub(crate) fn control(&self) -> Option<&Arc<Control>> {
+    pub fn control(&self) -> Option<&Arc<Control>> {
         self.control.as_ref()
     }
 }
@@ -1032,19 +1024,19 @@ impl Control {
     ///
     /// Never asked on a wait path: a wait needs only the [`Exit`], and a
     /// process that has gone answers `None` here, not a panic.
-    pub(crate) fn process<T: Host>(&self) -> Option<Arc<T>> {
+    pub fn process<T: Host>(&self) -> Option<Arc<T>> {
         downcast(self.process.upgrade()?)
     }
 
     /// The process, if it still exists, as the core holds it: what a start
     /// through the native ABI hands the personality back.
-    pub(crate) fn host(&self) -> Option<Arc<dyn Host>> {
+    pub fn host(&self) -> Option<Arc<dyn Host>> {
         self.process.upgrade()
     }
 
     /// Let go of the reference that kept it before it started, now that its
     /// task holds it.
-    pub(crate) fn started(&self) {
+    pub fn started(&self) {
         let held = self.unstarted.lock().take();
         drop(held);
     }
@@ -1087,17 +1079,17 @@ impl Drop for Control {
 }
 
 /// One past the largest pid: Linux's default `pid_max`.
-pub(crate) const PID_MAX: u32 = 32_768;
+pub const PID_MAX: u32 = 32_768;
 
 /// Where numbering resumes after wrapping. Linux's `RESERVED_PIDS`: the
 /// numbers below it stay with whatever started at boot.
-pub(crate) const RESERVED: u32 = 300;
+pub const RESERVED: u32 = 300;
 
 /// The pid Linux gives the first user process, which programs rely on: a shell
 /// running as init reports `$$` as 1, its children see 1 as their parent, and
 /// busybox's `init` refuses to run as anything else. [`allocate`] never hands
 /// it out; [`allocate_init`] does.
-pub(crate) const INIT_PID: u32 = 1;
+pub const INIT_PID: u32 = 1;
 
 /// The pid table.
 #[derive(Debug)]
@@ -1143,7 +1135,7 @@ static TABLE: SpinLock<Table> = SpinLock::new(Table {
 
 /// Choose and reserve a number, or `None` if every one is in use or there was
 /// no memory to record it.
-pub(crate) fn allocate() -> Option<u32> {
+pub fn allocate() -> Option<u32> {
     let mut guard = TABLE.lock();
     let table = &mut *guard;
     let mut candidate = table.last;
@@ -1164,7 +1156,7 @@ pub(crate) fn allocate() -> Option<u32> {
 
 /// Reserve [`INIT_PID`] for the process init starts, or `None` if a process
 /// still holds it or there was no memory to record it.
-pub(crate) fn allocate_init() -> Option<u32> {
+pub fn allocate_init() -> Option<u32> {
     let mut guard = TABLE.lock();
     if guard.live.contains_key(&INIT_PID) {
         return None;
@@ -1174,7 +1166,7 @@ pub(crate) fn allocate_init() -> Option<u32> {
 }
 
 /// Whether no process, live or on its way out, holds `number`.
-pub(crate) fn is_free(number: u32) -> bool {
+pub fn is_free(number: u32) -> bool {
     !TABLE.lock().live.contains_key(&number)
 }
 
@@ -1188,7 +1180,7 @@ pub(crate) fn is_free(number: u32) -> bool {
 ///
 /// [`AllocError`] for a number not reserved, when there was no memory to add
 /// it.
-pub(crate) fn name(number: u32, process: Weak<dyn Host>) -> Result<(), AllocError> {
+pub fn name(number: u32, process: Weak<dyn Host>) -> Result<(), AllocError> {
     let mut table = TABLE.lock();
     let named = Entry {
         host: Some(process),
@@ -1203,12 +1195,12 @@ pub(crate) fn name(number: u32, process: Weak<dyn Host>) -> Result<(), AllocErro
 
 /// Give `number` back, whatever it names. Called by a process as it is
 /// dropped, and by the boot check.
-pub(crate) fn release(number: u32) {
+pub fn release(number: u32) {
     let _ = TABLE.lock().live.remove(&number);
 }
 
 /// Give `number` back if it still names `process`.
-pub(crate) fn release_naming<H: Host>(number: u32, process: &H) {
+pub fn release_naming<H: Host>(number: u32, process: &H) {
     let mut table = TABLE.lock();
     if table
         .live
@@ -1221,7 +1213,7 @@ pub(crate) fn release_naming<H: Host>(number: u32, process: &H) {
 
 /// How many numbers name `process`: its pid, and one for each of its threads
 /// that holds a number of its own.
-pub(crate) fn numbers_naming<H: Host>(process: &H) -> usize {
+pub fn numbers_naming<H: Host>(process: &H) -> usize {
     TABLE
         .lock()
         .live
@@ -1248,7 +1240,7 @@ fn names<H: Host>(entry: Option<&Weak<dyn Host>>, process: &H) -> bool {
 /// [`live`] still lists the process, for the core's own walks that must see
 /// an ended process whose memory is not yet freed (`object::oom`); [`find`]
 /// and [`listed`] do not.
-pub(crate) fn unlist<H: Host>(process: &H) {
+pub fn unlist<H: Host>(process: &H) {
     for entry in TABLE.lock().live.values_mut() {
         if names(entry.host.as_ref(), process) {
             entry.listed = false;
@@ -1257,7 +1249,7 @@ pub(crate) fn unlist<H: Host>(process: &H) {
 }
 
 /// The live process `number` names, unless it has been reaped ([`unlist`]).
-pub(crate) fn find(number: u32) -> Option<Arc<dyn Host>> {
+pub fn find(number: u32) -> Option<Arc<dyn Host>> {
     TABLE
         .lock()
         .live
@@ -1276,7 +1268,7 @@ pub(crate) fn find(number: u32) -> Option<Arc<dyn Host>> {
 /// # Errors
 ///
 /// [`AllocError`].
-pub(crate) fn live() -> Result<Vec<Arc<dyn Host>>, AllocError> {
+pub fn live() -> Result<Vec<Arc<dyn Host>>, AllocError> {
     gather(false)
 }
 
@@ -1287,7 +1279,7 @@ pub(crate) fn live() -> Result<Vec<Arc<dyn Host>>, AllocError> {
 /// # Errors
 ///
 /// [`AllocError`].
-pub(crate) fn listed() -> Result<Vec<Arc<dyn Host>>, AllocError> {
+pub fn listed() -> Result<Vec<Arc<dyn Host>>, AllocError> {
     gather(true)
 }
 

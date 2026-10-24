@@ -16,7 +16,7 @@ use super::{Abi, Outcome};
 /// # Errors
 ///
 /// Two entries compared as equal that differ, or as different that do not.
-pub(crate) fn outcomes() -> Result<(), &'static str> {
+pub fn outcomes() -> Result<(), &'static str> {
     // The dispatcher's callers compare outcomes, and an entry compared by
     // anything less than its entry and stack would restart a program at
     // another's first instruction, or on another's stack.

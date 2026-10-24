@@ -61,6 +61,23 @@ const KERNEL_VIRT_BASE_32: &str = "0xf0000000";
 /// rather than panicking because the workspace lint table denies `panic!`,
 /// `unwrap` and `exit` in this tree, build scripts included.
 fn main() -> Result<(), Box<dyn Error>> {
+    // The one build script of the kernel's crates (`docs/KERNEL-CRATES.md`,
+    // ledger 3282 (K1), (K2)): each gets the same flags as cfgs, and only the
+    // binary links. Any other package naming this script is refused.
+    match std::env::var("CARGO_PKG_NAME")?.as_str() {
+        "ferrix-kernel" => {}
+        "ferrix-kernel-core" | "ferrix-kernel-item" | "ferrix-kernel-load" => {
+            let _ = build_flags()?;
+            println!("cargo::rerun-if-changed=../build.rs");
+            return Ok(());
+        }
+        other => {
+            return Err(format!(
+                "src/kernel/build.rs is the kernel's crates' build script, not {other}'s"
+            )
+            .into());
+        }
+    }
     let manifest = std::env::var("CARGO_MANIFEST_DIR")?;
     let script = Path::new(&manifest).join("linker").join("kernel.ld");
 
@@ -131,14 +148,15 @@ fn relocatable_link(flags: &[(String, String)]) -> Result<&'static [&'static str
 }
 
 /// The build flags (`docs/BUILD-FLAGS.md`): what xtask resolved from the
-/// kernel's profile and any `--set`, made into this crate's `cfg`s, and
+/// kernel's profile and any `--set`, made into the running kernel crate's
+/// `cfg`s (each of the kernel's crates runs this script), and
 /// every declared flag and value made into its `--check-cfg`s.
 ///
 /// xtask gives them in two variables: `FERRIX_BUILD_FLAGS`, the chosen
 /// `name=value` words (`profile` and `level` among them), and
 /// `FERRIX_FLAG_VALUES`, each declared flag as `name=a,b,c`. They become
-/// `cfg(ferrix_<name> = "<value>")` for this crate alone: a flag is read only
-/// in the kernel crate (rule 6 b), and no library is ever compiled with one,
+/// `cfg(ferrix_<name> = "<value>")` for the kernel's crates alone: a flag is
+/// read only in them (rule 6 b), and no other library is ever compiled with one,
 /// so none can take a branch on it. The workspace denies `unexpected_cfgs`,
 /// so a `cfg` naming a flag or value not declared fails the build. Without
 /// the variables the build is refused: a kernel without its flags would

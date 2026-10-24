@@ -76,11 +76,11 @@ use crate::sched::WaitQueue;
 ///
 /// 128 plus `SIGKILL`, which is what a shell prints for a killed child and
 /// what `process::kill`'s own boot check uses.
-pub(crate) const KILLED_STATUS: i32 = 137;
+pub const KILLED_STATUS: i32 = 137;
 
 /// Why a job refused something.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum JobError {
+pub enum JobError {
     /// The job has been killed, and takes no new processes or children.
     Killed,
     /// A child of that name already exists.
@@ -131,7 +131,7 @@ static ROOT: Once<Arc<Job>> = Once::new();
 ///
 /// Made by the first call, which bring-up makes (`main.rs`) before the first
 /// program runs, so the allocation is a boot one.
-pub(crate) fn root() -> &'static Arc<Job> {
+pub fn root() -> &'static Arc<Job> {
     ROOT.call_once(|| {
         // FATAL-ALLOC: the root job is made once, during bring-up, before any
         // program exists to be told memory ran out.
@@ -146,7 +146,7 @@ pub(crate) fn root() -> &'static Arc<Job> {
 
 /// A job.
 #[derive(Debug)]
-pub(crate) struct Job {
+pub struct Job {
     /// The job this one is inside, kept alive by it. `None` for a root.
     ///
     /// Holding it is its purpose: a parent outlives every job beneath it, so
@@ -214,7 +214,7 @@ pub(crate) struct Job {
 /// whoever makes it, since whether a directory is writable by someone other
 /// than root is cgroupfs's to know, not the core's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Budget {
+pub enum Budget {
     /// Its own: a job only root could have made, such as a unit's cgroup
     /// init made in a directory only root may write.
     Own,
@@ -227,13 +227,13 @@ pub(crate) enum Budget {
 /// Who owns one node of a job's cgroupfs directory, and its mode: what
 /// delegation by `chown` changes (`docs/CGROUPS.md` §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NodeAttributes {
+pub struct NodeAttributes {
     /// The owner.
-    pub(crate) uid: u32,
+    pub uid: u32,
     /// The group.
-    pub(crate) gid: u32,
+    pub gid: u32,
     /// The permission bits.
-    pub(crate) permissions: u32,
+    pub permissions: u32,
 }
 
 /// What a job holds.
@@ -390,12 +390,12 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn new_root() -> Result<Arc<Job>, AllocError> {
+    pub fn new_root() -> Result<Arc<Job>, AllocError> {
         Job::new_root_as(false)
     }
 
     /// [`Job::new_root`], sealed as asked.
-    pub(crate) fn new_root_as(sealed: bool) -> Result<Arc<Job>, AllocError> {
+    pub fn new_root_as(sealed: bool) -> Result<Arc<Job>, AllocError> {
         let mut job = Job::bare(None, None, Some(Quota::new(None)?), Budget::Own)?;
         job.sealed = sealed;
         fallible::try_arc(job)
@@ -468,7 +468,7 @@ impl Job {
     /// # Errors
     ///
     /// [`JobError::Killed`], [`JobError::NoMemory`].
-    pub(crate) fn new_child(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
+    pub fn new_child(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
         self.new_child_in(0, false)
     }
 
@@ -480,17 +480,13 @@ impl Job {
     /// # Errors
     ///
     /// As [`Job::new_child`].
-    pub(crate) fn new_child_domain(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
+    pub fn new_child_domain(self: &Arc<Job>) -> Result<Arc<Job>, JobError> {
         self.new_child_in(NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed), false)
     }
 
     /// [`Job::new_child`], a speculation domain if `domain`, sealed if
     /// `sealed` (`job_create`'s options).
-    pub(crate) fn new_child_as(
-        self: &Arc<Job>,
-        domain: bool,
-        sealed: bool,
-    ) -> Result<Arc<Job>, JobError> {
+    pub fn new_child_as(self: &Arc<Job>, domain: bool, sealed: bool) -> Result<Arc<Job>, JobError> {
         let domain = if domain {
             NEXT_DOMAIN.fetch_add(1, Ordering::Relaxed)
         } else {
@@ -507,14 +503,14 @@ impl Job {
     }
 
     /// Whether it is sealed.
-    pub(crate) fn sealed(&self) -> bool {
+    pub fn sealed(&self) -> bool {
         self.sealed
     }
 
     /// Whether a member of `self` may start a process in `to` (`L.object.249`,
     /// `251`): a sealed job's members only within its tree; and, but by
     /// native `process_create`, nobody into a sealed job from outside it.
-    pub(crate) fn may_start_in(&self, to: &Job, native: bool) -> bool {
+    pub fn may_start_in(&self, to: &Job, native: bool) -> bool {
         if self.sealed {
             self.contains(to)
         } else {
@@ -523,7 +519,7 @@ impl Job {
     }
 
     /// The speculation domain it is: zero for none.
-    pub(crate) fn domain(&self) -> u64 {
+    pub fn domain(&self) -> u64 {
         self.domain
     }
 
@@ -550,7 +546,7 @@ impl Job {
     /// [`JobError::Exists`] if a named child already has that name, or
     /// [`JobError::Limited`] if a limit at or above it allows no further job,
     /// or [`JobError::NoMemory`].
-    pub(crate) fn new_named_child(
+    pub fn new_named_child(
         self: &Arc<Job>,
         name: &str,
         budget: Budget,
@@ -559,7 +555,7 @@ impl Job {
     }
 
     /// [`Job::new_named_child`], sealed as asked: `drivers.slice`.
-    pub(crate) fn new_named_child_as(
+    pub fn new_named_child_as(
         self: &Arc<Job>,
         name: &str,
         budget: Budget,
@@ -584,19 +580,19 @@ impl Job {
 
     /// Its quota slot, or [`quota::NONE`] for the tree's root: what a charge
     /// made on its behalf names.
-    pub(crate) fn quota_index(&self) -> u32 {
+    pub fn quota_index(&self) -> u32 {
         self.quota.as_ref().map_or(quota::NONE, Quota::index)
     }
 
     /// What it holds of `resource`, its limit and its refusals; `None` for
     /// the tree's root, which is charged nothing.
-    pub(crate) fn usage(&self, resource: Resource) -> Option<Usage> {
+    pub fn usage(&self, resource: Resource) -> Option<Usage> {
         self.quota.as_ref().map(|quota| quota.usage(resource))
     }
 
     /// Limit what it and everything beneath it may hold of `resource`.
     /// Whether it could be: the tree's root takes no limit.
-    pub(crate) fn set_limit(&self, resource: Resource, limit: u64) -> bool {
+    pub fn set_limit(&self, resource: Resource, limit: u64) -> bool {
         self.quota
             .as_ref()
             .map(|quota| quota.set_limit(resource, limit))
@@ -605,7 +601,7 @@ impl Job {
 
     /// Its `memory.high`, `memory.low` or `memory.min` mark; a `max` high and
     /// a zero low and min for the tree's root, which has none.
-    pub(crate) fn mark(&self, mark: Mark) -> u64 {
+    pub fn mark(&self, mark: Mark) -> u64 {
         self.quota.as_ref().map_or(
             if mark == Mark::High {
                 quota::UNLIMITED
@@ -617,7 +613,7 @@ impl Job {
     }
 
     /// Set a mark. Whether it could be: the tree's root takes none.
-    pub(crate) fn set_mark(&self, mark: Mark, value: u64) -> bool {
+    pub fn set_mark(&self, mark: Mark, value: u64) -> bool {
         self.quota
             .as_ref()
             .map(|quota| quota.set_mark(mark, value))
@@ -625,7 +621,7 @@ impl Job {
     }
 
     /// How many of `counter` were counted in it and beneath it.
-    pub(crate) fn counted(&self, counter: Counter) -> u64 {
+    pub fn counted(&self, counter: Counter) -> u64 {
         self.quota
             .as_ref()
             .map_or(0, |quota| quota.counted(counter))
@@ -643,7 +639,7 @@ impl Job {
 
     /// Its `cpu.max`: the quota in nanoseconds, or [`quota::UNLIMITED`], and
     /// the period in nanoseconds.
-    pub(crate) fn bandwidth(&self) -> (u64, u64) {
+    pub fn bandwidth(&self) -> (u64, u64) {
         self.quota.as_ref().map_or(
             (quota::UNLIMITED, quota::DEFAULT_PERIOD_NS),
             Quota::bandwidth,
@@ -651,7 +647,7 @@ impl Job {
     }
 
     /// Set its `cpu.max`. Whether it could be: the tree's root takes none.
-    pub(crate) fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
+    pub fn set_bandwidth(&self, quota: u64, period: u64) -> bool {
         self.quota
             .as_ref()
             .map(|slot| slot.set_bandwidth(quota, period))
@@ -661,7 +657,7 @@ impl Job {
     /// Nanoseconds its tasks, and those of the jobs beneath it, have used
     /// the processor in user mode and in kernel mode; the whole machine's for
     /// the tree's root.
-    pub(crate) fn cpu_times(&self) -> (u64, u64) {
+    pub fn cpu_times(&self) -> (u64, u64) {
         self.quota
             .as_ref()
             .map_or_else(quota::machine_cpu, Quota::cpu_times)
@@ -672,23 +668,23 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`] when the list cannot be made.
-    pub(crate) fn subtree(self: &Arc<Job>) -> Result<Vec<Arc<Job>>, AllocError> {
+    pub fn subtree(self: &Arc<Job>) -> Result<Vec<Arc<Job>>, AllocError> {
         self.walk(|_| {})
     }
 
     /// Whether `cgroup.freeze` is set here: its own, not an ancestor's.
-    pub(crate) fn freeze_requested(&self) -> bool {
+    pub fn freeze_requested(&self) -> bool {
         self.freeze.load(Ordering::Acquire)
     }
 
     /// Set `cgroup.freeze` here. The processes beneath it are to be told by
     /// the caller ([`Process::sync_freeze`]), after this.
-    pub(crate) fn set_freeze(&self, on: bool) {
+    pub fn set_freeze(&self, on: bool) {
         self.freeze.store(on, Ordering::SeqCst);
     }
 
     /// Whether it, or a job above it, asks for its processes to be frozen.
-    pub(crate) fn freezing(&self) -> bool {
+    pub fn freezing(&self) -> bool {
         let mut at = Some(self);
         while let Some(job) = at {
             if job.freeze.load(Ordering::SeqCst) {
@@ -700,13 +696,13 @@ impl Job {
     }
 
     /// What `cgroup.events` last said of `frozen`.
-    pub(crate) fn frozen_seen(&self) -> bool {
+    pub fn frozen_seen(&self) -> bool {
         self.frozen_seen.load(Ordering::Acquire)
     }
 
     /// Record that `frozen` is now `now`, and, if that changed what
     /// `cgroup.events` says, wake whatever polls it. Whether it changed.
-    pub(crate) fn note_frozen(&self, now: bool) -> bool {
+    pub fn note_frozen(&self, now: bool) -> bool {
         let changed = self.frozen_seen.swap(now, Ordering::AcqRel) != now;
         if changed {
             self.events.wake_all();
@@ -716,14 +712,14 @@ impl Job {
     }
 
     /// Its `cpu.weight`: [`quota::DEFAULT_WEIGHT`] for the tree's root.
-    pub(crate) fn cpu_weight(&self) -> u32 {
+    pub fn cpu_weight(&self) -> u32 {
         self.quota
             .as_ref()
             .map_or(quota::DEFAULT_WEIGHT, Quota::weight)
     }
 
     /// Set its `cpu.weight`. Whether it could be: the tree's root has none.
-    pub(crate) fn set_cpu_weight(&self, weight: u32) -> bool {
+    pub fn set_cpu_weight(&self, weight: u32) -> bool {
         self.quota
             .as_ref()
             .map(|quota| quota.set_weight(weight))
@@ -731,22 +727,22 @@ impl Job {
     }
 
     /// Its name, if it has one.
-    pub(crate) fn name(&self) -> Option<&str> {
+    pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
     /// Its number.
-    pub(crate) fn id(&self) -> u64 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 
     /// Whether it is a root: the tree's, or one a boot check made alone.
-    pub(crate) fn is_root(&self) -> bool {
+    pub fn is_root(&self) -> bool {
         self.parent.is_none()
     }
 
     /// The job it is inside, unless it is a root.
-    pub(crate) fn parent(&self) -> Option<&Arc<Job>> {
+    pub fn parent(&self) -> Option<&Arc<Job>> {
         self.parent.as_ref()
     }
 
@@ -756,7 +752,7 @@ impl Job {
     }
 
     /// Whether `rmdir` has taken it out of its parent.
-    pub(crate) fn is_removed(&self) -> bool {
+    pub fn is_removed(&self) -> bool {
         self.state.lock().removed
     }
 
@@ -768,12 +764,12 @@ impl Job {
     /// # Errors
     ///
     /// [`JobError::Removed`] or [`JobError::Internal`].
-    pub(crate) fn admits(&self) -> Result<(), JobError> {
+    pub fn admits(&self) -> Result<(), JobError> {
         self.state.lock().admits(self.parent.is_none())
     }
 
     /// Its `cgroup.subtree_control`.
-    pub(crate) fn subtree_control(&self) -> Set {
+    pub fn subtree_control(&self) -> Set {
         self.state.lock().subtree_control
     }
 
@@ -790,11 +786,7 @@ impl Job {
     /// [`JobError::Missing`] for a controller not offered, [`JobError::Busy`]
     /// for one a child still enables, [`JobError::Internal`] for the rule,
     /// [`JobError::NoMemory`].
-    pub(crate) fn change_subtree_control(
-        &self,
-        change: Change,
-        offered: Set,
-    ) -> Result<(), JobError> {
+    pub fn change_subtree_control(&self, change: Change, offered: Set) -> Result<(), JobError> {
         let current = self.subtree_control();
         let enable = change.enable.minus(current);
         let disable = change.disable.intersect(current);
@@ -817,7 +809,7 @@ impl Job {
 
     /// The owner, group and mode `chown` or `chmod` gave the node at `slot`
     /// of its cgroupfs directory, if either did.
-    pub(crate) fn node(&self, slot: u64) -> Option<NodeAttributes> {
+    pub fn node(&self, slot: u64) -> Option<NodeAttributes> {
         self.nodes
             .lock()
             .iter()
@@ -830,7 +822,7 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`] when a node not yet listed could not be.
-    pub(crate) fn set_node(&self, slot: u64, attributes: NodeAttributes) -> Result<(), AllocError> {
+    pub fn set_node(&self, slot: u64, attributes: NodeAttributes) -> Result<(), AllocError> {
         let mut nodes = self.nodes.lock();
         match nodes.iter_mut().find(|(at, _)| *at == slot) {
             Some((_, held)) => *held = attributes,
@@ -845,7 +837,7 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn children(&self) -> Result<Vec<Arc<Job>>, AllocError> {
+    pub fn children(&self) -> Result<Vec<Arc<Job>>, AllocError> {
         let members = self.state.lock();
         fallible::try_collect(
             members
@@ -868,7 +860,7 @@ impl Job {
     ///
     /// [`JobError::Missing`] when it has no such named child, and
     /// [`JobError::Busy`] when that child is populated or has children.
-    pub(crate) fn remove_named_child(&self, name: &str) -> Result<Arc<Job>, JobError> {
+    pub fn remove_named_child(&self, name: &str) -> Result<Arc<Job>, JobError> {
         let mut members = self.state.lock();
         let at = members
             .named
@@ -898,24 +890,24 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`]: counting walks the tree.
-    pub(crate) fn descendants(self: &Arc<Job>) -> Result<u32, AllocError> {
+    pub fn descendants(self: &Arc<Job>) -> Result<u32, AllocError> {
         let count = self.walk(|_| {})?.len().saturating_sub(1);
         Ok(u32::try_from(count).unwrap_or(u32::MAX))
     }
 
     /// Its `cgroup.max.depth` and `cgroup.max.descendants`.
-    pub(crate) fn limits(&self) -> (Limit, Limit) {
+    pub fn limits(&self) -> (Limit, Limit) {
         let members = self.state.lock();
         (members.max_depth, members.max_descendants)
     }
 
     /// Set its `cgroup.max.depth`.
-    pub(crate) fn set_max_depth(&self, limit: Limit) {
+    pub fn set_max_depth(&self, limit: Limit) {
         self.state.lock().max_depth = limit;
     }
 
     /// Set its `cgroup.max.descendants`.
-    pub(crate) fn set_max_descendants(&self, limit: Limit) {
+    pub fn set_max_descendants(&self, limit: Limit) {
         self.state.lock().max_descendants = limit;
     }
 
@@ -945,7 +937,7 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn path_names(&self) -> Result<Vec<String>, AllocError> {
+    pub fn path_names(&self) -> Result<Vec<String>, AllocError> {
         let mut names = Vec::new();
         let mut at = Some(self);
         while let Some(job) = at {
@@ -963,7 +955,7 @@ impl Job {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn display_name(&self) -> Result<String, AllocError> {
+    pub fn display_name(&self) -> Result<String, AllocError> {
         match &self.name {
             Some(name) => fallible::try_string(name),
             None => fallible::try_format(format_args!("job-{}", self.id)),
@@ -972,28 +964,28 @@ impl Job {
 
     /// Whether it, or a job beneath it, has a member that has not been
     /// released.
-    pub(crate) fn is_populated(&self) -> bool {
+    pub fn is_populated(&self) -> bool {
         self.state.lock().populated()
     }
 
     /// How many of its own members have not been released.
-    pub(crate) fn live(&self) -> usize {
+    pub fn live(&self) -> usize {
         self.state.lock().live
     }
 
     /// The queue woken whenever it becomes populated or empty.
-    pub(crate) fn events(&self) -> &Arc<WaitQueue> {
+    pub fn events(&self) -> &Arc<WaitQueue> {
         &self.events
     }
 
     /// The queue woken whenever its `memory.events` counts change.
-    pub(crate) fn memory_events(&self) -> &Arc<WaitQueue> {
+    pub fn memory_events(&self) -> &Arc<WaitQueue> {
         &self.memory_events
     }
 
     /// `memory.events`' `oom` and `oom_kill`, its own and every job's
     /// beneath it, as cgroup v2 counts them.
-    pub(crate) fn oom_counts(&self) -> (u64, u64) {
+    pub fn oom_counts(&self) -> (u64, u64) {
         (
             self.ooms.load(Ordering::Acquire),
             self.oom_kills.load(Ordering::Acquire),
@@ -1015,7 +1007,7 @@ impl Job {
     }
 
     /// Whether `job` is this job or beneath it.
-    pub(crate) fn contains(&self, job: &Job) -> bool {
+    pub fn contains(&self, job: &Job) -> bool {
         let mut at = Some(job);
         while let Some(current) = at {
             if core::ptr::eq(current, self) {
@@ -1028,7 +1020,7 @@ impl Job {
 
     /// Whether a process joining it now would be ended: it or a job above it
     /// has been killed, or is having its members killed.
-    pub(crate) fn is_dying(&self) -> bool {
+    pub fn is_dying(&self) -> bool {
         let mut at = Some(self);
         while let Some(current) = at {
             let members = current.state.lock();
@@ -1119,7 +1111,7 @@ impl Job {
     ///
     /// [`JobError::Killed`] if this job, or one above it, has been killed, in
     /// which case the caller should not start it.
-    pub(crate) fn adopt(self: &Arc<Job>, process: &Process) -> Result<(), JobError> {
+    pub fn adopt(self: &Arc<Job>, process: &Process) -> Result<(), JobError> {
         process.move_to(self)
     }
 
@@ -1146,7 +1138,7 @@ impl Job {
     ///
     /// [`PortError::Full`] when the job already holds
     /// [`super::port::MAX_OBSERVERS`] registrations; [`PortError::NoMemory`].
-    pub(crate) fn observe(&self, observer: Observer) -> Result<(), PortError> {
+    pub fn observe(&self, observer: Observer) -> Result<(), PortError> {
         let mut members = self.state.lock();
         let asserted = members.signals();
         if observer.wants(asserted) {
@@ -1159,12 +1151,12 @@ impl Job {
 
     /// What a native waiter on it sees: [`Signals::TERMINATED`] once it has
     /// been killed, and [`Signals::EMPTY`] while it is not populated.
-    pub(crate) fn signals(&self) -> Signals {
+    pub fn signals(&self) -> Signals {
         self.state.lock().signals()
     }
 
     /// Whether it has been killed.
-    pub(crate) fn is_killed(&self) -> bool {
+    pub fn is_killed(&self) -> bool {
         self.state.lock().killed
     }
 
@@ -1252,7 +1244,7 @@ impl Job {
     /// running, and a second kill ends them. A job made beneath one of them
     /// between the listing and the marking is not marked itself, but refuses
     /// new members all the same, through the killed job above it.
-    pub(crate) fn kill(self: &Arc<Job>, status: i32) -> Result<usize, AllocError> {
+    pub fn kill(self: &Arc<Job>, status: i32) -> Result<usize, AllocError> {
         let jobs = self.walk(|_| {})?;
         for job in &jobs {
             let mut members = job.state.lock();
@@ -1280,7 +1272,7 @@ impl Job {
     ///
     /// [`AllocError`] when the jobs or the processes could not be listed;
     /// nothing has been ended, and every job is as it was.
-    pub(crate) fn kill_members(self: &Arc<Job>) -> Result<usize, AllocError> {
+    pub fn kill_members(self: &Arc<Job>) -> Result<usize, AllocError> {
         let jobs = self.walk(|_| {})?;
         for job in &jobs {
             job.state.lock().killing += 1;

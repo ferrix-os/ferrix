@@ -39,7 +39,7 @@ static ONE_UNPROGRAMMED_FOR_CHECK: AtomicBool = AtomicBool::new(false);
 /// write-through, which caches reads of the aperture, so
 /// `io_mapping_map_combining` is refused rather than mapped so. The Arm
 /// architectures have no table to program.
-pub(crate) fn combining_ready() -> bool {
+pub fn combining_ready() -> bool {
     let unprogrammed = usize::from(ONE_UNPROGRAMMED_FOR_CHECK.load(Ordering::Acquire));
     arch::write_combining_processors()
         .is_none_or(|programmed| programmed.saturating_sub(unprogrammed) == crate::smp::count())
@@ -47,13 +47,13 @@ pub(crate) fn combining_ready() -> bool {
 
 /// Count one processor's PAT as not programmed while `on`: stage 9's check of
 /// the refusal (`object::check`), which runs before any program does.
-pub(crate) fn count_one_unprogrammed_for_check(on: bool) {
+pub fn count_one_unprogrammed_for_check(on: bool) {
     ONE_UNPROGRAMMED_FOR_CHECK.store(on, Ordering::Release);
 }
 
 /// Why an I/O mapping could not be made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IoMappingError {
+pub enum IoMappingError {
     /// The aperture does not start on a page boundary or is not a whole
     /// number of pages, so no page mapping covers it and nothing else.
     NotWholePages,
@@ -63,7 +63,7 @@ pub(crate) enum IoMappingError {
 
 /// A device aperture a driver may map.
 #[derive(Debug)]
-pub(crate) struct IoMapping {
+pub struct IoMapping {
     /// What it covers, exactly.
     aperture: Aperture,
 }
@@ -74,7 +74,7 @@ impl IoMapping {
     /// # Errors
     ///
     /// [`IoMappingError::NotWholePages`], [`IoMappingError::NoMemory`].
-    pub(crate) fn new(aperture: Aperture) -> Result<Arc<IoMapping>, IoMappingError> {
+    pub fn new(aperture: Aperture) -> Result<Arc<IoMapping>, IoMappingError> {
         if !aperture.whole_pages() {
             return Err(IoMappingError::NotWholePages);
         }
@@ -83,7 +83,11 @@ impl IoMapping {
 
     /// Whether the device says reads of it have no side effects: a
     /// prefetchable BAR, which alone may be mapped write-combining.
-    pub(crate) const fn prefetchable(&self) -> bool {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+    )]
+    pub const fn prefetchable(&self) -> bool {
         self.aperture.cacheable()
     }
 
@@ -93,7 +97,7 @@ impl IoMapping {
     /// # Errors
     ///
     /// Whatever [`AddressSpace::map_device`] refuses.
-    pub(crate) fn map_into(
+    pub fn map_into(
         &self,
         space: &AddressSpace,
         at: Option<u64>,

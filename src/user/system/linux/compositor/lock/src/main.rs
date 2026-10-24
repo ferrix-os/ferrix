@@ -1,4 +1,6 @@
-//! `lock [seconds]`: lock the screen, hold it, and unlock.
+//! `lock [--clear] [seconds]`: lock the screen, hold it, and unlock;
+//! `--clear` draws the lock see-through, so the compositor's wallpaper
+//! shows under it where it is allowed to.
 
 use std::io::Write as _;
 use std::time::Duration;
@@ -6,11 +8,13 @@ use std::time::Duration;
 fn main() {
     let arguments =
         compositor_evecho::init::unshell(std::env::args().skip(1).collect::<Vec<String>>());
+    let clear = arguments.iter().any(|word| word == "--clear");
     let held = arguments
-        .first()
+        .iter()
+        .find(|word| *word != "--clear")
         .and_then(|word| word.parse::<u64>().ok())
         .map_or(Duration::from_secs(5), Duration::from_secs);
-    match socket().and_then(|path| compositor_lock::lock(&path, held)) {
+    match socket().and_then(|path| compositor_lock::lock_drawing(&path, held, clear)) {
         Ok(locked) => say(&format!(
             "lock: locked {} screen(s) and unlocked again",
             locked.screens

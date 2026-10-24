@@ -345,6 +345,9 @@ fn status(unit: &str) -> Result<u8, Failure> {
         "     Active: {} ({}){result}",
         status.active, status.sub
     );
+    if let Some(invocation) = &status.invocation {
+        let _ = writeln!(out, " Invocation: {invocation}");
+    }
     if let Some(main) = status.main {
         let _ = writeln!(out, "   Main PID: {main}");
     }
@@ -361,6 +364,22 @@ fn status(unit: &str) -> Result<u8, Failure> {
         if let Some(memory) = memory {
             let _ = writeln!(out, "     Memory: {}", size(memory));
         }
+    }
+    // The run's last lines, as systemctl shows them: from the log, when lode
+    // keeps one this caller may read (docs/LOGGING.md §9.2).
+    if let Some(invocation) = &status.invocation
+        && let Some(lines) = from_lode(&[
+            "-u",
+            &format!("{}@{invocation}", status.name),
+            "-n",
+            "10",
+            "-o",
+            "short",
+        ])
+        && !lines.is_empty()
+    {
+        let _ = writeln!(out);
+        let _ = out.write_all(&lines);
     }
     Ok(match (status.load.as_str(), status.active.as_str()) {
         ("not-found", _) => 4,
@@ -400,7 +419,21 @@ fn list(failed: bool) -> Result<u8, Failure> {
     Ok(0)
 }
 
-/// `svc log unit [-n N]`.
+/// What `/bin/lode` prints for `args`, if it ran and found what was asked
+/// for: `None` when there is no lode, no log, or nothing of that run.
+fn from_lode(args: &[&str]) -> Option<Vec<u8>> {
+    let output = std::process::Command::new("/bin/lode")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
+/// `svc log unit [-n N]`: the unit's current or last run from the log
+/// (`lode -u UNIT@last`), or init's own ring of its last lines when lode
+/// keeps none this caller may read.
 fn log(rest: &[String]) -> Result<u8, Failure> {
     let (unit, lines) = match rest {
         [unit] => (unit, 50),
@@ -412,6 +445,18 @@ fn log(rest: &[String]) -> Result<u8, Failure> {
         ),
         _ => return Err(Failure::new(2, "usage: svc log unit [-n N]")),
     };
+    if let Some(text) = from_lode(&[
+        "-u",
+        &format!("{unit}@last"),
+        "-n",
+        &lines.to_string(),
+        "-o",
+        "short",
+    ]) && !text.is_empty()
+    {
+        let _ = io::stdout().lock().write_all(&text);
+        return Ok(0);
+    }
     let answers = ask(&Call::Log {
         unit: unit.clone(),
         lines,

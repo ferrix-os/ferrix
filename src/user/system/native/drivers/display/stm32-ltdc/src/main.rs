@@ -299,9 +299,7 @@ fn monitor(bridge: &mut Bridge<I2c<Window>>, device: &Device<Kernel>) -> (bool, 
     let mut base = [0_u8; edid::BLOCK_BYTES];
     let mut extension = [0_u8; edid::BLOCK_BYTES];
     if bridge.read_edid(0, &mut base).is_err() || !edid::is_base(&base) {
-        say(format_args!(
-            "ltdc: the monitor gave no EDID; DVI at 1280x720, 60 Hz"
-        ));
+        ferrix_rt::warn!("ltdc: the monitor gave no EDID; DVI at 1280x720, 60 Hz");
         return (false, None);
     }
     let extensions = edid::extensions(&base);
@@ -322,10 +320,7 @@ fn monitor(bridge: &mut Bridge<I2c<Window>>, device: &Device<Kernel>) -> (bool, 
         tell_offer(offer, &mut round);
     }
     if offers.dropped() > 0 {
-        say(format_args!(
-            "ltdc: {} more offered modes not read",
-            offers.dropped()
-        ));
+        ferrix_rt::notice!("ltdc: {} more offered modes not read", offers.dropped());
     }
     let runnable = choice::runnable(
         &offers,
@@ -334,7 +329,7 @@ fn monitor(bridge: &mut Bridge<I2c<Window>>, device: &Device<Kernel>) -> (bool, 
         round,
     );
     for candidate in runnable.as_slice() {
-        say(format_args!(
+        ferrix_rt::info!(
             "ltdc: can run {}{}",
             Described(&candidate.mode),
             match candidate.how {
@@ -342,7 +337,7 @@ fn monitor(bridge: &mut Bridge<I2c<Window>>, device: &Device<Kernel>) -> (bool, 
                 How::Retimed => ", retimed inside the monitor's range limits",
                 How::Assumed => ", as every HDMI sink does though this one does not list it",
             }
-        ));
+        );
     }
     (hdmi, Some(runnable))
 }
@@ -360,10 +355,10 @@ fn first_mode(device: &Device<Kernel>, runnable: &mut Option<Runnable>) -> Mode 
     if set_clock(device, &chosen.mode) {
         return chosen.mode;
     }
-    say(format_args!(
+    ferrix_rt::warn!(
         "ltdc: the kernel would not set the pixel clock for {}; 720p60 instead",
         Described(&chosen.mode)
-    ));
+    );
     // The mode list goes with it: a card that cannot set its clock runs
     // the one mode it has the clock for.
     *runnable = None;
@@ -502,11 +497,11 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let mut bridge = bridge(I2c::new(i2c_window, TIMING_100KHZ_AT_64MHZ))?;
     let (hdmi, mut runnable) = monitor(&mut bridge, &device);
     let mode = first_mode(&device, &mut runnable);
-    say(format_args!(
+    ferrix_rt::info!(
         "ltdc: running {}, {}",
         Described(&mode),
         if hdmi { "HDMI" } else { "DVI" }
-    ));
+    );
     // The bridge learns the mode with its output off, the controller starts
     // sending it, and only then does the monitor see a signal.
     bridge.set_mode(&mode, hdmi).map_err(|_| Step::BridgeMode)?;
@@ -515,9 +510,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
 
     let cursor = ltdc.has_cursor_layer();
     if cursor {
-        say(format_args!(
-            "ltdc: a {CURSOR_SIZE}x{CURSOR_SIZE} cursor plane on the second layer"
-        ));
+        ferrix_rt::info!("ltdc: a {CURSOR_SIZE}x{CURSOR_SIZE} cursor plane on the second layer");
     }
     match introduce(
         &control,
@@ -848,11 +841,11 @@ impl Serving {
         let mode = if set_clock(&self.device, &wanted.mode) {
             wanted.mode
         } else {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "ltdc: the kernel would not set the pixel clock for {}; staying at {}",
                 Described(&wanted.mode),
                 Described(&running)
-            ));
+            );
             let _ = set_clock(&self.device, &running);
             running
         };
@@ -864,7 +857,7 @@ impl Serving {
         // the same place, clipped to the new screen.
         self.place_pointer();
         self.bridge.enable().map_err(|_| Step::BridgeBus)?;
-        say(format_args!("ltdc: now running {}", Described(&mode)));
+        ferrix_rt::info!("ltdc: now running {}", Described(&mode));
         Ok(())
     }
 
@@ -987,15 +980,6 @@ impl Serving {
 // The console
 // ---------------------------------------------------------------------------
 
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
 struct Line {
     bytes: [u8; 160],
     len: usize,
@@ -1075,26 +1059,26 @@ fn tell_edid(
     let (name, len) = edid::name(base).unwrap_or(([b'?'; 13], 1));
     let name = core::str::from_utf8(name.get(..len).unwrap_or(&[])).unwrap_or("?");
     let [version, revision] = [18, 19].map(|at| base.get(at).copied().unwrap_or(0));
-    say(format_args!(
+    ferrix_rt::info!(
         "ltdc: monitor {name}, EDID {version}.{revision}, {extensions} extension block{}, {}",
         if extensions == 1 { "" } else { "s" },
         if hdmi { "HDMI" } else { "DVI" }
-    ));
+    );
     for (number, block) in core::iter::once(base).chain(following).enumerate() {
         for (row, bytes) in block.chunks(32).enumerate() {
             let mut hex = Line::default();
             for byte in bytes {
                 let _ = write!(hex, "{byte:02x}");
             }
-            say(format_args!(
+            ferrix_rt::debug!(
                 "ltdc: edid {:03x} {}",
                 number * edid::BLOCK_BYTES + row * 32,
                 hex.as_str()
-            ));
+            );
         }
     }
     match edid::range_limits(base) {
-        Some(limits) => say(format_args!(
+        Some(limits) => ferrix_rt::info!(
             "ltdc: range limits {}-{} Hz, {}-{} kHz, {}; takes timings it does not list: {}",
             limits.vertical_hz.0,
             limits.vertical_hz.1,
@@ -1102,8 +1086,8 @@ fn tell_edid(
             limits.horizontal_khz.1,
             Mhz(limits.max_clock_khz),
             if edid::continuous(base) { "yes" } else { "no" }
-        )),
-        None => say(format_args!("ltdc: no range limits")),
+        ),
+        None => ferrix_rt::info!("ltdc: no range limits"),
     }
 }
 
@@ -1129,38 +1113,36 @@ fn tell_offer(offer: &Offer, round: &mut impl FnMut(u32) -> Option<u32>) {
             };
             if let Source::Standard(code) = offer.source {
                 let (w, h, hz) = edid::standard_size(code);
-                say(format_args!(
-                    "ltdc: offered {source} {w}x{h} at {hz} Hz: {why}"
-                ));
+                ferrix_rt::info!("ltdc: offered {source} {w}x{h} at {hz} Hz: {why}");
             } else {
-                say(format_args!("ltdc: offered {source}: {why}"));
+                ferrix_rt::info!("ltdc: offered {source}: {why}");
             }
             return;
         }
     };
     let described = Described(&mode);
     match choice::verdict(&mode, round) {
-        Verdict::Runs { clock_khz } => say(format_args!(
+        Verdict::Runs { clock_khz } => ferrix_rt::info!(
             "ltdc: offered {source} {described}: runs, at {}",
             Mhz(clock_khz)
-        )),
-        Verdict::TooFast => say(format_args!(
+        ),
+        Verdict::TooFast => ferrix_rt::info!(
             "ltdc: offered {source} {described}: over the LTDC's {}",
             Mhz(choice::MAX_PIXEL_KHZ)
-        )),
-        Verdict::TooSlow => say(format_args!(
+        ),
+        Verdict::TooSlow => ferrix_rt::info!(
             "ltdc: offered {source} {described}: under the bridge's {}",
             Mhz(choice::MIN_PIXEL_KHZ)
-        )),
-        Verdict::Clock { nearest_khz } => say(format_args!(
+        ),
+        Verdict::Clock { nearest_khz } => ferrix_rt::info!(
             "ltdc: offered {source} {described}: the nearest clock is {}",
             Mhz(nearest_khz)
-        )),
-        Verdict::NoClock => say(format_args!(
-            "ltdc: offered {source} {described}: the kernel sets no clock"
-        )),
-        Verdict::Counters => say(format_args!(
-            "ltdc: offered {source} {described}: too large for the LTDC"
-        )),
+        ),
+        Verdict::NoClock => {
+            ferrix_rt::info!("ltdc: offered {source} {described}: the kernel sets no clock");
+        }
+        Verdict::Counters => {
+            ferrix_rt::info!("ltdc: offered {source} {described}: too large for the LTDC");
+        }
     }
 }

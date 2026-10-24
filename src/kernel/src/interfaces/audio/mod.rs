@@ -266,7 +266,7 @@ pub(crate) fn card_indices() -> Vec<u32> {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for the registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::SoundControlCreate, control_create)?;
     native::register_server(&SERVER)
 }

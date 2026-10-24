@@ -54,15 +54,15 @@ use crate::syscall::{fd, uaccess};
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// The number the check's disk was registered with, major half.
-    pub(crate) major: u32,
+    pub major: u32,
     /// And minor half.
-    pub(crate) minor: u32,
+    pub minor: u32,
     /// Sectors read back through the device `block_device` found.
-    pub(crate) sectors: u64,
+    pub sectors: u64,
     /// Frames the second run did not give back. Zero, or the check fails.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// The check disk's name.
@@ -87,17 +87,29 @@ const READ_SECTORS: u64 = 2;
 /// it: 64 sectors of 512 bytes are 32 KiB.
 const PARTITIONS: &[u8] = b"major minor  #blocks  name\n\n 254      250         32 ferrixcheck0\n";
 
-/// The character nodes, in the order `/dev` lists them.
-const STATIC_NODES: [&[u8]; 9] = [
-    b"null", b"zero", b"full", b"random", b"urandom", b"tty", b"console", b"ptmx", b"kmsg",
+/// The character nodes, in the order `/dev` lists them; `ferrix-crashes`
+/// is root:root 0400 (`fs::crashes`).
+const STATIC_NODES: [&[u8]; 10] = [
+    b"null",
+    b"zero",
+    b"full",
+    b"random",
+    b"urandom",
+    b"tty",
+    b"console",
+    b"ptmx",
+    b"kmsg",
+    b"ferrix-crashes",
 ];
 
 /// `shm`, which `/dev` lists after the disks and always: the one directory
 /// there unconditionally, and the one this filesystem does not publish a
 /// device for.
 const SHM: &[u8] = b"shm";
-/// The links every Linux `/dev` has, listed after `shm`, in this order.
-const LINKS: [&[u8]; 4] = [b"fd", b"stdin", b"stdout", b"stderr"];
+/// The links every Linux `/dev` has, listed after `shm`, in this order;
+/// `log` is systemd's, to the syslog socket lode serves (`docs/LOGGING.md`
+/// §5), dangling while nothing does.
+const LINKS: [&[u8]; 5] = [b"fd", b"stdin", b"stdout", b"stderr", b"log"];
 
 /// Where `/dev` is staged in the check's page.
 const AT_DEV: u64 = 0;

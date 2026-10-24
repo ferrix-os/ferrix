@@ -39,12 +39,12 @@
 //! memory are sent with [`println_unlogged!`] instead and are not recorded:
 //! [`write_unlogged`] lists them.
 
-pub(crate) mod input;
-pub(crate) mod log;
-pub(crate) mod log_check;
-pub(crate) mod output;
-pub(crate) mod pstore;
-pub(crate) mod screen;
+pub mod input;
+pub mod log;
+pub mod log_check;
+pub mod output;
+pub mod pstore;
+pub mod screen;
 
 use core::fmt::{self, Write};
 use core::hint::spin_loop;
@@ -98,7 +98,7 @@ static RECENT_WRITTEN: AtomicUsize = AtomicUsize::new(0);
 ///
 /// (DEVICE) The caller must have configured the port `arch::console::write_byte` writes
 /// to, including any mapping it needs.
-pub(crate) unsafe fn mark_ready() {
+pub unsafe fn mark_ready() {
     READY.store(true, Ordering::Release);
 }
 
@@ -119,7 +119,8 @@ struct Writer<'port> {
     /// to the port by polling.
     queued: bool,
     /// Whether bytes are kept in [`RECENT`] for a failure report: the
-    /// kernel's own lines are, a program's output is not.
+    /// kernel's own lines and the records programs send the log are, a
+    /// program's console output is not.
     remembered: bool,
     /// Whether bytes are recorded in the kernel [`log`]: everything is but
     /// the lines [`write_unlogged`] sends.
@@ -228,7 +229,7 @@ fn remember(byte: u8) {
 /// Copy the most recent console output into `out`, oldest byte first, and
 /// return how many bytes were copied: at most `out.len()`, and never more
 /// than the ring has kept.
-pub(crate) fn recent(out: &mut [u8]) -> usize {
+pub fn recent(out: &mut [u8]) -> usize {
     let written = RECENT_WRITTEN.load(Ordering::Relaxed);
     let count = written.min(RECENT_BYTES).min(out.len());
     let start = written.saturating_sub(count);
@@ -260,7 +261,8 @@ enum Kind {
     /// A program's output: kept in the log only.
     Program,
     /// A record a program sent to the log itself, `/dev/kmsg`'s, at its
-    /// priority: kept in the log only, as a line of its own.
+    /// priority: kept in the log, as a line of its own, and for a failure
+    /// report, as a kernel line is.
     Record(u8),
 }
 
@@ -268,7 +270,7 @@ impl Kind {
     /// Whether the bytes are kept in [`RECENT`]. Every kind is drawn on the
     /// screen under `ferrix.fbcon`.
     const fn remembered(self) -> bool {
-        matches!(self, Kind::Line | Kind::Unlogged)
+        matches!(self, Kind::Line | Kind::Unlogged | Kind::Record(_))
     }
 
     /// Whether the bytes are recorded in the kernel [`log`].
@@ -291,7 +293,7 @@ impl Kind {
 ///
 /// Queued with interrupts on and polled with them masked, as [`output`]
 /// explains, and never waiting for room: the idle task prints too.
-pub(crate) fn write(arguments: fmt::Arguments<'_>) {
+pub fn write(arguments: fmt::Arguments<'_>) {
     write_as(arguments, Kind::Line);
 }
 
@@ -320,7 +322,7 @@ pub(crate) fn write(arguments: fmt::Arguments<'_>) {
 /// device-side or the program's own. A panic's message is logged as written,
 /// whatever it holds: by the time it is, every other processor is stopping
 /// and no reader will run again.
-pub(crate) fn write_unlogged(arguments: fmt::Arguments<'_>) {
+pub fn write_unlogged(arguments: fmt::Arguments<'_>) {
     write_as(arguments, Kind::Unlogged);
 }
 
@@ -444,32 +446,41 @@ pub(crate) fn announce_power_off_failed() {
 /// translation every program's output would climb the screen in a staircase.
 /// When stage 15 brings ttys, this moves there and this function stops
 /// translating.
-pub(crate) fn write_bytes(bytes: &[u8]) {
+pub fn write_bytes(bytes: &[u8]) {
     emit(bytes, true);
 }
 
 /// Write raw bytes to the console exactly as they are: a terminal whose
 /// program turned `ONLCR` or `OPOST` off. See `crate::fs::terminal`.
-pub(crate) fn write_raw(bytes: &[u8]) {
+pub fn write_raw(bytes: &[u8]) {
     emit(bytes, false);
 }
 
 /// Write `line`, a record a program sent to the kernel log at `priority`
 /// (`/dev/kmsg`), to the console as a line of its own: the log begins a line
-/// for it whatever came before, and it ends in a newline.
+/// for it whatever came before, the port is sent a newline first if another
+/// writer's line was left open, and it ends in a newline.
 ///
 /// Written as a kernel line is, never waiting for room, under the port's lock
 /// from its first byte to its newline, so no other writer's bytes land inside
 /// it.
-pub(crate) fn write_record(priority: u8, line: &[u8]) {
+pub fn write_record(priority: u8, line: &[u8]) {
     if !READY.load(Ordering::Acquire) {
         return;
     }
     let queued = may_queue();
     let wake = {
         let mut port = PORT.lock();
-        log::break_line();
+        let cut = log::break_line();
         let mut writer = Writer::new(&mut port, queued, Kind::Record(priority));
+        // A line another writer left without its newline is ended on the
+        // port, as Linux's console ends a continued line a record cuts, and
+        // only there: the log has ended it already.
+        if cut {
+            writer.logged = false;
+            writer.bytes(b"\n", true);
+            writer.logged = true;
+        }
         writer.bytes(line, true);
         if line.last() != Some(&b'\n') {
             writer.bytes(b"\n", true);
@@ -507,6 +518,7 @@ fn emit(bytes: &[u8], crlf: bool) {
 }
 
 /// Print to the kernel console, with a newline.
+#[macro_export]
 macro_rules! println {
     () => { $crate::console::write(format_args!("\n")) };
     ($($argument:tt)*) => {
@@ -514,14 +526,15 @@ macro_rules! println {
     };
 }
 
-pub(crate) use println;
+pub use crate::println;
 
 /// Print to the kernel console, with a newline, and keep the line out of the
 /// kernel log: see [`write_unlogged`] for which lines, and why.
+#[macro_export]
 macro_rules! println_unlogged {
     ($($argument:tt)*) => {
         $crate::console::write_unlogged(format_args!("{}\n", format_args!($($argument)*)))
     };
 }
 
-pub(crate) use println_unlogged;
+pub use crate::println_unlogged;

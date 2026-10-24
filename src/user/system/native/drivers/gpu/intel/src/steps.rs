@@ -30,8 +30,6 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_intel_xelp::options::{self, Options, Words};
 
-use crate::say;
-
 /// The steps, in the order the driver takes them. The number is what
 /// `ferrix.intelgpu.stop` names; the box's run plan cites them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -135,7 +133,7 @@ impl Steps {
         let options = read_cmdline(&mut line).map_or_else(Options::default, |len| {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}, fwhold {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
@@ -146,18 +144,18 @@ impl Steps {
             if options.freqtest { "on" } else { "off" },
             if options.uapitrace { "on" } else { "off" },
             if options.fwhold { "on" } else { "off" },
-        ));
+        );
         if options.reset_refused {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: ferrix.intelgpu.reset refused: seconds 1 to {} after boot; no restart",
                 options::RESET_MAX_SECONDS
-            ));
+            );
         }
         if let Some(seconds) = options.reset_seconds {
             RESET_AT_NANOS.store(u64::from(seconds) * 1_000_000_000, Ordering::Relaxed);
-            say(format_args!(
+            ferrix_rt::notice!(
                 "intel: the machine restarts {seconds} s after boot (ferrix.intelgpu.reset), whatever this driver is doing then"
-            ));
+            );
         }
         Steps {
             stop: options.stop,
@@ -176,12 +174,12 @@ impl Steps {
     pub(crate) fn before(&self, at: At, what: fmt::Arguments<'_>) -> Result<(), Stopped> {
         let n = at as u32;
         if self.stop.is_some_and(|stop| stop <= n) {
-            say(format_args!(
+            ferrix_rt::notice!(
                 "intel: stopped before step {n} ({at:?}) as ferrix.intelgpu.stop asks; the driver now waits and touches nothing"
-            ));
+            );
             return Err(Stopped);
         }
-        say(format_args!("intel: step {n} ({at:?}): {what}"));
+        ferrix_rt::info!("intel: step {n} ({at:?}): {what}");
         Ok(())
     }
 }
@@ -209,12 +207,12 @@ pub(crate) fn reset_if_due(now: u64) {
         return;
     }
     RESET_AT_NANOS.store(0, Ordering::Relaxed);
-    say(format_args!(
+    ferrix_rt::notice!(
         "intel: restarting the machine, {} s after boot, as ferrix.intelgpu.reset asks",
         at / 1_000_000_000
-    ));
+    );
     if let Err(error) = ferrix_rt::linux::reboot_restart() {
-        say(format_args!("intel: the restart was refused: {error:?}"));
+        ferrix_rt::err!("intel: the restart was refused: {error:?}");
     }
 }
 
@@ -288,7 +286,7 @@ fn read_file(path: &[u8], buf: &mut [u8]) -> Result<usize, ferrix_linux_abi::err
 }
 
 fn unreadable(errno: impl fmt::Debug) {
-    say(format_args!(
+    ferrix_rt::warn!(
         "intel: /proc/cmdline unreadable ({errno:?}): no ferrix.intelgpu.stop, trace or reset"
-    ));
+    );
 }

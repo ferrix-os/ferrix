@@ -44,7 +44,6 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
 use core::ptr;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES, Start};
@@ -205,9 +204,7 @@ impl Screen {
         // (L.device.39): a refusal here says so on the console, the line
         // wc-ctl-plain expects (docs/DISPLAY.md section 8).
         let base = mapping.map_combining(None).map_err(|_| {
-            say(format_args!(
-                "efifb: the kernel refused the window's mapping"
-            ));
+            ferrix_rt::err!("efifb: the kernel refused the window's mapping");
             Step::Window
         })?;
         Ok(Screen {
@@ -316,15 +313,15 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         control,
     } = started(boot)?;
     let screen = Screen::map(&device, &start)?;
-    say(format_args!(
+    ferrix_rt::info!(
         "efifb: {}x{} firmware framebuffer, {} bytes a line, {}",
         screen.width,
         screen.height,
         screen.pitch,
         if screen.rgbx { "RGBX" } else { "BGRX" }
-    ));
+    );
     let port = port::create(Kernel).map_err(|_| Step::Events)?;
-    say(format_args!("efifb: window mapped write-combining"));
+    ferrix_rt::info!("efifb: window mapped write-combining");
     introduce(&control, &port, start.location, &screen)?;
     let mut list = ModeList::new();
     add_scaled(&mut list, screen.timing());
@@ -334,10 +331,10 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
             .write(page.encode().as_bytes())
             .map_err(|_| Step::Control)?;
     }
-    say(format_args!(
+    ferrix_rt::info!(
         "efifb: {} modes listed, smaller ones shown scaled",
         list.len()
-    ));
+    );
     time_frames(&screen);
     control
         .wait_async(&port, Signals::READABLE | Signals::PEER_CLOSED, KEY_CONTROL)
@@ -502,7 +499,7 @@ impl Serving {
                 }
                 self.scaler = Scaler::new(size, screen).filter(|scaler| !scaler.is_identity());
                 self.clear();
-                say(format_args!(
+                ferrix_rt::info!(
                     "efifb: mode {}x{}{}",
                     size.0,
                     size.1,
@@ -511,7 +508,7 @@ impl Serving {
                     } else {
                         ""
                     }
-                ));
+                );
                 Ok(())
             }
             // No cursor plane was offered, so neither can come; and nothing
@@ -726,9 +723,7 @@ fn time_frames(screen: &Screen) {
     let mapped = ferrix_rt::native::vmo::create(Kernel, frame_len)
         .and_then(|frame| frame.map(None, frame_len, Protection::Read, 0));
     let Ok(card_base) = mapped else {
-        say(format_args!(
-            "efifb: full-frame copy not timed: no memory for a frame"
-        ));
+        ferrix_rt::warn!("efifb: full-frame copy not timed: no memory for a frame");
         return;
     };
     time_copies(screen, card_base);
@@ -766,13 +761,13 @@ fn time_copies(screen: &Screen, card_base: usize) {
     }
     times.sort_unstable();
     let median = times.get(TIMED_FRAMES / 2).copied().unwrap_or(0);
-    say(format_args!(
+    ferrix_rt::info!(
         "efifb: full-frame copy {}x{}: median {} us over {} (write-combining)",
         screen.width,
         screen.height,
         median / 1000,
         TIMED_FRAMES
-    ));
+    );
 }
 
 /// A pixel of the card's `XRGB8888` as the screen holds it: unchanged on a
@@ -826,45 +821,5 @@ impl Area {
             columns: right - left,
             rows: bottom - top,
         })
-    }
-}
-
-/// A line on standard error, which is the console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-struct Line {
-    bytes: [u8; 160],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Self {
-        Line {
-            bytes: [0; 160],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or(&[])
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            if let Some(slot) = self.bytes.get_mut(self.len) {
-                *slot = byte;
-                self.len += 1;
-            }
-        }
-        Ok(())
     }
 }

@@ -173,24 +173,30 @@ fn blend(pixel: &mut [u8], color: Rgba, coverage: u8) {
 }
 
 /// `mask` blended in `color` into `pixmap` with its top-left at
-/// (`column`, `row`), whatever of it falls outside cut off.
+/// (`column`, `row`), whatever of it falls outside the pixmap or outside
+/// `clip` -- columns `clip.0..clip.2`, rows `clip.1..clip.3` -- cut off.
 pub(crate) fn blend_mask(
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     mask: &Mask,
-    column: i64,
-    row: i64,
+    (column, row): (i64, i64),
     color: Rgba,
+    clip: (i64, i64, i64, i64),
 ) {
-    let (pixmap_width, pixmap_height) = (i64::from(pixmap.width()), i64::from(pixmap.height()));
+    let pixmap_width = i64::from(pixmap.width());
+    let (left, top) = (clip.0.max(0), clip.1.max(0));
+    let (right, bottom) = (
+        clip.2.min(pixmap_width),
+        clip.3.min(i64::from(pixmap.height())),
+    );
     let mask_width = mask.width as usize;
     let data = pixmap.data_mut();
     for (y, coverage_row) in mask.coverage.chunks_exact(mask_width.max(1)).enumerate() {
         let target_row = row + y as i64;
-        if !(0..pixmap_height).contains(&target_row) {
+        if !(top..bottom).contains(&target_row) {
             continue;
         }
-        let first = column.max(0);
-        let last = (column + mask_width as i64).min(pixmap_width);
+        let first = column.max(left);
+        let last = (column + mask_width as i64).min(right);
         if first >= last {
             continue;
         }

@@ -20,8 +20,25 @@
 //! Input is read as soon as its device is ready and everything it does still
 //! happens at once. Only the drawing waits, and what it draws is where the
 //! pointer is by then.
+//!
+//! A card whose flip waits for the screen's vertical blank -- the Intel
+//! driver's card0 copies a frame in the blank and answers then -- holds the
+//! loop in the flip until that blank. Drawn on a grid of its own, the loop
+//! drew at any point of the screen's refresh and then waited up to a whole
+//! one in the flip. So a flip that waited ([`WAITED`]) sets the grid by the
+//! blank it ended in, as a KMS compositor draws when the vblank event of
+//! its last flip comes (wlroots' `wlr_output` frame event, Hyprland's
+//! `CMonitorFrameScheduler::onFrame`): the next frame is drawn [`LEAD`]
+//! before the next blank, and the clients are told that blank is when it
+//! is shown (`wp_presentation_feedback.presented`).
 
 use std::time::{Duration, Instant};
+
+/// A flip that took this long waited for the screen.
+pub(crate) const WAITED: Duration = Duration::from_millis(2);
+/// How long before a blank the frame for it is drawn: the drawing of a
+/// directly shown frame takes about a millisecond and its copy another.
+pub(crate) const LEAD: Duration = Duration::from_millis(4);
 
 /// The clock frames are drawn by.
 #[derive(Clone, Copy, Debug, Default)]
@@ -33,6 +50,9 @@ pub(crate) struct Pace {
     /// where a real screen's vblanks are, rather than whenever the loop
     /// got round to it.
     drawn: Option<Instant>,
+    /// The grid is the screen's: each frame is drawn [`LEAD`] before the
+    /// blank it is shown in.
+    aligned: bool,
 }
 
 impl Pace {
@@ -70,10 +90,34 @@ impl Pace {
         }
     }
 
-    /// When the frame [`Pace::due`] last allowed was due, if one was.
+    /// When the frame [`Pace::due`] last allowed is shown: the blank after
+    /// it on a grid set by the screen, else when it was due.
     #[must_use]
-    pub(crate) fn drawn(&self) -> Option<Instant> {
-        self.drawn
+    pub(crate) fn shown(&self) -> Option<Instant> {
+        let drawn = self.drawn?;
+        Some(if self.aligned {
+            drawn.checked_add(LEAD).unwrap_or(drawn)
+        } else {
+            drawn
+        })
+    }
+
+    /// A flip that began at `began` came back at `ended`. One that waited
+    /// for the screen ended in its blank, and the next frame is drawn
+    /// [`LEAD`] before the one a `period` on.
+    pub(crate) fn flipped(&mut self, began: Instant, ended: Instant, period: u32) {
+        if ended.saturating_duration_since(began) < WAITED {
+            return;
+        }
+        let period = Duration::from_nanos(u64::from(period));
+        let Some(next) = ended
+            .checked_add(period)
+            .and_then(|at| at.checked_sub(LEAD))
+        else {
+            return;
+        };
+        self.next = Some(next);
+        self.aligned = true;
     }
 }
 
@@ -117,6 +161,34 @@ mod tests {
             !pace.due(later + Duration::from_millis(1), PERIOD),
             "the quiet was paid back in frames"
         );
+    }
+
+    /// A flip that waited for the blank sets the grid: the next frame is
+    /// drawn the lead before the next blank, and is said to be shown at it.
+    #[test]
+    fn a_flip_that_waited_sets_the_grid_by_its_blank() {
+        let start = Instant::now();
+        let mut pace = Pace::default();
+        assert!(pace.due(start, PERIOD));
+        // The flip waited 9 ms for the blank.
+        let blank = start + Duration::from_millis(10);
+        pace.flipped(start + Duration::from_millis(1), blank, PERIOD);
+        let next = blank + Duration::from_nanos(u64::from(PERIOD)) - LEAD;
+        assert!(!pace.due(next - Duration::from_micros(10), PERIOD));
+        assert!(pace.due(next, PERIOD));
+        assert_eq!(pace.shown(), Some(next + LEAD));
+    }
+
+    /// A flip that did not wait leaves the grid where it was.
+    #[test]
+    fn a_flip_that_did_not_wait_changes_nothing() {
+        let start = Instant::now();
+        let mut pace = Pace::default();
+        assert!(pace.due(start, PERIOD));
+        let before = pace.until(start);
+        pace.flipped(start, start + Duration::from_millis(1), PERIOD);
+        assert_eq!(pace.until(start), before);
+        assert_eq!(pace.shown(), Some(start));
     }
 
     #[test]

@@ -92,6 +92,7 @@ Causes are listed most likely first.
 | [FX-0892](#fx-0892) | A UTS, IPC or cgroup namespace, or setns, failed its self-check |
 | [FX-0893](#fx-0893) | A network namespace failed its self-check |
 | [FX-0894](#fx-0894) | /proc let a process look into another's tree |
+| [FX-0895](#fx-0895) | the crash hold failed its self-check |
 | [FX-0901](#fx-0901) | the native ABI's objects failed their self-check |
 | [FX-0902](#fx-0902) | an allocation failure was not survived |
 | [FX-0903](#fx-0903) | a native call accepted what the ABI says it refuses |
@@ -2236,6 +2237,32 @@ proc_pid_stack asks CAP_SYS_ADMIN.
 
 See: src/kernel/src/fs/procaccess_check.rs; src/kernel/src/fs/procfs.rs;
 src/kernel/src/syscall/credentials.rs.
+
+<a id="fx-0895"></a>
+
+## FX-0895 — the crash hold failed its self-check
+
+`syscall::deliver::check_the_crash_hold` arms /dev/ferrix-crashes from a check
+process and makes faults through the fault path's own entry. Unarmed, a fault
+must end its process at once. Armed, a fatal fault must be held: its line read,
+its process shown as t (tracing stop), its other thread parked, not stopped, and
+not released by SIGCONT; done, SIGKILL, another thread's exit_group and the
+reader's close must each release it at once, and with no done the 2 s deadline
+must, every end by the fault's signal. Sixteen are held at once and a
+seventeenth is not, and counted; the reader's own process and one holding its
+description are never held (docs/LOGGING.md §21, crash-1 to crash-4, load-ring
+statements).
+
+1. `fs::crashes::hold` waits without its deadline, or `CrashFile`'s drop does
+   not release the held slots: the check's wait for an end times out.
+2. `Process::end` does not take the held fault's signal, so a SIGKILL or an
+   exit_group ends a held process by its own status.
+3. `Process::must_park` does not count the hold, or `return_to_user` parks a
+   held thread as a stop, which SIGCONT undoes.
+4. The host stopped the emulator for longer than the check's one-second margin.
+
+See: src/kernel/src/fs/crashes.rs; src/kernel/src/syscall/deliver/hold_check.rs;
+src/kernel/src/syscall/deliver.rs; src/kernel/src/syscall/process.rs.
 
 <a id="fx-0901"></a>
 

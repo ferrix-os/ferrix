@@ -8,6 +8,11 @@
 //! third back-off without such a cool spell between, or a back-off asked of
 //! the lowest step, gives up: firmware's value back, and nothing more is
 //! asked until the driver starts again.
+//!
+//! When the kernel ends a claim on its lease and the driver claims again,
+//! firmware's value is back in force: [`Policy::restart`] climbs the plan
+//! again from its first step, one step a period as at the start, and keeps
+//! what the back-offs learned (the cap, the count, a give-up).
 
 use crate::decode::Reading;
 use crate::plan::Plan;
@@ -70,6 +75,9 @@ pub struct Policy {
     cool_since: Option<u64>,
     /// Whether the policy has given up.
     done: bool,
+    /// The second the plan's clock counts from: 0, or when the claim was
+    /// last regained.
+    origin: u64,
 }
 
 impl Policy {
@@ -85,6 +93,7 @@ impl Policy {
             backoffs: 0,
             cool_since: None,
             done: false,
+            origin: 0,
         }
     }
 
@@ -146,7 +155,7 @@ impl Policy {
                 self.cool_since = None;
             }
         }
-        let planned = self.plan.step_at(elapsed);
+        let planned = self.plan.step_at(elapsed.saturating_sub(self.origin));
         let target = self.cap.map_or(planned, |cap| planned.min(cap));
         if self.current == Some(target) {
             return Action::Hold;
@@ -163,5 +172,18 @@ impl Policy {
     /// second later).
     pub fn refused(&mut self, was: Option<usize>) {
         self.current = was;
+    }
+
+    /// The claim was regained at second `elapsed`, with firmware's value in
+    /// force: no step is, and the plan climbs again from its first, its
+    /// clock counted from now. A back-off's cap, the back-off count and a
+    /// give-up are kept: a lapse is no cool spell.
+    pub fn restart(&mut self, elapsed: u64) {
+        self.current = None;
+        self.origin = elapsed;
+        if self.last_backoff.is_some() {
+            self.last_backoff = Some(elapsed);
+        }
+        self.cool_since = None;
     }
 }

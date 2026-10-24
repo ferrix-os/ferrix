@@ -79,13 +79,13 @@ const HINTS: [i32; 12] = [
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Frames the advice gave back to the allocator, counted in windows.
-    pub(crate) given_back: u64,
+    pub given_back: u64,
     /// Calls refused as Linux refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Frames the second run cost.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// What one run counts.
@@ -96,7 +96,7 @@ struct Counts {
 }
 
 /// Run it twice, measured on the second.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the madvise check")?;
     let _warm = check_once(&process)?;

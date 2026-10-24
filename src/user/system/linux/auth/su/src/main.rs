@@ -24,11 +24,7 @@ use std::os::unix::process::CommandExt as _;
 use std::process::{Command, ExitCode};
 
 use ferrix_auth_account as account;
-use ferrix_auth_client::{Connection, Terminal, Verdict, converse};
-
-/// The listening uids `su` will talk to: the init's, which owns a socket it
-/// activates, and `authd`'s own account's.
-const AUTHD_UIDS: [u32; 2] = [0, 90];
+use ferrix_auth_client::{Connection, Terminal, Verdict, converse, talks_to_authd};
 
 /// The `PATH` the new shell starts with.
 const PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
@@ -124,22 +120,6 @@ fn prove(real: u32, caller: &str) -> Result<(), String> {
     accepted(&verdict, real, caller)
 }
 
-/// U1: whether whoever listens at the other end of `connection` is the
-/// init or `authd`, by the uid `SO_PEERCRED` recorded; a server a user
-/// started is refused before a byte is sent.
-fn talks_to_authd(connection: &Connection) -> Result<(), String> {
-    let listener = connection
-        .peer_uid()
-        .map_err(|error| format!("cannot tell who listens at authd's socket: {error}"))?;
-    if AUTHD_UIDS.contains(&listener) {
-        Ok(())
-    } else {
-        Err(format!(
-            "the authentication socket is held by uid {listener}, not authd"
-        ))
-    }
-}
-
 /// U3: whether `verdict` lets `caller` (uid `real`) become root.
 fn accepted(verdict: &Verdict, real: u32, caller: &str) -> Result<(), String> {
     match verdict {
@@ -192,6 +172,7 @@ fn say(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrix_auth_client::AUTHD_UIDS;
 
     /// U3: root only for an ACCEPTED naming the caller itself.
     #[test]

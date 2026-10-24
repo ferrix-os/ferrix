@@ -13,6 +13,13 @@
 //! 5. TCG with a processor that answers as Intel family 6 model 0xBE: the
 //!    model gate passes, and the probe reads 0x601 as 0 (TCG answers an MSR
 //!    it does not have with 0, not `#GP`), so no node.
+//! 6. The fake with a plan, and the driver stopped from the shell
+//!    (`kill -STOP`) for eight seconds after its second write, as a driver
+//!    starved of every processor would be: the kernel restores on the
+//!    lease; let go, the driver says how late it ran, that it lost the
+//!    claim, claims again, says it regained it, and climbs to 27 then 29 A
+//!    again. devmgr starts it once (the N150's lapse of 2026-10-23,
+//!    `docs/POWERCTL.md` §9).
 //!
 //! Each row is judged by [`judge`], a pure function host tests hold.
 //!
@@ -37,8 +44,9 @@ pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-power",
     help_at: 206,
     help: &[
-        "test-power    Boot x86_64 five times for the power core (docs/POWERCTL.md section 10): no word,",
-        "              a refused processor, the fake's lease lapse and holder death, and TCG's 0x601 of 0;",
+        "test-power    Boot x86_64 six times for the power core (docs/POWERCTL.md section 10): no word,",
+        "              a refused processor, the fake's lease lapse and holder death, TCG's 0x601 of 0, and",
+        "              a driver stopped past its lease that claims again;",
         "              needs --init (the static busybox test-shell uses) to keep the machine up",
     ],
     run: |_, args| test_power(args),
@@ -62,11 +70,21 @@ pub(crate) enum Row {
     Gone,
     /// TCG answering as Intel 6/0xBE, `ferrix.powerctl`.
     Absent,
+    /// The fake, a plan, and the driver stopped from outside for longer than
+    /// its lease: the kernel restores, the driver claims again and climbs.
+    Recover,
 }
 
 impl Row {
     /// Every row, in order.
-    const ALL: [Row; 5] = [Row::Off, Row::Refused, Row::Lease, Row::Gone, Row::Absent];
+    const ALL: [Row; 6] = [
+        Row::Off,
+        Row::Refused,
+        Row::Lease,
+        Row::Gone,
+        Row::Absent,
+        Row::Recover,
+    ];
 
     /// The kernel options the row boots with.
     fn options(self) -> &'static [&'static str] {
@@ -83,6 +101,7 @@ impl Row {
                 "ferrix.power.vr=27,29@1",
                 "ferrix.power.test=exit@3",
             ],
+            Row::Recover => &["ferrix.powerctl.fake", "ferrix.power.vr=27,29@1"],
         }
     }
 }
@@ -117,6 +136,7 @@ pub(crate) fn judge(row: Row, lines: &[String]) -> std::result::Result<(), Strin
         .filter(|line| line.contains("devmgr   power "))
         .count();
     match row {
+        Row::Recover => return judge_recover(lines),
         Row::Off => {
             if let Some(line) = lines.iter().find(kernel_power) {
                 return Err(format!("a power line without the word: {line}"));
@@ -188,6 +208,86 @@ pub(crate) fn judge(row: Row, lines: &[String]) -> std::result::Result<(), Strin
     Ok(())
 }
 
+/// What the shell says before it stops the driver, with the driver's pid:
+/// typed as `xtask-"stopping"-`, so the console's echo of the line does not
+/// hold it.
+const STOPPING: &str = "xtask-stopping-";
+/// How long [`Row::Recover`] stops the driver: longer than the kernel's
+/// five-second lease and the task's second to see it.
+const STOPPED_SECONDS: u32 = 8;
+
+/// [`Row::Recover`]: the driver's weight; both writes; the driver stopped;
+/// the kernel's lease restore; the driver saying how late it ran and that it
+/// lost and regained the claim; both writes again, in that order; no latch,
+/// no stop, and one start.
+fn judge_recover(lines: &[String]) -> std::result::Result<(), String> {
+    let need_after = |from: usize, text: &str| {
+        lines
+            .iter()
+            .skip(from)
+            .position(|line| line.contains(text))
+            .map(|at| at + from)
+            .ok_or_else(|| format!("no line `{text}` after line {from}"))
+    };
+    let _ = need_after(0, "power: running at nice -20")?;
+    let second = need_after(0, SECOND_WRITE)?;
+    let stopping = need_after(second, STOPPING)?;
+    let restored = need_after(stopping, &format!("{RESTORED}Lease"))?;
+    let _ = need_after(restored, " ms late (the kernel's lease is 5000 ms)")?;
+    let lost = need_after(restored, "power: lost the claim: firmware's limit is back")?;
+    let regained = need_after(
+        lost,
+        "power: regained the claim: firmware 25.000 A, now 25.000 A",
+    )?;
+    let first_again = need_after(regained, FIRST_WRITE)?;
+    let _ = need_after(first_again, SECOND_WRITE)?;
+    if let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("power (fake): latched") || line.contains("power: stopped at"))
+    {
+        return Err(format!("the driver did not carry on: {line}"));
+    }
+    let started = lines
+        .iter()
+        .filter(|line| line.contains("devmgr   power "))
+        .count();
+    if started != 1 {
+        return Err(format!(
+            "devmgr started the power driver {started} times, not once"
+        ));
+    }
+    Ok(())
+}
+
+/// What a row types at the shell once the driver's second write is out:
+/// [`Row::Recover`] stops the driver from outside -- it gets no processor at
+/// all, which no load can do more thoroughly -- for longer than its lease,
+/// and lets it go on.
+fn typed(row: Row) -> Option<String> {
+    (row == Row::Recover).then(|| {
+        format!(
+            "p=$(pidof power); echo xtask-\"stopping\"-$p; kill -STOP $p; sleep {STOPPED_SECONDS}; \
+             kill -CONT $p\n"
+        )
+    })
+}
+
+/// Wait for the driver's second write and a shell that answers, then type
+/// `keys`.
+fn type_after_second_write(
+    watching: &mut qemu::Watching<'_>,
+    before: &[String],
+    keys: &str,
+) -> Result<()> {
+    let deadline = Instant::now() + PATIENCE;
+    let written = find(before, SECOND_WRITE).is_some();
+    let _ = watching.read_more(deadline, |seen| {
+        written || find(seen, SECOND_WRITE).is_some()
+    })?;
+    let _ = watching.wait_for_shell(deadline)?;
+    watching.type_in(keys.as_bytes())
+}
+
 /// `test-power` on x86-64; skipped elsewhere, which publishes no node.
 ///
 /// # Errors
@@ -226,6 +326,9 @@ fn test_power(args: &Args) -> Result<()> {
             let mut lines = Vec::new();
             let hook = |watching: &mut qemu::Watching<'_>| -> Result<()> {
                 let before = watching.lines().to_vec();
+                if let Some(keys) = typed(row) {
+                    type_after_second_write(watching, &before, &keys)?;
+                }
                 let _ = watching.read_more(Instant::now() + PATIENCE, |seen| {
                     let mut all = before.clone();
                     all.extend_from_slice(seen);
@@ -317,6 +420,52 @@ mod tests {
                 "line {missing} missing passed"
             );
         }
+    }
+
+    fn recover() -> Vec<String> {
+        lines(&[
+            "power: running at nice -20",
+            "power (fake): node: signature 0xb06e0, 0x601 0xc8, ceiling 0x180",
+            "devmgr   power 0xffffffff 0000:0007: started",
+            FIRST_WRITE,
+            SECOND_WRITE,
+            "xtask-stopping-436",
+            &format!("{RESTORED}Lease"),
+            "power: the loop ran 7084 ms late (the kernel's lease is 5000 ms)",
+            "power: the kernel ended the claim (BadState, closed true)",
+            "power: lost the claim: firmware's limit is back; claiming again (1 of 4)",
+            "power: regained the claim: firmware 25.000 A, now 25.000 A; the plan again from its first step",
+            FIRST_WRITE,
+            SECOND_WRITE,
+        ])
+    }
+
+    #[test]
+    fn the_recover_row_needs_the_lapse_the_new_claim_and_the_climb_again() {
+        assert_eq!(judge(Row::Recover, &recover()), Ok(()));
+        // Each line the row needs, taken away: the nice value, the second
+        // write before, the stop, the restore, the late loop, the loss, the
+        // regain and the writes after.
+        for missing in [0, 4, 5, 6, 7, 9, 10, 11, 12] {
+            let mut short = recover();
+            let _ = short.remove(missing);
+            assert!(
+                judge(Row::Recover, &short).is_err(),
+                "line {missing} missing passed"
+            );
+        }
+        // A driver that stopped at the claim's end, as before.
+        let mut stopped = recover();
+        stopped.truncate(9);
+        stopped.extend(lines(&["power: stopped at Ended"]));
+        assert!(judge(Row::Recover, &stopped).is_err());
+        let mut restarted = recover();
+        restarted.extend(lines(&["devmgr   power 0xffffffff 0000:0007: started"]));
+        assert!(judge(Row::Recover, &restarted).is_err());
+        // The writes again must follow the regain.
+        let mut early = recover();
+        early.swap(10, 11);
+        assert!(judge(Row::Recover, &early).is_err());
     }
 
     #[test]

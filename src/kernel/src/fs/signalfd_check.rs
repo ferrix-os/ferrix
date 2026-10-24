@@ -173,16 +173,16 @@ impl Timed {
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Signals read back through signalfds.
-    pub(crate) signals: u64,
+    pub signals: u64,
     /// Calls refused as Linux refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// The latest a waiter came back after its signal was sent, in
     /// microseconds.
-    pub(crate) late_micros: u64,
+    pub late_micros: u64,
     /// Frames the second run cost.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// What one run counts.
@@ -194,7 +194,7 @@ struct Counts {
 }
 
 /// Run it twice, measured on the second.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the signalfd check")?;
     process.with_signals(|signals| {

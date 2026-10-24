@@ -42,9 +42,9 @@ use crate::device::{DeviceNode, Reserved};
 /// What finders share while they run: the memory no aperture may overlap,
 /// and the device tree interrupt lines already given to a node.
 #[derive(Debug)]
-pub(crate) struct Context<'r> {
+pub struct Context<'r> {
     /// Memory no aperture may overlap.
-    pub(crate) reserved: &'r Reserved,
+    pub reserved: &'r Reserved,
     /// Interrupt lines a finder's node already holds.
     pub(crate) held: BTreeSet<u32>,
 }
@@ -60,7 +60,7 @@ impl<'r> Context<'r> {
 }
 
 /// A way of finding devices.
-pub(crate) trait Finder {
+pub trait Finder {
     /// What its boot lines start with: `pci`, `tree`, `board`.
     fn name(&self) -> &'static str;
 
@@ -88,11 +88,11 @@ pub(crate) trait Finder {
 /// A finder could not find its devices; it says why in
 /// [`failure`](Finder::failure).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Failed;
+pub struct Failed;
 
 /// Running out of memory while adding a node.
 #[derive(Debug)]
-pub(crate) struct OutOfMemory;
+pub struct OutOfMemory;
 
 impl fmt::Display for OutOfMemory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

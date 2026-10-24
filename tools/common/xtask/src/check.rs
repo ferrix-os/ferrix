@@ -384,6 +384,17 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "panic catalog",
         &[&["tools/common/gen/gen-panic-catalog.py", "--check"]],
     ),
+    // The kernel's crates meet through their `pub` items, and since nothing
+    // in the kernel was `pub` before the split, those items are the
+    // interface the certified item offers what runs above it. The document
+    // listing them, and the checks-only methods clippy refuses to product
+    // code, are regenerated and compared; a `pub` no crate above names, or
+    // one that hands product code a checks-only type, fails.
+    // docs/KERNEL-CRATES.md, docs/generated/KERNEL-INTERFACE.md.
+    (
+        "kernel interface",
+        &[&["tools/common/gen/kernel-interface.py", "--check"]],
+    ),
 ];
 
 /// Run the gate set.
@@ -932,10 +943,17 @@ const NO_SYSTEM_BUS: &str = "unix:path=/nonexistent/ferrix-check-has-no-system-b
 const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("init", "src/user/system/linux/init"),
     ("auth", "src/user/system/linux/auth"),
+    // The settings writer (docs/SETTINGS-WRITER.md).
+    ("settingsd", "src/user/system/linux/settingsd"),
     ("pkg", "src/user/system/linux/pkg"),
     ("dhcp", "src/user/system/linux/dhcp"),
     ("dmesg", "src/user/system/linux/dmesg"),
     ("installer", "src/user/system/linux/installer"),
+    // lode-upload and lode-receive (docs/LOGGING.md §10.2, §10.3).
+    ("lode-net", "src/user/system/linux/lode-net"),
+    // tole, the UI framework: a component (components.toml), checked out
+    // beside the compositor's workspace.
+    ("tole", "src/user/system/linux/tole"),
 ];
 
 /// `cargo xtask check-unit`: the one unit `FERRIX_CHECK_UNIT` names, as

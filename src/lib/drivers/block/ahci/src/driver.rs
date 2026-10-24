@@ -19,6 +19,15 @@ pub const CONTROL_PAGES: usize = 2;
 pub const COMMAND_TIMEOUT: u64 = 10_000_000_000;
 /// How long the port's engines may take to stop (AHCI 1.3.1 section 10.1.2).
 pub const STOP_TIMEOUT: u64 = 500_000_000;
+/// How often a running command is looked at, for its first
+/// [`COMMAND_FINE`] nanoseconds: a SATA read of 128 KiB takes a few hundred
+/// microseconds, and a poll every millisecond, as every other wait settles
+/// into, added up to a millisecond to every command that ran past its first
+/// one.
+pub const COMMAND_POLL: u64 = 20_000;
+/// How long a command is polled every [`COMMAND_POLL`] before every
+/// millisecond.
+pub const COMMAND_FINE: u64 = 100_000_000;
 /// How long a device may stay busy after its port receives FISes again.
 pub const BUSY_TIMEOUT: u64 = 1_000_000_000;
 /// How long the BIOS may keep the HBA after the OS asked for it.
@@ -110,6 +119,9 @@ pub struct Ahci<R: Registers, C: Clock, M: Memory> {
     cap: u32,
     port: u8,
     identity: Identity,
+    /// Whether a command [`Ahci::start_read`] launched has not been waited
+    /// for.
+    outstanding: bool,
 }
 
 /// Why a port was passed over.
@@ -136,6 +148,7 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
                 serial: [b' '; 20],
                 port: 0,
             },
+            outstanding: false,
         };
         hba.cap = hba.regs.read(regs::CAP);
         if hba.cap == regs::GONE {
@@ -193,6 +206,9 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
     /// `lba` and `count` are in sectors, and `data` covers exactly
     /// `count` sectors; a flush ignores all three. Transfers longer than
     /// one command moves are split.
+    ///
+    /// A read [`Ahci::start_read`] launched is waited for first, and what
+    /// came of it is lost: call [`Ahci::finish`] to learn it.
     pub fn transfer(
         &mut self,
         op: Op,
@@ -200,27 +216,14 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         count: u32,
         data: &[Segment],
     ) -> Result<(), Error> {
+        let _earlier = self.finish();
         let opcode = match op {
             Op::Flush => return self.issue(FLUSH_CACHE_EXT, 0, 0, false, &[]),
             Op::Read => READ_DMA_EXT,
             Op::Write => WRITE_DMA_EXT,
         };
+        self.check(lba, count, data)?;
         let size = u64::from(self.identity.sector_size);
-        let end = lba.checked_add(u64::from(count)).ok_or(Error::OutOfRange)?;
-        if end > self.identity.sectors {
-            return Err(Error::OutOfRange);
-        }
-        let total: u64 = data.iter().map(|segment| u64::from(segment.len)).sum();
-        if total != u64::from(count) * size {
-            return Err(Error::BadBuffer);
-        }
-        if data.iter().any(|segment| {
-            segment.addr % 2 != 0
-                || segment.len % 2 != 0
-                || !self.reachable(segment.addr + u64::from(segment.len).saturating_sub(1))
-        }) {
-            return Err(Error::Unaligned);
-        }
         let mut cursor = Cursor::default();
         let mut lba = lba;
         let mut left = u64::from(count);
@@ -247,8 +250,73 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         Ok(())
     }
 
+    /// Launch one READ DMA EXT of up to `count` sectors at `lba` into
+    /// `data`, which covers exactly `count` sectors, and return without
+    /// waiting for it: how many sectors it reads from `lba`, fewer than
+    /// `count` when `data` is too fragmented for one command table, or
+    /// longer than one command moves. [`Ahci::finish`] waits for it; any
+    /// other call waits for it first.
+    ///
+    /// So a driver reads ahead while the kernel takes what it read last:
+    /// the drive works between two requests instead of after each.
+    pub fn start_read(&mut self, lba: u64, count: u32, data: &[Segment]) -> Result<u32, Error> {
+        let _earlier = self.finish();
+        self.check(lba, count, data)?;
+        let size = u64::from(self.identity.sector_size);
+        let most = u64::from(count.min(MAX_SECTORS)) * size;
+        let mut pieces = [(0u64, 0u32); PRD_ENTRIES];
+        let used = Cursor::default().fill(data, most, &mut pieces);
+        let bytes: u64 = pieces
+            .iter()
+            .take(used)
+            .map(|piece| u64::from(piece.1))
+            .sum();
+        let sectors = bytes / size;
+        if sectors == 0 {
+            return Err(Error::TooLarge);
+        }
+        let used = trim(&mut pieces, used, bytes - sectors * size);
+        let pieces = pieces.get(..used).ok_or(Error::TooLarge)?;
+        self.launch(READ_DMA_EXT, lba, sectors as u16, false, pieces)?;
+        self.outstanding = true;
+        Ok(sectors as u32)
+    }
+
+    /// Wait for the read [`Ahci::start_read`] launched, and say what came of
+    /// it; `Ok` when there is none.
+    pub fn finish(&mut self) -> Result<(), Error> {
+        if !self.outstanding {
+            return Ok(());
+        }
+        self.outstanding = false;
+        self.complete()
+    }
+
+    /// Whether `count` sectors at `lba` are on the disk and `data` is a
+    /// buffer for exactly them the HBA can reach.
+    fn check(&self, lba: u64, count: u32, data: &[Segment]) -> Result<(), Error> {
+        let size = u64::from(self.identity.sector_size);
+        let end = lba.checked_add(u64::from(count)).ok_or(Error::OutOfRange)?;
+        if end > self.identity.sectors {
+            return Err(Error::OutOfRange);
+        }
+        let total: u64 = data.iter().map(|segment| u64::from(segment.len)).sum();
+        if total != u64::from(count) * size {
+            return Err(Error::BadBuffer);
+        }
+        if data.iter().any(|segment| {
+            segment.addr % 2 != 0
+                || segment.len % 2 != 0
+                || !self.reachable(segment.addr + u64::from(segment.len).saturating_sub(1))
+        }) {
+            return Err(Error::Unaligned);
+        }
+        Ok(())
+    }
+
     /// Flush the drive's cache, stop the port, and hand the parts back.
     pub fn shutdown(mut self) -> (R, C, M) {
+        let _earlier = self.finish();
         // A failed flush cannot be retried from here; the port stops either
         // way.
         let _flushed = self.transfer(Op::Flush, 0, 0, &[]);
@@ -454,6 +522,19 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         write: bool,
         pieces: &[(u64, u32)],
     ) -> Result<(), Error> {
+        self.launch(opcode, lba, count, write, pieces)?;
+        self.complete()
+    }
+
+    /// Build slot 0's command and issue it.
+    fn launch(
+        &mut self,
+        opcode: u8,
+        lba: u64,
+        count: u16,
+        write: bool,
+        pieces: &[(u64, u32)],
+    ) -> Result<(), Error> {
         let table = self.control_addr(TABLE);
         let prds = u16::try_from(pieces.len()).map_err(|_| Error::TooLarge)?;
         self.put(COMMAND_LIST, &command::header(write, prds, table));
@@ -467,10 +548,21 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         self.control.barrier();
         self.regs.write(port(self.port, regs::PX_IS), u32::MAX);
         self.regs.write(port(self.port, regs::PX_CI), 1);
-        let outcome = self.wait(COMMAND_TIMEOUT, "command", |hba| {
-            let is = hba.regs.read(port(hba.port, regs::PX_IS));
-            is & regs::IS_ERRORS != 0 || hba.regs.read(port(hba.port, regs::PX_CI)) & 1 == 0
-        });
+        Ok(())
+    }
+
+    /// Poll slot 0's command to completion, and say what came of it.
+    fn complete(&mut self) -> Result<(), Error> {
+        let outcome = self.wait_paced(
+            COMMAND_TIMEOUT,
+            "command",
+            COMMAND_FINE,
+            COMMAND_POLL,
+            |hba| {
+                let is = hba.regs.read(port(hba.port, regs::PX_IS));
+                is & regs::IS_ERRORS != 0 || hba.regs.read(port(hba.port, regs::PX_CI)) & 1 == 0
+            },
+        );
         if let Err(error) = outcome {
             self.recover();
             return Err(error);
@@ -528,6 +620,19 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         &mut self,
         timeout: u64,
         what: &'static str,
+        done: impl FnMut(&mut Self) -> bool,
+    ) -> Result<(), Error> {
+        self.wait_paced(timeout, what, 1_000_000, 5_000, done)
+    }
+
+    /// Poll `done` until it holds or `timeout` nanoseconds pass: every
+    /// `poll` nanoseconds for the first `fine`, then every millisecond.
+    fn wait_paced(
+        &mut self,
+        timeout: u64,
+        what: &'static str,
+        fine: u64,
+        poll: u64,
         mut done: impl FnMut(&mut Self) -> bool,
     ) -> Result<(), Error> {
         let start = self.clock.now_nanos();
@@ -540,7 +645,7 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
                 return Err(Error::Timeout(what));
             }
             self.clock
-                .pause(if waited < 1_000_000 { 5_000 } else { 1_000_000 });
+                .pause(if waited < fine { poll } else { 1_000_000 });
         }
     }
 }

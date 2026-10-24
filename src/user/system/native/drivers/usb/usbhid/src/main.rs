@@ -31,7 +31,7 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
+use core::fmt;
 use core::ptr;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES, Start};
@@ -114,7 +114,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(()) => 0,
         Err(step) => {
-            say(format_args!("usbhid: stopped at {step:?}"));
+            ferrix_rt::err!("usbhid: stopped at {step:?}");
             step as i32
         }
     }
@@ -123,47 +123,6 @@ fn main(bootstrap: Bootstrap) -> i32 {
 // ---------------------------------------------------------------------------
 // The console
 // ---------------------------------------------------------------------------
-
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-struct Line {
-    bytes: [u8; 160],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Self {
-        Line {
-            bytes: [0; 160],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or(&[])
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            if let Some(slot) = self.bytes.get_mut(self.len) {
-                *slot = byte;
-                self.len += 1;
-            }
-        }
-        Ok(())
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Registers, memory, time
@@ -297,9 +256,9 @@ impl Area {
             Some(self.base + offset)
         } else {
             if !self.strayed.replace(true) {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "usbhid: an access of {size} bytes at {offset:#x} is outside the controller's memory; ignored"
-                ));
+                );
             }
             None
         }
@@ -531,9 +490,7 @@ where
     let controller = match controller {
         Ok(controller) => controller,
         Err((error, parts)) => {
-            say(format_args!(
-                "usbhid: the {name} controller would not start: {error:?}"
-            ));
+            ferrix_rt::err!("usbhid: the {name} controller would not start: {error:?}");
             // Unresponsive may mean still running: its memory stays.
             if matches!(error, host::Error::Unresponsive) {
                 let _kept_for_good = core::mem::ManuallyDrop::new(parts);
@@ -542,7 +499,7 @@ where
             return Err(Step::Controller);
         }
     };
-    say(format_args!("usbhid: {name} running"));
+    ferrix_rt::info!("usbhid: {name} running");
     let mut driver = Driver {
         bus: Bus::with(controller),
         device,
@@ -625,11 +582,11 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                 Err(Error::TimedOut) if !interrupted => {
                     if !said {
                         said = true;
-                        say(format_args!(
+                        ferrix_rt::notice!(
                             "usbhid: no interrupt from the controller yet: its events are taken every {} to {} ms until one comes",
                             SERVICE_POLL / 1_000_000,
                             SERVICE_POLL_IDLE_MAX / 1_000_000
-                        ));
+                        );
                     }
                     if self.bus.on_interrupt().is_err() {
                         return Err(Step::Faulted);
@@ -681,7 +638,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     if let Some(slot) = self.channels.get_mut(function) {
                         *slot = None;
                     }
-                    say(format_args!("usbhid: function {function} unplugged"));
+                    ferrix_rt::info!("usbhid: function {function} unplugged");
                 }
             }
         }
@@ -694,7 +651,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
     fn tell_disk(&mut self, change: DiskChange) {
         let disk = match change {
             DiskChange::Detached(disk) => {
-                say(format_args!("usbhid: disk {disk} unplugged"));
+                ferrix_rt::info!("usbhid: disk {disk} unplugged");
                 return;
             }
             DiskChange::Attached(disk) => disk,
@@ -719,14 +676,15 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                 let sum = first.iter().fold(0xCBF2_9CE4_8422_2325_u64, |sum, &byte| {
                     (sum ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01B3)
                 });
-                say(format_args!(
+                ferrix_rt::info!(
                     "usbhid: disk {disk} {vendor} {product}: {} blocks of {} bytes, block 0 fnv {sum:016x}",
-                    found.blocks, found.block_bytes
-                ));
+                    found.blocks,
+                    found.block_bytes
+                );
             }
-            Err(error) => say(format_args!(
-                "usbhid: disk {disk} {vendor} {product} would not read: {error:?}"
-            )),
+            Err(error) => {
+                ferrix_rt::err!("usbhid: disk {disk} {vendor} {product} would not read: {error:?}");
+            }
         }
     }
 
@@ -740,9 +698,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         let kind = self.bus.kind(function).map_or("input", Kind::word);
         let name = core::str::from_utf8(hello.name.as_bytes()).unwrap_or("?");
         let Ok(control) = self.device.input_control() else {
-            say(format_args!(
-                "usbhid: no input channel for the {kind} {name}"
-            ));
+            ferrix_rt::warn!("usbhid: no input channel for the {kind} {name}");
             return;
         };
         let Ok(share) = self
@@ -760,7 +716,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         }
         match ready(&control) {
             Some(node) => {
-                say(format_args!("usbhid: {kind} {name} is event{node}"));
+                ferrix_rt::info!("usbhid: {kind} {name} is event{node}");
                 let key = KEY_FIRST_CONTROL + function as u64;
                 if control
                     .wait_async(&self.port, Signals::READABLE | Signals::PEER_CLOSED, key)
@@ -770,7 +726,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     *slot = Some(control);
                 }
             }
-            None => say(format_args!("usbhid: the core refused the {kind} {name}")),
+            None => ferrix_rt::warn!("usbhid: the core refused the {kind} {name}"),
         }
     }
 
@@ -795,9 +751,9 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     }
                     Ok(Message::Status(leds)) => {
                         if let Err(error) = self.bus.set_leds(function, leds.as_slice()) {
-                            say(format_args!(
+                            ferrix_rt::warn!(
                                 "usbhid: function {function}'s LEDs were not set: {error:?}"
-                            ));
+                            );
                         }
                         true
                     }
@@ -878,23 +834,23 @@ fn tell(note: Note) {
             hub_ports,
             functions,
         } => match hub_ports {
-            Some(ports) => say(format_args!(
+            Some(ports) => ferrix_rt::info!(
                 "usbhid: device {address} {vendor:04x}:{product:04x} {speed:?} speed, a hub of {ports} ports"
-            )),
-            None => say(format_args!(
+            ),
+            None => ferrix_rt::info!(
                 "usbhid: device {address} {vendor:04x}:{product:04x} {speed:?} speed, {functions} input functions"
-            )),
+            ),
         },
-        Note::Gone { address } => say(format_args!("usbhid: device {address} gone")),
-        Note::PortEvent { port, status } => say(format_args!(
+        Note::Gone { address } => ferrix_rt::info!("usbhid: device {address} gone"),
+        Note::PortEvent { port, status } => ferrix_rt::debug!(
             "usbhid: port status change event, root port {port}: PORTSC {status:08x} {}",
             Portsc(status)
-        )),
+        ),
         Note::RootGone {
             port,
             status,
             changed,
-        } => say(format_args!(
+        } => ferrix_rt::warn!(
             "usbhid: root port {port}'s device let go ({}): PORTSC {status:08x} {}",
             if changed {
                 "connect status change"
@@ -902,10 +858,10 @@ fn tell(note: Note) {
                 "nothing connected"
             },
             Portsc(status)
-        )),
+        ),
         // A short packet is how most reports end: not worth a line.
         Note::Transfer(trouble) if trouble.code == 13 && trouble.known => {}
-        Note::Transfer(trouble) => say(format_args!(
+        Note::Transfer(trouble) => ferrix_rt::warn!(
             "usbhid: slot {} endpoint {} transfer event code {}{}",
             trouble.slot,
             trouble.endpoint,
@@ -915,21 +871,19 @@ fn tell(note: Note) {
             } else {
                 ", for a TRB it did not queue"
             }
-        )),
-        Note::Stopped { function } => say(format_args!(
+        ),
+        Note::Stopped { function } => ferrix_rt::warn!(
             "usbhid: function {function}'s pipe kept failing and is stopped until it is plugged in again"
-        )),
+        ),
         Note::Failed { parent, error } => {
-            say(format_args!(
-                "usbhid: a device at {parent:?} could not be set up: {error:?}"
-            ));
+            ferrix_rt::err!("usbhid: a device at {parent:?} could not be set up: {error:?}");
         }
         Note::Disk { .. } => {}
-        Note::DiskFailed { error } => say(format_args!(
-            "usbhid: a mass-storage interface would not open as a disk: {error:?}"
-        )),
-        Note::Handed { port } => say(format_args!(
+        Note::DiskFailed { error } => {
+            ferrix_rt::err!("usbhid: a mass-storage interface would not open as a disk: {error:?}");
+        }
+        Note::Handed { port } => ferrix_rt::info!(
             "usbhid: root port {port} has a full- or low-speed device, which EHCI hands to its companion"
-        )),
+        ),
     }
 }

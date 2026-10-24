@@ -74,6 +74,7 @@ mod args;
 mod audio;
 mod auth;
 mod badapple;
+mod box_log;
 mod btrfs_check;
 mod btrfs_disk;
 mod btrfs_pressure;
@@ -145,6 +146,10 @@ mod ipc;
 mod jobs;
 mod kaslr;
 mod keyboard;
+mod lode;
+mod lode_budget;
+mod lode_net;
+mod lode_remote;
 mod machine_check;
 mod n150;
 mod native;
@@ -161,6 +166,7 @@ mod parallel;
 mod paths;
 mod pe;
 mod persistent;
+mod phone;
 mod pipe_bench;
 mod pkg;
 mod ports;
@@ -181,6 +187,7 @@ mod selfhost;
 mod sem;
 mod serial;
 mod session;
+mod settingsd;
 mod sha256;
 mod shader_cache;
 mod shell;
@@ -265,9 +272,10 @@ OPTIONS:
     --iterate                            With --release: the kernel with thin LTO, relinked in
                                          seconds; for working on it, never for a gate
                                          (docs/TEST-TIME.md, C4)
-    --strip-kernel                       Images carry the kernel without its debug information, as
-                                         flash writes it; the loader reads the whole file into
-                                         memory, so a small --memory needs it [default: off]
+    --strip-kernel                       Images carry the kernel and the initramfs's programs
+                                         without their debug information, as flash writes them;
+                                         the loader reads both whole into memory, so a small
+                                         --memory needs it [default: off]
     --kernel-profile <NAME>              The kernel's profile in tools/common/data/profiles/
                                          [default: present, today's reference configuration]:
                                          every build flag's value (docs/BUILD-FLAGS.md)
@@ -530,6 +538,7 @@ const TASKS: &[&[Task]] = &[
     audio::TASKS,
     auth::TASKS,
     badapple::TASKS,
+    box_log::TASKS,
     btrfs_check::TASKS,
     btrfs_pressure::TASKS,
     builds::TASKS,
@@ -557,6 +566,9 @@ const TASKS: &[&[Task]] = &[
     installer::TASKS,
     ipc::TASKS,
     jobs::TASKS,
+    lode::TASKS,
+    lode_budget::TASKS,
+    lode_remote::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,
     n150::TASKS,
@@ -564,6 +576,7 @@ const TASKS: &[&[Task]] = &[
     nvidia::TASKS,
     nvme::TASKS,
     omz::TASKS,
+    phone::TASKS,
     pipe_bench::TASKS,
     pkg::TASKS,
     ports::TASKS,
@@ -578,6 +591,7 @@ const TASKS: &[&[Task]] = &[
     seat::TASKS,
     sem::TASKS,
     serial::TASKS,
+    settingsd::TASKS,
     shader_cache::TASKS,
     slot_image::TASKS,
     steamcmd::TASKS,

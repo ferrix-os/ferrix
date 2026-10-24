@@ -24,7 +24,7 @@ use ferrix_dwc3::usb_device::acm::ADB_IN;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_rt::linux;
 
-use crate::{Step, Usb, say};
+use crate::{Step, Usb};
 
 /// Where the socket is. `/tmp` is in the initramfs and writable, as `vport`
 /// found.
@@ -63,10 +63,8 @@ impl Bridge {
     pub(crate) fn new() -> Bridge {
         let listener = listen();
         match listener {
-            Some(_) => say(format_args!(
-                "usbdev: adb's interface waits for adbd on /tmp/adbd-usb"
-            )),
-            None => say(format_args!("usbdev: no socket for adbd; adb is off")),
+            Some(_) => ferrix_rt::info!("usbdev: adb's interface waits for adbd on /tmp/adbd-usb"),
+            None => ferrix_rt::warn!("usbdev: no socket for adbd; adb is off"),
         }
         Bridge {
             listener,
@@ -99,9 +97,7 @@ impl Bridge {
         }
         self.outbound_len += count;
         if count < bytes.len() {
-            say(format_args!(
-                "usbdev: adbd is not reading what the host sends; starting over"
-            ));
+            ferrix_rt::warn!("usbdev: adbd is not reading what the host sends; starting over");
             self.drop_client();
         }
     }
@@ -127,7 +123,7 @@ impl Bridge {
             return;
         };
         if let Ok(fd) = linux::accept4(listener, linux::SOCK_NONBLOCK) {
-            say(format_args!("usbdev: adbd connected"));
+            ferrix_rt::info!("usbdev: adbd connected");
             self.client = Some(fd);
         }
     }
@@ -135,7 +131,7 @@ impl Bridge {
     fn drop_client(&mut self) {
         if let Some(fd) = self.client.take() {
             let _closed = linux::close(fd);
-            say(format_args!("usbdev: adbd's connection closed"));
+            ferrix_rt::info!("usbdev: adbd's connection closed");
         }
         self.inbound_len = 0;
         self.outbound_len = 0;
@@ -195,7 +191,7 @@ impl Bridge {
                     Some(0) => (HEADER_BYTES, None),
                     Some(length) => (HEADER_BYTES, Some(length)),
                     None => {
-                        say(format_args!("usbdev: adbd sent a bad header; dropping it"));
+                        ferrix_rt::warn!("usbdev: adbd sent a bad header; dropping it");
                         self.drop_client();
                         return Ok(());
                     }
@@ -213,9 +209,7 @@ impl Bridge {
             return Ok(());
         }
         if taken != part {
-            say(format_args!(
-                "usbdev: adb's endpoint took part of a part; dropping adbd"
-            ));
+            ferrix_rt::warn!("usbdev: adb's endpoint took part of a part; dropping adbd");
             self.drop_client();
             return Ok(());
         }

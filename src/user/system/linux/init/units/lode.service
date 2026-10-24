@@ -1,0 +1,15 @@
+# lode, the log manager (docs/LOGGING.md): the service, a native program.
+# Under drivers.slice, the slice the kernel seals (docs/CGROUPS.md §3.3):
+# nothing moves into or out of lode's job, and lode starts nothing outside
+# it. It opens /dev/kmsg and its store as root, then becomes uid 91. Not
+# started unless an image enables it (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=The log manager
+DefaultDependencies=no
+
+[Service]
+Type=native
+ExecStart=/sbin/lode
+Slice=drivers.slice
+Restart=always
+RestartSec=100ms

@@ -3207,3 +3207,434 @@ fn an_event_socket_too_long_for_sun_path_is_refused_as_the_request_socket_is() {
         "{error}"
     );
 }
+
+/// lode's crash screenshots (`docs/LOGGING.md` §19): a compositor given
+/// lode's socket and the session's token registers with that token, takes
+/// lode's acceptance, and answers a capture with its whole screen, in QOI.
+#[test]
+fn answers_lode_with_the_screen() {
+    use ferrix_lode_capture::{FORMAT_QOI, Message, qoi};
+    use std::io::{Read as _, Write as _};
+    use std::os::unix::net::UnixListener;
+
+    let desk = Desk::new("lodeshot", "");
+    let socket = desk.work.join("lode-capture");
+    let listener = UnixListener::bind(&socket).expect("lode's socket");
+    let token = [0x5a; 16];
+    let options = Options {
+        lode: Some((socket.clone(), token)),
+        ..desk.options()
+    };
+    let (_, picture) = running(&desk, &options, move |ends| {
+        let (mut lode, _) = listener.accept().expect("the compositor's connection");
+        lode.set_read_timeout(Some(PATIENCE))
+            .expect("a read timeout");
+        let mut held = Vec::new();
+        let mut read_one = |lode: &mut std::os::unix::net::UnixStream| loop {
+            if let Ok(Some((message, used))) = Message::decode(&held) {
+                let _ = held.drain(..used);
+                return message;
+            }
+            let mut buf = vec![0_u8; 1 << 16];
+            let got = lode.read(&mut buf).expect("a read");
+            assert!(got > 0, "the compositor closed lode's connection");
+            held.extend_from_slice(&buf[..got]);
+        };
+        match read_one(&mut lode) {
+            Message::Register {
+                token: given, seat, ..
+            } => {
+                assert_eq!(given, [0x5a; 16]);
+                assert_eq!(seat, "seat0");
+            }
+            other => panic!("not a registration: {other:?}"),
+        }
+        lode.write_all(
+            &Message::Accepted {
+                formats: FORMAT_QOI,
+            }
+            .encode(),
+        )
+        .expect("accepted");
+        lode.write_all(
+            &Message::Capture {
+                request: 1,
+                seqnum: 99,
+                what: "a test".to_owned(),
+            }
+            .encode(),
+        )
+        .expect("a capture");
+        let picture = read_one(&mut lode);
+        ends.stop();
+        picture
+    })
+    .expect("the compositor ran");
+    match picture {
+        Message::Image {
+            request: 1,
+            format,
+            width,
+            height,
+            bytes,
+        } => {
+            assert_eq!(format, FORMAT_QOI);
+            assert_eq!((width, height), (WIDTH, HEIGHT));
+            let (w, h, rgba) = qoi::decode(&bytes).expect("a QOI picture");
+            assert_eq!((w, h), (WIDTH, HEIGHT));
+            assert_eq!(rgba.len(), (WIDTH * HEIGHT * 4) as usize);
+        }
+        other => panic!("not a picture: {other:?}"),
+    }
+}
+
+/// Ask the compositor `requests` in turn, with no window open, and give
+/// the answers: for what a request changes in the seat or the
+/// configuration rather than in a window.
+fn asked_alone(desk: &Desk, requests: &[&str]) -> Vec<String> {
+    let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
+    let (_, answers) = running(desk, &desk.options(), move |ends| {
+        let answers = requests.iter().map(|request| ends.ask(request)).collect();
+        ends.stop();
+        answers
+    })
+    .expect("the compositor ran");
+    answers
+}
+
+/// What the Settings app's Keyboard page and a person's `hyprctl keyword`
+/// change takes at once (`docs/RUNTIME-SETTINGS.md` §3.3): key repeat is
+/// told to the keyboards, a new layout makes a new keymap, a bind added is
+/// a bind in force, and `reload` puts the file's binds back. Each says so
+/// in the log `rollinglog` reads.
+#[test]
+fn input_keywords_take_at_once() {
+    let desk = Desk::new("input-keywords", "bind = SUPER, Q, exit\n");
+    let answers = asked_alone(
+        &desk,
+        &[
+            "keyword input:repeat_rate 40",
+            "keyword input:repeat_delay 250",
+            "keyword input:kb_layout de",
+            "keyword bind SUPER, W, exec, true",
+            "rollinglog",
+            "reload",
+            "rollinglog",
+        ],
+    );
+    let [rate, delay, layout, bind, said, reloaded, said_again] = answers.as_slice() else {
+        panic!("seven answers: {answers:?}");
+    };
+    for answer in [rate, delay, layout, bind, reloaded] {
+        assert_eq!(answer.trim(), "ok", "{answers:?}");
+    }
+    assert!(
+        said.contains("hyprix: key repeat 40 a second after 600 ms")
+            && said.contains("hyprix: key repeat 40 a second after 250 ms"),
+        "repeat was not put in force: {said}"
+    );
+    assert!(said.contains("hyprix: keymap de"), "no new keymap: {said}");
+    assert!(
+        said.contains("hyprix: 2 binds"),
+        "the bind was not added: {said}"
+    );
+    let after = said_again
+        .split("hyprix: reloaded the configuration")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no reload in the log: {said_again}"));
+    assert!(
+        after.contains("hyprix: key repeat 25 a second after 600 ms")
+            && after.contains("hyprix: keymap us")
+            && after.contains("hyprix: 1 binds"),
+        "the reload left the keywords' seat: {after}"
+    );
+}
+
+/// `hyprctl keyword bezier` and `animation` change the curves at once, and
+/// `hyprctl animations` lists the new one: before, only `animations:*`
+/// names rebuilt them, and the two keywords waited for a reload.
+#[test]
+fn an_animation_keyword_takes_at_once() {
+    let desk = Desk::new("animation-keyword", "");
+    let answers = asked_alone(
+        &desk,
+        &[
+            "keyword bezier wobble, 0.1, 0.9, 0.1, 1.05",
+            "keyword animation windows, 1, 4, wobble",
+            "animations",
+        ],
+    );
+    let [bezier, animation, listed] = answers.as_slice() else {
+        panic!("three answers: {answers:?}");
+    };
+    assert_eq!(bezier.trim(), "ok", "{answers:?}");
+    assert_eq!(animation.trim(), "ok", "{answers:?}");
+    assert!(
+        listed.contains("wobble"),
+        "the curve is not listed: {listed}"
+    );
+}
+
+/// `exec =` runs at start and again on every reload, and `exec-shutdown =`
+/// as the compositor ends, which the compositor waits for: both were
+/// parsed and never run (`docs/RUNTIME-SETTINGS.md` §6, finding 8).
+#[test]
+fn exec_runs_at_start_and_reload_and_exec_shutdown_at_the_end() {
+    let desk = Desk::new("exec-lines", "");
+    let ran = desk.work.join("exec-ran");
+    let ended = desk.work.join("shutdown-ran");
+    let mut text = std::fs::read_to_string(&desk.config).expect("the configuration");
+    text.push_str(&format!(
+        "exec = /bin/sh -c \"echo ran >> {}\"\nexec-shutdown = /bin/sh -c \"sleep 0.2; echo ended > {}\"\n",
+        ran.display(),
+        ended.display()
+    ));
+    std::fs::write(&desk.config, text).expect("the configuration");
+    let counted = ran.clone();
+    let (_, lines) = running(&desk, &desk.options(), move |ends| {
+        let lines = |at_least: usize| {
+            until("exec's lines", || {
+                let read = std::fs::read_to_string(&counted).unwrap_or_default();
+                let count = read.lines().count();
+                if count >= at_least {
+                    Ok(count)
+                } else {
+                    Err(format!("{count} lines"))
+                }
+            })
+        };
+        let first = lines(1);
+        assert_eq!(ends.ask("reload").trim(), "ok");
+        let second = lines(2);
+        ends.stop();
+        (first, second)
+    })
+    .expect("the compositor ran");
+    assert_eq!(lines, (1, 2), "exec ran once at start and once on reload");
+    assert_eq!(
+        std::fs::read_to_string(&ended).expect("exec-shutdown ran and was waited for"),
+        "ended\n"
+    );
+}
+
+/// Ask a compositor reading the Settings app's file at `settings`
+/// `requests` in turn, with no window open.
+fn asked_with_settings(name: &str, settings: &Path, requests: &[&str]) -> Vec<String> {
+    let desk = Desk::new(name, "");
+    let options = Options {
+        settings: Some(settings.to_path_buf()),
+        ..desk.options()
+    };
+    let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
+    let (_, answers) = running(&desk, &options, move |ends| {
+        let answers = requests.iter().map(|request| ends.ask(request)).collect();
+        ends.stop();
+        answers
+    })
+    .expect("the compositor ran");
+    answers
+}
+
+/// `hyprctl setting` (`crate::settings`): a value is checked, written to
+/// the Settings app's file and put in force at once; a wrong one is
+/// refused and nothing changes; and a compositor started again reads the
+/// file, so the setting survives the restart. `setting reset` takes it
+/// away again, back to the default, at once.
+#[test]
+fn a_setting_is_kept_across_a_restart() {
+    let kept = workspace("settings-file");
+    let settings = kept.join("hypr").join("settings.conf");
+    let first = asked_with_settings(
+        "settings-first",
+        &settings,
+        &[
+            "setting general:gaps_in 12",
+            "setting input:repeat_rate 40",
+            "setting general:gaps_in ten",
+            "getoption general:gaps_in",
+            "settings",
+        ],
+    );
+    let [gaps, repeat, wrong, read, listed] = first.as_slice() else {
+        panic!("five answers: {first:?}");
+    };
+    assert_eq!(gaps.trim(), "ok", "{first:?}");
+    assert_eq!(repeat.trim(), "ok", "{first:?}");
+    assert!(
+        wrong.starts_with("setting general:gaps_in:"),
+        "a wrong value was taken: {wrong}"
+    );
+    assert!(read.contains("12"), "the setting is not in force: {read}");
+    assert_eq!(
+        listed, "general:gaps_in = 12\ninput:repeat_rate = 40\n",
+        "the file holds the two settings and not the refused one"
+    );
+
+    let second = asked_with_settings(
+        "settings-second",
+        &settings,
+        &[
+            "getoption general:gaps_in",
+            "getoption input:repeat_rate",
+            "setting reset general:gaps_in",
+            "getoption general:gaps_in",
+            "settings",
+        ],
+    );
+    let [read, repeat, reset, back, listed] = second.as_slice() else {
+        panic!("five answers: {second:?}");
+    };
+    assert!(read.contains("12"), "the restart lost the setting: {read}");
+    assert!(repeat.starts_with("int: 40\n"), "{repeat}");
+    assert_eq!(reset.trim(), "ok", "{second:?}");
+    assert!(
+        back.contains('5') && !back.contains("12"),
+        "reset did not bring the default back: {back}"
+    );
+    assert_eq!(listed, "input:repeat_rate = 40\n");
+}
+
+/// Whether process `pid` has ended: gone, or a zombie nobody reaped yet.
+fn ended(pid: &str) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+        stat.rsplit_once(')')
+            .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'))
+    })
+}
+
+/// `wallpaper =` lines (`crate::wallpaper`): the compositor starts the
+/// wallpaper client with the lines in force, starts it again when
+/// `hyprctl setting wallpaper` changes them and ends the one before, ends
+/// it as it ends itself -- and a compositor started again starts it with
+/// the line the Settings app's file kept. A script stands in for the
+/// client and writes down what it was given.
+#[test]
+fn the_wallpaper_follows_its_lines_and_is_kept() {
+    let kept = workspace("wallpaper-kept");
+    let settings = kept.join("hypr").join("settings.conf");
+    let started = kept.join("started");
+    let program = kept.join("fake-wallpaper");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s ' \"$$\" >> {0}\nfor a in \"$@\"; do printf '[%s]' \"$a\" >> {0}; done\necho >> {0}\nexec sleep 60\n",
+            started.display()
+        ),
+    )
+    .expect("the stand-in");
+    let mut permissions = std::fs::metadata(&program).expect("there").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+    std::fs::set_permissions(&program, permissions).expect("executable");
+
+    let starts = |at_least: usize| {
+        until("the wallpaper started", || {
+            let text = std::fs::read_to_string(&started).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= at_least {
+                Ok(lines)
+            } else {
+                Err(format!("{} starts", lines.len()))
+            }
+        })
+    };
+
+    // Each start is waited for, written down whole, before the next
+    // request replaces it, and the last before the compositor is ended,
+    // which ends the client: a client replaced or ended before it wrote
+    // would be no start at all, and one replaced while it was still
+    // writing could write after the client that replaced it. The
+    // compositor starts one client as it starts, and one per request.
+    let run = |name: &str, lines: &str, requests: Vec<String>, expected: usize| {
+        let desk = Desk::new(name, lines);
+        let options = Options {
+            settings: Some(settings.clone()),
+            wallpaper: Some(program.clone()),
+            ..desk.options()
+        };
+        let written = started.clone();
+        let whole = move || {
+            std::fs::read_to_string(&written)
+                .unwrap_or_default()
+                .matches('\n')
+                .count()
+        };
+        let before = whole();
+        assert_eq!(before + 1 + requests.len(), expected, "{name}'s starts");
+        let wait = move |count: usize| {
+            until("the stand-in's starts", || {
+                let now = whole();
+                (now >= count)
+                    .then_some(())
+                    .ok_or_else(|| format!("{now} starts"))
+            });
+        };
+        let (_, answers) = running(&desk, &options, move |ends| {
+            wait(before + 1);
+            let answers: Vec<String> = requests
+                .iter()
+                .enumerate()
+                .map(|(index, request)| {
+                    let answer = ends.ask(request);
+                    wait(before + 2 + index);
+                    answer
+                })
+                .collect();
+            ends.stop();
+            answers
+        })
+        .expect("the compositor ran");
+        answers
+    };
+
+    // The file's line starts the client; a setting starts it again.
+    let answers = run(
+        "wallpaper-first",
+        "wallpaper = , colour 102030\n",
+        vec![
+            "setting wallpaper , picture /pictures/tide.png, fit centre".to_owned(),
+            "setting wallpaper DP-1, slideshow /pictures, every 1h".to_owned(),
+        ],
+        3,
+    );
+    assert!(
+        answers.iter().all(|answer| answer.trim() == "ok"),
+        "{answers:?}"
+    );
+    let first = starts(3);
+    assert!(
+        first[0].ends_with("[--line][, colour ff102030]"),
+        "the file's line: {first:?}"
+    );
+    assert!(
+        first[1].ends_with("[--line][, picture /pictures/tide.png, fit centre, colour ff1d2027]"),
+        "the setting's line: {first:?}"
+    );
+    assert!(
+        first[2].contains("[DP-1, slideshow /pictures, every 3600, shuffle 1, fit fill"),
+        "a second line, for one output: {first:?}"
+    );
+    // Every one of them has ended: replaced, or with the compositor.
+    for line in &first {
+        let pid = line.split_whitespace().next().expect("a pid");
+        until("the client ended", || {
+            if ended(pid) {
+                Ok(())
+            } else {
+                Err(format!("{pid} still runs"))
+            }
+        });
+    }
+
+    // Started again with no line of its own, the compositor starts the
+    // client with the lines the Settings app's file kept.
+    let _ = run("wallpaper-second", "", Vec::new(), 4);
+    let second = starts(4);
+    assert!(
+        second[3].ends_with(
+            "[--line][, picture /pictures/tide.png, fit centre, colour ff1d2027]\
+             [--line][DP-1, slideshow /pictures, every 3600, shuffle 1, fit fill, \
+             colour ff1d2027, pause_covered 1, pause_battery 1]"
+        ),
+        "the kept lines: {second:?}"
+    );
+}

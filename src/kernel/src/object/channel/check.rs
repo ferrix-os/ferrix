@@ -33,7 +33,7 @@ fn agrees(end: &Endpoint) -> bool {
 /// A word that disagrees with its inbox or its peer, naming the operation
 /// after which it did, or a pair that could not be made.
 /// Verifies: `L.object.140`
-pub(crate) fn run() -> Result<u32, &'static str> {
+pub fn run() -> Result<u32, &'static str> {
     let (first, second) = Endpoint::pair().map_err(|_| "no memory for the word check's pair")?;
     // Every operation across the empty-to-not boundary once, in order,
     // first: a long random run rarely empties a queue it keeps writing to.

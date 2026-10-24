@@ -111,6 +111,9 @@ pub struct UnitStatus {
     pub status: Option<String>,
     /// Its cgroup, below the cgroup2 mount.
     pub cgroup: Option<String>,
+    /// Its current or last run's id, `INVOCATION_ID` (`docs/LOGGING.md`
+    /// §9.2): what `svc status` reads its lines by.
+    pub invocation: Option<String>,
 }
 
 /// What init says back.
@@ -464,6 +467,7 @@ impl Answer {
                     w.opt_str(unit.result.as_deref());
                     w.opt_str(unit.status.as_deref());
                     w.opt_str(unit.cgroup.as_deref());
+                    w.opt_str(unit.invocation.as_deref());
                 }
             }
             Answer::Lines(lines) => {
@@ -502,6 +506,7 @@ impl Answer {
                         result: r.opt_str()?,
                         status: r.opt_str()?,
                         cgroup: r.opt_str()?,
+                        invocation: r.opt_str()?,
                     });
                 }
                 Answer::Units(units)

@@ -5,6 +5,7 @@
 use core::fmt;
 
 use ferrix_linux_abi::errno::Errno;
+pub use ferrix_linux_abi::kmsg::Level;
 
 /// What a dmabuf install answered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -113,6 +114,7 @@ pub trait Host<M> {
     /// Ferrix has no capabilities, so the host answers for root.
     fn privileged(&self, request: u64) -> bool;
 
-    /// A line on the driver's console.
-    fn say(&mut self, line: fmt::Arguments<'_>);
+    /// A line of the driver's log at `level` (refusals a program sees as a
+    /// lost device at error, others at warning, trace at debug).
+    fn say(&mut self, level: Level, line: fmt::Arguments<'_>);
 }

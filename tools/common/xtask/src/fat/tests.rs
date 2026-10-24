@@ -360,3 +360,34 @@ fn a_directory_named_like_the_volume_label_is_still_found() {
         Some(&b"initrd"[..])
     );
 }
+
+#[test]
+fn the_clusters_a_driver_counts_all_have_fat_entries() {
+    // A driver takes the cluster count from the boot sector: the sectors
+    // after the reserved ones and the tables, by the cluster size. Every one
+    // of those clusters (numbered from 2) needs an entry in the table, or
+    // fsck.fat and mtools refuse the volume. 512 MiB is the N150 box's ESP,
+    // which had 226 clusters too many.
+    for bytes in [IMAGE_BYTES, 64 << 20, 66 << 20, 100 << 20, 512 << 20] {
+        let image = Fat32::new(bytes).unwrap().finish();
+        let u16_at = |i: usize| u32::from(u16::from_le_bytes([image[i], image[i + 1]]));
+        let u32_at =
+            |i: usize| u32::from_le_bytes([image[i], image[i + 1], image[i + 2], image[i + 3]]);
+        let (spc, reserved, fats) = (u32::from(image[13]), u16_at(14), u32::from(image[16]));
+        let (total, fat_sectors) = (u32_at(32), u32_at(36));
+        assert!(
+            total as usize <= bytes / SECTOR,
+            "{bytes}: the volume is larger than its image"
+        );
+        let clusters = (total - reserved - fats * fat_sectors) / spc;
+        let entries = fat_sectors * (SECTOR as u32 / 4);
+        assert!(
+            clusters + 2 <= entries,
+            "{bytes}: {clusters} clusters but only {entries} FAT entries"
+        );
+        assert!(
+            clusters >= MIN_FAT32_CLUSTERS,
+            "{bytes}: {clusters} clusters is not FAT32"
+        );
+    }
+}

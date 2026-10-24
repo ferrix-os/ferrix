@@ -23,8 +23,7 @@ use core::cell::UnsafeCell;
 use super::cpu;
 use super::gdt;
 
-#[cfg(ferrix_linux_abi = "on")]
-pub(in crate::arch) mod check;
+pub mod gate_check;
 
 /// Vectors in an interrupt descriptor table. Fixed by the architecture.
 const VECTORS: usize = 256;
@@ -38,6 +37,10 @@ const STUB_SIZE: usize = 16;
 const DEBUG: usize = 1;
 /// The non-maskable interrupt.
 const NMI: usize = 2;
+/// `#BP`: `int3`, a program's own breakpoint.
+const BREAKPOINT: usize = 3;
+/// `#OF`: `into` with the overflow flag set, which only 32-bit code has.
+const OVERFLOW: usize = 4;
 /// `#DF`: a fault while delivering another.
 const DOUBLE_FAULT: usize = 8;
 /// `#MC`: the processor found its own hardware in error.
@@ -53,7 +56,7 @@ const GENERAL_PROTECTION: u64 = 13;
 /// pushed has the lowest address and is the first field.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TrapFrame {
+pub struct TrapFrame {
     pub(crate) r15: u64,
     pub(crate) r14: u64,
     pub(crate) r13: u64,
@@ -401,9 +404,14 @@ struct Gate {
 /// by the same source before it has saved anything.
 const INTERRUPT_GATE: u8 = 0x8E;
 
-/// The same gate, callable from ring 3 by `int`: only the legacy system call's
-/// vector has one. Every other vector's DPL of 0 turns a program's `int n`
-/// into `#GP`, which is how a program is kept from faking an interrupt.
+/// The same gate, callable from ring 3 by a software interrupt: the three
+/// vectors Linux gives system gates (`arch/x86/kernel/idt.c`, `SYSG`) and no
+/// others -- `#BP`, `#OF` and the legacy system call. The processor checks the
+/// gate's DPL for `int3`, `into` and `int n` alike, so with DPL 0 a program's
+/// `int3` is `#GP` and ends it with `SIGSEGV`, where Linux sends `SIGTRAP`
+/// and Wine, reading trap 13, reports an access violation for a breakpoint.
+/// Every other vector's DPL of 0 turns a program's `int n` into `#GP`, which
+/// is how a program is kept from faking an interrupt or another exception.
 const USER_INTERRUPT_GATE: u8 = INTERRUPT_GATE | (3 << 5);
 
 impl Gate {
@@ -485,7 +493,12 @@ pub(crate) unsafe fn init() {
             MACHINE_CHECK => Gate::new(paranoid(3), gdt::MACHINE_CHECK_IST),
             // `int $0x80`: an i386 program's system call, and any program's
             // through this instruction, as on Linux (`docs/I386.md` §3.3).
-            LEGACY_SYSCALL => {
+            // And `int3` and `into`, which a program raises on purpose: a
+            // breakpoint is `SIGTRAP` and an overflow `SIGSEGV`, as Linux's
+            // system gates make them. Neither switches stack: a program's
+            // arrives on the kernel stack the TSS names, and the kernel's own
+            // `int3` (`breakpoint`) comes from ring 0, which any DPL admits.
+            LEGACY_SYSCALL | BREAKPOINT | OVERFLOW => {
                 Gate::with_flags(stubs + (vector * STUB_SIZE) as u64, 0, USER_INTERRUPT_GATE)
             }
             _ => Gate::new(stubs + (vector * STUB_SIZE) as u64, 0),
@@ -626,8 +639,9 @@ pub(crate) fn classify(frame: &TrapFrame) -> crate::trap::Trap {
 /// The signal Linux raises for a trap a program's own instruction took and
 /// nothing resolved, as `(signal, si_code, si_addr)`: a page fault `SIGSEGV`
 /// at the address, `#UD` `SIGILL` and `#DE` `SIGFPE` at the instruction,
-/// `#MF` and `#XM` `SIGFPE`, `#AC` `SIGBUS`, a breakpoint `SIGTRAP`, and
-/// everything else -- `#GP` from a privileged instruction, `#SS`, `#NP` --
+/// `#MF` and `#XM` `SIGFPE`, `#AC` `SIGBUS`, a breakpoint `SIGTRAP` from the
+/// kernel with no address (Linux's `do_int3_user`), and everything else --
+/// `#GP` from a privileged instruction, `#SS`, `#NP`, `#OF` from `into` --
 /// `SIGSEGV` from the kernel with no address.
 pub(crate) fn fault_signal(frame: &TrapFrame, trap: &crate::trap::Trap) -> (u32, i32, u64) {
     use crate::trap::Trap;
@@ -706,7 +720,7 @@ pub(crate) fn report_trap(frame: &TrapFrame) {
 pub(crate) const fn advance_past_breakpoint(_frame: &mut TrapFrame) {}
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.
-pub(crate) fn breakpoint() {
+pub fn breakpoint() {
     // SAFETY: (PROBE) `int3` raises vector 3, for which the IDT holds a gate. It has no
     // effect other than entering the handler, which returns to the instruction
     // after it.

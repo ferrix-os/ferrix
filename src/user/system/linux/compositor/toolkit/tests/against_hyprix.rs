@@ -941,3 +941,97 @@ fn a_data_control_offer_is_read_with_its_types_and_pasted() {
         "copied by the toolkit"
     );
 }
+
+/// A square on a test frame: its left, top, side and colour.
+type Square = (u32, u32, u32, (u8, u8, u8));
+
+/// A `w` × `h` frame in tiny-skia's order, `colour` all over and the
+/// squares `squares` (`x`, `y`, side, colour) on it.
+fn frame_with(w: u32, h: u32, colour: (u8, u8, u8), squares: &[Square]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (r, g, b) = squares
+                .iter()
+                .find(|(sx, sy, side, _)| x >= *sx && x < sx + side && y >= *sy && y < sy + side)
+                .map_or(colour, |square| square.3);
+            rgba.extend([r, g, b, 255]);
+        }
+    }
+    rgba
+}
+
+#[test]
+fn a_damaged_draw_copies_what_changed_and_what_the_buffer_missed() {
+    let green = (30, 160, 90);
+    let red = (200, 40, 40);
+    let blue = (40, 40, 200);
+    let (answer, frame) = with_compositor("damaged", 4000, move |socket| {
+        let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+        let window = client
+            .toplevel(&ToplevelOptions {
+                title: "damaged".to_owned(),
+                app_id: "toolkit-damaged".to_owned(),
+                size: (200, 100),
+                parent: None,
+                ..ToplevelOptions::default()
+            })
+            .map_err(|error| error.to_string())?;
+        let mut size = None;
+        until(&mut client, Duration::from_secs(2), |_, event| {
+            if let Event::Configure {
+                surface,
+                width,
+                height,
+            } = event
+                && *surface == window
+            {
+                size = Some((*width, *height));
+                return true;
+            }
+            false
+        })?;
+        let (w, h) = size.ok_or("not configured")?;
+        // Three frames, each drawn when the one before was shown: all
+        // green; a red square, damaged alone; a blue square, damaged
+        // alone, into the buffer that held only the green -- which must
+        // get the red square too.
+        let frames = [
+            (frame_with(w, h, green, &[]), vec![]),
+            (
+                frame_with(w, h, green, &[(0, 0, 20, red)]),
+                vec![(0, 0, 20, 20)],
+            ),
+            (
+                frame_with(w, h, green, &[(0, 0, 20, red), (40, 0, 20, blue)]),
+                vec![(40, 0, 20, 20)],
+            ),
+        ];
+        for (rgba, damage) in &frames {
+            let _ = client
+                .draw_damaged(window, rgba, (w, h), 1, damage)
+                .map_err(|error| error.to_string())?;
+            client.request_frame(window);
+            until(
+                &mut client,
+                Duration::from_secs(2),
+                |_, event| matches!(event, Event::Frame { surface, .. } if *surface == window),
+            )?;
+        }
+        let _ = until(&mut client, Duration::from_secs(5), |_, _| false);
+        Ok::<_, String>(())
+    });
+    answer.expect("the client worked");
+    let red_at = first(&frame, red).expect("the red square is still there");
+    let blue_at = first(&frame, blue).expect("the blue square was drawn");
+    assert_eq!(
+        (blue_at.0 - red_at.0, blue_at.1),
+        (40, red_at.1),
+        "each where it was drawn"
+    );
+    assert_eq!(
+        pixel(&frame, red_at.0 + 25, red_at.1 + 5),
+        green,
+        "between them, the first frame's green"
+    );
+}

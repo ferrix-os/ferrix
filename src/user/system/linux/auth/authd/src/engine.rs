@@ -464,6 +464,21 @@ impl Engine {
                 text: text.to_owned(),
             })
         };
+        // `Methods=none` (`docs/SETTINGS-WRITER.md` §5): where the password
+        // would be asked, and only there -- after the caller, the target,
+        // the group, the throttle and the record have all been checked --
+        // a policy that may skip it accepts an account that exists.
+        if policy.methods_none
+            && policy.purpose == Purpose::Authenticate
+            && let Some(account) = &target.account
+        {
+            let accepted = Reply::Accepted {
+                uid: account.uid,
+                account: account.name.clone(),
+            };
+            self.log_method(peer, &policy.service, &target.name, "none", "accepted", "");
+            return (Step::Over, Out::now(accepted));
+        }
         match policy.purpose {
             Purpose::Authenticate => (Step::Password { policy, target }, prompt("Password: ")),
             Purpose::ChangePassword if root_changes => {
@@ -892,6 +907,19 @@ impl Engine {
     }
 
     fn log(&mut self, peer: Peer, service: &str, account: &str, result: &str, why: &str) {
+        self.log_method(peer, service, account, "password", result, why);
+    }
+
+    /// [`Engine::log`], for a conversation whose method was `method`.
+    fn log_method(
+        &mut self,
+        peer: Peer,
+        service: &str,
+        account: &str,
+        method: &str,
+        result: &str,
+        why: &str,
+    ) {
         let pid = peer.pid.to_string();
         let uid = peer.uid.to_string();
         let mut fields = vec![
@@ -899,7 +927,7 @@ impl Engine {
             ("account", account),
             ("peer-pid", pid.as_str()),
             ("peer-uid", uid.as_str()),
-            ("method", "password"),
+            ("method", method),
             ("result", result),
         ];
         if !why.is_empty() {

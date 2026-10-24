@@ -113,20 +113,20 @@ const ANSWER_NANOS: u64 = 10_000_000_000;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Bytes compared between the mapping and the file, both ways.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
     /// Pages of the mapping a truncation took away.
-    pub(crate) cut: u64,
+    pub cut: u64,
     /// Pages a private mapping copied and kept from the file.
-    pub(crate) copied: u64,
+    pub copied: u64,
     /// Frames the second run cost. Zero, or a mapping kept a file's pages.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// Run it twice, measured on the second: the first grows the heap to where it
 /// stays.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the mmap check")?;
     let _warm = check_once(&process)?;

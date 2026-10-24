@@ -1,6 +1,6 @@
 //! The kernel's judgement of a driver's HELLO.
 
-use crate::message::{Hello, MAX_NODES, VERSION};
+use crate::message::{Hello, MAX_NODES, VERSION, VERSION_INTERRUPTS};
 use crate::node;
 
 /// Why a HELLO was refused, as REFUSED names it.
@@ -83,6 +83,9 @@ pub struct Publication {
     pub count: usize,
     /// The minors.
     pub minors: [u16; MAX_NODES],
+    /// Whether the driver takes [`crate::message::Op::Interrupt`]: its
+    /// HELLO named [`VERSION_INTERRUPTS`].
+    pub interrupts: bool,
 }
 
 impl Publication {
@@ -100,7 +103,7 @@ impl Publication {
 ///
 /// The [`Refusal`] the kernel answers with.
 pub fn judge(hello: &Hello, location: u32) -> Result<Publication, Refusal> {
-    if hello.version != VERSION {
+    if hello.version != VERSION && hello.version != VERSION_INTERRUPTS {
         return Err(Refusal::Version);
     }
     if hello.location != location {
@@ -121,5 +124,6 @@ pub fn judge(hello: &Hello, location: u32) -> Result<Publication, Refusal> {
     Ok(Publication {
         count: hello.count,
         minors: hello.minors,
+        interrupts: hello.version == VERSION_INTERRUPTS,
     })
 }

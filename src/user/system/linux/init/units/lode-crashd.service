@@ -1,0 +1,16 @@
+# lode crashd: the crash collector (docs/LOGGING.md §21, tombstones step 2).
+# Root's, as reading another process's /proc needs: it arms the kernel's
+# crash hold by holding /dev/ferrix-crashes open, reads each held process's
+# threads, status, maps and descriptors, hands them to lode and lets the
+# process go. The kernel lets a process go by itself after 2 s, and the
+# collector's end disarms the hold. Not started unless an image enables it
+# (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Collect what a crashing process leaves
+After=lode.service
+
+[Service]
+Type=simple
+ExecStart=/sbin/lode crashd
+Restart=always
+RestartSec=1s

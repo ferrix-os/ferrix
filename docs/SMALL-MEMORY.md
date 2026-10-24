@@ -34,6 +34,11 @@ writes it to a card: armv7a's is 8.2 MiB rather than 98, and aarch64's is
 4.5 MiB. It is off unless asked for. The kernel now prints free and managed
 memory at the end of boot, beside stage 2's line.
 
+Since 2026-10-24 it strips the initramfs's programs too, as `flash` does.
+Built in the release profile with full DWARF, they had grown to 38 MiB of
+the x86-64 archive, lode alone 19, and the 128 MiB row ran out of memory in
+the self-checks. Stripped, they come to a few MiB.
+
 The sweep: `test-boot --release --strip-kernel --smp 1 --memory N`, with
 self-checks on.
 

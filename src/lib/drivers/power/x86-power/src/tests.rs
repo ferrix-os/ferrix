@@ -325,3 +325,70 @@ fn no_reading_neither_backs_off_nor_lifts() {
     ));
     assert_eq!(policy.step(1, &blind), Action::Hold);
 }
+
+#[test]
+fn a_regained_claim_climbs_the_plan_again_from_its_first_step() {
+    let mut policy = Policy::new(plan_of(&[30, 34, 37], 60), 85);
+    let cool = reading(60, 62);
+    let _ = policy.step(0, &cool);
+    let _ = policy.step(60, &cool);
+    let _ = policy.step(120, &cool);
+    assert_eq!(policy.current(), Some(2));
+    // The lease lapsed and the claim was regained at 400 s: firmware's value
+    // is in force, and the plan starts over rather than jumping to 37 A.
+    policy.restart(400);
+    assert_eq!(policy.current(), None);
+    assert_eq!(
+        policy.step(400, &cool),
+        Action::Set {
+            amps: 30,
+            why: Why::Plan
+        }
+    );
+    assert_eq!(policy.step(459, &cool), Action::Hold);
+    assert_eq!(
+        policy.step(460, &cool),
+        Action::Set {
+            amps: 34,
+            why: Why::Plan
+        }
+    );
+}
+
+#[test]
+fn a_regained_claim_keeps_the_back_offs_cap_and_a_give_up() {
+    let mut policy = Policy::new(plan_of(&[30, 34, 37], 1), 85);
+    let cool = reading(60, 62);
+    for second in 0..3 {
+        let _ = policy.step(second, &cool);
+    }
+    assert_eq!(
+        policy.step(3, &reading(86, 80)),
+        Action::Set {
+            amps: 34,
+            why: Why::BackOff { celsius: 86 }
+        }
+    );
+    policy.restart(10);
+    assert_eq!(
+        policy.step(10, &cool),
+        Action::Set {
+            amps: 30,
+            why: Why::Plan
+        }
+    );
+    let _ = policy.step(11, &cool);
+    // Capped at 34 A: the back-off's cap outlives the lapse.
+    assert_eq!(policy.step(12, &cool), Action::Hold);
+    assert_eq!(policy.current(), Some(1));
+
+    let mut given_up = Policy::new(plan_of(&[30], 1), 85);
+    let _ = given_up.step(0, &cool);
+    assert_eq!(
+        given_up.step(1, &reading(90, 80)),
+        Action::GiveUp { celsius: 90 }
+    );
+    given_up.restart(5);
+    assert!(given_up.done());
+    assert_eq!(given_up.step(5, &cool), Action::Hold);
+}

@@ -2,13 +2,16 @@
 """Three of docs/BUILD-FLAGS.md's checks that read source: where build flags
 are read, which boot options are, and the kernel's own table of flags.
 
-1. **Flags are read in the kernel crate alone** (rule 6 b). A library built
+1. **Flags are read in the kernel's crates alone** (rule 6 b). A library built
    without a `cfg` takes its other branch without a word, which `--check-cfg`
    cannot see, so no crate under src/lib may name a `ferrix_` cfg at all, and
    no crate outside the kernel's may name a declared flag's cfg
    (`ferrix_<flag>`, `ferrix_profile`, `ferrix_level`), nor read one through
-   a build script's `CARGO_CFG_FERRIX_*`. The kernel crate is src/kernel; its
-   build script is where the flags become `cfg`s, and is the kernel's.
+   a build script's `CARGO_CFG_FERRIX_*`. The kernel's crates are the four
+   under src/kernel (`kernel_crates` in certification-item.json), and their
+   one build script, src/kernel/build.rs, is where the flags become `cfg`s
+   for each of them. That they all build with it, and nothing else does, is
+   check-item-boundary.py's rule (ledger line 3282, (K1)).
 
 2. **No boot option is read that the registry does not declare** (BF4). Every
    read of the kernel command line in src/kernel and src/boot -- `.option(K)`,
@@ -31,7 +34,10 @@ are read, which boot options are, and the kernel's own table of flags.
 3. **The kernel's flag table follows the flag file**: `build_flags.rs` names
    the profiles, the levels and every flag with every value, in the flag
    file's order, each `cfg!` filed under its own word. The audit record
-   packs places in those lists, and AUDIT.md decodes them by the file.
+   packs places in those lists, and AUDIT.md decodes them by the file. And
+   the core's `build_flag_word!` names the same values in the same order:
+   each of the kernel's crates expands it, and the binary requires the four
+   words equal (ledger line 3282, (K4)).
 
 The first two have a planted negative control (a `ferrix_` cfg in a library; a reader
 of an undeclared option), run with `gate.sh control` over `cargo xtask
@@ -128,9 +134,9 @@ def flag_cfg_problems(rust_files: list[tuple[str, str]], flags: set[str]) -> lis
             continue
         for line, name in cfg_names(source):
             if rel.startswith("src/lib/"):
-                problems.append(f"{rel}:{line}: a library names the cfg `{name}`; flags are read in the kernel crate alone")
+                problems.append(f"{rel}:{line}: a library names the cfg `{name}`; flags are read in the kernel's crates alone")
             elif name in declared or name.startswith("ferrix_mitigations"):
-                problems.append(f"{rel}:{line}: names the build flag `{name}` outside the kernel crate")
+                problems.append(f"{rel}:{line}: names the build flag `{name}` outside the kernel's crates")
     return problems
 
 
@@ -317,6 +323,41 @@ def kernel_table_problems(source: str, flag_file: dict, profiles: list[str]) -> 
     return problems
 
 
+KERNEL_WORD = "src/kernel/src/kernel_core.rs"
+WORD_ENTRY = re.compile(r'cfg!\(\s*ferrix_([a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\)')
+
+
+def flag_word_problems(source: str, flag_file: dict, profiles: list[str]) -> list[str]:
+    """The core's `build_flag_word!` (ledger line 3282, (K4)) names the
+    profile, the level and every flag of the flag file with every value, in
+    the file's order (the profiles in any), and no more than 64: each of the
+    kernel's crates expands it, and the binary requires the words equal, so
+    a value it missed is one the crates could differ in unseen."""
+    blanked = comments_blanked(source)
+    start = blanked.find("macro_rules! build_flag_word")
+    if start < 0:
+        return [f"{KERNEL_WORD} defines no build_flag_word! macro"]
+    end = blanked.find("\n}", start)
+    found = [(m.group(1), m.group(2)) for m in WORD_ENTRY.finditer(blanked[start:end])]
+    wanted = [("profile", profiles), ("level", list(flag_file.get("levels", {})))]
+    wanted += [(flag, list(entry.get("values", {}))) for flag, entry in flag_file.get("flags", {}).items()]
+    problems = []
+    if len(found) > 64:
+        problems.append(f"{KERNEL_WORD}: build_flag_word! names {len(found)} values, more than a word holds")
+    names = []
+    for flag, _ in found:
+        if not names or names[-1] != flag:
+            names.append(flag)
+    if names != [name for name, _ in wanted]:
+        problems.append(f"{KERNEL_WORD}: build_flag_word!'s flags are {names}, the flag file's "
+                        f"{[name for name, _ in wanted]}")
+    for name, want in wanted:
+        values = [value for flag, value in found if flag == name]
+        if (sorted(values) != sorted(want)) if name == "profile" else (values != want):
+            problems.append(f"{KERNEL_WORD}: build_flag_word!'s {name} values are {values}, the flag file's {want}")
+    return problems
+
+
 def rust_files() -> list[tuple[str, str]]:
     files = []
     for top in ("src", "tools"):
@@ -377,6 +418,22 @@ def self_test() -> list[str]:
     problems, counts = option_problems([forwarded], {"noactlr": {}}, {"src/kernel/src/f.rs": "flag"})
     if problems or counts != {"noactlr": 1}:
         failures.append(f"a forwarder's read was not followed: {problems} {counts}")
+    word_file = {"levels": {"none": {}, "sc4": {}}, "flags": {"checks": {"values": {"on": {}, "off": {}}}}}
+    word = (
+        'macro_rules! build_flag_word {\n    () => { f(&[cfg!(ferrix_profile = "none"), cfg!(ferrix_level = "none"), '
+        'cfg!(ferrix_level = "sc4"), cfg!(ferrix_checks = "on"), cfg!(ferrix_checks = "off")]) };\n}\n'
+    )
+    if flag_word_problems(word, word_file, ["none"]):
+        failures.append(f"a complete flag word was refused: {flag_word_problems(word, word_file, ['none'])}")
+    for what, broken in [
+        ("a missing value", word.replace(', cfg!(ferrix_checks = "off")', "")),
+        ("a reordered flag", word.replace('cfg!(ferrix_level = "none"), cfg!(ferrix_level = "sc4"), ', "")
+         .replace('cfg!(ferrix_checks = "off")]', 'cfg!(ferrix_checks = "off"), cfg!(ferrix_level = "none"), '
+                  'cfg!(ferrix_level = "sc4")]')),
+        ("no macro", "fn nothing() {}\n"),
+    ]:
+        if not flag_word_problems(broken, word_file, ["none"]):
+            failures.append(f"the flag word check passed {what}")
     return failures
 
 
@@ -400,7 +457,7 @@ def main() -> int:
     cfg = flag_cfg_problems(files, set(flag_file.get("flags", {})))
     if cfg:
         print(
-            f"build-flags: {len(cfg)} build-flag cfg(s) outside the kernel crate (BUILD-FLAGS.md rule 6 b):",
+            f"build-flags: {len(cfg)} build-flag cfg(s) outside the kernel's crates (BUILD-FLAGS.md rule 6 b):",
             file=sys.stderr,
         )
         for problem in cfg:
@@ -408,6 +465,7 @@ def main() -> int:
         status = 1
     profiles = sorted(path.stem for path in (ROOT / "tools/common/data/profiles").glob("*.toml")) + ["none"]
     table = kernel_table_problems((ROOT / KERNEL_TABLE).read_text(encoding="utf-8"), flag_file, profiles)
+    table += flag_word_problems((ROOT / KERNEL_WORD).read_text(encoding="utf-8"), flag_file, profiles)
     if table:
         print("build-flags: the kernel's flag table does not follow the flag file:", file=sys.stderr)
         for problem in table:
@@ -435,7 +493,7 @@ def main() -> int:
         status = 1
     if status == 0:
         print(
-            f"build-flags: no build-flag cfg outside the kernel crate; {sum(counts.values())} "
+            f"build-flags: no build-flag cfg outside the kernel's crates; {sum(counts.values())} "
             f"boot-option reads, all of the {len(registry)} declared options; the libraries' and "
             f"loaders' option-like literals all accounted for"
         )

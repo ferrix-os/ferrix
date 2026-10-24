@@ -46,21 +46,21 @@ const LEN: u64 = 64;
 
 /// What the check did, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Device windows a copy was asked through.
-    pub(crate) windows: u32,
+    pub windows: u32,
     /// Copies refused with `EFAULT`, the page never faulted in by one.
-    pub(crate) refused: u32,
+    pub refused: u32,
     /// Whether one of the windows was a device's own aperture.
-    pub(crate) aperture: bool,
+    pub aperture: bool,
     /// Whether one lay between two runs of RAM, inside the direct map's span.
-    pub(crate) inside: bool,
+    pub inside: bool,
 }
 
 /// Run it.
 ///
 /// Verifies: L.user.107, L.mm.62
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let side = Side::new()?;
     let checked = copy_through_windows(&side);
     side.close_everything();

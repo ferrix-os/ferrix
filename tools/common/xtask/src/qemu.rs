@@ -160,41 +160,14 @@ pub(crate) fn test_boot_lines(
                     "the {arch} kernel reported success but QEMU exited {code}"
                 )));
             }
-            boot_line(arch, &watched.log, kernel, args)?;
-            let off = crate::cargo::mitigations_off();
-            if let Some(problem) =
-                crate::kaslr::problem(&watched.lines, off, crate::kaslr::declined(args))
-            {
-                return Err(Error::new(format!(
-                    "{arch}: {problem}.\n  Serial output is in {}",
-                    watched.log.display()
-                )));
-            }
-            let own_model = std::env::var_os("FERRIX_X86_CPU").is_none();
-            // In the order each is reported: the first that fails is said.
-            let problems = [
-                fallback_problem(&watched.lines),
-                entropy_problem(&watched.lines),
-                devmgr_problem(&watched.lines),
-                msi_problem(arch, &watched.lines),
-                held_off_problem(arch, &watched.lines),
-                cleaning_problem(arch, &watched.lines),
-                remap_problem(arch, own_model, &watched.lines),
-                queue_problem(arch, &watched.lines),
-                config_problem(arch, &watched.lines),
-                iommu_problem(&watched.lines),
-                walk_problem(arch, args, &watched.lines),
-                namespace_problem(&watched.lines),
-                xstate_problem(arch, own_model, &watched.lines),
-                fault_problem(arch, &watched.lines),
-                crate::smbios::problem(arch, &watched.lines),
-            ];
-            if let Some(problem) = problems.into_iter().flatten().next() {
-                return Err(Error::new(format!(
-                    "{arch}: {problem}.\n  Serial output is in {}",
-                    watched.log.display()
-                )));
-            }
+            judge(
+                arch,
+                &watched.lines,
+                &watched.log,
+                kernel,
+                args,
+                Machine::QemuVirt,
+            )?;
             if args.reset {
                 if let Some(problem) = reset_problem(arch, &watched) {
                     return Err(Error::new(format!(
@@ -216,6 +189,87 @@ pub(crate) fn test_boot_lines(
         ))),
     }
 }
+
+/// The machine a boot ran on, for [`judge`]: the checks of devices only one
+/// of them gives are held only there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Machine {
+    /// QEMU, as `qemu_command` builds it.
+    QemuVirt,
+    /// A phone's own crosvm on its KVM (`crate::phone`): PCI from the device
+    /// tree with `INTx` lines only, no IOMMU, no firmware tables, and no
+    /// TRNG for the loader to place the kernel with.
+    Crosvm,
+}
+
+/// Judge a boot that printed [`SUCCESS_MARKER`]: the build line, KASLR, and
+/// every line a stage must have printed on `machine`.
+///
+/// # Errors
+///
+/// The first of those that does not hold, naming the serial log.
+pub(crate) fn judge(
+    arch: Arch,
+    lines: &[String],
+    log: &Path,
+    kernel: &Path,
+    args: &Args,
+    machine: Machine,
+) -> Result<()> {
+    let failed = |problem: String| {
+        Error::new(format!(
+            "{arch}: {problem}.\n  Serial output is in {}",
+            log.display()
+        ))
+    };
+    boot_line(arch, log, kernel, args)?;
+    let off = crate::cargo::mitigations_off();
+    let declined = crate::kaslr::declined(args);
+    if machine == Machine::Crosvm && !off && !declined {
+        // The Pixel loader places the kernel only from SMCCC's TRNG, and
+        // KVM's guest on the phone offers none: what is required is that
+        // the loader said so, rather than a layout it cannot make.
+        if !lines.iter().any(|line| line.contains(NO_RANDOMNESS)) {
+            return Err(failed(format!("the loader never said `{NO_RANDOMNESS}`")));
+        }
+    } else if let Some(problem) = crate::kaslr::problem(lines, off, declined) {
+        return Err(failed(problem));
+    }
+    let own_model = std::env::var_os("FERRIX_X86_CPU").is_none();
+    let qemu = machine == Machine::QemuVirt;
+    // In the order each is reported: the first that fails is said.
+    let problems = [
+        fallback_problem(lines),
+        entropy_problem(lines, qemu),
+        devmgr_problem(lines),
+        msi_problem(arch, lines),
+        held_off_problem(arch, lines),
+        cleaning_problem(arch, lines),
+        remap_problem(arch, own_model, lines),
+        queue_problem(arch, lines),
+        config_problem(arch, lines),
+        qemu.then(|| iommu_problem(lines)).flatten(),
+        walk_problem(arch, args, lines),
+        namespace_problem(lines),
+        xstate_problem(arch, own_model, lines),
+        fault_problem(arch, lines),
+        qemu.then(|| crate::smbios::problem(arch, lines)).flatten(),
+    ];
+    if let Some(problem) = problems.into_iter().flatten().next() {
+        return Err(failed(problem));
+    }
+    if !qemu {
+        println!(
+            "  {arch}: not held on crosvm, which has none of them: KASLR's layout, completions by \
+             MSI-X, an IOMMU, SMBIOS"
+        );
+    }
+    Ok(())
+}
+
+/// What the Pixel loader says when it has no randomness to place the kernel
+/// with (`src/boot/vendor/google/pixel7/src/kaslr.rs`).
+const NO_RANDOMNESS: &str = "NOT randomised: the loader found no source of randomness";
 
 /// Why a `--reset` boot did not show a reset, if it did not.
 ///
@@ -336,7 +390,7 @@ fn fallback_problem(lines: &[String]) -> Option<String> {
 /// entropy has lost DMA. A device may legitimately write fewer bytes than it
 /// was asked for, so any positive count passes.
 /// Verifies: `L.x86_64.113`
-fn entropy_problem(lines: &[String]) -> Option<String> {
+fn entropy_problem(lines: &[String], by_msix: bool) -> Option<String> {
     let Some(line) = lines.iter().find(|line| line.contains(ENTROPY_READ)) else {
         return Some("the kernel never reported reading entropy by DMA".to_owned());
     };
@@ -348,7 +402,7 @@ fn entropy_problem(lines: &[String]) -> Option<String> {
     }
     // Every machine this tool boots has an interrupt controller that takes
     // messages, so a completion that had to be polled is a lost interrupt.
-    if !count_before(line, BY_MSIX).is_some_and(|count| count > 0) {
+    if by_msix && !count_before(line, BY_MSIX).is_some_and(|count| count > 0) {
         return Some(format!(
             "no entropy request completed by MSI-X: `{}`",
             line.trim()
@@ -4337,27 +4391,35 @@ mod tests {
                 ),
                 "FERRIX-BOOT-OK stages 1-12",
             ]);
-            assert_eq!(entropy_problem(&boot), None, "{count} bytes");
+            assert_eq!(entropy_problem(&boot, true), None, "{count} bytes");
         }
     }
 
     #[test]
     fn a_boot_that_read_none_or_never_said_fails() {
         let none = lines(&["  pci      1 virtio transports, 0 entropy bytes read by DMA"]);
-        assert!(entropy_problem(&none).is_some(), "zero bytes");
+        assert!(entropy_problem(&none, true).is_some(), "zero bytes");
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
-        assert!(entropy_problem(&silent).is_some(), "no line at all");
+        assert!(entropy_problem(&silent, true).is_some(), "no line at all");
     }
 
     #[test]
     fn a_boot_whose_completion_was_polled_fails() {
         let polled = lines(&["  pci      64 entropy bytes read by DMA, 0 completions by MSI-X"]);
-        assert!(entropy_problem(&polled).is_some(), "no MSI-X");
+        assert!(entropy_problem(&polled, true).is_some(), "no MSI-X");
         let old = lines(&["  pci      64 entropy bytes read by DMA"]);
         assert!(
-            entropy_problem(&old).is_some(),
+            entropy_problem(&old, true).is_some(),
             "a kernel that does not say"
         );
+    }
+
+    #[test]
+    fn a_polled_completion_passes_on_a_machine_without_msi() {
+        let polled = lines(&["  pci      64 entropy bytes read by DMA, 0 completions by MSI-X"]);
+        assert_eq!(entropy_problem(&polled, false), None, "crosvm's INTx");
+        let none = lines(&["  pci      0 entropy bytes read by DMA, 0 completions by MSI-X"]);
+        assert!(entropy_problem(&none, false).is_some(), "still no bytes");
     }
 
     #[test]

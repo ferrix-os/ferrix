@@ -15,7 +15,8 @@ use crate::discovery::finder::{Context, Failed, Finder, OutOfMemory};
 use crate::fallible;
 
 /// The power node's finder.
-pub(crate) struct Power {
+#[derive(Debug)]
+pub struct Power {
     /// Whether the core said to publish a node.
     publish: bool,
     /// Whether adding it ran out of memory.
@@ -24,7 +25,7 @@ pub(crate) struct Power {
 
 impl Power {
     /// Ask the core, once, on the boot processor.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         Power {
             publish: crate::arch::power_probe(view),
             out_of_memory: false,

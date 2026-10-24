@@ -16,4 +16,4 @@
 /// The Wayland client.
 pub mod client;
 
-pub use client::{Locked, lock, lock_until};
+pub use client::{Locked, lock, lock_drawing, lock_until};

@@ -90,9 +90,11 @@ pub(super) fn check_vectors(
     HELD_OFF.get().copied().unwrap_or(Ok(()))
 }
 
+// CHECKS-ONLY: device/config_check.rs; home: super
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
 /// its interrupt on request (QEMU's `docs/specs/edu.rst`).
-pub(super) const EDU: (u16, u16) = (0x1234, 0x11E8);
+#[doc(hidden)]
+pub const EDU: (u16, u16) = (0x1234, 0x11E8);
 /// `edu`'s register that raises its interrupt with the bits written.
 const EDU_RAISE: u64 = 0x60;
 /// `edu`'s register that clears the bits written from its interrupt status.
@@ -216,6 +218,10 @@ const GRACE_NANOS: u64 = 2_000_000;
 /// `edu`'s minted message is programmed back, masked, after each.
 ///
 /// Verifies: `L.x86_64.129`, L.iommu.54, H.DMA.9
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 fn check_forged(
     node: &DeviceNode,
     edu: Mmio,
@@ -324,6 +330,10 @@ fn check_forged(
     clippy::too_many_arguments,
     reason = "one forged message, every part of it named"
 )]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 fn forge(
     node: &DeviceNode,
     edu: Mmio,
@@ -363,6 +373,10 @@ fn forge(
 }
 
 /// Program `edu`'s minted message back, masked.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 fn restore(
     node: &DeviceNode,
     msi: &MsiFunction,
@@ -675,6 +689,10 @@ pub(super) fn check_node(
 /// bridge; a machine with none has nothing to switch.
 ///
 /// Verifies: L.device.9
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
 pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure> {
     // Not a bridge (base class 06): an Intel host bridge's bus master enable
     // is hardwired on, so on the N150 box 00:00.0 failed this check; QEMU's
@@ -748,7 +766,7 @@ pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure>
 /// The memory map's ranges are counted and left out of the digest: the
 /// loader places them around the kernel image, so they move whenever the
 /// image changes size, whatever gathered them.
-pub(crate) fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
+pub fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
     let (first, last) = reserved.map;
     let mut others = 0;
     // FNV-1a over each range's two ends, summed, so that gathering the same
@@ -773,7 +791,7 @@ pub(crate) fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
 /// order they were published: what the `nodes` boot line prints, so that a
 /// change to how nodes are found shows when it reorders them, which a count
 /// cannot.
-pub(crate) fn order(nodes: &[Arc<DeviceNode>]) -> (usize, u64) {
+pub fn order(nodes: &[Arc<DeviceNode>]) -> (usize, u64) {
     let mut hasher = Fnv(0xcbf2_9ce4_8422_2325);
     for node in nodes {
         // Writing to an FNV sum cannot fail.
@@ -794,13 +812,38 @@ impl Write for Fnv {
     }
 }
 
+/// PCI's refusal to turn a function's memory decoding on: its own BARs,
+/// every other function's, and the reserved ranges, to why it is refused.
+pub type DecodingRefusal = fn(&[(u64, u64)], &[(u64, u64)], &Reserved) -> Option<&'static str>;
+
+/// The item's discovery policy that [`check_decoding_refusals`] and
+/// [`check_lent_framebuffer`] hold the nodes to: PCI's refusal to turn memory
+/// decoding on, and the firmware framebuffer's lending (`discovery::pci`,
+/// `discovery::firmware`). The core may not name the item, so the item hands
+/// it to [`super::publish`] (`docs/KERNEL-CRATES.md`, ledger 3294).
+#[derive(Debug, Clone, Copy)]
+pub struct Policy {
+    /// `discovery::pci::decoding_refusal`.
+    pub decoding_refusal: DecodingRefusal,
+    /// `discovery::firmware::may_lend`.
+    pub may_lend: fn() -> bool,
+    /// `discovery::firmware::refuses`.
+    pub refuses: fn(u64, u64, crate::user::memory_type::MemoryType) -> bool,
+    /// `discovery::firmware::KERNEL_MAPPING`.
+    pub kernel_mapping: crate::user::memory_type::MemoryType,
+}
+
 /// What holds of the nodes taken together rather than one at a time:
 /// [`check_exclusive`], [`check_input_functions`] and
 /// [`check_lent_framebuffer`].
-pub(super) fn check_together(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
+pub(super) fn check_together(
+    nodes: &[DeviceNode],
+    reserved: &Reserved,
+    policy: &Policy,
+) -> Result<(), Failure> {
     check_exclusive(nodes)?;
     check_widening()
-        .and_then(|()| check_decoding_refusals())
+        .and_then(|()| check_decoding_refusals(policy))
         .map_err(|what| Failure {
             location: Location::Tree(0),
             what,
@@ -810,7 +853,7 @@ pub(super) fn check_together(nodes: &[DeviceNode], reserved: &Reserved) -> Resul
         location: Location::Tree(0),
         what,
     })?;
-    check_lent_framebuffer(nodes, reserved)
+    check_lent_framebuffer(nodes, reserved, policy)
 }
 
 /// The Intel integrated GPU is not driven without `ferrix.intelgpu`
@@ -935,8 +978,8 @@ fn check_widening() -> Result<(), &'static str> {
 /// another function's BAR may not.
 ///
 /// Verifies: L.device.1
-fn check_decoding_refusals() -> Result<(), &'static str> {
-    use crate::discovery::pci::decoding_refusal;
+fn check_decoding_refusals(policy: &Policy) -> Result<(), &'static str> {
+    let decoding_refusal = policy.decoding_refusal;
 
     const AT: u64 = 0x7f00_0000_0000;
     const SIZE: u64 = 0x4000;
@@ -961,8 +1004,12 @@ fn check_decoding_refusals() -> Result<(), &'static str> {
 
 /// [`check_framebuffer`] on the published nodes, then [`check_lending`]
 /// against made-up ones.
-fn check_lent_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
-    check_framebuffer(nodes, reserved)?;
+fn check_lent_framebuffer(
+    nodes: &[DeviceNode],
+    reserved: &Reserved,
+    policy: &Policy,
+) -> Result<(), Failure> {
+    check_framebuffer(nodes, reserved, policy)?;
     check_lending().map_err(|what| Failure {
         location: Location::Tree(0),
         what,
@@ -977,7 +1024,11 @@ fn check_lent_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(
 /// reserved test already holds of every other. At most one such node.
 ///
 /// Verifies: L.device.1, L.device.38, L.device.39, L.device.40, L.device.41, L.device.43
-fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
+fn check_framebuffer(
+    nodes: &[DeviceNode],
+    reserved: &Reserved,
+    policy: &Policy,
+) -> Result<(), Failure> {
     let mut seen = 0;
     // Only the framebuffer's own node holds a lent aperture, or, under
     // `ferrix.intelgpu`, the Intel GPU holding it, in place of that node
@@ -1013,7 +1064,7 @@ fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Fa
         if seen > 1 {
             return Err(fail("a second firmware framebuffer node"));
         }
-        if !crate::discovery::firmware::may_lend() {
+        if !(policy.may_lend)() {
             return Err(fail(
                 "a firmware framebuffer node without ferrix.efifb on x86-64",
             ));
@@ -1049,7 +1100,7 @@ fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Fa
         // The kernel's type hold: write-combining, the type of its own
         // window; an uncached mapping is refused, a write-combining one is
         // not.
-        use crate::discovery::firmware::refuses;
+        let refuses = policy.refuses;
         use crate::user::memory_type::MemoryType;
         if !refuses(aperture.phys, aperture.len, MemoryType::Device)
             || !refuses(aperture.phys, aperture.len, MemoryType::Cached)
@@ -1059,7 +1110,7 @@ fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Fa
                 "the framebuffer's memory type is not held as the kernel's",
             ));
         }
-        check_combining(aperture).map_err(fail)?;
+        check_combining(aperture, policy).map_err(fail)?;
         // The boot console, which draws through a slice it holds alone, has
         // stopped: a driver can map the window from now on.
         if crate::console::screen::drawing() {
@@ -1354,7 +1405,7 @@ fn mode_bytes(node: &DeviceNode) -> u64 {
 /// What [`check_held_off`] found, kept from stage 10's enumeration, which
 /// runs it, until [`super::publish`] reports it: `None` where no function
 /// was its case (no QEMU `e1000e`, or `ferrix.checks=skip`).
-pub(crate) static HELD_OFF: ferrix_sync::Once<Result<(), Failure>> = ferrix_sync::Once::new();
+pub static HELD_OFF: ferrix_sync::Once<Result<(), Failure>> = ferrix_sync::Once::new();
 
 /// The held-off path, on a scratch node: QEMU's `e1000e` with QEMU's
 /// subsystem (`ferrix_pci::msix::held_off_check_case`), built by
@@ -1396,7 +1447,11 @@ pub(crate) static HELD_OFF: ferrix_sync::Once<Result<(), Failure>> = ferrix_sync
 /// this returns, and builds the published node from fresh reads.
 ///
 /// Verifies: L.device.35, L.device.36, L.device.37
-pub(crate) fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Result<(), Failure> {
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
+)]
+pub fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Result<(), Failure> {
     let fail = |what| Failure {
         location: node.location(),
         what,
@@ -1505,8 +1560,7 @@ pub(crate) fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Resul
 /// W8 reads a driver's mapping of it back the same way.
 ///
 /// Verifies: L.device.38, L.device.39, L.device.43
-fn check_combining(aperture: &super::Aperture) -> Result<(), &'static str> {
-    use crate::discovery::firmware::KERNEL_MAPPING;
+fn check_combining(aperture: &super::Aperture, policy: &Policy) -> Result<(), &'static str> {
     use crate::user::memory_type::MemoryType;
     if !aperture.cacheable {
         return Err("the firmware framebuffer's aperture is not prefetchable");
@@ -1523,7 +1577,11 @@ fn check_combining(aperture: &super::Aperture) -> Result<(), &'static str> {
         let flags = crate::mm::flags_in(root, window + page * PAGE_SIZE)
             .ok_or("the kernel's window on the lent framebuffer has a hole")?;
         let kind = MemoryType::of(false, flags.write_combining && !flags.device);
-        if kind != MemoryType::Combining || kind != KERNEL_MAPPING || !flags.write || flags.user {
+        if kind != MemoryType::Combining
+            || kind != policy.kernel_mapping
+            || !flags.write
+            || flags.user
+        {
             return Err("the kernel's window on the lent framebuffer is not write-combining");
         }
     }

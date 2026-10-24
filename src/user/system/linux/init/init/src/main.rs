@@ -31,7 +31,9 @@ mod cgroup;
 mod control;
 mod devices;
 mod directory;
+mod lode;
 mod logs;
+mod machine_id;
 mod probe;
 mod readiness;
 mod sandbox;
@@ -63,7 +65,7 @@ use crate::cgroup::Groups;
 use crate::control::{Control, Heard};
 use crate::devices::Devices;
 use crate::directory::Directory;
-use crate::logs::Logs;
+use crate::logs::{Logs, Whose};
 use crate::probe::Machine;
 use crate::readiness::Readiness;
 use crate::sockets::Sockets;
@@ -163,6 +165,12 @@ struct Init {
     pending: BTreeMap<u64, Pending>,
     /// The log pipes and each unit's last lines.
     logs: Logs,
+    /// The connection to lode, which units' lines go to with who wrote
+    /// them.
+    lode: lode::Lode,
+    /// Each unit's current or last run, drawn when its cgroup is made: its
+    /// `INVOCATION_ID`.
+    invocations: BTreeMap<UnitId, String>,
     /// The readiness pipes of `Type=notify` services.
     readiness: Readiness,
     /// The first process of each `Type=forking` service still starting.
@@ -341,6 +349,8 @@ impl Init {
             control,
             pending: BTreeMap::new(),
             logs: Logs::default(),
+            lode: lode::Lode::default(),
+            invocations: BTreeMap::new(),
             readiness: Readiness::default(),
             forking: BTreeMap::new(),
             sockets: Sockets::default(),
@@ -349,6 +359,7 @@ impl Init {
         // `/` is settled already when the kernel started devmgr itself: the
         // audit record's reader starts now, and otherwise once it is.
         if !awaiting_root {
+            machine_id::ensure(&say);
             make_homes();
             init.start_audit();
         }
@@ -381,11 +392,13 @@ impl Init {
                 .devices
                 .next_poll()
                 .map(|at| at.saturating_duration_since(std::time::Instant::now()));
+            self.lode.flush();
             let timeout = match manager
                 .into_iter()
                 .chain(groups)
                 .chain(audit)
                 .chain(devices)
+                .chain(self.lode.next_flush())
                 .min()
             {
                 None => -1,
@@ -559,6 +572,8 @@ impl Init {
         match action {
             Action::Log { line, .. } => say(&line),
             Action::MakeGroup { unit, path, limits } => {
+                // A start: a new run, whose id its processes get.
+                let _ = self.invocations.insert(unit, lode::invocation_id());
                 let mut log = |line: String| say(&line);
                 match self.groups.make(unit, &path, &limits, &mut log) {
                     Ok((events, memory)) => {
@@ -754,7 +769,12 @@ impl Init {
         } else {
             None
         };
-        let prepared = match spawn::prepare(spec, &self.terminal, &passed) {
+        let invocation = self
+            .invocations
+            .entry(unit)
+            .or_insert_with(lode::invocation_id)
+            .clone();
+        let prepared = match spawn::prepare(spec, &self.terminal, &passed, Some(&invocation)) {
             Ok(prepared) => prepared,
             Err(unprepared) => return failed(self, unprepared.errno, &unprepared.why),
         };
@@ -771,7 +791,7 @@ impl Init {
             Ok(spawn::Started {
                 pid,
                 report,
-                log,
+                logs,
                 notify,
                 go,
             }) => {
@@ -799,8 +819,20 @@ impl Init {
                 if spec.service_type == ServiceType::Forking && spec.role == Role::Main {
                     let _ = self.forking.insert(pid, unit);
                 }
-                if let Some(log) = log {
-                    let (id, fd) = self.logs.add(unit, pid, log);
+                if !logs.is_empty() {
+                    // Which program the pid runs, for every record of its
+                    // lines: lode cannot read another user's /proc/<pid>/exe.
+                    self.lode.send(&lode::program(pid, prepared.program()));
+                }
+                for (stream, log) in logs {
+                    let whose = Whose {
+                        unit,
+                        pid,
+                        ids: prepared.ids(),
+                        stderr: stream == 2,
+                        invocation: Some(invocation.clone()),
+                    };
+                    let (id, fd) = self.logs.add(whose, log);
                     if let Err(error) = sys::watch(
                         self.epoll.as_fd(),
                         fd,
@@ -996,6 +1028,7 @@ impl Init {
         } else {
             say("/ stays in memory");
         }
+        machine_id::ensure(&say);
         make_homes();
         self.start_audit();
         if std::mem::take(&mut self.awaiting_root) {
@@ -1120,9 +1153,13 @@ impl Init {
     /// Read log pipe `id`, and say each line as its unit's.
     fn read_log(&mut self, id: u32) {
         let (said, closed) = self.logs.read(id);
+        let monotonic_us = sys::monotonic() / 1000;
         for line in said {
-            let name = self.display(line.unit);
-            say(&format!("{name}[{}]: {}", line.pid, line.line));
+            let name = self.display(line.whose.unit);
+            // lode first, the console after: lode pairs the console's copy
+            // with the line it was handed (`ferrix_lode_core::units`).
+            self.lode.send(&lode::encode(&line, &name, monotonic_us));
+            say(&format!("{name}[{}]: {}", line.whose.pid, line.line));
         }
         if let Some(fd) = closed {
             sys::unwatch(self.epoll.as_fd(), fd);
@@ -1205,7 +1242,8 @@ impl Init {
 
     /// A call from `svc`, made by `uid`.
     fn call(&mut self, id: u64, uid: u32, call: Call) {
-        if let Some(why) = refusal(uid, &call) {
+        let startable = matches!(&call, Call::Start(unit) if self.startable_by(unit, uid));
+        if let Some(why) = refusal(uid, &call).filter(|_| !startable) {
             self.answer(id, &Answer::Refused(why));
             return;
         }
@@ -1352,8 +1390,34 @@ impl Init {
                 .manager
                 .group(status.unit)
                 .map(|group| group.as_str().to_owned()),
+            invocation: self.invocations.get(&status.unit).cloned(),
         }
     }
+}
+
+impl Init {
+    /// Whether `unit`'s file lets `uid` start it: `StartableBy=` names the
+    /// user, by name or number (lode's alerts, `docs/LOGGING.md` §7.4).
+    fn startable_by(&self, unit: &str, uid: u32) -> bool {
+        let Ok(loaded) = self.source.load(unit) else {
+            return false;
+        };
+        loaded
+            .unit
+            .startable_by
+            .iter()
+            .any(|who| who.parse::<u32>().ok().or_else(|| user_uid(who)) == Some(uid))
+    }
+}
+
+/// The uid `/etc/passwd` gives the user `name`.
+fn user_uid(name: &str) -> Option<u32> {
+    let text = fs::read_to_string("/etc/passwd").ok()?;
+    text.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        (fields.next()? == name).then_some(())?;
+        fields.nth(1)?.parse().ok()
+    })
 }
 
 /// Why `uid` may not make `call`, if it may not (§10): anyone may read,

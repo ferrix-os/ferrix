@@ -1,0 +1,74 @@
+# The settings writer (docs/SETTINGS-WRITER.md): `/sbin/settingsd`, the
+# root helper that makes the typed changes a user's Settings app asks for,
+# once authd says the person may; `/bin/settingsctl`, its command line; the
+# records they speak; and the client crate the Settings app reaches by path.
+#
+# A workspace of its own, as auth's is: Linux user programs built with std
+# on musl, speaking only the Linux ABI. It reaches authd's client and init's
+# control records by path, so the conversation it relays and the calls it
+# makes cannot disagree with theirs.
+[workspace]
+resolver = "3"
+members = ["client", "proto", "settingsctl", "settingsd"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+# ---------------------------------------------------------------------------
+# Lints
+#
+# The Ferrix discipline, as authd has it. A panic in settingsd ends a
+# person's change half-asked, so the ways of reaching one are denied and a
+# failing call is a refusal with its reason, never an abort.
+# ---------------------------------------------------------------------------
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+uninlined_format_args = "warn"
+semicolon_if_nothing_returned = "warn"
+doc_markdown = "warn"
+
+[profile.dev]
+overflow-checks = true
+# A panic ends the process rather than unwinding through half-written state.
+panic = "abort"
+
+# Stripped: the release build is what goes into the initramfs.
+[profile.release]
+overflow-checks = true
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+

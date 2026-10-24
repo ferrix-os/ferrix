@@ -200,7 +200,7 @@ impl KeeperLink for Link {
         self.now
     }
 
-    fn say(&mut self, line: core::fmt::Arguments<'_>) {
+    fn say(&mut self, _level: ferrix_linux_abi::kmsg::Level, line: core::fmt::Arguments<'_>) {
         self.lines.push(format!("{line}"));
     }
 

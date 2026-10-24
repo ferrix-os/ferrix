@@ -31,66 +31,37 @@
 
 extern crate alloc;
 
-mod arch;
-mod audit;
-mod backtrace;
-mod boot_checks;
-mod build_flags;
-mod checks;
-mod claim;
-mod console;
-mod device;
-mod discovery;
-mod early;
-mod fallible;
-mod fastpath;
+use ferrix_kernel_load::*;
+// Named, not only reached through the glob above, so that each crate's word
+// is named by the binary (`kernel-interface.py`).
+use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};
+
+// The four crates compiled with one set of build flags (ledger line 3282,
+// (K4)): the build line is the item's `cfg`s, and the binary's, the core's
+// and the load's must be the same, or the image would run code its line does
+// not name.
+const BINARY_FLAG_WORD: u64 = flag_word(&build_flag_word!());
+const _: () = assert!(
+    CORE_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-core was compiled with other build flags than the binary"
+);
+const _: () = assert!(
+    ITEM_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-item was compiled with other build flags than the binary"
+);
+const _: () = assert!(
+    LOAD_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-load was compiled with other build flags than the binary"
+);
+
 #[cfg(ferrix_linux_abi = "on")]
-mod fs;
-mod hooks;
-mod init;
-mod init_check;
-#[cfg(ferrix_linux_abi = "on")]
-mod interfaces;
-mod iommu;
-mod irq;
-mod mm;
-mod mmio;
-#[cfg(ferrix_linux_abi = "on")]
-mod net;
-mod object;
-mod panic;
+pub mod stages_check;
+
 // What belongs to one system on chip rather than to an architecture: the
 // kernel's part in a board's devices, each found in the device tree at boot
 // and a no-op on a machine without one, grouped by the vendor prefix of the
 // chip's `compatible`. The gs201 is the Pixel 7's Tensor G2; its watchdogs
 // are serviced from `arch::aarch64` alone.
-mod platform {
-    pub(crate) mod google {
-        pub(crate) mod gs201 {
-            pub(crate) mod usb;
-            #[allow(dead_code, reason = "only AArch64 has a gs201, the Pixel 7's")]
-            pub(crate) mod watchdog;
-        }
-    }
-    pub(crate) mod st {
-        pub(crate) mod stm32mp1;
-    }
-}
-mod power;
-mod random;
-mod sched;
-#[cfg(ferrix_linux_abi = "on")]
-mod service_check;
-mod signal_frame;
-mod smp;
-#[cfg(ferrix_linux_abi = "on")]
-mod stages_check;
-mod sync;
-mod syscall;
-mod timer;
-mod trap;
-mod user;
-mod vmap;
 
 use ferrix_bootinfo::{BootInfo, BootView, KASLR_FIXED_IMAGE, KASLR_MOVED, MemKind, PAGE_SIZE};
 use ferrix_paging::MapError;
@@ -169,6 +140,12 @@ fn register_system_calls() {
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<NoLinux>);
 }
+
+// The Linux ABI's number and error types name `NoLinux`'s call below; with
+// the Linux ABI on, the binary names the crate nowhere else, its users
+// being the item's and the load's.
+#[cfg(ferrix_linux_abi = "on")]
+use ferrix_linux_abi as _;
 
 /// The personality a kernel without the Linux ABI composes: it answers no
 /// Linux call.
@@ -615,7 +592,7 @@ fn check_filesystems(view: &BootView<'_>) {
     stages_check::check_eventfd();
     stages_check::check_timerfd();
     stages_check::check_program_files();
-    stages_check::check_signalfd();
+    stages_check::check_signals();
     stages_check::check_madvise();
     stages_check::check_cgroupfs();
 
@@ -909,6 +886,16 @@ fn check_btrfs_write() {
     fs::home_disk::mount();
 }
 
+/// The item's discovery policy that stage 10's checks of the nodes hold
+/// them to, handed to the core's `device::publish` (`device::check::Policy`,
+/// ledger 3294): the core may not name the item.
+const DISCOVERY_POLICY: device::check::Policy = device::check::Policy {
+    decoding_refusal: pci::decoding_refusal,
+    may_lend: firmware::may_lend,
+    refuses: firmware::refuses,
+    kernel_mapping: firmware::KERNEL_MAPPING,
+};
+
 /// Stage 10's discovery: run every finder in precedence order, reserving the
 /// ranges they read, and publish what they found.
 ///
@@ -940,7 +927,7 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
         &mut framebuffer,
         &mut power,
     ];
-    let report = match device::publish(&mut finders, &reserved) {
+    let report = match device::publish(&mut finders, &reserved, &DISCOVERY_POLICY) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.
         Err(device::Stopped::Finder { name: "pci", why }) => {

@@ -618,9 +618,35 @@ pub(super) fn check_madvise() {
     );
 }
 
+/// Stage 8's signal checks: signalfd's, then the crash hold's.
+pub(super) fn check_signals() {
+    check_signalfd();
+    check_crash_hold();
+}
+
+/// The crash hold's check (`fs::crashes`, `docs/LOGGING.md` §21): a fault
+/// held while `/dev/ferrix-crashes` is armed, released every way it can be,
+/// and not held otherwise.
+fn check_crash_hold() {
+    let held = match syscall::deliver::check_the_crash_hold() {
+        Ok(held) => held,
+        Err(problem) => fatal!(
+            catalog::STAGE8_CRASH_HOLD,
+            "stage 8 crash hold self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  crashes  a fault held while /dev/ferrix-crashes is armed and not otherwise; released \
+         by done in {} us, by SIGKILL, exit_group and the reader's close at once, by the \
+         deadline after {} ms, each by the fault's signal; {} held at once, {} more counted \
+         dropped; the reader's own and a sharer's faults not held",
+        held.done_micros, held.deadline_millis, held.held_at_once, held.dropped,
+    );
+}
+
 /// Stage 8's signalfd check: flags and masks, signals read and dequeued, and
 /// waiters woken by a signal's arrival.
-pub(super) fn check_signalfd() {
+fn check_signalfd() {
     let checked = match fs::signalfd_check::run() {
         Ok(checked) => checked,
         Err(problem) => fatal!(
@@ -1467,6 +1493,12 @@ pub(super) fn check_chardev() {
         },
     );
     println!(
+        "  chardev  {} signals to programs waiting in requests: a version-1 driver's request \
+         abandoned, EINTR; a driver taking interrupts sent one INTERRUPT and answered, a queued \
+         request abandoned with nothing sent, a killed program's request abandoned",
+        report.interrupts,
+    );
+    println!(
         "  chardev  render-only HELLO {}; {} HELLOs of the Intel GPU refused while its DMA is \
          untranslated, one of another function taken; {} requests answered out of order",
         report.render_only.map_or_else(
@@ -1928,13 +1960,16 @@ pub(super) fn check_console_log() {
             "  log      {} bytes kept of a wrapped ring and {} reported lost, resumed after \
              a partial read; {} bytes from two writers on {} processor(s) counted, {} read \
              while they wrote; a task's write and a failure report recorded, an unlogged line not; \
-             {} lines begun where a newline or a priority ended the last, found whole",
+             {} lines begun where a newline or a priority ended the last, found whole; \
+             {} found whole while written on {} processor(s)",
             report.kept,
             report.lost,
             report.raced,
             report.processors,
             report.read_racing,
             report.lines,
+            report.whole,
+            report.whole_processors,
         ),
         Err(problem) => fatal!(
             catalog::CONSOLE_LOG,

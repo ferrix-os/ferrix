@@ -561,6 +561,24 @@ impl Signals {
             .is_none_or(|action| action.handler == SIG_DFL)
     }
 
+    /// The signals set to `SIG_IGN` and those with a handler, bit `n - 1`
+    /// for signal `n`: `status`'s `SigIgn` and `SigCgt`.
+    pub(crate) fn ignored_and_caught(&self) -> (u64, u64) {
+        let mut ignored = 0;
+        let mut caught = 0;
+        for (index, action) in self.actions.iter().enumerate() {
+            let bit = 1_u64
+                .checked_shl(u32::try_from(index).unwrap_or(u32::MAX))
+                .unwrap_or(0);
+            match action.handler {
+                SIG_DFL => {}
+                SIG_IGN => ignored |= bit,
+                _ => caught |= bit,
+            }
+        }
+        (ignored, caught)
+    }
+
     /// Whether a child that ends is released without being waited for:
     /// `SIGCHLD` ignored, or its handler installed with `SA_NOCLDWAIT`. What a
     /// daemon that never calls `wait` relies on to leave no zombies.

@@ -229,7 +229,7 @@ pub(crate) fn clamp_below(value: u64, end: u64) -> u64 {
 /// `MIDR` of processor `logical`, for `/proc/cpuinfo`: the running core's.
 /// Every core of an ARMv7-A machine is taken to be of one kind, as [`init`]
 /// takes it when it plans for all of them from the boot processor's `MIDR`.
-pub(crate) fn midr_of(_logical: usize) -> Option<u32> {
+pub fn midr_of(_logical: usize) -> Option<u32> {
     Some(read_midr())
 }
 

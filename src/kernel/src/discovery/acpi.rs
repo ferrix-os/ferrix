@@ -25,7 +25,7 @@ use ferrix_bootinfo::{BootView, PAGE_SIZE};
 
 /// Physical memory, as the table parser is allowed to see it.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DirectMap {
+pub struct DirectMap {
     /// Virtual address the direct map begins at.
     base: u64,
     /// The physical address that appears there.
@@ -67,7 +67,7 @@ impl Tables for DirectMap {
 
 /// The firmware tables, rooted and ready to walk.
 #[derive(Debug)]
-pub(crate) struct Firmware {
+pub struct Firmware {
     /// How the parser reads physical memory.
     memory: DirectMap,
     /// Physical address of the XSDT or RSDT.
@@ -102,7 +102,7 @@ impl Firmware {
     }
 
     /// The table set, borrowed from this structure's own view of memory.
-    pub(crate) fn acpi(&self) -> Acpi<'_, DirectMap> {
+    pub fn acpi(&self) -> Acpi<'_, DirectMap> {
         Acpi::new(&self.memory, self.root, self.kind)
     }
 }

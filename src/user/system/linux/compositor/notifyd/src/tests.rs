@@ -121,3 +121,17 @@ fn banners_are_drawn_and_clicked() {
             .any(|area| area.hit == Hit::Action(0, "clear".to_owned()))
     );
 }
+
+/// A line of lode's alerts is a banner keyed by the alert and its source.
+#[test]
+fn an_alert_line_is_a_notification() {
+    use crate::store::from_alert_line;
+    let (key, summary, body, urgency) =
+        from_alert_line("alert flood chrome chrome is flooding the log (4 in a second)").unwrap();
+    assert_eq!(key, "lode:flood:chrome");
+    assert_eq!(summary, "Log alert: flood");
+    assert_eq!(body, "chrome is flooding the log (4 in a second)");
+    assert_eq!(urgency, Urgency::Normal);
+    assert_eq!(from_alert_line("died gpu 0x10 13"), None);
+    assert_eq!(from_alert_line("alert flood"), None);
+}

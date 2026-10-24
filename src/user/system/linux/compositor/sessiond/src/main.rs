@@ -58,6 +58,7 @@ use crate::relay::{Act, Relay};
 mod authd;
 mod bus;
 mod gate;
+mod lode;
 mod relay;
 mod scope;
 
@@ -360,6 +361,7 @@ fn run(args: &[String]) -> Result<i32, String> {
     let (ours, theirs) = UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
     let (lock_ours, lock_theirs) =
         UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
+    let token = lode::token();
     let Started {
         child,
         bus: mut bus_child,
@@ -367,7 +369,7 @@ fn run(args: &[String]) -> Result<i32, String> {
     } = start(
         &account,
         &program,
-        &runtime,
+        (&runtime, &token),
         (theirs, lock_theirs),
         bus.as_ref(),
     )?;
@@ -379,6 +381,7 @@ fn run(args: &[String]) -> Result<i32, String> {
         child.id(),
         account.uid
     ));
+    say(&lode::began(&scope, account.uid, child.id(), &token));
     let mut child = child;
     // Whatever way `serve` ends -- the compositor gone, or a failure of
     // sessiond's own -- the compositor is killed and the session's scope is
@@ -391,6 +394,7 @@ fn run(args: &[String]) -> Result<i32, String> {
         let _ = child.wait();
     }
     let ended = scope::end(account.uid, &scope);
+    lode::ended(&scope);
     // The bus was in the scope, and went with it: reaped here, and said if
     // it had not gone, which the scope's end would then have said too.
     if let Some(bus) = bus_child.as_mut()
@@ -483,7 +487,7 @@ fn gated(
 fn start(
     account: &Account,
     program: &[String],
-    runtime: &str,
+    (runtime, token): (&str, &[u8; 16]),
     (theirs, lock): (UnixStream, UnixStream),
     bus: Option<&bus::Bus>,
 ) -> Result<Started, String> {
@@ -528,7 +532,10 @@ fn start(
             compositor_seat::FD_VARIABLE,
             compositor_seat::CHANNEL_FD.to_string(),
         )
-        .env(LOCK_FD_VARIABLE, LOCK_FD.to_string());
+        .env(LOCK_FD_VARIABLE, LOCK_FD.to_string())
+        // The session's token, beside the card: how the compositor proves to
+        // lode that it holds seat0 (docs/LOGGING.md §19.1).
+        .env(lode::TOKEN_VARIABLE, lode::hex(token));
     let moves = [
         (channel.as_raw_fd(), compositor_seat::CHANNEL_FD),
         (lock.as_raw_fd(), LOCK_FD),

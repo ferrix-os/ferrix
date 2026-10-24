@@ -36,7 +36,14 @@ impl Machine {
             &root.join("etc/group"),
             "root:x:0:\nwheel:x:10:ferrix\nferrix:x:1000:\nother:x:1001:\n",
         );
-        for service in ["hyprlock", "passwd", "login", "su"] {
+        for service in [
+            "hyprlock",
+            "passwd",
+            "login",
+            "su",
+            "settings.hostname",
+            "settings.services",
+        ] {
             let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../services")
                 .join(service);
@@ -745,5 +752,163 @@ fn su_takes_a_wheel_members_own_password() {
     assert!(matches!(
         m.verdict(OTHER, "su", "ferrix", &[]).reply,
         Reply::Unavailable(_)
+    ));
+}
+
+/// Put `Methods=none` in an admin's drop-in for `service`.
+fn without_password(m: &Machine, service: &str) {
+    write(
+        &m.root
+            .join(format!("etc/ferrix/auth/services/{service}.d/10-none.conf")),
+        "[Service]\nMethods=none\n",
+    );
+}
+
+/// Whether any of `outs` asked for something.
+fn prompted(outs: &[Out]) -> bool {
+    outs.iter()
+        .any(|out| matches!(out.reply, Reply::Prompt { .. }))
+}
+
+/// The settings writer's services (`docs/SETTINGS-WRITER.md` §5): root
+/// names a wheel member, who gives their own password; a non-member is
+/// refused before any prompt; nobody but root may ask.
+#[test]
+fn a_settings_service_asks_a_wheel_member_named_by_root() {
+    let mut m = Machine::new("settings");
+    m.set("ferrix", 1000, "mine");
+    m.set("other", 1001, "theirs");
+    let outs = m.converse(ROOT, "settings.hostname", "ferrix", &["mine"]);
+    assert!(prompted(&outs));
+    assert_eq!(outs.last(), Some(&accepted("ferrix", 1000)));
+    assert!(matches!(
+        m.verdict(ROOT, "settings.hostname", "ferrix", &["guess"])
+            .reply,
+        Reply::Failed { .. }
+    ));
+    let outs = m.converse(ROOT, "settings.services", "other", &[]);
+    assert!(!prompted(&outs), "a non-member was asked for a password");
+    assert_eq!(
+        outs.last().map(|out| out.reply.clone()),
+        Some(Reply::Unavailable("other is not in wheel".to_owned()))
+    );
+    let outs = m.converse(FERRIX, "settings.hostname", "", &[]);
+    assert!(!prompted(&outs));
+    assert_eq!(
+        outs.last().map(|out| out.reply.clone()),
+        Some(Reply::Unavailable(
+            "only root may use the settings.hostname service".to_owned()
+        ))
+    );
+}
+
+/// `Methods=none` (the certification consultant's ledger line 3482,
+/// condition 1): no prompt for a wheel member of a settings service, said
+/// as `method=none` in the audit line; still nothing for a non-member, an
+/// account with no password or a locked one.
+#[test]
+fn methods_none_accepts_a_member_where_the_prompt_would_be_and_nowhere_earlier() {
+    let mut m = Machine::new("settings-none");
+    without_password(&m, "settings.hostname");
+    m.set("ferrix", 1000, "mine");
+    let outs = m.converse(ROOT, "settings.hostname", "ferrix", &[]);
+    assert_eq!(outs, vec![accepted("ferrix", 1000)]);
+    assert!(
+        m.audit()
+            .contains("service=settings.hostname account=ferrix peer-pid=1 peer-uid=0 method=none result=accepted"),
+        "{}",
+        m.audit()
+    );
+    // A non-member: refused as before.
+    m.set("other", 1001, "theirs");
+    let outs = m.converse(ROOT, "settings.hostname", "other", &[]);
+    assert_eq!(
+        outs.last().map(|out| out.reply.clone()),
+        Some(Reply::Unavailable("other is not in wheel".to_owned()))
+    );
+    // Locked: refused.
+    Store::new(Paths::under(&m.root))
+        .set_credential(&Credential {
+            account: "ferrix".to_owned(),
+            uid: 1000,
+            password: None,
+            locked: Some("by-the-test".to_owned()),
+            changed: 0,
+        })
+        .unwrap();
+    assert!(matches!(
+        m.verdict(ROOT, "settings.hostname", "ferrix", &[]).reply,
+        Reply::Unavailable(_)
+    ));
+    // No credential at all: refused, never "no password needed".
+    let mut fresh = Machine::new("settings-none-fresh");
+    without_password(&fresh, "settings.hostname");
+    assert_eq!(
+        fresh.verdict(ROOT, "settings.hostname", "ferrix", &[]),
+        unavailable("no password is set for ferrix")
+    );
+    // An unknown account: refused, it is in no group.
+    assert!(matches!(
+        fresh
+            .verdict(ROOT, "settings.hostname", "nobody", &[])
+            .reply,
+        Reply::Unavailable(_)
+    ));
+}
+
+/// `Methods=none` in a drop-in for a person's login, `su`, `passwd`, the
+/// lock screen or a service of the same shape under another name changes
+/// nothing: each still asks for the password.
+#[test]
+fn methods_none_never_loosens_what_is_not_a_settings_service() {
+    let mut m = Machine::new("none-elsewhere");
+    m.set("ferrix", 1000, "mine");
+    write(
+        &m.root.join("etc/ferrix/auth/services/mechanism"),
+        "[Service]\nAccount=any\nCallers=root\nTargetGroup=wheel\n",
+    );
+    for service in ["hyprlock", "su", "passwd", "mechanism", "gate"] {
+        without_password(&m, service);
+    }
+    for (peer, service, account) in [
+        (FERRIX, "hyprlock", ""),
+        (FERRIX, "su", ""),
+        (FERRIX, "passwd", ""),
+        (ROOT, "mechanism", "ferrix"),
+        (ROOT, "gate", "ferrix"),
+    ] {
+        let mut conversation = Conversation::new(peer);
+        let outs = m.engine.handle(
+            &mut conversation,
+            &Record::Begin {
+                service,
+                account,
+                method: "",
+            },
+            m.now_ms,
+        );
+        assert!(prompted(&outs), "{service}: {outs:?}");
+    }
+}
+
+/// Failures through a settings service count against the account's one
+/// throttle, which `su` and `login` share (condition 3).
+#[test]
+fn settings_failures_share_the_accounts_throttle() {
+    let mut m = Machine::new("settings-throttle");
+    m.set("ferrix", 1000, "mine");
+    for _ in 0..4 {
+        assert!(matches!(
+            m.verdict(ROOT, "settings.hostname", "ferrix", &["guess"])
+                .reply,
+            Reply::Failed { .. }
+        ));
+    }
+    m.now_ms += 500;
+    let outs = m.converse(FERRIX, "su", "", &[]);
+    assert!(!prompted(&outs), "{outs:?}");
+    assert!(matches!(
+        outs.last().map(|out| &out.reply),
+        Some(Reply::Failed { .. })
     ));
 }

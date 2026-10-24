@@ -44,11 +44,11 @@ use crate::mm;
 use crate::trap::Abi;
 
 /// The most frames [`chain_of`] reports: the panic report's.
-pub(crate) const MAX_FRAMES: usize = backtrace::MAX_FRAMES;
+pub const MAX_FRAMES: usize = backtrace::MAX_FRAMES;
 
 /// What a blocked task's entry frame says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Call {
+pub enum Call {
     /// It waits inside a system call: the number and arguments as the
     /// program passed them, and where its stack and its next instruction are.
     Blocked {
@@ -148,7 +148,7 @@ fn word_at(at: u64) -> Option<u64> {
 /// Whether this architecture's entry frame is at a place the view can read
 /// (`arch::entry_frame`): x86-64's is, at the top of the task's stack; the
 /// Arm architectures' is not yet (`docs/DEBUG.md` §1.1).
-pub(crate) const fn calls_are_visible() -> bool {
+pub const fn calls_are_visible() -> bool {
     arch::entry_frame(Abi::Native, true).is_some()
 }
 
@@ -158,7 +158,7 @@ pub(crate) const fn calls_are_visible() -> bool {
 ///
 /// Checks nothing of the program's: the values are the registers the
 /// program passed, as Linux's `/proc/<pid>/syscall` prints them.
-pub(crate) fn call_of(task: &Arc<Task>, abi: Abi) -> Option<Call> {
+pub fn call_of(task: &Arc<Task>, abi: Abi) -> Option<Call> {
     let _ = task.thread()?;
     let sample = sample(task)?;
     let frame = arch::entry_frame(abi, sample.in_call)?;
@@ -204,7 +204,7 @@ fn read_call(frame: &arch::inspect::EntryFrame, start: u64, in_call: bool) -> Op
 /// inside the task's own stack, each above the last and aligned, every
 /// return address inside the image ([`backtrace::in_image`]), at most
 /// [`MAX_FRAMES`]. A word that fails ends the chain, and is never reported.
-pub(crate) fn chain_of(task: &Arc<Task>, out: &mut [u64; MAX_FRAMES]) -> Option<usize> {
+pub fn chain_of(task: &Arc<Task>, out: &mut [u64; MAX_FRAMES]) -> Option<usize> {
     let sample = sample(task)?;
     let found = walk(&sample, out);
     still(task, &sample).then_some(found)

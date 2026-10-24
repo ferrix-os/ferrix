@@ -16,7 +16,9 @@
 //!   IDENTIFY, polled reads, writes and flushes, recovery and shutdown.
 //!
 //! One command at a time, slot 0, polled: no interrupts, no native command
-//! queuing. Correctness first.
+//! queuing. Correctness first. A read may be launched and waited for later
+//! ([`Ahci::start_read`], [`Ahci::finish`]), so a driver can read ahead
+//! while the kernel takes what came; any other command waits for it first.
 //!
 //! # Where the numbers come from
 //!

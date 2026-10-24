@@ -717,6 +717,13 @@ impl Compositor<'_> {
                 || (String::new(), String::new()),
                 |top| (top.app_id.clone(), top.title.clone()),
             );
+            // The log hears of it: an error dialog always (events.conf's
+            // app-error), any window when window-opened is on.
+            let dialog = slot
+                .client
+                .toplevel(toplevel)
+                .is_some_and(|top| top.parent.is_some() || top.modal);
+            crate::lode_events::window_opened(&called.0, &called.1, slot.pid(), dialog);
             let _ = slot.firsts.insert(window, called);
             // Where it was before the rules: a rule that moved or sized it
             // placed it, and a floating workspace's own placement then

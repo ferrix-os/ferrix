@@ -70,12 +70,12 @@ use ferrix_intel_xelp::display::light;
 use ferrix_intel_xelp::io::Mmio;
 
 use crate::m2::ScreenPlane;
-use crate::say;
 
 mod hotplug;
 mod modeset;
 mod regs;
 mod surface;
+mod vblank;
 
 /// The port key the display control's signals arrive under, beside
 /// `serve::KEY_CONTROL` (1) and `serve::KEY_INTERRUPT` (2).
@@ -197,10 +197,23 @@ pub(crate) struct Display {
     /// plug.
     device: Option<Device<Kernel>>,
     apertures: u32,
+    /// `ferrix.intelgpu.modeset=on`, where the command line says it.
+    written: Option<modeset::Written>,
+    /// Pipe A's beam, where `FLUSH`es of the first scanout wait for its
+    /// blank ([`vblank`]); `None` copies at once.
+    beam: Option<vblank::Beam>,
+    /// The FLUSH waiting for the blank, and when the loop comes back for it.
+    pending: Option<vblank::Pending>,
+    flip_at: u64,
+    /// When the hotplug poll is due, in milliseconds; `u64::MAX` for never.
+    hotplug_at: u64,
+    tally: vblank::Tally,
 }
 
 /// What the second scanout starts with.
 struct Second {
+    /// The command line's word, which a later surface is made under.
+    written: Option<modeset::Written>,
     surface: Option<surface::Surface>,
     /// Its mode where it is lit now.
     size: Option<(u32, u32)>,
@@ -222,20 +235,18 @@ impl Display {
         port: &Port<Kernel>,
     ) -> Option<Display> {
         let Some(plane) = plane else {
-            say(format_args!("intel: no card0: pipe A's plane is not lit"));
+            ferrix_rt::info!("intel: no card0: pipe A's plane is not lit");
             return None;
         };
         let (window, first, phys) = map_screen(device, apertures, plane)?;
         let control = device
             .display_control()
             .inspect_err(|error| {
-                say(format_args!(
-                    "intel: no card0: no display control ({error:?})"
-                ));
+                ferrix_rt::err!("intel: no card0: no display control ({error:?})");
             })
             .ok()?;
         let mut regs = regs::Regs::map(device, apertures)
-            .inspect_err(|why| say(format_args!("intel: card0: no hotplug: {why}")))
+            .inspect_err(|why| ferrix_rt::warn!("intel: card0: no hotplug: {why}"))
             .ok();
         // `ferrix.intelgpu.modeset=dry` prints the steps for the second port;
         // `=on` gives the card a second scanout (`docs/DESKTOP.md` §3.5).
@@ -247,31 +258,30 @@ impl Display {
                         modeset::dry(regs, port);
                     }
                 }
-                modeset::Asked::On => {
-                    second = prepare_second(device, apertures, regs);
+                modeset::Asked::On(written) => {
+                    second = prepare_second(written, device, apertures, regs);
                 }
                 modeset::Asked::Nothing => {}
             }
         }
         let first_watch = regs.as_mut().and_then(hotplug::Watch::start);
+        let beam = beam(regs.as_mut(), first.height as u32);
         let (scanouts, modes, connectors) = hello_parts(&first, plane.connector, second.as_ref());
         let running = timing(first.width as u16, first.height as u16);
         if let Err(why) = introduce(
             &control, port, location, scanouts, modes, connectors, running,
         ) {
-            say(format_args!("intel: no card0: {why}"));
+            ferrix_rt::warn!("intel: no card0: {why}");
             return None;
         }
         if control
             .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
             .is_err()
         {
-            say(format_args!(
-                "intel: no card0: the display control could not be waited on"
-            ));
+            ferrix_rt::err!("intel: no card0: the display control could not be waited on");
             return None;
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0 published: copies frames into the lit {}x{} plane at {phys:#x} ({} bytes a line, write-combining){}",
             first.width,
             first.height,
@@ -281,7 +291,7 @@ impl Display {
             } else {
                 ""
             }
-        ));
+        );
         let mut card = Display {
             _window: window,
             surface: None,
@@ -295,6 +305,12 @@ impl Display {
             watches: [first_watch, None],
             device: None,
             apertures: 0,
+            written: None,
+            beam,
+            pending: None,
+            flip_at: u64::MAX,
+            hotplug_at: u64::MAX,
+            tally: vblank::Tally::default(),
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -306,13 +322,15 @@ impl Display {
             // made now.
             card.device = device.duplicate(Requested::Same).ok();
             card.apertures = apertures;
+            card.written = second.written;
         }
         if let Err(why) = card.announce() {
-            say(format_args!("intel: no card0: {why}"));
+            ferrix_rt::warn!("intel: no card0: {why}");
             return None;
         }
         if card.watches.iter().any(Option::is_some) {
-            schedule(now_ms());
+            card.hotplug_at = now_ms();
+            card.rearm();
         }
         Some(card)
     }
@@ -389,9 +407,7 @@ fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
         Some(PortOf::Combo(0)) => Some(PortOf::Combo(1)),
         Some(PortOf::Combo(1)) => Some(PortOf::Combo(0)),
         _ => {
-            say(format_args!(
-                "intel: card0: no second port: pipe A drives no combo port"
-            ));
+            ferrix_rt::info!("intel: card0: no second port: pipe A drives no combo port");
             None
         }
     }
@@ -405,6 +421,7 @@ fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
 /// there and dark, its port watched, to be tried again at a plug. `None`,
 /// said, only where pipe A drives no combo port.
 fn prepare_second(
+    written: modeset::Written,
     device: &Device<Kernel>,
     apertures: u32,
     regs: &mut regs::Regs,
@@ -414,15 +431,15 @@ fn prepare_second(
         Some(running) => running.port,
         None => dark_port(regs)?,
     };
-    let surface = surface::Surface::make(device, apertures, regs);
+    let surface = surface::Surface::make(written, device, apertures, regs);
     let mut size = None;
     if let (Some(running), Some(surface)) = (cloned, surface.as_ref()) {
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: card0: the firmware runs pipe B on port {} at {}x{}: it gets a surface of its own",
             running.port.name(),
             running.size.0,
             running.size.1
-        ));
+        );
         if modeset::repoint(regs, 1, surface.ggtt, running.size) {
             size = Some(running.size);
         }
@@ -445,6 +462,7 @@ fn prepare_second(
     };
     let watch = hotplug::Watch::on(regs, port, 1);
     Some(Second {
+        written: Some(written),
         surface,
         size,
         connector,
@@ -460,10 +478,10 @@ fn map_screen(
     plane: ScreenPlane,
 ) -> Option<(IoMapping<Kernel>, Output, u64)> {
     if !plane.linear_xrgb8888() {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the lit plane is not linear XRGB8888 (PLANE_CTL {:#010x})",
             plane.ctl
-        ));
+        );
         return None;
     }
     let find = |bar: u8| {
@@ -472,21 +490,21 @@ fn map_screen(
             .find(|aperture| aperture.bar == bar)
     };
     let Some(window) = find(APERTURE_NOT_BAR) else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: no lent framebuffer (K4 lends it under ferrix.efifb with ferrix.intelgpu)"
-        ));
+        );
         return None;
     };
     // The window must be the pixels the plane scans: BAR 2 (the GGTT's
     // aperture) at the plane's GGTT offset.
     let gmadr = find(2);
     if gmadr.is_some_and(|bar2| bar2.phys + u64::from(plane.ggtt) != window.phys) {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the lent window at {:#x} is not the plane's surface (BAR 2 {:#x} + GGTT {:#x})",
             window.phys,
             gmadr.map_or(0, |b| b.phys),
             plane.ggtt
-        ));
+        );
         return None;
     }
     let (width, height) = (plane.width as usize, plane.height as usize);
@@ -501,9 +519,9 @@ fn map_screen(
         || pitch * height > len
         || !len.is_multiple_of(PAGE)
     {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel: no card0: the plane {width}x{height} (pitch {pitch}) does not fit the lent window ({len:#x} bytes)"
-        ));
+        );
         return None;
     }
     let mapping = device
@@ -512,17 +530,15 @@ fn map_screen(
             len: window.len,
         })
         .inspect_err(|error| {
-            say(format_args!(
-                "intel: no card0: the lent window refused ({error:?})"
-            ));
+            ferrix_rt::err!("intel: no card0: the lent window refused ({error:?})");
         })
         .ok()?;
     let base = mapping
         .map_combining(None)
         .inspect_err(|error| {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: no card0: the window's write-combining mapping refused ({error:?})"
-            ));
+            );
         })
         .ok()?;
     Some((
@@ -537,9 +553,43 @@ fn now_ms() -> u64 {
     ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1_000_000
 }
 
-/// The hotplug poll due at `at_ms`.
-fn schedule(at_ms: u64) {
-    crate::serve::WAKE_AT.store(at_ms.saturating_mul(1_000_000).max(1), Ordering::Relaxed);
+/// Nanoseconds of `CLOCK_MONOTONIC`.
+fn now_ns() -> u64 {
+    ferrix_rt::linux::monotonic_nanos().unwrap_or(0)
+}
+
+/// The loop's wake-up at `at_ns`.
+fn schedule(at_ns: u64) {
+    crate::serve::WAKE_AT.store(at_ns.max(1), Ordering::Relaxed);
+}
+
+/// Pipe A's beam, said, unless `ferrix.intelgpu.vblank=off` asks to copy
+/// each frame at once or the transcoder's numbers make no sense.
+fn beam(regs: Option<&mut regs::Regs>, height: u32) -> Option<vblank::Beam> {
+    if vblank_off() {
+        ferrix_rt::info!("intel: card0: copies at once (ferrix.intelgpu.vblank=off)");
+        return None;
+    }
+    let beam = regs.and_then(|regs| vblank::Beam::read(regs, height, REFRESH_HZ, now_ns()));
+    match beam.map(|beam| beam.timing()) {
+        Some((vactive, vtotal, frame_ns)) => ferrix_rt::info!(
+            "intel: card0: flips wait for pipe A's blank (lines {vactive} of {vtotal}, {frame_ns} ns a refresh)"
+        ),
+        None => ferrix_rt::info!("intel: card0: no beam to wait for; frames are copied at once"),
+    }
+    beam
+}
+
+/// `ferrix.intelgpu.vblank=off`: copy each frame the moment it comes, as
+/// before frames waited for the blank.
+fn vblank_off() -> bool {
+    let mut line = [0_u8; 4096];
+    crate::steps::read_cmdline(&mut line).is_some_and(|length| {
+        line.get(..length)
+            .unwrap_or_default()
+            .split(u8::is_ascii_whitespace)
+            .any(|word| word == b"ferrix.intelgpu.vblank=off")
+    })
 }
 
 impl Display {
@@ -547,9 +597,66 @@ impl Display {
     /// or the control channel's. `false` when the card is gone.
     pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>) -> bool {
         if key == KEY_HOTPLUG {
-            return self.poll_hotplug();
+            if self.pending.is_some() && self.flip_due().is_err() {
+                return false;
+            }
+            let alive = now_ms() < self.hotplug_at || self.poll_hotplug();
+            self.rearm();
+            return alive;
         }
         self.on_packet(port)
+    }
+
+    /// The loop's wake-up: the earlier of the hotplug poll and the blank a
+    /// FLUSH waits for, a spin's length before it.
+    fn rearm(&self) {
+        let hotplug = self.hotplug_at.saturating_mul(1_000_000);
+        let flip = self.pending.map_or(u64::MAX, |_| self.flip_at);
+        let at = hotplug.min(flip);
+        if at != u64::MAX {
+            schedule(at);
+        }
+    }
+
+    /// The FLUSH waiting for the blank, copied and answered if the blank
+    /// is near enough to spin for; otherwise the wake-up set for it.
+    fn flip_due(&mut self) -> Result<(), &'static str> {
+        let (Some(_), Some(beam), Some(regs)) =
+            (self.pending, self.beam.as_mut(), self.regs.as_mut())
+        else {
+            return self.finish_pending(false);
+        };
+        let mut left = beam.until_blank(regs, now_ns());
+        if left > vblank::SPIN_NS {
+            self.flip_at = now_ns() + left - vblank::SPIN_NS;
+            return Ok(());
+        }
+        // Spin the last stretch: a wake a little late would miss a blank
+        // of under a millisecond.
+        let give_up = now_ns() + vblank::SPIN_NS + 500_000;
+        while left > 0 && now_ns() < give_up {
+            core::hint::spin_loop();
+            left = beam.until_blank(regs, now_ns());
+        }
+        self.finish_pending(left > 0)
+    }
+
+    /// Copy the FLUSH waiting for the blank and answer it; `torn` when it
+    /// is copied outside the blank.
+    fn finish_pending(&mut self, torn: bool) -> Result<(), &'static str> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        self.flush(pending.buffer, pending.rect);
+        let now = now_ns();
+        self.tally.flip(now, now.saturating_sub(pending.at), torn);
+        if let Some(done) = self.tally.report(now) {
+            done.say();
+        }
+        self.reply(Message::Flipped {
+            sequence: pending.sequence,
+            status: Status::Ok,
+        })
     }
 
     /// Read each watched port's hot-plug state, tell the core of a
@@ -570,12 +677,12 @@ impl Display {
                 *change = changed;
             }
         }
-        schedule(next);
+        self.hotplug_at = next;
         for (scanout, change) in changes.into_iter().enumerate() {
             if let Some(connected) = change
                 && let Err(why) = self.changed(scanout, connected)
             {
-                say(format_args!("intel: card0 stopped: {why}"));
+                ferrix_rt::err!("intel: card0 stopped: {why}");
                 return false;
             }
         }
@@ -618,9 +725,9 @@ impl Display {
             return watch.shown_again(regs);
         }
         if self.surface.is_none()
-            && let Some(device) = self.device.as_ref()
+            && let (Some(device), Some(written)) = (self.device.as_ref(), self.written)
         {
-            self.surface = surface::Surface::make(device, self.apertures, regs);
+            self.surface = surface::Surface::make(written, device, self.apertures, regs);
         }
         let Some(surface) = self.surface.as_ref() else {
             return false;
@@ -645,13 +752,11 @@ impl Display {
                 .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
                 .is_ok(),
             Ok(false) => {
-                say(format_args!(
-                    "intel: card0: the display core closed its end"
-                ));
+                ferrix_rt::warn!("intel: card0: the display core closed its end");
                 false
             }
             Err(why) => {
-                say(format_args!("intel: card0 stopped: {why}"));
+                ferrix_rt::err!("intel: card0 stopped: {why}");
                 false
             }
         }
@@ -677,6 +782,12 @@ impl Display {
                         .next();
                     let message = Message::decode(bytes.get(..received.bytes).unwrap_or_default())
                         .map_err(|_| "a message that does not decode")?;
+                    // Whatever comes next is acted on after the FLUSH that
+                    // waits for the blank, as it was sent after it: that
+                    // one is copied now.
+                    if self.pending.is_some() {
+                        self.finish_pending(true)?;
+                    }
                     match message {
                         Message::Stop if vmo.is_none() => {
                             let _ = self.reply(Message::Stopped);
@@ -727,11 +838,27 @@ impl Display {
                 sequence,
                 rect,
             } => {
-                self.flush(buffer, rect);
-                self.reply(Message::Flipped {
+                // The first scanout's frame waits for pipe A's blank
+                // ([`vblank`]); another scanout's is copied at once.
+                let shown_first = self
+                    .outputs
+                    .first()
+                    .and_then(|output| output.as_ref())
+                    .and_then(|output| output.shown)
+                    .is_some_and(|(id, _)| id == buffer);
+                self.pending = Some(vblank::Pending {
+                    buffer,
                     sequence,
-                    status: Status::Ok,
-                })
+                    rect,
+                    at: now_ns(),
+                });
+                if shown_first && self.beam.is_some() {
+                    self.flip_due()?;
+                    self.rearm();
+                    Ok(())
+                } else {
+                    self.finish_pending(false)
+                }
             }
             Message::Detach { buffer } => {
                 let status = self.detach(buffer);
@@ -750,7 +877,7 @@ impl Display {
                 }
                 output.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
                 clear(output);
-                say(format_args!(
+                ferrix_rt::info!(
                     "intel: card0: scanout {scanout} mode {}x{}{}",
                     size.0,
                     size.1,
@@ -759,7 +886,7 @@ impl Display {
                     } else {
                         ""
                     }
-                ));
+                );
                 Ok(())
             }
             _ => Err("a message a copying card without a cursor takes no part in"),
@@ -787,9 +914,7 @@ impl Display {
             copy(output, &source, changed);
             self.flushes += 1;
             if self.flushes == 1 {
-                say(format_args!(
-                    "intel: card0: the first frame is on the screen"
-                ));
+                ferrix_rt::info!("intel: card0: the first frame is on the screen");
             }
         }
     }
@@ -989,7 +1114,7 @@ fn send_edid(
         .write(Message::Edid(edid).encode().as_bytes())
         .is_err()
     {
-        say(format_args!("intel: card0: the EDID could not be written"));
+        ferrix_rt::err!("intel: card0: the EDID could not be written");
     }
 }
 
@@ -1008,10 +1133,10 @@ fn send_list(
             .write(page.encode().as_bytes())
             .map_err(|_| "the mode list could not be written")?;
     }
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: card0: scanout {scanout}: {} modes listed, the smaller ones shown scaled",
         list.len()
-    ));
+    );
     Ok(())
 }
 

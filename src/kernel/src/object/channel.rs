@@ -50,7 +50,7 @@
 //! `Channel` adds no edge: what a side's queue holds is freed when that
 //! side's `Endpoint` goes, whichever end still holds the channel.
 
-pub(crate) mod check;
+pub mod check;
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -89,11 +89,11 @@ pub(crate) const SMALL_BYTES: usize = ferrix_native_abi::nr::CHANNEL_WRITE_READ_
 
 /// A message of at most [`SMALL_BYTES`] and no handles, held in place.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Small {
+pub struct Small {
     /// The bytes, the first `len` of them meant.
-    pub(crate) bytes: [u8; SMALL_BYTES],
+    pub bytes: [u8; SMALL_BYTES],
     /// How many.
-    pub(crate) len: usize,
+    pub len: usize,
 }
 
 impl Small {
@@ -108,7 +108,7 @@ impl Small {
     }
 
     /// The bytes meant.
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         self.bytes.get(..self.len).unwrap_or_default()
     }
 }
@@ -328,11 +328,11 @@ impl Inbox {
 const MAX_WALK: usize = 1024;
 
 /// A message as it sits in a queue.
-pub(crate) type ChannelMessage = Message<Transfer>;
+pub type ChannelMessage = Message<Transfer>;
 
 /// Why a write did not happen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WriteFailure<E> {
+pub enum WriteFailure<E> {
     /// Nobody holds the other end.
     PeerClosed,
     /// Larger than a channel carries.
@@ -347,7 +347,7 @@ pub(crate) enum WriteFailure<E> {
 
 /// Why a read found nothing to return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReadError {
+pub enum ReadError {
     /// Nothing is queued, and nobody holds the other end to write more.
     PeerClosed,
     /// Nothing is queued yet.
@@ -498,7 +498,7 @@ impl Channel {
 
 /// One end of a channel.
 #[derive(Debug)]
-pub(crate) struct Endpoint {
+pub struct Endpoint {
     /// The channel, shared with the other end.
     channel: Arc<Channel>,
     /// Which side of it this end is.
@@ -512,7 +512,7 @@ impl Endpoint {
     ///
     /// [`AllocError`] when the channel or either end could not be allocated
     /// (finding F-23).
-    pub(crate) fn pair() -> Result<(Arc<Endpoint>, Arc<Endpoint>), AllocError> {
+    pub fn pair() -> Result<(Arc<Endpoint>, Arc<Endpoint>), AllocError> {
         let charge = Charge::running(Resource::Objects, 2).map_err(|_| AllocError)?;
         let channel = fallible::try_arc(Channel {
             first: Half::new(),
@@ -551,7 +551,7 @@ impl Endpoint {
     ///
     /// [`WriteFailure`]; whichever it is, `take` either did not run or failed
     /// and removed nothing.
-    pub(crate) fn write<E>(
+    pub fn write<E>(
         &self,
         bytes: Vec<u8>,
         handle_count: usize,
@@ -625,7 +625,7 @@ impl Endpoint {
     /// Whether the other end's queue has room for one more message. Only
     /// meaningful to an end nobody else writes from, which the answer then
     /// stays true for until it writes: a reader only makes room.
-    pub(crate) fn peer_has_room(&self) -> bool {
+    pub fn peer_has_room(&self) -> bool {
         let peer = self.peer();
         !peer.is_closed() && !peer.inbox.lock().is_full()
     }
@@ -643,7 +643,7 @@ impl Endpoint {
     /// # Errors
     ///
     /// [`ReadError`]. A message too large stays queued.
-    pub(crate) fn read(
+    pub fn read(
         &self,
         byte_capacity: usize,
         handle_capacity: usize,
@@ -697,7 +697,7 @@ impl Endpoint {
     /// # Errors
     ///
     /// [`WriteFailure`], never `Take`.
-    pub(crate) fn write_small(&self, bytes: &[u8]) -> Result<(), WriteFailure<()>> {
+    pub fn write_small(&self, bytes: &[u8]) -> Result<(), WriteFailure<()>> {
         let peer = self.peer();
         let (fired, parked) = {
             let mut inbox = peer.inbox.lock();
@@ -746,7 +746,7 @@ impl Endpoint {
     /// [`ReadError::Empty`], [`ReadError::PeerClosed`], or
     /// [`ReadError::TooSmall`] for a message only `channel_read` can take,
     /// left where it was.
-    pub(crate) fn read_small(&self) -> Result<Small, ReadError> {
+    pub fn read_small(&self) -> Result<Small, ReadError> {
         // Before the queue, for the reason `read` gives.
         let peer_closed = self.peer_closed();
         let (taken, was_full) = {
@@ -796,7 +796,7 @@ impl Endpoint {
     ///   finds the waiter `BLOCKED`, or the waiter finds the word.
     ///
     /// The model of all three is `src/tests/loom` (`cargo xtask loom`).
-    pub(crate) fn readable_or_closed(&self) -> bool {
+    pub fn readable_or_closed(&self) -> bool {
         self.own().word() != 0
     }
 
@@ -814,7 +814,7 @@ impl Endpoint {
     /// The message back, when a writer took its slot meanwhile and the queue
     /// could not grow to take it again. The caller disposes of what it
     /// carries once it holds no lock; its call was failing already.
-    pub(crate) fn unread(&self, message: ChannelMessage) -> Result<(), ChannelMessage> {
+    pub fn unread(&self, message: ChannelMessage) -> Result<(), ChannelMessage> {
         let parked = {
             let mut inbox = self.own().inbox.lock();
             let put_back = inbox.unpop(message);
@@ -830,7 +830,7 @@ impl Endpoint {
     }
 
     /// Whether nobody holds the other end.
-    pub(crate) fn peer_closed(&self) -> bool {
+    pub fn peer_closed(&self) -> bool {
         self.peer().is_closed()
     }
 
@@ -846,7 +846,7 @@ impl Endpoint {
     ///
     /// [`PortError::Full`] when this end already holds
     /// [`super::port::MAX_OBSERVERS`] registrations.
-    pub(crate) fn observe(&self, observer: Observer) -> Result<(), PortError> {
+    pub fn observe(&self, observer: Observer) -> Result<(), PortError> {
         let own = self.own();
         let inbox = own.inbox.lock();
         let mut asserted = Signals::NONE;
@@ -870,7 +870,7 @@ impl Endpoint {
     /// Whether a reader waits on this end: listed on its queue, or parked
     /// by the fast path's receive half (`docs/OPAQUE-KERNEL.md` §9.7). For
     /// the checks, which wake a reader once it waits.
-    pub(crate) fn reader_waiting(&self) -> bool {
+    pub fn reader_waiting(&self) -> bool {
         if self.own().inbox.lock().parked.is_some() {
             return true;
         }
@@ -878,12 +878,12 @@ impl Endpoint {
     }
 
     /// The queue woken when this end's signals may have changed.
-    pub(crate) fn waiters(&self) -> &WaitQueue {
+    pub fn waiters(&self) -> &WaitQueue {
         &self.own().waiters
     }
 
     /// What a waiter on this end would see now.
-    pub(crate) fn signals(&self) -> Signals {
+    pub fn signals(&self) -> Signals {
         let mut signals = Signals::NONE;
         if !self.own().inbox.lock().is_empty() {
             signals = signals | Signals::READABLE;
@@ -944,7 +944,7 @@ impl Endpoint {
     /// until the switch: the halves' locks are held under that mask, counted
     /// for A3 but without the site record or the deferred decision
     /// (`sync::try_lock_masked`).
-    pub(crate) unsafe fn send_direct(
+    pub unsafe fn send_direct(
         &self,
         caller: &Task,
         len: usize,
@@ -990,7 +990,7 @@ impl Endpoint {
     /// (T6 to T8, under this side's lock, the order a writer and a close
     /// read it in). Answers whether it parked; the caller then makes the
     /// last look and blocks (`sched::direct::block_parked`).
-    pub(crate) fn park(&self, task: &Arc<Task>) -> bool {
+    pub fn park(&self, task: &Arc<Task>) -> bool {
         let own = self.own();
         let mut inbox = own.inbox.lock();
         if !inbox.is_empty() || inbox.parked.is_some() || own.word() & PEER_CLOSED != 0 {
@@ -1004,7 +1004,7 @@ impl Endpoint {
 
     /// Clear this side's record if it still names `task`: a parked task
     /// leaving its park by any way but a commit, which cleared it already.
-    pub(crate) fn unpark(&self, task: &Task) {
+    pub fn unpark(&self, task: &Task) {
         let taken = {
             let mut inbox = self.own().inbox.lock();
             if inbox
@@ -1083,7 +1083,7 @@ fn sendable<'a>(
 ///
 /// [`Reach::NoMemory`] when the walk ran out of memory, which the caller
 /// refuses as it does a walk too long.
-pub(crate) fn check_carry(writer: &Endpoint, carried: Vec<Arc<Endpoint>>) -> Reach {
+pub fn check_carry(writer: &Endpoint, carried: Vec<Arc<Endpoint>>) -> Reach {
     // A closed peer is no cycle, and the write itself will say it is closed.
     if writer.peer_closed() {
         return Reach::Clear;

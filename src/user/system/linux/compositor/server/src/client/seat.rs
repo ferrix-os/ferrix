@@ -278,6 +278,35 @@ impl Client {
         self.repeat = (rate, delay);
     }
 
+    /// [`Self::set_repeat_info`] while the client runs: the numbers are
+    /// kept and every `wl_keyboard` bound at version 4 or above is told
+    /// them at once, which is what `hyprctl keyword input:repeat_rate`
+    /// changes. The protocol lets `repeat_info` come at any time; a
+    /// keyboard bound below version 4 never hears of repeat at all.
+    pub fn change_repeat_info(&mut self, rate: i32, delay: i32) {
+        self.repeat = (rate, delay);
+        for keyboard in self.objects_with_version(Role::Keyboard, 4) {
+            let _ = self.out.write(
+                keyboard,
+                core::wl_keyboard::event::REPEAT_INFO,
+                &[ArgType::Int, ArgType::Int],
+                &[Arg::Int(rate), Arg::Int(delay)],
+            );
+        }
+    }
+
+    /// [`Self::set_keymap`] while the client runs: every `wl_keyboard` it
+    /// holds is sent the new keymap, which a client takes in place of the
+    /// old one -- how a layout chosen in Settings reaches the windows
+    /// already open. The descriptor must stay open until the event has
+    /// gone out; the caller keeps the old one for the same reason.
+    pub fn change_keymap(&mut self, keymap: Option<(Fd, u32)>) {
+        self.keymap = keymap;
+        for keyboard in self.objects_with(Role::Keyboard) {
+            self.send_keymap(keyboard);
+        }
+    }
+
     /// What this client last asked the pointer to look like over its
     /// windows: the surface and where in it the pointer is.
     ///

@@ -22,7 +22,7 @@ use crate::console::println;
 /// A register the copy changed, or one the printed frame does not name with
 /// its value.
 /// Verifies: `L.x86_64.62`
-pub(crate) fn run() -> Result<(), &'static str> {
+pub fn run() -> Result<(), &'static str> {
     let frame = SyscallFrame {
         r15: 15,
         r14: 14,
@@ -90,7 +90,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
 /// Interrupts are as the caller had them: a real entry starts with them masked
 /// and leaves them so, this wrapper does both for a task that runs with them
 /// open.
-pub(crate) fn drive_system_call(
+pub fn drive_system_call(
     abi: crate::trap::Abi,
     number: usize,
     args: [u64; 6],
@@ -168,7 +168,7 @@ pub(crate) fn drive_system_call(
 ///
 /// For the `channel_write_read` check (`object::write_read_check`), run on a
 /// thread of a check's process, as [`drive_system_call`] is run.
-pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
+pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 
     let mut frame = SyscallFrame {
@@ -215,7 +215,7 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
 /// A native number decoded against the Linux table, or one of the entry's two
 /// calls not decoded as itself.
 /// Verifies: `L.x86_64.140`
-pub(crate) fn run_decode() -> Result<(), &'static str> {
+pub fn run_decode() -> Result<(), &'static str> {
     use ferrix_linux_abi::nr::{Syscall, x86_64};
     use ferrix_native_abi::nr::{FIRST, LAST};
 

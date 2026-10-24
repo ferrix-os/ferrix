@@ -40,7 +40,7 @@ use ferrix_rt::native::port;
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 
-use crate::serve::{AsVmo, say};
+use crate::serve::AsVmo;
 
 ferrix_rt::entry!(main);
 
@@ -80,7 +80,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(never) => match never {},
         Err(step) => {
-            say(format_args!("intel-fake: stopped at {step:?}"));
+            ferrix_rt::err!("intel-fake: stopped at {step:?}");
             step as i32
         }
     }
@@ -109,15 +109,16 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     let device = started(boot)?;
     let info = device.info().map_err(|_| Step::Identity)?;
     if device_info::lookup(info.vendor_id, info.device_id).is_none() {
-        say(format_args!(
+        ferrix_rt::warn!(
             "intel-fake: {:04x}:{:04x} is not ADL-N",
-            info.vendor_id, info.device_id
-        ));
+            info.vendor_id,
+            info.device_id
+        );
         return Err(Step::Identity);
     }
     let revision = device.config_read(0x08, 1).map_or(0, |value| value as u8);
     let facts = fake::facts(info.device_id, revision, SYSTEM_MEMORY);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel-fake: {:#010x} {:04x}:{:04x} rev {revision}: facts {} EUs, DSS {:#x}, CS {} Hz; {}",
         info.location,
         info.vendor_id,
@@ -126,7 +127,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         facts.sseu.subslice_mask,
         facts.cs_timestamp_hz,
         fake::MARKER
-    ));
+    );
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
     let mut frontend = Frontend::new(fake::Fake::new(facts, |bytes| {
         let bytes = usize::try_from(bytes).map_err(|_| Errno::ENOMEM)?;
@@ -138,7 +139,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     match serve::serve(&mut host, &port, &mut frontend, &mut |_, _| {}) {
         Ok(never) => match never {},
         Err(stopped) => {
-            say(format_args!("intel-fake: serving stopped: {stopped:?}"));
+            ferrix_rt::err!("intel-fake: serving stopped: {stopped:?}");
             Err(Step::Serve)
         }
     }

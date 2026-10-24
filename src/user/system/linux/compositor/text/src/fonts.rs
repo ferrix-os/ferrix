@@ -1003,6 +1003,27 @@ impl Fonts {
         baseline: f32,
         color: Rgba,
     ) {
+        self.draw_run_clipped(
+            run,
+            pixmap,
+            (x, baseline),
+            color,
+            (i64::MIN, i64::MIN, i64::MAX, i64::MAX),
+        );
+    }
+
+    /// [`Fonts::draw_run`], with only the pixels inside `clip` drawn:
+    /// columns `clip.0..clip.2` and rows `clip.1..clip.3`, in the
+    /// pixmap's pixels. A scrolled list's rows stop at its edge this way
+    /// without a layer to draw them into.
+    pub fn draw_run_clipped(
+        &mut self,
+        run: &Run,
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        (x, baseline): (f32, f32),
+        color: Rgba,
+        clip: (i64, i64, i64, i64),
+    ) {
         for glyph in &run.glyphs {
             let pen = x + glyph.x;
             let whole = pen.floor();
@@ -1017,9 +1038,9 @@ impl Fonts {
                 crate::raster::blend_mask(
                     pixmap,
                     mask,
-                    column + i64::from(mask.left),
-                    row - i64::from(mask.top),
+                    (column + i64::from(mask.left), row - i64::from(mask.top)),
                     color,
+                    clip,
                 );
             }
         }

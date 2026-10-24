@@ -116,7 +116,7 @@ static SCRATCH: ScratchCell = ScratchCell(UnsafeCell::new(Scratch {
 /// `mapped` bytes of `framebuffer` are mapped at `virt`. A format this kernel
 /// cannot draw in records nothing, and so does a mapping too small for a
 /// single line.
-pub(crate) fn install(framebuffer: &Framebuffer, virt: u64, mapped: u64) {
+pub fn install(framebuffer: &Framebuffer, virt: u64, mapped: u64) {
     if framebuffer.format == PixelFormat::Unknown {
         return;
     }
@@ -409,7 +409,7 @@ fn report_start(text: &[u8]) -> Option<usize> {
 /// address and the bytes mapped, or `None` when there is none. What
 /// `discovery::firmware` reads back write-combining when it lends the
 /// framebuffer, and stage 9 on every x86-64 boot.
-pub(crate) fn window() -> Option<(u64, u64)> {
+pub fn window() -> Option<(u64, u64)> {
     let virt = VIRT.load(Ordering::Acquire);
     let len = LEN.load(Ordering::Acquire);
     (virt != 0 && len != 0).then_some((virt, len))

@@ -732,10 +732,18 @@ package FerrixAarch64Requirements {
             attribute :>> statement = "Each processor shall decide its defences
                 from its core and firmware's answers, apply them, record what it
                 saw and applied, and the vector entry's branch history loop shall
-                run exactly when some processor recorded that it needs it.";
+                run exactly when some processor recorded that it needs it. Where
+                PSCI is reached through hvc, so that a processor's MIDR_EL1 may
+                change under it, a core without ECBHB shall need the most
+                branches any core Arm lists needs, and Arm's Spectre v2 list
+                shall excuse no core.";
             attribute :>> criterion = "After every processor has started, the
                 loop's count is non-zero exactly when a processor's record holds
-                the loop.";
+                the loop; and a vCPU that recorded a Cortex-A55 under a
+                hypervisor is given a count that covers the Cortex-X1 it later
+                reads and a switch barrier firmware asks for, while without a
+                hypervisor the A55 needs neither and the X1 32 branches, and an
+                ECBHB core needs no loop on either.";
             attribute :>> parent = "H.TRAP.3";
             attribute :>> unit = ("arch::aarch64::speculation::init",
                 "arch::aarch64::speculation::apply_this_cpu",
@@ -743,7 +751,8 @@ package FerrixAarch64Requirements {
                 "arch::aarch64::speculation::plan_for",
                 "arch::aarch64::speculation::Seen::pack",
                 "arch::aarch64::speculation::Seen::unpack",
-                "arch::aarch64::speculation::kind_of", "arch::aarch64::init_speculation");
+                "arch::aarch64::speculation::kind_of", "arch::aarch64::init_speculation",
+                "arch::aarch64::speculation::Core::bhb_loops_needed");
         }
         requirement <'L.aarch64.67'> eachProcessorsIdentityIsReadBack : ItemLowLevel {
             attribute :>> statement = "midr_of shall answer the MIDR_EL1 that
@@ -752,9 +761,11 @@ package FerrixAarch64Requirements {
                 and for every processor of a kernel built without its
                 side-channel defences, which records nothing.";
             attribute :>> criterion = "After every processor has started,
-                midr_of answers each one's record, which for the processor
-                running the check is its own MIDR_EL1, and None for every
-                logical number from the processor count to MAX_CPUS.";
+                midr_of answers each one's record, the entry loop in force is at
+                least what each recorded core needs and what the core the check
+                runs on needs by the MIDR_EL1 it reads now, which under a
+                hypervisor need not be its record, and midr_of answers None for
+                every logical number from the processor count to MAX_CPUS.";
             attribute :>> parent = "H.TRAP.3";
             attribute :>> unit = ("arch::aarch64::speculation::midr_of");
         }

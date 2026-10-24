@@ -52,12 +52,20 @@ controller's ABAR is BAR slot 5, sized and mappable whole.
    bound, as every PCI driver's is, and never asked for) and no native
    command queuing. A request longer than one command table holds is
    split; segments must be even in address and length, and below 4 GiB
-   when the HBA lacks 64-bit addressing.
-6. **Recover.** A command that fails or times out (10 s) stops the port's
+   when the HBA lacks 64-bit addressing. A running command is looked at
+   every 20 us for its first 100 ms, then every millisecond; every other
+   wait polls every 5 us for a millisecond, then every millisecond.
+6. **Read ahead.** Once two reads follow each other on the disk, the
+   driver launches a READ DMA EXT of the next 512 KiB into one of two
+   pinned windows and answers the read without waiting for it (§5). A
+   later read the windows hold is a copy; any other command waits for the
+   window first; a write drops a window it lands on.
+7. **Recover.** A command that fails or times out (10 s) stops the port's
    command list, clears the errors, overrides a busy task file and starts
    it again (AHCI 1.3.1 §6.2.2.1); the request is answered with the error.
    Registers that read all ones mean the HBA left the bus.
-7. **Shut down.** Flush the drive's cache, stop the port.
+8. **Shut down.** Wait for a window being read, flush the drive's cache,
+   stop the port.
 
 On the console: one line when the function is found, before a register is
 written, with the HBA's registers as firmware left them; one when the drive
@@ -81,8 +89,39 @@ gone, a command waits for the task file's BSY and DRQ to clear after
 
 * Only the first ATA disk on the first controller is served.
 * No interrupts, no NCQ, one command in flight: correctness first. A disk
-  with a slow seek holds every request behind it.
+  with a slow seek holds every request behind it, and so does a window
+  being read ahead, for at most one 512 KiB command.
 * No hot plug, no port multipliers, no ATAPI, no TRIM.
 * Register offsets, bits and layouts are from the Serial ATA AHCI 1.3.1
   specification, opcodes and IDENTIFY's words from ATA8-ACS. No Linux or
   QEMU code was taken.
+
+## 5. Throughput (2026-10-23)
+
+On the N150 box `busybox dd` of an uncached 1.6 GB file read 48.9 MB/s at
+`bs=1M` and 41.5 MB/s at `bs=64k`, with a game loading beside it, where a
+SATA SSD gives 450 to 550. Measured in QEMU (`test-n150-sata` with a
+256 MiB file, release build, KVM), by counting the driver's commands and
+timing each layer:
+
+* Every command was 128 KiB or less, one or two PRDT entries: the kernel
+  fills a file's page cache 128 KiB at a time (`MAX_FILL_RUN`), and each
+  fill is one synchronous ring request. Queue depth 1, always.
+* Of about 300 us a request, the driver held it 140 and the kernel's ring
+  and fill path the rest; the drive was idle for all of the latter.
+* A command still running after its first millisecond was polled every
+  millisecond: anything slower than that, or held up by a busy processor,
+  lost up to a millisecond more.
+
+The two fixes are the driver's, with no kernel line: commands are polled
+every 20 us for 100 ms, and sequential reads are read ahead 512 KiB at a
+time (§2, steps 5 and 6). `dd` of an uncached 256 MiB file, `bs=1M`, before
+and after:
+
+| QEMU | idle | four processors busy |
+|---|---|---|
+| as QEMU completes (instantly) | 342 / 381 -> 910 / 1500 MB/s | 239 -> 658 / 804 MB/s |
+| each command held to a 500 MB/s SSD's time (60 us + 2 ns a byte) | 219 / 263 -> 439 / 444 MB/s | 209 / 213 -> 398 / 410 MB/s |
+
+QEMU's figures are only relative; the box's are owed. The kernel's 128 KiB
+fill, depth 1, is still the bound for a reader the driver cannot predict.

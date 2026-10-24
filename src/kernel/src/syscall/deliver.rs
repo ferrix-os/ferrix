@@ -75,8 +75,10 @@ use crate::syscall::uaccess;
 use crate::signal_frame::{BadFrame, FrameRequest, StackRecord};
 
 mod check;
+mod hold_check;
 
 pub(crate) use check::check_the_delivery_cap;
+pub use hold_check::{Report as HoldReport, check_the_crash_hold};
 
 /// How many signals one round of the way back to user mode acts on before it
 /// looks again with interrupts masked. One more than there are signals, so
@@ -103,14 +105,31 @@ static RETURN_PATH: crate::trap::ReturnPath = crate::trap::ReturnPath {
 ///
 /// The core decides a fault is the program's problem; this decides what that
 /// means. `Posted` and `Origin` stay on this side of the interface.
-fn fault_signal(signal: u32, code: i32, address: u64) -> crate::trap::FaultOutcome {
+///
+/// A fault that ends the process is said in the kernel log first with who
+/// the process was -- `  signal   pid N is NAME exe PATH at FILE+OFFSET
+/// cmdline ...` -- read while this thread still runs in it, since the core's
+/// `ended by signal` line follows the end, when the pid may be gone and its
+/// name with it (`docs/LOGGING.md` §18, crash records).
+fn fault_signal(signal: u32, code: i32, address: u64, pc: u64) -> crate::trap::FaultOutcome {
     use crate::trap::FaultOutcome;
 
-    match force(signal, Origin::Fault { code, address }) {
+    match force_held(signal, code, address, pc) {
         None => FaultOutcome::NoProcess,
-        Some(Posted::Fatal) => FaultOutcome::Ended {
-            pid: process::current().map_or(0, |process| process.pid()),
-        },
+        Some(Posted::Fatal) => {
+            let current = process::current();
+            if let Some(process) = &current {
+                let who = crate::fs::procfs::crash_identity(process, pc);
+                crate::println!(
+                    "  signal   pid {} is {}",
+                    process.pid(),
+                    alloc::string::String::from_utf8_lossy(&who)
+                );
+            }
+            FaultOutcome::Ended {
+                pid: current.map_or(0, |process| process.pid()),
+            }
+        }
         Some(Posted::Discarded | Posted::Pending) => FaultOutcome::Delivered,
     }
 }
@@ -119,7 +138,7 @@ fn fault_signal(signal: u32, code: i32, address: u64) -> crate::trap::FaultOutco
 ///
 /// Called once from `_start`, before the first user program -- which is a boot
 /// check, not init, so this cannot wait for `init::run`.
-pub(crate) fn install() {
+pub fn install() {
     crate::trap::set_return_path(&RETURN_PATH);
 }
 
@@ -197,6 +216,13 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
                     process.thread_parked();
                     crate::fs::cgroupfs::settle_frozen(&process.core().job());
                 }
+                // Held for a crash reader: counted apart from a freeze, and
+                // the faulting thread told (`fs::crashes`).
+                let held = process.is_held();
+                if held {
+                    process.thread_held(true);
+                    crate::fs::crashes::thread_parked();
+                }
                 // Woken by everything that ends a park (a continue, a thaw, an
                 // end, an `execve`), so it looks again only now and then: a
                 // parked thread that woke every few milliseconds to find
@@ -210,6 +236,9 @@ pub(crate) fn return_to_user(context: &mut arch::UserContext) {
                 );
                 if frozen {
                     process.thread_unparked();
+                }
+                if held {
+                    process.thread_held(false);
                 }
                 continue;
             }
@@ -522,6 +551,26 @@ pub(crate) fn force(signal: u32, origin: Origin) -> Option<Posted> {
     crate::sched::work::post_own(crate::sched::work::SIGNAL);
     if posted == Posted::Fatal {
         process::kill(thread.process(), 128 + signal as i32);
+    }
+    Some(posted)
+}
+
+/// [`force`] for a fault of the program's own instruction: a fatal one is
+/// first held for `/dev/ferrix-crashes` while a reader is armed, at most
+/// [`crate::fs::crashes::HOLD_NANOS`] (LOGGING.md §21.7 crash-2), then ended as
+/// [`force`] ends it. Only `fault_signal` calls this: seccomp's ends,
+/// `kill`, limits and the OOM end are never held.
+fn force_held(signal: u32, code: i32, address: u64, pc: u64) -> Option<Posted> {
+    let thread = thread::current()?;
+    let origin = Origin::Fault { code, address };
+    let posted = thread.with_signals(|shared, own| signal::force(shared, own, signal, origin));
+    crate::sched::work::post_own(crate::sched::work::SIGNAL);
+    if posted == Posted::Fatal {
+        let held = crate::fs::crashes::hold(&thread, signal, code, address, pc);
+        process::kill(thread.process(), 128 + signal as i32);
+        if held {
+            thread.process().set_held(0);
+        }
     }
     Some(posted)
 }

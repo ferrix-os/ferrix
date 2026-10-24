@@ -63,6 +63,29 @@ pub(crate) struct Policy {
     /// `TargetGroup=`: the account must be in this group before anything is
     /// asked of it (`su`'s `wheel`, decision 5).
     pub(crate) target_group: Option<String>,
+    /// `Methods=none`: ACCEPTED once every other check holds, with no
+    /// prompt. Honoured only within [`methods_none_bound`]; anywhere else
+    /// the policy asks for a password (`docs/SETTINGS-WRITER.md` §5).
+    pub(crate) methods_none: bool,
+}
+
+/// The only services `Methods=none` may loosen: the settings writer's
+/// (`docs/SETTINGS-WRITER.md` §5; the certification consultant's ledger
+/// line 3482, condition 1).
+const METHODS_NONE_PREFIX: &str = "settings.";
+
+/// Whether `policy` may skip its prompt: a service of the settings
+/// writer's, asked by root alone, for a member of a group, to say who
+/// someone is, with nothing granted and no first password offered. Every
+/// shipped policy for a person's login, `su`, `passwd` or the lock screen
+/// fails it by name as well as by shape.
+fn methods_none_bound(policy: &Policy) -> bool {
+    policy.service.starts_with(METHODS_NONE_PREFIX)
+        && policy.callers == Callers::Root
+        && policy.target_group.is_some()
+        && policy.purpose == Purpose::Authenticate
+        && !policy.grant_seat
+        && !policy.first_password_local
 }
 
 /// Read `service`'s policy from `layers`, lowest first. Warnings about keys
@@ -122,6 +145,7 @@ fn interpret(service: &str, document: &Document, warn: &mut dyn FnMut(String)) -
         grant_seat: false,
         first_password_local: false,
         target_group: None,
+        methods_none: false,
     };
     let known = [
         "Description",
@@ -168,12 +192,16 @@ fn interpret(service: &str, document: &Document, warn: &mut dyn FnMut(String)) -
         Some("change-password") => policy.purpose = Purpose::ChangePassword,
         Some(other) => bad(warn, "Purpose", other),
     }
-    match last(document, "Methods") {
-        None | Some("password") => {}
-        Some(other) => warn(format!(
-            "{service}: Methods={other}: only password exists yet (docs/AUTH.md §4.1); password it is"
-        )),
-    }
+    let methods_none = match last(document, "Methods") {
+        None | Some("password") => false,
+        Some("none") => true,
+        Some(other) => {
+            warn(format!(
+                "{service}: Methods={other}: only password and none exist yet (docs/AUTH.md §4.1); password it is"
+            ));
+            false
+        }
+    };
     if let Some(value) = last(document, "FailDelaySec") {
         match value.parse::<u64>() {
             Ok(seconds) if seconds <= 30 => policy.fail_delay = Duration::from_secs(seconds),
@@ -200,6 +228,17 @@ fn interpret(service: &str, document: &Document, warn: &mut dyn FnMut(String)) -
             policy.target_group = Some(group.to_owned());
         }
         Some(other) => bad(warn, "TargetGroup", other),
+    }
+    if methods_none {
+        if methods_none_bound(&policy) {
+            policy.methods_none = true;
+        } else {
+            warn(format!(
+                "{service}: Methods=none is honoured only for a settings.* service with \
+                 Callers=root, a TargetGroup=, Purpose=authenticate and no Grant= or \
+                 FirstPassword= (docs/AUTH.md §4.2); password it is"
+            ));
+        }
     }
     policy
 }
@@ -267,10 +306,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    const SETTINGS: &str =
+        "[Service]\nAccount=any\nCallers=root\nTargetGroup=wheel\nMethods=none\n";
+
+    #[test]
+    fn methods_none_loosens_a_settings_service_of_the_shape_alone() {
+        let root = scratch("none");
+        let l = layers(&root);
+        write(&l[0], "settings.hostname", SETTINGS);
+        let mut warnings = Vec::new();
+        let policy = load(&l, "settings.hostname", &mut |w| warnings.push(w)).unwrap();
+        assert!(policy.methods_none, "{warnings:?}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        // The same shape under another name asks for a password.
+        write(&l[0], "mechanism", SETTINGS);
+        let mut warnings = Vec::new();
+        let policy = load(&l, "mechanism", &mut |w| warnings.push(w)).unwrap();
+        assert!(!policy.methods_none);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        // A settings.* service that breaks the shape in any one way asks too.
+        for broken in [
+            "[Service]\nAccount=any\nTargetGroup=wheel\nMethods=none\n",
+            "[Service]\nAccount=any\nCallers=root\nMethods=none\n",
+            "[Service]\nAccount=any\nCallers=root\nTargetGroup=wheel\nPurpose=change-password\nMethods=none\n",
+            "[Service]\nAccount=any\nCallers=root\nTargetGroup=wheel\nGrant=seat\nMethods=none\n",
+            "[Service]\nAccount=any\nCallers=root\nTargetGroup=wheel\nFirstPassword=local\nMethods=none\n",
+        ] {
+            write(&l[0], "settings.broken", broken);
+            let policy = load(&l, "settings.broken", &mut |_| {}).unwrap();
+            assert!(!policy.methods_none, "{broken}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn methods_none_in_a_drop_in_never_loosens_the_shipped_policies() {
+        let root = scratch("dropins");
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../services");
+        let etc = root.join("etc/ferrix/auth/services");
+        let l = [shipped, etc.clone()];
+        for service in ["hyprlock", "passwd", "login", "su"] {
+            write(
+                &etc.join(format!("{service}.d")),
+                "10-none.conf",
+                "[Service]\nMethods=none\n",
+            );
+            let mut warnings = Vec::new();
+            let policy = load(&l, service, &mut |w| warnings.push(w)).unwrap();
+            assert!(!policy.methods_none, "{service}");
+            assert_eq!(warnings.len(), 1, "{service}: {warnings:?}");
+        }
+        // The shipped settings policies ask for a password, and a drop-in
+        // may loosen them.
+        for service in ["settings.hostname", "settings.services"] {
+            let policy = load(&l, service, &mut |_| {}).unwrap();
+            assert!(!policy.methods_none, "{service}");
+            assert_eq!(policy.callers, Callers::Root, "{service}");
+            assert_eq!(policy.target_group.as_deref(), Some("wheel"), "{service}");
+            write(
+                &etc.join(format!("{service}.d")),
+                "10-none.conf",
+                "[Service]\nMethods=none\n",
+            );
+            let policy = load(&l, service, &mut |_| {}).unwrap();
+            assert!(policy.methods_none, "{service}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn the_shipped_policies_read_cleanly() {
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../services");
         let layers = [shipped];
+        for service in ["settings.hostname", "settings.services"] {
+            let mut warnings = Vec::new();
+            let _ = load(&layers, service, &mut |w| warnings.push(w)).unwrap();
+            assert!(warnings.is_empty(), "{service}: {warnings:?}");
+        }
         for service in ["hyprlock", "passwd", "login"] {
             let mut warnings = Vec::new();
             let policy = load(&layers, service, &mut |w| warnings.push(w)).unwrap();

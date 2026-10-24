@@ -65,6 +65,11 @@ pub(crate) struct Model {
     pub(crate) fail_next: Option<(u8, u8)>,
     /// Commands never complete.
     pub(crate) hang: bool,
+    /// Commands complete this many nanoseconds of the clock after they are
+    /// issued, as a drive's do, rather than at once.
+    pub(crate) slow: Option<(Rc<Cell<u64>>, u64)>,
+    /// The port and the instant of a slow command still running.
+    running: Option<(usize, u64)>,
     pub(crate) seen: Vec<Seen>,
     pub(crate) flushes: u32,
 }
@@ -118,6 +123,8 @@ impl Model {
             identify,
             fail_next: None,
             hang: false,
+            slow: None,
+            running: None,
             seen: Vec::new(),
             flushes: 0,
         }
@@ -260,6 +267,10 @@ impl Model {
 
     /// Run slot 0 of port `index`'s command list.
     fn execute(&mut self, index: usize) {
+        assert!(
+            self.running.is_none() || self.slow.is_none(),
+            "slot 0 issued again while its command runs"
+        );
         let clb = self.ports[index].clb;
         let flags = self.read_u32(clb);
         let table = u64::from(self.read_u32(clb + 8)) | (u64::from(self.read_u32(clb + 12)) << 32);
@@ -291,6 +302,10 @@ impl Model {
             prds: prds.clone(),
         });
         if self.hang {
+            return;
+        }
+        if let Some((clock, takes)) = &self.slow {
+            self.running = Some((index, clock.get() + takes));
             return;
         }
         if let Some((status, error)) = self.fail_next.take() {
@@ -357,6 +372,26 @@ impl Model {
         (at == bytes.len()).then_some(at)
     }
 
+    /// End a slow command whose time has come, as it would have ended at
+    /// once: run again, as fast, without counting it twice.
+    fn tick(&mut self) {
+        let Some((index, due)) = self.running else {
+            return;
+        };
+        let now = self
+            .slow
+            .as_ref()
+            .map_or(u64::MAX, |(clock, _)| clock.get());
+        if now < due {
+            return;
+        }
+        let slow = self.slow.take();
+        self.execute(index);
+        self.slow = slow;
+        self.running = None;
+        let _again = self.seen.pop();
+    }
+
     fn fail(&mut self, index: usize, status: u8, error: u8) {
         let port = &mut self.ports[index];
         port.tfd = u32::from(status) | (u32::from(error) << 8);
@@ -372,6 +407,7 @@ pub(crate) struct Regs(pub(crate) Shared);
 
 impl Registers for Regs {
     fn read(&self, offset: u32) -> u32 {
+        self.0.borrow_mut().tick();
         self.0.borrow().read_reg(offset)
     }
 

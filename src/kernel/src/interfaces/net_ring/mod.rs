@@ -69,7 +69,7 @@ use crate::syscall::native;
 use crate::timer;
 use crate::user::vmo::{Held, Vmo};
 
-pub(crate) mod check;
+pub mod check;
 
 /// How long a ring waits for its driver's HELLO.
 const HELLO_PATIENCE_NANOS: u64 = 10_000_000_000;
@@ -182,7 +182,7 @@ static NEXT_RING: AtomicUsize = AtomicUsize::new(1);
 /// # Errors
 ///
 /// [`Full`] when the item has no room for the registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::NetRingCreate, control_create)?;
     native::register_server(&SERVER)
 }

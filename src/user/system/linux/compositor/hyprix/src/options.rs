@@ -21,6 +21,10 @@ pub struct Options {
     pub exec: Vec<String>,
     /// Give up after this many milliseconds, so a test can never hang.
     pub deadline: Option<u64>,
+    /// lode's screenshot-provider socket and the session's token, when
+    /// `sessiond` gave this compositor one (`crate::lodeshot`); `main` fills
+    /// it from the environment, a test with a socket of its own.
+    pub lode: Option<(PathBuf, [u8; 16])>,
     /// The instance name `hyprctl` finds the control socket under, in
     /// `$XDG_RUNTIME_DIR/hypr/<instance>/`. Without one the socket is not
     /// bound at all, which is what a test that does not want it asks for.
@@ -44,6 +48,15 @@ pub struct Options {
     /// (`crate::layouts`): `$XDG_STATE_HOME/hyprix` when started from the
     /// command line, nowhere for a compositor made in a test.
     pub state_dir: Option<PathBuf>,
+    /// The Settings app's `settings.conf` (`crate::settings`): read after
+    /// the configuration and written by `hyprctl setting`.
+    /// `$XDG_CONFIG_HOME/hypr/settings.conf` when started from the command
+    /// line, nowhere for a compositor made in a test unless it says.
+    pub settings: Option<PathBuf>,
+    /// The wallpaper client `wallpaper =` lines start
+    /// (`crate::wallpaper`); `None` is `wallpaper` beside the compositor's
+    /// program. Not a command-line option: what a test puts in its place.
+    pub wallpaper: Option<PathBuf>,
 }
 
 /// What draws the frame: `--renderer`.
@@ -73,11 +86,14 @@ impl Default for Options {
             dump: None,
             exec: Vec::new(),
             deadline: None,
+            lode: None,
             instance: None,
             renderer: Renderer::Auto,
             refuse_flips: 0,
             animation_step: None,
             state_dir: None,
+            settings: None,
+            wallpaper: None,
         }
     }
 }
@@ -95,7 +111,8 @@ usage: hyprix [options]
   --exec <command>    start this once the socket is listening, repeatable
   --deadline <ms>     give up after this long
   --instance <name>   bind hyprctl's socket under $XDG_RUNTIME_DIR/hypr/<name>
-  --renderer <which>  auto, software, gpu or vtest (default auto)";
+  --renderer <which>  auto, software, gpu or vtest (default auto)
+  --settings <path>   the Settings app's file (default ~/.config/hypr/settings.conf)";
 
     /// Read the arguments.
     ///
@@ -105,6 +122,7 @@ usage: hyprix [options]
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, String> {
         let mut options = Self {
             state_dir: crate::layouts::default_dir(),
+            settings: crate::settings::default_path(),
             ..Self::default()
         };
         let mut args = compositor_evecho::init::unshell(args.into_iter().collect()).into_iter();
@@ -125,6 +143,7 @@ usage: hyprix [options]
                     );
                 }
                 "--dump" => options.dump = Some(PathBuf::from(value()?)),
+                "--settings" => options.settings = Some(PathBuf::from(value()?)),
                 "--instance" => options.instance = Some(value()?),
                 "--exec" => options.exec.push(value()?),
                 "--deadline" => {
@@ -251,6 +270,7 @@ mod tests {
             parse(&["-i"]).expect("valid"),
             Options {
                 state_dir: crate::layouts::default_dir(),
+                settings: crate::settings::default_path(),
                 ..Options::default()
             }
         );

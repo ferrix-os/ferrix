@@ -589,9 +589,12 @@ verdicts, with their conditions, are binding on the code that follows:
   core takes replies in any order: `chardev_reply` looks a request up by
   its id, so any outstanding request may be answered at any time, once.
   A second reply to an id, or a reply to an abandoned request, is
-  `BAD_STATE`. A signal abandons the client's request without telling the
-  driver: the client sees `EINTR`, not a restart, and the driver's later
-  reply is `BAD_STATE`, which the driver must tolerate. At most 256
+  `BAD_STATE`. A signal to a client whose request the driver has is told
+  to the driver by an `INTERRUPT` (HELLO version 2, 2026-10-24, ledger
+  3471): the driver answers a held wait `-ERESTARTSYS`, so the client's
+  handler runs and the call is made again, and lets running work finish,
+  whose answer the client waits for. A request still queued is abandoned,
+  `EINTR`, as before. At most 256
   requests are outstanding per control, deferred `GEM_WAIT` and
   `SYNCOBJ_WAIT` replies included, and the 257th is `EBUSY` to the client.
   So the driver's waits are deferred replies within that bound (§4.1), and
@@ -1024,10 +1027,14 @@ next. The box check is `tools/common/n150/intel-card-checkpoint.sh`.
   §2.1, the opens, mmaps and releases, and the chardev core's dmabuf events,
   answered as Linux v7.0's DRM core and i915 answer them on Gen12 (each
   function names the one it follows). Waits are deferred replies, at most 64
-  at once (C1). A signal abandons a program's request in the chardev core
-  without telling the driver, and libdrm calls again on `EINTR`, so a full
-  table first drops the waits whose requests are dead, which a one-byte
-  copy-in from each wait's argument finds (2026-10-21; a table full of
+  at once (C1). A signal is told to the driver (`Frontend::interrupt`),
+  which answers a held wait `-ERESTARTSYS` (2026-10-24: before, the core
+  abandoned the request without telling it, and an execbuffer it was
+  running had its copies refused after its batch was queued, which hung
+  Endfield's present thread and, since ec379d638, submitted the batch
+  twice). A request abandoned all the same -- its program ending -- leaves
+  its wait, so a full table first drops the waits whose requests are dead,
+  which a one-byte copy-in from each wait's argument finds (2026-10-21; a table full of
   abandoned waits had answered the next one `ENOMEM`, which Mesa reports as
   `VK_ERROR_UNKNOWN`). An execbuffer that reads or writes a shared object sets its
   dmabuf's slot (ledger 2360). No memory is allocated, so every table has a
@@ -1048,7 +1055,9 @@ next. The box check is `tools/common/n150/intel-card-checkpoint.sh`.
   too). A syncobj cannot be exported as an opaque descriptor, because the
   chardev core has no object for one; that would be a kernel interface, so
   it answers `EOPNOTSUPP` and says so once. A binding over one still in use
-  answers `EAGAIN` instead of sleeping. Userptr (K7), the legacy mmap,
+  holds the execbuffer, as i915 sleeps, until that one's request finishes,
+  then runs it again (until 2026-10-24 it answered `EAGAIN`, which Mesa
+  retried at once). Userptr (K7), the legacy mmap,
   pread, pwrite and perf answer `ENODEV`. Every unserved call is said once a
   boot, by name.
 * **`cargo xtask test-intel-uapi`** boots `intel-fake`

@@ -457,7 +457,7 @@ impl Platform for Real<'_> {
 
     fn frequency_report(&mut self, report: &FrequencyReport) {
         let sample = &report.sample;
-        crate::say(format_args!(
+        ferrix_rt::debug!(
             "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, RC6 {}.{} %, package {}.{:03} W, parks {}, boosts {}, waiters {}",
             sample.requested_mhz,
             if report.pinned {
@@ -479,7 +479,7 @@ impl Platform for Real<'_> {
             report.parks,
             report.boosts,
             report.waiters
-        ));
+        );
     }
 
     fn forcewake_release(&mut self, now_ns: u64) {
@@ -489,10 +489,11 @@ impl Platform for Real<'_> {
         forcewake.release(&mut self.bar, now_ns);
         if forcewake.failures != self.forcewake_said {
             self.forcewake_said = forcewake.failures;
-            crate::say(format_args!(
+            ferrix_rt::warn!(
                 "intel: forcewake: {} wakes failed so far, the last {:?}",
-                forcewake.failures, forcewake.last_error
-            ));
+                forcewake.failures,
+                forcewake.last_error
+            );
         }
     }
 

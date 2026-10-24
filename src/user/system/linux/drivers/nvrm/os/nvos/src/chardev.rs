@@ -183,6 +183,9 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                     // RM keeps no fences on them, so the import is refused
                     // as nvidia-drm's dmabufs did before Linux 6.0, and as
                     // Ferrix's did before K5 (`docs/INTEL-GPU.md` §5).
+                    // Sent only to a driver whose HELLO asked for it,
+                    // which this one's does not.
+                    Op::Interrupt => continue,
                     Op::DmabufImport => {
                         const ENOTTY: i32 = 25;
                         let _ = nvos_chardev_reply(request.id, -ENOTTY, 0);

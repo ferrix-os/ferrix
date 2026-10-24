@@ -45,7 +45,7 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 
 use crate::steps::{At, Steps};
-use crate::{Bar0, Step, Time, say};
+use crate::{Bar0, Step, Time};
 
 /// Pages in the pool: four context images and their rings, two default
 /// images, two status pages, the test pages and the page tables, with room.
@@ -373,9 +373,7 @@ pub(crate) fn run(
         ),
     )?;
     let pool = Pool::new(device).inspect_err(|_| {
-        say(format_args!(
-            "intel: M2: {POOL_PAGES} pages could not be pinned and mapped"
-        ));
+        ferrix_rt::err!("intel: M2: {POOL_PAGES} pages could not be pinned and mapped");
     })?;
     let window_start = (firmware
         .scanned
@@ -383,10 +381,12 @@ pub(crate) fn run(
         * 4096)
         .max(GGTT_WINDOW_FLOOR);
     let ggtt = GgttSpace::new(window_start, firmware.total);
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: M2: {POOL_PAGES} pages pinned; GGTT window {window_start:#x}..{:#x} (M1 read {} entries, last present {:?})",
-        firmware.total, firmware.scanned, firmware.last_present
-    ));
+        firmware.total,
+        firmware.scanned,
+        firmware.last_present
+    );
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
     let mut pool = pool;
     let vm = Ppgtt::create(&mut pool).map_err(|_| Step::Memory)?;
@@ -425,7 +425,7 @@ pub(crate) fn run(
     )?;
     m2.ppgtt_readback()?;
     m2.checkpoints(&mut rcs, &mut bcs, firmware.plane, steps)?;
-    say(format_args!(
+    ferrix_rt::info!(
         "intel: M2: checkpoint {CHECKPOINT} done: completions {} by interrupt, {} by the {} us poll; {} interrupt packets, {} with GT sources ({} ms)",
         m2.by_interrupt,
         m2.by_poll,
@@ -433,7 +433,7 @@ pub(crate) fn run(
         m2.packets,
         m2.gt_sources,
         m2.time.now_us().saturating_sub(started) / 1_000
-    ));
+    );
     Ok(())
 }
 
@@ -512,15 +512,15 @@ impl M2<'_> {
         let lost = match gt::intel_gt_init_hw(self.bar, &wal) {
             Ok(report) => report.lost_workarounds,
             Err(error) => {
-                say(format_args!("intel: M2: intel_gt_init_hw: {error:?}"));
+                ferrix_rt::err!("intel: M2: intel_gt_init_hw: {error:?}");
                 wal.len()
             }
         };
         let mocs_lost = mocs::intel_mocs_verify(self.bar).count();
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: PAT written, {pat_lost} of 8 lost; GT workarounds {} applied, {lost} lost; MOCS and L3CC written, {mocs_lost} lost",
             wal.len()
-        ));
+        );
         // The values themselves, against i915's (tgl_setup_private_ppat,
         // gen12_mocs_table): what the checkpoint script compares.
         let mut pat = [0_u32; 8];
@@ -530,7 +530,7 @@ impl M2<'_> {
         {
             *slot = self.bar.read32(reg.offset());
         }
-        say(format_args!("intel: M2: PAT read {pat:x?}"));
+        ferrix_rt::debug!("intel: M2: PAT read {pat:x?}");
         let mut global = [0_u32; 8];
         for (i, slot) in global.iter_mut().enumerate() {
             *slot = self.bar.read32(mocs::gen12_global_mocs(i as u32).offset());
@@ -539,9 +539,9 @@ impl M2<'_> {
         for (i, slot) in l3cc.iter_mut().enumerate() {
             *slot = self.bar.read32(mocs::gen9_lncfcmocs(i as u32).offset());
         }
-        say(format_args!(
+        ferrix_rt::debug!(
             "intel: M2: MOCS read GLOBAL_MOCS[0..8] {global:x?} LNCFCMOCS[0..4] {l3cc:x?}"
-        ));
+        );
         Ok(())
     }
 
@@ -561,16 +561,14 @@ impl M2<'_> {
             let va = AT + (n * PAGE) as u64;
             let translated = vm.translate(&mut self.pool, va + 0x123);
             wrong += u32::from(translated != Some(page + 0x123));
-            say(format_args!(
-                "intel: M2: PPGTT {va:#x} -> {translated:x?} (page {page:#x})"
-            ));
+            ferrix_rt::debug!("intel: M2: PPGTT {va:#x} -> {translated:x?} (page {page:#x})");
         }
         vm.clear_range(&mut self.pool, AT, 2 * PAGE as u64)
             .map_err(|_| Step::Memory)?;
         self.pool.give(obj.first, obj.pages);
         let after = self.pool.used.iter().filter(|&&used| used).count();
         let scratch = vm.translate(&mut self.pool, AT);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: PPGTT PML4 {:#x}, scratch {:#x} (PTE {:#x}, PDEs {:#x} {:#x} {:#x}): 2 pages mapped and walked back, {wrong} wrong; unmapped, the address reads {}, pool pages {before} -> {after}",
             vm.pml4,
             vm.scratch[0],
@@ -583,7 +581,7 @@ impl M2<'_> {
             } else {
                 "STILL MAPPED"
             }
-        ));
+        );
         if wrong == 0 && scratch.is_none() && before == after {
             Ok(())
         } else {
@@ -608,13 +606,11 @@ impl M2<'_> {
         match device.interrupt(0) {
             Ok(interrupt) => match interrupt.bind(&self.port, KEY_INTERRUPT) {
                 Ok(()) => self.interrupt = Some(interrupt),
-                Err(error) => say(format_args!(
+                Err(error) => ferrix_rt::warn!(
                     "intel: M2: the interrupt could not be bound ({error:?}); polling only"
-                )),
+                ),
             },
-            Err(error) => say(format_args!(
-                "intel: M2: no interrupt ({error:?}); polling only"
-            )),
+            Err(error) => ferrix_rt::warn!("intel: M2: no interrupt ({error:?}); polling only"),
         }
         Ok(())
     }
@@ -631,16 +627,14 @@ impl M2<'_> {
     /// Pages from the pool, bound into the GGTT window.
     fn object(&mut self, pages: usize) -> Result<Obj, Step> {
         let first = self.pool.take(pages).ok_or_else(|| {
-            say(format_args!(
-                "intel: M2: the pool has no {pages} pages in a row"
-            ));
+            ferrix_rt::err!("intel: M2: the pool has no {pages} pages in a row");
             Step::Memory
         })?;
         let range = self
             .ggtt
             .alloc((pages * PAGE) as u64, PAGE as u64)
             .map_err(|error| {
-                say(format_args!("intel: M2: GGTT window: {error:?}"));
+                ferrix_rt::err!("intel: M2: GGTT window: {error:?}");
                 Step::Memory
             })?;
         let obj = Obj {
@@ -659,10 +653,7 @@ impl M2<'_> {
             .bind(self.bar, range, pages)
             .map(|_| ())
             .map_err(|error| {
-                say(format_args!(
-                    "intel: M2: GGTT bind at {:#x}: {error:?}",
-                    range.start
-                ));
+                ferrix_rt::err!("intel: M2: GGTT bind at {:#x}: {error:?}", range.start);
                 Step::Memory
             })
     }
@@ -716,23 +707,23 @@ impl M2<'_> {
             let write = self
                 .pool
                 .read32(hwsp, ferrix_intel_xelp::execlists::ICL_HWS_CSB_WRITE_INDEX);
-            say(format_args!(
+            ferrix_rt::debug!(
                 "intel: M2: {} RING_MODE {mode:#010x} RING_EMR {emr:#010x} EL_STAT_HI {el_hi:#010x} EL_STAT_LO {el_lo:#010x} CSB_PTR {csb:#010x} HWSP CSB write {write}",
                 info.name
-            ));
+            );
         }
         self.bar.write32(
             ring_imr(info.mmio_base).offset(),
             irq::gen8_logical_ring_imr_enabled(),
         );
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: {} resumed, status page at GGTT {:#x}: engine workarounds {}, {lost} lost; whitelist {}, {nonpriv_lost} slots lost; ESR {:#x}",
             info.name,
             hwsp.ggtt,
             wal.len(),
             whitelist.len(),
             report.still_in_error
-        ));
+        );
         Ok(Engine {
             info,
             state,
@@ -765,10 +756,7 @@ impl M2<'_> {
             None => HwContext::new(engine.info, place, self.pool.dwords(image), None),
         }
         .map_err(|error| {
-            say(format_args!(
-                "intel: M2: {} context: {error:?}",
-                engine.info.name
-            ));
+            ferrix_rt::err!("intel: M2: {} context: {error:?}", engine.info.name);
             Step::Memory
         })?;
         Ok((context, image, ring))
@@ -787,12 +775,12 @@ impl M2<'_> {
         let seen = self.wait(engine, context, seqno, queued, REQUEST_PATIENCE_US);
         let took = self.time.now_us().saturating_sub(queued);
         if seen == Seen::Hung {
-            say(format_args!(
+            ferrix_rt::err!(
                 "intel: M2: {} seqno {seqno} not complete after {} ms: {}",
                 engine.info.name,
                 took / 1_000,
                 Stuck::read(self.bar, engine.info.mmio_base)
-            ));
+            );
             return Err(Step::Hung);
         }
         // i915_request_retire: the ring is free up to the saved head.
@@ -814,17 +802,14 @@ impl M2<'_> {
             return Err(Step::Banned);
         }
         let (seqno, built) = context.emit(self.pool.dwords(ring), payload).map_err(|_| {
-            say(format_args!(
-                "intel: M2: {}: no room in the ring",
-                engine.info.name
-            ));
+            ferrix_rt::warn!("intel: M2: {}: no room in the ring", engine.info.name);
             Step::Memory
         })?;
         if !engine.state.can_submit() {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: M2: {}: a submission is still pending",
                 engine.info.name
-            ));
+            );
             return Err(Step::Submit);
         }
         let desc = {
@@ -867,7 +852,7 @@ impl M2<'_> {
             if let Err(error) = woke
                 && error != Error::TimedOut
             {
-                say(format_args!("intel: M2: port wait: {error:?}"));
+                ferrix_rt::warn!("intel: M2: port wait: {error:?}");
             }
             let report = engine.state.process_csb(
                 self.bar,
@@ -879,10 +864,10 @@ impl M2<'_> {
                 |_| {},
             );
             if let Some(csb) = report.error {
-                say(format_args!(
+                ferrix_rt::err!(
                     "intel: M2: {}: status buffer entry {csb:#018x} makes no sense",
                     engine.info.name
-                ));
+                );
             }
             if context.is_complete(
                 &mut Hwsp {
@@ -924,12 +909,12 @@ impl M2<'_> {
         let (to, from) = self.pool.two(default, image).ok_or(Step::Memory)?;
         lrc::record_default_state(from, to, table).map_err(|_| Step::Memory)?;
         engine.default = Some(default);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: {} default image recorded: {} context workarounds in its first request, done in {took} us ({seen:?}); saved RING_HEAD {:#x}",
             engine.info.name,
             wal.len(),
             self.pool.read32(image, PAGE_DWORDS + lrc::ctx::RING_HEAD)
-        ));
+        );
         Ok(())
     }
 
@@ -957,16 +942,16 @@ impl M2<'_> {
         let mut count = 0;
         for (reg, value) in lost {
             count += 1;
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: M2: context workaround lost: {:#x} reads {value:#010x}",
                 reg.offset()
-            ));
+            );
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: {} context workarounds read back by {} SRMs from a context of the default image: {count} lost ({took} us, {seen:?})",
             wal.len(),
             n / 4
-        ));
+        );
         Ok(())
     }
 
@@ -989,7 +974,7 @@ impl M2<'_> {
             Payload::Commands(&commands),
         )?;
         let read = self.pool.read32(target, 0x10);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: MI_STORE_DWORD_IMM on {} into the pinned page at GGTT {:#x} (device {:#x}): read {read:#010x}, {} ({took} us, {seen:?})",
             engine.info.name,
             target.ggtt + 0x40,
@@ -999,7 +984,7 @@ impl M2<'_> {
             } else {
                 "NOT what was written"
             }
-        ));
+        );
         if read == VALUE {
             Ok(())
         } else {
@@ -1055,11 +1040,11 @@ impl M2<'_> {
             src_hash = fnv1a(src_hash, s);
             dst_hash = fnv1a(dst_hash, d);
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: XY_FAST_COPY_BLT on {}: 8 KiB from PPGTT {SRC:#x} to {DST:#x}, {differ} of {} dwords differ, FNV-1a source {src_hash:#018x} copy {dst_hash:#018x} ({took} us, {seen:?})",
             engine.info.name,
             2 * PAGE_DWORDS
-        ));
+        );
         if differ == 0 {
             Ok(())
         } else {
@@ -1093,7 +1078,7 @@ impl M2<'_> {
             },
         )?;
         let read = self.pool.read32(target, 0x20);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: a batch from the PPGTT at {BATCH:#x} on {}: its store read {read:#010x}, {} ({took} us, {seen:?})",
             engine.info.name,
             if read == VALUE {
@@ -1101,7 +1086,7 @@ impl M2<'_> {
             } else {
                 "NOT what was written"
             }
-        ));
+        );
         if read == VALUE {
             Ok(())
         } else {
@@ -1137,7 +1122,7 @@ impl M2<'_> {
             ring_imr(engine.info.mmio_base).offset(),
             irq::gen8_logical_ring_imr_enabled(),
         );
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: {} reset in {} us: stop {:x?}, pending forcewakes {:#x}, ready {:x?}, GDRST {:x?}; {cancelled} port(s) cancelled; ESR after resume {:#x}",
             engine.info.name,
             self.time.now_us().saturating_sub(started),
@@ -1146,7 +1131,7 @@ impl M2<'_> {
             report.ready,
             report.reset,
             resumed.still_in_error
-        ));
+        );
         if !report.is_reset() {
             return Err(Step::Hung);
         }
@@ -1185,17 +1170,17 @@ impl M2<'_> {
         let seen = self.wait(engine, &context, seqno, queued, HANG_PATIENCE_US);
         let stuck = Stuck::read(self.bar, engine.info.mmio_base);
         if seen != Seen::Hung {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: M2: the spinner on {} completed ({seen:?}): no hang to reset",
                 engine.info.name
-            ));
+            );
             return Err(Step::Wrong);
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: the spinner on {} hung as meant after {} ms: {stuck}",
             engine.info.name,
             HANG_PATIENCE_US / 1_000
-        ));
+        );
 
         self.reset_engine(engine)?;
 
@@ -1209,7 +1194,7 @@ impl M2<'_> {
             return Err(Step::Submit);
         }
         let replay = self.wait(engine, &context, seqno, queued, REQUEST_PATIENCE_US);
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: the hung request replayed with its batch skipped: seqno {seqno} {} ({replay:?}); context banned {}",
             if replay == Seen::Hung {
                 "NOT written"
@@ -1217,7 +1202,7 @@ impl M2<'_> {
                 "written"
             },
             context.banned
-        ));
+        );
         if replay == Seen::Hung {
             return Err(Step::Hung);
         }
@@ -1231,14 +1216,14 @@ impl M2<'_> {
                 flags: 0,
             },
         );
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: a later request on the banned context: {}",
             if matches!(refused, Err(Step::Banned)) {
                 "refused"
             } else {
                 "NOT refused"
             }
-        ));
+        );
         if !matches!(refused, Err(Step::Banned)) {
             return Err(Step::Wrong);
         }
@@ -1259,16 +1244,16 @@ impl M2<'_> {
         const VA_SRC: u64 = 0x50_0000_0000;
         const VA_BACK: u64 = 0x60_0000_0000;
         let Some(plane) = plane else {
-            say(format_args!("intel: M2: no lit plane to blit onto"));
+            ferrix_rt::info!("intel: M2: no lit plane to blit onto");
             return Ok(());
         };
         if !plane.linear_xrgb8888() || plane.width < W + 32 || plane.height < H + 32 {
-            say(format_args!(
+            ferrix_rt::warn!(
                 "intel: M2: the lit plane is not linear XRGB8888 of at least {}x{} (ctl {:#010x}); no screen blit",
                 W + 32,
                 H + 32,
                 plane.ctl
-            ));
+            );
             return Ok(());
         }
         let pitch = plane.pitch_bytes();
@@ -1289,9 +1274,9 @@ impl M2<'_> {
             let Some(device) =
                 ferrix_intel_xelp::gtt::gen8_ggtt_pte_decode(self.bar.read_pte(page))
             else {
-                say(format_args!(
+                ferrix_rt::warn!(
                     "intel: M2: the plane's GGTT entry {page:#x} is not present; no screen blit"
-                ));
+                );
                 return Ok(());
             };
             vm.insert_entry(&mut self.pool, device, VA_FB + page * PAGE as u64, 3)
@@ -1339,14 +1324,14 @@ impl M2<'_> {
             src_hash = fnv1a(src_hash, s & 0x00ff_ffff);
             back_hash = fnv1a(back_hash, b & 0x00ff_ffff);
         }
-        say(format_args!(
+        ferrix_rt::info!(
             "intel: M2: screen blit on {}: {W}x{H} bars at ({x}, {y}) of the lit {}x{} plane (GGTT {:#x}, pitch {pitch}), read back by a second blit: {differ} of {} pixels differ, FNV-1a pattern {src_hash:#018x} screen {back_hash:#018x} ({took} us, {seen:?}); it stays on the screen",
             engine.info.name,
             plane.width,
             plane.height,
             plane.ggtt,
             W * H
-        ));
+        );
         if differ == 0 {
             Ok(())
         } else {

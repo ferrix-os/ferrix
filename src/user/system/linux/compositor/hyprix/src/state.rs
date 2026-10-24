@@ -253,6 +253,13 @@ pub fn run_with(options: &Options, report: &mut dyn FnMut(&str)) -> Result<Strin
     };
     let mut compositor = Compositor::new(options, &rolling, &mut report)?;
     while compositor.pass()? {}
+    compositor.wallpapers.end_now();
+    run_at_exit(
+        &compositor.config,
+        compositor.listener.path(),
+        options,
+        compositor.report,
+    );
     Ok(compositor.finish())
 }
 
@@ -302,6 +309,9 @@ struct Compositor<'r> {
     lock: Option<Lock>,
     /// Whether a lock goes on `authd`'s grant, and the channel it comes by.
     grants: crate::grants::Grants,
+    /// lode's crash screenshots: this compositor as seat0's provider, when
+    /// `sessiond` gave it the session's token (`docs/LOGGING.md` §19).
+    lodeshot: crate::lodeshot::Provider,
     /// `misc:lock_grace`, capped: how long a fresh lock's holder may unlock
     /// with no grant.
     lock_grace: Duration,
@@ -432,6 +442,8 @@ struct Compositor<'r> {
     /// What ends among the programs started here -- and, as pid 1, among
     /// everybody's orphans -- is reaped on every pass, and its end wakes one.
     children: Option<crate::children::Children>,
+    /// The wallpaper client the `wallpaper =` lines ask for.
+    wallpapers: crate::wallpaper::Wallpapers,
 }
 
 /// What the compositor settled on as it started, which nothing changes
@@ -450,6 +462,14 @@ struct Fixed {
     display: String,
     /// The keymap every client is handed, when one could be made.
     keymap: Option<Keymap>,
+    /// The text `keymap` was made from: a reload or a keyword that leaves
+    /// it as it was sends nobody a new one.
+    keymap_text: String,
+    /// Keymaps a change replaced. Their descriptors went out by number in
+    /// queued `wl_keyboard.keymap` events, so they stay open until those
+    /// have surely been written; the last few are kept, a handful of
+    /// small sealed files.
+    retired_keymaps: Vec<Keymap>,
     /// `input:repeat_rate` and `input:repeat_delay`.
     repeat: (i32, i32),
     /// `input:follow_mouse`.
@@ -561,7 +581,8 @@ impl<'r> Compositor<'r> {
             .headless
             .is_none()
             .then(|| Instant::now() + RESCAN_EARLY);
-        let keymap = make_keymap(&config, report);
+        let keymap_text = keymap_text(&config, report);
+        let keymap = make_keymap(&keymap_text, report);
         let mut seat = Seat::new(&config, desktop.2, desktop.3);
         seat.place_at(desktop.0, desktop.1);
         let animations = crate::animate::Animations::new(&config);
@@ -574,10 +595,7 @@ impl<'r> Compositor<'r> {
         for reason in animations.diagnostics() {
             report(&format!("hyprix: an animation line was dropped: {reason}"));
         }
-        let repeat = (
-            i32::try_from(config.int("input:repeat_rate").unwrap_or(25)).unwrap_or(25),
-            i32::try_from(config.int("input:repeat_delay").unwrap_or(600)).unwrap_or(600),
-        );
+        let repeat = repeat_of(&config);
         let follow_mouse = config.int("input:follow_mouse").unwrap_or(1) != 0;
         let planes = crate::plane::wanted(config.int("cursor:no_hardware_cursors").unwrap_or(2));
         let focus_on_activate = config.int("misc:focus_on_activate").unwrap_or(0) != 0;
@@ -599,6 +617,8 @@ impl<'r> Compositor<'r> {
         let (control, events) = bind_control(options)?;
         let plugins = crate::plugins::Plugins::new();
         start_programs(&config, options, &listener, report);
+        let mut wallpapers = crate::wallpaper::Wallpapers::default();
+        let _ = wallpapers.follow(&config, options, listener.path(), report);
 
         let started = Instant::now();
         let deadline = options.deadline.map(Duration::from_millis);
@@ -612,6 +632,8 @@ impl<'r> Compositor<'r> {
                 layer_rules,
                 display,
                 keymap,
+                keymap_text,
+                retired_keymaps: Vec::new(),
                 repeat,
                 follow_mouse,
                 planes,
@@ -647,6 +669,7 @@ impl<'r> Compositor<'r> {
             shots: Vec::new(),
             lock: None,
             grants: crate::grants::Grants::adopted(),
+            lodeshot: crate::lodeshot::Provider::new(options.lode.clone()),
             lock_grace,
             method: None,
             listener,
@@ -693,6 +716,7 @@ impl<'r> Compositor<'r> {
             injected: Vec::new(),
             ready: None,
             children,
+            wallpapers,
         })
     }
 
@@ -705,6 +729,7 @@ impl<'r> Compositor<'r> {
         if let Some(children) = self.children.as_ref() {
             let _ = children.reap();
         }
+        self.wallpapers.retire(Instant::now());
         if self.stopping() {
             return Ok(false);
         }
@@ -755,6 +780,7 @@ impl<'r> Compositor<'r> {
         changed |= self.carry_asks(asks, now);
         self.after_clients();
         changed |= self.carry_grants();
+        self.carry_lodeshot();
         changed |= self.run_asked(asked, &placements, now);
         changed |= self.drop_gone();
 
@@ -1077,7 +1103,12 @@ impl<'r> Compositor<'r> {
         if !whole.is_empty() {
             let snapshot = self.snapshot();
             for pending in whole {
-                match crate::control::serve(pending, &snapshot, &mut self.plugins) {
+                match crate::control::serve(
+                    pending,
+                    &snapshot,
+                    &mut self.plugins,
+                    self.options.settings.as_deref(),
+                ) {
                     Ok(todo) => asked.extend(todo),
                     Err(_) => {
                         // A client that went away mid-request is not the
@@ -1458,6 +1489,33 @@ impl<'r> Compositor<'r> {
         changed
     }
 
+    /// lode's crash screenshots: connect when it is time, and answer each
+    /// capture with the first screen as last shown -- or decline it while
+    /// the session is locked.
+    fn carry_lodeshot(&mut self) {
+        self.lodeshot.connect("seat0", self.report);
+        let woke = self
+            .lodeshot
+            .raw_fd()
+            .is_some_and(|fd| self.ready.as_ref().is_none_or(|ready| ready.contains(&fd)));
+        if !woke {
+            return;
+        }
+        for request in self.lodeshot.read(self.report) {
+            if self.lock.is_some() {
+                self.lodeshot.answer(request, Err("the session is locked"));
+            } else if let Some(screen) = self.screens.first() {
+                self.lodeshot.answer(request, Ok(screen_pixels(screen)));
+                (self.report)(&format!(
+                    "hyprix: sent lode a screenshot for record {}",
+                    request.seqnum
+                ));
+            } else {
+                self.lodeshot.answer(request, Err("there is no screen"));
+            }
+        }
+    }
+
     /// The lock channel: what `sessiond` said, a waiting unlock given up on,
     /// and the lines owed it. Gives whether the screen changed.
     fn carry_grants(&mut self) -> bool {
@@ -1550,16 +1608,22 @@ impl<'r> Compositor<'r> {
     /// and says why.
     ///
     /// The window and layer rules stay those the windows were mapped with,
-    /// and `exec-once` is not run again, as in Hyprland.
+    /// and `exec-once` is not run again, as in Hyprland; `exec` is.
     fn reload(&mut self) -> bool {
         match read_config(self.options) {
             Ok(config) => {
                 self.settings = Settings::from_config(&config);
                 self.style = Style::from_config(&config);
                 let _ = self.state.set_settings(self.settings);
-                self.animations = crate::animate::Animations::new(&config);
                 self.config = config;
+                self.rebuild_animations();
                 (self.report)("hyprix: reloaded the configuration");
+                run_exec(
+                    &self.config,
+                    self.listener.path(),
+                    self.options,
+                    self.report,
+                );
                 true
             }
             Err(why) => {
@@ -1567,6 +1631,80 @@ impl<'r> Compositor<'r> {
                 false
             }
         }
+    }
+
+    /// The animations made again from the configuration, and what
+    /// `hyprctl animations` and `configerrors` read with them.
+    fn rebuild_animations(&mut self) {
+        self.animations = crate::animate::Animations::new(&self.config);
+        self.fixed.said.animations = self.animations.described();
+        self.fixed.said.beziers = self.animations.beziers();
+        self.fixed.said.errors = self.animations.diagnostics().to_vec();
+        for reason in self.animations.diagnostics() {
+            (self.report)(&format!("hyprix: an animation line was dropped: {reason}"));
+        }
+    }
+
+    /// What the seat and the clients' keyboards take from the
+    /// configuration, put in force after `hyprctl reload` or `hyprctl
+    /// keyword`: key repeat, told to every keyboard at once; the keymap,
+    /// when `binds_too` or `keymap_too` asked and its text changed, sent to
+    /// every keyboard; the binds, resolved again against it; and the
+    /// switches read with them -- `input:follow_mouse`,
+    /// `misc:focus_on_activate`, `misc:lock_grace`. Gives the modifiers to
+    /// send when the keymap changed, since a new keymap starts its client's
+    /// state afresh and the layout group may have moved.
+    fn refresh_input(&mut self, binds_too: bool, keymap_too: bool) -> Option<crate::seat::Action> {
+        let repeat = repeat_of(&self.config);
+        if repeat != self.fixed.repeat {
+            self.fixed.repeat = repeat;
+            for slot in &mut self.slots {
+                slot.client_mut().change_repeat_info(repeat.0, repeat.1);
+            }
+            (self.report)(&format!(
+                "hyprix: key repeat {} a second after {} ms",
+                repeat.0, repeat.1
+            ));
+        }
+        self.fixed.follow_mouse = self.config.int("input:follow_mouse").unwrap_or(1) != 0;
+        self.fixed.focus_on_activate = self.config.int("misc:focus_on_activate").unwrap_or(0) != 0;
+        self.lock_grace = lock_grace(self.config.int("misc:lock_grace"));
+        let mut new_keymap = false;
+        if binds_too || keymap_too {
+            let text = keymap_text(&self.config, self.report);
+            if text != self.fixed.keymap_text {
+                let keymap = make_keymap(&text, self.report);
+                self.fixed.keymap_text = text;
+                let handed = keymap.as_ref().map(Keymap::handed);
+                for slot in &mut self.slots {
+                    slot.client_mut().change_keymap(handed);
+                }
+                if let Some(old) = std::mem::replace(&mut self.fixed.keymap, keymap) {
+                    self.fixed.retired_keymaps.push(old);
+                }
+                if self.fixed.retired_keymaps.len() > RETIRED_KEYMAPS {
+                    let _ = self.fixed.retired_keymaps.remove(0);
+                }
+                new_keymap = true;
+                (self.report)(&format!(
+                    "hyprix: keymap {}",
+                    crate::seat::chosen_layouts(&self.config)
+                        .iter()
+                        .map(|(layout, _)| layout.described())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
+        }
+        if binds_too || new_keymap {
+            self.seat.set_binds(&self.config);
+            let (live, unresolved) = self.seat.binds();
+            for reason in unresolved {
+                (self.report)(&format!("hyprix: a bind was dropped: {reason}"));
+            }
+            (self.report)(&format!("hyprix: {live} binds"));
+        }
+        new_keymap.then(|| crate::seat::Action::Modifiers(self.seat.modifiers()))
     }
 
     /// What `hyprctl` and the plugins asked for this pass: dispatchers and
@@ -1601,6 +1739,17 @@ impl<'r> Compositor<'r> {
                 let read = self.reload();
                 changed |= read;
                 monitors |= read;
+                if read && let Some(action) = self.refresh_input(true, true) {
+                    pending.push(action);
+                }
+                if read {
+                    let _ = self.wallpapers.follow(
+                        &self.config,
+                        self.options,
+                        self.listener.path(),
+                        self.report,
+                    );
+                }
                 continue;
             }
             // `hyprctl keyword monitor <rule>`: a line added to the file's,
@@ -1611,9 +1760,27 @@ impl<'r> Compositor<'r> {
             );
             monitors |= monitor_keyword;
             arranged_by_hand |= monitor_keyword;
+            // `animations:enabled`, and the `animation` and `bezier`
+            // lines the curves are made from.
             let animated = matches!(
                 &reply,
-                compositor_ipc::Reply::Keyword { name, .. } if name.starts_with("animations")
+                compositor_ipc::Reply::Keyword { name, .. }
+                    if name.starts_with("animations") || name == "animation" || name == "bezier"
+            );
+            // What the seat takes from the configuration: the binds, and
+            // the keymap they are resolved against.
+            let (binds, keymap) = match &reply {
+                compositor_ipc::Reply::Keyword { name, .. } => (
+                    name.starts_with("bind") && !name.contains(':') || name == "unbind",
+                    name == "input:kb_layout" || name == "input:kb_variant",
+                ),
+                compositor_ipc::Reply::Reload => (true, true),
+                _ => (false, false),
+            };
+            let keyword = matches!(&reply, compositor_ipc::Reply::Keyword { .. });
+            let wallpaper = matches!(
+                &reply,
+                compositor_ipc::Reply::Keyword { name, .. } if name == "wallpaper"
             );
             let mut around = crate::act::Around {
                 slots: &mut self.slots,
@@ -1654,7 +1821,18 @@ impl<'r> Compositor<'r> {
             // `hyprctl keyword animations:enabled false` and the curves:
             // the animations are made from the configuration, so again.
             if animated {
-                self.animations = crate::animate::Animations::new(&self.config);
+                self.rebuild_animations();
+            }
+            if keyword && let Some(action) = self.refresh_input(binds, keymap) {
+                pending.push(action);
+            }
+            if wallpaper {
+                changed |= self.wallpapers.follow(
+                    &self.config,
+                    self.options,
+                    self.listener.path(),
+                    self.report,
+                );
             }
         }
         // `forceidle` changed how long the seat has been idle after the
@@ -2421,6 +2599,9 @@ impl<'r> Compositor<'r> {
             injected_wait,
             request_wait,
             unlock_wait,
+            self.wallpapers
+                .next_retirement()
+                .map(|at| at.saturating_duration_since(Instant::now())),
         ]
         .into_iter()
         .flatten()
@@ -2475,6 +2656,7 @@ impl<'r> Compositor<'r> {
                 .and_then(crate::children::Children::raw_fd),
         );
         fds.extend(self.grants.raw_fd());
+        fds.extend(self.lodeshot.raw_fd());
         // A client whose socket was full has bytes waiting for it; the loop
         // wakes when it can take them, not only when it next asks something.
         let writable: Vec<i32> = self
@@ -2556,12 +2738,35 @@ fn open_devices(options: &Options, report: &mut dyn FnMut(&str)) -> Devices {
     }
 }
 
+/// How many replaced keymaps stay open (`Fixed::retired_keymaps`).
+const RETIRED_KEYMAPS: usize = 8;
+
+/// `input:repeat_rate` and `input:repeat_delay`: keys a second, and
+/// milliseconds before the first repeat.
+fn repeat_of(config: &Config) -> (i32, i32) {
+    (
+        i32::try_from(config.int("input:repeat_rate").unwrap_or(25)).unwrap_or(25),
+        i32::try_from(config.int("input:repeat_delay").unwrap_or(600)).unwrap_or(600),
+    )
+}
+
 /// The keymap every client is handed.
 ///
 /// It is made whether or not there is a keyboard: a client that binds one
 /// on a seat that announced none is already refused, and a machine whose
 /// keyboard arrives later should not need a new file.
-fn make_keymap(config: &Config, report: &mut dyn FnMut(&str)) -> Option<Keymap> {
+fn make_keymap(text: &str, report: &mut dyn FnMut(&str)) -> Option<Keymap> {
+    match Keymap::new(text) {
+        Ok(keymap) => Some(keymap),
+        Err(error) => {
+            report(&format!("hyprix: no keymap: {error}"));
+            None
+        }
+    }
+}
+
+/// The text of the keymap `input:kb_layout` and `input:kb_variant` ask for.
+fn keymap_text(config: &Config, report: &mut dyn FnMut(&str)) -> String {
     // `input:kb_layout` and `input:kb_variant`, and a sentence when the
     // configuration asked for a layout this compositor does not ship: a
     // person whose keyboard suddenly types English is owed a reason.
@@ -2580,14 +2785,7 @@ fn make_keymap(config: &Config, report: &mut dyn FnMut(&str)) -> Option<Keymap> 
     // hands Hyprland for `kb_layout = de,us` and what lets a switch send
     // only a new group rather than a new keymap.
     let layouts = asked.iter().map(|(layout, _)| *layout).collect::<Vec<_>>();
-    let text = compositor_xkb::merged(&layouts);
-    match Keymap::new(&text) {
-        Ok(keymap) => Some(keymap),
-        Err(error) => {
-            report(&format!("hyprix: no keymap: {error}"));
-            None
-        }
-    }
+    compositor_xkb::merged(&layouts)
 }
 
 /// The layout, with a monitor for every screen and the workspace rules in.
@@ -2716,6 +2914,71 @@ fn start_programs(
                 }
             }
         }
+    }
+    // `exec`: at start, and again on every reload.
+    run_exec(config, listener.path(), options, report);
+}
+
+/// `exec = <command>` lines: started at start and on every `hyprctl
+/// reload`, as Hyprland's are, so each reload starts them again.
+fn run_exec(
+    config: &Config,
+    socket: &std::path::Path,
+    options: &Options,
+    report: &mut dyn FnMut(&str),
+) {
+    for command in &config.exec {
+        match start(command, socket, options.instance.as_deref()) {
+            Ok(pid) => report(&format!("hyprix: exec {command} started as {pid}")),
+            Err(error) => {
+                if let Some(line) = not_started(command, &error) {
+                    report(&line);
+                }
+            }
+        }
+    }
+}
+
+/// How long the compositor waits for its `exec-shutdown` programs before
+/// it ends anyway.
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+
+/// `exec-shutdown = <command>` lines, as the compositor ends: each is
+/// started, and the compositor waits for them all to end, up to
+/// [`SHUTDOWN_WAIT`], so that a program saving something on the way out
+/// is not cut short by the session going away under it.
+fn run_at_exit(
+    config: &Config,
+    socket: &std::path::Path,
+    options: &Options,
+    report: &mut dyn FnMut(&str),
+) {
+    let mut running = Vec::new();
+    for command in &config.exec_shutdown {
+        match start(command, socket, options.instance.as_deref()) {
+            Ok(pid) => {
+                report(&format!("hyprix: exec-shutdown {command} started as {pid}"));
+                running.push(pid);
+            }
+            Err(error) => {
+                if let Some(line) = not_started(command, &error) {
+                    report(&line);
+                }
+            }
+        }
+    }
+    let until = Instant::now() + SHUTDOWN_WAIT;
+    while !running.is_empty() && Instant::now() < until {
+        running.retain(|&pid| !crate::children::ended(pid));
+        if !running.is_empty() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    if !running.is_empty() {
+        report(&format!(
+            "hyprix: {} exec-shutdown programs still running; ending anyway",
+            running.len()
+        ));
     }
 }
 
@@ -3255,7 +3518,13 @@ fn frames_done(
     // a client deriving its vsync from these times -- Chrome's BeginFrames,
     // a video's cadence -- sees one refresh after another, not the loop's
     // jitter.
+    // On a grid set by the screen's blank (`crate::pace`) the time is the
+    // blank to come, which the frame is drawn for.
     let at = match due {
+        Some(due) if due > Instant::now() => after(
+            now_monotonic(),
+            due.saturating_duration_since(Instant::now()),
+        ),
         Some(due) => before(
             now_monotonic(),
             Instant::now().saturating_duration_since(due),
@@ -4904,6 +5173,28 @@ fn shot_area(screen: &Screen, region: Option<ServerRect>) -> Option<Rect> {
     (w > 0 && h > 0).then(|| Rect::new(i64::from(x), i64::from(y), i64::from(w), i64::from(h)))
 }
 
+/// A screen as last shown, for lode: its width, height, row stride and
+/// XRGB bytes -- the frame the GPU or a client's buffer gave, or the
+/// software canvas.
+fn screen_pixels(screen: &Screen) -> (u32, u32, usize, &[u8]) {
+    if screen.gpu.is_some() || screen.stale {
+        let (width, height) = screen.backend.size();
+        (
+            width,
+            height,
+            screen.backend.drawn_stride() as usize,
+            screen.backend.drawn(),
+        )
+    } else {
+        (
+            screen.canvas.width(),
+            screen.canvas.height(),
+            screen.canvas.width() as usize * 4,
+            screen.canvas.data(),
+        )
+    }
+}
+
 /// Write the screen into the client's buffer, row by row.
 ///
 /// Gives whether it was written. The buffer has to be the size the
@@ -5137,6 +5428,16 @@ fn before((seconds, nanos): (u64, u32), by: Duration) -> (u64, u32) {
     let total = total.saturating_sub(by.as_nanos());
     (
         u64::try_from(total / 1_000_000_000).unwrap_or(0),
+        u32::try_from(total % 1_000_000_000).unwrap_or(0),
+    )
+}
+
+/// `(seconds, nanos)` moved on by `by`.
+fn after((seconds, nanos): (u64, u32), by: Duration) -> (u64, u32) {
+    let total = u128::from(seconds) * 1_000_000_000 + u128::from(nanos);
+    let total = total.saturating_add(by.as_nanos());
+    (
+        u64::try_from(total / 1_000_000_000).unwrap_or(u64::MAX),
         u32::try_from(total % 1_000_000_000).unwrap_or(0),
     )
 }
@@ -7471,20 +7772,68 @@ pub(crate) fn not_started(command: &str, why: &crate::command::NotStarted) -> Op
 
 /// Read the configuration, or take Hyprland's defaults, and remember its
 /// `env =` pairs for [`start`].
+/// The file system's `source`, remembering what it read: whether the
+/// configuration sourced the Settings app's file itself.
+struct Sourced {
+    files: compositor_config::FsSources,
+    read: Vec<PathBuf>,
+}
+
+impl Sourced {
+    /// Whether `path` was among the files read.
+    fn read(&self, path: &std::path::Path) -> bool {
+        let wanted = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        self.read
+            .iter()
+            .any(|read| std::fs::canonicalize(read).unwrap_or_else(|_| read.clone()) == wanted)
+    }
+}
+
+impl compositor_config::Sources for Sourced {
+    fn resolve(
+        &mut self,
+        spec: &str,
+        from: &str,
+    ) -> Result<Vec<compositor_config::SourceFile>, String> {
+        let files = self.files.resolve(spec, from)?;
+        self.read
+            .extend(files.iter().map(|file| PathBuf::from(&file.name)));
+        Ok(files)
+    }
+}
+
 fn read_config(options: &Options) -> Result<Config, String> {
-    let Some(path) = options.config.as_ref() else {
-        return Ok(Config::default());
-    };
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| format!("reading {}: {error}", path.display()))?;
-    let name = path.to_string_lossy().into_owned();
     // `source =` lines are read as Hyprland reads them, `~` the home this
     // compositor runs with: the `--everything` session's configuration
     // sources the user's own, kept in their home.
-    let mut sources = compositor_config::FsSources {
-        home: std::env::var_os("HOME").map(PathBuf::from),
+    let mut sources = Sourced {
+        files: compositor_config::FsSources {
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        },
+        read: Vec::new(),
     };
-    let config = compositor_config::parse(&name, &text, &mut sources).config;
+    let config = match options.config.as_ref() {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|error| format!("reading {}: {error}", path.display()))?;
+            let name = path.to_string_lossy().into_owned();
+            compositor_config::parse(&name, &text, &mut sources).config
+        }
+        None => Config::default(),
+    };
+    // The Settings app's file, after everything else -- unless a `source`
+    // line read it already, where that line put it -- and nothing at all
+    // when there is none yet.
+    let config = match options.settings.as_ref() {
+        Some(settings) if !sources.read(settings) => match std::fs::read_to_string(settings) {
+            Ok(text) => {
+                let name = settings.to_string_lossy().into_owned();
+                compositor_config::parse_over(config, &name, &text, &mut sources).config
+            }
+            Err(_) => config,
+        },
+        _ => config,
+    };
     if let Ok(mut env) = CHILD_ENV.lock() {
         env.clone_from(&config.env);
     }
@@ -7545,6 +7894,15 @@ pub(crate) fn start(
     // The command's own `NAME=value` words, after those: in `sh` they are
     // this one program's, over whatever it would otherwise inherit.
     let _ = child.envs(assigned);
+    // Its output to the log under its own name (`events.conf`'s
+    // session-streams), and on to hyprix's own as before.
+    if let Some(stream) =
+        crate::lode_events::stream(&crate::lode_events::identifier(program, arguments))
+        && let Ok(copy) = stream.try_clone()
+    {
+        let _ = child.stdout(std::process::Stdio::from(stream));
+        let _ = child.stderr(std::process::Stdio::from(copy));
+    }
     let pid = child.spawn().map(|child| child.id()).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             crate::command::NotStarted::Missing {

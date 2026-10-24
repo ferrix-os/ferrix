@@ -548,6 +548,10 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
             content: Content::Link("svc".to_owned()),
         });
     }
+    // lode's reader, under its own name and journalctl's (docs/LOGGING.md),
+    // and what the image was built from, which lode's boot record says.
+    files.extend(crate::lode::links());
+    files.push(crate::lode::image_file());
     let units = paths::workspace_root().join(UNITS);
     let mut names: Vec<PathBuf> = std::fs::read_dir(&units)
         .map_err(|error| Error::new(format!("reading {}: {error}", units.display())))?
@@ -805,6 +809,16 @@ pub(crate) fn desktop_files(
         "/lib/ferrix/units/graphical.target",
     ));
     files.extend(console_getty(session_user.is_some(), shell));
+    // The desktop keeps its log (docs/LOGGING.md): lode with basic.target,
+    // crash and app-error screenshots on (§19, the customer, 2026-10-23),
+    // and the event kinds at their defaults, written out to be changed.
+    files.push(crate::lode::enabled());
+    files.push(crate::lode::crashd_enabled());
+    files.extend(crate::lode::desktop_settings());
+    // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
+    // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is
+    // enabled (`lode-receive pair` says how).
+    files.extend(crate::lode_net::carried(arch)?);
     files.extend(session_files(bus, data_nosuid));
     if let Some(pulsed) = pulsed {
         files.push(File {

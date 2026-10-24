@@ -1,0 +1,11 @@
+# The settings writer's services area (docs/SETTINGS-WRITER.md §5): settingsd,
+# root, names the person who asked; a member of wheel, with their own
+# password. An administrator may drop the prompt with a drop-in saying
+# Methods=none, which authd honours for settings.* services alone.
+[Service]
+Description=Switch a service at boot in Settings
+Account=any
+Callers=root
+TargetGroup=wheel
+Methods=password
+FailDelaySec=2

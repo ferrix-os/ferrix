@@ -259,6 +259,10 @@ pub struct UnitSection {
     pub refuse_manual_stop: bool,
     /// `StopWhenUnneeded=`.
     pub stop_when_unneeded: bool,
+    /// `StartableBy=` (Ferrix's): users, by name or number, who may `svc
+    /// start` the unit without being root -- lode's alerts
+    /// (`docs/LOGGING.md` §7.4).
+    pub startable_by: Vec<String>,
 }
 
 impl Default for UnitSection {
@@ -276,6 +280,7 @@ impl Default for UnitSection {
             refuse_manual_start: false,
             refuse_manual_stop: false,
             stop_when_unneeded: false,
+            startable_by: Vec::new(),
         }
     }
 }
@@ -356,7 +361,7 @@ impl UnitSection {
 }
 
 /// The `[Unit]` keys that are neither dependencies nor conditions.
-const UNIT_KEYS: [(&str, Setter<UnitSection>); 11] = [
+const UNIT_KEYS: [(&str, Setter<UnitSection>); 12] = [
     ("Description", |unit, a, _| {
         unit.description = keys::string(a);
     }),
@@ -389,6 +394,9 @@ const UNIT_KEYS: [(&str, Setter<UnitSection>); 11] = [
     }),
     ("StopWhenUnneeded", |unit, a, w| {
         unit.stop_when_unneeded = keys::boolean(a, w).unwrap_or(unit.stop_when_unneeded);
+    }),
+    ("StartableBy", |unit, a, _| {
+        keys::words(&mut unit.startable_by, a);
     }),
 ];
 

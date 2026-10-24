@@ -260,8 +260,9 @@ package FerrixConsoleRequirements {
         }
         requirement <'L.console.18'> onlyKernelLinesAreKept : ItemLowLevel {
             attribute :>> statement = "Writer::bytes shall keep a kernel line, logged
-                or not, in the recent-output ring, and a program's output not, and
-                give both to the screen console.";
+                or not, and a record a program sends the log, in the recent-output
+                ring, and a program's console output not, and give all of them to the
+                screen console.";
             attribute :>> criterion = "After a program's write of a marker line and a
                 kernel line, the last 4,096 bytes recent gives hold the kernel line
                 and not the marker.";
@@ -483,15 +484,22 @@ package FerrixConsoleRequirements {
         }
         requirement <'L.console.51'> aLineIsHandedOutWhole : ItemLowLevel {
             attribute :>> statement = "line shall hand a reader a line of the log only
-                once it is whole -- a later line has begun, or its last byte was a
-                newline -- with its first byte's place, the place past its last, its
-                stamp and its priority.";
+                once it is whole -- a later line has begun, or it is the last begun
+                and the log's last byte is a newline -- with its first byte's place,
+                the place past its last, its stamp and its priority, and never with
+                a byte of a line after it, however a writer on another processor is
+                interleaved with the reader; note shall begin a line before its first
+                byte is recorded.";
             attribute :>> criterion = "On the log check's lines, a line of 'half' with
                 no newline is not handed out, and after its newline it is, from byte
-                13 to 18, stamped 600.";
+                13 to 18, stamped 600; and while a writer on another processor, where
+                there are two, writes 20,000 rounds of 'half' at a program's priority
+                cut by a record of 'rec', six digits and a newline at the kernel's,
+                every line a reader on this one is handed is exactly one of the two.";
             attribute :>> parent = "H.TRAP.13";
             attribute :>> unit = ("console::log::Lines::line", "console::log::Lines::kept",
-                "console::log::slot_in");
+                "console::log::slot_in", "console::log::Ring::byte_at",
+                "console::log::record_lines", "console::log::Lines::note");
         }
         requirement <'L.console.52'> aReaderIsGivenTheFirstLineKept : ItemLowLevel {
             attribute :>> statement = "first shall answer the first line whose slot is
@@ -509,13 +517,19 @@ package FerrixConsoleRequirements {
         requirement <'L.console.53'> aRecordBeginsALineOfItsOwn : ItemLowLevel {
             attribute :>> statement = "write_record shall log a record at the priority
                 it is given as a line of its own ending in its newline, even after a
-                task's half-written line.";
+                task's half-written line, and shall send the console's port a newline
+                before the record when it cuts a line left open, and none when no line
+                was open.";
             attribute :>> criterion = "After a task's write with no newline, a record
                 written at priority 13 is found through line_from as a line that
-                begins with the record, at priority 13, its last byte a newline.";
+                begins with the record, at priority 13, its last byte a newline; the
+                recent-output ring holds a newline of its own before the record, after
+                the last kernel line's; and a second record written straight after is
+                preceded there by the first record's newline alone.";
             attribute :>> parent = "H.TRAP.15";
             attribute :>> unit = ("console::write_record", "console::log::break_line",
-                "console::log::Lines::break_line", "console::Kind::priority");
+                "console::log::Lines::break_line", "console::Kind::priority",
+                "console::Kind::remembered");
         }
         requirement <'L.console.55'> aGrownRingKeepsWhatItHeld : ItemLowLevel {
             attribute :>> statement = "Ring::grow shall move a log ring into longer

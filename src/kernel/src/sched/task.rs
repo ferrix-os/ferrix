@@ -42,13 +42,13 @@ use crate::vmap::Stack;
 /// thread, and through it the process, alive while the task is.
 ///
 /// `Any`, so that the personality can have its own thread back from a task.
-pub(crate) trait UserThread: Any + Send + Sync + fmt::Debug {
+pub trait UserThread: Any + Send + Sync + fmt::Debug {
     /// The process whose code it runs.
     fn process(&self) -> &dyn Host;
 }
 
 /// A task's name, unique for the life of the machine.
-pub(crate) type TaskId = u64;
+pub type TaskId = u64;
 
 /// Runnable: on a run queue, or running.
 pub(crate) const RUNNABLE: u8 = 0;
@@ -102,9 +102,9 @@ impl Wakees {
 
 /// One kernel thread.
 #[derive(Debug)]
-pub(crate) struct Task {
+pub struct Task {
     /// Its name.
-    pub(crate) id: TaskId,
+    pub id: TaskId,
     /// What to call it in the boot log.
     pub(crate) name: &'static str,
     /// What it runs. `None` for a context that was already running when the
@@ -590,7 +590,7 @@ impl Task {
     /// The reply it was handed, emptying the cell: by the task itself, as it
     /// resumes in `channel_write_read`. `None` when it was woken some other
     /// way.
-    pub(crate) fn take_reply(&self) -> Option<(usize, [u64; 3])> {
+    pub fn take_reply(&self) -> Option<(usize, [u64; 3])> {
         let first = self.reply.first()?;
         let head = first.load(Ordering::Relaxed);
         if head & REPLY_FULL == 0 {
@@ -636,7 +636,7 @@ impl Task {
     }
 
     /// What it is doing.
-    pub(crate) fn state(&self) -> u8 {
+    pub fn state(&self) -> u8 {
         self.state.load(Ordering::Acquire)
     }
 
@@ -692,7 +692,7 @@ impl Task {
 
     /// Its job and the weight it is counted there with (0 when it is not
     /// counted), as one read of its word.
-    pub(crate) fn group_word(&self) -> (u32, u32) {
+    pub fn group_word(&self) -> (u32, u32) {
         let word = self.group.load(Ordering::Acquire);
         (group_of(word), counted_of(word))
     }
@@ -791,7 +791,7 @@ impl Task {
     }
 
     /// Its own weight, before its job's share.
-    pub(crate) fn base_weight(&self) -> u32 {
+    pub fn base_weight(&self) -> u32 {
         self.base_weight.load(Ordering::Relaxed)
     }
 
@@ -841,7 +841,7 @@ impl Task {
     }
 
     /// The queue that owns it.
-    pub(crate) fn cpu(&self) -> usize {
+    pub fn cpu(&self) -> usize {
         self.cpu.load(Ordering::Acquire) as usize
     }
 
@@ -852,7 +852,7 @@ impl Task {
     }
 
     /// Whether a run queue holds it.
-    pub(crate) fn is_queued(&self) -> bool {
+    pub fn is_queued(&self) -> bool {
         self.queued.load(Ordering::Acquire)
     }
 
@@ -957,7 +957,7 @@ impl Task {
     }
 
     /// What it carries between queues.
-    pub(crate) fn entity_state(&self) -> EntityState {
+    pub fn entity_state(&self) -> EntityState {
         EntityState {
             weight: self.weight.load(Ordering::Relaxed),
             vlag: self.vlag.load(Ordering::Relaxed),
@@ -993,7 +993,7 @@ impl Task {
 
     /// Real nanoseconds it has run for, up to when it was last charged: the
     /// CPU-time clocks' reading.
-    pub(crate) fn runtime(&self) -> u64 {
+    pub fn runtime(&self) -> u64 {
         self.sum_exec.load(Ordering::Relaxed)
     }
 
@@ -1011,7 +1011,7 @@ impl Task {
     /// Nanoseconds of [`Task::runtime`] it spent in the kernel, up to its
     /// processor's last decision or its own last return to user mode:
     /// `stime`. No more than its runtime, which is charged at other moments.
-    pub(crate) fn kernel_time(&self) -> u64 {
+    pub fn kernel_time(&self) -> u64 {
         let ticks = self.kernel_ticks.load(Ordering::Relaxed);
         crate::timer::counter_ticks_to_nanos(ticks).min(self.runtime())
     }
@@ -1031,14 +1031,14 @@ impl Task {
 
     /// Switches away from it while it was blocked, asleep or dead:
     /// `voluntary_ctxt_switches`.
-    pub(crate) fn voluntary_switches(&self) -> u64 {
+    pub fn voluntary_switches(&self) -> u64 {
         let [voluntary, _] = &self.switched_out;
         voluntary.load(Ordering::Relaxed)
     }
 
     /// Switches away from it while it was still runnable:
     /// `nonvoluntary_ctxt_switches`.
-    pub(crate) fn involuntary_switches(&self) -> u64 {
+    pub fn involuntary_switches(&self) -> u64 {
         let [_, involuntary] = &self.switched_out;
         involuntary.load(Ordering::Relaxed)
     }
@@ -1109,7 +1109,7 @@ impl Task {
     }
 
     /// How many times it has been switched to.
-    pub(crate) fn switches(&self) -> u64 {
+    pub fn switches(&self) -> u64 {
         self.switches.load(Ordering::Relaxed)
     }
 
@@ -1128,12 +1128,12 @@ impl Task {
     /// preemption is released, and a system call that takes several such
     /// locks while the timer ticks is switched out several times without the
     /// program's own code ever having been cut.
-    pub(crate) fn preemptions(&self) -> u64 {
+    pub fn preemptions(&self) -> u64 {
         self.preemptions.load(Ordering::Relaxed)
     }
 
     /// Which CPUs it has run on, one bit each.
-    pub(crate) fn cpus_run_on(&self) -> u64 {
+    pub fn cpus_run_on(&self) -> u64 {
         self.cpus_run_on.load(Ordering::Relaxed)
     }
 
@@ -1149,13 +1149,13 @@ impl Task {
     }
 
     /// The thread this task runs user code for, or `None` for a kernel thread.
-    pub(crate) fn thread(&self) -> Option<&Arc<dyn UserThread>> {
+    pub fn thread(&self) -> Option<&Arc<dyn UserThread>> {
         self.thread.as_ref()
     }
 
     /// The core process its thread runs in: `thread().process().core()`,
     /// without the two `dyn` calls; `None` for a kernel thread.
-    pub(crate) fn core_process(&self) -> Option<&crate::object::process::Process> {
+    pub fn core_process(&self) -> Option<&crate::object::process::Process> {
         self.core.as_deref()
     }
 
@@ -1166,7 +1166,7 @@ impl Task {
     ///
     /// (SHARED) As [`Task::stack_pointer_slot`]: the caller must hold the lock of the
     /// run queue that owns this task, which is what orders every access.
-    pub(crate) unsafe fn user_state(&self) -> Option<*mut arch::UserState> {
+    pub unsafe fn user_state(&self) -> Option<*mut arch::UserState> {
         self.user.as_ref().map(|cell| cell.get())
     }
 
@@ -1176,12 +1176,12 @@ impl Task {
     }
 
     /// Whether it has exited.
-    pub(crate) fn is_dead(&self) -> bool {
+    pub fn is_dead(&self) -> bool {
         self.state() == DEAD
     }
 
     /// Whether it is waiting for something, on no run queue.
-    pub(crate) fn is_blocked(&self) -> bool {
+    pub fn is_blocked(&self) -> bool {
         self.state() == BLOCKED
     }
 

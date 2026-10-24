@@ -6,6 +6,11 @@
 //! boot can afford, on the first translated PCI domain. With no translated
 //! domain there is no quarantine, and nothing is checked (ARMv7-A).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
+
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -100,7 +105,7 @@ fn check_failed_invalidation(
     }
     let before = counts(domain);
     let (mut pin, frames) = watched_pin(domain, &owners.live)?;
-    pin.wait = Wait::Unwritten;
+    super::set_wait(&mut pin, Wait::Unwritten);
     let failed = crate::iommu::invalidations().failed;
     drop(pin);
     let now = counts(domain);

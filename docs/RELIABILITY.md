@@ -70,10 +70,15 @@ FERRIX-PANIC stage 2 self-check failed: the heap lost an allocation
   stopped   this processor halts here; nothing will recover it
   trace     #0  0xffffffff80002428  __rustc::rust_begin_unwind+0x1b4
   trace     #1  0xffffffff800074fc  core::panicking::panic_fmt+0x28
-  trace     #2  0xffffffff80002e54  ferrix_kernel::memory_check+0x20
+  trace     #2  0xffffffff80002e54  ferrix_kernel_core::mm::check::memory_check+0x20
   trace     #3  0xffffffff80003268  ferrix_kernel::kmain+0x414
   trace     #4  0xffffffff800000fc  _start+0xfc
 ```
+
+A frame's name starts with the crate that holds the function: since the
+kernel split (`docs/KERNEL-CRATES.md`) `ferrix_kernel_core::`,
+`ferrix_kernel_item::` or `ferrix_kernel_load::` by the function's ring, and
+`ferrix_kernel::` for the binary's `main.rs`.
 
 The marker and the message share the first line, because that is the line the
 boot test judges on. What follows is context, which `xtask` keeps reading for a

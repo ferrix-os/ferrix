@@ -300,6 +300,10 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     // hyprix's own too (docs/DESKTOP.md §2.2): 1 draws a title bar above
     // each floating window whose client asked for the compositor's frame.
     ("hyprix:titlebars", Int(0)),
+    // hyprix's own (docs/RUNTIME-SETTINGS.md §3.3): 1 shows the wallpaper
+    // the compositor started under the lock screen's surfaces, where the
+    // lock leaves them see-through; 0 leaves the lock screen dark.
+    ("hyprix:wallpaper_lock", Int(1)),
     ("input-capture:capture_modifiers", Int(0)),
     ("input-capture:enforce_barriers", Int(1)),
     ("input:accel_profile", Str("")),

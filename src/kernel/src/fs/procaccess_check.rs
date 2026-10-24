@@ -191,7 +191,7 @@ fn message(text: alloc::string::String) -> &'static str {
 }
 
 /// What the check saw, for the boot line.
-pub(crate) fn run() -> Result<Counts, &'static str> {
+pub fn run() -> Result<Counts, &'static str> {
     let mut counts = Counts::default();
     let mut tally = Tally {
         report: &mut counts,

@@ -32,8 +32,6 @@ use ferrix_paging::MapFlags;
 
 use super::cpu;
 
-pub(crate) mod check;
-
 /// The boot processor's `IA32_PAT` as it read back when the window was
 /// mapped, or 0 when it was not read (no table programmed, no `CLFLUSH`):
 /// what [`framebuffer_flags`] chose by, kept for stage 9's check.
@@ -65,7 +63,7 @@ pub(crate) fn framebuffer_flags() -> MapFlags {
 
 /// The table [`framebuffer_flags`] chose the window's type by, when it read
 /// one.
-pub(crate) fn window_pat() -> Option<u64> {
+pub fn window_pat() -> Option<u64> {
     Some(WINDOW_PAT.load(Ordering::Acquire)).filter(|&pat| pat != 0)
 }
 
@@ -79,7 +77,7 @@ pub(crate) fn window_pat() -> Option<u64> {
 /// of the address it is given. Nothing without `CLFLUSH`: the window is
 /// then device memory ([`framebuffer_flags`]), and an uncached store
 /// allocates no line.
-pub(crate) fn flush_window(virt: u64, len: u64) {
+pub fn flush_window(virt: u64, len: u64) {
     if !has_clflush() {
         return;
     }
@@ -94,7 +92,7 @@ pub(crate) fn flush_window(virt: u64, len: u64) {
 /// write-back line of it out of the caches ([`flush_cache_lines`]; K6,
 /// `L.user.132`). That every processor programmed its PAT is the caller's
 /// to ask too (`object::io_mapping::combining_ready`).
-pub(crate) fn user_combining() -> bool {
+pub fn user_combining() -> bool {
     has_clflush()
 }
 
@@ -140,7 +138,7 @@ fn line_size() -> u64 {
 
 /// The cache lines `virt..virt + len` touches: what [`flush_window`] must
 /// have flushed, for stage 9's check.
-pub(crate) fn window_lines(virt: u64, len: u64) -> u64 {
+pub fn window_lines(virt: u64, len: u64) -> u64 {
     let line = line_size();
     virt.saturating_add(len)
         .saturating_sub(virt - virt % line)
@@ -149,7 +147,7 @@ pub(crate) fn window_lines(virt: u64, len: u64) -> u64 {
 
 /// The lines [`flush_window`] flushed and the time stamp counter's ticks
 /// it took.
-pub(crate) fn window_flush() -> (u64, u64) {
+pub fn window_flush() -> (u64, u64) {
     (
         FLUSHED_LINES.load(Ordering::Acquire),
         FLUSH_TICKS.load(Ordering::Acquire),
@@ -183,7 +181,7 @@ pub(crate) fn pat() -> Option<u64> {
 ///
 /// For a boot line only: a page the PAT maps write-combining is
 /// write-combining under every MTRR type, so nothing is decided by this.
-pub(crate) fn mtrr_type(phys: u64, len: u64) -> Option<u8> {
+pub fn mtrr_type(phys: u64, len: u64) -> Option<u8> {
     // CPUID.(EAX=1):EDX.MTRR is bit 12.
     if __cpuid(1).edx & (1 << 12) == 0 {
         return None;

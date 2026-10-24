@@ -22,11 +22,38 @@
 //! after its first write, for `cargo xtask test-power`; with either it first
 //! checks the claim's own refusals (a second claim, a copy of the claim, the
 //! node's memory, mapping and interrupt, a quiesce under it) and says each.
+//!
+//! # A lease that must not lapse
+//!
+//! A policy loop that stops calling for five seconds is a hung driver to the
+//! kernel, which puts firmware's value back (`docs/POWERCTL.md` §7). On the
+//! N150 box under a game the loop once went thirteen seconds without
+//! running, and the raise never came back: the driver stopped at the claim's
+//! end. So, all in ring 3:
+//!
+//! * **Its weight.** It asks for nice -20 at the start, the fair class's
+//!   heaviest weight, so the game's threads and Wine's cannot crowd out its
+//!   millisecond a second. The scheduler has no real-time class
+//!   (`sched_setscheduler` refuses one), and the driver needs none.
+//! * **Its lines never wait for the console.** They go to `/dev/kmsg`, a
+//!   record a line, which the kernel writes without ever waiting for room
+//!   (`console::write_record`), where a write to standard error from a task
+//!   that may sleep waits for the transmit ring to drain. Standard error
+//!   only when `/dev/kmsg` cannot be opened.
+//! * **It says when it ran late**, by more than [`LATE_NANOS`], so a box log
+//!   shows the stall itself rather than only its consequence.
+//! * **It claims again after a lapse.** A lease the kernel ended is
+//!   firmware's value back and the claim gone, not a latch: the driver says
+//!   it lost the claim, claims again (at most [`MOST_RECLAIMS`] times, well
+//!   inside the kernel's eight ended claims a boot), says it regained it, and
+//!   climbs its plan again from the first step. A latch -- the backstop, a
+//!   write that did not read back -- refuses the claim, and the driver stops
+//!   as before.
 
 #![no_std]
 #![no_main]
 
-use core::fmt::{self, Write as _};
+use core::fmt;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES};
 use ferrix_native_abi::handle::Handle;
@@ -59,6 +86,15 @@ const WORDS: Words<'static> = Words {
 const SECOND: u64 = 1_000_000_000;
 /// Seconds between temperature lines.
 const LOG_EVERY: u64 = 5;
+/// How late a second's reading may come before the driver says so: one and
+/// a half seconds, a third of the kernel's five-second lease.
+const LATE_NANOS: u64 = 1_500_000_000;
+/// The most times the driver claims again after the kernel ended its claim:
+/// four, so that with the first claim five end at most, below the kernel's
+/// eight ended claims a boot that latch the core off (`L.x86_64.201`).
+const MOST_RECLAIMS: u32 = 4;
+/// The nice value the driver asks for: the fair class's heaviest weight.
+const NICE: i32 = -20;
 
 /// Where a run stopped, as the exit status.
 #[derive(Clone, Copy, Debug)]
@@ -83,7 +119,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
     match run(&boot) {
         Ok(()) => 0,
         Err(step) => {
-            say(format_args!("power: stopped at {step:?}"));
+            ferrix_rt::err!("power: stopped at {step:?}");
             step as i32
         }
     }
@@ -111,11 +147,11 @@ fn started(boot: &Channel<Kernel>) -> Result<Device<Kernel>, Step> {
 
 fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let device = started(boot)?;
+    open_log();
+    weigh();
     let options = read_options();
     let claim = device.power_control().map_err(|error| {
-        say(format_args!(
-            "power: the kernel refused the claim: {error:?}"
-        ));
+        ferrix_rt::err!("power: the kernel refused the claim: {error:?}");
         Step::Claim
     })?;
     if options.test.is_some() {
@@ -124,32 +160,29 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let idle = port::create(Kernel).map_err(|_| Step::Port)?;
     let first = claim.power_read().map_err(|_| Step::Ended)?;
     let reading = decode::reading(&first);
-    say(format_args!(
+    ferrix_rt::info!(
         "power: claimed: firmware {} A, ceiling {} A, back off at {} C",
         Amps(reading.firmware_eighths),
         Amps(reading.ceiling_eighths),
         options.hot
-    ));
+    );
     let Some(plan) = options.plan else {
-        say(format_args!(
-            "power: no ferrix.power.vr plan: writing nothing"
-        ));
-        return watch(&claim, &idle, None, &options);
+        ferrix_rt::notice!("power: no ferrix.power.vr plan: writing nothing");
+        return watch(&device, claim, &idle, None, &options);
     };
     let Some((plan, dropped)) = plan.below(u32::try_from(reading.ceiling_eighths / 8).unwrap_or(0))
     else {
-        say(format_args!(
+        ferrix_rt::warn!(
             "power: every step of the plan is above the kernel's ceiling: writing nothing"
-        ));
-        return watch(&claim, &idle, None, &options);
+        );
+        return watch(&device, claim, &idle, None, &options);
     };
     if dropped > 0 {
-        say(format_args!(
-            "power: {dropped} steps above the kernel's ceiling dropped"
-        ));
+        ferrix_rt::warn!("power: {dropped} steps above the kernel's ceiling dropped");
     }
     watch(
-        &claim,
+        &device,
+        claim,
         &idle,
         Some(Policy::new(plan, options.hot)),
         &options,
@@ -163,24 +196,22 @@ fn read_options() -> Options {
         Ok(len) => {
             let options = options::parse(line.get(..len).unwrap_or_default(), &WORDS);
             if options.plan_refused.is_some() || options.hot_refused || options.test_refused {
-                say(format_args!(
-                    "power: a ferrix.power word did not parse and is ignored"
-                ));
+                ferrix_rt::warn!("power: a ferrix.power word did not parse and is ignored");
             }
             options
         }
         Err(errno) => {
-            say(format_args!(
-                "power: /proc/cmdline unreadable ({errno:?}): no plan"
-            ));
+            ferrix_rt::warn!("power: /proc/cmdline unreadable ({errno:?}): no plan");
             Options::default()
         }
     }
 }
 
-/// The loop: a reading a second, the policy's action, a line every five.
+/// The loop: a reading a second, the policy's action, a line every five;
+/// a claim the kernel ended claimed again (the module's note).
 fn watch(
-    claim: &Channel<Kernel>,
+    device: &Device<Kernel>,
+    mut claim: Channel<Kernel>,
     idle: &Port<Kernel>,
     mut policy: Option<Policy>,
     options: &Options,
@@ -188,12 +219,37 @@ fn watch(
     let start = now();
     let mut energy: Option<((u32, u32), u64)> = None;
     let mut first_write: Option<u64> = None;
-    let mut elapsed = 0_u64;
+    let mut next_report = 0_u64;
+    let mut reclaims = 0_u32;
+    let mut due = start;
     loop {
-        let words = read(claim)?;
+        // The second it is, by the clock: a loop that ran late does not
+        // catch up with a burst of readings.
+        let at = now();
+        let late = at.saturating_sub(due);
+        if late > LATE_NANOS {
+            ferrix_rt::warn!(
+                "power: the loop ran {} ms late (the kernel's lease is 5000 ms)",
+                late / 1_000_000
+            );
+        }
+        let elapsed = at.saturating_sub(start) / SECOND;
+        let words = match read(&claim) {
+            Ok(words) => words,
+            Err(step) => {
+                let (again, words) = reclaim(device, &mut reclaims, step)?;
+                claim = again;
+                if let Some(policy) = policy.as_mut() {
+                    policy.restart(elapsed);
+                }
+                words
+            }
+        };
         let reading = decode::reading(&words);
         if let Some(policy) = policy.as_mut() {
-            act(claim, policy, elapsed, &reading)?;
+            // A claim that ended under the write is claimed again by the
+            // next second's reading, as one that ended between seconds.
+            let _ = act(&claim, policy, elapsed, &reading);
             if first_write.is_none() && policy.current().is_some() {
                 first_write = Some(elapsed);
             }
@@ -203,23 +259,59 @@ fn watch(
         {
             match mode {
                 TestMode::Hang => {
-                    say(format_args!("power: test: renewing no more"));
+                    ferrix_rt::notice!("power: test: renewing no more");
                     loop {
                         let _ = idle.wait(Deadline::Never);
                     }
                 }
                 TestMode::Exit => {
-                    say(format_args!("power: test: exiting"));
+                    ferrix_rt::notice!("power: test: exiting");
                     return Err(Step::TestExit);
                 }
             }
         }
-        if elapsed.is_multiple_of(LOG_EVERY) {
+        if elapsed >= next_report {
             energy = report(&reading, energy);
+            next_report = (elapsed / LOG_EVERY + 1) * LOG_EVERY;
         }
-        elapsed += 1;
-        let _ = idle.wait(Deadline::At(start.saturating_add(elapsed * SECOND)));
+        due = start.saturating_add((elapsed + 1) * SECOND);
+        let _ = idle.wait(Deadline::At(due));
     }
+}
+
+/// The kernel ended the claim (`step`, already said by [`read`]): claim
+/// again, unless that has been done [`MOST_RECLAIMS`] times, and say how it
+/// went. The new claim and its first reading.
+fn reclaim(
+    device: &Device<Kernel>,
+    reclaims: &mut u32,
+    step: Step,
+) -> Result<(Channel<Kernel>, [u64; POWER_READ_WORDS]), Step> {
+    if *reclaims >= MOST_RECLAIMS {
+        ferrix_rt::err!(
+            "power: lost the claim, and claimed again {MOST_RECLAIMS} times already: firmware's limit for good"
+        );
+        return Err(step);
+    }
+    *reclaims += 1;
+    ferrix_rt::warn!(
+        "power: lost the claim: firmware's limit is back; claiming again ({} of {MOST_RECLAIMS})",
+        *reclaims
+    );
+    let claim = device.power_control().map_err(|error| {
+        ferrix_rt::err!(
+            "power: the kernel refused the claim again: {error:?}; firmware's limit for good"
+        );
+        step
+    })?;
+    let words = read(&claim)?;
+    let reading = decode::reading(&words);
+    ferrix_rt::notice!(
+        "power: regained the claim: firmware {} A, now {} A; the plan again from its first step",
+        Amps(reading.firmware_eighths),
+        Amps(reading.vr_eighths.unwrap_or(0))
+    );
+    Ok((claim, words))
 }
 
 /// `power_read`, or the claim's end said.
@@ -228,9 +320,7 @@ fn read(claim: &Channel<Kernel>) -> Result<[u64; POWER_READ_WORDS], Step> {
         let closed = claim
             .wait_one(Signals::PEER_CLOSED, Deadline::At(0))
             .is_ok();
-        say(format_args!(
-            "power: the kernel ended the claim ({error:?}, closed {closed})"
-        ));
+        ferrix_rt::warn!("power: the kernel ended the claim ({error:?}, closed {closed})");
         Step::Ended
     })
 }
@@ -247,9 +337,7 @@ fn act(
         Action::Hold => return Ok(()),
         Action::Set { amps, why } => (amps, Some(why)),
         Action::GiveUp { celsius } => {
-            say(format_args!(
-                "power: giving up at {celsius} C: firmware's limit for good"
-            ));
+            ferrix_rt::warn!("power: giving up at {celsius} C: firmware's limit for good");
             (
                 u32::try_from(reading.firmware_eighths / 8).unwrap_or(0),
                 None,
@@ -261,24 +349,23 @@ fn act(
     match claim.power_set(eighths) {
         Ok(back) => {
             if let Some(Why::BackOff { celsius }) = why {
-                say(format_args!("power: backing off to {amps} A: {celsius} C"));
+                ferrix_rt::warn!("power: backing off to {amps} A: {celsius} C");
             }
-            say(format_args!(
+            ferrix_rt::info!(
                 "msr: vrcurrent set {} A (was {} A)",
                 Amps(back & 0x1fff),
                 Amps(before)
-            ));
+            );
             Ok(())
         }
         Err(Error::ShouldWait | Error::LimitReached | Error::InvalidArgs) => {
-            say(format_args!("power: the kernel refused {amps} A for now"));
+            ferrix_rt::warn!("power: the kernel refused {amps} A for now");
             policy.refused(was);
             Ok(())
         }
         Err(error) => {
-            say(format_args!(
-                "power: the kernel ended the claim at {amps} A ({error:?})"
-            ));
+            ferrix_rt::warn!("power: the kernel ended the claim at {amps} A ({error:?})");
+            policy.refused(was);
             Err(Step::Ended)
         }
     }
@@ -298,7 +385,7 @@ fn report(reading: &Reading, energy: Option<((u32, u32), u64)>) -> Option<((u32,
         reading.core_reasons.unwrap_or(0) | reading.graphics_reasons.unwrap_or(0),
         &mut names,
     );
-    say(format_args!(
+    ferrix_rt::debug!(
         "msr: vrcurrent {} A, core {} C, package {} C, ratio {}, package {} mW, limited by {}",
         Amps(reading.vr_eighths.unwrap_or(0)),
         Shown(reading.core),
@@ -306,7 +393,7 @@ fn report(reading: &Reading, energy: Option<((u32, u32), u64)>) -> Option<((u32,
         Shown(reading.ratio),
         Shown(power),
         Names(names.get(..count).unwrap_or_default())
-    ));
+    );
     reading.energy.map(|now| (now, at))
 }
 
@@ -323,9 +410,9 @@ fn refusals(device: &Device<Kernel>, claim: &Channel<Kernel>) {
         .err();
     let interrupt = device.interrupt(0).err();
     let quiesce = device.quiesce().err();
-    say(format_args!(
+    ferrix_rt::info!(
         "power: refusals: second claim {second:?}, copy {copy:?}, pin {pin:?}, mapping {mapping:?}, interrupt {interrupt:?}, quiesce {quiesce:?}"
-    ));
+    );
 }
 
 /// The monotonic clock, in nanoseconds.
@@ -395,32 +482,31 @@ fn read_file(path: &[u8], buf: &mut [u8]) -> Result<usize, ferrix_linux_abi::err
     Ok(len)
 }
 
-/// A line on standard error, which a native process has open on the
-/// console.
-fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line {
-        bytes: [0; 200],
-        len: 0,
+/// Send the driver's lines to `/dev/kmsg`, whose writes never wait for the
+/// console's room (the module's note), at once, and say so on standard
+/// error when it cannot be opened (`ferrix_rt::log`).
+fn open_log() {
+    if let Err(errno) = ferrix_rt::log::open() {
+        ferrix_rt::warn!(
+            "power: /dev/kmsg unopened ({errno:?}): lines to standard error, which may wait for the console"
+        );
+    }
+}
+
+/// Ask for the fair class's heaviest weight (the module's note), and say
+/// what the kernel answered.
+fn weigh() {
+    use ferrix_rt::linux::{self, numbers};
+    const PRIO_PROCESS: usize = 0;
+    // SAFETY: no pointer: which, who and the value.
+    let answer = unsafe {
+        linux::call(
+            numbers::SETPRIORITY,
+            [PRIO_PROCESS, 0, NICE as isize as usize, 0, 0, 0],
+        )
     };
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.bytes.get(..line.len).unwrap_or_default());
-}
-
-/// A line, formatted into a fixed buffer and cut at its end.
-struct Line {
-    bytes: [u8; 200],
-    len: usize,
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            if let Some(slot) = self.bytes.get_mut(self.len) {
-                *slot = byte;
-                self.len += 1;
-            }
-        }
-        Ok(())
+    match answer {
+        Ok(_) => ferrix_rt::info!("power: running at nice {NICE}"),
+        Err(errno) => ferrix_rt::warn!("power: nice {NICE} refused ({errno:?}): running at nice 0"),
     }
 }

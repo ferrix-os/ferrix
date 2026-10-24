@@ -22,6 +22,8 @@ members = [
     "src/lib/proto/chardevctl",
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
+    "src/lib/log/lode",
+    "src/lib/proto/lode-capture",
     "src/lib/drivers/power/x86-power",
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
@@ -98,6 +100,9 @@ members = [
 
     # The kernel proper.
     "src/kernel",
+    "src/kernel/core",
+    "src/kernel/item",
+    "src/kernel/load",
 
     # Native user-space programs, built for the kernel's own targets and put
     # in the initramfs. Like the kernel they cannot be built or tested for the
@@ -130,6 +135,7 @@ members = [
     "src/user/system/native/devmgr",
     "src/user/system/native/drvupdated",
     "src/user/system/native/devmgr-events",
+    "src/user/system/native/lode",
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/xtask",
@@ -165,6 +171,8 @@ ferrix-chardevctl = { path = "src/lib/proto/chardevctl" }
 ferrix-adb = { path = "src/lib/proto/adb" }
 ferrix-vdagent = { path = "src/lib/drivers/console/vdagent" }
 ferrix-logctl = { path = "src/lib/proto/logctl" }
+ferrix-lode-core = { path = "src/lib/log/lode" }
+ferrix-lode-capture = { path = "src/lib/proto/lode-capture" }
 ferrix-audit = { path = "src/lib/proto/audit" }
 ferrix-bootinfo = { path = "src/lib/proto/bootinfo" }
 ferrix-slots = { path = "src/lib/proto/slots" }
@@ -212,6 +220,9 @@ ferrix-net-driver = { path = "src/user/system/native/drivers/net/virtio-net" }
 ferrix-yt6801-driver = { path = "src/user/system/native/drivers/net/yt6801" }
 ferrix-objects = { path = "src/lib/kernel/objects" }
 ferrix-sync = { path = "src/lib/kernel/sync" }
+ferrix-kernel-core = { path = "src/kernel/core" }
+ferrix-kernel-item = { path = "src/kernel/item" }
+ferrix-kernel-load = { path = "src/kernel/load" }
 ferrix-ustack = { path = "src/lib/kernel/ustack" }
 ferrix-vdso = { path = "src/lib/kernel/vdso" }
 ferrix-virtio = { path = "src/lib/drivers/virtio" }

@@ -86,7 +86,15 @@ impl Fat32 {
             next_free: ROOT_CLUSTER + 1,
         };
 
-        fs.write_boot_sector(total_sectors);
+        // A driver counts the clusters from the boot sector's sector count,
+        // not from the FAT's size, and the search above can leave the tail a
+        // few sectors short of a FAT sector's worth: on a 512 MiB ESP 226
+        // sectors more than the table has entries for, which fsck.fat and
+        // mtools refuse (Linux clamps it). So the volume says it ends where
+        // its last cluster does; the tail past that is unused.
+        let used_sectors =
+            RESERVED_SECTORS + NUM_FATS * fat_sectors + cluster_count * sectors_per_cluster;
+        fs.write_boot_sector(used_sectors);
         fs.write_fs_info();
 
         // FAT[0] is the media descriptor, FAT[1] the end-of-chain marker; both
@@ -478,7 +486,8 @@ fn directory_entry(name: &[u8; 11], attr: u8, first_cluster: u32, size: u32) -> 
 /// card: the loader reads the file after `CMDLINE.TXT`.
 pub(crate) const DEFAULTS_PATH: &str = "FERRIX/DEFAULTS.TXT";
 
-/// Whether this run's images carry the stripped kernel: `--strip-kernel`.
+/// Whether this run's images carry the stripped kernel, and the initramfs's
+/// programs stripped: `--strip-kernel`.
 static STRIP_KERNEL: AtomicBool = AtomicBool::new(false);
 
 /// Say whether every image this run writes carries the kernel as `flash`
@@ -491,6 +500,22 @@ static STRIP_KERNEL: AtomicBool = AtomicBool::new(false);
 /// everything in it stays beside the image for resolving a panic's addresses.
 pub(crate) fn set_strip_kernel(strip: bool) {
     STRIP_KERNEL.store(strip, Ordering::Relaxed);
+}
+
+/// Whether this run's images also leave their kernel and initramfs as files.
+static KEEP_PARTS: AtomicBool = AtomicBool::new(false);
+
+/// Have every image this run writes also leave the kernel it carries and its
+/// initramfs, init inputs included, in [`parts_dir`]: what another loader
+/// wraps, as the Pixel 7's does for `phone-boot`.
+pub(crate) fn keep_parts(keep: bool) {
+    KEEP_PARTS.store(keep, Ordering::Relaxed);
+}
+
+/// Where [`keep_parts`] puts them: `KERNEL.ELF` and `INITRD.IMG`, the names
+/// they have in the image.
+pub(crate) fn parts_dir(arch: Arch) -> PathBuf {
+    paths::build_dir(arch).join("parts")
 }
 
 /// Assemble the bootable image for `arch` from a built loader and kernel, with
@@ -540,7 +565,14 @@ pub(crate) fn write_image_carrying(
     defaults: Option<&str>,
 ) -> Result<PathBuf> {
     let mut fs = Fat32::new(IMAGE_BYTES)?;
-    let carried = kernel.initramfs(initramfs)?;
+    let mut carried = kernel.initramfs(initramfs)?;
+    // Under `--strip-kernel` the programs too, as `flash` gives them to a
+    // card: the release profile's full DWARF made them 38 of a 128 MiB
+    // machine's MiB (lode alone 19), which the loader holds and the kernel
+    // keeps while it unpacks them, and the 128 MiB boot ran out of memory.
+    if STRIP_KERNEL.load(Ordering::Relaxed) {
+        carried = crate::flash::card_initramfs(arch, &carried)?;
+    }
     let initramfs = carried.as_slice();
     let kernel: &Path = kernel;
 
@@ -574,6 +606,12 @@ pub(crate) fn write_image_carrying(
         fs.add_file(DEFAULTS_PATH, defaults.as_bytes())?;
     }
 
+    if KEEP_PARTS.load(Ordering::Relaxed) {
+        let parts = parts_dir(arch);
+        std::fs::create_dir_all(&parts)?;
+        std::fs::write(parts.join("KERNEL.ELF"), &kernel_bytes)?;
+        std::fs::write(parts.join("INITRD.IMG"), initramfs)?;
+    }
     let directory = paths::build_dir(arch);
     std::fs::create_dir_all(&directory)?;
     let _ = crate::slot_image::write_if_wanted(arch, &kernel_bytes, initramfs, cmdline, defaults)?;

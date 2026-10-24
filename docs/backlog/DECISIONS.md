@@ -7,6 +7,24 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-23 (customer, through the coordinator)** **tole is a
+  repository of its own**, https://github.com/ferrix-os/tole, a component
+  checked out at `src/user/system/linux/tole` (`components.toml`), built
+  alone with its own CI; its Wayland backend is behind a feature. The
+  compositor's `text` and `toolkit` crates stay in this tree and tole
+  reaches them by path (`docs/UI-FRAMEWORK.md` §4.13).
+
+* **2026-10-23 (customer, through the coordinator)** **Ferrix's UI
+  framework is called tole** (painted sheet metal, French *tôle*), built
+  as designed in `docs/UI-FRAMEWORK.md` without waiting for a review: a
+  QML-like markup in `.tole` files compiled into Rust at build time, the
+  crates `tole` and `tole-compiler`. `struct` and `enum` are declared in
+  the markup for typed models; "identical screenshots" for the ports means
+  the same layout and colours within a small stated antialiasing
+  tolerance; Settings and the desktop clients take tole's one controls
+  style, with theme tokens for light, dark and accents. Chosen over vein
+  and sinter after the collision check in the design's §6.
+
 * **2026-10-23 (customer, through the coordinator)** **The central log
   manager is called lode** ("lode sounds good"; a vein of ore, where you
   dig for what happened). The program and service binary is `lode` (`lode

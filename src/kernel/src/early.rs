@@ -45,7 +45,7 @@ static POOL: TablePool = TablePool(UnsafeCell::new(
 
 /// Why an early mapping could not be made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum EarlyError {
+pub enum EarlyError {
     /// The mapper refused the request. A pool in `.bss` that has run dry
     /// arrives here too, as `MapError::OutOfMemory`.
     MapFailed(ferrix_paging::MapError),
@@ -62,7 +62,7 @@ pub(crate) enum EarlyError {
 
 /// Physical memory as the kernel sees it during early boot.
 #[derive(Debug)]
-pub(crate) struct EarlyMemory {
+pub struct EarlyMemory {
     /// Base of the loader's direct map of physical memory.
     physmap: u64,
     /// The physical address that appears at `physmap`.
@@ -82,7 +82,7 @@ pub(crate) struct EarlyMemory {
 
 impl EarlyMemory {
     /// Build from the loader's hand-off.
-    pub(crate) fn new(view: &BootView<'_>) -> EarlyMemory {
+    pub fn new(view: &BootView<'_>) -> EarlyMemory {
         let info = view.raw();
         EarlyMemory {
             physmap: info.physmap_base,
@@ -113,14 +113,14 @@ impl EarlyMemory {
     ///
     /// Used by the boot self-check to prove the direct map really does alias
     /// the same memory the kernel image is mapped from.
-    pub(crate) fn read_physical_byte(&self, phys: u64) -> u8 {
+    pub fn read_physical_byte(&self, phys: u64) -> u8 {
         // SAFETY: (FRAME) the loader mapped every byte of RAM into the direct map, and
         // the caller is reading an address that came from the memory map.
         unsafe { core::ptr::read_volatile(self.direct(phys) as *const u8) }
     }
 
     /// Resolve a virtual address the way the hardware would.
-    pub(crate) fn translate(&self, virt: u64) -> Option<u64> {
+    pub fn translate(&self, virt: u64) -> Option<u64> {
         let mapper: Mapper<PageEncoding> = Mapper::new(self.root);
         mapper.translate(self, VirtAddr(virt)).map(|phys| phys.0)
     }
@@ -142,7 +142,7 @@ impl EarlyMemory {
     /// [`EarlyError::KernelImage`] for a range that touches the kernel's own
     /// image, which no device window may map ([`crate::mm::overlaps_image`]);
     /// [`EarlyError::MapFailed`] for what the mapper refuses.
-    pub(crate) fn map_device(&mut self, virt: u64, phys: u64, len: u64) -> Result<(), EarlyError> {
+    pub fn map_device(&mut self, virt: u64, phys: u64, len: u64) -> Result<(), EarlyError> {
         self.map_window(virt, phys, len, MapFlags::KERNEL_DEVICE)
     }
 
@@ -156,12 +156,7 @@ impl EarlyMemory {
     /// # Errors
     ///
     /// As [`EarlyMemory::map_device`].
-    pub(crate) fn map_framebuffer(
-        &mut self,
-        virt: u64,
-        phys: u64,
-        len: u64,
-    ) -> Result<(), EarlyError> {
+    pub fn map_framebuffer(&mut self, virt: u64, phys: u64, len: u64) -> Result<(), EarlyError> {
         self.map_window(virt, phys, len, arch::framebuffer_flags())
     }
 

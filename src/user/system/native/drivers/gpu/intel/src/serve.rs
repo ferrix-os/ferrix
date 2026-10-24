@@ -16,10 +16,11 @@
 //! (`../../intel-fake`), over the fake back end only `test-intel-uapi`'s
 //! image carries (consultant C2, ledger 2352).
 
-use core::fmt::{self, Write as _};
+use core::fmt;
+use ferrix_rt::log::Level;
 
 use ferrix_chardevctl::message::{
-    self, Hello, MAP_VMO, MAP_WRITE_COMBINING, MAX_NODES, Message, Op, Request, VERSION,
+    self, Hello, MAP_VMO, MAP_WRITE_COMBINING, MAX_NODES, Message, Op, Request, VERSION_INTERRUPTS,
 };
 use ferrix_chardevctl::node::RENDER_MINOR;
 use ferrix_intel_xelp::frontend::{Backend, Frontend, Host, Installed};
@@ -73,46 +74,9 @@ fn with_wake(port: &Port<Kernel>, deadline: Option<u64>) -> Option<u64> {
     Some(deadline.map_or(due, |deadline| deadline.min(due)))
 }
 
-/// A line on standard error, which a native process has open on the
-/// console.
-pub(crate) fn say(arguments: fmt::Arguments<'_>) {
-    let mut line = Line::default();
-    let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
-    let _ = ferrix_rt::linux::write(2, line.as_bytes());
-}
-
-/// One console line.
-struct Line {
-    bytes: [u8; 256],
-    len: usize,
-}
-
-impl Default for Line {
-    fn default() -> Self {
-        Line {
-            bytes: [0; 256],
-            len: 0,
-        }
-    }
-}
-
-impl Line {
-    fn as_bytes(&self) -> &[u8] {
-        self.bytes.get(..self.len).unwrap_or(&[])
-    }
-}
-
-impl fmt::Write for Line {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-        for &byte in text.as_bytes() {
-            if let Some(slot) = self.bytes.get_mut(self.len) {
-                *slot = byte;
-                self.len += 1;
-            }
-        }
-        Ok(())
-    }
+/// A line of the driver's log at `level` (`ferrix_rt::log`).
+pub(crate) fn say(level: Level, arguments: fmt::Arguments<'_>) {
+    ferrix_rt::log::line(level, arguments);
 }
 
 /// A back end's object memory, as the chardev core needs it: the VMO that
@@ -244,8 +208,8 @@ impl<M: AsVmo> Host<M> for ChardevHost {
         self.euid == 0
     }
 
-    fn say(&mut self, line: fmt::Arguments<'_>) {
-        say(line);
+    fn say(&mut self, level: Level, line: fmt::Arguments<'_>) {
+        say(level, line);
     }
 }
 
@@ -257,7 +221,7 @@ impl<M: AsVmo> Host<M> for ChardevHost {
 /// the kernel's reason said.
 pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevHost, Stopped> {
     let control = device.chardev_control().map_err(|error| {
-        say(format_args!("intel: no chardev control ({error:?})"));
+        ferrix_rt::err!("intel: no chardev control ({error:?})");
         Stopped::Control
     })?;
     let mut minors = [0; MAX_NODES];
@@ -265,7 +229,8 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
         *first = RENDER_MINOR;
     }
     let hello = Hello {
-        version: VERSION,
+        // It takes `Op::Interrupt` ([`answer`]).
+        version: VERSION_INTERRUPTS,
         location,
         count: 1,
         minors,
@@ -283,11 +248,11 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
         .map_err(|_| Stopped::Hello)?;
     match Message::decode(bytes.get(..received.bytes).unwrap_or(&[])) {
         Ok(Message::Ready(count)) => {
-            say(format_args!("intel: render node published ({count} node)"));
+            ferrix_rt::info!("intel: render node published ({count} node)");
             Ok(ChardevHost { control, euid: 0 })
         }
         Ok(Message::Refused(refusal)) => {
-            say(format_args!("intel: render node refused: {refusal}"));
+            ferrix_rt::err!("intel: render node refused: {refusal}");
             Err(Stopped::Refused)
         }
         _ => Err(Stopped::Hello),
@@ -355,9 +320,7 @@ where
         };
         match Message::decode(bytes.get(..received.bytes).unwrap_or(&[])) {
             Ok(Message::Request(request)) => answer(host, frontend, &request),
-            _ => say(format_args!(
-                "intel: a control message that is not a REQUEST"
-            )),
+            _ => ferrix_rt::warn!("intel: a control message that is not a REQUEST"),
         }
     }
 }
@@ -374,6 +337,7 @@ where
         Op::Release => frontend.release(host, request.file),
         Op::Mmap => frontend.mmap(host, request.id, request.file, request.arg, request.pages),
         Op::DmabufRelease => frontend.dmabuf_release(host, request.arg),
+        Op::Interrupt => frontend.interrupt(host, request.id),
         Op::DmabufImport => frontend.dmabuf_import(
             host,
             request.id,

@@ -1,0 +1,574 @@
+//! The output formats (`docs/LOGGING.md` §9.3).
+//!
+//! journald's are kept as journalctl prints them, since scripts read them:
+//! `short`, `short-full`, `short-iso`, `short-iso-precise`, `short-precise`,
+//! `short-monotonic`, `short-unix`, `with-unit`, `cat`, `json`,
+//! `json-pretty`, `json-seq`, `json-sse`, `export` and `verbose`. lode's own default, `human`, shows the year
+//! and the zone, the priority as a letter, and the message whole:
+//!
+//! ```text
+//! 2026-10-23 14:01:02.123 +02:00 E hyprix[812]: message
+//! ```
+
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+
+use crate::cursor;
+use crate::record::{LEVEL_FIELD, Record, UNSPECIFIED};
+use crate::segment::push_hex;
+use crate::time::{Civil, Zone, days, month_name, weekday};
+
+/// An output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Output {
+    /// lode's default.
+    Human,
+    /// journald's `short`.
+    Short,
+    /// `short-iso`.
+    ShortIso,
+    /// `short-iso-precise`.
+    ShortIsoPrecise,
+    /// `short-precise`.
+    ShortPrecise,
+    /// `short-monotonic`.
+    ShortMonotonic,
+    /// `with-unit`.
+    WithUnit,
+    /// The message alone.
+    Cat,
+    /// One JSON object a line.
+    Json,
+    /// The Journal Export Format.
+    Export,
+    /// journald's `verbose`: a time line, then every field on its own.
+    Verbose,
+    /// `short-full`: `Fri 2026-10-23 14:01:02 CEST host ident[pid]: text`.
+    ShortFull,
+    /// `short-unix`: seconds since 1970 with microseconds.
+    ShortUnix,
+    /// `json-pretty`: one object over many lines, indented with tabs.
+    JsonPretty,
+    /// `json-seq`: RFC 7464, each object after an ASCII record separator.
+    JsonSeq,
+    /// `json-sse`: server-sent events, `data: ` and a blank line.
+    JsonSse,
+}
+
+impl Output {
+    /// The format `-o NAME` names.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Output> {
+        Some(match name {
+            "human" => Output::Human,
+            "short" => Output::Short,
+            "short-iso" => Output::ShortIso,
+            "short-iso-precise" => Output::ShortIsoPrecise,
+            "short-precise" => Output::ShortPrecise,
+            "short-monotonic" => Output::ShortMonotonic,
+            "with-unit" => Output::WithUnit,
+            "cat" => Output::Cat,
+            "json" => Output::Json,
+            "export" => Output::Export,
+            "verbose" => Output::Verbose,
+            "short-full" => Output::ShortFull,
+            "short-unix" => Output::ShortUnix,
+            "json-pretty" => Output::JsonPretty,
+            "json-seq" => Output::JsonSeq,
+            "json-sse" => Output::JsonSse,
+            _ => return None,
+        })
+    }
+}
+
+/// The letter `human` shows for a level.
+#[must_use]
+pub fn level_letter(level: u8) -> char {
+    match level {
+        0 => 'X',
+        1 => 'A',
+        2 => 'C',
+        3 => 'E',
+        4 => 'W',
+        5 => 'N',
+        6 => 'I',
+        7 => 'D',
+        _ => '?',
+    }
+}
+
+/// `record` in `output`, appended to `out`, with times in `zone`.
+pub fn write(record: &Record, output: Output, zone: &Zone, out: &mut Vec<u8>) {
+    let offset = zone.offset_at(record.realtime_us);
+    let when = Civil::at(record.realtime_us, offset);
+    match output {
+        Output::Human => {
+            push(
+                out,
+                &alloc::format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03} {} {} ",
+                    when.year,
+                    when.month,
+                    when.day,
+                    when.hour,
+                    when.minute,
+                    when.second,
+                    when.micros / 1000,
+                    when.offset(),
+                    level_letter(record.priority)
+                ),
+            );
+            who(record, false, out);
+            message(record, out);
+        }
+        Output::Short | Output::ShortPrecise | Output::WithUnit => {
+            push(
+                out,
+                &alloc::format!(
+                    "{} {:02} {:02}:{:02}:{:02}",
+                    month_name(when.month),
+                    when.day,
+                    when.hour,
+                    when.minute,
+                    when.second
+                ),
+            );
+            if output == Output::ShortPrecise {
+                push(out, &alloc::format!(".{:06}", when.micros));
+            }
+            host_and_who(record, output == Output::WithUnit, out);
+        }
+        Output::ShortIso | Output::ShortIsoPrecise => {
+            push(
+                out,
+                &alloc::format!(
+                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+                    when.year,
+                    when.month,
+                    when.day,
+                    when.hour,
+                    when.minute,
+                    when.second
+                ),
+            );
+            if output == Output::ShortIsoPrecise {
+                push(out, &alloc::format!(".{:06}", when.micros));
+            }
+            push(out, &when.offset());
+            host_and_who(record, false, out);
+        }
+        Output::ShortMonotonic => {
+            push(
+                out,
+                &alloc::format!(
+                    "[{:5}.{:06}]",
+                    record.monotonic_us / 1_000_000,
+                    record.monotonic_us % 1_000_000
+                ),
+            );
+            host_and_who(record, false, out);
+        }
+        Output::ShortFull | Output::ShortUnix => short_more(record, output, zone, &when, out),
+        Output::Cat => message(record, out),
+        Output::Json => json(record, out),
+        Output::JsonPretty => json_pretty(record, out),
+        Output::JsonSeq => {
+            out.push(0x1e);
+            json(record, out);
+        }
+        Output::JsonSse => {
+            push(out, "data: ");
+            json(record, out);
+            out.push(b'\n');
+        }
+        Output::Export => export(record, out),
+        Output::Verbose => verbose(record, &when, out),
+    }
+}
+
+/// `short-full` and `short-unix`: journald's other short lines.
+fn short_more(record: &Record, output: Output, zone: &Zone, when: &Civil, out: &mut Vec<u8>) {
+    match output {
+        Output::ShortFull => {
+            push(
+                out,
+                &alloc::format!(
+                    "{} {:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
+                    day_name(when),
+                    when.year,
+                    when.month,
+                    when.day,
+                    when.hour,
+                    when.minute,
+                    when.second,
+                    zone.abbreviation_at(record.realtime_us)
+                ),
+            );
+            host_and_who(record, false, out);
+        }
+        Output::ShortUnix => {
+            push(
+                out,
+                &alloc::format!(
+                    "{:10}.{:06}",
+                    record.realtime_us / 1_000_000,
+                    record.realtime_us % 1_000_000
+                ),
+            );
+            host_and_who(record, false, out);
+        }
+        _ => {}
+    }
+}
+
+/// journald's `verbose`: `Fri 2026-10-23 14:01:02.123456 +00:00
+/// [i=..;b=..]`, then each field indented on its own line, a value that is
+/// not UTF-8 shown as its length.
+fn verbose(record: &Record, when: &Civil, out: &mut Vec<u8>) {
+    let day = day_name(when);
+    push(
+        out,
+        &alloc::format!(
+            "{day} {:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06} {} [{}]\n",
+            when.year,
+            when.month,
+            when.day,
+            when.hour,
+            when.minute,
+            when.second,
+            when.micros,
+            when.offset(),
+            cursor::of(record)
+        ),
+    );
+    let field = |out: &mut Vec<u8>, name: &str, value: &[u8]| {
+        push(out, "    ");
+        push(out, name);
+        out.push(b'=');
+        if core::str::from_utf8(value).is_ok() {
+            printable(value, out);
+        } else {
+            push(out, &alloc::format!("[{} bytes blob data]", value.len()));
+        }
+        out.push(b'\n');
+    };
+    for (name, value) in own_fields(record).iter().skip(5) {
+        field(out, name, value.as_bytes());
+    }
+    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
+        field(out, "_HOSTNAME", record.host.as_bytes());
+    }
+    for each in &record.fields {
+        field(out, &each.name, &each.value);
+    }
+}
+
+/// The day's short name, `Fri`.
+fn day_name(when: &Civil) -> &'static str {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    DAYS.get(weekday(days(when.year, when.month, when.day)) as usize)
+        .copied()
+        .unwrap_or("???")
+}
+
+/// ` host who: message\n`, journald's tail of a short line.
+fn host_and_who(record: &Record, unit: bool, out: &mut Vec<u8>) {
+    out.push(b' ');
+    push(
+        out,
+        if record.host.is_empty() {
+            "localhost"
+        } else {
+            &record.host
+        },
+    );
+    out.push(b' ');
+    who(record, unit, out);
+    message(record, out);
+}
+
+/// `ident[pid]: ` (or the unit's name, for `with-unit`).
+fn who(record: &Record, unit: bool, out: &mut Vec<u8>) {
+    let name = if unit {
+        record
+            .get("_SYSTEMD_UNIT")
+            .or_else(|| record.get("UNIT"))
+            .unwrap_or_else(|| record.identifier())
+    } else {
+        record.identifier()
+    };
+    printable(name, out);
+    if let Some(pid) = record.pid() {
+        out.push(b'[');
+        printable(pid, out);
+        out.push(b']');
+    }
+    out.extend_from_slice(b": ");
+}
+
+/// The message and a newline, control bytes shown `\xNN`, and a newline
+/// inside it followed by an indent so the next line is seen to continue.
+fn message(record: &Record, out: &mut Vec<u8>) {
+    for &byte in record.message() {
+        match byte {
+            b'\n' => out.extend_from_slice(b"\n    "),
+            b'\t' => out.push(byte),
+            0..0x20 | 0x7f => push(out, &alloc::format!("\\x{byte:02x}")),
+            _ => out.push(byte),
+        }
+    }
+    out.push(b'\n');
+}
+
+/// `bytes` with control bytes shown `\xNN`.
+fn printable(bytes: &[u8], out: &mut Vec<u8>) {
+    for &byte in bytes {
+        if byte < 0x20 || byte == 0x7f {
+            push(out, &alloc::format!("\\x{byte:02x}"));
+        } else {
+            out.push(byte);
+        }
+    }
+}
+
+/// `text`'s bytes.
+fn push(out: &mut Vec<u8>, text: &str) {
+    out.extend_from_slice(text.as_bytes());
+}
+
+/// The store's own fields, as `json` and `export` begin with them:
+/// `PRIORITY` only for a known level, as journald writes it, and
+/// [`LEVEL_FIELD`] always, so a reader never has to infer one.
+fn own_fields(record: &Record) -> Vec<(&'static str, String)> {
+    let mut boot = String::new();
+    push_hex(&mut boot, &record.boot_id);
+    let mut fields = vec![
+        ("__CURSOR", cursor::of(record)),
+        (
+            "__REALTIME_TIMESTAMP",
+            alloc::format!("{}", record.realtime_us),
+        ),
+        (
+            "__MONOTONIC_TIMESTAMP",
+            alloc::format!("{}", record.monotonic_us),
+        ),
+        ("__SEQNUM", alloc::format!("{}", record.seqnum)),
+        ("_BOOT_ID", boot),
+    ];
+    if record.priority != UNSPECIFIED {
+        fields.push(("PRIORITY", alloc::format!("{}", record.priority)));
+    }
+    fields.push((LEVEL_FIELD, record.level_text()));
+    fields
+}
+
+/// Every field `json` writes, in order: the store's own, the host, then
+/// the record's.
+fn json_fields(record: &Record) -> Vec<(String, Vec<u8>)> {
+    let mut fields: Vec<(String, Vec<u8>)> = own_fields(record)
+        .into_iter()
+        .map(|(name, value)| (String::from(name), value.into_bytes()))
+        .collect();
+    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
+        fields.push((String::from("_HOSTNAME"), Vec::from(record.host.as_bytes())));
+    }
+    for field in &record.fields {
+        fields.push((field.name.clone(), field.value.clone()));
+    }
+    fields
+}
+
+/// The fields `-N` names and `-F` reads: what `json` shows but the
+/// store's `__` ones.
+#[must_use]
+pub fn shown_fields(record: &Record) -> Vec<(String, Vec<u8>)> {
+    json_fields(record)
+        .into_iter()
+        .filter(|(name, _)| !name.starts_with("__"))
+        .collect()
+}
+
+/// One JSON object, journald's: every value a string, a value that is not
+/// UTF-8 an array of its bytes.
+fn json(record: &Record, out: &mut Vec<u8>) {
+    out.push(b'{');
+    for (index, (name, value)) in json_fields(record).iter().enumerate() {
+        if index > 0 {
+            out.push(b',');
+        }
+        json_string(name.as_bytes(), out);
+        out.push(b':');
+        json_value(value, None, out);
+    }
+    out.extend_from_slice(b"}\n");
+}
+
+/// `json-pretty`, as systemd's JSON printer lays an object out: `{`, each
+/// member on its own line after a tab with ` : ` between name and value,
+/// `,` and a newline between members, then `}`; a byte array's items each
+/// on a line of their own two tabs in.
+fn json_pretty(record: &Record, out: &mut Vec<u8>) {
+    out.extend_from_slice(b"{\n");
+    for (index, (name, value)) in json_fields(record).iter().enumerate() {
+        if index > 0 {
+            out.extend_from_slice(b",\n");
+        }
+        out.push(b'\t');
+        json_string(name.as_bytes(), out);
+        out.extend_from_slice(b" : ");
+        json_value(value, Some("\t"), out);
+    }
+    out.extend_from_slice(b"\n}\n");
+}
+
+/// A value: a string when it is UTF-8, else an array of its bytes; with
+/// `pretty`, the array laid out after the indent its member had.
+fn json_value(value: &[u8], pretty: Option<&str>, out: &mut Vec<u8>) {
+    if core::str::from_utf8(value).is_ok() {
+        json_string(value, out);
+        return;
+    }
+    out.push(b'[');
+    for (index, byte) in value.iter().enumerate() {
+        if index > 0 {
+            out.push(b',');
+        }
+        if let Some(indent) = pretty {
+            out.push(b'\n');
+            push(out, indent);
+            out.push(b'\t');
+        }
+        push(out, &alloc::format!("{byte}"));
+    }
+    if let Some(indent) = pretty {
+        out.push(b'\n');
+        push(out, indent);
+    }
+    out.push(b']');
+}
+
+/// `bytes`, which are UTF-8, as a JSON string, escaped as systemd's JSON
+/// printer escapes: `"` and `\\`, `\b \f \n \r \t`, every other byte below
+/// 0x20 as `\u00XX`, and nothing else.
+fn json_string(bytes: &[u8], out: &mut Vec<u8>) {
+    out.push(b'"');
+    for &byte in bytes {
+        match byte {
+            b'"' => out.extend_from_slice(b"\\\""),
+            b'\\' => out.extend_from_slice(b"\\\\"),
+            0x08 => out.extend_from_slice(b"\\b"),
+            0x0c => out.extend_from_slice(b"\\f"),
+            b'\n' => out.extend_from_slice(b"\\n"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            0..0x20 => push(out, &alloc::format!("\\u{byte:04x}")),
+            _ => out.push(byte),
+        }
+    }
+    out.push(b'"');
+}
+
+/// The Journal Export Format: `NAME=value` lines, a value with a newline or
+/// that is not UTF-8 written `NAME\n<le64 length><bytes>\n`, and a blank
+/// line after the record.
+fn export(record: &Record, out: &mut Vec<u8>) {
+    let field = |out: &mut Vec<u8>, name: &str, value: &[u8]| {
+        push(out, name);
+        if value.contains(&b'\n') || core::str::from_utf8(value).is_err() {
+            out.push(b'\n');
+            out.extend_from_slice(&u64::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        } else {
+            out.push(b'=');
+        }
+        out.extend_from_slice(value);
+        out.push(b'\n');
+    };
+    for (name, value) in own_fields(record) {
+        field(out, name, value.as_bytes());
+    }
+    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
+        field(out, "_HOSTNAME", record.host.as_bytes());
+    }
+    for each in &record.fields {
+        field(out, &each.name, &each.value);
+    }
+    out.push(b'\n');
+}
+
+/// `lode levels`: for each source -- `SYSLOG_IDENTIFIER`, else `UNIT`, else
+/// `_TRANSPORT` -- its records, how many have no level, and how many a
+/// level read from their words; the sources with most unspecified first.
+/// Where levels are still missing, so the writers can be fixed.
+#[must_use]
+pub fn level_table(records: &[Record]) -> Vec<u8> {
+    let mut sources: alloc::collections::BTreeMap<String, [u64; 3]> =
+        alloc::collections::BTreeMap::new();
+    for record in records {
+        let name = ["SYSLOG_IDENTIFIER", "UNIT", "_TRANSPORT"]
+            .iter()
+            .find_map(|field| record.get(field))
+            .map_or_else(
+                || String::from("-"),
+                |value| String::from_utf8_lossy(value).into_owned(),
+            );
+        let counts = sources.entry(name).or_default();
+        counts[0] += 1;
+        if record.priority == UNSPECIFIED {
+            counts[1] += 1;
+        }
+        if record.get(crate::record::LEVEL_SOURCE) == Some(b"derived") {
+            counts[2] += 1;
+        }
+    }
+    let mut rows: Vec<(String, [u64; 3])> = sources.into_iter().collect();
+    rows.sort_by(|a, b| {
+        b.1[1]
+            .cmp(&a.1[1])
+            .then(b.1[0].cmp(&a.1[0]))
+            .then(a.0.cmp(&b.0))
+    });
+    let mut out = Vec::new();
+    push(
+        &mut out,
+        &alloc::format!(
+            "{:<24} {:>8} {:>12} {:>8}\n",
+            "SOURCE",
+            "RECORDS",
+            "UNSPECIFIED",
+            "DERIVED"
+        ),
+    );
+    for (name, [total, unspecified, derived]) in rows {
+        push(
+            &mut out,
+            &alloc::format!("{name:<24} {total:>8} {unspecified:>12} {derived:>8}\n"),
+        );
+    }
+    out
+}
+
+/// Bytes as systemd's `FORMAT_BYTES` writes them: `512B`, `8.0M`, `1.2G`,
+/// powers of 1024 with one decimal, the digit cut, not rounded.
+#[must_use]
+pub fn bytes_text(bytes: u64) -> String {
+    const UNITS: [(&str, u32); 6] = [
+        ("E", 60),
+        ("P", 50),
+        ("T", 40),
+        ("G", 30),
+        ("M", 20),
+        ("K", 10),
+    ];
+    for (index, (suffix, shift)) in UNITS.iter().enumerate() {
+        let factor = 1_u64 << shift;
+        if bytes >= factor {
+            let tenth = match UNITS.get(index + 1) {
+                Some((_, below)) => (bytes >> below) * 10 / 1024 % 10,
+                None => bytes * 10 / factor % 10,
+            };
+            return alloc::format!("{}.{tenth}{suffix}", bytes / factor);
+        }
+    }
+    alloc::format!("{bytes}B")
+}

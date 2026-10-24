@@ -83,7 +83,8 @@ there. And judge a gate by its exit status and its output — never through
 ferrousli, zinc, the apps (`src/user/apps`: every program a person starts,
 Ferrix's own and those ported onto ferrousli), the Pixel 7 tools and the
 website are repositories of their own in the ferrix-os organization since
-2026-10-03. `components.toml` names each one, the path it is
+2026-10-03, and tole, the UI framework (`src/user/system/linux/tole`), since
+2026-10-23. `components.toml` names each one, the path it is
 checked out at -- the path it had in this tree -- and the commit this tree is
 gated with. Every `cargo xtask` command clones a missing component and moves a
 clean checkout that is behind its pin, so a new worktree needs no extra step;

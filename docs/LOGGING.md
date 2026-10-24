@@ -242,11 +242,47 @@ anything journald accepts round-trips.
 | `_HOSTNAME` | `lode` | `uname`'s nodename |
 | `_SOURCE_REALTIME_TIMESTAMP`, `_SOURCE_MONOTONIC_TIMESTAMP` | `lode` | the kernel's stamp for kernel records (`usec` in `/dev/kmsg`), init's receive time for unit lines it buffered, the sender's for native-protocol records that carry one |
 | `_KERNEL_SEQNUM` | `lode` | `/dev/kmsg`'s sequence number (Ferrix's): how a restarted `lode` knows where it stopped (§11.3) |
-| `REPEATED`, `N_SUPPRESSED`, `N_DROPPED` | `lode` | on the records that say what a rule folded or dropped (§7) |
+| `REPEATED`, `LAST_MESSAGE`, `N_SUPPRESSED`, `N_DROPPED`, `N_BLANK` | `lode` | on the records that say what a rule folded or dropped (§7) |
+| `FERRIX_PRIORITY_SOURCE`, `FERRIX_PRIORITY_WORD` | `lode` | where the level came from, and the words a derived one was read from (below) |
 | `__REALTIME_TIMESTAMP`, `__MONOTONIC_TIMESTAMP`, `__UTC_OFFSET`, `__SEQNUM`, `__CURSOR` | the store | when `lode` stored it; the UTC offset in force then (USER-WISHES theme 8; journald keeps none, #6589); the store's own sequence; a cursor in journald's text shape |
 
 A sender that writes a field beginning with `_` has it dropped, as
 journald drops it. `_CMDLINE` is not recorded by default (§12.3).
+
+**Every record has a level, and `unspecified` is one of its own** (the
+customer, 2026-10-23). A record nobody gave a level is never shown as info:
+
+* The store keeps a level on every record, 0 to 7 or `unspecified` (8 in
+  the entry's priority byte), and `FERRIX_PRIORITY_SOURCE` says where it
+  came from: `stated` (the writer said it: `PRIORITY=`, a `<PRI>` or `<N>`
+  prefix, a `tracing` line's `WARN`, lode's own records, and a program's
+  `/dev/kmsg` write that named its level: one of a facility no console
+  line has, as the ring-3 drivers' and devmgr's `LOG_DAEMON` records
+  (`ferrix_rt::log`), or `LOG_USER` at another level than info), `kernel`
+  (a level other than info on the kernel's own facility), `derived` (read from the line's words, `failed` or
+  `refused`, with the words in `FERRIX_PRIORITY_WORD`), or `unspecified`.
+  A sender's own `FERRIX_PRIORITY_SOURCE` or `FERRIX_LEVEL` is dropped.
+* Info that arrives with no word from the writer says nothing and is
+  stored as unspecified: the kernel's own lines and programs' console
+  output all come at info (a `/dev/kmsg` write of `<6>` at `LOG_USER`
+  cannot be told from them, and is not), as does every unit's stdout stream unless its
+  header says another level; `lode cat` without `-p` sends none, and `-p
+  info` puts `<6>` on each line. A syslog datagram without `<PRI>` and a
+  native datagram without `PRIORITY` are unspecified too.
+* **`FERRIX_LEVEL`** is the explicit level every output that shows fields
+  carries (`json`, `export`, `verbose`): `0` to `7` or `unspecified`, made
+  from the record, never stored, so a viewer never infers one. journald's
+  `PRIORITY` is written only for a known level, as journald's own records
+  may lack it. `-o human` shows `?` for unspecified, never `I`.
+* Filters: `-p err` and every range leave unspecified out; `-p
+  err,unspecified` (commas join ranges) or `--where 'level = unspecified'`
+  asks for it; in the filter language it matches only `=` and `!=`. A
+  `level` rule never holds an unspecified record. `PRIORITY=3` as a
+  journalctl match compares the level, and matches no unspecified record,
+  as journalctl's does no record without the field.
+* `lode levels [-b ...] [filters]` counts per source (`SYSLOG_IDENTIFIER`,
+  else `UNIT`, else `_TRANSPORT`) the records, the unspecified and the
+  derived, most unspecified first: where writers still need to say levels.
 
 ### 4.2 Attribution
 
@@ -258,7 +294,7 @@ with no kernel change:
 
 | Path | Identity, and from whom | Race? |
 |---|---|---|
-| A unit's standard output and error | init, which made the pipe for that unit's spawn: unit, invocation, main pid, stream | none: a dying service's last lines are its unit's, whatever the process |
+| A unit's standard output and error | init, which made the pipes for that unit's spawn: unit, invocation, main pid, stream, ids (as built: each line on the root-only `/run/lode/units`, §18) | none: a dying service's last lines are its unit's, whatever the process |
 | A native channel (`ferrix.log`) | init, when it routes the OPEN (`CONNECT` names the client unit, `docs/INIT.md` §6); `devmgr` for a driver's channel | none |
 | A stdout stream (`lode cat`, hyprix's programs) | `SO_PEERCRED` at `connect`, resolved through `/proc` at `accept`, while the writer is necessarily alive, and kept for the stream's life | none after accept |
 | `/dev/log`, the journal socket | `SCM_CREDENTIALS`, stamped by the kernel at send time (pid, uid, gid); unit, comm and exe from `/proc` at receive, with a per-pid cache of the last resolution kept 10 s after the pid's last record | uid and pid: none. Unit, comm, exe: only for a sender that exits before its *first* datagram is read |
@@ -278,7 +314,12 @@ before seq S" at warning, `N` from the sequence gap. A kernel record's
 priority and facility are `/dev/kmsg`'s; a line with facility `user` (a
 program's console output) gets `_TRANSPORT=driver-fallback` when it
 matches a driver's name prefix (`intelgpu: ...`), with `SYSLOG_IDENTIFIER`
-from the prefix, and `kernel` otherwise. `lode` reads the ring as fast as
+from the prefix, and `kernel` otherwise. Since 2026-10-24 the ring-3
+drivers and `devmgr` write each line as a `/dev/kmsg` record of its own,
+`<N>` at `LOG_DAEMON` with the level the line's writer gave it
+(`ferrix_rt::log`: `err!`, `warn!`, `notice!`, `info!`, `debug!`), and
+`lode` stores that level as stated (§4.1); the text and the identifier
+from its prefix (`intel:`, `devmgr`) are as before. `lode` reads the ring as fast as
 it fills, so once it runs nothing the ring overwrites is lost: the
 `freqlog` problem ends there, even before drivers move to their channel.
 `log_buf_len=` (the kmsg branch) sizes the ring for the part of the boot
@@ -558,7 +599,8 @@ theme 1, systemd #31358), the field indexes and the sparse time index
 (§8.4) after them, a footer with their offsets and checksum -- then
 renames it over the online file. The online file is never modified; a
 crash during sealing leaves either the old online file or the new sealed
-one. Sealed segments are immutable.
+one. Sealed segments are immutable. (Built so far: the compression,
+§18 "Compression, as built"; the indexes are still to come.)
 
 **Crash safety** (theme 8). A reader stops at the first entry whose length
 runs past the file, whose checksum does not match, or whose offsets are
@@ -583,7 +625,9 @@ top item 1):
 Measured by QEMU's block statistics for the disk (`query-blockstats`
 before and after, through the run's QMP socket), with nothing else writing;
 the first figure is dominated by btrfs's commit of each `fdatasync`, which
-is why the sync interval is a setting.
+is why the sync interval is a setting. (Built: §18 "The write budget, as
+built" -- the fast load is within its budget, the slow one over it by
+btrfs's commit.)
 
 ### 8.4 Finding records fast
 
@@ -714,7 +758,9 @@ invocation's own last lines rather than a hint to run another command.
 * **Byte-compatible with journald** where journald defines it, because
   scripts parse it: `-o short`, `short-iso`, `short-iso-precise`,
   `short-precise`, `short-monotonic`, `with-unit`, `cat`, `json`,
-  `json-pretty`, `json-seq`, `export`, `verbose`. `-o json` is one object a
+  `json-pretty`, `json-seq`, `export`, `verbose` (journald's: a time line
+  with the cursor, then each field indented; built in the field-quality
+  landing). `-o json` is one object a
   line, every field a string, binary values as arrays of numbers; `-o
   export` is the Journal Export Format.
 * **Templates** (#3449): `--format '{time:iso} {unit} {priority:letter}
@@ -724,8 +770,9 @@ invocation's own last lines rather than a hint to run another command.
   `~/.config/ferrix/lode/formats.conf`.
 * **Ferrix's default, `-o human`**, when no `-o` is given:
   `2026-10-23 14:01:02.123 +02:00 E hyprix[812]: message` -- the year and
-  the zone (theme 8), the priority as a letter (`E W N I D`, and colour on
-  a terminal; #39281), the identifier and pid, the message whole.
+  the zone (theme 8), the priority as a letter (`E W N I D`, `?` for a
+  record with no level (§4.1), and colour on a terminal; #39281), the
+  identifier and pid, the message whole.
 
 ### 9.4 Defaults
 
@@ -780,6 +827,9 @@ the reconnecting, writes the stream to the run's log directory, and turns
 
 ### 10.2 Continuous forwarding
 
+(Built in part: see §18, "Store-and-forward, as built" and "TLS and
+lode-receive, as built". RFC 5424 and OTLP are still to come.)
+
 `lode-upload.service`, its own unit, user and sealed job, off unless
 `/etc/ferrix/lode-upload.conf` names a destination (theme 9):
 
@@ -803,6 +853,10 @@ the reconnecting, writes the stream to the run's log directory, and turns
   and `auth.service` never unless named.
 
 ### 10.3 Receiving
+
+(Built first as `lode-receive` on a Linux host, for the viewer on nazuna:
+§18, "TLS and lode-receive, as built". The Ferrix-side service below is
+still to come.)
 
 `lode-receive.service` (opt-in) takes journal-upload's export, RFC
 3164/5424 and JSON lines, and writes each host into
@@ -973,7 +1027,10 @@ with `ferrix.intelgpu.trace` off).
 The directory is `lode:lode 2755`; system segments `lode:adm 0640`; a user's
 directory `user-<uid>/` is `lode:<uid> 0750` and its segments
 `lode:<uid's primary group> 0640`, which with Ferrix's user private groups
-(`ferrix:x:1000:`) is that user alone. Only `lode` writes. USER-WISHES
+(`ferrix:x:1000:`) is that user alone. Only `lode` writes. (As built, a
+user's directory and segments are `lode:adm`, like the system's, and the
+user is handed theirs by lode: one group per file cannot be both the
+user's and `adm`'s, §18 "Users' own records and units' runs".) USER-WISHES
 (theme 14) warns against "file permissions over a shared file"; here no
 file is shared between readers of different rights: a record is in
 exactly one owner's segments. `wheel` is not a reader by membership; a
@@ -1099,6 +1156,25 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 
 ## 17. Plan
 
+**Where it stands (2026-10-23).** Landed: the design and steps 1, 2,
+2a, 2b, 3, 4 and 5, and the field-quality fixes from the N150's first
+records, and store-and-forward to a collector (§10.2's first part);
+compression of sealed segments, and the write-budget row (§8.3) as
+below, and the customer's order after them: TLS forwarding and
+`lode-receive` on a Linux host (§10.2, §10.3), for the viewer on nazuna;
+then the first of the three steps the customer approved after §20's audit:
+units' own streams with their runs, and users' own records (§18 "Users'
+own records and units' runs"), then the second, the journalctl
+compatibility pack (§18 "journalctl's options"), then the third, `lode
+top` and alerts (§18 "Top talkers and alerts").
+The viewer is a separate agent's, a Rust desktop app built from the
+customer's design. Follow-up rows: the uploader as a native service in a
+sealed job (today a plain Linux service, §18); a machine id written at
+first boot, so a machine is not filed under its host name; RFC 5424 and
+OTLP outputs.
+
+
+
 | Step | What | Points | Rows (tests) |
 |---|---|---:|---|
 | 1 | `src/lib/log/`: record, segment format with `FORMAT.md`, torn-tail recovery, sealing with zstd and indexes, summaries, retention classes, vacuum; `logproto` | 9 | host tests; Miri; fuzz `log_segment`; `check` |
@@ -1112,7 +1188,9 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 | 9 | file sources; pstore import | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
 | 10 | the N150 box run (§17.2) | 3 | box |
 | 11 | the write budget (§8.3) | 2 | `test-log` part E |
-| | **Total** | **66** | |
+| 2a | session ids (§19.1): the piece that owns seat0 issues a session id and a random token per session, tells lode on the root-only `/run/lode/seat`, hands the compositor the token beside the card; lode stamps records with `_SESSION_ID`, `lode -s ID` | 5 | host tests; `test-compositor`: a session's records carry its id, a second session a new one |
+| 2b | crash screenshots (§19): the provider protocol crate, lode's side, sessiond's seat token, hyprix as the first provider; off by default | 8 | host tests of the protocol; `test-compositor`: a forced crash with capture on stores an image linked to its record, with capture off none, with no provider a `CAPTURE=none` record, a hung provider times out |
+| | **Total** | **79** | |
 | (opt) | §14's datagram-to-name, if the customer wants it | 3 | stage 7's socket checks; a `sd_journal_send` program from a libsystemd build |
 
 Order: 1 and 2 (one crate family, one agent), then 3 and 4 together (they
@@ -1166,10 +1244,1429 @@ write budget's first row holds on the real NVMe and btrfs. What QEMU
 cannot show and the box does: real btrfs latency under `fdatasync`, a real
 power cut, the real driver's rate.
 
+## 19. Crash screenshots (the customer, 2026-10-23; planned as step 2b, after 2a)
+
+When something crashes -- a process killed by a fault, a driver restarted,
+a game's error popup that is gone before anyone looks (Endfield's
+"illegal instruction" on the N150) -- lode keeps a picture of the screen at
+that moment, linked to the crash's record, so `lode --around` shows it
+beside the lines. **Off by default**: `/etc/ferrix/lode.d/capture.conf`
+with `Capture=yes` turns it on.
+
+**An open interface, not a hyprix hookup.** lode never reads `card0` or
+any display device: it stays in its box (§11.2). Instead any desktop --
+hyprix, a future shell, a kiosk, a headless framebuffer grabber -- can
+register with lode as a *screenshot provider* and be asked for a picture.
+X sessions under yserver are hyprix's windows, so hyprix's capture covers
+them.
+
+**The protocol** (`src/lib/proto/lode-capture`, `no_std`, host-tested,
+typed, length-prefixed messages over the stream socket `/run/lode/capture`,
+mode 0666; anyone may connect, only a proven seat holder is accepted):
+
+```
+REGISTER    provider -> lode   name; seat; outputs; formats it can send (QOI, PNG); seat token
+ACCEPTED    lode -> provider   the formats lode takes
+REFUSED     lode -> provider   why (no token, a wrong token, the seat held by another)
+CAPTURE     lode -> provider   request id; the record's sequence number; one line of what crashed
+IMAGE       provider -> lode   request id; format; width; height; the encoded bytes
+DECLINED    provider -> lode   request id; why (locked screen, nothing shown, privacy mode)
+UNREGISTER  provider -> lode   (or the connection closes: the provider is gone)
+```
+
+### 19.1 Session ids first (step 2a, the customer's order)
+
+The seat token the providers prove themselves with is built first, on its
+own, as step 2a, because a session id on every record is useful before any
+picture: which login's programs said what. Before writing it, step 2a
+reads what exists and reuses it rather than adding a second notion of who
+holds the seat: `sessiond` (seat0's owner, `docs/AUTH.md` §6.2), card0's
+DRM-master work (0e3e343a3), `authd`'s console revoke, and the backlog
+rows for sessiond and session switching. Kernel lines: 0 unless a generic
+typed mechanism is truly needed, and then counted and asked for first.
+The order is 2, then 2a, then 2b.
+
+**Proving it owns the display.** `sessiond` already owns seat0 and hands
+the compositor its card (`docs/AUTH.md` §6.2, `compositor_seat`). When it
+starts a session it also draws a random seat token, tells lode on a socket
+only root can reach (`/run/lode/seat`, root's 0600: "seat0 is held by pid
+P of uid U with token T"), and gives T to the compositor beside the card.
+lode accepts a REGISTER only from that pid (`SO_PEERCRED`) with that token;
+a new session's token replaces the old, and the old provider is dropped.
+An untrusted client cannot post a picture: it has neither the pid nor the
+token, and lode only ever stores an IMAGE that answers a CAPTURE it sent.
+
+**Several providers.** One per seat: the one holding the seat's current
+token. A headless grabber may register for a seat no compositor holds
+(`seat: headless`). lode never merges or picks between pictures.
+
+**No provider.** The crash record is stored as always, with
+`CAPTURE=none` and the reason (off, no provider, declined, timed out).
+Logging never waits for a picture.
+
+**Timeouts.** The crash record is written first. A CAPTURE is answered
+within 2 s or recorded `CAPTURE=timed-out`; three time-outs in a row drop
+the provider until it registers again. The image arrives on its own
+connection, read without blocking into a buffer capped at 16 MiB, so a
+hung or slow compositor costs lode a socket and a buffer, never a stalled
+read of the kernel log.
+
+**What triggers it.** Crash records (§18, step 2), `devmgr`'s driver
+deaths and restarts, and a rule action, `capture where EXPR`, for
+anything else (`capture where message ~ "illegal instruction"`). At most
+one picture each 10 s.
+
+**Storage and privacy.** The screen can show secrets, so capture is off
+unless turned on, and a picture is kept like the journal: in
+`/var/log/journal/captures/<boot>-<seqnum>.<qoi|png>`, `lode:adm 0640`,
+readable by exactly those who read the journal (§12). A record
+`CAPTURE_OF=<seqnum>` with `CAPTURE_FILE=` links it to its crash. Kept 7
+days and at most 256 MiB, the oldest removed first, and removed with
+`lode delete` when its crash record is. A provider may decline while the
+screen is locked.
+
+**Certification.** lode, sessiond and hyprix are ring-3 programs outside
+the item; no kernel lines.
+
 ## 18. Where it stands (2026-10-23)
 
-Design only, on branch `docs/logging`. No code, no reserved requirement
-ids (none are needed: nothing here is in the item). The kmsg work it builds on is on `develop` (815604fa7). The customer
-said go (2026-10-23, "ok then go with it"): the steps are built in
-order, each gated and landed before the next. USER-WISHES.md's top ten are taken
-in (§2).
+The design landed as dbc6f9bc4. The customer said go (2026-10-23, "ok
+then go with it"): the steps are built in order, each gated and landed
+before the next, the smallest useful first. No requirement ids are needed:
+nothing here is in the item.
+
+### Step 1, as built
+
+`src/lib/log/lode` (`ferrix-lode-core`, `no_std`, no `unsafe`, 31 host
+tests) and `src/user/system/native/lode` (the native program, `/sbin/lode`
+in every initramfs, `/bin/lode` and `/bin/journalctl` linking to it in
+every image that boots init). Kernel lines: 0.
+
+* **The service** (`lode.service`, `Type=native`): started by init with a
+  bootstrap channel, it opens `/dev/kmsg` and makes `/var/log/journal`
+  (or `/run/log/journal` where `/var` cannot be written) as root, gives
+  the store to uid 91 and group `adm` (4), becomes uid 91 for good, cuts a
+  torn tail off the newest segment, finds this boot's last stored kernel
+  sequence number, writes its started or restarted record, says READY,
+  and stores every kernel record as it reads it: one `write` a wakeup,
+  `fdatasync` every 5 s and at once after crit or worse, segments of 16
+  MiB, the oldest removed past 1 GiB. A restart reads the ring from its
+  oldest record, skips what was stored, and says in a record how many
+  were lost where the sequence jumps. The boot id is drawn once a boot
+  and kept in `/run/lode/boot_id` for a restarted instance.
+* **Its box**: `Slice=drivers.slice`, the slice the kernel seals
+  (`docs/CGROUPS.md` §3.3), so lode's job is sealed with no new init or
+  kernel mechanism; init's `Restart=always`. `test-log` checks uid 91,
+  the cgroup `/drivers.slice/lode.service` and a refused move out of it.
+  Not yet: init handing it its descriptors (§11.2.1), so it opens them as
+  root before dropping to its user; `WatchdogSec=`; the sandboxing keys,
+  which init applies to Linux services only.
+* **Sources**: the kernel log alone. Units' output arrives through it,
+  since init writes every unit line to the console as `  init
+  NAME[PID]: TEXT`; lode reads that into `UNIT`, `SYSLOG_IDENTIFIER`
+  and `SYSLOG_PID` -- not the trusted `_SYSTEMD_UNIT`, since anything can
+  write to the console. init's `ferrix.log` channel (step 4 of §17)
+  brings the trusted fields. Kernel subsystems' `  name     text` lines
+  get `FERRIX_SUBSYSTEM`, a driver's `name: text` the identifier.
+* **The reader**: `-b [N|ID]`, `--list-boots`, `-k`, `-u`, `-t`, `-T`,
+  `-p P[..Q]`, `-g` (globs, any case for a lower-case pattern), `-S`/`-U`
+  in every form it prints, `-n`, `-r`, `-e`, `-f`, `-o human|short|
+  short-iso|short-iso-precise|short-precise|short-monotonic|with-unit|
+  cat|json|export`, `--after-cursor`, `--show-cursor`, `-D`, `--utc`,
+  `FIELD=VALUE` matches with `+`, `--where` (the filter language's core:
+  `and`, `or`, `not`, parentheses, globs, `~` as "contains", `priority`
+  by name), and for the N150's needs `lode mark TEXT`, `--since-mark`/
+  `--until-mark`, `--around TEXT DURATION`, and local time from `TZ`,
+  `/etc/TZ` or `/etc/localtime`'s POSIX footer with no zone database.
+  `lode verify [--kernel]` checks the segments and a boot's kernel
+  sequence. No indexes yet (step 5): a query reads the boot's segments
+  whole.
+* **Box tests stream** with `ssh box lode -f -o json --after-cursor=C`
+  and a `--where` filter; the cursor resumes across a dropped connection
+  or a reboot.
+* **The desktop's image** enables it (`basic.target.wants`), so the N150
+  keeps its boots once installed from this landing.
+
+### Step 2, as built
+
+Floods held, retention per class, deletion, crashes (§7, §8.5; the
+N150's needs 3a and 5):
+
+* **Rules** in `/etc/ferrix/lode.d/*.rules` (`drop`, `sample 1/N`, `level
+  P`, `fold DURATION`, `limit BURST/DURATION`, each `where` a filter), read
+  at start; a file that does not read is said in an error record and not
+  used. A rule that held records back says how many every 10 s (`RULE`,
+  `N_DROPPED`).
+* **Folding**: a source's message repeating its last, within 30 s (or a
+  `fold` rule's window), is counted; `message repeated N time(s): ...`
+  with `REPEATED=N` follows when another message comes or the window ends.
+* **The limiter**: per source (`UNIT`, else the identifier, else the
+  subsystem, else the transport) and per class -- errors 10,000, warnings
+  2,000, chatter 1,000 a 30 s window, or a `limit` rule's -- never scaled
+  by anything else; `Suppressed N message(s) from SOURCE` with
+  `N_SUPPRESSED`. The kernel's own records and lode's are never held.
+* Every record that says what was held carries `HELD_FIRST_SEQNUM` and
+  `HELD_LAST_SEQNUM`, so `lode verify --kernel` counts those gaps as said.
+  A restart that finds a gap no record accounts for -- a window or fold
+  still open when the earlier instance was killed -- says it in a record
+  of its own, so a crash never leaves a gap unsaid.
+* **Retention classes** (`retention.conf`, §8.5; without it, `errors`
+  (priority err or worse) a year and 256 MiB, `system` 90 days and 1 GiB):
+  one segment series per class, `<class>@<boot>-<seq>.fxj`; `ram-only`
+  classes in `/run/log/journal`; a segment is sealed at 16 MiB or a day,
+  and vacuum removes whole sealed segments by age and size per class, then
+  the oldest past 1 GiB (64 MiB in `/run`).
+* **`lode rotate`** asks the service, through the kernel log, to seal every
+  segment and begin new ones; **`lode delete --where EXPR`** (root's)
+  rotates, then rewrites every sealed segment holding a match without it
+  (a new file synced, then renamed over the old), and writes a
+  `lode-delete` record saying how many it removed and by whom.
+* **Crash records**: the kernel's `signal` lines that end a process
+  become priority err with `MESSAGE_ID` for crashes, `CRASH_PID`,
+  `CRASH_SIGNAL` (by name), `CRASH_ADDRESS`, `CRASH_PC`, `CRASH_TRAP`,
+  and `CRASH_COMM`/`CRASH_PROGRAM` when the process is still there to read
+  them from; `lode --where 'crash = "*"'` lists them.
+* `test-log` adds: 50 repeats become one line and one `REPEATED=49`; 300
+  lines over `limit 100/2s` become 100 and one record of 200 held; a
+  dropped source is absent and its drop said; an error lands in the
+  `errors` class; `lode delete` removes two records and says so.
+
+### Step 2a, as built
+
+Session ids (§19.1). What already existed is reused, not doubled:
+`sessiond` owns seat0 and numbers its sessions from the count `login`
+keeps (`/run/ferrix/login/next`, `session-<n>.scope`), so the session id is
+that `n`, the one its scope already has.
+
+* `sessiond` draws a 16-byte token per session from `/dev/urandom`, gives
+  it to the compositor in `FERRIX_SESSION_TOKEN` beside the card's channel,
+  and once the scope exists writes `SESSION <n> seat=seat0 uid=U pid=P
+  scope=session-<n>.scope unit=<its own unit> token=<hex>` to lode's
+  `/run/lode/seat`; `END <n>` when the session is gone. A lode that is not
+  there costs one line on `sessiond`'s output; the session goes on.
+* lode makes `/run/lode/seat` while it is still root, leaves it root's
+  0600, and refuses a peer whose uid is not 0. It keeps the open sessions
+  in `/run/lode/sessions`, so a restarted lode takes them up; says each
+  begin and end in a record (`SESSION_ID`, `SESSION_SEAT`, `SESSION_UID`,
+  `SESSION_SCOPE`, `SESSION_UNIT`; never the token); and stamps
+  `SESSION_ID` on every record of the session's unit while it lasts.
+* `lode -s ID` (`--where 'session = ID'`) is a session's lines; `lode
+  session begin|end` is the same line for a seat owner other than
+  `sessiond` (a kiosk's starter, the row).
+* `test-log`: a session begun before the kill keeps stamping the unit's
+  lines after lode's restart, and stops at its end.
+* Kernel lines: 0; ring-3 programs only (`sessiond`, lode), none in the
+  item.
+
+### Step 2b, as built
+
+Crash screenshots (§19), on the session token of step 2a.
+
+* `src/lib/proto/lode-capture` (`ferrix-lode-capture`, `no_std`, no
+  `unsafe`): the provider protocol's seven messages as frames, decoded
+  strictly, and a QOI encoder and decoder -- the one picture format every
+  provider can write without a library. Host-tested.
+* lode (`capture.rs`): off unless `/etc/ferrix/lode.d/capture.conf` says
+  `Capture=yes`; then `/run/lode/capture` (0666) and
+  `<journal>/captures/` (`lode:adm 2750`). A REGISTER is accepted only from
+  the pid `sessiond` named for the seat with that session's token
+  (`SO_PEERCRED`); anything else is REFUSED and dropped. Triggers: crash
+  records, `devmgr` lines saying a driver died, and `capture where EXPR`
+  lines of the file. The crash record is stored first; then one CAPTURE to
+  the seat's provider, at most one each 10 s; the answer within 2 s or a
+  `timed-out` record, three in a row dropping the provider. Every outcome
+  is a record, `CAPTURE_OF=<seqnum>` and `CAPTURE=stored|none|declined|
+  timed-out|skipped`; a stored picture is
+  `captures/<boot>-<seqnum>-<time>.qoi`, 0640, kept 7 days and 256 MiB.
+* hyprix (`lodeshot.rs`): takes `FERRIX_SESSION_TOKEN` out of its
+  environment first thing in `main`, registers for seat0, and answers each
+  CAPTURE with its first screen as last shown (the GPU's or a client's
+  buffer, or the software canvas), or declines while the session is
+  locked. A host test runs the compositor headless against a socket
+  standing in for lode and decodes the 1024x768 picture it sends.
+* `lode provide-stub TOKEN` is the protocol's smallest peer (a 2x2
+  picture): what `test-log` proves lode's side with -- `none` with no
+  provider, one stored QOI file from the proven one, a refusal for one
+  with the wrong token.
+* Not yet: `lode delete` removing a deleted crash's picture; PNG.
+* Kernel lines: 0; ring-3 only (lode, sessiond, hyprix), none in the item.
+
+### Step 3, as built
+
+The Linux front (§5; `front.rs`), made while lode is still root:
+
+* `/run/systemd/journal/dev-log`, syslog datagrams, and `/dev/log`, a link
+  to it in devfs's fixed table beside `fd`, `stdin`, `stdout` and `stderr`
+  -- the one kernel change of the log so far, two lines in
+  `src/kernel/src/fs/devfs.rs` (load ring; `fs` exists only under
+  `linux_abi=on`) and the devfs boot check's expected names. Without lode
+  the link dangles and `syslog()` is refused at once, as on Linux without
+  journald. RFC 5424 when a datagram says `1 `, RFC 3164 read leniently.
+* `/run/systemd/journal/` is made by lode as root, root's 0755, so while
+  lode is stopped nobody else can bind the syslog socket there and take
+  other programs' records (the consultant's C2, ledger line 3404).
+* `/run/systemd/journal/socket`, systemd's native protocol, a large record
+  in a passed memfd. libsystemd's `sd_journal_send` sends to the name on an
+  unconnected socket, which the kernel refuses (§14's optional item, not
+  built): a program that connects first gets through (`lode cat
+  --journal`).
+* `/run/systemd/journal/stdout`, stdout streams: the seven-line header,
+  then lines, `<N>` prefixes read when the header says so.
+* Each datagram's pid, uid and gid are the kernel's (`SO_PASSCRED`), a
+  stream's are `SO_PEERCRED` at accept; `_COMM`, `_SYSTEMD_CGROUP`,
+  `_SYSTEMD_UNIT` and `_SYSTEMD_SLICE` come from `/proc` at once and are
+  kept 10 s for a sender that has exited since. A session's scope stamps
+  its programs' records with its id. A one-shot sender that has exited
+  before lode reads its datagram keeps the kernel's `_PID`, `_UID` and
+  `_GID` but has no `_COMM` or unit (§4.2's residual; seen on AArch64 with
+  busybox `logger`), never a wrong one.
+* `COMMAND | lode cat [-t ID] [-p PRIO] [--journal]`: standard input into
+  the log, as `systemd-cat` sends it (no program to start: pipe into it).
+* Not yet: streams parked in init's descriptor store across a restart of
+  lode (a stream open while lode restarts is lost and its writer sees
+  `EPIPE`); the sockets owned by init rather than lode.
+* `test-log`: busybox `logger`, a stream and a native datagram each arrive
+  once with the trusted fields; `/dev/log` is the link; with lode stopped,
+  `logger` returns at once.
+
+### Step 4, as built
+
+Box tests stream to nazuna (§10.1; the N150's needs 2 and 10).
+
+* `cargo xtask box-log --host <DEST> [-- <lode options>] [--until-match
+  TEXT] [--out FILE]` runs `lode -f -o json` on the machine over ssh,
+  writes every record to `~/.local/share/ferrix/logs/box/<UTC>-<host>.jsonl`
+  (its first line naming the host, this tree's commit and the time, so the
+  evidence can be cited) and a line of each to the terminal, and keeps the
+  last record's cursor. A dropped connection -- the machine rebooting --
+  is made again every 2 s and goes on `--after-cursor` the last record
+  kept, across the reboot; the store's sequence numbers make a repeat
+  impossible. `--until-match` ends it at the first record whose message
+  holds the text; xtask's `--timeout` bounds the whole follow.
+* Not yet: lode's own store-and-forward to a collector (§10.2's
+  journal-upload, RFC 5424 and JSON outputs) and receiving (§10.3); ssh is
+  the transport and its authentication the access control.
+
+### Step 5, as built
+
+Queries that stay fast as the store grows (USER-WISHES top item 2, §8.4).
+
+* At every seal the service writes `<segment>.sum` beside the segment
+  (`ferrix-lode-core` `summary`): its sequence and time range, record
+  count, priority range, and every value of `SYSLOG_IDENTIFIER`, `UNIT`,
+  `_SYSTEMD_UNIT`, `_TRANSPORT`, `SESSION_ID` and `_FERRIX_DRIVER` it
+  holds, with counts, under a CRC; a new file renamed over the old. At
+  start it summarises up to 64 sealed segments that have none (an older
+  lode's); vacuum removes a summary with its segment; `lode delete`
+  rewrites the summary of each segment it rewrites.
+* A reader skips a segment whose summary proves the query cannot match
+  (a time range missed, a cursor already past it, a priority range or a
+  summarised field's value absent under an `and`), and reads a segment
+  with no summary -- the one being written -- always.
+* `-n N` with no marks or `--around` reads the candidate segments newest
+  first and stops once no segment left can hold a newer match than the
+  Nth found; `--list-boots` takes the last time from summaries.
+* `lode bench RECORDS [DIR]` writes a store of that many records over 200
+  units and times `-u <rare unit> -n 50` both ways. On 200,000 records (3
+  segments): x86-64 25 ms through summaries against 409 ms reading all,
+  AArch64 133 ms against 1,970 ms, the same 50 records. test-log requires
+  the same answer and no slower, and `-u lode-test -n 3` on its own store.
+* Not yet: the field indexes inside a sealed segment and its sparse time
+  index (a segment that may match is read whole); compression.
+
+### Field quality, as built (the N150's first records, 2026-10-23)
+
+What the first 1,907 records from a real machine showed lode reading
+wrong, fixed in one landing before step 6:
+
+* **Names.** A name with a number's tail glued before it (`0usbhid`,
+  `00usbhid`, `0xusbhid`: another writer left digits on the console with
+  no newline) is read without them. ANSI colour is taken out before a
+  line is read. A Rust `tracing` line (`2026-...Z  WARN russh::server:
+  text`) gives its crate as the identifier and its own level. A program's
+  padded name without the kernel's two-space indent (`devmgr   intel-gt
+  started`) is read as the kernel's are. `error:` and `WARNING:` name a
+  level, never a program. The 49 records with no `SYSLOG_IDENTIFIER` were
+  these.
+* **Levels** (1,906 of 1,907 were info): §4.1. A level is stated, the
+  kernel's, derived from the words -- `failed`, `could not`, `cannot`,
+  `unable`, `error:` an error; `refused`, `denied`, `lost`, `dropped`,
+  `timed out`, `warning` a warning; none of them after `0` or `no` one or
+  two words before (`0 rows refused`); for the kernel's own lines only the
+  error words and an upper-case `WARNING:`, since its boot checks report
+  what they refused on purpose -- or unspecified.
+* **`FERRIX_SUBSYSTEM`** (on 155 of 1,907): the subsystem a line names,
+  else the program that wrote it, else `kernel` for the kernel's own lines.
+  Every line that says who wrote it now has one.
+* **The empty `MESSAGE`** (record 2) was a blank console line: blank
+  kernel and console lines are no longer stored, and a record says how many
+  there were (`N_BLANK`, with their kernel sequence range, so `verify
+  --kernel` still accounts for every one).
+* **Floods alike but for their numbers** fold: two messages are the same
+  when they differ only in runs of digits (hyprix's `not scanning out
+  directly ... the top one is 839x497 at 181,99` every frame). The record
+  that says so reads `message repeated N time(s), numbers varying: <the
+  first>` and carries `LAST_MESSAGE`, the last of them. A line the
+  limiter held breaks a run, and a mark is never folded. Each kind of rule is now read on its own,
+  the first match deciding: the first matching `fold` sets the fold
+  window, the first `limit` the limit, and the first `drop`, `sample` or
+  `level` whether the line is held -- so a fold rule and a limit rule both
+  apply to one line. `fold 0s where ...` turns folding off for lines
+  that must each be kept (test-log's flood).
+* **`-o verbose`**, journald's.
+* test-log checks each on all three architectures: a similar flood folded
+  with its last line, a glued name read, and a line with no level shown as
+  unspecified in json, human and verbose, left out by `-p err`, brought in
+  by `-p err,unspecified`, and counted by `lode levels`.
+
+### Drivers' levels, as built (2026-10-24)
+
+The customer's: the Intel driver's lines reached lode as unspecified.
+Every ring-3 driver and devmgr now says each line at a level it chose
+(`ferrix_rt::log`: `err!`, `warn!`, `notice!`, `info!`, `debug!`, or
+`log::line(level, ...)`; intel-xelp's `Host::say` and the keeper's take a
+`Level`): refusals a program takes for a lost device at error, other
+refusals and work-arounds at warning, steps at info, `freqlog`, uapi
+traces and register dumps at debug, a panic at critical. Each line is a
+`/dev/kmsg` record `<N>` at `LOG_DAEMON`, which the console prints as
+before and lode stores as stated (`ingest::written_with_level`); a
+program that cannot open `/dev/kmsg` keeps to standard error. No kernel
+line changed. `test-compositor --boot direct-scanout` prints `lode levels
+-b` and requires `intel`, `intel-fake`, `devmgr`, `efifb` and `ahci` with
+no unspecified or derived record: on the commit before, 21 of their 21
+records were unspecified, after it none. Step 7's native channel per
+driver (§17) is still to come; this is its fallback made exact.
+
+### Store-and-forward, as built (§10.2's first part)
+
+`lode upload`, `lode-upload.service`, sends the log on to collectors.
+
+* **The store is the buffer.** Each destination keeps a cursor in
+  `/var/lib/ferrix/lode-upload/<name>`: the store sequence number of the
+  last record it acknowledged. The cursor is written through a new file
+  renamed over the old one, and only after the destination answered
+  `2xx`. A destination that is down is tried again after 1 s, 2, 4, ...,
+  up to 5 min, for ever; the uploader never gives up and exits. Killed,
+  init starts it again and it goes on from the cursor: nothing is sent
+  twice that was acknowledged, nothing lost that the store still holds.
+* **What was gone before it was sent is said.** Records missing from the
+  store's sequence after a cursor (vacuum, `lode delete`, a RAM-only class
+  at a reboot) are counted in a record of their own: `MESSAGE_ID`
+  e2a6c4b8d0f24e1a9c3b5d7f9e1a3c5b, `N_UNSENT`, `UPLOAD_DESTINATION`, the
+  range.
+* **Configuration**: `/etc/ferrix/lode-upload.conf`, one destination a
+  line, `NAME URL FORMAT [auth] [where EXPR]`. No file, or no line: it
+  says so and ends. `export` posts the Journal Export Format as
+  `systemd-journal-upload` posts it (`POST /upload`, `Content-Type:
+  application/vnd.fdo.journal`); `json` posts journald's JSON a line
+  (`application/x-ndjson`) for Vector, Loki and Fluent Bit. At most 1,000
+  records or 1 MiB a request. The filter is §6's language; records of the
+  auth and authpriv facilities and of `auth.service` go only to a line that
+  says `auth`.
+* **Plain HTTP only to this machine** (`localhost`, `127.0.0.0/8`): a
+  configuration naming another host is refused and says to use an ssh
+  tunnel. TLS is not built yet; it comes with a TLS stack for native
+  programs.
+* **Its box**: started as root to make its state directory, then uid 92 in
+  `adm`, which reads the log and nothing else. An ordinary Linux service
+  in `system.slice`, not the sealed `drivers.slice`: that slice takes
+  native services only (init's start of a Linux process there fails
+  `EPERM`), and the uploader holds nothing the log depends on. Off unless
+  an image enables the unit.
+* **Reading**: it reads only what follows its cursor -- sealed segments
+  that end before it are skipped by their summaries, the one being written
+  is read from where the last read stopped -- at most 5,000 records ahead,
+  and an idle pass, which sees no segment change size, reads nothing.
+* `test-log` runs `lode upload-stub`, a collector on 127.0.0.1 that keeps
+  what it is sent and answers 503 while told to. The uploader starts
+  before it; 5 records reach it; while it refuses, nothing is counted as
+  kept and the failures are said; once it is back, 5 more follow. Then the
+  uploader is killed, and after init starts it again, 5 more. All 15
+  arrive exactly once, in the export format.
+* Not yet: TLS and client certificates; RFC 5424 over TCP; OTLP;
+  `lode-receive` and `--merge` (§10.3, §10.4); a check against a real
+  `systemd-journal-remote` (nazuna has none installed; the body is the
+  same `-o export` that the format tests cover); a cursor past a store that was
+  wiped and begun again, which today waits for the new store to pass it.
+
+### Compression, as built (§8.2)
+
+* When a segment is sealed (16 MiB, a day, `lode rotate`), the service
+  compresses it: its entries in zstd frames of about 64 KiB of whole
+  entries (`ruzstd`'s fastest level, the crate the btrfs code already
+  uses), each frame with its unpacked and packed length and a CRC-32C, and
+  the segment's header kept whole in front (`ferrix-lode-core`
+  `compress`, magic `FXJZSTD1`). Written to a new file, synced, renamed
+  over the sealed one: a crash leaves one or the other.
+* **Unpacked, it is the segment it was made from, byte for byte** (cut at
+  its last good entry): the same header, the same entries at the same
+  offsets. So every reader -- `lode`, `-f` holding an offset, the
+  uploader, `verify`, `delete` -- reads it through one function
+  (`store::bytes`) and nothing else changed. A frame whose checksum or
+  length is wrong ends the unpacking there, as a torn entry ends a scan.
+* **No stall**: the service packs four frames (256 KiB) a turn of its
+  loop and reads the kernel log in between, so sealing a full segment
+  never holds the log back; it does not sleep while a segment waits.
+  Segments sealed but not compressed -- by an older lode, or one stopped
+  midway -- are queued at start. A segment that changed meanwhile
+  (`lode delete` rewrote it) or did not get smaller is left as it is;
+  `lode delete` compresses again what it rewrites of a compressed one. A
+  compressed segment is never cut as torn nor reopened for writing.
+* The N150's first 1,907 records pack 5.6 to 1 (682 KB to 123 KB), at
+  about 110 MB/s on nazuna. `test-log` requires a compressed segment
+  after `lode rotate`, and then reads all 3,000 flood lines and `verify
+  --kernel` through it on all three architectures; host tests cover the
+  round trip, a torn tail, a flipped bit and frame-at-a-time packing.
+* Not yet: the field indexes and the sparse time index after the frames
+  (§8.4); a sealed segment that may match is unpacked whole.
+
+### The viewer, as built (2026-10-23)
+
+The customer's design of a log viewer (`~/.local/share/ferrix/design/lode-app`
+on nazuna) is the app `lode-viewer`, in every image a
+person runs and "Logs" in the launcher. It reads the store as `lode`
+does, with `ferrix-lode-core` (segments, compressed or not, summaries, the
+filter language, the JSON output), as the person running it, and follows it for Live as `lode -f`
+does. It also opens a JSONL export (`lode -o json`, `cargo xtask box-log`'s
+files) on Ferrix or a Linux host. Its window is the desktop's own
+`compositor-toolkit`, drawn on the CPU; egui and iced were set aside because
+both reach Wayland through winit, which loads libwayland and libxkbcommon at
+run time, which a static Ferrix program cannot.
+
+* **Overview** (a boot's track, lanes, tiles, activity per 10 s, rate
+  against the limiter, top sources, the window's warnings and worse first),
+  **Logs** (the filter language, saved queries, chips, facets with
+  unspecified among the levels, held and folded lines, lode's marks, a
+  record's every field) and lode's state at the sidebar's foot.
+* A record from before the field-quality landing above, stored as info, is
+  shown at the level its words say by `ingest::guess_level`, with a note
+  saying so; the filter language sees that level.
+* `test-compositor --boot lode-viewer` boots it on the desktop, types a
+  query into it and requires the 13 records of 801 it must find (x86-64).
+* On a Linux desktop too (nazuna's GNOME, any Wayland session; its
+  README's `install-linux.sh`), with a machine picker over the stores
+  `lode-receive` keeps, `~/.local/share/ferrix/lode-receive/<machine-id>/`
+  (or `host-<hostname>/`), each followed Live; `--import FILE.jsonl --into
+  DIR` makes such a store from an export.
+* Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
+  and dragging the brush's edges.
+
+### The write budget, as built (§8.3)
+
+`cargo xtask test-log-budget` (x86-64 by default, KVM): init with lode's
+store on a btrfs volume at `/data`, `/var/log/journal` a link there; a
+unit writes two loads to the kernel log with nothing else writing; xtask
+reads the volume's `wr_bytes` from QEMU (`query-blockstats` on the boot's
+QMP socket) around each and divides by the `MESSAGE` bytes. It also
+requires every line stored and none lost (`verify --kernel`).
+
+| Load | Measured (2026-10-23) | Budget | The row requires |
+|---|---:|---:|---:|
+| 2 lines a second of 100 bytes, a minute (the hour's ratio: each 5 s sync is the same) | 45.4 | 40 | 50 |
+| 20,000 lines of 100 bytes, about 2,000 a second | 2.61 | 3 | 3 |
+
+* **Field names as indexes.** An entry wrote every field's name in full
+  -- `_SOURCE_MONOTONIC_TIMESTAMP`, `FERRIX_PRIORITY_SOURCE` and five more
+  on every kernel record, 128 bytes of a 380-byte record for a 100-byte
+  message. The 40 names records carry most (`segment::NAMES`, append only)
+  are now written as a two-byte index (a name length with its top bit set,
+  which no real name has); everything else, order included, is as before,
+  and older segments read as they did. The fast load went from 3.96 to
+  2.61, within its budget.
+* **The slow load is btrfs's.** A minute with lode running and no load
+  writes 60 KiB to the volume; with the load, 532 KiB for 12 KiB of
+  messages: about 40 KiB for each of the twelve five-second `fdatasync`s,
+  whatever lode wrote (2.6 KiB). That is the commit Ferrix's btrfs makes
+  for an `fsync`; lode can only sync less often (`SyncIntervalSec=`). The
+  row holds the slow load to 50, so it cannot grow, and says it is over
+  the design's 40. Meeting 40 is the file system's: an `fsync` through a
+  log tree, as Linux's btrfs does, rather than a whole commit.
+
+### TLS and lode-receive, as built (§10.2, §10.3)
+
+The customer's order: a Ferrix machine's log over TLS to nazuna, kept
+there for the viewer. One workspace, `src/user/system/linux/lode-net`, a
+std program against musl as dhcp is, with two programs:
+
+* **`lode-upload`** (`/bin/lode-upload`, `lode-upload.service`), in the
+  desktop's image and `test-log`'s, replaces the native `lode upload`:
+  the same cursor, back-off and reading of the store (std's file system,
+  `ferrix-lode-core`'s formats), and now `https://` to any host. A line is
+  `NAME https://HOST:PORT/upload export ca=FILE [cert=FILE key=FILE]
+  [where EXPR]`; plain `http://` stays limited to this machine. The keys
+  are read as root before it becomes uid 92. Each upload says
+  `X-Lode-Machine-Id` (from `/etc/machine-id`) and `X-Lode-Hostname`.
+  Records gone before they were sent are said in a record of their own
+  (`MESSAGE_ID` e2a6c4b8..., `N_UNSENT`).
+* **`lode-receive`**, on a Linux host as an ordinary user:
+  `pair --machine NAME --server-name HOST [--port P] [--root DIR] [--json]`
+  makes (once) a CA, the server's certificate for HOST, and NAME's client
+  certificate, and prints the files and the line the machine needs;
+  `run [--listen ADDR:PORT] [--allow-unpaired]` takes uploads; `check
+  [--json]` says whether it runs, where, its certificate's fingerprint and
+  the machines it keeps; `install-service` writes and starts a systemd user
+  unit; `show --machine DIR` prints a machine's records as JSON lines. Exit
+  status 0 done, 1 error, 2 usage, 3 not running (`check`), 4 certificates.
+* **The stores**: `~/.local/share/ferrix/lode-receive/<machine-id>/` (or
+  `host-<hostname>/` for a machine with no machine id), each a lode store
+  as lode lays out its own -- `system@<boot>-<seq>.fxj`, `.sum` beside, the
+  sealed ones compressed -- with a `machine` file (`hostname=`,
+  `last_seen=`, `paired=`); `.pki/` and `.receive.lock` beside them. The
+  viewer opens them with `ferrix-lode-core`. A machine directory is bound to
+  the certificate it was first paired with: another is refused.
+* **Once, and only after it is safe.** The receiver answers 200 only after
+  the records are synced; a record whose sequence number it already holds
+  in a boot it holds is dropped, so an upload sent again after a lost
+  answer stores nothing twice; a lower number in a boot never seen (a
+  machine whose store began again) is new.
+* **The TLS** is rustls with a provider of ours (`src/provider.rs`): TLS
+  1.3 only, one cipher suite (ChaCha20-Poly1305 with SHA-256), one key
+  exchange (X25519), one signature scheme (Ed25519), on the RustCrypto
+  crates. Why so few: we make both ends -- `pair` issues Ed25519
+  certificates and the two programs speak only to each other -- so every
+  algorithm more is code that never runs. Why ours: ring and aws-lc need a
+  C compiler for the musl Arm targets, which the tree does not have; the
+  RustCrypto organisation's `rustls-rustcrypto` is an alpha that pins an
+  older `rustls-webpki` and brings RSA (RUSTSEC-2023-0071), so its glue for
+  our three algorithms is copied, with attribution, not the crate.
+  Randomness is the kernel's alone, `getrandom(2)` with no flags (on Ferrix
+  the kernel's ChaCha20 generator seeded from firmware and the processor,
+  `src/kernel/src/random.rs`); no seeding in user space, no fallback, and a
+  failed read fails the handshake or the key. The client must present a
+  certificate from the receiver's CA unless `run --allow-unpaired`.
+* **Keys** are made from the kernel's random numbers, written 0600 through
+  a new file renamed into place (`.pki/` itself 0700), and never printed:
+  `pair` prints paths and fingerprints.
+* **Tests**: the provider against RFC vectors (SHA-256, HMAC, rustls's HKDF
+  on our HMAC per RFC 5869, X25519 per RFC 7748 with a low-order point
+  refused, Ed25519 per RFC 8032, a record sealed and opened, tampering
+  refused); on the host, a paired machine's uploads kept once across a
+  resend, a wrong CA, a foreign client certificate, an expired one and none
+  at all refused, keys 0600 and absent from `pair`'s output, and our
+  provider against rustls's own ring provider both ways (`ring` a
+  test-only dependency). `cargo xtask test-log-remote` boots a guest that
+  sends forty lines over TLS to `lode-receive` on the host through xtask's
+  gateway (10.0.2.2), takes the receiver away after twenty, writes twenty
+  more while the uploader fails and backs off, brings it back, and
+  requires all forty kept once, in order, under the guest's host name.
+* Not yet: a machine id at first boot (today a guest is
+  `host-ferrix/`); RFC 5424 and OTLP; certificate revocation (a paired
+  machine is unpaired by removing its `.pki/clients/NAME.pem`).
+
+### Users' own records and units' runs, as built (2026-10-23)
+
+The first of the three steps the customer approved after §20's audit
+(§20.1 gaps 6 and 10, themes 12 and 14).
+
+* **Units' streams, attributed by init** (§4.2). init makes a pipe for a
+  unit's standard output and another for its standard error (an error that
+  inherits a log gets its own), and hands lode every line on
+  `/run/lode/units` -- made by lode as root, 0600, any peer but root
+  refused -- with the unit, its run, the process, its uid and gid and the
+  stream (`ferrix-lode-core` `units`). lode stores it with
+  `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID` and
+  `_GID`, `_TRANSPORT=stdout`, and the identifier and level its words say,
+  as before. Nothing waits for lode: init's connection is non-blocking,
+  what lode is slow to take is not sent, and a lode that is gone is looked
+  for again once a second.
+* **The console copy is paired, not stored twice.** init still writes every
+  line to the console, after the socket: gates read units' lines there, and
+  it is how a line reaches the log while lode is not running. lode pairs a
+  copy it reads in the kernel log with the trusted line it was handed (same
+  unit, pid and message): the trusted record takes the copy's
+  `_KERNEL_SEQNUM`, so `verify --kernel` still finds no gap, and the copy is
+  not stored. A copy with no trusted line -- lode was down, or init's
+  socket full -- is stored as before, with `UNIT` read from its text. A
+  trusted line waits for its copy until the kernel log has been read to its
+  end and 2 s have passed. Standard error is not raised to warning (§5
+  said it would be): most of Ferrix's services write their ordinary lines
+  there, so a stream says where a line went, not how bad it is.
+* **Runs** (§9.2). init draws 32 hex digits each time a unit's cgroup is
+  made -- each start -- gives them to its processes as `INVOCATION_ID`,
+  and says them in `svc status` (`Invocation:`). Summaries keep
+  `_SYSTEMD_INVOCATION_ID`'s values, so a run's records skip every other
+  segment; a reader that knows fewer summary fields ignores the new one.
+  `lode -u UNIT@last` is the current or last run, `@-1` the one before,
+  `@N` the Nth kept, `@ID` one run; `--invocation` and `-I` as journalctl's.
+  `svc status UNIT` ends with the run's last ten lines and `svc log UNIT` is
+  the run (`lode -u UNIT@last -n 50`), each falling back to init's ring
+  when lode keeps nothing the caller may read.
+* **A user's own records** (§12.1, `access`). A record whose trusted
+  `_UID` is 1000 or more (never `nobody`) goes to `user-<uid>/` beside the
+  system's segments, a series per retention class, vacuumed against a
+  quarter of the store's limit. Every file stays `lode:adm 0640`, so root,
+  `adm` and the uploader read them as before (`lode-upload` reads the users'
+  directories too). A user who cannot open the store is handed theirs:
+  `lode` connects to `/run/lode/read` (`SOCK_SEQPACKET`, 0666), and lode,
+  having read the caller's uid with `SO_PEERCRED`, passes each of that
+  user's segments and summaries open for reading (`SCM_RIGHTS`), then
+  `END`. The reader reads them itself; lode opens and never reads for
+  anyone. Unix permissions name one group a file, and a user's segments
+  must be `adm`'s too: that is why the design's `lode:<uid>` modes were not
+  used.
+* `test-log` on all three architectures: a unit's standard error stored
+  once, under its unit, `_STREAM=stderr`, with its console copy's kernel
+  sequence number; a oneshot started twice told apart by `-u twice@last`,
+  `@-1`, its invocation id, `svc log` and `svc status`; a unit running as
+  uid 1000 reads its two lines with their stream and none of lode's own
+  records, which are the system's; root finds `user-1000/` and reads them.
+* **The viewer**: `lode-viewer` already looks in `user-<uid>/` as root or
+  `adm`; a person who is neither needs it to ask `/run/lode/read` as `lode`
+  does (`ferrix_lode_core::access` has the packets) -- a change in the
+  viewer, told to its agent. The store's format did not change.
+* Not yet: `_EXE`; init writing units' lines to the console only at or
+  above `MaxLevelConsole=` once lode takes them (§13.2), which waits for the
+  gates that read units' lines from the console to read them from lode.
+* Kernel lines: 0. init, `svc`, lode and `lode-upload` are ring-3
+  programs outside the item.
+
+### journalctl's options, as built (2026-10-23)
+
+The second of the three steps the customer approved after §20's audit.
+
+* **`-F FIELD` and `-N`**: each value of a field, and each field name,
+  once, over the records the other options choose (`-b`, `-u`, ...), as
+  journalctl prints them, `PRIORITY`, `_BOOT_ID` and `_HOSTNAME` included.
+* **`-g` is a regular expression** (`ferrix-lode-core` `regex`, the tree's
+  own, no crate): PCRE2's syntax a person writes at a shell -- classes,
+  `\d \w \s \b`, `[:alpha:]`, `* + ? {n,m}` and their lazy forms,
+  groups, `|`, anchors, `(?i)` -- matched by a Pike VM, so no pattern can
+  make a read slow; back-references, look-around and possessive
+  quantifiers are refused with where and why (exit 2), never matched
+  wrongly. journalctl's smart case: a pattern with no upper-case letter
+  ignores case, `--case-sensitive[=yes|no]` says otherwise. `--around` and
+  the marks still take text.
+* **Output**: `json-pretty` as systemd's JSON printer lays it out (a tab,
+  `" : "`, a byte array's items two tabs in), `json-seq`, `json-sse`,
+  `short-full` (`Fri 2026-10-23 14:01:02 CEST`: the zone's name from the
+  POSIX rule, `UTC`, or the offset), `short-unix`. JSON strings are now
+  escaped as systemd escapes them: `\b` and `\f`, and DEL left as it is.
+* **`--user-unit UNIT`**: `_SYSTEMD_USER_UNIT`, `USER_UNIT` and the
+  coredump and object forms, `.service` when the name has no type.
+* **`--disk-usage`**: `Archived and active journals take up 8.0M in the
+  file system.`, over every segment and summary the caller may read, sizes
+  as systemd's `FORMAT_BYTES` writes them.
+* **`--vacuum-size`, `--vacuum-time`, `--vacuum-files`** (root's): the
+  oldest sealed segments first, never one being written, each said as
+  `Deleted archived journal PATH (SIZE).` and each store directory closed
+  with `Vacuuming done, freed SIZE of archived journals from DIR.`, on
+  standard error as journalctl's log lines; sizes and spans read as
+  systemd's `parse_size` and `parse_sec` read them. A vacuum is recorded in
+  the log (`lode-vacuum`), as a deletion is.
+* **`--sync`, `--flush`, `--rotate`** ask the service on
+  `/run/lode/control` (root's 0600, any peer but root refused) and return
+  once it is done; `lode rotate` and `lode delete` use it too, and the
+  kernel-log request is kept for an older lode. `--flush` makes
+  `/var/log/journal` for lode first when it is missing; lode then takes the
+  directory, seals what it was writing in `/run`, moves every sealed segment
+  of a class that is not RAM-only over -- compressed on the way, synced,
+  then removed from `/run` -- and writes there from then on.
+* `test-log` on all three architectures: `-F _STREAM`, `-N`, a regular
+  expression with smart case, refused and case-sensitive, `json-pretty`
+  and `short-full`; `--sync`, `--flush`, `--rotate` and `--disk-usage`
+  answering; `--vacuum-time` removing sealed segments with journalctl's
+  lines and its record; and a lode restarted with `/var/log/journal`
+  unreachable keeping the log in `/run` until `--flush` moves it. Host
+  tests: the regular expressions (a nested quantifier on 5,000 characters
+  included), the formats against goldens, sizes and spans.
+* `test-log-budget` still restarts lode to move its store: a store moved by
+  `--flush` just before the slow load measured 53.6 to 59.1 bytes a byte against
+  45.7 for the restart, a cost of btrfs's commits after the move that the
+  row does not set out to measure.
+* Not yet: `-o short-delta`, `--relinquish-var`, `--user`, `-M`, the
+  journald.conf keys. Kernel lines: 0.
+
+### Top talkers and alerts, as built (2026-10-23)
+
+The third of the three steps the customer approved after §20's audit
+(§7.4, theme 22): a way for box runs to flag floods.
+
+* **Summaries count sources.** Each sealed segment's summary now also
+  holds every source -- the limiter's: unit, else identifier, else
+  subsystem, else transport -- with its records and the bytes of their
+  messages, in a section after the values that a reader written before it
+  ignores (the CRC covers it). The viewer reads them as before.
+* **`lode top [-b ...] [-n ROWS] [filters]`**: per source, records, bytes
+  and share, most first, for this boot unless `-b` says; a sealed segment
+  wholly in the window with no filter is counted from its summary alone,
+  the rest from their records. **`lode top --live [SECONDS]`** prints every
+  few seconds who wrote what since the last look, per second.
+* **Alerts** (`ferrix-lode-core` `alert`): `alert [NAME] [rate > N/DURATION]
+  [where EXPR] notify "TEXT"` or `... start UNIT` in any `*.rules` file.
+  Records are counted as they arrive, before the limiter, so a flood it
+  holds back is still seen; per source, more than N in a window fires, and
+  an alert fires at most once a source in 10 minutes. Each firing is a
+  record (`MESSAGE_ID` a1e47f1e..., `ALERT`, `ALERT_SOURCE`,
+  `ALERT_ACTION`, `N_RECORDS`). `%n`, `%s` and `%c` are the name, the
+  source and the count.
+* **`notify`** is a line, `alert NAME SOURCE TEXT`, to every reader of
+  `/run/lode/alerts` (made by lode as root, 0666: the text is root's).
+  notifyd reads it beside devmgr's events and shows a banner keyed by
+  alert and source; `lode alerts` prints the lines, for a box run over ssh.
+* **`start`** asks init on its control socket as lode's own user; init
+  starts a unit for a user other than root only when its file says
+  `StartableBy=` that user, by name or number (a new `[Unit]` key in
+  `src/lib/init/svc`). init's answer is read without waiting and said in a
+  record, a refusal included. Images that run lode need `lode` (uid 91) in
+  `/etc/passwd` for `StartableBy=lode`; `StartableBy=91` needs nothing.
+* `test-log` on all three architectures: a flood over `rate > 50/s` said
+  once to `lode alerts` and in the log; a crit line starting a unit that
+  allows it; a unit that does not refused and said; `lode top` listing the
+  sources; `--live` showing a source writing now. Host tests: the alert
+  rules, rates, the ten-minute quiet and the `%` forms; summaries' sources
+  and a summary from before them; notifyd's alert lines.
+* Found on the way: `lode delete` leaves the deleted records' kernel
+  sequence numbers unsaid, so `verify --kernel` reports them as a gap
+  unless a restart's record covers them, as it did in every `test-log` run
+  until now. The deletion record should carry the numbers it removed.
+* Not yet: `capture` as an alert action; alerts from summaries rather than
+  arriving records. Kernel lines: 0.
+
+### Crash records name their process, as built (2026-10-23)
+
+The first of the customer's gap items: the N150's crash records said only
+a pid and a pc (`signal pid 27915 ended by signal 5 at 0x0, pc
+0x7ffff57601a1: Breakpoint`), because lode read `/proc/<pid>` after the
+process was gone and its pid could be reused.
+
+* **The kernel says who it was, while it still is.** When a fault ends a
+  process, the Linux personality (`syscall/deliver.rs`, load ring) writes
+  a line just before the core's `ended by signal`: `  signal   pid N is
+  NAME exe PATH at FILE+OFFSET cmdline ARGS` -- the name, the path it was
+  started from as `/proc/<pid>/exe` gives it (` (deleted)` kept), the file
+  mapping the program counter is in with the pc's offset into that file
+  (`libcef.so+0x1a01a1`, `?` for anonymous memory), and the arguments
+  joined by spaces, at most 512 bytes copied (`procfs::crash_identity`).
+  Every field has its control bytes as spaces, so a name or path cannot
+  split the line. The core passes the faulting pc to the personality's
+  `fault_signal` (`trap.rs`, its one call). Kernel lines: 66 added and 7
+  changed in the first form (3 of them in the core), plus a bounded
+  argument copy (`Process::args_prefix`) after the consultant's review,
+  ledger line 3460.
+* **lode joins the two lines**: it keeps the identity line per pid and
+  gives the crash record that follows `CRASH_COMM`, `CRASH_EXE`,
+  `CRASH_MODULE`, `CRASH_CMDLINE` and `CRASH_PROGRAM`. `/proc` stays the
+  fallback for a kernel without the line.
+* **Privacy.** A command line can carry a secret (a token, a password on
+  the command line). It now sits in the kernel log, which only privileged
+  readers may read (`dmesg_restrict`), on the serial console (physical
+  access), and in lode's system segments (`lode:adm 0640`), as
+  systemd-coredump keeps `COREDUMP_CMDLINE` for the same readers. §12.3's
+  rule that `_CMDLINE` is not recorded is the customer's to change for
+  ordinary records (the name-and-path item); for crashes it is changed
+  here, at the customer's order of 2026-10-23.
+* `test-log`: `lode fault-stub`, a read of address 0, is recorded with
+  `CRASH_EXE=/sbin/lode`, `CRASH_MODULE=/sbin/lode+0x...` and its command
+  line ("crash" row). Boots on every architecture show the line for the
+  kernel's own fault checks (`pid 258 is mprotect exe /mprotect at ?
+  cmdline /mprotect`, AArch64).
+
+### Session programs, names and event kinds, as built (2026-10-23)
+
+The customer's gap items after tonight's Endfield start failures: what a
+desktop program, the X server, Steam and Proton said was in files on
+tmpfs or nowhere, records named no program, and an error dialog left no
+trace.
+
+* **`lode cat --tee FILE --echo`.** `--tee` also writes everything to FILE,
+  made afresh as `>` makes it, so a script's log file stays where its
+  readers look; `--echo` also to standard output. Without a lode, or when
+  it goes away, the lines go to standard output instead and the command's
+  output keeps being read: nothing waits, nothing is lost.
+* **Scripts**: the desktop's `/etc/yserver.sh` (`yserver`, and
+  `/tmp/yserver.log` as before), Steam's `desktop.sh` (`steam`,
+  `/tmp/steam.log`), the N150's `ef-player-anv.sh` (`proton`,
+  `plog/proton.out`, Proton's exit status kept) pipe into `lode cat`.
+* **hyprix's programs** (`exec`, `exec-once`, keybinds, fuzzel's) write to
+  `lode cat -t NAME --echo`, NAME the program's file name or a shell
+  script's (`sh /etc/yserver.sh` is `yserver`); the echo keeps the console,
+  and every gate that reads it, as it was. The echo's copy comes back as
+  hyprix's unit's line, and lode keeps the two as one: an echoed stream's
+  line (`FERRIX_ECHOED=1`, the stream header's seventh line) waits up to
+  2 s for its copy and takes the copy's kernel sequence number
+  (`units::Echoes`). `session-streams off` in `events.conf` turns it off.
+* **Names on every record with a pid** (`process-names`): `_COMM` and
+  `_CMDLINE` from `/proc` when the pid is first seen, while it writes, kept
+  10 s after its last record; `_EXE` from `/proc/<pid>/exe` where lode may
+  read it, and for a unit's processes from init, which says once a spawn
+  which program it runs (`P <pid> <path>` on `/run/lode/units`), since
+  lode's user may not read another user's `exe`. `_CMDLINE` is recorded by
+  default now (the customer's order; §12.3 said it was not): the same
+  privacy note as for crash records applies.
+* **App errors and windows** (hyprix, `lode_events.rs`): when a window
+  first maps, a window whose class is Windows' dialog class `#32770` or
+  whose title or class says error, failed, failure, fatal, exception or
+  crash is an `app-error` record (native protocol: `FERRIX_EVENT=app-error`,
+  `WINDOW_TITLE`, `WINDOW_CLASS`, `WINDOW_PID`, `WINDOW_COMM`, `WINDOW_EXE`,
+  `WINDOW_DIALOG` for a modal or child window, at warning); any other
+  window a `window-opened` record when that kind is on (off by default).
+  lode takes a screenshot of an app error as of a crash (§19), and desktop
+  images ship `Capture=yes`.
+* **`events.conf`** (`/etc/ferrix/lode.d/`, a person's
+  `~/.config/ferrix/lode/events.conf` over it for their session's kinds):
+  `KIND on|off [LEVEL]` for `window-opened` (off), `app-error`,
+  `session-streams`, `crash-names`, `process-names`, `capture` (on).
+  `lode events` lists them with where each was set; which records of a
+  kind are kept is the rules' (`drop where event = window-opened and id =
+  waybar`; `event` is `FERRIX_EVENT` in the filter language). hyprix reads
+  the files each time it would make an event; **`lode reload`** (root's,
+  on the control socket) has lode read its rules, alerts and events again.
+* `test-log` ("streams", "names" rows): `--tee` keeps the file and the
+  record, an echoed line is one record with its kernel sequence number,
+  `lode events` and `lode reload` answer, a stream's record has its
+  writer's `_CMDLINE` and a unit's line its program's `_EXE`. Host tests:
+  `events.conf`, echoes, hyprix's dialog test, switches and identifiers.
+* Not yet: a hang snapshot (`lode snapshot PID`); "not responding" as a
+  capture trigger; file sources for the game's `Player.log` and CrashSight;
+  the image and command line on lode's boot record; the window's process
+  through yserver for X clients (`WINDOW_PID` is yserver's).
+
+### Hang snapshots, file sources and the boot record, as built (2026-10-24)
+
+What the night of the Endfield start failures needed beyond streams.
+
+* **`lode snapshot PID [-n N] [--reason TEXT]`**: one record set under a
+  `SNAPSHOT` id (`FERRIX_EVENT=snapshot`): the process's record --
+  `SNAPSHOT_COMM`, `SNAPSHOT_EXE`, `SNAPSHOT_CMDLINE`, `SNAPSHOT_FDS` (how
+  many descriptors), `SNAPSHOT_STATUS` (its whole `status`, the `Sig*` lines
+  included), `SNAPSHOT_TAIL` (its last N lines in the log), `SNAPSHOT_REASON`
+  -- and one record a thread: `THREAD_TID`, `THREAD_COMM`, `THREAD_STATE`,
+  `THREAD_SYSCALL`, `THREAD_WCHAN`, `THREAD_SIGNALS`. Read from `/proc` as
+  the person running it (their own processes; root's, anyone's), written
+  through the native protocol, and printed. hyprix takes one of an app
+  error's window's process (`events.conf`'s `snapshot`, on); for an X
+  client that is yserver's process until yserver says its client's pid.
+* **`lode follow FILE [-t ID] [--from-start] [--until-pid PID]`**: a file
+  a program writes, a line a record under ID -- the game's `Player.log`,
+  its crash reporter's, DXVK's -- read on every quarter second from its end
+  (or start), from the beginning again when it is cut short or replaced
+  (its inode), ending once PID is gone and the file read to its end. A
+  launch script runs it beside the program it watches.
+* **The boot record** ("lode started for this boot") carries
+  `BOOT_CMDLINE` (the kernel's command line), `BOOT_DEPLOY` (a deploy's
+  `n150.deploy=` nonce) and `BOOT_IMAGE` (the tree's commit the image was
+  built from, `-dirty` for a changed tree), which xtask writes to
+  `/etc/ferrix/image` in every image that boots init.
+* **Echoes, second form**: a unit's line that arrives before the echo it
+  copies is held up to 0.5 s while an echoing stream is open, so the order
+  the two arrive in does not matter.
+* `test-log` "box" row: a snapshot of a sleeping process records its
+  thread, `lode follow` takes a file's three lines as another process
+  writes them, the boot record has the command line and the image.
+
+### Known issues
+
+* **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
+  handing out a record cut short on Arm SMP, and a write merged into a
+  half-written console line -- was fixed in the core by 722824a8d; step
+  2's `test-log` then stored 3,000 of 3,000 flood lines on all three
+  architectures, and the row is strict again.
+
+## 20. Feature status (2026-10-23)
+
+The customer asked what lode still lacks against everything promised. Each
+row: **built**, **partly** or **missing**, the evidence, and what is left
+in the plan's points (§17; a point is about a day's work with its gate).
+"test-log" is `cargo xtask test-log`, which runs on all three
+architectures.
+
+### 20.1 The top ten wishes (§2)
+
+| # | Wish | Status | Evidence | Left |
+|---|---|---|---|---:|
+| 1 | Writes that cost about what the line costs | partly | append-only, no `mmap`, compressed when sealed (`compress.rs`), field names as indexes; `test-log-budget`: fast load 2.67 (budget 3), slow load 45.7 against 40 | 0 in lode (the slow load is btrfs's `fsync`, a kernel item); 2 for per-source metadata written once (§8.2's SOURCE entries) |
+| 2 | Queries fast as the store grows | partly | segment summaries skip whole segments, newest-first `-n` (`lode bench`, `test-log` part F) | 4: field indexes and a sparse time index inside sealed segments (§8.4); the 1 GB / 100 GB benchmark |
+| 3 | A real filter language | built | `--where` with and/or/not, globs, `~`; rules, retention, capture and upload use it (`filter.rs`, host tests) | 1: `~` is a substring, not a regular expression |
+| 4 | Noise controlled at ingest, never silent | built | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `lode top` and `--live`, flood alerts (`test-log` held/folded, "top", "live" and "alerts" rows) | 0 |
+| 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row); journalctl's `--vacuum-size/-time/-files` and `--disk-usage` (`test-log` "vacuum" row) | 0 |
+| 6 | Every entry attributed; stdout vs stderr | built | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' lines handed over by init with `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID`, `_GID` (§18 "Users' own records and units' runs"; `test-log` "stream" row) | 0.5: `_EXE` |
+| 7 | Output usable without flags | partly | `-o human` with year, zone and level letter (`?` for none), never truncated; 11 journald formats | 2: `--format` templates; colour on a terminal; a pager |
+| 8 | A crash costs at most the unsynced tail | built | per-entry CRC and torn-tail cut, restart without loss (`test-log`: SIGKILL mid-flood, `verify --kernel` "unsaid gaps: none"), sealed segments immutable | 1: a full or failing disk degrading to RAM (§11.4) is untested |
+| 9 | Store-and-forward, syslog in and out | partly | `lode-upload` with cursor, back-off, TLS; `lode-receive` (`test-log-remote`); `/dev/log` in | 3: RFC 5424 out over TCP/TLS, OTLP out; 2: `lode-receive` on Ferrix and a merged view (§10.3, §10.4) |
+| 10 | The right slice by default | built | `-b`, `--list-boots`, persistent by default, `-u` globs, `-u UNIT@last`/`@-1`, `-s` sessions, marks, users' own segments (`test-log` "runs" and "user" rows) | 0 |
+
+### 20.2 The themes after the top ten (USER-WISHES.md)
+
+| Theme | Status | Evidence | Left |
+|---|---|---|---:|
+| 11 Previous boots, persistent by default | built | `/var/log/journal` when writable, `-b -1`, `--list-boots` | 0 |
+| 12 This run of a service | built | `INVOCATION_ID` from init, `-u UNIT@last`, `svc status`/`svc log` show the run (`test-log` "runs" row) | 0 |
+| 13 Full-text search | built | `-g` a regular expression in linear time with journalctl's smart case and `--case-sensitive` (`regex.rs`; `test-log` "jctl" row), `--around`, marks | 0 |
+| 14 Unprivileged access | built | users' segments in `user-<uid>/`, handed to their user by lode (`/run/lode/read`; `test-log` "user" row) | 0; the viewer asking for them is the viewer agent's |
+| 15 Rate limiting that surprises | built | every hold is said (`N_SUPPRESSED`, `N_DROPPED`, `REPEATED`); the kernel's lines never held | 0 |
+| 16 Early boot and kernel messages | built | `/dev/kmsg` read from its first record, `_KERNEL_SEQNUM`, `verify --kernel` | 0 |
+| 17 Structured logging from programs | partly | native protocol, `lode cat --journal`; tracing lines read for crate and level | 1: JSON lines on stdout turned into fields (§5) |
+| 18 Logging never stalls the system | partly | `logger` returns at once with no lode (`test-log` "no lode"); compression a frame at a time | 1: a test that a stalled disk never blocks a writer |
+| 19 The collector's own security | built | lode in a sealed job, its own user (`test-log`: uid 91, cgroup, move refused); uploader uid 92 | 1: the uploader as a native service in a sealed job |
+| 20 A viewer | partly | `lode-viewer` (the viewer agent's), on Ferrix and on nazuna, over `lode-receive`'s stores | the viewer agent's |
+| 21 Runtime log levels per service | missing | no `INTEREST` or `lode level` | 3 (with drivers, plan step 7) |
+| 22 Alerts and actions | built | `alert` rules with a rate, `notify` to `/run/lode/alerts` (notifyd's banners, `lode alerts`), `start` through init with `StartableBy=` (`test-log` "alerts" row) | 0 |
+| 23 Privacy and redaction | missing | no `redact` rule; `_CMDLINE` is not recorded | 1 |
+| 24 Multi-line messages | partly | a value with a newline is stored whole (native protocol, export) | 1: `LogMultiline=` for units' stdout (§5) |
+| 25 Containers and namespaces | missing | no `_NAMESPACE` | 1 |
+| 26 Trace and request correlation | partly | `TRACE_ID`/`SPAN_ID` kept as sent | 1: filters and the viewer joining on them |
+
+### 20.3 The design's sections
+
+| § | Promise | Status | Evidence | Left |
+|---|---|---|---|---:|
+| 5 | Sources: kmsg, `/dev/log`, native socket, stdout streams | built | `front.rs`; `test-log` "front: 1 1 1 1 0" | 0 |
+| 5 | Drivers' `logproto` with `INTEREST`; `devmgr` hands ends | missing | plan step 7 | 6 |
+| 5 | pstore: the last boot's panic | missing | plan step 9 | 3 |
+| 5 | File sources (ad-hoc logs moved over, §13.1) | missing | plan step 9 | 2 |
+| 6 | One filter language everywhere | built | §20.1 #3 | 0 |
+| 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
+| 7.3 | Bounded memory | partly | per-source state is bounded by sources, not capped | 1 |
+| 7.4 | `lode top`, alerts | built | §18 "Top talkers and alerts" | 0 |
+| 8.1 | RAM and disk tiers, `/var` taken when it comes | partly | both tiers; `lode --flush` moves the RAM tier to `/var/log/journal` and writes there from then on (`test-log` "flush" row) | 0.5: `--relinquish-var`, and a `lode-flush.service` that asks at boot |
+| 8.2 | Format, CRC, torn tail, sealing, compression | built | `segment.rs`, `compress.rs`, `test-log` | 2: SOURCE entries (§20.1 #1) |
+| 8.3 | Write budget row | built | `test-log-budget` | 0 (btrfs's part is the kernel's) |
+| 8.4 | Summaries, field indexes, time index | partly | summaries | 4 |
+| 8.5 | Retention classes, vacuum, delete | built | `retention.rs`, `test-log` | 0 |
+| 8.7 | Configuration: `WriteIntervalMs=`, `SyncIntervalSec=`, `SegmentMaxSize=` | missing | fixed in `serve.rs` | 1 |
+| 9.1-9.4 | The reader and its defaults | partly | §20.4 | see §20.4 |
+| 9.5 | `dmesg` | built | `dmesg` reads `/dev/kmsg` (`src/user/system/linux/dmesg`) | 0 |
+| 9.6 | `svc log`, `svc status` through lode | built | `svc log` is `lode -u UNIT@last`, `svc status` ends with the run's last lines, init's ring when lode cannot answer (`test-log` "runs" row) | 0 |
+| 9.7 | Benchmark | partly | `lode bench` at 200,000 records | 1 |
+| 10.1 | `box-log` | built | `cargo xtask box-log` | 0 |
+| 10.2 | Continuous forwarding | partly | export and JSON over HTTP(S), TLS 1.3, client certificates (`test-log-remote`) | 3: RFC 5424, OTLP |
+| 10.3 | Receiving | partly | `lode-receive` on Linux | 2: on Ferrix, RFC 3164/5424 in |
+| 10.4 | A merged view | missing | `-m` accepted and ignored | 2 |
+| 11 | Isolation, restart without loss, start order | built | `test-log` | 0 |
+| 12.1 | Who may read what | built | root and `adm` everything, a user their own (theme 14) | 0 |
+| 12.2 | Sessions and authd | built | `_SESSION_ID`, `-s`, `/run/lode/seat` (`test-log`, `test-compositor`) | 0 |
+| 12.3 | Privacy | partly | `_CMDLINE` off | 1 (theme 23) |
+| 13.1 | Ad-hoc logs moved onto lode | missing | `/var/log/audit`, files of programs | 2 |
+| 13.2 | The console | partly | lode reads what the console carried; `MaxLevelConsole=` in init missing | 1 |
+| 14 | The kernel: zero lines beyond `/dev/kmsg` and the devfs link | built | every landing: 0 kernel lines | 0 |
+| 19 | Crash screenshots | built | provider protocol, hyprix provider, `test-log` capture row | 0 |
+
+### 20.4 What journalctl and journald users rely on
+
+| Feature | Status | Evidence or note | Left |
+|---|---|---|---:|
+| `-o short, short-iso, short-iso-precise, short-precise, short-monotonic, with-unit, cat, json, export, verbose` | built | `format.rs` | 0 |
+| `-o json-pretty, json-seq, json-sse, short-full, short-unix` | built | `format.rs`, host goldens; `test-log` "jctl" row | 0 |
+| `-o short-delta` | missing | needs the record before | 0.25 |
+| `--output-fields` | missing | | 0.5 |
+| `-u` (globs, `name` is `name.service`), `-t`, `-T`, `-k`, `-p` (ranges, `unspecified`), `-g`, `-S`/`-U`, `-n`, `-r`, `-f`, `-e`, `-b`, `--list-boots`, `FIELD=VALUE` with `+`, `--after-cursor`, `--show-cursor`, `-D`, `--utc` | built | `cli.rs`; `test-log` | 0 |
+| `--user-unit` | built | `_SYSTEMD_USER_UNIT`, `USER_UNIT` and their coredump and object forms, as journalctl's | 0 |
+| `--user`, `-M/--machine`, `--file`, `--root`, `--image` | missing | | 1 |
+| `--cursor-file`, `--since` from a cursor's time | missing | | 0.5 |
+| `-F/--field`, `-N/--fields` (a field's values) | built | over the records the other options choose (`test-log` "jctl" row) | 0 |
+| `-x`, `--catalog`, `--list-catalog` | missing | no message catalog | 2 |
+| `-g` as a PCRE2 regular expression, `--case-sensitive` | built | PCRE2's syntax a person writes at a shell; back-references and look-around refused with the reason | 0 |
+| `--facility` | missing | `--where 'SYSLOG_FACILITY = 4'` works | 0.5 |
+| `--disk-usage`, `--vacuum-size/-time/-files` | built | journalctl's sentences and sizes (`FORMAT_BYTES`); a vacuum is recorded in the log | 0 |
+| `--rotate`, `--verify` | built | `lode rotate`, `lode verify` | 0 |
+| `--flush`, `--sync`, `--rotate` | built | the control socket `/run/lode/control` (`test-log` "jctl admin" and "flush" rows) | 0 |
+| `--relinquish-var` | missing | | 0.25 |
+| `--setup-keys`, `Seal=` (forward-secure sealing) | missing | the CRC catches damage, not tampering | 3 |
+| `--namespace`, `LogNamespace=`, `--list-namespaces` | missing | | 2 |
+| `--header`, `--new-id128` | missing | | 0.5 |
+| `--no-pager`, `-a`, `-l`, `-q`, `-m` | accepted, no effect | there is no pager, nothing is truncated; `-m` merges nothing yet | (in 10.4) |
+| journald.conf `Storage=`, `SystemMaxUse=`, `MaxRetentionSec=`, `Compress=` | partly | `retention.conf` classes say the same differently; compression always on | 0.5: read journald.conf's keys |
+| `RateLimitIntervalSec=`, `RateLimitBurst=` | partly | the limiter's bursts and rules (`limit`), not these keys | 0.5 |
+| `MaxLevelStore=`, `MaxLevelConsole=`, `ForwardToSyslog/KMsg/Console/Wall=` | missing | `level` rules do the first | 1 |
+| `SplitMode=uid` | built, always on | users' own segments (theme 14) | 0 |
+| `sd_journal_print`, `/dev/log`, stdout streams, `systemd-cat` | built | `test-log` front row; `lode cat` | 0 |
+| `sd-journal` / libsystemd reading the files | missing, by design | §8.6: the format is lode's; `-o export` is the bridge | 0 |
+| `systemd-journal-upload` / `-remote` interoperability | partly | `lode-upload` posts the same export; a real journal-remote is not tested (none on nazuna) | 1 |
+
+### 20.5 The customer's asks today
+
+| Ask | Status | Evidence |
+|---|---|---|
+| Every record has a level; unspecified is one of its own | built | §4.1; `test-log` "levels" row; `lode levels` |
+| Crash screenshots | built | §19; `test-log` capture row; hyprix provider |
+| Sessions | built | §19.1; `test-log` session row |
+| The viewer | built (the viewer agent's) | `lode-viewer`, on nazuna over `lode-receive` |
+| TLS forwarding to nazuna | built | `lode-upload`, `lode-receive`, `test-log-remote` on all three architectures |
+| The box's field quality | built | §18 "Field quality" |
+| Box run of TLS forwarding | waiting | the PO's box run |
+| Crash records name their process | built, landing | §18 "Crash records name their process"; `test-log` "crash" row |
+| Session programs' output under their names | built, landing | §18 "Session programs, names and event kinds"; `test-log` "streams" row |
+| Names and paths on every record | built, landing | `_COMM`, `_CMDLINE`, `_EXE` (from init for units); `test-log` "names" row |
+| App-error events with a screenshot | built, landing | hyprix `lode_events.rs`; `Capture=yes` on desktop images |
+| Event kinds configurable and reloadable | built | `events.conf`, `lode events`, `lode reload` (rules, alerts, events, retention, capture), which says what changed; `test-log` "reload" row |
+| Hang snapshot (`lode snapshot PID`) | built, landing | §18 "Hang snapshots"; `test-log` "box" row |
+| The image and command line on the boot record | built, landing | `BOOT_IMAGE`, `BOOT_CMDLINE`, `BOOT_DEPLOY` |
+| Tombstones' threads, maps and descriptors (step 2, the crash hold) | built, landing | §21.7; the boot's `crashes` line; `test-log` "collected" row; the consultant's OK IF, ledger 3545 (verdict 3546) |
+
+### 20.6 Where logs still go that lode does not get (the audit, 2026-10-24)
+
+The customer: "if there is a gap, we need to close it." Every place on a
+Ferrix image where something writes a log, and whether lode has it.
+
+| Where | Who writes it | lode has it? | What closes it, or why not |
+|---|---|---|---|
+| The kernel log, drivers' prints | the kernel, ring-3 drivers on standard error | yes | `/dev/kmsg`, from its first record |
+| Units' standard output and error | every unit | yes | init's pipes, trusted (§18 "Users' own records and units' runs") |
+| `devmgr`'s DIED/RESTARTED events | `devmgr-events` | partly | `devmgr`'s own lines reach the kernel log; the event socket itself is not read (plan step 7) |
+| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP; plan step 9 imports it as `lode -b -1`'s end |
+| Firmware and EFI logs | the firmware, the loader | partly | the loader's lines are the kernel log's first; the firmware's own (UEFI's console, TF-A's) are not kept anywhere on Ferrix |
+| `/tmp/yserver.log` | the desktop's X server | yes, landing | `lode cat -t yserver --tee` |
+| `/tmp/steam.log` | Steam's `desktop.sh` | yes, landing | `lode cat -t steam --tee` |
+| `~/plog/proton.out` | the N150's game script | yes, landing | `lode cat -t proton --tee` |
+| `~/plog/dxvk/*.log`, the game's `Player.log`, CrashSight's logs, Steam's `logs/*.txt` | DXVK, Unity, the anti-cheat, Steam, each to a file | by a launch script | `lode follow FILE -t ID --until-pid PID` beside the program (§18 "Hang snapshots, file sources") |
+| `/tmp/ef-fullscreen.log`, `plog/status`, `plog/gpu-report.txt` | the N150's scripts | no | reports, not logs (§13.1); `ef-fullscreen.sh` should pipe into `lode cat` too |
+| hyprix's programs' standard output | waybar, notifyd, fuzzel, `exec` lines | yes, under hyprix's unit; under their own names with `session-streams on` | the wrapper loses a program's output if the program outlives its session (§18) |
+| Programs started from a terminal | foot's children | no | a terminal's programs write to the terminal; `lode cat` in a person's pipeline is the way |
+| `/var/log/audit/<id>.bin` | init, the kernel's FAU rings | no, by design | §15: the audit record stays its own store |
+| `/var/log/ferrix/auth.log` | `authd` | no | `authd`'s lines could also go to `/dev/log` with `LOG_AUTHPRIV`; its own file stays (`docs/AUTH.md` §3.6) |
+| Test rigs' `/tmp/yserver.log` (`:1`) | `test-yserver`, `test-dxvk`, shader cache | no, by choice | gate rigs read their own file and run without lode |
+| A hung process's threads | -- | on asking | `lode snapshot PID`; hyprix takes one at an app error |
+
+## 21. Tombstones (researched 2026-10-24; the customer approved the three landings)
+
+The customer asked what Android records when a process crashes, how Linux
+does the same, and what Ferrix could keep: a "tombstone" record in lode
+that links a crash to its log tail, its screenshot (§19) and its session.
+
+### 21.1 What Android records
+
+* **debuggerd and crash_dump.** The C library's signal handler for fatal
+  signals (`debuggerd_handler`, linked into every native process) clones a
+  child that execs `crash_dump`, which `ptrace`s the crashed thread's
+  process while the crashed thread waits in the handler. Since Android 12
+  `tombstoned` hands out the output file and keeps the directory.
+* **What a tombstone holds** (`/data/tombstones/tombstone_NN`, and since
+  Android 12 a protobuf `tombstone_NN.pb` beside the text): the build
+  fingerprint, revision, ABI, timestamp, process uptime; pid, tid, thread
+  name, process name, uid, the command line; the signal, its code and fault
+  address, a cause guess (null pointer, stack overflow, MTE fault);
+  the abort message (`android_set_abort_message`, set by `abort()` callers
+  and libc's fortify checks); every register of the crashing thread; a
+  backtrace of every thread of the process (libunwindstack: `.eh_frame`,
+  `.debug_frame`, ARM's exidx, symbols from `.symtab`/`.dynsym` and
+  MiniDebugInfo, build ids); memory around the registers (256 bytes either
+  side of each pointer-like register); the memory map with build ids and
+  offsets; the open file descriptors with their paths and owners (fdsan
+  tags); the last lines of logcat for the process (and the system's).
+* **Rotation**: at most 32 tombstones (`tombstoned`'s
+  `tombstone.max_count`), the oldest overwritten; readable by `system` and
+  `log`; uploaded with `dropbox` entries.
+
+### 21.2 How Linux does it
+
+* **`core_pattern`**: `|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c
+  %h` hands the core dump on a pipe to a helper the kernel starts as root.
+* **systemd-coredump** stores the core (compressed, in
+  `/var/lib/systemd/coredump`, size limits in `coredump.conf`), runs
+  elfutils' unwinder over it for a backtrace of every thread, and logs one
+  journal entry with `COREDUMP_PID`, `COREDUMP_UID`, `COREDUMP_SIGNAL`,
+  `COREDUMP_EXE`, `COREDUMP_CMDLINE`, `COREDUMP_COMM`, `COREDUMP_UNIT`,
+  `COREDUMP_CGROUP`, `COREDUMP_OPEN_FDS`, `COREDUMP_PROC_STATUS`,
+  `COREDUMP_PROC_MAPS`, `COREDUMP_PROC_LIMITS`, `COREDUMP_ENVIRON`,
+  `COREDUMP_FILENAME`, `COREDUMP_PACKAGE_JSON` (the ELF's package note),
+  and the stack trace in `MESSAGE`. `coredumpctl` lists and opens them.
+  Privacy: a core holds the process's memory, so it is root's (or the
+  user's own, through ACLs), and `Storage=none` keeps only the entry.
+
+### 21.3 What Ferrix can capture, and where
+
+| Part | Where | Cost |
+|---|---|---|
+| pid, name, exe, cmdline, module+offset of the pc | the kernel, at the fault: built (§18) | about 85 kernel lines |
+| signal, code, fault address, trap | the kernel: built (`ended by signal`) | 0 |
+| registers of the faulting thread | the kernel at the fault: the trap frame is there; one more line of the same kind | about 30 kernel lines, three architectures |
+| every thread's state, the open fds, the maps, the status lines | a ring-3 collector reading `/proc/<pid>/{task/*/stat,status,fd,maps}` while the process is held | ring 3: the kernel must hold a fatally signalled process instead of reaping it at once, which is Linux's `core_pattern` pipe's own semantics: about 60 kernel lines, in the load ring |
+| a backtrace of every thread | ring 3: unwind from each thread's registers through `.eh_frame` of the mapped files, without symbols (offsets and build ids); `ferrix-lode-core` gains a CFA interpreter (about 600 lines, host-tested on the tree's own binaries); reading another process's memory needs `process_vm_readv` or `/proc/<pid>/mem`, which the kernel has for a ptrace-able target | 0 kernel lines if the hold above exists |
+| memory around the registers | ring 3, the same reads | 0 |
+| the abort message | ring 3: ferrousli and musl write `abort()`'s reason to standard error, which units' streams carry; a field would need the C library to say it | 0 |
+| the log tail | lode: the crashing process's last 50 records by `_PID` and its unit's, linked by cursor | 0 |
+| the screenshot | lode: built (§19), linked by `CAPTURE_OF` | 0 |
+| the session | lode: `SESSION_ID` (§19.1) | 0 |
+| the build | lode: the image's commit and the kernel command line on the boot record (next landing) | 0 |
+
+**Recommendation.** A tombstone is a lode record set, not a file format:
+one `TOMBSTONE=1` record per crash (`MESSAGE_ID` of its own) carrying the
+fields above, the backtrace as `TOMBSTONE_BACKTRACE` (one line a frame:
+module, offset, build id), and cursors to its log tail, its screenshot and
+its session; `lode tombstones` lists them, `lode tombstone SEQ` prints one
+as Android's text does, and the viewer's Crashes page reads the same
+fields. Build it in three landings:
+
+1. **The record from what exists** (2 points): the crash record, its log
+   tail by `_PID` and unit, the screenshot and session links, the boot's
+   image and command line. No kernel lines.
+2. **The ring-3 collector** (6 points): `lode-crashd`, a root unit, sealed
+   job, told of each crash by lode; the kernel holds a process a fatal
+   signal ends until the collector says it is done or 2 s pass (a load-ring
+   change of about 60 lines with a consultant review); the collector reads
+   threads, fds, maps and status, and unwinds each thread through
+   `.eh_frame` (`ferrix-lode-core` `unwind`, no symbols). Registers through
+   the same `/proc/<pid>/task/<tid>/` reads it uses for ptrace's
+   `PTRACE_GETREGS`.
+3. **Retention and privacy** (1 point): tombstones are a retention class
+   of their own, 32 kept, 64 MiB, `lode:adm 0640` as the journal, the
+   memory dump bytes off by default (`events.conf`'s `tombstone-memory`),
+   never forwarded unless a forwarding line names them.
+
+Kernel lines for all three: about 60 (the hold) beyond what is built; 30
+more for the registers in the kernel line if the collector cannot read
+them. Points: about 9.
+
+### 21.4 Storage: lean records, a blob container beside them (the customer, 2026-10-24)
+
+The customer approved the three landings and set how they are stored:
+inside lode, one tool, and without the heavy parts slowing the log.
+
+* **Two containers.** The segments hold only lean records. A tombstone
+  record, a crash record and a screenshot record carry small references:
+  `BLOB_<PART>=<id> <size> <type>`, the id the SHA-256 of the bytes, beside
+  a few summary fields (signal, comm, module+offset, the top frame). The
+  heavy parts -- screenshots, per-thread backtraces, maps, descriptor
+  lists, memory bytes when they are on -- are blobs in a **blob container**
+  lode keeps beside the segments: `<store>/blobs/`, content-addressed,
+  append-only, compressed on its own, with its own retention, quota and
+  integrity check. A blob under about 4 KiB is not a blob: it is a field of
+  the record itself.
+* **Packs, not a file a blob** (Git's way): blobs are appended to a pack
+  file, `pack-<first id>.fxb`, with an index of ids to offsets written when
+  the pack is sealed (at 16 MiB or a day); each entry a header (id,
+  length, type, CRC-32C) and the bytes, zstd-compressed except for an
+  already compressed type (PNG, QOI stays raw: it is small). On Ferrix's
+  btrfs every `fdatasync` costs about 40 KiB whatever was written (§8.3), so
+  one pack synced once a batch costs what a record batch costs, where a
+  file a blob would cost a commit each.
+* **Blob first, then the record.** A blob is appended and synced before the
+  record that names it is written; a record whose blob is missing (a crash
+  between the two, or a pack damaged since) says so when it is read (`blob
+  missing`), never guesses. A blob no record names -- written, then lode
+  killed before the record -- is removed after a grace period (an hour) by
+  the sweep below. `lode verify` checks every reference against the packs.
+* **Garbage collection by mark and sweep**, at vacuum time: each sealed
+  segment's summary lists the blob ids its records name; the sweep marks
+  every id the remaining segments' summaries list and the segment being
+  written holds, and rewrites a pack whose live bytes fell below half
+  (a new pack, synced, renamed over the old) or removes one with none. No
+  reference counts across retention classes, which would break whenever
+  a class's segment is vacuumed alone. The container's quota is its own
+  (`BlobMaxUse=`, 256 MiB by default) and evicts the oldest pack first;
+  a record whose blob went is shown with `blob expired`.
+* **Lazy.** Queries, `-f`, summaries, `lode top`, the viewer's lists and
+  forwarding of records never read a blob. A blob is read when someone asks
+  for it by id: `lode blob ID`, `ferrix-lode-core`'s `blob(id)`, the viewer
+  opening a crash or a screenshot, `lode tombstone SEQ` printing a
+  tombstone whole.
+* **No stall.** Blobs have a writer path of their own in lode, after the
+  record batch, with a bounded queue (16 MiB): record ingest never waits for
+  a blob, and a blob that cannot be queued or written makes its record say
+  `blob dropped` with why. Sealing and compressing segments never touch
+  blobs.
+* **Crash storms.** Per crash signature -- program, module+offset of the
+  pc, signal -- a boot gets full tombstones for the first N (`events.conf`:
+  `tombstone on 5`), then only a count and the last time on the newest
+  one (`TOMBSTONE_REPEATS`, `TOMBSTONE_LAST`). On the night of
+  2026-10-23 steamwebhelper crashed every 2 s, 146 times: that is five
+  tombstones and a counter. Content addressing dedupes identical blobs
+  beyond that (the same maps, the same backtrace).
+* **Forwarding.** Records forward as today. Blobs follow on a second,
+  lower-priority stream per destination, so a screenshot never delays log
+  delivery: small blobs (backtraces, maps, descriptor lists) are pushed by
+  default, since the machine that crashed may be gone or power-cycled before
+  anyone asks; screenshots and memory bytes per destination (`blobs=small|
+  all|none` on its line), on demand where the receiver can ask back.
+  `lode-receive` keeps the same two containers per machine.
+* **Write budget.** Blobs count towards lode's write budget (§8.3); the
+  capture rate limit stays (one each 10 s); `test-log-budget` gains a blob
+  row: a crash storm of 100 identical crashes writes at most five
+  tombstones' worth of blobs.
+* **Screenshots move in too.** Today's QOI files under
+  `<journal>/captures/` become blobs; the record names them, and `lode blob`
+  serves them, so the viewer never handles a path.
+* **One tool.** The viewer and `lode tombstone SEQ` resolve references for
+  the person; JSON and export output carry the references, and `--blobs`
+  inlines them (base64 in JSON, the export format's binary fields).
+
+**Links.** The tombstone record carries the cursor of the crash record
+(`TOMBSTONE_OF`) and of the first and last record of its log tail
+(`TOMBSTONE_TAIL_FIRST`, `TOMBSTONE_TAIL_LAST`); every record of the
+crashed process from then on, and the crash record, carry nothing new: the
+viewer and `lode tombstone` find a record's tombstone through
+`TOMBSTONE_PID` and the boot, and `lode -o json` adds `TOMBSTONE` (the
+tombstone's cursor) to a crash record when one exists.
+
+**The fields** (step 1): `TOMBSTONE=1`, `MESSAGE_ID` (its own),
+`TOMBSTONE_PID`, `TOMBSTONE_COMM`, `TOMBSTONE_EXE`, `TOMBSTONE_CMDLINE`,
+`TOMBSTONE_SIGNAL`, `TOMBSTONE_ADDRESS`, `TOMBSTONE_PC`,
+`TOMBSTONE_MODULE`, `TOMBSTONE_TOP_FRAME`, `TOMBSTONE_UNIT`,
+`TOMBSTONE_SESSION`, `TOMBSTONE_BOOT_IMAGE`, `TOMBSTONE_OF`,
+`TOMBSTONE_TAIL_FIRST`, `TOMBSTONE_TAIL_LAST`, `TOMBSTONE_CAPTURE` (the
+screenshot record's cursor), `TOMBSTONE_REPEATS`, `TOMBSTONE_LAST`, and
+the blob references `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
+`BLOB_THREADS`, `BLOB_SCREENSHOT`, `BLOB_MEMORY` (step 2 fills these).
+
+### 21.5 Built: the blob container and tombstone step 1 (2026-10-24)
+
+* **The container** (`ferrix-lode-core` `blob`, lode `blobs.rs`):
+  `<store>/blobs/pack-<16 hex>.fxb`, entries as §21.4 says (SHA-256 id,
+  zstd unless the type is packed already, CRC-32C), an index written at
+  sealing (16 MiB), a scan for a pack without one. lode queues a blob
+  (bounded at 16 MiB) and writes and syncs the queue once, before the batch
+  whose records name it; a blob that could not be queued or written makes
+  its record say `BLOB_DROPPED` instead of naming it. The service sweeps
+  once an hour: live ids are those the segments' summaries list (a new
+  `BLB1` section, older readers skip it) and those the segments being
+  written name; a pack an hour old with nothing live goes, one less than
+  half live is rewritten.
+* **Screenshots are blobs.** `captures/` is gone: a stored capture's
+  record names `BLOB_SCREENSHOT=<id> <size> qoi|png`, and `lode blob ID`
+  gives the bytes. `CAPTURE_FILE` is no longer written.
+* **Tombstones, step 1** (`ferrix-lode-core` `tombstone`): for each crash
+  record, once stored, lode writes a tombstone (`TOMBSTONE=1`, the
+  `MESSAGE_ID` of §21.4, at err) with `TOMBSTONE_PID`, `_COMM`, `_EXE`,
+  `_CMDLINE`, `_SIGNAL`, `_ADDRESS`, `_PC`, `_TRAP`, `_MODULE`,
+  `_TOP_FRAME` (the module until a collector unwinds), `_UNIT`, `_SESSION`,
+  `_SIGNATURE`, `_OF` (the crash record's cursor), `_REPEATS`, and
+  `_TAIL_FIRST`/`_TAIL_LAST`, the cursors of the process's last 50 records.
+  A crash storm: per signature and boot, the first five (`events.conf`'s
+  `tombstone on err 5`) are full; after them a repeat record
+  (`MESSAGE_ID` ...3c2e, `TOMBSTONE_REPEATS`, `TOMBSTONE_FIRST`,
+  `TOMBSTONE_LAST`) each time the count doubles from ten. The boot's image
+  is on the boot record (`BOOT_IMAGE`), one per boot.
+* **Reading**: `lode tombstones` lists them; `lode tombstone SEQ|CURSOR`
+  prints one whole -- its fields, the crash record, its screenshot record
+  with whether the blob is there, the process's last lines, its blobs;
+  `lode blob ID [-o FILE]`; `lode verify` checks every reference against
+  the container and counts the blobs no record names.
+* `test-log` on all three architectures: "capture" reads the screenshot
+  back through `lode blob` (`qoif`); "tombstones": twelve crashes of one
+  signature are five tombstones and a counter at ten, `lode tombstone`
+  shows the crash, `lode verify` finds nothing missing. Host tests: packs,
+  torn tails, the index, references, summaries' ids, mark and sweep, the
+  storm's counts. test-log's own deadline is 300 s (armv7a's rows passed
+  120).
+* **Not yet** (steps 2 and 3): the collector (`lode-crashd` and the
+  kernel's hold) that fills `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
+  `BLOB_THREADS`; forwarding blobs on a second stream; the blob row in
+  `test-log-budget` (there is nothing to measure before the collector
+  writes blobs; the screenshot rate limit stands); the tombstone retention
+  class and `BlobMaxUse=`; `--blobs` on JSON output.
+
+### `lode reload`, whole (2026-10-24; Settings plan B8, RUNTIME-SETTINGS finding 2)
+
+`lode reload` (root's, on the control socket) has lode read every file of
+`/etc/ferrix/lode.d` again and answers with what changed, which `lode
+reload` prints and a record keeps: `reloaded: N rule(s), M alert(s);
+retention changed, segments sealed|unchanged; capture on|off|turned
+on|turned off|on in the file, but lode must restart to listen; events
+KIND on|off, ...|unchanged`. The limiter's held counts are said before
+the new rules take over; new retention classes seal every segment being
+written first, so no segment mixes two sets of classes; capture's switch
+and triggers change at once, except that a capture off at start needs a
+restart to be turned on (its socket is made as root). `test-log`'s
+"reload" row switches an event kind and the classes and reads the
+answer. SIGHUP is not used: lode's control socket is root's and answers.
+
+### 21.6 Built: tombstones step 3, retention and privacy (2026-10-24)
+
+* **Quota.** `retention.conf`'s `blobs max SIZE` (256 MiB without one,
+  `retention::blob_quota`) bounds the container; past it the sweep evicts
+  the oldest sealed packs, named or not, after the mark and sweep. A
+  record whose blob was evicted reads `expired, or never written` in `lode
+  tombstone`; `lode verify` says such references and fails only on a blob
+  that does not read back to its id (a damaged pack). `lode reload` takes
+  a new quota and sweeps at once.
+* **Retention.** Tombstones are records at err, so the default `errors`
+  class keeps them a year in 256 MiB, as crash records; a `retention.conf`
+  can give them a class of their own (`class tombstones where tombstone =
+  1 keep 2y`). Five full tombstones a signature a boot (`events.conf`).
+* **Privacy.** The container is the store's (`lode:adm`, packs 0640, the
+  directory 2750), readable by exactly who reads the journal; `lode blob`
+  reads through the same directories the reader may open. Memory bytes are
+  not captured at all until step 2's variant b, and then off by default
+  (`tombstone-memory`). Blobs are not forwarded: `lode-upload` sends
+  records, whose references a receiver can resolve only when blobs follow
+  on their own stream (step 2's forwarding).
+
+### 21.7 Built: tombstones step 2, the crash hold (2026-10-24)
+
+Variant a of §21.3, with the consultant's OK IF (ledger lines 3501 and
+3524; the arming file is a device, not `/proc/ferrix/crashes`, since procfs
+files are snapshots made at open).
+
+* **The kernel** (`fs::crashes`, load ring, no core or item line). While a
+  root reader holds `/dev/ferrix-crashes` (char 1:13, root's 0400, opened
+  read-write by a caller privileged in the first user namespace, one at a
+  time, `EBUSY` for a second), a fatal fault of a program's own instruction
+  (`deliver::force_held`, reached only from `fault_signal`: seccomp's ends,
+  `kill`, limits and the OOM end are never held) parks the process -- a
+  third park beside a stop and a freeze: no parent told, `SIGCONT` and a
+  thaw do not release it, `/proc/<pid>/status` says `t (tracing stop)` --
+  and queues a line once the other threads have parked (200 ms at most):
+  `held PID TID SIGNAL CODE ADDRESS PC threads N unparked M dropped D`. The
+  faulting thread waits in the kernel until the reader writes `done PID`,
+  the reader's last close, an end from outside, another thread's exit, or
+  2 s from the fault; then the process ends as before, and the identity
+  line and the core's `ended by signal` line print in today's order.
+  **Every end while held takes the fault's signal** (`Process::end`):
+  `SIGKILL`, `cgroup.kill`, the OOM end and an `exit_group` included, so the
+  parent's `WTERMSIG`, `SIGCHLD` and the core's line agree. At most 16 are
+  held, in a ring that is never allocated; a fault past them is not held and
+  counted in the next line. Never held: the reader's own process, any
+  process whose descriptors hold the reader's description (a forked child,
+  one sent it over a socket), a process an `execve` has claimed, a thread
+  already leaving. A description in flight in a socket, or held by another
+  process, keeps the device armed; each hold is still bounded by its 2 s.
+  Unarmed, a fault reads one atomic more.
+* **The bound**: a crashing process's end, and so its restart by init or
+  `devmgr`, can come up to 2 s later while a collector runs
+  (MEMORY-AND-TIMING §2.2y, `docs/INIT.md` §5.4, `docs/DEVMGR.md` §4).
+* **The collector**: `lode crashd`, `lode-crashd.service` (root, enabled
+  on the desktop and in `test-log`), reads each held process's threads (as
+  `lode snapshot` does), `status`, `maps` and descriptors from `/proc`,
+  sends them to lode in one native-protocol record (`FERRIX_EVENT=
+  crash-collected`, at most 216 KiB of parts) and writes `done`. lode takes
+  the record only from uid 0, makes `COLLECTED_THREADS`, `_MAPS`, `_FDS` and
+  `_STATUS` blobs (always blobs, whatever their size, so a reader resolves
+  them one way), names them `BLOB_THREADS`, `BLOB_MAPS`, `BLOB_FDS` and
+  `BLOB_STATUS` on that record and on the crash's tombstone, which the
+  viewer reads through `read_blob`. A collector that stalls costs a crash
+  its parts, never its end; one that dies disarms the hold.
+* **What the hold promises** -- load-ring statements, uncertified, which
+  carry no item claim (the consultant, ledger 3537: an `L.*` id names item
+  code, and none of this is). Each is held by a sub-case of the boot's
+  `crashes` line (stage 8, FX-0895, `syscall::deliver::check_the_crash_hold`)
+  and a negative control run through `fleet/gate.sh control`, cited in the
+  landing message:
+  1. **crash-1**, the unarmed path unchanged: with the device closed a fatal
+     fault ends its process at once by its signal (case a; control: a
+     second's sleep before the hold's look).
+  2. **crash-2**, the hold and its release: armed, a fatal fault parks its
+     process -- both threads parked, not stopped, `t (tracing stop)`,
+     `SIGCONT` leaves it held -- and `done`, `SIGKILL`, another thread's
+     `exit_group(0)` and the reader's close each end it at once, the deadline
+     after 2 s, every end by the fault's signal (cases b, c, d, i, e, f;
+     controls: the deadline moved to 60 s, the close's release skipped while
+     any is held, the hold read as a stop -- caught by `status` -- and the
+     end's override of the status removed).
+  3. **crash-3**, the bound and the exclusions: sixteen held at once, a
+     seventeenth not and counted in the next line; a process holding the
+     reader's description and the reader's own process are not held (cases
+     h, 5d, g; control: the descriptor scan's answer ignored).
+  4. **crash-4**, one root reader: a read-only open `EINVAL`, a second open
+     `EBUSY`; a read is `EAGAIN` under `O_NONBLOCK` with nothing queued,
+     `ERESTARTSYS` when a signal ends its wait, `EINVAL` into a buffer too
+     small (the line kept); `done` for a pid not held, a malformed and a
+     partial line `EINVAL` (the open and errno cases; control: the second
+     open let through).
+
+  What it rests on in the item is cited, not traced again: `L.sched.35` (the
+  core records the end's status), `L.sched.22` (`may_block`, asserted at the
+  wait), `L.sched.92` (a wait ends at its deadline: the 2 s, with a sched
+  check and a control of its own: the deadline test skipped for the
+  check's own waiting task), and `trap.rs` unchanged under the
+  `L.trap.*` requirements. `test-log`'s "collected" row: the tombstones of
+  `lode fault-stub`'s crashes carry the three blobs, and the maps read back
+  through `lode blob`.
+* **Reviewed**: the consultant's final verdict, OK IF (1)-(6), ledger line
+  3545 (verdict 3546), after 3501, 3524-3527 and 3537-3538. About 520 kernel
+  lines of load code, against the ~150 3501 (11) foresaw: the per-open device,
+  the fixed ring and its errnos, and the release on every end took the rest.
+  A second thread faulting during its own process's hold takes a second slot
+  and line; `lode crashd` collects for both and ignores the second `done`'s
+  answer, and the first end releases the second.
+* **Not yet**: backtraces (step 2's stack capture, its own review), blobs
+  forwarded (§21.4), the blob row in `test-log-budget`.
