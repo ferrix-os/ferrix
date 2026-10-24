@@ -25,28 +25,35 @@ exec-once = /bin/pattern checkerboard two --after one
 decoration:blur:noise = 0
 ";
 
-/// A boot of Yoru's look (step Y1): the theme sourced as `run-compositor`
-/// sources it, the wallpaper drawn, two pattern windows with Yoru's title
-/// bars, and the picture judged by its colours -- Nocturne's ground, the
-/// bars' surface, the accent's line.
+/// A boot of Yoru's look (steps Y1 and Y2): the theme sourced as
+/// `run-compositor` sources it, the wallpaper drawn, two pattern windows
+/// with Yoru's title bars, the dock at the foot, and the picture judged by
+/// its colours -- Nocturne's ground, the bars' surface, the accent's line,
+/// the dock's bar with the shown workspace lit.
 pub(super) fn test_yoru(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
-    let themed = Args {
-        theme: Some("yoru".to_owned()),
-        config: None,
-        ..args.clone()
-    };
-    let mut carried = Carried::none();
-    let config = format!(
-        "monitor = , {}x{}@60, auto, 1\n{CONFIG}",
-        SCREEN.0, SCREEN.1
-    );
-    let config = super::theme::apply(config, &themed, &mut carried.ports)?;
+    boot(arch, programs, args, false)
+}
+
+/// The same desktop with the launcher open over it (step Y3): fuzzel in
+/// Yoru's look, as Ctrl K starts it, listing the image's applications --
+/// the palette's card on the surface, high on the screen.
+pub(super) fn test_yoru_launcher(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    boot(arch, programs, args, true)
+}
+
+/// A Yoru boot, with the launcher open or not.
+fn boot(arch: Arch, programs: &Programs, args: &Args, launcher: bool) -> Result<()> {
+    let (config, carried) = desktop(arch, args, launcher)?;
     let (image, kernel) = build_image(arch, programs, &config, carried, args)?;
     let port = free_port()?;
     let mut qemu_args = args.clone();
     qemu_args.display = true;
     qemu_args.qmp_port = Some(port);
-    let dump = paths::build_dir(arch).join("yoru.ppm");
+    let dump = paths::build_dir(arch).join(if launcher {
+        "yoru-launcher.ppm"
+    } else {
+        "yoru.ppm"
+    });
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         watching.stop_when_done();
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
@@ -57,24 +64,39 @@ pub(super) fn test_yoru(arch: Arch, programs: &Programs, args: &Args) -> Result<
             let framed = lines
                 .iter()
                 .any(|line| line.contains("pattern: two decorations server"));
-            drawn && framed
+            let docked = lines
+                .iter()
+                .any(|line| line.contains("yoru-shell: the dock is up"));
+            drawn && framed && docked
         })?;
         if !ready {
             return Err(with_the_transcript(
                 &Error::new(format!(
-                    "{arch}: yoru: the wallpaper or the second window never said it was drawn"
+                    "{arch}: yoru: the wallpaper, the second window or the dock never said it was up"
                 )),
                 watching,
             ));
         }
+        // Judged once the screen has stopped changing: two dumps a second
+        // apart, the same and both Yoru's, so the picture kept is not one
+        // caught while the second window was being placed.
         let deadline = Instant::now() + SETTLE;
+        let mut last: Option<Image> = None;
         loop {
             qmp.screendump(Some(DEVICE_ID), &dump)?;
             let bytes = std::fs::read(&dump)
                 .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
             let screen = parse_ppm(&bytes)?;
-            match judge(&screen) {
-                Ok(said) => {
+            let verdict = judge(&screen).and_then(|said| {
+                if launcher {
+                    judge_launcher(&screen).map(|more| format!("{said}, {more}"))
+                } else {
+                    Ok(said)
+                }
+            });
+            let still = last.as_ref() == Some(&screen);
+            match verdict {
+                Ok(said) if still => {
                     println!("  {arch}: yoru: {said}; the picture is {}", dump.display());
                     return Ok(());
                 }
@@ -87,12 +109,90 @@ pub(super) fn test_yoru(arch: Arch, programs: &Programs, args: &Args) -> Result<
                         watching,
                     ));
                 }
-                Err(_) => std::thread::sleep(Duration::from_millis(250)),
+                Ok(_) if Instant::now() >= deadline => {
+                    return Err(with_the_transcript(
+                        &Error::new(format!(
+                            "{arch}: yoru: the screen never stopped changing; it is {}",
+                            dump.display()
+                        )),
+                        watching,
+                    ));
+                }
+                _ => {
+                    last = Some(screen);
+                    std::thread::sleep(Duration::from_secs(1));
+                }
             }
         }
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, MARKER, hook)?;
     Ok(())
+}
+
+/// A program built for `arch`, carried at `/<path>`.
+fn program(arch: Arch, app: &str, path: &str) -> Result<crate::ports::File> {
+    let built = crate::apps::program(arch, app, app)?;
+    Ok(crate::ports::File {
+        path: path.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(
+            std::fs::read(&built)
+                .map_err(|error| Error::new(format!("{}: {error}", built.display())))?,
+        ),
+    })
+}
+
+/// A Yoru boot's configuration and what its image carries: the theme as
+/// `run-compositor` sources it, the dock, and with `launcher` fuzzel and
+/// the applications it lists.
+fn desktop(arch: Arch, args: &Args, launcher: bool) -> Result<(String, Carried)> {
+    let themed = Args {
+        theme: Some("yoru".to_owned()),
+        config: None,
+        ..args.clone()
+    };
+    let mut carried = Carried::none();
+    // The dock, as every desktop carries it (step Y2).
+    carried
+        .ports
+        .push(program(arch, "yoru-shell", super::theme::DOCK)?);
+    let mut config = format!(
+        "monitor = , {}x{}@60, auto, 1\n{CONFIG}",
+        SCREEN.0, SCREEN.1
+    );
+    if launcher {
+        carried.ports.push(program(arch, "fuzzel", "bin/fuzzel")?);
+        carried.ports.extend(crate::fuzzel::files(None, false)?);
+        config.push_str(
+            "exec-once = /bin/fuzzel --config /usr/share/hyprix/themes/yoru-fuzzel.ini \
+             --log-level=info\n",
+        );
+    }
+    let config = super::theme::apply(config, &themed, &mut carried.ports)?;
+    Ok((config, carried))
+}
+
+/// Whether the launcher is open on `screen`: its card on Nocturne's
+/// surface across the middle of the screen's top half, wider than the
+/// windows' title bars leave of it.
+fn judge_launcher(screen: &Image) -> core::result::Result<String, String> {
+    let row = 175;
+    let mut card = 0usize;
+    for x in 0..screen.width {
+        let at = (row * screen.width + x) * 3;
+        if let Some(&[r, g, b]) = screen.pixels.get(at..at + 3) {
+            let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
+            if (r - 0x23).abs() <= 6 && (g - 0x25).abs() <= 6 && (b - 0x32).abs() <= 6 {
+                card += 1;
+            }
+        }
+    }
+    if card < 400 {
+        return Err(format!(
+            "{card} pixels of the launcher's card across row {row}"
+        ));
+    }
+    Ok(format!("the launcher's card {card} pixels across"))
 }
 
 /// Whether `screen` is Yoru's desktop: Nocturne's ground in the lower
@@ -140,8 +240,29 @@ fn judge(screen: &Image) -> core::result::Result<String, String> {
     if accent < 80 {
         return Err(format!("{accent} pixels of the accent's line"));
     }
+    // The wallpaper's glow up right, which the compositor's own ground
+    // (the same colour as the wallpaper's corner) does not have: the
+    // wallpaper is drawn, not only started.
+    let [r, g, b] = pixel(900, 100);
+    if !(b > 0x48 && b > r + 0x20) {
+        return Err(format!("no wallpaper's glow at 900,100: {r},{g},{b}"));
+    }
+    // The dock: its bar's dark ground across the middle of its row, 36
+    // pixels above the screen's foot, and the shown workspace's button
+    // ringed in accent-500 at its left.
+    let row = screen.height - 6 - 30;
+    let [r, g, b] = pixel(screen.width / 2, row);
+    if !(r < 0x30 && g < 0x30 && b < 0x40) {
+        return Err(format!("the dock's middle is {r},{g},{b}, not its bar"));
+    }
+    let lit = (0..200).any(|x| {
+        (screen.height - 66..screen.height - 6).any(|y| near(pixel(x, y), [0x96, 0x8a, 0xe0], 20))
+    });
+    if !lit {
+        return Err("no workspace lit in the dock".to_owned());
+    }
     Ok(format!(
-        "Nocturne's ground, {surface} pixels of title bar, {accent} of the accent"
+        "Nocturne's ground, {surface} pixels of title bar, {accent} of the accent, the dock"
     ))
 }
 
@@ -177,11 +298,21 @@ mod tests {
                 pixels[at..at + 3].copy_from_slice(&colour);
             }
         }
+        // The wallpaper's glow.
+        let at = (100 * SCREEN.0 + 900) * 3;
+        pixels[at..at + 3].copy_from_slice(&[0x2c, 0x31, 0x5d]);
+        // The dock's lit workspace at the foot.
+        for y in SCREEN.1 - 50..SCREEN.1 - 48 {
+            for x in 80..110 {
+                let at = (y * SCREEN.0 + x) * 3;
+                pixels[at..at + 3].copy_from_slice(&[0x96, 0x8a, 0xe0]);
+            }
+        }
         let screen = Image {
             width: SCREEN.0,
             height: SCREEN.1,
             pixels,
         };
-        assert!(judge(&screen).is_ok());
+        assert_eq!(judge(&screen).map(|_| ()), Ok(()));
     }
 }

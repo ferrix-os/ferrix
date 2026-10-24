@@ -828,3 +828,63 @@ Left of Y1: a window under a title bar has square bottom corners (as in
 Ferrix light: the renderer rounds all four corners or none); the
 animations' styles (`popin`, `slidefade`) are written and not yet drawn
 by hyprix, which moves windows and does not yet slide workspaces.
+
+**Y2, the dock, is built** (8 points estimated):
+
+* tole windows can be layer-shell surfaces (`WindowOptions::layer`,
+  `Window::set_layer`, `Window::set_input_region`; ferrix-os/tole);
+* `yoru-shell`, a new app (ferrix-os/apps) on tole: the design's dock as
+  a `yoru-dock` layer surface 60 px high, 6 px above the foot, its
+  exclusive zone keeping windows clear of it; the frame of the three
+  accents; the search; the workspaces 1 to 4 (and any other that exists)
+  with a dot a window and the shown one lit; the launchers found among the
+  desktop entries (terminal always, browser and Settings where the image
+  has them) with a mark under a running one; the search, scratchpad and
+  Settings tools; focus mode (`decoration:dim_inactive`); the pomodoro
+  (25 and 5 minutes, its progress under it); the clock and date. It
+  follows hyprix's `.socket2.sock` and asks `j/workspaces`,
+  `j/activeworkspace` and `j/clients` after each event that moves
+  something; a press is a dispatcher. `--render FILE` draws a sample dock;
+  host tests for the model, the IPC events and a drawn dock;
+* every desktop carries `/bin/yoru-shell` as it carries waybar; Yoru's
+  theme starts it unless the configuration starts a bar of its own
+  (`exec-once` of waybar);
+* the title bars' face is `Inter Variable`, the family name of the
+  vendored Inter;
+* the `yoru` boot now carries the dock and judges it too, once the screen
+  has stopped changing (`~/.local/share/ferrix/yoru/shots/Y2-yoru-dock-1024x768.png`).
+
+**What it costs** (`compositor-render`'s ignored `yoru_frame_cost`, a
+whole 1920x1080 frame of two windows over a wallpaper, the median of 20 on
+virglrenderer's test server over this host's GL -- the path a guest's
+frames take through QEMU -- and of 7 in software on this host):
+
+| Frame | GPU path | Software |
+|---|---|---|
+| no decorations | 8.0 ms | 8.0 ms |
+| + Yoru's shadows | 8.7 ms | 11.8 ms |
+| + the focused window's glow | 8.3 ms | 13.3 ms |
+| + the dock's blur behind it | 8.6 ms | 39.5 ms |
+
+On the GPU path the look is within the noise of none; in software the
+dock's blur is three quarters of the frame. A guest drawing in software
+(no `--gl`) should keep the blur off: a layer rule after the theme,
+`layerrule = blur false, match:namespace ^(yoru-.*)$`, or `decoration:blur:enabled = false`.
+A host test also checks that the glow and the inactive shadow are the same
+picture on the GPU as in software.
+
+Left of Y2: the dock's tooltips, its popovers (the stash) and the `Bar`
+layout; auto-tile, the shortcut sheet, clipboard and wallpaper tools come
+with their slices (Y5 to Y7); the clock is UTC or `TZ=UTC±h`, as waybar's.
+
+**Y3's first half, the launcher in Yoru's look, is built** (3 points
+estimated): `hyprix/themes/yoru-fuzzel.ini`, fuzzel drawn as the design's
+command palette -- a card on the surface high on the screen, Phosphor's
+search glyph as its prompt in accent-300, the picked row tinted with the
+accent, Inter, radius 14 -- which `Ctrl K`, `Alt Space` and the dock's
+search start fuzzel with (`--config`); a person's own `fuzzel.ini` is what
+their own binds use. `test-compositor --boot yoru-launcher` opens it over
+the Yoru desktop and judges its card
+(`~/.local/share/ferrix/yoru/shots/Y3-yoru-launcher-1024x768.png`). The
+palette's second half -- windows, actions and workspaces beside the
+applications, in `yoru-shell` -- is still to come (5 points).

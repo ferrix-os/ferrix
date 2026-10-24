@@ -612,6 +612,12 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["lode-viewer", "lode-viewer-ssh"]) {
         lode_viewer::build_ahead(arch)?;
     }
+    if asked(&["yoru", "yoru-launcher"]) {
+        let _ = crate::apps::program(arch, "yoru-shell", "yoru-shell")?;
+    }
+    if asked(&["yoru-launcher"]) {
+        let _ = crate::apps::program(arch, "fuzzel", "fuzzel")?;
+    }
     if asked(&["tole-demo"]) {
         tole_demo::build_ahead(arch)?;
     }
@@ -744,7 +750,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 58] = [
+const BOOTS: [(&str, Boot); 59] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -785,6 +791,7 @@ const BOOTS: [(&str, Boot); 58] = [
     ("caption", test_caption),
     ("wallpaper", test_wallpaper),
     ("yoru", yoru::test_yoru),
+    ("yoru-launcher", yoru::test_yoru_launcher),
     ("waybar", test_waybar),
     ("waybar-volume", test_waybar_volume),
     ("fuzzel", test_fuzzel),

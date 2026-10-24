@@ -28,6 +28,8 @@ const DESKTOP_APPS: &[(&str, &str)] = &[
     ("waybar", "waybar"),
     ("fuzzel", "fuzzel"),
     ("hyprlock", "hyprlock"),
+    // Yoru's dock (docs/DESKTOP.md §6), which its theme starts.
+    ("yoru-shell", "yoru-shell"),
 ];
 
 /// Where `run-compositor` puts the wallpaper it carries.

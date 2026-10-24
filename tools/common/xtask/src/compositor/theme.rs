@@ -46,6 +46,21 @@ const FACES: [(&str, &str); 4] = [
     ),
 ];
 
+/// Yoru's dock, the `yoru-shell` app, which every desktop carries
+/// (`desktop::DESKTOP_APPS`).
+pub(super) const DOCK: &str = "bin/yoru-shell";
+
+/// Whether `config` starts a bar of its own: an `exec-once` of waybar or
+/// of Yoru's shell.
+fn starts_a_bar(config: &str) -> bool {
+    config.lines().any(|line| {
+        line.split_once('=').is_some_and(|(key, value)| {
+            matches!(key.trim(), "exec-once" | "exec")
+                && (value.contains("waybar") || value.contains("yoru-shell"))
+        })
+    })
+}
+
 /// A desktop's look.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Theme {
@@ -135,7 +150,17 @@ pub(super) fn apply(config: String, args: &Args, files: &mut Vec<File>) -> Resul
         carry(themes.join(name), format!("{THEMES}/{name}"))?;
         head.push_str(&format!("source = /{THEMES}/{name}\n"));
     }
+    // Yoru's dock, unless the configuration starts a bar of its own.
+    if theme == Theme::Yoru && !starts_a_bar(&config) {
+        head.push_str(&format!("exec-once = /{DOCK}\n"));
+    }
     if theme == Theme::Yoru {
+        // The launcher's look, which Yoru's keys and its dock start fuzzel
+        // with (`--config`).
+        carry(
+            themes.join("yoru-fuzzel.ini"),
+            format!("{THEMES}/yoru-fuzzel.ini"),
+        )?;
         carry(
             root.join("docs/brand/yoru/yoru-nocturne.svg"),
             YORU_WALLPAPER.to_owned(),
@@ -184,8 +209,10 @@ mod tests {
             .expect("keys");
         let own = config.find("bind = SUPER, Q").expect("own line");
         assert!(yoru < keys && keys < own);
+        assert!(config.contains("exec-once = /bin/yoru-shell"), "the dock");
         for path in [
             "usr/share/hyprix/themes/yoru.conf",
+            "usr/share/hyprix/themes/yoru-fuzzel.ini",
             "usr/share/backgrounds/yoru/yoru-nocturne.svg",
             "usr/share/fonts/phosphor/Phosphor.ttf",
             "usr/share/fonts/phosphor/LICENSE",
@@ -207,6 +234,16 @@ mod tests {
         let config = apply(String::new(), &args, &mut files).expect("themed");
         assert!(config.contains("yoru.conf"));
         assert!(!config.contains("yoru-keys.conf"));
+        assert!(
+            config.contains("yoru-shell"),
+            "no bar of its own: Yoru's dock"
+        );
+        let with_waybar =
+            apply("exec-once = waybar\n".to_owned(), &args, &mut files).expect("themed");
+        assert!(
+            !with_waybar.contains("yoru-shell"),
+            "its own bar, not the dock"
+        );
     }
 
     /// No `--theme` is no theme (a judged boot's), `none` the same, and an

@@ -484,3 +484,174 @@ fn a_waiting_draw_keeps_the_pixels_it_was_written_with() {
     assert_eq!(at(8, 8), Some(vec![0x00, 0x00, 0xff]), "the first draw");
     assert_eq!(at(40, 8), Some(vec![0xff, 0x00, 0x00]), "the second");
 }
+
+/// Yoru's decorations (Ferrix's docs/DESKTOP.md §6): the focused window's
+/// glow over its deep shadow, a lighter shadow under the other, drawn the
+/// same by the GPU as by the software renderer.
+fn yoru_style() -> Style {
+    let config = compositor_config::parse(
+        "test",
+        "decoration:rounding = 8\n\
+         decoration:shadow:range = 40\n\
+         decoration:shadow:render_power = 2\n\
+         decoration:shadow:offset = 0 16\n\
+         decoration:shadow:color = rgba(0000008c)\n\
+         decoration:shadow:color_inactive = rgba(00000066)\n\
+         decoration:glow:enabled = 1\n\
+         decoration:glow:range = 36\n\
+         decoration:glow:render_power = 3\n\
+         decoration:glow:color = rgba(9184d940)\n",
+        &mut compositor_config::NoSources,
+    )
+    .config;
+    let style = Style::from_config(&config).undithered();
+    assert!(style.glow.is_some() && style.shadow_inactive.is_some());
+    style
+}
+
+#[test]
+fn yoru_glow_and_shadows_are_the_same_picture() {
+    let (_, layout) = two_clients_on(SIZE, Settings::default());
+    let buffers = client_buffers(&layout);
+    let Some((software, gpu)) = both(
+        "yoru",
+        &layout,
+        &yoru_style(),
+        &surfaces(&buffers),
+        &[],
+        true,
+    ) else {
+        return;
+    };
+    let (count, furthest) = difference(&software, &gpu, STEP);
+    assert!(
+        count == 0,
+        "{count} pixels differ by more than {STEP}, the furthest by {furthest}"
+    );
+}
+
+/// What Yoru's decorations cost a 1920x1080 frame on the GPU path, against
+/// the same frame with none (`cargo test -p compositor-render --release
+/// -- --ignored yoru_frame_cost --nocapture`): two windows, then with the
+/// shadows, with the glow too, and with the blur behind a translucent bar
+/// across the foot, as the dock is. Measured on virglrenderer's test
+/// server over this host's GL, which is the path a guest's frames take
+/// through QEMU; each the median of twenty whole frames after five warm.
+#[test]
+#[ignore = "a measurement, not a check"]
+#[expect(clippy::print_stderr, reason = "the measurement is the output")]
+fn yoru_frame_cost() {
+    const BIG: (u32, u32) = (1920, 1080);
+    let (_, layout) = two_clients_on(BIG, Settings::default());
+    let buffers = client_buffers(&layout);
+    let surfaces = surfaces(&buffers);
+    let wallpaper = Pattern::Checkerboard.draw(BIG.0, BIG.1);
+    let bar: Vec<u8> = [0x26, 0x18, 0x16, 0xc7].repeat((BIG.0 * 60) as usize);
+    let full = Rect::new(0, 0, i64::from(BIG.0), i64::from(BIG.1));
+    let wall = || LayerFrame {
+        rect: full,
+        above: false,
+        surface: Some(
+            Surface::new(
+                &wallpaper,
+                BIG.0,
+                BIG.1,
+                BIG.0 * 4,
+                Pattern::Checkerboard.format(),
+            )
+            .expect("a wallpaper"),
+        ),
+        dim_around: false,
+        blur: false,
+        xray: false,
+    };
+    let dock = |blur: bool| LayerFrame {
+        rect: Rect::new(12, i64::from(BIG.1) - 66, i64::from(BIG.0) - 24, 60),
+        above: true,
+        surface: Some(Surface::new(&bar, BIG.0, 60, BIG.0 * 4, Format::Argb8888).expect("a bar")),
+        dim_around: false,
+        blur,
+        xray: false,
+    };
+    let none = Style {
+        shadow: None,
+        glow: None,
+        blur: None,
+        ..yoru_style()
+    };
+    let shadows = Style {
+        glow: None,
+        blur: None,
+        ..yoru_style()
+    };
+    let glow = Style {
+        blur: None,
+        ..yoru_style()
+    };
+    let blurred = Style {
+        blur: Some(Blur {
+            noise: 0.0,
+            ..Blur::new(6, 2)
+        }),
+        ..yoru_style()
+    };
+    let cases: [(&str, &Style, bool); 4] = [
+        ("no decorations", &none, false),
+        ("+ shadows", &shadows, false),
+        ("+ glow", &glow, false),
+        ("+ the dock's blur", &blurred, true),
+    ];
+    for (what, style, blur) in cases {
+        let Some(server) = server("yoru-cost") else {
+            return;
+        };
+        let mut gpu = Canvas::new(server, BIG.0, BIG.1).expect("a GPU canvas");
+        let mut behind = Backdrop::new(BIG.0, BIG.1);
+        let styles = Styles::plain(style);
+        let layers = [wall(), dock(blur)];
+        let whole = Damage::full(BIG.0, BIG.1);
+        let mut times = Vec::new();
+        for round in 0..25 {
+            let started = std::time::Instant::now();
+            let _ = render_onto(
+                &mut gpu,
+                Some(&mut behind),
+                &layout,
+                (0, 0),
+                &styles,
+                &surfaces,
+                &layers,
+                &whole,
+            );
+            gpu.finish().expect("the frame was drawn");
+            let _ = gpu.read(Rect::new(0, 0, 1, 1)).expect("waited for");
+            if round >= 5 {
+                times.push(started.elapsed());
+            }
+        }
+        times.sort();
+        let median = times[times.len() / 2];
+        // The same frame in software, for the frames a guest without a 3D
+        // card draws.
+        let mut software = crate::Canvas::new(BIG.0, BIG.1).expect("a canvas");
+        let mut kept = crate::Backdrop::new(BIG.0, BIG.1).expect("a backdrop");
+        let mut cpu = Vec::new();
+        for _ in 0..7 {
+            let started = std::time::Instant::now();
+            let _ = render_onto(
+                &mut software,
+                Some(&mut kept),
+                &layout,
+                (0, 0),
+                &styles,
+                &surfaces,
+                &layers,
+                &whole,
+            );
+            cpu.push(started.elapsed());
+        }
+        cpu.sort();
+        let on_cpu = cpu[cpu.len() / 2];
+        eprintln!("yoru frame cost, 1920x1080: {what}: GPU {median:?}, software {on_cpu:?}");
+    }
+}
