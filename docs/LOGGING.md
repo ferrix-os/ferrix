@@ -1807,6 +1807,23 @@ acceptance on nazuna. (3) Queries and facets over the boot in the
 background. (4) The Overview's and crashes' counts in the background.
 (5) JSONL files by offsets.
 
+**Built: steps 1 and 2 (2026-10-24).** lode-core's `entries_before`, and
+in the viewer `paged.rs` (the pager) and `scrollback.rs` (the table over
+it), for a store of more than 200,000 records; a shorter one is read whole
+as before, and `LODE_VIEWER_WHOLE=1` reads any whole. On a store of
+1,005,000 records in 13 segments of lode's 16 MiB (`--import` now seals at
+that size): opening on Logs took 1.62 s and 1.1 GB resident read whole,
+0.28 s and 142 MB paged; scrolling the whole boot up and back with steady
+wheel steps and flings in a real window on nazuna kept 65,536 records held
+and 185 to 320 MB resident throughout. A page step costs about 10 ms
+(reading 2, the log 3, the table's lines 5): pages are spliced at the
+window's end rather than sorted into it, each record's kernel sequence
+number is read once, and records let go are freed a slice per step. The
+selection and open lines come back with their page. What the steps after
+it cover -- a query, the facets, the Overview and crashes over the whole
+boot -- see the records read so far; the count line says how many of the
+boot's those are.
+
 ### The write budget, as built (§8.3)
 
 `cargo xtask test-log-budget` (x86-64 by default, KVM): init with lode's
