@@ -315,6 +315,13 @@ measured worst case on the board replaces the estimate before any claim.
 * SHA-256 over 32 MiB took 6.59 s (127.7 cycles per byte, 4.5× eBACS's).
   That is the slot hashing's cost in S4, not the signature's.
 
+**After S4's SHA-256 fix (2026-10-24, the same section).** The slowness
+was our code, not memory or a missing accelerator. With the fix, A.4
+verifies in 2.88 ms cold, the 555-step manifest in 3.56 ms, and the
+computed 765-step bound is 4.85 ms (L = 1) and about 9.7 ms (L = 2), a
+margin of 10×. SHA-256 over 32 MiB takes 2.29 s (44.4 cycles per byte).
+The S2 figures above are the record of S1's code.
+
 ## 3. (P3) State custody in the HSM
 
 ### 3.1 What the HSM must be

@@ -17,11 +17,11 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | High (`H.*`) | 146 | 93 | 53 |
 | Low (`L.*`) | 1061 | 796 | 265 |
 
-2339 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2341 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2341 |
+| Named by a low-level requirement | 2343 |
 | Accessors, covered by the requirement they serve | 1059 |
 | Check code in a product file | 83 |
 | Named by none | 938 |
@@ -1889,7 +1889,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
-| `L.sha256.1` | digest shall return the SHA-256 of FIPS 180-4 for every message. | Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files. | H.SIGN.1 | `ferrix_sha256::digest`, `ferrix_sha256::Sha256::finish`, `ferrix_sha256::compress` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_short_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_long_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_monte_carlo` | host test | host test | host test |
+| `L.sha256.1` | digest shall return the SHA-256 of FIPS 180-4 for every message. | Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files. | H.SIGN.1 | `ferrix_sha256::digest`, `ferrix_sha256::Sha256::finish`, `ferrix_sha256::compress`, `ferrix_sha256::rounds_0_to_31`, `ferrix_sha256::rounds_32_to_63` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_short_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_long_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_monte_carlo` | host test | host test | host test |
 | `L.sha256.2` | A message given to update in any pieces shall hash as the whole message does. | Host tests: every length from 0 to 130 bytes byte by byte, and a million bytes in pieces of 997. | H.SIGN.1 | `ferrix_sha256::Sha256::update` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::every_short_length_hashes_the_same_whole_and_bytewise`, `src/lib/crypto/sha256/src/tests.rs::the_default_hash_is_the_empty_hash` | host test | host test | host test |
 | `L.sha256.3` | finish_192 and digest_192 shall return the first 24 bytes of the SHA-256 digest (RFC 9858 section 2.1). | Host test: RFC 9858's SHA-256/192 of abc, whole and in pieces. | H.SIGN.1 | `ferrix_sha256::finish_192`, `ferrix_sha256::digest_192` | `src/lib/crypto/sha256/src/tests.rs::sha256_192_matches_rfc_9858` | host test | host test | host test |
 

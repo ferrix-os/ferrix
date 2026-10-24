@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "359327afc69d40b5c50b878fd0bf6b560efdb8e3928b6399037630a1c501cfdf",
+  "digest": "ee098624db6632437e625300194937f87a57897718c427bc86a5ef1d19500f26",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -88833,10 +88833,10 @@
                   "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"ferrix_sha256::digest\", \"ferrix_sha256::Sha256::finish\", \"ferrix_sha256::compress\")",
+                  "value": "(\"ferrix_sha256::digest\", \"ferrix_sha256::Sha256::finish\", \"ferrix_sha256::compress\", \"ferrix_sha256::rounds_0_to_31\", \"ferrix_sha256::rounds_32_to_63\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 268
+                    "line": 269
                   }
                 }
               ]
@@ -88849,7 +88849,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 270
+                "line": 271
               },
               "children": [
                 {
@@ -88860,7 +88860,7 @@
                   "value": "\"A message given to update in any pieces shall hash as the whole message does.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 272
+                    "line": 273
                   }
                 },
                 {
@@ -88871,7 +88871,7 @@
                   "value": "\"Host tests: every length from 0 to 130 bytes byte by byte, and a million bytes in pieces of 997.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 274
+                    "line": 275
                   }
                 },
                 {
@@ -88882,7 +88882,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 275
+                    "line": 276
                   }
                 },
                 {
@@ -88893,7 +88893,7 @@
                   "value": "\"ferrix_sha256::Sha256::update\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 276
+                    "line": 277
                   }
                 }
               ]
@@ -88906,7 +88906,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 278
+                "line": 279
               },
               "children": [
                 {
@@ -88917,7 +88917,7 @@
                   "value": "\"finish_192 and digest_192 shall return the first 24 bytes of the SHA-256 digest (RFC 9858 section 2.1).\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 280
+                    "line": 281
                   }
                 },
                 {
@@ -88928,7 +88928,7 @@
                   "value": "\"Host test: RFC 9858's SHA-256/192 of abc, whole and in pieces.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 282
+                    "line": 283
                   }
                 },
                 {
@@ -88939,7 +88939,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 283
+                    "line": 284
                   }
                 },
                 {
@@ -88950,7 +88950,7 @@
                   "value": "(\"ferrix_sha256::finish_192\", \"ferrix_sha256::digest_192\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 284
+                    "line": 285
                   }
                 }
               ]

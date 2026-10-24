@@ -1918,15 +1918,88 @@ it. It leaves the baseline in a later landing that brings:
 
 A backlog row (`docs/backlog/p2.md`) owes that.
 
-**SHA-256 throughput over 32 MiB of DRAM:** 6.594 s, 127.7 cycles per
-byte, against eBACS's 28.24. That is 4.5×, and it is the cost of hashing
-a slot's blobs, not of the signature. A 32 MiB kernel and initramfs takes
-about 6.6 s to hash in the ARMv7-A loader, which AB-BOOT's §4 cost line
-("well under a second") does not hold on this board. It is S4's concern,
-and a faster SHA-256 is its own work item.
+**SHA-256 throughput over 32 MiB of DRAM, as landed in S1:** 6.594 s,
+127.7 cycles per byte, against eBACS's 28.24. That is 4.5×. It is the cost
+of hashing a slot's blobs, not of the signature.
 
-The program and its data, the raw binary with its SHA-256, and the board's
-console log are kept in `~/.local/share/ferrix/signing-bench/dk1-s2/`.
+**Why it was slow (investigated 2026-10-24, before S4).** The same bench
+program, on the same board in the same state, measured memory, cache and
+codegen apart, against references. One raw binary held all the variants
+(`shabench2.bin`, SHA-256 `26eb14af6ddff9c7…`); each agreed with the
+others' digest. Figures are cycles per byte over 32 MiB of DRAM. The
+figure over 4 KiB held in L1 is within 3% of each.
+
+| What | cycles/byte | 32 MiB |
+|---|---:|---:|
+| Reading 32 MiB (a word XOR loop) | 0.89 | 0.05 s |
+| Copying 16 MiB | 1.07 | -- |
+| `ferrix-sha256` as landed in S1 | 127.7 | 6.59 s |
+| `ferrix-slots`' SHA-256 before S1 | 57.0 | 2.94 s |
+| Textbook Rust (64-word schedule) | 52.4 | 2.71 s |
+| Unrolled rounds over a 16-word ring | 44.5 | 2.30 s |
+| `sha2` 0.10.9, its software backend | 40.4 | 2.08 s |
+| CRYPTOGAMS `sha256-armv4` (from `ring` 0.17.14), integer | 30.2 | 1.56 s |
+| CRYPTOGAMS `sha256-armv4`, NEON | 28.5 | 1.47 s |
+| The 157D's HASH1 peripheral, fed by the CPU, no DMA | 7.4 | 0.38 s |
+
+* **Memory and cache are not the cost.** A read runs at under one cycle
+  per byte, and in-cache and DRAM figures agree. U-Boot's DRAM sections
+  are write-back (TEX 000, C 1, B 1), although `dcache` prints
+  "writethrough". Remapping the region write-back write-allocate changed
+  nothing.
+* **Codegen settings are not the cost.** `-C target-cpu=cortex-a7`
+  changed nothing; `opt-level = 3` gained 2.5%. Thumb-2 was not measured
+  (no prebuilt library for `thumbv7a-none-eabi`), and the loader builds
+  for ARM mode.
+* **The cost was ours.** S1's rewrite shifted the 16-word schedule one
+  place every round (48 × 16 moves per block) and copied input byte by
+  byte into the block buffer. That made it 2.2× slower than the code it
+  replaced.
+
+**The fix (S4).** Whole blocks are compressed straight from the input,
+and the 64 rounds are written out over a 16-word ring with constant
+indices. It runs at **44.4 cycles per byte, 2.29 s per 32 MiB**, within
+10% of `sha2`'s software backend. The CAVP vectors pass unchanged.
+
+The figures below are from the landing source: `src/lib/crypto/sha256/src/lib.rs`
+of SHA-256 `c7847ca9be82eeb353aaf9dae7a41320c88f84d1792dba12f9c2022d271214fd`,
+built with Rust 1.97.1 into `shabench4.bin` (`b634bda22106631036db48b2…`,
+`run4.out`) and `sigbench-s4b.bin`, the S2 program on that source
+(`da0434ca500a739c9f9f15edd0a50c18…`, `run-sig-s4b.out`). An earlier build
+of the fix, taking `&[u8]` in place of `&[u8; 64]`, measured the same to
+within 0.2% (`run3.out`, `run-sig-s4.out`). The verifier is 2.7× faster
+than S1's:
+
+| Case | Chain steps | Cold | Warm (min / mean / max) |
+|---|---|---|---|
+| RFC 9858 A.4, `hss_verify` | 435 | 1,870,902 cycles = 2.88 ms | 1,832,355 / 1,832,445 / 1,833,089 cycles |
+| The near-worst 4 KiB manifest `verify` | 555 | 2,316,563 cycles = 3.56 ms | 2,313,030 / 2,313,049 / 2,313,186 cycles |
+
+One step costs about 4,006 cycles (a 47-byte SHA-256 call is 3,370, 1.1×
+eBACS), and the fixed part about 0.09 M. **The computed 765-step bound is
+about 3.15 M cycles, 4.85 ms**, a margin of 10× against the 50 ms bound
+(about 9.7 ms and 5× for L = 2). The S2 figures above stay as the record
+of the landed S1 code.
+
+**Slot hashing in the loader** is then about 2.3 s per 32 MiB of kernel
+and initramfs on the DK1, still not AB-BOOT §4's "well under a second".
+What closes the rest:
+
+* Assembly (CRYPTOGAMS, 1.5 s) adds a SOUP unit in the item for a 1.5×
+  gain, so it is not taken.
+* HASH1 (0.38 s) is 6× faster than the fix. It is reachable from the
+  normal world at U-Boot time: its clock is RCC_MP_AHB5ENSETR bit 5, its
+  registers at 0x54002000, and the DK's OP-TEE does not secure it (ETZPC
+  id 8). A peripheral in the trust path needs its own argument, which is
+  for the consultant: a fault in it gives a wrong digest, which the
+  manifest's signature does not cover. The comparison would fail closed
+  on most faults, but a peripheral that returns the expected digest
+  regardless would pass any image. S4 uses software and states the cost.
+
+The S2 program and its data, the raw binaries with their SHA-256, and the
+board's console log are kept in `~/.local/share/ferrix/signing-bench/dk1-s2/`;
+the investigation's bench, its variants, binaries (`SHA256SUMS`), runs and
+`FINDINGS.md` in `~/.local/share/ferrix/signing-bench/dk1-sha/` (ledger 3988).
 The board was not written: the program went over the serial line with
 `loady`, and the board was left booted as it was found.
 

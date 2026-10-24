@@ -8,11 +8,11 @@
   "argued": {},
   "files": {
     "src/lib/crypto/sha256/src/lib.rs": {
-      "branch_outcomes": 8,
-      "branch_outcomes_hit": 8,
-      "lines": 84,
-      "lines_hit": 84,
-      "sha256": "af805af372f03438d89b11770af716218418d92fa4354956cd3cb232b18b6241",
+      "branch_outcomes": 6,
+      "branch_outcomes_hit": 6,
+      "lines": 137,
+      "lines_hit": 137,
+      "sha256": "c7847ca9be82eeb353aaf9dae7a41320c88f84d1792dba12f9c2022d271214fd",
       "unreached_branches": [],
       "unreached_lines": []
     },

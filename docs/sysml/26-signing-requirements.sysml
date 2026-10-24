@@ -265,7 +265,8 @@ package FerrixSigningRequirements {
                 NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files.";
             attribute :>> parent = "H.SIGN.1";
             attribute :>> unit = ("ferrix_sha256::digest", "ferrix_sha256::Sha256::finish",
-                "ferrix_sha256::compress");
+                "ferrix_sha256::compress", "ferrix_sha256::rounds_0_to_31",
+                "ferrix_sha256::rounds_32_to_63");
         }
         requirement <'L.sha256.2'> sha256InAnyPieces : ItemLowLevel {
             attribute :>> statement = "A message given to update in any pieces shall

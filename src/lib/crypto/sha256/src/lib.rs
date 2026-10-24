@@ -122,10 +122,11 @@ impl Sha256 {
         }
     }
 
-    /// Add `bytes`.
+    /// Add `bytes`. A partial block first fills the buffer; whole blocks
+    /// are then compressed straight from `bytes`, and what is left is kept.
     pub fn update(&mut self, mut bytes: &[u8]) {
         self.length = self.length.wrapping_add(bytes.len() as u64);
-        while !bytes.is_empty() {
+        if self.filled != 0 {
             let free = self.block.get_mut(self.filled..).unwrap_or_default();
             let take = free.len().min(bytes.len());
             let (head, rest) = bytes.split_at(take);
@@ -135,12 +136,21 @@ impl Sha256 {
             // `take` is at most the 64 - `filled` bytes left in the block.
             self.filled = self.filled.saturating_add(take);
             bytes = rest;
-            if self.filled >= 64 {
-                let block = self.block;
-                compress(&mut self.state, &block);
-                self.filled = 0;
+            if self.filled < 64 {
+                return;
             }
+            let block = self.block;
+            compress(&mut self.state, &block);
+            self.filled = 0;
         }
+        let (blocks, rest) = bytes.as_chunks::<64>();
+        for block in blocks {
+            compress(&mut self.state, block);
+        }
+        for (slot, byte) in self.block.iter_mut().zip(rest) {
+            *slot = *byte;
+        }
+        self.filled = rest.len();
     }
 
     /// The digest.
@@ -188,50 +198,132 @@ pub fn digest_192(bytes: &[u8]) -> [u8; 24] {
     finish_192(hash)
 }
 
-/// One 64-byte block into the state. The message schedule is kept as the
-/// last 16 words, shifted one place a round, so that every index is a
-/// constant.
+/// One round of FIPS 180-4 §6.2.2 step 3, with the working variables
+/// renamed rather than moved: the caller passes them rotated by one each
+/// round, so that only `d` and `h` are written.
+macro_rules! round {
+    ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $w:expr, $k:expr) => {{
+        let t1 = $h
+            .wrapping_add($e.rotate_right(6) ^ $e.rotate_right(11) ^ $e.rotate_right(25))
+            .wrapping_add(($e & $f) ^ (!$e & $g))
+            .wrapping_add($k)
+            .wrapping_add($w);
+        let t2 = ($a.rotate_right(2) ^ $a.rotate_right(13) ^ $a.rotate_right(22))
+            .wrapping_add(($a & $b) ^ ($a & $c) ^ ($b & $c));
+        $d = $d.wrapping_add(t1);
+        $h = t1.wrapping_add(t2);
+    }};
+}
+
+/// Schedule word `t` (FIPS 180-4 §6.2.2 step 1) into the 16-word ring, in
+/// place of word `t - 16`: `w[t] = s1(w[t-2]) + w[t-7] + s0(w[t-15]) +
+/// w[t-16]`, every index a literal (`t mod 16` and its neighbours').
+macro_rules! sched {
+    ($w:ident, $i:literal, $i2:literal, $i7:literal, $i15:literal) => {{
+        let s0 = $w[$i15].rotate_right(7) ^ $w[$i15].rotate_right(18) ^ ($w[$i15] >> 3);
+        let s1 = $w[$i2].rotate_right(17) ^ $w[$i2].rotate_right(19) ^ ($w[$i2] >> 10);
+        $w[$i] = $w[$i]
+            .wrapping_add(s0)
+            .wrapping_add($w[$i7])
+            .wrapping_add(s1);
+        $w[$i]
+    }};
+}
+
+/// Rounds 0 to 31 of [`compress`]: the working variables come back in order, since 32 is a multiple of 8.
+#[inline(always)]
+fn rounds_0_to_31(v: &mut [u32; 8], w: &mut [u32; 16]) {
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *v;
+    round!(a, b, c, d, e, f, g, h, w[0], K[0]);
+    round!(h, a, b, c, d, e, f, g, w[1], K[1]);
+    round!(g, h, a, b, c, d, e, f, w[2], K[2]);
+    round!(f, g, h, a, b, c, d, e, w[3], K[3]);
+    round!(e, f, g, h, a, b, c, d, w[4], K[4]);
+    round!(d, e, f, g, h, a, b, c, w[5], K[5]);
+    round!(c, d, e, f, g, h, a, b, w[6], K[6]);
+    round!(b, c, d, e, f, g, h, a, w[7], K[7]);
+    round!(a, b, c, d, e, f, g, h, w[8], K[8]);
+    round!(h, a, b, c, d, e, f, g, w[9], K[9]);
+    round!(g, h, a, b, c, d, e, f, w[10], K[10]);
+    round!(f, g, h, a, b, c, d, e, w[11], K[11]);
+    round!(e, f, g, h, a, b, c, d, w[12], K[12]);
+    round!(d, e, f, g, h, a, b, c, w[13], K[13]);
+    round!(c, d, e, f, g, h, a, b, w[14], K[14]);
+    round!(b, c, d, e, f, g, h, a, w[15], K[15]);
+    round!(a, b, c, d, e, f, g, h, sched!(w, 0, 14, 9, 1), K[16]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 1, 15, 10, 2), K[17]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 2, 0, 11, 3), K[18]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 3, 1, 12, 4), K[19]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 4, 2, 13, 5), K[20]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 5, 3, 14, 6), K[21]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 6, 4, 15, 7), K[22]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 7, 5, 0, 8), K[23]);
+    round!(a, b, c, d, e, f, g, h, sched!(w, 8, 6, 1, 9), K[24]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 9, 7, 2, 10), K[25]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 10, 8, 3, 11), K[26]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 11, 9, 4, 12), K[27]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 12, 10, 5, 13), K[28]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 13, 11, 6, 14), K[29]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 14, 12, 7, 15), K[30]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 15, 13, 8, 0), K[31]);
+    *v = [a, b, c, d, e, f, g, h];
+}
+
+/// Rounds 32 to 63 of [`compress`].
+#[inline(always)]
+fn rounds_32_to_63(v: &mut [u32; 8], w: &mut [u32; 16]) {
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *v;
+    round!(a, b, c, d, e, f, g, h, sched!(w, 0, 14, 9, 1), K[32]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 1, 15, 10, 2), K[33]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 2, 0, 11, 3), K[34]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 3, 1, 12, 4), K[35]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 4, 2, 13, 5), K[36]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 5, 3, 14, 6), K[37]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 6, 4, 15, 7), K[38]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 7, 5, 0, 8), K[39]);
+    round!(a, b, c, d, e, f, g, h, sched!(w, 8, 6, 1, 9), K[40]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 9, 7, 2, 10), K[41]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 10, 8, 3, 11), K[42]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 11, 9, 4, 12), K[43]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 12, 10, 5, 13), K[44]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 13, 11, 6, 14), K[45]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 14, 12, 7, 15), K[46]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 15, 13, 8, 0), K[47]);
+    round!(a, b, c, d, e, f, g, h, sched!(w, 0, 14, 9, 1), K[48]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 1, 15, 10, 2), K[49]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 2, 0, 11, 3), K[50]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 3, 1, 12, 4), K[51]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 4, 2, 13, 5), K[52]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 5, 3, 14, 6), K[53]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 6, 4, 15, 7), K[54]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 7, 5, 0, 8), K[55]);
+    round!(a, b, c, d, e, f, g, h, sched!(w, 8, 6, 1, 9), K[56]);
+    round!(h, a, b, c, d, e, f, g, sched!(w, 9, 7, 2, 10), K[57]);
+    round!(g, h, a, b, c, d, e, f, sched!(w, 10, 8, 3, 11), K[58]);
+    round!(f, g, h, a, b, c, d, e, sched!(w, 11, 9, 4, 12), K[59]);
+    round!(e, f, g, h, a, b, c, d, sched!(w, 12, 10, 5, 13), K[60]);
+    round!(d, e, f, g, h, a, b, c, sched!(w, 13, 11, 6, 14), K[61]);
+    round!(c, d, e, f, g, h, a, b, sched!(w, 14, 12, 7, 15), K[62]);
+    round!(b, c, d, e, f, g, h, a, sched!(w, 15, 13, 8, 0), K[63]);
+    *v = [a, b, c, d, e, f, g, h];
+}
+
+/// One 64-byte block into the state. The 64 rounds are
+/// written out, the message schedule kept as a ring of 16 words: every
+/// index is a literal, so nothing is bounds-checked, nothing is computed
+/// for an index at run time, and no word is moved but the one replaced
+/// (the measured cost on the DK1's Cortex-A7, 44.4 cycles per byte against
+/// 127.7 for the version this replaces: `docs/certification/
+/// MEMORY-AND-TIMING.md` §2.2z).
 fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w = [0u32; 16];
     for (word, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
         *word = bytes.iter().fold(0u32, |acc, &b| (acc << 8) | u32::from(b));
     }
-    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-    for (round, k) in K.iter().enumerate() {
-        // From round 16 on, the next schedule word from the last 16:
-        // w[t] = s1(w[t-2]) + w[t-7] + s0(w[t-15]) + w[t-16].
-        let wt = if round >= 16 {
-            let [w0, w1, .., w9, _, _, _, _, w14, _] = w;
-            let s0 = w1.rotate_right(7) ^ w1.rotate_right(18) ^ (w1 >> 3);
-            let s1 = w14.rotate_right(17) ^ w14.rotate_right(19) ^ (w14 >> 10);
-            w.rotate_left(1);
-            let next = w0.wrapping_add(s0).wrapping_add(w9).wrapping_add(s1);
-            let [.., last] = &mut w;
-            *last = next;
-            next
-        } else {
-            w.get(round).copied().unwrap_or(0)
-        };
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ (!e & g);
-        let t1 = h
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(*k)
-            .wrapping_add(wt);
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = s0.wrapping_add(maj);
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
-    }
-    for (word, add) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+    let mut v = *state;
+    rounds_0_to_31(&mut v, &mut w);
+    rounds_32_to_63(&mut v, &mut w);
+    for (word, add) in state.iter_mut().zip(v) {
         *word = word.wrapping_add(add);
     }
 }
