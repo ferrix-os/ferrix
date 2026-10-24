@@ -120,7 +120,6 @@ impl Style {
                 .map_or(default, rgba)
         };
         #[expect(
-            clippy::cast_possible_truncation,
             clippy::cast_precision_loss,
             reason = "a bar's lengths are a few dozen pixels"
         )]

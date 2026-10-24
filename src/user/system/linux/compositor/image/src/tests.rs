@@ -176,7 +176,7 @@ fn the_users_icons_render() {
 fn the_yoru_wallpaper_is_nocturne() {
     let bytes = include_bytes!("../../../../../../../docs/brand/yoru/yoru-nocturne.svg");
     let started = std::time::Instant::now();
-    let drawn = crate::svg(bytes, Fit::Exactly(1920, 1080)).expect("renders");
+    let drawn = svg(bytes, Fit::Exactly(1920, 1080)).expect("renders");
     let took = started.elapsed();
     assert_eq!((drawn.width(), drawn.height()), (1920, 1080));
     let at = |x: u32, y: u32| {
