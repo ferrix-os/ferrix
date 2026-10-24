@@ -13,10 +13,12 @@
 #
 #   tools/common/release/github-flow-setup.sh switch [--apply]
 #       The moment the product owner moves the fleet's landings to develop:
-#       main then takes pull requests only, and a pull request merges only
-#       with `CI result`, `flow/lane` and `certification/verdict` green. Run
-#       it when no agent is mid-landing; after it, a direct push to main is
-#       refused, for the owner too.
+#       main then moves only as a fast-forward with `CI result`, `flow/lane`
+#       and `certification/verdict` green on the pushed commit, by pull
+#       request or by the Promote workflow (the GitHub Actions app bypasses
+#       the pull-request rule alone, in its own ruleset). Run it when no agent
+#       is mid-landing; after it, a direct push to main is refused, for the
+#       owner too. Running it again applies a changed rule set.
 #
 #   tools/common/release/github-flow-setup.sh undo-switch [--apply]
 #       Puts main's ruleset back to what it was before `switch` (no deletion,
@@ -130,11 +132,14 @@ JSON
     echo "setup: done. main is unchanged until 'switch'." ;;
 
 switch)
-    # main: pull requests only, merge commits only, the three checks green.
-    # No bypass, so not even the owner pushes to main past them; undo-switch
-    # restores the old ruleset. Not strict ("branch up to date"): a promotion
-    # carries develop, which main's last promotion merge is not in, so strict
-    # would make every promotion update itself and run CI twice.
+    # main, in two rulesets (customer, 2026-10-24: promotions open no pull
+    # request, so the owner gets no review request per promotion):
+    # "protected main": no deletion, fast-forward only, the three checks green
+    # on any pushed commit; nobody bypasses it, the Promote workflow included.
+    # "main via promotion": changes reach main by pull request only, except
+    # the GitHub Actions app (integration 15368, the Promote workflow's token),
+    # which fast-forwards main to a promotion whose checks passed. Not strict
+    # ("branch up to date"): a promotion is a fast-forward by construction.
     id=$(ruleset_id "protected main")
     [ -n "$id" ] || { echo "no ruleset named 'protected main'"; exit 1; }
     api_json PUT "repos/$repo/rulesets/$id" <<JSON
@@ -144,14 +149,22 @@ switch)
  "rules": [
    {"type": "deletion"},
    {"type": "non_fast_forward"},
+   $(checks_rule)]}
+JSON
+    id=$(ruleset_id "main via promotion" || true)
+    method=POST; path="repos/$repo/rulesets"; [ -n "$id" ] && { method=PUT; path="$path/$id"; }
+    api_json "$method" "$path" <<'JSON'
+{"name": "main via promotion", "target": "branch", "enforcement": "active",
+ "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+ "bypass_actors": [{"actor_type": "Integration", "actor_id": 15368, "bypass_mode": "always"}],
+ "rules": [
    {"type": "pull_request", "parameters": {
       "required_approving_review_count": 0,
       "require_code_owner_review": false,
       "dismiss_stale_reviews_on_push": false,
       "require_last_push_approval": false,
       "required_review_thread_resolution": false,
-      "allowed_merge_methods": ["merge"]}},
-   $(checks_rule)]}
+      "allowed_merge_methods": ["merge"]}}]}
 JSON
     # Promote and Nightly run only with this variable set.
     run gh variable set FLOW_PROMOTE --repo "$repo" --body on
@@ -159,6 +172,8 @@ JSON
 
 undo-switch)
     run gh variable delete FLOW_PROMOTE --repo "$repo"
+    id=$(ruleset_id "main via promotion" || true)
+    [ -z "$id" ] || run gh api -X DELETE "repos/$repo/rulesets/$id"
     id=$(ruleset_id "protected main")
     api_json PUT "repos/$repo/rulesets/$id" <<'JSON'
 {"name": "protected main", "target": "branch", "enforcement": "active",
