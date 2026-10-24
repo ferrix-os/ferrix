@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "1a3f48ce4e5994b194bfc1f231afbe9f594cb1341995ee87f032915d2bb27f72",
+  "digest": "068f439eb8edd0aae095b4c6798139a690a944a4645fb6717490add6d3d37b54",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -54839,7 +54839,7 @@
                   "qualifiedName": "FerrixX8664Requirements::UserState::anUnsavedStateIsReset",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The wakes of the `vectors` line read neither program's pattern and their own MXCSR and control word, beside a program that used the x87 and one that left it initial, with both of the fast reset's x87 branches taken where XGETBV 1 is offered and the probe, woken after a quiet program, reads the x87's XINUSE bit clear in the first pair and in each of three more probes (set may mean initial, SDM Vol. 1 13.6), the x87-left branch within 16 wakes, and a probe woken after a busy and after a quiet program reads no XINUSE bit set after the busy one and clear after the quiet one, in one of up to three pairs; with the x87 reset done by FNINIT, VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE test inverted, the check fails by name.\"",
+                  "value": "\"The wakes of the `vectors` line read neither program's pattern and their own MXCSR and control word, beside a program that used the x87 and one that left it initial, with both of the fast reset's x87 branches taken where XGETBV 1 is offered and the probe, woken after a quiet program, reads the x87's XINUSE bit clear in the first pair and in each of three more probes (set may mean initial, SDM Vol. 1 13.6), the x87-left branch within 16 wakes or counted on any processor in the boot, and a probe woken after a busy and after a quiet program reads no XINUSE bit set after the busy one and clear after the quiet one, in one of up to three pairs; with the x87 reset done by FNINIT, VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE test inverted, the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 325

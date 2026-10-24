@@ -318,7 +318,7 @@ package FerrixX8664Requirements {
                 the fast reset's x87 branches taken where XGETBV 1 is offered and the
                 probe, woken after a quiet program, reads the x87's XINUSE bit clear
                 in the first pair and in each of three more probes (set may mean
-                initial, SDM Vol. 1 13.6), the x87-left branch within 16 wakes, and a probe woken after a
+                initial, SDM Vol. 1 13.6), the x87-left branch within 16 wakes or counted on any processor in the boot, and a probe woken after a
                 busy and after a quiet program reads no XINUSE bit set after the busy
                 one and clear after the quiet one, in one of up to three pairs; with
                 the x87 reset done by FNINIT, VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE
