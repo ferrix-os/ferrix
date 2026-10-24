@@ -197,6 +197,7 @@ mod signing;
 mod slot_image;
 mod smbios;
 mod ssh;
+mod stall;
 mod start_page;
 mod steam;
 mod steamcmd;
@@ -597,6 +598,7 @@ const TASKS: &[&[Task]] = &[
     settingsd::TASKS,
     shader_cache::TASKS,
     slot_image::TASKS,
+    stall::TASKS,
     steamcmd::TASKS,
     symbolize::TASKS,
     sysfs::TASKS,

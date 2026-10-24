@@ -597,7 +597,12 @@ Real, and narrower than a WCET:
   the admission test valid at all.
 * **Bounded critical sections on the RT path**, by construction rather than by
   measurement.
-* **Preemptible kernel**, so a long section delays rather than blocks.
+* **Preemptible kernel**, so a long section delays rather than blocks --
+  **except for the tasks that wait for it.** A task waiting for a kernel
+  spin lock waits with its preemption count raised, so a long hold stops
+  every processor whose task waits for that lock, and those processors make
+  no scheduling decision and wake none of their sleepers until it is let go
+  (F-95, open; §2.2y).
   Taking and letting go of a kernel spin lock masks no interrupts on x86-64:
   the preemption count it raises is one `GS`-relative `xadd` in the
   processor's record (L.sched.20, since 2026-10-03). On AArch64 and ARMv7-A
@@ -1673,6 +1678,39 @@ written: queued for the transmit interrupt or polled, never waiting for
 room, so the lock is held for at most 1,025 bytes' queueing or polling,
 the same bound a kernel line of that length has. Recording it in the log
 is `log::record`'s, which takes no lock (L.console.35). Ledger 3366.
+
+### 2.2y Waiting for a kernel spin lock, and the holds a program can ask for (F-95, 2026-10-24)
+
+**The wait.** `crate::sync::SpinLock` (`ferrix_sync::PreemptSpinLock`)
+raises the processor's preemption count and then waits for its ticket.
+Ticket order is arrival order, so each waiter waits out every hold queued
+ahead of it, and does so with the count raised: its processor makes no
+scheduling decision (`preempt_on_irq_exit` returns at once) and wakes none
+of its timed sleepers, which only that processor's own decision wakes
+(`choose_next` → `wake_sleepers`). With one multi-threaded program
+contending one of its locks, that is every processor at once. The
+interrupts still run and the waiting is charged to the waiting task, so
+nothing here is unaccounted; it is time every other job loses. No bound is
+stated for it today. `cargo xtask test-stall` measures it, reporting and not
+asserting (`docs/PREEMPTIBLE-WAITS.md` §5).
+
+**The holds a ring-3 program can make long.** A census, started
+2026-10-24 and not yet complete; each is one hold of a spin lock over work
+that grows with what the program asked for:
+
+| Hold | Lock | Grows with | Measured (KVM, 1 GiB, loaded host, I1) |
+|---|---|---|---|
+| `AddressSpace::fork`'s copy | the space's | pages and regions of the parent | 157-391 ms |
+| `Vmo::fork`'s page-map copy | the VMO's pages | committed pages | 155-379 ms |
+| `give_back` → `Vmo::take_range` | the space's, then the VMO's pages | pages unmapped | 134-459 ms |
+| `unmap`'s `take_down` | the space's | pages unmapped | not measured apart |
+| `Vmo::detach`'s `retain` | the VMO's mappers | mappers, dead ones included | 128 s seen with zombies unreaped |
+| the shootdown turn, held for the answers | `smp::SHOOTING` | the slowest answer (FM-10) | 344-1,107 ms, host-starved processors not ruled out |
+
+Each such hold is a stop of its own processor and, through the wait above,
+of every processor whose task waits for the lock. The fix, its bounds and
+its checks are `docs/PREEMPTIBLE-WAITS.md`'s, under the consultant's
+verdict of ledger line 3950.
 
 ### 2.3 What is missing, per standard
 
