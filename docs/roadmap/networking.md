@@ -631,6 +631,70 @@ session reading it must check:
    with it on; Ferrix leaves link power management as firmware set it. If
    step 7 fails, that is the first suspect.
 
+**Done in a VM, owed on bare metal — nazuna's onboard port, a Realtek
+RTL8111H (2026-10-24, branch `feature/rtl8169`).** nazuna's second wired
+port is an RTL8111H, PCI `10EC:8168` rev 15, ASUS subsystem `1043:8677`,
+XID `0x541` (Linux's `RTL_GIGA_MAC_VER_46`): registers in BAR 2 (4 KiB),
+the MSI-X table in BAR 4, so no page the driver needs is withheld and the
+kernel needs no change. The facts are from Linux's `r8169` (6.18's
+`r8169_main.c` and `r8169_phy_config.c`) and Realtek's public datasheets;
+no code was taken from either. Two crates:
+
+* `src/lib/drivers/net/rtl8169` (`ferrix-rtl8169`): the chip as logic over
+  8/16/32-bit registers, a clock and DMA memory -- its four indirect buses
+  (ERI, MAC OCP, the PHY's OCP bus addressed by page without a page
+  selector, the PCIe PHY), the XID check that refuses every other member of
+  the family, taking the chip from firmware (receive path gated, FIFOs
+  drained, the out-of-band claim cleared, the link list rebuilt), the
+  reset, the station address (ERI's permanent one, else firmware's, else a
+  made one), the RTL8111H's PHY and MAC set-up, sixteen-byte descriptor
+  rings with `RingEnd`, the transmit doorbell rung again while frames are
+  still out (the 8168 can lose one), lengths, error and fragment bits
+  checked before a copy, memory back only after a reset seen to finish. 33
+  host tests against a model of the chip that walks the rings by device
+  address, ignores writes under the configuration lock as the chip does, and
+  lies when asked (another XID, a chip that vanished, a reset or a bus that
+  never ends, lengths past the buffer, errors, pieces, a system error).
+* `src/user/system/native/drivers/net/rtl8169` (`rtl8169`): the yt6801's
+  process with this chip under it: every MSI-X vector bound, the 1-to-8 ms
+  look until a first interrupt, `serve.before_sleep`/`woke`, a link change
+  read when the chip announces it, short frames padded with zeroes, never
+  an earlier frame's bytes. `devmgr` starts it on `10EC:8168`.
+
+Where it does something other than Linux, on purpose: the chip's own ASPM
+and `CLKREQ#` off (a driver may not write Link Control; Linux turns L1 off
+on this family); **EEE off** in the PHY's advertisement and the MAC; **no
+PHY patch** -- Linux loads `rtl_nic/rtl8168h-2.fw` (Realtek's 2015 EEE patch
+for the PHY, redistributable from linux-firmware with Realtek's notice) and
+runs without it if absent, and with EEE off it has nothing to patch;
+whether to ship it is the customer's (BACKLOG, P3); no checksum,
+segmentation or VLAN offload; the ASPM entry latency and read request size
+left as firmware set them, both being configuration-space writes.
+
+**On the real chip (2026-10-24, vfio in a KVM guest on nazuna, QEMU's VT-d
+translating):** `Rtl8168h XID 0x541, PHY 0x001cc800, address
+bc:fc:e7:52:82:8a from Permanent` (the address Linux showed as `eno1`),
+four MSI-X vectors bound, `link Up { speed: Thousand, full_duplex: true }`,
+interrupts carrying the traffic (no look found a frame they missed),
+`dhcpc` leased `192.168.8.73/22` from the LAN's router, `ping` to
+`192.168.8.1` 10 of 10 (0.4 to 4.2 ms), a 16 MiB fetch matched the host's
+MD5, and sustained TCP against a stub on nazuna's own LAN address: 1 GiB
+down at 235 and 372 Mbit/s, 512 MiB up at 405 Mbit/s, no frame dropped for
+want of a slot. The ceiling is the stack's, not the chip's: the receive ring
+ran dry thousands of times a second while the net ring was full, as
+virtio-net's does under KVM (43 MB/s). Logs:
+`~/.local/share/ferrix/rtl8169/hw2.log`, `hw3.log`, `bench.log`. Tools:
+`rtl-tovfio.sh`/`rtl-tohost.sh` (pkexec), the QEMU wrapper, `drive.py`
+and `netbench.py`, in the same directory; the guest needs `--memory 2048`
+under the 4 GiB memlock limit.
+
+**Owed: nazuna's bare metal.** QEMU models no 8168, so only the host models
+gate it. On bare metal there is no AMD-Vi driver: the NIC's DMA is
+untranslated, which is degraded trusted mode, and once the bus-master gate
+lands a dev image needs `ferrix.unisolated` on its command line for devmgr
+to start the driver (DMA-GATE, ledger 3906); with AMD-Vi it does not. The
+boot must show the lines above, a lease and a ping (BACKLOG, P3).
+
 **Exit, and it is met:** under `xtask`'s gateway — which is where this
 criterion's *"under QEMU's user-mode network"* now reads — busybox configures
 `eth0` with `ip`, and `route` and `netstat` report through `/proc/net`. `wget`

@@ -122,12 +122,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 7886 elements, 218 relations. Model digest `6a40ff70e32b770e`.
+27 files, 149 packages, 7887 elements, 218 relations. Model digest `e9fa3ec01d3ae392`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
 | `#implemented` | 282 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 28 | The owning stage has started; part of the element runs. |
+| `#inProgress` | 29 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -2273,8 +2273,9 @@ flowchart TB
   n8_FerrixDrivers_NvmeDriver["NvmeDriver<br>stage 10"]
   n9_FerrixDrivers_AhciDriver["AhciDriver<br>stage 10"]
   n10_FerrixDrivers_Yt6801Driver["Yt6801Driver<br>stage 10"]
-  n11_FerrixDrivers_EfifbDriver["EfifbDriver<br>stage 21"]
-  n12_FerrixDrivers_IntelGpuDriver["IntelGpuDriver<br>stage 21"]
+  n11_FerrixDrivers_Rtl8169Driver["Rtl8169Driver<br>stage 10"]
+  n12_FerrixDrivers_EfifbDriver["EfifbDriver<br>stage 21"]
+  n13_FerrixDrivers_IntelGpuDriver["IntelGpuDriver<br>stage 21"]
   n1_FerrixDrivers_VirtioBlkDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n2_FerrixDrivers_VirtioNetDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n3_FerrixDrivers_VirtioGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
@@ -2285,15 +2286,16 @@ flowchart TB
   n8_FerrixDrivers_NvmeDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n9_FerrixDrivers_AhciDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n10_FerrixDrivers_Yt6801Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
-  n11_FerrixDrivers_EfifbDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
-  n12_FerrixDrivers_IntelGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n11_FerrixDrivers_Rtl8169Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n12_FerrixDrivers_EfifbDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n13_FerrixDrivers_IntelGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   class n0_FerrixDrivers_DriverProcess,n1_FerrixDrivers_VirtioBlkDriver,n2_FerrixDrivers_VirtioNetDriver,n3_FerrixDrivers_VirtioGpuDriver,n4_FerrixDrivers_VirtioInputDriver,n5_FerrixDrivers_UsbHidDriver implemented
-  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver,n8_FerrixDrivers_NvmeDriver,n9_FerrixDrivers_AhciDriver,n10_FerrixDrivers_Yt6801Driver,n11_FerrixDrivers_EfifbDriver,n12_FerrixDrivers_IntelGpuDriver inProgress
+  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver,n8_FerrixDrivers_NvmeDriver,n9_FerrixDrivers_AhciDriver,n10_FerrixDrivers_Yt6801Driver,n11_FerrixDrivers_Rtl8169Driver,n12_FerrixDrivers_EfifbDriver,n13_FerrixDrivers_IntelGpuDriver inProgress
 ```
 
-**Figure 13 — Driver process and its subtypes.** 12 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
+**Figure 13 — Driver process and its subtypes.** 13 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
 
 ```mermaid
 flowchart TB
@@ -2512,6 +2514,12 @@ src/user/system/native/drivers/block/ahci over src/lib/drivers/block/ahci: a SAT
 `#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
 
 src/user/system/native/drivers/net/yt6801 over src/lib/drivers/net/yt6801 and src/lib/drivers/net/dwmac: the Motorcomm YT6801, the N150 box's gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 1F0A:6801. The kernel holds the function's MSI-X off and grants its table page (L.device.35-37). Its gates are the libraries' tests against models of the chip and the DesignWare core, and a QEMU e1000e for the kernel change; on the box on 2026-10-15 the link came up at one gigabit, and the driver polls every millisecond until its one MSI arrives, which it does rarely (docs/BACKLOG.md).
+
+#### Rtl8169Driver
+
+`#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/net/rtl8169 over src/lib/drivers/net/rtl8169: Realtek's RTL8111H (8168H, XID 0x541), nazuna's onboard gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 10EC:8168 and the driver refuses any other XID. No kernel change: registers in BAR 2, MSI-X table in BAR 4. Its gates are the library's tests against a model of the chip and cargo xtask check; QEMU models no 8168. On 2026-10-24 it drove the real chip through vfio in a KVM guest: link at one gigabit, DHCP, ping, TCP at 235 to 405 Mbit/s.
 
 #### EfifbDriver
 
@@ -5186,6 +5194,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::NvmeDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::AhciDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::Yt6801Driver` | part | `#inProgress` |
+| 10 | `FerrixDrivers::Rtl8169Driver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
 | 11 | `FerrixStructure::Workspace::btrfs` | part | `#implemented` |
@@ -5242,7 +5251,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 21 | `FerrixDrivers::EfifbDriver` | part | `#inProgress` |
 | 21 | `FerrixDrivers::IntelGpuDriver` | part | `#inProgress` |
 
-192 elements across 19 stages.
+193 elements across 19 stages.
 
 ## Figures
 
@@ -5262,7 +5271,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 10 | Demand fault | 5 nodes, 4 edges | `04-memory.sysml` | [ferrix-memory-demand-fault.svg](diagrams/ferrix-memory-demand-fault.svg) |
 | 11 | Domain lifecycle | 5 nodes, 5 edges | `05-scheduling.sysml` | [ferrix-scheduling-domain-lifecycle.svg](diagrams/ferrix-scheduling-domain-lifecycle.svg) |
 | 12 | Kernel object and its subtypes | 10 nodes, 9 edges | `06-objects.sysml` | [ferrix-objects-kernel-object.svg](diagrams/ferrix-objects-kernel-object.svg) |
-| 13 | Driver process and its subtypes | 13 nodes, 12 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
+| 13 | Driver process and its subtypes | 14 nodes, 13 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |

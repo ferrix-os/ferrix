@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-rtl8169"
+description = "Realtek's 8168 family (the RTL8111H) as logic over registers and DMA memory: the chip's indirect buses, its bring-up and PHY set-up, one transmit and one receive descriptor ring, frames and completions"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

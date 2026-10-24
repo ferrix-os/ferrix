@@ -359,6 +359,20 @@ package FerrixDrivers {
              * which it does rarely (docs/BACKLOG.md). */
     }
 
+    #inProgress part def Rtl8169Driver :> DriverProcess {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drivers/net/rtl8169 over
+             * src/lib/drivers/net/rtl8169: Realtek's RTL8111H (8168H, XID
+             * 0x541), nazuna's onboard gigabit port (networking page),
+             * speaking the net ring under ferrix-netserve's loop. devmgr
+             * starts it on 10EC:8168 and the driver refuses any other XID.
+             * No kernel change: registers in BAR 2, MSI-X table in BAR 4.
+             * Its gates are the library's tests against a model of the chip
+             * and cargo xtask check; QEMU models no 8168. On 2026-10-24 it
+             * drove the real chip through vfio in a KVM guest: link at one
+             * gigabit, DHCP, ping, TCP at 235 to 405 Mbit/s. */
+    }
+
     #inProgress part def EfifbDriver :> DriverProcess {
         @stage { number = 21; }
         doc /* src/user/system/native/drivers/display/efifb: the firmware's

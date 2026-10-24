@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "6a40ff70e32b770e9508f94d7a1b46565d625820c9b471edb6e80c4601e4297b",
+  "digest": "e9fa3ec01d3ae392074c0a635a5535ee2a882de695855915a675c3dc27550998",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,10 +113,10 @@
   ],
   "summary": {
     "packages": 149,
-    "elements": 7886,
+    "elements": 7887,
     "maturity": {
       "implemented": 282,
-      "inProgress": 28,
+      "inProgress": 29,
       "writtenAhead": 1,
       "planned": 24
     },
@@ -15748,6 +15748,20 @@
           }
         },
         {
+          "name": "Rtl8169Driver",
+          "qualifiedName": "FerrixDrivers::Rtl8169Driver",
+          "kind": "part",
+          "definition": true,
+          "specializes": "DriverProcess",
+          "maturity": "inProgress",
+          "stage": 10,
+          "doc": "src/user/system/native/drivers/net/rtl8169 over src/lib/drivers/net/rtl8169: Realtek's RTL8111H (8168H, XID 0x541), nazuna's onboard gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 10EC:8168 and the driver refuses any other XID. No kernel change: registers in BAR 2, MSI-X table in BAR 4. Its gates are the library's tests against a model of the chip and cargo xtask check; QEMU models no 8168. On 2026-10-24 it drove the real chip through vfio in a KVM guest: link at one gigabit, DHCP, ping, TCP at 235 to 405 Mbit/s.",
+          "source": {
+            "file": "docs/sysml/08-drivers.sysml",
+            "line": 362
+          }
+        },
+        {
           "name": "EfifbDriver",
           "qualifiedName": "FerrixDrivers::EfifbDriver",
           "kind": "part",
@@ -15758,7 +15772,7 @@
           "doc": "src/user/system/native/drivers/display/efifb: the firmware's framebuffer as the display core's card0, for a PC whose GPU has no driver (docs/DISPLAY.md section 8). Under the kernel option ferrix.efifb the last finder lends the framebuffer to a node of its own, write-combining from its first map, and the driver copies each flushed rectangle onto it; hyprix composites into dumb buffers as on virtio-gpu. Its gate is cargo xtask test-compositor --boot firmware-screen; hyprix drew on the N150 box's framebuffer on 2026-10-15.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 362
+            "line": 376
           }
         },
         {
@@ -15772,7 +15786,7 @@
           "doc": "src/user/system/native/drivers/gpu/intel over src/lib/drivers/gpu/intel-xelp: a render driver for the N150's Xe-LP graphics (docs/INTEL-GPU.md), following i915 file by file. The library is the i915 uAPI front end over a back end, the GT's bring-up, execlists, the PPGTT and the power management a host does, all host-tested; the process serves a render-only chardev node and is started on ferrix.intelgpu. The kernel lends it the screen by identity and maps its buffers write-combining. On the box, M1 (the device answers) and M2 (the first GPU commands) ran on 2026-10-20; M3, the render node over the GT back end, is wired and not shown on the box.",
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 375
+            "line": 389
           }
         },
         {
@@ -15832,7 +15846,7 @@
           ],
           "source": {
             "file": "docs/sysml/08-drivers.sysml",
-            "line": 391
+            "line": 405
           },
           "children": [
             {
@@ -15844,7 +15858,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 405
+                "line": 419
               }
             },
             {
@@ -15856,7 +15870,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 406
+                "line": 420
               }
             },
             {
@@ -15868,7 +15882,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 407
+                "line": 421
               }
             },
             {
@@ -15880,7 +15894,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 408
+                "line": 422
               }
             },
             {
@@ -15892,7 +15906,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 409
+                "line": 423
               }
             },
             {
@@ -15904,7 +15918,7 @@
               ],
               "source": {
                 "file": "docs/sysml/08-drivers.sysml",
-                "line": 410
+                "line": 424
               }
             }
           ]
@@ -94668,7 +94682,7 @@
       "title": "Driver process and its subtypes",
       "kind": "block",
       "direction": "TB",
-      "caption": "12 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common.",
+      "caption": "13 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common.",
       "nodes": [
         {
           "id": "FerrixDrivers::DriverProcess",
@@ -94757,6 +94771,14 @@
           "stage": 10
         },
         {
+          "id": "FerrixDrivers::Rtl8169Driver",
+          "label": "Rtl8169Driver",
+          "kind": "box",
+          "sublabel": "stage 10",
+          "maturity": "inProgress",
+          "stage": 10
+        },
+        {
           "id": "FerrixDrivers::EfifbDriver",
           "label": "EfifbDriver",
           "kind": "box",
@@ -94830,6 +94852,12 @@
         },
         {
           "from": "FerrixDrivers::Yt6801Driver",
+          "to": "FerrixDrivers::DriverProcess",
+          "kind": "specialization",
+          "label": ""
+        },
+        {
+          "from": "FerrixDrivers::Rtl8169Driver",
           "to": "FerrixDrivers::DriverProcess",
           "kind": "specialization",
           "label": ""

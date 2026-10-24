@@ -85,6 +85,7 @@ members = [
     "src/lib/drivers/net/virtio-net",
     "src/lib/drivers/net/dwmac",
     "src/lib/drivers/net/yt6801",
+    "src/lib/drivers/net/rtl8169",
     "src/lib/kernel/vma",
     "src/lib/kernel/paging",
     "src/lib/fs/common/procfs",
@@ -126,6 +127,7 @@ members = [
     "src/user/system/native/drivers/block/ahci",
     "src/user/system/native/drivers/net/virtio-net",
     "src/user/system/native/drivers/net/yt6801",
+    "src/user/system/native/drivers/net/rtl8169",
     "src/user/system/native/drivers/display/virtio-gpu",
     "src/user/system/native/drivers/display/efifb",
     "src/user/system/native/drivers/display/stm32-ltdc",
@@ -230,6 +232,7 @@ ferrix-rt = { path = "src/user/system/native/rt" }
 ferrix-driver = { path = "src/user/system/native/driver" }
 ferrix-net-driver = { path = "src/user/system/native/drivers/net/virtio-net" }
 ferrix-yt6801-driver = { path = "src/user/system/native/drivers/net/yt6801" }
+ferrix-rtl8169-driver = { path = "src/user/system/native/drivers/net/rtl8169" }
 ferrix-objects = { path = "src/lib/kernel/objects" }
 ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-kernel-core = { path = "src/kernel/core" }
@@ -248,6 +251,7 @@ ferrix-virtio-snd = { path = "src/lib/drivers/sound/virtio-snd" }
 ferrix-virtio-net = { path = "src/lib/drivers/net/virtio-net" }
 ferrix-dwmac = { path = "src/lib/drivers/net/dwmac" }
 ferrix-yt6801 = { path = "src/lib/drivers/net/yt6801" }
+ferrix-rtl8169 = { path = "src/lib/drivers/net/rtl8169" }
 ferrix-vma = { path = "src/lib/kernel/vma" }
 ferrix-qr = { path = "src/lib/kernel/qr" }
 ferrix-vfs = { path = "src/lib/fs/common/vfs" }

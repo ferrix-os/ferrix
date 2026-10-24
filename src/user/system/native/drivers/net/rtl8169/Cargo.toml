@@ -1,0 +1,25 @@
+[package]
+name = "ferrix-rtl8169-driver"
+description = "The Realtek RTL8111H (8168 family) driver process: the net ring's driver end over the chip, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rtl8169"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-native-abi.workspace = true
+ferrix-netring.workspace = true
+ferrix-netserve.workspace = true
+ferrix-rt.workspace = true
+ferrix-rtl8169.workspace = true
+ferrix-virtio-net.workspace = true
+
+[lints]
+workspace = true

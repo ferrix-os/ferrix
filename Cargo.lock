@@ -827,6 +827,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-rtl8169"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-rtl8169-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
+ "ferrix-netring",
+ "ferrix-netserve",
+ "ferrix-rt",
+ "ferrix-rtl8169",
+ "ferrix-virtio-net",
+]
+
+[[package]]
 name = "ferrix-sched"
 version = "0.1.0"
 dependencies = [

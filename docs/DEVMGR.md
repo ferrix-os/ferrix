@@ -135,7 +135,10 @@ a driver's death or of its restart (§4), printed the same way.
    register blocks; the driver asks `device_aperture` for its BAR. Motorcomm's
    YT6801 gigabit adapter (`1F0A:6801`) is a network interface driven by
    `yt6801` over a net ring, as virtio-net is by `net`
-   (`docs/roadmap/networking.md`).
+   (`docs/roadmap/networking.md`). Realtek's 8168 family (`10EC:8168`) is
+   one driven by `rtl8169` the same way; the driver itself refuses every
+   member but the RTL8111H/8168H by the chip's XID. Its MSI-X table has a
+   BAR of its own (BAR 4), so nothing about it is special to the kernel.
 
    The YT6801 is also the one function whose MSI-X the kernel never enables.
    Its MSI-X table, at `0x1200` of BAR 0, shares a page with the chip's own

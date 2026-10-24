@@ -138,6 +138,13 @@ const ADLN_IDS: [u16; 5] = [0x46D0, 0x46D1, 0x46D2, 0x46D3, 0x46D4];
 const MOTORCOMM_VENDOR: u16 = 0x1F0A;
 const YT6801_IDS: [u16; 1] = [0x6801];
 
+/// Realtek's PCI vendor id, and the 8168 family's device id: the RTL8111H
+/// on nazuna's board, driven by `rtl8169` over a net ring as virtio-net is.
+/// The driver refuses every member of the family but the RTL8168H and the
+/// RTL8168M it is handled as, by the chip's own XID (`ferrix-rtl8169`).
+const REALTEK_VENDOR: u16 = 0x10EC;
+const RTL8168_IDS: [u16; 1] = [0x8168];
+
 /// How a PCI function that is not virtio is matched.
 #[derive(Clone, Copy)]
 enum PciMatch {
@@ -155,13 +162,19 @@ enum PciMatch {
 ///
 /// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
 /// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 7] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 8] = [
     (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
     (ANY_VENDOR, AHCI_INTERFACE, b"ahci", Kind::Block),
     (
         MOTORCOMM_VENDOR,
         PciMatch::Devices(&YT6801_IDS),
         b"yt6801",
+        Kind::Net,
+    ),
+    (
+        REALTEK_VENDOR,
+        PciMatch::Devices(&RTL8168_IDS),
+        b"rtl8169",
         Kind::Net,
     ),
     (
@@ -2363,7 +2376,8 @@ fn start_block(
     )
 }
 
-/// A net driver -- virtio-net's `net`, or a YT6801's `yt6801` -- over a
+/// A net driver -- virtio-net's `net`, a YT6801's `yt6801` or an RTL8111H's
+/// `rtl8169` -- over a
 /// net ring. The kernel names the interface, so START carries no name: only
 /// which device it is, and index zero for "choose one".
 fn start_net(
@@ -2389,10 +2403,10 @@ fn start_net(
         .map_err(|_| ())?;
     let mut bytes = [0_u8; MAX_MESSAGE];
     let written = NetRing::Start(start).encode(&mut bytes).map_err(|_| ())?;
-    let program = if info.vendor_id == MOTORCOMM_VENDOR {
-        "yt6801"
-    } else {
-        "net"
+    let program = match info.vendor_id {
+        MOTORCOMM_VENDOR => "yt6801",
+        REALTEK_VENDOR => "rtl8169",
+        _ => "net",
     };
     launch(
         job,

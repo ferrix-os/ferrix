@@ -99,6 +99,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DRIVERS,
     },
     Program {
+        package: "ferrix-rtl8169-driver",
+        binary: "rtl8169",
+        directory: DRIVERS,
+    },
+    Program {
         package: "ferrix-gpu",
         binary: "gpu",
         directory: DRIVERS,

@@ -175,6 +175,7 @@ forbid ferrix-virtio-blk "virtio-blk driver logic" "$K|ferrix-boot"
 forbid ferrix-virtio-net "virtio-net driver logic" "$K|ferrix-boot"
 forbid ferrix-dwmac "DesignWare QoS core logic" "$K|ferrix-boot"
 forbid ferrix-yt6801 "YT6801 glue logic" "$K|ferrix-boot"
+forbid ferrix-rtl8169 "RTL8168 chip logic" "$K|ferrix-boot"
 forbid ferrix-blkserve "block driver serve loop" "$K|ferrix-boot"
 
 # ---------------------------------------------------------------------------
