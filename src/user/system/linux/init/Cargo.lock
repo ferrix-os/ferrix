@@ -24,6 +24,10 @@ name = "ferrix-audit"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-auth-proto"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-drvupdate-proto"
 version = "0.1.0"
 
@@ -51,6 +55,13 @@ name = "ferrix-restart"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-settings-proto"
+version = "0.1.0"
+dependencies = [
+ "ferrix-auth-proto",
+]
+
+[[package]]
 name = "ferrix-svc"
 version = "0.1.0"
 dependencies = [
@@ -75,6 +86,7 @@ dependencies = [
  "ferrix-audit",
  "ferrix-native",
  "ferrix-native-abi",
+ "ferrix-settings-proto",
  "ferrix-svc",
  "ferrix-svc-proto",
  "libc",

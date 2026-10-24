@@ -23,6 +23,7 @@
 //!
 //! | What is required | Control |
 //! |---|---|
+//! | init set the running name from the image's `/etc/hostname` at boot (B2) | B2-N: init's `hostname::apply` call removed |
 //! | guest, with its own right password, is refused both requests, and nothing changes | N1: settingsd treats every peer as root |
 //! | ferrix with a wrong password is refused, and nothing changes | N2: settingsd takes a FAILED as ACCEPTED |
 //! | ferrix with its password renames the machine (`/etc/hostname` and `hostname`) and enables `sshd.service` (its link) | |
@@ -211,7 +212,7 @@ fn test_files(shell: &[u8], busybox: Vec<u8>) -> Result<Vec<File>> {
                 crate::auth::GROUP_LINE
             ),
         ),
-        bytes("etc/hostname", 0o644, "ferrix\n"),
+        bytes("etc/hostname", 0o644, &format!("{BOOT_NAME}\n")),
     ];
     for path in ["bin/sh", "bin/zinc"] {
         files.push(File {
@@ -387,6 +388,7 @@ fn session(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         failures.push("the getty's shell never answered at the console".into());
         return Ok(());
     }
+    boot_name(at, failures)?;
     outsider(at, failures)?;
     wrong_password(at, failures)?;
     administrator(at, failures)?;
@@ -399,6 +401,24 @@ fn session(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let _ = at.read_more(deadline, |lines| {
         lines.iter().any(|line| line.contains(POWER_DOWN))
     })?;
+    Ok(())
+}
+
+/// The name the image's `/etc/hostname` holds, which init sets at boot (B2),
+/// and which is not the kernel's own default, `ferrix`.
+const BOOT_NAME: &str = "settings-gate";
+
+/// `/etc/hostname` and the running name once init has set it.
+const BOOTED_NAMES: &str = "settings-gate settings-gate";
+
+/// init set the running name from `/etc/hostname` at boot (B2).
+fn boot_name(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let names = names(at, "b1")?;
+    if names.as_deref() != Some(BOOTED_NAMES) {
+        failures.push(format!(
+            "the name in /etc/hostname was not set at boot: names {names:?}"
+        ));
+    }
     Ok(())
 }
 
@@ -424,7 +444,7 @@ fn outsider(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let link = linked(at, SSHD_LINK, "g4")?;
     if answer(&named, "settingsctl: ") != Some(refused)
         || answer(&switched, "settingsctl: ") != Some(refused)
-        || names.as_deref() != Some("ferrix ferrix")
+        || names.as_deref() != Some(BOOTED_NAMES)
         || link
     {
         failures.push(format!(
@@ -445,7 +465,7 @@ fn wrong_password(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
     let names = names(at, "w2")?;
     let refused = answer(&wrong, "settingsctl: ")
         .is_some_and(|line| line.starts_with("settingsctl: refused: authentication-failed: "));
-    if !refused || names.as_deref() != Some("ferrix ferrix") {
+    if !refused || names.as_deref() != Some(BOOTED_NAMES) {
         failures.push(format!(
             "ferrix's wrong password was not refused: {wrong:?} names {names:?}"
         ));
@@ -463,7 +483,7 @@ fn administrator(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()
     )?;
     let names = names(at, "a2")?;
     if answer(&named, "settingsctl: ")
-        != Some("settingsctl: done: the computer is called box (was ferrix)")
+        != Some("settingsctl: done: the computer is called box (was settings-gate)")
         || names.as_deref() != Some("box box")
     {
         failures.push(format!(

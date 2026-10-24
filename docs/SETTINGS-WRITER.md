@@ -428,7 +428,17 @@ Lesser points taken: one uid holds at most two conversations at once
 
 2026-10-24: **B1 built** on `feature/settings-writer`: the design review
 is OK IF (1)-(9), ledger line 3482; `set-hostname` and
-`service-enable-persistent` work end to end in `test-settings`. Nothing
-reads `/etc/hostname` at boot yet, so a renamed machine keeps its name only
-until the next boot: making init (or a unit) set it from the file is B2's.
+`service-enable-persistent` work end to end in `test-settings`.
 B3 to B6 build on §9's recipe; B4 and B5 start with a design review.
+
+2026-10-24: **B2 built**: init sets the running name from `/etc/hostname`
+once `/` is settled, beside `/etc/machine-id`
+(`src/user/system/linux/init/init/src/hostname.rs`). It reads at most 256
+bytes and takes the first line, trimmed, and only a name
+`ferrix-settings-proto::valid_hostname` takes -- the function
+`set-hostname` is checked with -- is set; a missing, empty or invalid file
+leaves the kernel's default name and one line, "the computer keeps its
+default name: ...", and never stops the boot. `test-settings`' image is
+called `settings-gate`, and its first step requires the file and
+`hostname` to agree; its control (the call removed) FIRED. Code review OK
+IF (1)-(4), ledger line 3686, on design review 3636 (18).
