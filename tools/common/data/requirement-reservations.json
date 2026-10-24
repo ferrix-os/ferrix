@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["H.SIGN.1-6", "L.sigverify.1-24", "L.sha256.1-6"],
+      "owner": "product-signing",
+      "branch": "feature/sigverify",
+      "date": "2026-10-24",
+      "purpose": "docs/SIGNING.md, product signing (consultant OK IF, ledger 3667; customer decisions, ledger 3731): H.SIGN, the hazard-level family under ASR-7 (authenticity under the expected kind's anchors, the signed fields' binding, the security-version floor, revocation, fail-closed refusal with its reason, bounded time and memory); L.sigverify, one id per check of SIGNING.md section 8.1 for the ferrix-sigverify crate (manifest format, type codes, LM-OTS, LMS, HSS, anchor selection, binding, revocation, payload, time, stack); L.sha256 for ferrix-sha256 (SHA-256 and SHA-256/192); consultant OK IF, ledger 3738"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
