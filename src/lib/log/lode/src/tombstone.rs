@@ -82,6 +82,40 @@ impl Tombstones {
         }
     }
 
+    /// After a restart, a tombstone or repeat record this boot already
+    /// stored, so a storm's counts go on where they were.
+    pub fn restore(&mut self, record: &Record) {
+        let (Some(key), Some(count)) = (
+            record.get_str("TOMBSTONE_SIGNATURE"),
+            record
+                .get_str("TOMBSTONE_REPEATS")
+                .and_then(|count| count.parse::<u64>().ok()),
+        ) else {
+            return;
+        };
+        let full = record.get("TOMBSTONE").is_some();
+        let of = record
+            .get_str(if full {
+                "TOMBSTONE_OF"
+            } else {
+                "TOMBSTONE_FIRST"
+            })
+            .and_then(crate::cursor::seqnum)
+            .unwrap_or(0);
+        let seen = self.seen.entry(String::from(key)).or_insert(Seen {
+            count: 0,
+            last_full: of,
+            said: 0,
+        });
+        if count >= seen.count {
+            seen.count = count;
+            seen.last_full = of;
+            if !full {
+                seen.said = count;
+            }
+        }
+    }
+
     /// A record of process `pid` was stored as `seqnum`.
     pub fn stored(&mut self, pid: u32, seqnum: u64) {
         let at = match self.tails.iter().position(|(each, _)| *each == pid) {

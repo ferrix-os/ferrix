@@ -2465,3 +2465,33 @@ fn the_blob_quota_is_a_retention_line() {
     assert_eq!(retention::blob_quota(text), 64 << 20);
     assert_eq!(retention::parse(text).unwrap().len(), 1);
 }
+
+#[test]
+fn a_restarted_lode_goes_on_counting_a_storm() {
+    use crate::tombstone::Tombstones;
+    let boot = [0x33; 16];
+    let now = Now {
+        realtime_us: 1,
+        monotonic_us: 1,
+    };
+    let crash = || {
+        let mut record = record(1, "x");
+        record.push("CRASH_PROGRAM", b"/bin/x");
+        record.push("CRASH_SIGNAL", b"SIGSEGV");
+        record
+    };
+    let mut before = Tombstones::new(5);
+    let mut stored = Vec::new();
+    for n in 0..5 {
+        stored.extend(before.for_crash(&crash(), n, &boot, now));
+    }
+    let mut after = Tombstones::new(5);
+    for record in &stored {
+        after.restore(record);
+    }
+    let next = after.for_crash(&crash(), 9, &boot, now);
+    assert!(
+        next.is_none(),
+        "the sixth is not a full tombstone after a restart"
+    );
+}

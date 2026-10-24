@@ -382,6 +382,9 @@ impl Service {
     /// say, until init lets go.
     fn serve(&mut self, channel: &Channel<Kernel>, restarted: bool) -> Result<(), Step> {
         let mut first_start = !restarted && self.sequence.last.is_none();
+        if restarted {
+            self.seed_identities();
+        }
         loop {
             let mut batch: Vec<Record> = Vec::new();
             let now = clocks();
@@ -627,10 +630,11 @@ impl Service {
                 None => {
                     let bytes = store::bytes(&segment, 0).unwrap_or_default();
                     live.extend(
-                        segment::entries(&bytes)
-                            .0
+                        segment::scan(&bytes, 0)
+                            .map(|scanned| scanned.records)
+                            .unwrap_or_default()
                             .iter()
-                            .flat_map(ferrix_lode_core::blob::references)
+                            .flat_map(|found| ferrix_lode_core::blob::references(&found.record))
                             .map(|(_, reference)| reference.id),
                     );
                 }
@@ -723,6 +727,47 @@ impl Service {
         ));
         let _ = self.store.append(said, &self.zone);
         text
+    }
+
+    /// After a restart, the identity lines this boot's newest segments
+    /// already hold, for a crash line still to be read: a lode killed
+    /// between the two lines joins them still.
+    fn seed_identities(&mut self) {
+        let mut dirs = alloc::vec![Dir {
+            fd: self.store.volatile
+        }];
+        dirs.extend(self.store.persistent.map(|fd| Dir { fd }));
+        let boot = self.store.header.boot_id;
+        let segments: Vec<store::Segment> = store::all_segments(&dirs)
+            .into_iter()
+            .filter(|each| store::header(each).is_some_and(|header| header.boot_id == boot))
+            .collect();
+        // Identity lines from the newest three (the two lines are a moment
+        // apart); tombstones from them all, so a storm's counts go on.
+        let newest = segments.len().saturating_sub(3);
+        for (index, each) in segments.iter().enumerate() {
+            let bytes = store::bytes(each, 0).unwrap_or_default();
+            let records: Vec<Record> = segment::scan(&bytes, 0)
+                .map(|scanned| {
+                    scanned
+                        .records
+                        .into_iter()
+                        .map(|found| found.record)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let skip = records.len().saturating_sub(256);
+            for (at, record) in records.iter().enumerate() {
+                if ferrix_lode_core::tombstone::is_tombstone(record) {
+                    self.tombstones.restore(record);
+                } else if index >= newest
+                    && at >= skip
+                    && record.get("_TRANSPORT") == Some(b"kernel")
+                {
+                    self.remember_identity(record.message());
+                }
+            }
+        }
     }
 
     /// Keep the kernel's identity line in `text`, if it is one, for the

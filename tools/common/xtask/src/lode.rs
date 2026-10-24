@@ -409,6 +409,15 @@ say "box: $($bb grep -c '^snapshot .*: thread ' /tmp/snap) $(/bin/lode -b --wher
 /bin/lode fault-stub > /dev/null 2>&1
 $bb sleep 1
 say "crash: $(/bin/lode -b --where 'crash = "*"' -o json | $bb grep '"CRASH_CMDLINE":"/bin/lode fault-stub"' | $bb grep '"CRASH_EXE":"/sbin/lode"' | $bb grep -c '"CRASH_MODULE":"/sbin/lode+0x')"
+# A crash while lode is down: both kernel lines are read after its restart
+# and joined; lode also seeds what it already stored (a restart between
+# the two lines).
+/bin/svc stop lode.service > /dev/null 2>&1
+/bin/lode fault-stub > /dev/null 2>&1
+/bin/svc start lode.service > /dev/null 2>&1
+i=0; until /bin/lode -b -n 1 > /dev/null 2>&1; do i=$((i+1)); [ $i -gt 50 ] && break; $bb usleep 100000; done
+$bb sleep 1
+say "rejoined: $(/bin/lode -b --where 'crash = "*"' -o json | $bb grep -c '"CRASH_EXE":"/sbin/lode"')"
 # Tombstones (§21): the crash above has one, which `lode tombstone` shows
 # whole; a storm of one signature is five tombstones and a counter at ten.
 i=0; while [ $i -lt 11 ]; do /bin/lode fault-stub > /dev/null 2>&1; i=$((i+1)); done
@@ -750,6 +759,11 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
              from the kernel's identity line",
         ),
         (
+            "lode-test: rejoined:",
+            "2",
+            "a crash read after lode's restart did not join its identity line",
+        ),
+        (
             "lode-test: tombstones:",
             "5 1 1 1",
             "a crash storm was not five tombstones and a counter, `lode tombstone` did not show the \
@@ -950,6 +964,7 @@ lode-test: reload: 1
 lode-test: names: 1 1
 lode-test: box: 1 1 3 1
 lode-test: crash: 1
+lode-test: rejoined: 2
 lode-test: tombstones: 5 1 1 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1
