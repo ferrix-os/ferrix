@@ -1119,6 +1119,12 @@ more.
   hypridle.conf for the next sign-in (a hand-written one left alone);
   Name and time with About; Remote login, Power, Users, Logs and Boot
   options shown until the settings writer. `settings --render PAGE FILE
-  [--light]` draws a page headless; 22 host tests. Next: U9c, Wallpaper
-  with the file chooser, then each page wired to the settings writer's
-  rows as they land.
+  [--light]` draws a page headless; 22 host tests.
+* **U9c built** (2026-10-24): Wallpaper, on hyprix's `wallpaper` lines
+  through `hyprctl setting`: the displays drawn with what each shows; the
+  same on all, different on each or spanning them; the design's six
+  pictures (drawn from its gradients, shipped with Settings) or one's own
+  through tole's `FileDialog` taking `[image]`, with its fit; a colour; a
+  slideshow of a folder; video said, not chosen; the lock screen's. 27
+  host tests. Next: each System page wired to the settings writer's rows
+  as they land, "Not kept yet" until then.
