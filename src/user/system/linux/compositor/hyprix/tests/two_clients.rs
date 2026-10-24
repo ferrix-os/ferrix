@@ -3538,9 +3538,12 @@ fn the_wallpaper_follows_its_lines_and_is_kept() {
         })
     };
 
-    // Each run waits until the stand-in has written down as many starts
-    // as it expects before it ends the compositor, which ends the client:
-    // a client ended before it wrote would be no start at all.
+    // Each start is waited for, written down whole, before the next
+    // request replaces it, and the last before the compositor is ended,
+    // which ends the client: a client replaced or ended before it wrote
+    // would be no start at all, and one replaced while it was still
+    // writing could write after the client that replaced it. The
+    // compositor starts one client as it starts, and one per request.
     let run = |name: &str, lines: &str, requests: Vec<String>, expected: usize| {
         let desk = Desk::new(name, lines);
         let options = Options {
@@ -3549,24 +3552,33 @@ fn the_wallpaper_follows_its_lines_and_is_kept() {
             ..desk.options()
         };
         let written = started.clone();
+        let whole = move || {
+            std::fs::read_to_string(&written)
+                .unwrap_or_default()
+                .matches('\n')
+                .count()
+        };
+        let before = whole();
+        assert_eq!(before + 1 + requests.len(), expected, "{name}'s starts");
+        let wait = move |count: usize| {
+            until("the stand-in's starts", || {
+                let now = whole();
+                (now >= count)
+                    .then_some(())
+                    .ok_or_else(|| format!("{now} starts"))
+            });
+        };
         let (_, answers) = running(&desk, &options, move |ends| {
+            wait(before + 1);
             let answers: Vec<String> = requests
                 .iter()
-                .map(|request| {
+                .enumerate()
+                .map(|(index, request)| {
                     let answer = ends.ask(request);
-                    std::thread::sleep(Duration::from_millis(100));
+                    wait(before + 2 + index);
                     answer
                 })
                 .collect();
-            until("the stand-in's starts", || {
-                let text = std::fs::read_to_string(&written).unwrap_or_default();
-                let whole = text.matches('\n').count();
-                if whole >= expected {
-                    Ok(())
-                } else {
-                    Err(format!("{whole} starts"))
-                }
-            });
             ends.stop();
             answers
         })
