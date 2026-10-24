@@ -442,6 +442,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | Stage 10's chardev check stopped an armv7a `--smp 2` TCG boot once (2026-10-19, load 15 to 25) with "the driver's reply was refused" (`interfaces/chardev/check.rs`); split from fl-071, whose refused admit is fixed. [more](backlog/flakes.md#fl-073) | open | 10 |
 | The quota self-check stopped an x86-64 TCG boot once (2026-10-23, linux-abi-off 6064977d5) with "a job with many spinning tasks took more than its share from another job" (`object/quota_check.rs`); passed on rerun. Seen before on armv7a TCG (bsa-lo-st-a32-12, 2026-10-15). [more](backlog/flakes.md#fl-074) | open | 13 |
 | `test-compositor`'s Settings step missed both its Returns once at host load 35 (2026-10-23, hyprix-gnome cad58e30c) after fl-001's fix; the next tip passed. [more](backlog/flakes.md#fl-075) | open | 18 |
+| nvos's host test `timer::tests::a_timer_fires_once_and_a_cancelled_one_never` failed once in `check` at host load 42 (2026-10-24, minimized-restore ed553b158, a compositor change); 3 of 3 reruns passed. [more](backlog/flakes.md#fl-080) | open | 19 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 

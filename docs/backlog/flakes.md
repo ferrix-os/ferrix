@@ -520,3 +520,9 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-10-24, kernel-flakes).** Stage 13's cgroupfs check stopped an x86-64 TCG `test-boot` at host load 57 with "a program throttled by cpu.max 1000 1000000 waited out its period to die of SIGKILL" (`fs/cgroupfs/cpu_check.rs`) at 23.83 s (pool row `kf-boot-x86_64acceltcg`, on b11220ee9, a change that does not reach stage 13); the rerun passed (`kf2-boot-x86_64acceltcg`). After F-78's fix (fl-019); the sentence is the one `g4-ctl-cpu-kill` makes on purpose, so it is the check's window missing under a starved TCG host until shown otherwise. | flake owner | 13 |
+
+### fl-080
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-10-24, minimized-restore).** `cargo xtask check`'s side unit `nvos` failed once: `timer::tests::a_timer_fires_once_and_a_cancelled_one_never` (`src/user/system/linux/drivers/nvrm/os/nvos/src/timer.rs:267`) read 0 timers fired, not 1, after its 100 ms sleep for a 5 ms timer, at host load 42 on ed553b158 (a compositor and waybar change that does not reach nvos). The unit's tests passed 3 of 3 alone straight after. Log kept: `~/.local/share/ferrix/logs/minimized-restore/check-nvos-timer-flake-ed553b158.log`. A wall-clock sleep standing in for a wait on the state read: wait for `FIRED` with a deadline that fails loudly instead. | unowned | 19 |
