@@ -409,13 +409,7 @@ pub fn send(
     request: &[u8],
 ) -> Result<(), String> {
     let url = &destination.url;
-    let address = (url.host.as_str(), url.port)
-        .to_socket_addrs()
-        .map_err(|error| format!("{}: {error}", url.host))?
-        .next()
-        .ok_or_else(|| format!("{}: no address", url.host))?;
-    let stream = TcpStream::connect_timeout(&address, PATIENCE)
-        .map_err(|error| format!("connecting: {error}"))?;
+    let stream = connect(&url.host, url.port)?;
     stream
         .set_read_timeout(Some(PATIENCE))
         .and_then(|()| stream.set_write_timeout(Some(PATIENCE)))
@@ -430,6 +424,34 @@ pub fn send(
         }
         None => exchange(stream, request),
     }
+}
+
+/// A connection to `host`'s first address that takes one, each tried in
+/// the order the resolver gave them: `localhost` is `::1` before
+/// `127.0.0.1` on many machines, and a collector may listen on only one.
+fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("{host}: {error}"))?;
+    connect_any(host, addresses)
+}
+
+/// [`connect`], to `addresses` in turn.
+fn connect_any(
+    host: &str,
+    addresses: impl IntoIterator<Item = std::net::SocketAddr>,
+) -> Result<TcpStream, String> {
+    let mut last = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, PATIENCE) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last = Some(error),
+        }
+    }
+    Err(last.map_or_else(
+        || format!("{host}: no address"),
+        |error| format!("connecting: {error}"),
+    ))
 }
 
 /// Write `request` on `stream` and read the answer's status: `Ok` on a
@@ -484,4 +506,30 @@ fn tell_unsent(name: &str, missing: u64, base: u64, first: Option<&Record>) {
 /// A line on standard output, which init's log pipe brings to the log.
 fn say(text: &str) {
     println!("lode upload: {text}");
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, reason = "tests")]
+
+    use super::*;
+
+    /// `localhost` as many machines resolve it, `::1` first, to a collector
+    /// listening on `127.0.0.1` alone: the second address takes it.
+    #[test]
+    fn an_address_that_refuses_is_passed_for_the_next() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let addresses = [
+            std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+            std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        ];
+        let stream = connect_any("localhost", addresses).unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), addresses[1]);
+        assert!(connect_any("localhost", addresses[..1].to_vec()).is_err());
+        assert_eq!(
+            connect_any("nowhere", []).unwrap_err(),
+            "nowhere: no address"
+        );
+    }
 }
