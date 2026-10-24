@@ -1223,6 +1223,11 @@ more.
   slideshow of a folder; video said, not chosen; the lock screen's. 27
   host tests. Next: each System page wired to the settings writer's rows
   as they land, "Not kept yet" until then.
+* **What is in force** (2026-10-25, the customer on Yoru): the pages read
+  every option they show from hyprix (`hyprctl --batch getoption`), not
+  hyprix's defaults, and a row says when its change cannot show (spacing
+  with a floating layout, frames a window draws itself, blur without a
+  GPU). `test-compositor --boot settings-live` holds the live path.
 * **System pages wired** (2026-10-24): Name and time and Remote login send
   `settingsd` requests (`docs/SETTINGS-WRITER.md`): Rename is
   `set-hostname`, Time zone `set-timezone`, Remote login's switch
