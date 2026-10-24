@@ -95,6 +95,16 @@ from the compositor's own frame
 `overview-one-minimized-picked.xrle`, the minimized window dimmed in the
 second slot), the renderer having no layout of the overview to bless them
 from.
+Gates (2026-10-24): on ed553b158 and 2091b7601, `check` PASSED (its first
+run met fl-080, nvos's timer test, unrelated), `test-compositor` x86_64
+PASSED, every boot `minimize` among them (`lode-viewer-ssh` onward rerun
+alone after building `sshdt`, which the host lacked), `test-apps` PASSED;
+waybar's 5 `against_hyprix` and hyprix's `two_clients` passed 3 of 3. The
+rebase onto 253a51630 needed `BOOTS` counted again (another boot had
+landed), so `check` and `--boot minimize` were run again on it, PASSED.
+Logs in `.claude/mr-gate-*.log` of the root checkout. Not done here: a
+`test-compositor --arch aarch64` stopped building `tole-examples` (no
+aarch64 musl linker on this host), before any boot.
 
 **Part 2 is built** (13 points estimated):
 
