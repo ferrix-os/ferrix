@@ -13,19 +13,110 @@ use super::limits;
 use super::{RequestId, fence::Waits};
 use ferrix_linux_abi::errno::Errno;
 
+/// The most slots a [`Slab`] has: [`limits::HANDLES`], the largest table.
+const MAX_SLOTS: usize = 16_384;
+
+/// Words of [`Slab::taken`]: one bit a slot, for [`MAX_SLOTS`].
+const TAKEN_WORDS: usize = MAX_SLOTS / 64;
+
 /// A fixed-size table of `N` optional `T`s.
+///
+/// Which slots are taken is also kept as a bitmap, so that a walk of the
+/// table ([`Slab::iter`], [`Slab::iter_mut`]) looks at the 64-slot chunks
+/// that hold something and skips the rest a word at a time: what a walk
+/// costs follows what the table holds, not its size. The driver walks
+/// several tables after every ioctl (`fence::settle`), and walking all 8192
+/// objects' slots, 2048 kernel fences' and the rest was 19 µs a call on
+/// the N150 (`docs/INTEL-GPU.md` §13).
 pub struct Slab<T, const N: usize> {
     slots: [Option<T>; N],
+    /// Bit `i % 64` of word `i / 64` is set while slot `i` is taken.
+    taken: [u64; TAKEN_WORDS],
     hint: usize,
     live: usize,
+}
+
+/// The indices of a [`Slab`]'s taken slots, in order, from its bitmap.
+struct Taken<'a> {
+    words: &'a [u64; TAKEN_WORDS],
+    /// The word being read, and what of it is left.
+    word: usize,
+    bits: u64,
+    /// The slab's size.
+    len: usize,
+}
+
+impl<'a> Taken<'a> {
+    fn new(words: &'a [u64; TAKEN_WORDS], len: usize) -> Self {
+        Self {
+            words,
+            word: 0,
+            bits: words.first().copied().unwrap_or(0),
+            len,
+        }
+    }
+}
+
+impl Iterator for Taken<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.bits == 0 {
+            self.word += 1;
+            if self.word * 64 >= self.len {
+                return None;
+            }
+            self.bits = self.words.get(self.word).copied().unwrap_or(0);
+        }
+        let index = self.word * 64 + self.bits.trailing_zeros() as usize;
+        // The lowest set bit, cleared.
+        self.bits &= self.bits - 1;
+        (index < self.len).then_some(index)
+    }
+}
+
+/// [`Slab::iter_mut`]: the taken slots, each lent once, by splitting the
+/// slots still ahead at the next taken one.
+struct TakenMut<'a, T> {
+    taken: Taken<'a>,
+    rest: &'a mut [Option<T>],
+    /// The index `rest` begins at.
+    at: usize,
+}
+
+impl<'a, T> Iterator for TakenMut<'a, T> {
+    type Item = (usize, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let index = self.taken.next()?;
+            let rest = core::mem::take(&mut self.rest);
+            let (_, from) = rest.split_at_mut(index.checked_sub(self.at)?);
+            let (slot, after) = from.split_first_mut()?;
+            self.rest = after;
+            self.at = index + 1;
+            if let Some(value) = slot.as_mut() {
+                return Some((index, value));
+            }
+        }
+    }
+}
+
+/// The bit of slot `index` in [`Slab::taken`]: its word and its mask.
+const fn bit(index: usize) -> (usize, u64) {
+    (index / 64, 1 << (index % 64))
 }
 
 impl<T, const N: usize> Slab<T, N> {
     /// An empty table.
     #[must_use]
     pub const fn new() -> Self {
+        const {
+            assert!(N <= MAX_SLOTS, "a slab larger than its bitmap");
+        }
         Self {
             slots: [const { None }; N],
+            taken: [0; TAKEN_WORDS],
             hint: 0,
             live: 0,
         }
@@ -42,6 +133,10 @@ impl<T, const N: usize> Slab<T, N> {
                 && slot.is_none()
             {
                 *slot = Some(value);
+                let (word, mask) = bit(index);
+                if let Some(word) = self.taken.get_mut(word) {
+                    *word |= mask;
+                }
                 self.hint = (index + 1) % N;
                 self.live += 1;
                 return Some(index);
@@ -66,6 +161,10 @@ impl<T, const N: usize> Slab<T, N> {
         let taken = self.slots.get_mut(index).and_then(Option::take);
         if taken.is_some() {
             self.live -= 1;
+            let (word, mask) = bit(index);
+            if let Some(word) = self.taken.get_mut(word) {
+                *word &= !mask;
+            }
         }
         taken
     }
@@ -84,18 +183,21 @@ impl<T, const N: usize> Slab<T, N> {
 
     /// The taken slots' indices and values.
     pub fn iter(&self) -> impl Iterator<Item = (usize, &T)> {
-        self.slots
-            .iter()
-            .enumerate()
-            .filter_map(|(index, slot)| slot.as_ref().map(|value| (index, value)))
+        Taken::new(&self.taken, N).filter_map(|index| {
+            self.slots
+                .get(index)
+                .and_then(Option::as_ref)
+                .map(|value| (index, value))
+        })
     }
 
     /// The taken slots' indices and values, to change.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut T)> {
-        self.slots
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(index, slot)| slot.as_mut().map(|value| (index, value)))
+        TakenMut {
+            taken: Taken::new(&self.taken, N),
+            rest: &mut self.slots,
+            at: 0,
+        }
     }
 }
 
@@ -885,5 +987,75 @@ impl<M> core::fmt::Debug for Tables<M> {
 impl<M> Default for Tables<M> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod slab_tests {
+    extern crate std;
+    use super::Slab;
+    use std::collections::BTreeMap;
+    use std::vec::Vec;
+
+    /// A slab and a plain map put through the same inserts and removes,
+    /// many of them, by a fixed pseudo-random walk: a walk of the slab
+    /// visits exactly the map's slots, in order, each once, whatever chunks
+    /// they fell in, and a walk to change them reaches every one.
+    #[test]
+    fn a_walk_visits_every_taken_slot_once_in_order() {
+        let mut slab: std::boxed::Box<Slab<u32, 2048>> = std::boxed::Box::default();
+        let mut model = BTreeMap::new();
+        let mut seed = 0x2545_f491_u32;
+        for step in 0..20_000_u32 {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            if seed.is_multiple_of(3) && !model.is_empty() {
+                let at = *model
+                    .keys()
+                    .nth(seed as usize % model.len())
+                    .expect("a key");
+                assert_eq!(slab.remove(at), model.remove(&at), "step {step}");
+            } else if let Some(index) = slab.insert(step) {
+                assert!(
+                    model.insert(index, step).is_none(),
+                    "slot {index} given twice"
+                );
+            } else {
+                assert_eq!(model.len(), 2048, "refused while not full");
+            }
+            if step % 997 == 0 {
+                let walked: Vec<(usize, u32)> =
+                    slab.iter().map(|(at, value)| (at, *value)).collect();
+                let wanted: Vec<(usize, u32)> =
+                    model.iter().map(|(at, value)| (*at, *value)).collect();
+                assert_eq!(walked, wanted, "step {step}");
+                for (_, value) in slab.iter_mut() {
+                    *value = value.wrapping_add(1);
+                }
+                for value in model.values_mut() {
+                    *value = value.wrapping_add(1);
+                }
+            }
+        }
+        assert_eq!(slab.len(), model.len());
+    }
+
+    /// The first and the last slot, and both sides of a word's edge.
+    #[test]
+    fn the_edges_of_the_bitmap_are_walked() {
+        let mut slab: std::boxed::Box<Slab<usize, 130>> = std::boxed::Box::default();
+        for value in 0..130 {
+            assert_eq!(slab.insert(value), Some(value));
+        }
+        for index in 0..130 {
+            if ![0, 63, 64, 127, 128, 129].contains(&index) {
+                let _ = slab.remove(index);
+            }
+        }
+        let walked: Vec<usize> = slab.iter().map(|(at, _)| at).collect();
+        assert_eq!(walked, [0, 63, 64, 127, 128, 129]);
+        let changed: Vec<usize> = slab.iter_mut().map(|(at, _)| at).collect();
+        assert_eq!(changed, walked);
     }
 }

@@ -2316,3 +2316,88 @@ fn trace_says_a_held_wait_and_names_it_when_stuck() {
         );
     });
 }
+
+/// What one settle costs with a game's tables: 300 objects, 120 syncobjs,
+/// 8 kernel fences pending, no work. Run by hand, in release:
+/// `cargo test --release -p ferrix-intel-xelp settle_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+#[expect(
+    clippy::print_stdout,
+    reason = "a measurement run by hand says its figures"
+)]
+fn settle_cost() {
+    let mut rig = Rig::new();
+    // Churn first, as a game's buffers come and go: the live ones end up
+    // spread over the whole table.
+    for _ in 0..9000 {
+        let handle = rig.create(4096);
+        let mut close = GemClose { handle, pad: 0 }.to_bytes();
+        assert_eq!(rig.ioctl(ioctl::GEM_CLOSE, &mut close), 0);
+        if handle.is_multiple_of(29) {
+            let _ = rig.create(4096);
+        }
+    }
+    for _ in 0..120 {
+        let _ = rig.syncobj(true);
+    }
+    let rounds = 20_000;
+    let start = std::time::Instant::now();
+    for _ in 0..rounds {
+        let _ = rig.getparam(param::CHIPSET_ID);
+    }
+    let ioctl = start.elapsed().as_nanos() / rounds;
+    let start = std::time::Instant::now();
+    for _ in 0..rounds {
+        fence::settle(&mut rig.frontend, &mut rig.host);
+    }
+    let settle = start.elapsed().as_nanos() / rounds;
+    std::println!("settle_cost: a GETPARAM {ioctl} ns with its settle; a settle alone {settle} ns");
+}
+
+/// Out fences spread over three of the kernel-fence table's 64-slot words:
+/// none signals before its request completes, every one signals once with
+/// the request's status after, and the requests ran in order. A walk of the
+/// table that missed a word would leave a program waiting on a sync file
+/// for ever.
+#[test]
+fn every_out_fence_signals_once_when_its_request_completes() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let batch = rig.create(4096);
+        let mut cookies = Vec::new();
+        for _ in 0..150 {
+            let (status, args) = rig.exec(
+                ioctl::GEM_EXECBUFFER2_WR,
+                &[(batch, 0x1000, PINNED)],
+                exec::FENCE_OUT,
+                &[],
+                0,
+            );
+            assert_eq!(status, 0);
+            let fd = (args.rsvd2 >> 32) as i32;
+            let Some(Fd::Sync(cookie)) = rig.host.fds.get(&fd).copied() else {
+                panic!("no out fence");
+            };
+            cookies.push(cookie);
+        }
+        rig.frontend.service(&mut rig.host, false);
+        assert!(
+            cookies
+                .iter()
+                .all(|cookie| !rig.host.signalled.contains_key(cookie)),
+            "a fence signalled before its request completed"
+        );
+        rig.frontend.backend.finish(Completion::Ok);
+        rig.frontend.service(&mut rig.host, true);
+        for cookie in &cookies {
+            assert_eq!(rig.host.signalled.get(cookie), Some(&0), "fence {cookie}");
+        }
+        let ids: Vec<RequestId> = rig.frontend.backend.submits.iter().map(|s| s.3).collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted, "submitted out of order");
+        assert_eq!(ids.len(), 150);
+    });
+}
