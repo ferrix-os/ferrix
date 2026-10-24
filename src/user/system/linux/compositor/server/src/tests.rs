@@ -2963,6 +2963,45 @@ fn a_window_that_asks_about_its_decorations_is_told_the_compositor_draws_them() 
         "{events:?}"
     );
 
+    assert!(client.wants_server_frame(ObjectId(8)));
+
+    // Where the compositor honours a client's own frame (a floating desktop
+    // that draws title bars), the client that asks to draw it is told yes,
+    // and gets no title bar from the compositor; asking for the
+    // compositor's again gives it back.
+    client.set_honour_client_frames(true);
+    let mode_is = |client: &mut Client, mode: u32| {
+        let bytes = request(
+            9,
+            zxdg_toplevel_decoration_v1::request::SET_MODE,
+            &[ArgType::Uint],
+            &[Arg::Uint(mode)],
+        );
+        assert_eq!(client.read(&bytes, &[]), bytes.len());
+        sent(client)
+            .first()
+            .and_then(|event| event.args.first().cloned())
+    };
+    assert_eq!(
+        mode_is(&mut client, zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+        ))
+    );
+    assert!(
+        !client.wants_server_frame(ObjectId(8)),
+        "no second title bar"
+    );
+    assert_eq!(
+        mode_is(&mut client, zxdg_toplevel_decoration_v1::mode::SERVER_SIDE),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::SERVER_SIDE
+        ))
+    );
+    assert!(client.wants_server_frame(ObjectId(8)));
+
     // A mode that is not one of the two is the interface's own error.
     let bytes = request(
         9,

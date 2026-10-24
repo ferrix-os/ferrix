@@ -73,7 +73,11 @@ impl Client {
     /// for (`docs/DESKTOP.md` §2.2).
     #[must_use]
     pub fn wants_server_frame(&self, toplevel: ObjectId) -> bool {
-        if self.xdg_decorations.values().any(|top| *top == toplevel) {
+        if self
+            .xdg_decorations
+            .iter()
+            .any(|(decoration, top)| *top == toplevel && !self.client_frames.contains(decoration))
+        {
             return true;
         }
         let Some(surface) = self.toplevels.get(&toplevel).map(|top| top.surface) else {
@@ -82,10 +86,21 @@ impl Client {
         self.kde_decorations.values().any(|on| *on == surface)
     }
 
+    /// Answer a client's `set_mode(client_side)` with `client_side`, so it
+    /// draws its own frame and the compositor draws no title bar over it --
+    /// Chrome's tab strip under a second bar was the customer's "double
+    /// taskbar" (2026-10-24) -- rather than `server_side` whatever was
+    /// asked. hyprix turns it on where it draws title bars itself.
+    pub const fn set_honour_client_frames(&mut self, on: bool) {
+        self.honour_client_frames = on;
+    }
+
     /// `zxdg_toplevel_decoration_v1`: `set_mode` and `unset_mode`.
     ///
-    /// Both are answered the same way, because the answer does not depend on
-    /// what was asked: this compositor draws the decorations.
+    /// Answered `server_side`, the compositor drawing the decorations,
+    /// unless [`Client::set_honour_client_frames`] is on and the client
+    /// asked to draw its own: then `client_side`. `unset_mode` is the
+    /// compositor's choice again.
     pub(super) fn toplevel_decoration(&mut self, sender: ObjectId, opcode: u16, args: &[Arg<'_>]) {
         use zxdg_toplevel_decoration_v1::request;
         match opcode {
@@ -101,20 +116,36 @@ impl Client {
                     });
                     return;
                 }
+                if self.honour_client_frames
+                    && mode == zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+                {
+                    let _ = self.client_frames.insert(sender);
+                } else {
+                    let _ = self.client_frames.remove(&sender);
+                }
                 self.configure_decoration(sender);
             }
-            request::UNSET_MODE => self.configure_decoration(sender),
+            request::UNSET_MODE => {
+                let _ = self.client_frames.remove(&sender);
+                self.configure_decoration(sender);
+            }
             _ => {}
         }
     }
 
-    /// Tell a decoration it is the compositor's to draw.
+    /// Tell a decoration who draws it: the client where it asked and that
+    /// is honoured, else the compositor.
     fn configure_decoration(&mut self, decoration: ObjectId) {
+        let mode = if self.client_frames.contains(&decoration) {
+            zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+        } else {
+            zxdg_toplevel_decoration_v1::mode::SERVER_SIDE
+        };
         let _ = self.out.write(
             decoration,
             zxdg_toplevel_decoration_v1::event::CONFIGURE,
             &[ArgType::Uint],
-            &[Arg::Uint(zxdg_toplevel_decoration_v1::mode::SERVER_SIDE)],
+            &[Arg::Uint(mode)],
         );
     }
 

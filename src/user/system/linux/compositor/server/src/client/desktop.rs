@@ -127,6 +127,7 @@ impl Client {
             }
             Role::ToplevelDecoration => {
                 let _ = self.xdg_decorations.remove(&id);
+                let _ = self.client_frames.remove(&id);
             }
             _ => {}
         }

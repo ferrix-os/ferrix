@@ -9,7 +9,7 @@
 //! in `seat.rs` and so on -- each an `impl Client` of its own. A child
 //! module sees its parent's private fields, so none of them is opened up.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use compositor_protocol::core::{self, wl_display, wl_registry, wl_seat, wl_shm};
 use compositor_protocol::presentation::wp_presentation;
@@ -271,7 +271,7 @@ pub struct Client {
     /// The primary offer it was last given, if it still has one.
     primary_offer: Option<ObjectId>,
     /// The activation tokens this client was given and has not used.
-    tokens: std::collections::BTreeSet<String>,
+    tokens: BTreeSet<String>,
     /// How many tokens it has been given, which makes each one different.
     token: u32,
     /// Which surface each `wp_viewport` is on.
@@ -314,6 +314,14 @@ pub struct Client {
     /// Which toplevel each `zxdg_toplevel_decoration_v1` is for: a toplevel
     /// with one has asked for the compositor's frame, and been told yes.
     xdg_decorations: BTreeMap<ObjectId, ObjectId>,
+    /// The `zxdg_toplevel_decoration_v1`s whose client asked to draw its
+    /// own frame and was told yes: only where the compositor honours that
+    /// ([`Client::set_honour_client_frames`]).
+    client_frames: BTreeSet<ObjectId>,
+    /// Whether a client's `set_mode(client_side)` is answered `client_side`
+    /// (a floating desktop that draws title bars, docs/DESKTOP.md §6) rather
+    /// than `server_side` whatever was asked (a tiling one, the default).
+    honour_client_frames: bool,
     /// The `zwp_relative_pointer_v1`s this client has made.
     relative_pointers: Vec<ObjectId>,
     /// The pointer constraints it holds, by object.
@@ -445,7 +453,7 @@ impl Client {
             primary_sources: BTreeMap::new(),
             primary_devices: Vec::new(),
             primary_offer: None,
-            tokens: std::collections::BTreeSet::new(),
+            tokens: BTreeSet::new(),
             token: 0,
             viewports: BTreeMap::new(),
             fractional: BTreeMap::new(),
@@ -465,6 +473,8 @@ impl Client {
             dialogs: BTreeMap::new(),
             kde_decorations: BTreeMap::new(),
             xdg_decorations: BTreeMap::new(),
+            client_frames: BTreeSet::new(),
+            honour_client_frames: false,
             relative_pointers: Vec::new(),
             constraints: BTreeMap::new(),
             shortcut_inhibitors: BTreeMap::new(),

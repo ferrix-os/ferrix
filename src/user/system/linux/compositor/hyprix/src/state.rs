@@ -998,6 +998,12 @@ impl<'r> Compositor<'r> {
                             client.set_seat_capabilities(self.capabilities);
                             client.set_keymap(self.fixed.keymap.as_ref().map(Keymap::handed));
                             client.set_repeat_info(self.fixed.repeat.0, self.fixed.repeat.1);
+                            // Where hyprix draws title bars (a floating
+                            // desktop), a client that draws its own frame
+                            // keeps it, and gets no second bar.
+                            client.set_honour_client_frames(
+                                self.config.int("hyprix:titlebars").unwrap_or(0) != 0,
+                            );
                             client
                         },
                         connection,
