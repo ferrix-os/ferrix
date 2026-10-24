@@ -131,7 +131,8 @@ impl Importer {
     pub fn find(drawn: &Drawn) -> Option<Self> {
         Self::pick(drawn, || {
             Render::open_driven_by("nvidia-drm").is_ok() || Render::open_driven_by("i915").is_ok()
-        }).or_else(|| {
+        })
+        .or_else(|| {
             matches!(drawn, Drawn::Node | Drawn::Server(None))
                 .then(Render::open)
                 .and_then(Result::ok)
