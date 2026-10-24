@@ -1223,6 +1223,15 @@ more.
   slideshow of a folder; video said, not chosen; the lock screen's. 27
   host tests. Next: each System page wired to the settings writer's rows
   as they land, "Not kept yet" until then.
+* **System pages wired** (2026-10-24): Name and time and Remote login send
+  `settingsd` requests (`docs/SETTINGS-WRITER.md`): Rename is
+  `set-hostname`, Time zone `set-timezone`, Remote login's switch
+  `service-enable-persistent sshd.service ... now`; the person confirms in
+  the compositor's trusted prompt (§12), so the window takes no password.
+  The pages read `/etc/ferrix/image-manifest` and show their values
+  read-only, "Fixed by this build (profile X)", when the build fixes them
+  or does not say. The date and time, Users, Power and Boot options keep
+  "Not kept yet" (`set-time` is parked; B4, B5 wait for design reviews).
 * **FileDialog split** (2026-10-24, the customer's review): the 816-line
   `FileDialog` is a composition of twelve file controls in `Fx.Controls`
   -- `SearchField` (the three modes, its menu, red on an error),
