@@ -272,9 +272,10 @@ OPTIONS:
     --iterate                            With --release: the kernel with thin LTO, relinked in
                                          seconds; for working on it, never for a gate
                                          (docs/TEST-TIME.md, C4)
-    --strip-kernel                       Images carry the kernel without its debug information, as
-                                         flash writes it; the loader reads the whole file into
-                                         memory, so a small --memory needs it [default: off]
+    --strip-kernel                       Images carry the kernel and the initramfs's programs
+                                         without their debug information, as flash writes them;
+                                         the loader reads both whole into memory, so a small
+                                         --memory needs it [default: off]
     --kernel-profile <NAME>              The kernel's profile in tools/common/data/profiles/
                                          [default: present, today's reference configuration]:
                                          every build flag's value (docs/BUILD-FLAGS.md)

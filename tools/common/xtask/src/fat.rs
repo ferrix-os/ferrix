@@ -486,7 +486,8 @@ fn directory_entry(name: &[u8; 11], attr: u8, first_cluster: u32, size: u32) -> 
 /// card: the loader reads the file after `CMDLINE.TXT`.
 pub(crate) const DEFAULTS_PATH: &str = "FERRIX/DEFAULTS.TXT";
 
-/// Whether this run's images carry the stripped kernel: `--strip-kernel`.
+/// Whether this run's images carry the stripped kernel, and the initramfs's
+/// programs stripped: `--strip-kernel`.
 static STRIP_KERNEL: AtomicBool = AtomicBool::new(false);
 
 /// Say whether every image this run writes carries the kernel as `flash`
@@ -564,7 +565,14 @@ pub(crate) fn write_image_carrying(
     defaults: Option<&str>,
 ) -> Result<PathBuf> {
     let mut fs = Fat32::new(IMAGE_BYTES)?;
-    let carried = kernel.initramfs(initramfs)?;
+    let mut carried = kernel.initramfs(initramfs)?;
+    // Under `--strip-kernel` the programs too, as `flash` gives them to a
+    // card: the release profile's full DWARF made them 38 of a 128 MiB
+    // machine's MiB (lode alone 19), which the loader holds and the kernel
+    // keeps while it unpacks them, and the 128 MiB boot ran out of memory.
+    if STRIP_KERNEL.load(Ordering::Relaxed) {
+        carried = crate::flash::card_initramfs(arch, &carried)?;
+    }
     let initramfs = carried.as_slice();
     let kernel: &Path = kernel;
 

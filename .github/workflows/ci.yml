@@ -394,7 +394,8 @@ jobs:
         uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: x86_64-unknown-none, aarch64-unknown-none-softfloat, armv7a-none-eabi, x86_64-unknown-uefi, aarch64-unknown-uefi, armv7-unknown-linux-musleabi
-          # `llvm-objcopy`, which `--strip-kernel` strips the kernel with.
+          # `llvm-objcopy`, which `--strip-kernel` strips the kernel and the
+          # initramfs's programs with.
           components: llvm-tools
 
       - name: Rust cache

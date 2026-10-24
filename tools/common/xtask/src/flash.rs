@@ -131,9 +131,10 @@ fn keeps_relocations(kernel: &Path) -> bool {
 /// come to 0.5 MB; the compositor's programs keep symbols that are
 /// another 2.9 MB (2026-09-24). A fault in one of them prints its `pc`, which
 /// resolves against the program the build left on the host, as a kernel
-/// panic's addresses do. Only the card's copy is stripped: images, and the
-/// archive every test boots, stay the bytes they were built as.
-fn card_initramfs(arch: Arch, archive: &[u8]) -> Result<Vec<u8>> {
+/// panic's addresses do. Only the card's copy is stripped, and an image's
+/// under `--strip-kernel` (`fat::set_strip_kernel`): other images, and the
+/// archive every other test boots, stay the bytes they were built as.
+pub(crate) fn card_initramfs(arch: Arch, archive: &[u8]) -> Result<Vec<u8>> {
     let Some(objcopy) = llvm_objcopy() else {
         println!("    llvm-objcopy not found; the initramfs's programs keep their symbols");
         return Ok(archive.to_vec());
