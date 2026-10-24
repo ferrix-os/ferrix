@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 145 | 93 | 52 |
-| Low (`L.*`) | 1035 | 771 | 264 |
+| High (`H.*`) | 146 | 93 | 53 |
+| Low (`L.*`) | 1036 | 772 | 264 |
 
-2279 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2281 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2281 |
-| Accessors, covered by the requirement they serve | 1046 |
+| Named by a low-level requirement | 2283 |
+| Accessors, covered by the requirement they serve | 1047 |
 | Check code in a product file | 83 |
-| Named by none | 939 |
+| Named by none | 938 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_sha256`, `ferrix_sigverify`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -131,7 +131,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | ASR-5 | `H.MEM.6` |
 | ASR-6 | `H.DEV.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5`, `H.SIGN.1`, `H.SIGN.2`, `H.SIGN.3`, `H.SIGN.4`, `H.SIGN.5`, `H.SIGN.6` |
-| ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13` |
+| ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13`, `H.SCHED.16` |
 | ASR-9 | `H.STORE.2`, `H.STORE.3`, `H.STORE.4`, `H.STORE.5`, `H.STORE.6`, `H.STORE.7`, `H.STORE.8` |
 | G.1 | `H.SCHED.1`, `H.SCHED.4`, `H.SCHED.5`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.SCHED.13`, `H.SCHED.14`, `H.SCHED.15` |
 | G.3 | `H.TRAP.9` |
@@ -145,7 +145,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.FAILSAFE | `H.DEV.6`, `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
-| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.OBJ.22`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
+| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.OBJ.22`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.SCHED.16`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
 | O.SCRUB | `H.MEM.6` |
 | O.VALIDATE | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.3`, `H.TRAP.5`, `H.TRAP.7`, `H.TRAP.11`, `H.TRAP.12`, `H.TRAP.13`, `H.TRAP.16` |
 | O.WXN | `H.MEM.4`, `H.MEM.5`, `H.MEM.10`, `H.MEM.13`, `H.MEM.18` |
@@ -236,6 +236,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.SCHED.13` | A switch channel_write_read's fast path makes without the run queue's pick shall leave every scheduling quantity as the pick would leave it, and shall be made only when the pick could choose nothing else: the task switched to asleep at home on this processor, nothing else waiting and no sleeper due. | RunQueue::hand_over equals enqueue, the rescale, remove_curr and pick_next field for field on 200,000 random queues (the ferrix-sched host test); a spinner beside the trips keeps its share, and an echo pinned to another processor never runs on the caller's (the `fastcase` line). | G.1, ASR-8 | `src/kernel/src/object/fast_path_check.rs::run`, `src/lib/kernel/sched/src/tests.rs::hand_over_is_the_general_sequence` | reached | host test | host test |
 | `H.SCHED.14` | A task's processor time shall be reported split into the time it spent in the kernel and the rest, and the switches away from it shall be counted as voluntary or involuntary. | Programs spinning in user mode are charged under a quarter of their runtime as kernel time, programs making system calls or taking page faults over half; tasks yielding to each other count involuntary switches, a task that sleeps voluntary ones (the `vtime` lines). | G.1 | `src/kernel/src/syscall/check.rs::run_thread_times` | reached | not reached | not reached |
 | `H.SCHED.15` | A task that is not running shall be reportable from outside it, from what its entry from user mode and its switch away already saved, without the report faulting, changing the task, or adding work to any path the task takes. | A thread blocked in a system call reads back its call's number and arguments, a blocked kernel task's chain ends in the chain it recorded itself, and a freed stack and a device window read as nothing (docs/DEBUG.md section 1.3). | G.1 | `src/kernel/src/sched/inspect_check.rs::chain_is_the_tasks_own`, `src/kernel/src/sched/inspect_check.rs::a_freed_stack_reads_as_nothing`, `src/kernel/src/sched/inspect_check.rs::a_device_window_reads_as_nothing`, `tools/common/xtask/src/procfs.rs::test_procfs` | reached | xtask gate | xtask gate |
+| `H.SCHED.16` | A task of one job, woken while a ring-3 load of another job saturates every processor, shall be running within the phase's bound in tools/common/xtask/src/stall.rs for that load: what the load's requests make the kernel do on its behalf -- holding a lock, freeing what its tasks left -- shall not keep other jobs' tasks off every processor (finding F-95). | cargo xtask test-stall: 10 ms sleepers, one pinned to each processor and one free, beside each load phase, within the phase's bound in tools/common/xtask/src/stall.rs in a run whose quiet phases are within theirs; until a phase is asserted there, it is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which. | ASR-8, O.QUOTA | *baselined* | — | — | — |
 
 ### Interrupts (`H.IRQ`)
 
@@ -670,6 +671,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.21` | The scheduler shall stop the machine (FX-0503), naming the site that last raised the count, when it is asked to switch with its processor's count raised, and when a release finds the count, or for a lock the locks held, already at zero, having put the word back first; a release that brings the count to zero shall make the decision an interrupt deferred, if interrupts are on. A wait's last look that blocks lowers its hand raise with interrupts masked, inside its own switch, and leaves the decision to that switch. | The release's cover test refuses a word whose count, or for a lock whose locks held, is zero, and passes one that covers the release (the stage-5 checks). That held-zero test is the detector L.sched.20's stress relies on; the negative controls of a task that sleeps holding a lock and of a release with nothing raised each stop the boot on FX-0503's message. The blocking last look's own lowering has two controls of its own: one that lowers nothing stops the boot on FX-0503's switch with the count raised, and one that lowers twice on its release whose count was already zero. | H.SCHED.1, H.SCHED.2 | `sched::preempt::preempt_enable`, `sched::preempt::Preempt::enable`, `sched::preempt::enable_from`, `sched::preempt::unmatched`, `sched::preempt::covers`, `sched::preempt::decide_deferred`, `sched::schedule_from`, `sched::preempt::enable_for_switch`, `sched::switch_from`, `sched::block_ending_hold` | `src/kernel/src/sched/preempt_check.rs::an_underflow_is_refused` | reached | not built | not built |
 | `L.sched.22` | may_block shall answer true only when the scheduler runs, interrupts are on, a task is running, and the count of the processor it runs on, read so that the processor and its count are one processor's (one instruction on x86-64, interrupts masked on Arm), is zero. | A task holding nothing may block; holding a preemption-disabling lock, or with the count raised by hand, it may not; once it lets go it may again (the stage-5 checks). | H.SCHED.1 | `sched::may_block`, `sched::preempt::count_here`, `arch::percpu::this_cpu_read`, `arch::x86_64::cpu::read_gs_at` | `src/kernel/src/sched/preempt_check.rs::may_block_reads_its_own_count` | reached | not built | not built |
 | `L.sched.23` | A try_lock of a preemption-disabling lock that fails shall leave its processor's count and locks held as it found them, and with interrupts masked shall not switch; one that succeeds shall raise both by one until its guard drops; and ferrix_sync::SpinLock::try_lock_manually shall take no ticket when it fails. | With a lock held, a try_lock of it with interrupts on and with them masked leaves the count and the locks held unchanged and, masked, the task's switches unchanged; a try_lock_manually of a held plain lock fails and changes neither; a successful try_lock raises both by one until it drops (the stage-5 checks, and ferrix-sync's host test of try_lock_manually). | H.SCHED.1 | `sched::preempt::Preempt::disable`, `sched::preempt::Preempt::enable` | `src/kernel/src/sched/preempt_check.rs::a_failed_try_leaves_the_count` | reached | not built | not built |
+| `L.sched.95` | A task that ends while more than REAP_AHEAD dead tasks wait for the reaper, and that may block, shall first free up to REAP_BATCH of them, so that the dead waiting never number more than REAP_AHEAD plus one for each processor ending a task, whether or not any processor runs its idle task. | At boot (the stage-5 checks): with every other processor held by a spinner and this one kept busy, 256 tasks made and ended here one after another leave at most REAP_AHEAD plus the processors' count waiting; with the ending task's reap removed, the count grows past it and the check fails. | H.SCHED.16 | `sched::reap_ahead`, `sched::exit_counted` | `src/kernel/src/sched/check.rs::the_dead_are_freed_with_no_processor_idle` | not reached | not reached | not reached |
 
 ### RunningTask
 
@@ -2231,6 +2233,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |
 | `src/kernel/src/sched/check.rs::sleeping` | kernel | L.x86_64.91 |
+| `src/kernel/src/sched/check.rs::the_dead_are_freed_with_no_processor_idle` | kernel | L.sched.95 |
 | `src/kernel/src/sched/deadline_check.rs::run` | kernel | L.sched.92 |
 | `src/kernel/src/sched/inspect_check.rs::a_device_window_reads_as_nothing` | kernel | L.sched.89, H.SCHED.15 |
 | `src/kernel/src/sched/inspect_check.rs::a_freed_stack_reads_as_nothing` | kernel | L.sched.88, H.SCHED.15 |

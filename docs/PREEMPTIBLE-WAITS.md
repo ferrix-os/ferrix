@@ -423,9 +423,205 @@ phase stays at 4 s, and the evidence that A is what helps rests on
 forkbig and `/proc` (190 s to 0.6 s, `baseh1` against `protoh1`), not on
 fault. k1 will be read on those phases.
 
+**Landing 2: the reaper, alone (L.sched.95).** Building A and gating it
+showed what the long stalls were:
+- A pool run of A (`swl-stall-3`, 36cabb0e2) still had forkbig's canaries
+  12.6 s late, together.
+- The cause: a dead task is freed only by an idle task, and under the
+  saturating load none is idle. The dead piled up with their address
+  spaces, and every object those spaces mapped -- the program's own file
+  among them -- kept them all in its mapper list, which every fork and exit
+  walks under the object's lock.
+- §8.4's fix, with every lock still on its ticket: locally (A switched
+  off, `row-k1row-1`, `row-k1row-2`, load 48-57, diagnosis only) forkbig
+  191-210 ms, bigunmap 15-21 ms, every short phase 77 ms or less; in the
+  gate pool (`f95r-stall` on de7ff1f5c, load 36-52) every canary but one
+  within 333 ms in forkbig, against develop's 1.4-6.4 s on all of them --
+  but the unpinned canary waited 4.1 s there, and bigunmap's canaries
+  260 ms together. Both stay open: an unpinned task left waiting is also
+  run E's signature on the box (3.18 s).
+- With A as well (`row-AR-1`): forkbig 170 ms, but bigunmap 790 ms once.
+
+So the reaper lands first and alone. A stays on `bugfix/sched-wake-latency`
+until it is measured against reaper-only and shows its own benefit. Its
+verdict, OK IF (L1)-(L12), ledger 4053, stands for that landing.
+
+**As built:**
+- The reap is made by a task that ends, not, as §8.4 first said, by a spawn.
+  A spawn may be made under its process's sleeping locks (`fork_memory`
+  holds the heap's and the layout's), and a reaped task's drop may end a
+  process whose teardown takes such locks; a task that ends holds nothing.
+  `exit_counted` calls `reap_ahead` first: up to `REAP_BATCH` when more than
+  `REAP_AHEAD` (4 × REAP_BATCH) wait and `may_block` holds.
+- The boot check `the_dead_are_freed_with_no_processor_idle`: 256 tasks
+  ended with no processor idle, at most 65 dead waiting (bound 68). Its
+  control (the reap removed) is cited in the commit.
+- `test-stall` stays reporting: its asserting form is A's landing's.
+
 **Next:**
-- A, with its fairness bound, its controls k1, k2 and k-mask, and the
-  requirement ids reserved first.
+- A, re-measured against reaper-only, with its fairness bound and its
+  controls k1, k1-row, k2 and k-mask, if it shows a benefit of its own.
 - Then the atomicity addendum for D, and the reaper's feedback: zombies are
   reaped only by idle tasks, so under a saturating load they pile up and
   lengthen `detach`'s hold.
+
+## 8. Addendum for landing 3: the holds cut, and the reaper (for review before code)
+
+Condition (19) asks, for each operation batched, what another thread,
+another process, reclaim or truncation can see at a batch boundary, and
+what is checked again once the lock is taken back. Condition (20) asks
+that a boundary be a point where the processor's count returns to zero:
+every spin lock let go, the space's included. P is
+`HOLD_PAGES = 512` (2 MiB of pages) per hold. The time per batch is
+measured on each architecture by the rows and stated in MEMORY-AND-TIMING
+§2.2y, with no WCET claimed (AoU-4). The requirement is H.SCHED.17, with
+one L.user id each below.
+
+### 8.1 `unmap`'s takedown (`AddressSpace::unmap`, phase one): L.user.163
+
+**Today.** One hold of the space's lock takes the range out of the map
+(`map.remove`), takes every translation in it out of the tables
+(`take_down` → `mm::unmap_in`), and reads the shootdown's set.
+
+**Batched.**
+1. Under the `layout` sleeping lock, which `munmap`, `mmap`, `mprotect`,
+   `mremap`, `brk` and shm all take first, one hold of the space's lock
+   takes the range out of the map and notes what it removed. This step is
+   O(regions), as today.
+2. The removed range's translations then come down P pages a hold, with the
+   space's lock let go between holds.
+3. The last hold reads the shootdown's set, `begin_shootdown` as today.
+4. The shootdown and `give_back` follow, as today.
+
+**What another party sees at a boundary:**
+- *Another thread of the process, faulting in the range:* no region, so
+  `NotMapped`, the segmentation fault. That is what it sees after the
+  unmap today, and what Linux gives after the VMA is gone.
+- *Another thread touching a page still translated in a later batch:* the
+  page, as it would have just before the unmap. Its frame is not given
+  back until after the shootdown, so it is never another owner's.
+- *Another thread mapping in the range:* it cannot. It needs `layout`, which
+  the unmap holds throughout.
+- *Another process:* none of this space's translations are its.
+- **Reclaim or truncation of a file's page mapped in the range** (`Vmo::retire`
+  → `forget_runs`): this is the case that rules out batching for
+  file-backed regions. The region is already out of the map, so
+  `forget_in` finds no mapping and does not take the translation down,
+  and the frame could be given back while a later batch still translates
+  it. **So only a region whose backing is anonymous and owned by this
+  space alone is batched**: `Backing::Anonymous`, an object of strong
+  count one in this space's table, decided in step 1. File and device
+  regions keep today's single hold. An anonymous owned object is reached
+  by no reclaim and no truncation, and a frame it shares after fork is
+  held by its own object's reference until `give_back`.
+
+**Checked again after each retake:** nothing of the map, since `layout` is
+held. Each batch walks only the tables of its own pages, and a table
+emptied by an earlier batch is already on the shootdown's list.
+
+### 8.2 `give_back` and `Vmo::take_range`: L.user.164
+
+**Today.** One hold of the space's lock decides which ranges' objects this
+space holds alone (`strong_count == 1`) and takes all their pages out
+(`take_range`, under the object's pages lock as well). The pages are
+retired after the lock is let go.
+
+**Batched.** For each freed range, P pages a hold:
+1. Take the space's lock.
+2. Decide again whether the object is still this space's alone.
+3. Take that batch's pages out (`take_range(first + k·P, P)`).
+4. Let go.
+5. Retire them, which costs no shootdown: this space's translations are
+   down, and no other space holds the object.
+
+**What another party sees at a boundary:**
+- *A fork between two batches:* it cannot happen, since fork takes `layout`
+  (`process.rs` 778/849).
+- *Another space taking a reference to the object between batches:* by
+  `vmo_map` or a shm attach (shm takes `layout`; `vmo_map` of an object by
+  handle does not). The per-batch decision then finds a strong count above
+  one, and the rest of the range is left to the object, as today's "not
+  this unmapper's to take".
+- *A fault through another region naming the same object:* the range was
+  removed from the map, so no region of this space names those pages.
+
+**Checked again after each retake:** the strong count, and the object's
+presence in the table (`owner`).
+
+### 8.3 `Vmo::fork` and `AddressSpace::fork`: an exception, not batched
+
+Condition (20) offers two ways for fork:
+- let the space's lock go between batches, with the parent write-protected
+  first and its faults sleeping;
+- or state fork as an exception with a bound proportional to its pages.
+
+This addendum takes the second. The first needs a fault that sleeps on the
+space, which is option B's sleeping lock, the customer's question (C1).
+
+So:
+- fork keeps one hold of the space's lock and of each object's pages lock,
+  and MEMORY-AND-TIMING §2.2y states its bound: proportional to the
+  committed pages and regions of the parent (157-391 ms a GiB under KVM,
+  measured on the box by the BACKLOG row).
+- After landing 2, the hold stops only the forking task's own processor and
+  the nested waiters on that object's lock. Any other waiter waits with its
+  processor free.
+- forkbig stays at the long bound in `test-stall`.
+- F-95 cannot close on this addendum alone: (23) wants every phase at the
+  short bound. The fork exception goes to the customer with B.
+
+### 8.4 The reaper on a busy processor: L.sched.95
+
+**What was seen** (`baseh1`, forkbig at 15 s on develop): 128 s and 190 s
+of raised count on two processors.
+- A dead task's stack, and the address space its last reference holds, are
+  freed only by an idle task (`idle_loop` → `reap_batch`). No processor ran
+  its idle task under the saturating load, so zombies, and the spaces they
+  held, piled up.
+- Every live space mapping the program's file stays in that file object's
+  mapper list. So `Vmo::detach`'s `retain` over the list, and `attach`'s,
+  grew with the zombies. Every fork and exit walked thousands of entries
+  under the object's lock.
+
+**The change.** (As built, a task that ends pays, not a spawn: §7.) A task being made pays for the dead first:
+- `spawn_task` reaps up to `REAP_BATCH` zombies before it makes the new
+  task, when the list holds more than `REAP_AHEAD` (4 × REAP_BATCH) and the
+  caller may block (`may_block`: count zero, interrupts on).
+- It uses the same `reap_up_to` the idle task does, preemptible, so the cost
+  falls on the program that makes and ends tasks, not on the machine.
+- The zombie list then stays under REAP_AHEAD plus one batch per processor
+  making tasks at once, and the mapper lists stay as long as the live
+  spaces.
+
+**What it changes:**
+- `fork`, `clone` and a kernel spawn sometimes free up to 16 stacks first,
+  under one shootdown, as the idle task does.
+- `spawn_task` is called from the check code and from `prepare_user` /
+  `spawn_user`. A caller that holds a lock or has interrupts masked does not
+  reap.
+
+**Check:** a boot check makes 4 × REAP_AHEAD tasks that exit at once on a
+processor kept busy, with no idle time on any processor (a spinner per
+processor), and requires the zombie count never to exceed REAP_AHEAD + N ×
+REAP_BATCH. Control: with the spawn's reap removed, the count grows past it.
+
+`detach`'s `retain` is not changed. With the reaper fixed, its length is the
+number of live spaces mapping the object, bounded by the processes
+running. That is an O(n) hold with n the live mappers, as today. It goes
+into §2.2y's census.
+
+### 8.5 Requirements and controls for landing 3
+
+H.SCHED.17: "A kernel spin-lock hold that a ring-3 request causes in the
+operations listed is at most P pages of work: unmap's takedown of an
+anonymous range it owns alone, and the giving back of its pages. Fork is
+the stated exception." Under it:
+
+| id | what | control (`gate.sh control`) |
+|---|---|---|
+| L.user.163 | takedown batched | `HOLD_PAGES = u64::MAX` (k3): bigunmap over its short bound |
+| L.user.164 | give_back batched | the per-batch strong-count recheck removed: a boot check of an object mapped into a second space between batches FAILED |
+| L.sched.95 | the reaper on a busy processor | the spawn's reap removed: the zombie-bound boot check FAILED |
+
+Once landed, bigunmap moves to the short bound. forkbig stays at the long
+bound, as the stated exception.

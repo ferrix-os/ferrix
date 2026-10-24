@@ -28,7 +28,8 @@
 //!   late measured the host, not the kernel.
 //!
 //! Each phase prints, per canary, `stall: <phase> <canary> wakes <n> p50 <ms>
-//! p99 <ms> max <ms>`, then `stall: <phase> worst <ms>`; the program ends
+//! p99 <ms> max <ms>`, then `stall: <phase> worst <ms>` and `stall: <phase>
+//! second <ms>`, the second latest canary's latest wake; the program ends
 //! with `stall: done` and status 0. Whether a phase's worst is within its
 //! bound is the row's to say (`tools/common/xtask/src/stall.rs`), so that the
 //! bounds live in one place.
@@ -368,7 +369,7 @@ fn ms(us: u64) -> String {
 /// Print phase `phase`'s lines, the worst canary last.
 fn report(shared: &Shared, phase: usize, cpus: usize) {
     let name = PHASES.get(phase.wrapping_sub(1)).copied().unwrap_or("?");
-    let mut worst = 0;
+    let mut maxes = Vec::new();
     for canary in 0..=cpus {
         let Some(stats) = shared
             .stats
@@ -394,7 +395,7 @@ fn report(shared: &Shared, phase: usize, cpus: usize) {
                 .map_or(0, u64::from)
         };
         let max = stats.max_us.load(Ordering::Relaxed);
-        worst = worst.max(max);
+        maxes.push(max);
         let who = if canary < cpus {
             format!("cpu{canary}")
         } else {
@@ -407,7 +408,15 @@ fn report(shared: &Shared, phase: usize, cpus: usize) {
             ms(max)
         );
     }
+    maxes.sort_unstable_by(|a, b| b.cmp(a));
+    let worst = maxes.first().copied().unwrap_or(0);
+    // The second latest of the canaries' latest wakes: what every canary but
+    // one was kept waiting at least once. A host that stops one virtual
+    // processor delays the canary pinned there; a kernel that keeps every
+    // processor from its sleepers delays them all.
+    let second = maxes.get(1).copied().unwrap_or(worst);
     println!("stall: {name} worst {} ms", ms(worst));
+    println!("stall: {name} second {} ms", ms(second));
     let _ = std::io::stdout().flush();
 }
 

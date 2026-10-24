@@ -584,6 +584,65 @@ pub(super) fn note_missing_slot() {
 /// so a batch is not memory held either.
 const REAP_BATCH: usize = 16;
 
+/// Dead tasks past which a task being made frees a batch of them first
+/// ([`reap_ahead`]).
+pub(super) const REAP_AHEAD: usize = 4 * REAP_BATCH;
+
+/// Free up to [`REAP_BATCH`] dead tasks, here and now, if more than
+/// [`REAP_AHEAD`] wait and this task may block: what a task that ends does
+/// first, before it is dead itself (finding F-95,
+/// `docs/PREEMPTIBLE-WAITS.md` §8.4, L.sched.95).
+///
+/// **Why the one that ends pays.** Only an idle task reaps otherwise, and a load that
+/// keeps every processor busy leaves none idle: under a forking program the
+/// dead piled up by the thousand, each holding its address space and so its
+/// place in every mapper list of every object the space mapped, and every
+/// `detach` walked them all under the object's lock -- 128 and 190 s of raised
+/// count on two processors (`baseh1`). The list is one for the machine, so an
+/// ending task may free another job's dead, and a reaped task's drop may be
+/// the last reference to another job's process and address space, whose
+/// teardown, growing with that space's pages, then runs here and is charged
+/// to the ending task's job: one exit pays for at most [`REAP_BATCH`] such
+/// teardowns, under one shootdown, preemptible as [`reap`] is (a residual
+/// MEMORY-AND-TIMING §2.2y states; reaping a job's own dead first is
+/// backlog p2-157). At the exit, not
+/// at a spawn: a task ends holding nothing, where a spawn may be made under
+/// its process's sleeping locks (`fork_memory` holds the heap's and the
+/// layout's), and a reaped task's drop may end a process whose own teardown
+/// takes such locks. The ways into [`exit_counted`]: [`exit`], when a kernel
+/// task's entry returns to [`task_start`], with nothing of the entry's left
+/// on the frame; and [`exit_leaving`], from `end_thread`
+/// (`syscall/process.rs`) for every Linux thread's end -- `exit`,
+/// `exit_group`, a kill, a program that never entered -- which opens
+/// interrupts and has dropped its thread and process references before it
+/// calls in, from the way back to user mode, where a task holds no kernel
+/// lock, spin or sleeping. A dead task of the ending task's own process is
+/// never the last reference to its space or process: the ending task's own
+/// `Task`, still alive here, holds both. The tree keeps no count of sleeping
+/// locks held, so this is argued, not checked at run time.
+///
+/// Only where [`may_block`] holds: freeing a stack waits for every other
+/// processor to answer a shootdown, which a caller holding a lock or with
+/// interrupts masked may not wait for. Both ways in reach it with
+/// interrupts on and nothing held, so every task end has `may_block` true; a
+/// kernel task whose entry returned with a lock still held would stop the
+/// machine at its next switch anyway (FX-0503). Each ending task adds one
+/// dead task and frees up to [`REAP_BATCH`] while more than [`REAP_AHEAD`]
+/// wait, so the list stays under `REAP_AHEAD` plus one for each processor
+/// ending a task at the same moment.
+fn reap_ahead() {
+    if !may_block() || ZOMBIES.lock().len() <= REAP_AHEAD {
+        return;
+    }
+    let count = reap_up_to(REAP_BATCH);
+    note_reaped(count);
+}
+
+/// How many dead tasks wait for the reaper, for a check.
+pub(super) fn zombies_waiting() -> usize {
+    ZOMBIES.lock().len()
+}
+
 /// Switches away from a dead task that a run queue still counted as queued.
 ///
 /// Counted in [`finish_switch`], the one place that sees every dead task
@@ -1606,6 +1665,8 @@ pub(crate) fn exit() -> ! {
 
 /// [`exit`] and [`exit_leaving`]: `leaving` when [`begin_leaving`] counted it.
 fn exit_counted(leaving: bool) -> ! {
+    // The dead before this one, if too many wait: see `reap_ahead`.
+    reap_ahead();
     // **Nothing switches it out while this frame holds the task.** From the
     // moment it is marked dead, a switch takes it off its queue for good and
     // the reaper frees this stack, with whatever it held still held: the

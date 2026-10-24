@@ -1708,7 +1708,26 @@ that grows with what the program asked for:
 | the shootdown turn, held for the answers | `smp::SHOOTING` | the slowest answer (FM-10) | 344-1,107 ms, host-starved processors not ruled out |
 
 Each such hold is a stop of its own processor and, through the wait above,
-of every processor whose task waits for the lock. The fix, its bounds and
+of every processor whose task waits for the lock.
+
+**The dead, freed on a busy machine** (L.sched.95, since 2026-10-24). A dead
+task's stack, and the address space and mapper entries its last reference
+holds, used to be freed only by an idle task. Under a load that leaves no
+processor idle the dead piled up by the thousand, and `Vmo::detach`'s and
+`attach`'s `retain` over an object's mapper list -- O(live mappers), with
+every unreaped task's space still live -- grew with them: 128 and 190 s of
+raised count on two processors under a forking program. Now a task that
+ends while more than `REAP_AHEAD` (64) dead wait, and that may block, frees
+up to `REAP_BATCH` (16) of them first, under at most one shootdown,
+preemptible as `sched::reap` is. The list is the machine's, so the ending
+task may free another job's dead, and a reaped task's drop may be the last
+reference to another job's process and address space: that teardown, which
+grows with the space's pages, then runs in the ending task and is charged to
+its job. **A bounded residual:** one exit pays for at most `REAP_BATCH`
+other jobs' teardowns (per-job reaping is backlog p2-157). The dead waiting then stay at most `REAP_AHEAD` plus one for each
+processor ending a task at once, whether or not any processor is idle, and
+`retain`'s length is the live mappers, bounded by the job's task quota
+(F-35) and the machine's. The fix, its bounds and
 its checks are `docs/PREEMPTIBLE-WAITS.md`'s, under the consultant's
 verdict of ledger line 3950.
 

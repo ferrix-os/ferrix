@@ -354,6 +354,20 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::preempt::Preempt::disable",
                 "sched::preempt::Preempt::enable");
         }
+        requirement <'L.sched.95'> theDeadAreFreedWithNoProcessorIdle : ItemLowLevel {
+            attribute :>> statement = "A task that ends while more than REAP_AHEAD dead
+                tasks wait for the reaper, and that may block, shall first free up to
+                REAP_BATCH of them, so that the dead waiting never number more than
+                REAP_AHEAD plus one for each processor ending a task, whether or not
+                any processor runs its idle task.";
+            attribute :>> criterion = "At boot (the stage-5 checks): with every other
+                processor held by a spinner and this one kept busy, 256 tasks made
+                and ended here one after another leave at most REAP_AHEAD plus the
+                processors' count waiting; with the ending task's reap removed, the
+                count grows past it and the check fails.";
+            attribute :>> parent = "H.SCHED.16";
+            attribute :>> unit = ("sched::reap_ahead", "sched::exit_counted");
+        }
     }
 
     package RunningTask {

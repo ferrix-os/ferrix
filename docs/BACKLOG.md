@@ -289,6 +289,7 @@ gates that fail on `main` itself, not flakes, and come before any row below.
 | x86-64 stage 10 panics with FX-1012 (G3, `iommu/check.rs`) in about 1 of 27 boots, a console pump race that also made xtask's SIGTERM "QEMU terminating" failures. xtask half fixed on `po6/red`. Next: kernel half, G3 and R5 must not race the pump; consultant's OK first. [more](backlog/red.md#red-012) | open (N0g's, interrupt remapping) |
 | **Fixed 2026-10-22 on `red013`, unlanded.** `test-compositor --arch x86_64 --accel kvm` failed at the display-driver restart since e06b456b9 (several opens of `card0`): `killgpu`'s `held` took a failed open of `card0` for the compositor holding it, and the open now succeeds. `held` now asks whether one of `hyprix`'s descriptors is the current `card0` (`-ef` through `/proc/<pid>/fd`); test-compositor and check PASSED [more](backlog/red.md#red-013) | red013 |
 | **Fixed 2026-10-22 on `red-restart`, unlanded.** `test-restart --arch x86_64 --accel kvm` failed at the display driver since e06b456b9: `/bin/blank` now runs the DRM master check first, which reads a line on stdin, and as the test's background job that read stopped it (`SIGTTIN`) before it showed a buffer. The test now starts it with stdin from `/dev/null`; test-restart, test-compositor, test-boot and check PASSED, and test-restart again on a `main` holding the port_wait change (699ec9834 as e7977992d) [more](backlog/red.md#red-014) | red-restart |
+| **Open (2026-10-25, sched-wake-latency).** `test-compositor --arch x86_64 --accel kvm` fails on develop itself: b5a59302d failed 3 of 3 gate runs (`logs/queue/f95r3-compositor-base.log`, `f95r6-comp-base1.log`, `f95r6-comp-base2.log`), at the hypridle step ("the guest never said [Running hyprctl dispatch dpms on, ...]") twice and once with "the demo was not drawn by gpu: llvmpipe". F-95's reaper branch fails the same ways, plus the hyprlock takeover once. Owner: the desktop (hypridle/tole). | — |
 
 ## Verification audit: claims without evidence
 
@@ -451,7 +452,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 * **`trap::ReturnPath` as a static trait seam** (the consultant, ledger 3934 (b)): the personality's return-path hooks, a struct of function pointers the load registers in the core at run time, would follow `docs/KERNEL-CRATES.md` §6.3's link-time binding. It is a core interface whose `fault_signal` changes under 3570 (2), so it comes after `CrashHook` and that change, alone, with its own design review. Open.
 
-181 items: performance, hardening, certification follow-ups the
+182 items: performance, hardening, certification follow-ups the
 consultant asked to ride with a later landing, and compatibility gaps that
 block nothing now. They are in [backlog/p2.md](backlog/p2.md). Read it
 when you take P2 work, or before touching an area to see what is owed there

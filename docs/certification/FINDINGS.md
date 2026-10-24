@@ -3097,6 +3097,21 @@ Annex D, IEC 61508-3 7.4.2.8-9), FM-8 and MEMORY-AND-TIMING §2.2's
 "preemptible kernel". F-89's box hang may share the cause; that is not
 shown.
 
+**What the second landing closed** (2026-10-24, L.sched.95): the dead are
+freed while no processor is idle. They were freed only by idle tasks, so
+under the saturating load they piled up, and the object mapper lists every
+fork and exit walks under a spin lock grew with them; that, more than the
+lock waits, was the multi-second stall `test-stall`'s forkbig phase shows
+(every canary late together by 1.4-6.4 s on develop in `row-dev1` and
+`row-dev2`, and by 12.6 s with the lock waits made preemptible, gate run
+`swl-stall-3` on 36cabb0e2). With this fix and every lock on its ticket
+(gate run `f95r-stall` on de7ff1f5c) all canaries but one were within
+333 ms -- but the unpinned one waited 4.1 s, and bigunmap's canaries 260 ms
+together, both still open: an unpinned task left waiting is the box's own
+signature too (3.18 s in run E). The lock waits
+themselves (`docs/PREEMPTIBLE-WAITS.md` §3 A) are measured again against
+this before anything of them lands.
+
 *Closes when* `test-stall` asserts every phase, fails on develop and passes
 with the fix, its controls k1 and k3 read FIRED, MEMORY-AND-TIMING states
 the wake-to-run and per-operation hold bounds with FM-8 and AoU-4 checked
