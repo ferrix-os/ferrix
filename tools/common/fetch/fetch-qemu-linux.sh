@@ -10,6 +10,9 @@
 # delivered. The patch (0002) implements CFI/CFIS and blocks those messages
 # with fault reason 0x25. Its own qtest runs here after every build. xtask
 # refuses an x86-64 boot on a QEMU whose `--version` lacks `(ferrix-cfi)`.
+# 0007 makes amd-iommu's event log readable as the specification lays it
+# out -- the address, the whole requester ID, RW, and refused interrupts
+# logged -- for the AMD-Vi row (docs/AMD-VI.md section 1.6).
 #
 # It is QEMU v10.2.1, the version Ubuntu's package has, from the release
 # tarball pinned by sha256, configured for x86-64 only, with the display,

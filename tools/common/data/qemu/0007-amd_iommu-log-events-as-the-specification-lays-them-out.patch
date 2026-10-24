@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SetZero <info@magical.rocks>
+Date: Sat, 24 Oct 2026 20:40:00 +0200
+Subject: [PATCH] hw/i386/amd_iommu: Log events as the specification lays
+ them out
+
+Ferrix's AMD-Vi driver reads the event log to tell a DMA access it
+provoked from one nobody did (docs/AMD-VI.md section 1.6), and 10.2.1's
+events cannot be read that way:
+
+* amdvi_setevent_bits builds its mask from the field's absolute start, so
+  for the address in the second quadword it shifts by 64: undefined, and
+  the built binary writes the address as 0.
+* An IO_PAGE_FAULT names the requester by its devfn alone: the bus is
+  dropped.
+* Every DMA page fault sets the I flag, which the specification keeps for
+  interrupt requests, and puts the access in bits 1:0 rather than RW.
+* A refused interrupt request logs nothing ("TODO: log the event").
+
+So the mask is built from the bit position within the quadword, the
+devid is the whole requester ID, a DMA fault sets RW for a write and
+not I, and a refused interrupt request is an IO_PAGE_FAULT with I set,
+naming the requester and the interrupt address.
+
+---
+--- a/hw/i386/amd_iommu.c	2026-10-24 20:23:34.651049968 +0200
++++ b/hw/i386/amd_iommu.c	2026-10-24 20:23:34.865561558 +0200
+@@ -275,7 +275,12 @@
+                                 int length)
+ {
+     int index = start / 64, bitpos = start % 64;
+-    uint64_t mask = MAKE_64BIT_MASK(start, length);
++    /*
++     * The field's mask within its own quadword: a mask built from `start`
++     * shifts by 64 or more for every field past the first quadword, which
++     * is undefined and loses the event's address.
++     */
++    uint64_t mask = MAKE_64BIT_MASK(bitpos, length);
+     buffer[index] &= ~mask;
+     buffer[index] |= (value << bitpos) & mask;
+ }
+@@ -304,7 +309,12 @@
+ {
+     uint64_t evt[2];
+ 
+-    info |= AMDVI_EVENT_IOPF_I | AMDVI_EVENT_IOPF;
++    /*
++     * A DMA request's fault: the I flag is for interrupt requests alone,
++     * and the access is the RW flag (bit 5), as the specification lays the
++     * IO_PAGE_FAULT event out.
++     */
++    info = ((info & AMDVI_PERM_WRITE) ? AMDVI_EVENT_IOPF_RW : 0) | AMDVI_EVENT_IOPF;
+     amdvi_encode_event(evt, devid, addr, info);
+     amdvi_log_event(s, evt);
+     pci_word_test_and_set_mask(s->pci->dev.config + PCI_STATUS,
+@@ -1796,7 +1806,9 @@
+     if (fetch_ret < 0 || !IOMMU_PTE_PRESENT(pte) ||
+         perms != (perms & amdvi_get_perms(pte))) {
+ 
+-        amdvi_page_fault(as->iommu_state, as->devfn, addr, perms);
++        amdvi_page_fault(as->iommu_state,
++                         PCI_BUILD_BDF(pci_bus_num(as->bus), as->devfn),
++                         addr, perms);
+         trace_amdvi_page_fault(addr);
+         return;
+     }
+@@ -2226,7 +2238,15 @@
+ 
+     ret = amdvi_int_remap_msi(opaque, &from, &to, sid);
+     if (ret < 0) {
+-        /* TODO: log the event using IOMMU log event interface */
++        /*
++         * A refused interrupt request is an IO_PAGE_FAULT with the I flag,
++         * naming the requester and the interrupt address.
++         */
++        uint64_t evt[2];
++
++        amdvi_encode_event(evt, sid, from.address,
++                           AMDVI_EVENT_IOPF | AMDVI_EVENT_IOPF_I);
++        amdvi_log_event(opaque, evt);
+         error_report_once("failed to remap interrupt from devid 0x%x", sid);
+         return MEMTX_ERROR;
+     }
+--- a/hw/i386/amd_iommu.h	2026-10-24 20:23:46.546374300 +0200
++++ b/hw/i386/amd_iommu.h	2026-10-24 20:23:46.549553138 +0200
+@@ -150,6 +150,7 @@
+ #define AMDVI_EVENT_ILLEGAL_DEVTAB_ENTRY  (0x1U << 12)
+ #define AMDVI_EVENT_IOPF                  (0x2U << 12)
+ #define   AMDVI_EVENT_IOPF_I              (1U << 3)
++#define   AMDVI_EVENT_IOPF_RW             (1U << 5)
+ #define AMDVI_EVENT_DEV_TAB_HW_ERROR      (0x3U << 12)
+ #define AMDVI_EVENT_PAGE_TAB_HW_ERROR     (0x4U << 12)
+ #define AMDVI_EVENT_ILLEGAL_COMMAND_ERROR (0x5U << 12)

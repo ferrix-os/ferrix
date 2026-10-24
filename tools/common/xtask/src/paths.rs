@@ -410,9 +410,11 @@ pub(crate) fn which_all(program: &str) -> Vec<PathBuf> {
     found
 }
 
-/// `~/.local/share/ferrix/qemu`, where the fetch scripts install a QEMU with
-/// the fixes in `tools/common/data/qemu/`, looked in before `PATH`. Taken
-/// whenever it is there, on any host: a machine that has it asked for it.
+/// `~/.local/share/ferrix/qemu` -- or `$FERRIX_QEMU_DIR`, the fetch
+/// script's own override, for a build tried beside the shared one -- where
+/// the fetch scripts install a QEMU with the fixes in
+/// `tools/common/data/qemu/`, looked in before `PATH`. Taken whenever it is
+/// there, on any host: a machine that has it asked for it.
 ///
 /// * `tools/common/fetch/fetch-qemu-linux.sh` installs an x86-64-only build
 ///   under `bin/`, whose intel-iommu blocks compatibility-format interrupts
@@ -424,6 +426,11 @@ pub(crate) fn which_all(program: &str) -> Vec<PathBuf> {
 ///   `virtio-gpu-gl-pci`, so every `--gl` boot there needs this one
 ///   (`docs/GPU.md` §3.12).
 fn own_qemu() -> Option<PathBuf> {
+    // The fetch script's own override, for a build kept beside the shared
+    // one while it is tried (tools/common/fetch/fetch-qemu-linux.sh).
+    if let Some(dir) = std::env::var_os("FERRIX_QEMU_DIR").map(PathBuf::from) {
+        return Some(dir.join("bin")).filter(|bin| bin.is_dir());
+    }
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     let dir = PathBuf::from(home)
         .join(".local")
