@@ -35,6 +35,16 @@ pub struct Options {
     /// a card whose driver timed out does: what a test of the compositor
     /// riding a stalled driver out asks for. Not a command-line option.
     pub refuse_flips: u32,
+    /// How long each of a headless screen's flips takes, made on a thread
+    /// of their own as a card's are (`crate::flush::FlipThread`): the Intel
+    /// driver's card0 answers in its vertical blank, 7 to 17 ms later. What
+    /// a test of the loop going on while a flip is out asks for. Not a
+    /// command-line option.
+    pub flip_takes: Option<std::time::Duration>,
+    /// How long a headless screen's first flip hangs before it says
+    /// `ETIMEDOUT`, as a stuck driver's does after the kernel's five
+    /// seconds. Not a command-line option.
+    pub flip_hangs: Option<std::time::Duration>,
     /// Move every animation on by this many milliseconds a drawn frame
     /// rather than by the wall clock's: what a test of an animation's
     /// frames asks for, so that a slide is the same frames however busy
@@ -90,6 +100,8 @@ impl Default for Options {
             instance: None,
             renderer: Renderer::Auto,
             refuse_flips: 0,
+            flip_takes: None,
+            flip_hangs: None,
             animation_step: None,
             state_dir: None,
             settings: None,

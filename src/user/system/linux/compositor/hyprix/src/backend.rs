@@ -81,6 +81,30 @@ pub trait Backend: core::fmt::Debug {
     /// Whatever the screen said.
     fn present(&mut self, drawn: &compositor_render::Damage) -> io::Result<()>;
 
+    /// Whether a frame [`Backend::present`] handed over is still on its way
+    /// to the screen: its answer is [`Backend::landed`]'s, and until then
+    /// nothing is drawn into this backend -- its buffer may be the one the
+    /// card is still copying or about to show.
+    fn in_flight(&self) -> bool {
+        false
+    }
+
+    /// A descriptor that becomes readable when the frame in flight has
+    /// landed, for the compositor's wait: `None` while none is.
+    fn flight_fd(&self) -> Option<std::os::fd::RawFd> {
+        None
+    }
+
+    /// A frame handed over that has landed: what the screen said, and when
+    /// it was handed over and answered. What follows a shown frame is done
+    /// by then: the next buffer to draw into, the client's buffer the card
+    /// shows. `None` while the frame is still on its way, and when none is
+    /// left to tell of -- asked until then, since a frame the backend had
+    /// to wait for itself is told of here too.
+    fn landed(&mut self) -> Option<Landed> {
+        None
+    }
+
     /// Show what was drawn on the GPU, from now on, rather than this
     /// backend's own buffer: `fd` names the buffer object the renderer drew
     /// into, which the card is given and points its screen at.
@@ -292,6 +316,30 @@ pub trait Backend: core::fmt::Debug {
     }
 }
 
+/// A frame that has landed ([`Backend::landed`]).
+#[derive(Debug)]
+pub struct Landed {
+    /// What the screen said: `Ok` for a frame shown. A card whose driver
+    /// went has been lost by now ([`Backend::lost`]), and says `Ok`.
+    pub result: io::Result<()>,
+    /// When the frame was handed to the screen.
+    pub began: std::time::Instant,
+    /// When the screen answered: on a card that answers in its vertical
+    /// blank, the blank.
+    pub ended: std::time::Instant,
+}
+
+impl Landed {
+    /// A frame's answer as the flipping thread gave it.
+    fn from(answer: crate::flush::Answer, result: io::Result<()>) -> Self {
+        Self {
+            result,
+            began: answer.began,
+            ended: answer.ended,
+        }
+    }
+}
+
 /// A card with no screen running on it: its last monitor was unplugged.
 /// It stays open, and is listened to, so that a monitor plugged back in is
 /// found -- with no screen on the card nothing else read its events, and
@@ -350,6 +398,21 @@ pub struct Headless {
     /// What it is called: `HEADLESS-1`, or the name `output create
     /// headless` gave it.
     name: Option<String>,
+    /// A card's flips, played: how long each takes on a flipping thread,
+    /// and how long the first hangs before it times out.
+    slow: Option<SlowFlips>,
+}
+
+/// A headless screen whose flips are a slow card's ([`Headless::slow`]).
+#[derive(Debug)]
+struct SlowFlips {
+    /// How long a flip takes.
+    takes: std::time::Duration,
+    /// How long the next flip hangs before it says `ETIMEDOUT`, as a stuck
+    /// driver's does after the kernel's five seconds.
+    hangs: Option<std::time::Duration>,
+    /// The thread they are made on, from the first.
+    thread: Option<crate::flush::FlipThread>,
 }
 
 impl Headless {
@@ -364,7 +427,27 @@ impl Headless {
             frames: 0,
             refusing: 0,
             name: None,
+            slow: None,
         }
+    }
+
+    /// The same screen, its flips a slow card's: each takes `takes` on a
+    /// thread of its own, as the Intel driver's card0 answers in its
+    /// vertical blank; and the first hangs `hangs`, if given, then times
+    /// out, as a stuck driver's does. What a test of the loop going on
+    /// while a flip is out asks for. Neither, and it flips as it always did.
+    #[must_use]
+    pub fn slow(
+        mut self,
+        takes: Option<std::time::Duration>,
+        hangs: Option<std::time::Duration>,
+    ) -> Self {
+        self.slow = (takes.is_some() || hangs.is_some()).then(|| SlowFlips {
+            takes: takes.unwrap_or_default(),
+            hangs,
+            thread: None,
+        });
+        self
     }
 
     /// Call it `name`, as `hyprctl output create headless NAME` does.
@@ -412,8 +495,53 @@ impl Backend for Headless {
                 "the card did not answer in time",
             ));
         }
+        if let Some(slow) = self.slow.as_mut() {
+            let hangs = slow.hangs.take();
+            let takes = slow.takes;
+            let flip = move || {
+                std::thread::sleep(hangs.unwrap_or(takes));
+                match hangs {
+                    Some(_) => Err(io::Error::from_raw_os_error(libc::ETIMEDOUT)),
+                    None => Ok(()),
+                }
+            };
+            if !crate::knobs::sync_flip() && slow.thread.is_none() {
+                slow.thread = crate::flush::FlipThread::start().ok();
+            }
+            match slow.thread.as_mut() {
+                Some(thread) if !crate::knobs::sync_flip() => {
+                    thread.send(Box::new(flip));
+                    return Ok(());
+                }
+                _ => flip()?,
+            }
+        }
         self.frames = self.frames.saturating_add(1);
         Ok(())
+    }
+
+    fn in_flight(&self) -> bool {
+        self.slow
+            .as_ref()
+            .and_then(|slow| slow.thread.as_ref())
+            .is_some_and(crate::flush::FlipThread::out)
+    }
+
+    fn flight_fd(&self) -> Option<std::os::fd::RawFd> {
+        self.slow
+            .as_ref()
+            .and_then(|slow| slow.thread.as_ref())
+            .filter(|thread| thread.out())
+            .map(crate::flush::FlipThread::raw_fd)
+    }
+
+    fn landed(&mut self) -> Option<Landed> {
+        let mut answer = self.slow.as_mut()?.thread.as_mut()?.answer()?;
+        let result = core::mem::replace(&mut answer.result, Ok(()));
+        if result.is_ok() {
+            self.frames = self.frames.saturating_add(1);
+        }
+        Some(Landed::from(answer, result))
     }
 
     fn describe(&self) -> String {
@@ -538,6 +666,80 @@ pub struct Drm {
     /// Why the card would not take a client's buffer, once it would not:
     /// asked no more, since every frame would be refused the same way.
     direct_refused: Option<String>,
+    /// The thread page flips and dirty flushes are made on, and the
+    /// descriptor they are made with, made at the first
+    /// (`crate::flush::FlipThread`): the loop does not wait for the card.
+    flipper: Option<(
+        crate::flush::FlipThread,
+        std::sync::Arc<compositor_drm::Flusher>,
+    )>,
+    /// What the frame out on it does once the card has shown it.
+    flight: Option<Flight>,
+    /// A frame's answer taken before the loop asked for it -- a change of
+    /// mode waits for the frame out first -- kept for [`Backend::landed`].
+    settled: Option<Landed>,
+    /// What the cursor plane was asked for while a frame was out, made once
+    /// it lands: the kernel holds the card for a flip until its driver
+    /// answers, and a cursor call meanwhile would wait that out on the
+    /// loop.
+    cursor_due: Option<CursorDue>,
+}
+
+/// What a frame handed to the card does once it is shown.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy)]
+enum Flight {
+    /// One of the screen's own buffers: drawn into next is the other, when
+    /// `flipped`; and the client's buffer shown before it is shown no more,
+    /// when `leaving_direct`.
+    Own { flipped: bool, leaving_direct: bool },
+    /// The client's buffer this handle names.
+    Direct(u32),
+}
+
+/// The call that shows a frame, made on the flipping thread or on the loop.
+#[cfg(target_os = "linux")]
+enum Call {
+    /// `PAGE_FLIP` to this framebuffer on this CRTC.
+    Flip { crtc: u32, framebuffer: u32 },
+    /// `DIRTYFB` of these rectangles of this framebuffer.
+    Dirty {
+        framebuffer: u32,
+        clips: Vec<(u32, u32, u32, u32)>,
+    },
+}
+
+#[cfg(target_os = "linux")]
+impl Call {
+    /// Make it on `card`, the flipping thread's descriptor.
+    fn on(self, card: &compositor_drm::Flusher) -> io::Result<()> {
+        match self {
+            Self::Flip { crtc, framebuffer } => card.page_flip(crtc, framebuffer),
+            Self::Dirty { framebuffer, clips } => card.dirty(framebuffer, &clips),
+        }
+    }
+}
+
+/// A framebuffer by its id, for a call made on the loop.
+#[cfg(target_os = "linux")]
+struct Framebuffer(u32);
+
+#[cfg(target_os = "linux")]
+impl compositor_drm::Shown for Framebuffer {
+    fn framebuffer(&self) -> u32 {
+        self.0
+    }
+}
+
+/// A cursor plane call put off until the frame out has landed.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy)]
+enum CursorDue {
+    /// Show the image drawn into the next of the plane's buffers, its
+    /// hotspot at the first and its corner at the second.
+    Image((i32, i32), (i32, i32)),
+    /// Move the image shown to here.
+    Move((i32, i32)),
 }
 
 /// A client's buffer the card can show: its framebuffer, and its pixels
@@ -735,6 +937,10 @@ impl Drm {
             direct_next: None,
             direct_shown: None,
             direct_refused: None,
+            flipper: None,
+            flight: None,
+            settled: None,
+            cursor_due: None,
         })
     }
 
@@ -742,11 +948,15 @@ impl Drm {
     /// card does not show, or all of them when `all` -- once the card shows
     /// a buffer of this screen's own, since a framebuffer that goes takes
     /// the screen with it.
+    ///
+    /// Never the one a frame out is flipping to: the card may show it yet.
     fn let_go_direct(&mut self, all: bool) {
         let shown = if all { None } else { self.direct_shown };
+        let flying = self.flying_direct();
         let mut kept = Vec::new();
         for direct in self.direct.drain(..) {
-            if Some(direct.imported.handle()) == shown {
+            let handle = Some(direct.imported.handle());
+            if handle == shown || handle == flying {
                 kept.push(direct);
             } else {
                 let _ = direct.imported.release(&self.card);
@@ -765,17 +975,122 @@ impl Drm {
         else {
             return Err(io::Error::other("a client's buffer that is not kept"));
         };
-        match self.card.page_flip(&self.plan, &direct.imported) {
+        let call = Call::Flip {
+            crtc: self.plan.crtc,
+            framebuffer: compositor_drm::Shown::framebuffer(&direct.imported),
+        };
+        self.send(Flight::Direct(handle), call)
+    }
+
+    /// The handle of the client's buffer a frame out is flipping to.
+    fn flying_direct(&self) -> Option<u32> {
+        match self.flight {
+            Some(Flight::Direct(handle)) => Some(handle),
+            _ => None,
+        }
+    }
+
+    /// Show a frame by `call`, and do what `flight` says once it is shown:
+    /// on the flipping thread, returning at once, unless
+    /// `HYPRIX_SYNC_FLIP=1` or the thread cannot be had, when the call is
+    /// made here and waited for as it always was.
+    fn send(&mut self, flight: Flight, call: Call) -> io::Result<()> {
+        // Never two out: the gate in the loop draws nothing while one is,
+        // and anything else that shows a frame waits for it first.
+        self.settle();
+        if !crate::knobs::sync_flip() && self.flipper.is_none() {
+            self.flipper = self.card.flusher().ok().and_then(|card| {
+                crate::flush::FlipThread::start()
+                    .ok()
+                    .map(|thread| (thread, std::sync::Arc::new(card)))
+            });
+        }
+        match self.flipper.as_mut() {
+            Some((thread, card)) if !crate::knobs::sync_flip() => {
+                let card = std::sync::Arc::clone(card);
+                thread.send(Box::new(move || call.on(&card)));
+                self.flight = Some(flight);
+                Ok(())
+            }
+            _ => {
+                let result = match call {
+                    Call::Flip { framebuffer, .. } => {
+                        self.card.page_flip(&self.plan, &Framebuffer(framebuffer))
+                    }
+                    Call::Dirty { framebuffer, clips } => {
+                        self.card.dirty(&Framebuffer(framebuffer), &clips)
+                    }
+                };
+                self.land(flight, result)
+            }
+        }
+    }
+
+    /// What follows a frame the card answered `result` for: the buffer
+    /// drawn into next, the client's buffer it shows, the frame counted --
+    /// or, for a card whose driver went, the screen lost, which is no
+    /// error of the frame's.
+    fn land(&mut self, flight: Flight, result: io::Result<()>) -> io::Result<()> {
+        match result {
             Ok(()) => {
-                self.direct_shown = Some(handle);
+                match flight {
+                    Flight::Own {
+                        flipped,
+                        leaving_direct,
+                    } => {
+                        if leaving_direct {
+                            self.direct_shown = None;
+                        }
+                        if flipped {
+                            self.back = 1 - self.back;
+                        }
+                    }
+                    Flight::Direct(handle) => self.direct_shown = Some(handle),
+                }
                 self.frames = self.frames.saturating_add(1);
                 Ok(())
             }
+            // The driver died. The compositor, its clients and the frame
+            // just drawn are all still good; only the card is not, until
+            // one is started again.
             Err(error) if gone(&error) => {
                 self.lose();
                 Ok(())
             }
             Err(error) => Err(error),
+        }
+    }
+
+    /// The frame out, landed, if its answer has come; or waited for when
+    /// `wait`. Then the cursor plane's calls put off meanwhile are made.
+    fn take_flight(&mut self, wait: bool) -> Option<Landed> {
+        let flight = self.flight?;
+        let (thread, _) = self.flipper.as_mut()?;
+        let mut answer = if wait {
+            thread.wait()?
+        } else {
+            thread.answer()?
+        };
+        self.flight = None;
+        let result = core::mem::replace(&mut answer.result, Ok(()));
+        let result = self.land(flight, result);
+        if self.lost.is_none()
+            && let Some(due) = self.cursor_due.take()
+        {
+            let _ = match due {
+                CursorDue::Image(hot, at) => self.show_cursor(hot, at),
+                CursorDue::Move(at) => self.move_cursor(at),
+            };
+        }
+        Some(Landed::from(answer, result))
+    }
+
+    /// Wait for the frame out, if one is, before a change that cannot be
+    /// made under it -- a new mode, other buffers, another frame -- and
+    /// keep its answer for the loop.
+    fn settle(&mut self) {
+        if let Some(landed) = self.take_flight(true) {
+            self.settled = Some(landed);
         }
     }
 
@@ -828,10 +1143,34 @@ impl Drm {
         result
     }
 
+    /// Show the image drawn into the cursor plane's next buffer, its
+    /// hotspot at `hot` and its corner at `at`.
+    fn show_cursor(&mut self, hot: (i32, i32), at: (i32, i32)) -> io::Result<()> {
+        let shown = self.cursors.get(self.next_cursor).and_then(Option::as_ref);
+        let result = self.card.set_cursor(&self.plan, shown, hot, at);
+        // The card now shows this one, and the call returned once it did:
+        // the other is no longer read, and takes the next image.
+        if result.is_ok() {
+            self.next_cursor ^= 1;
+        }
+        match result {
+            Err(error) if gone(&error) => {
+                self.lose();
+                Ok(())
+            }
+            result => self.refused(result),
+        }
+    }
+
     /// Note that the card went away, for [`Backend::recover`] to look for it
     /// from the next frame on.
     fn lose(&mut self) {
         self.flushing = None;
+        // A flip still out on the card that went answers nobody: the
+        // thread is let go of, and ends when its call does.
+        self.flipper = None;
+        self.flight = None;
+        self.cursor_due = None;
         // The card's handles went with its driver's open.
         self.direct.clear();
         self.direct_next = None;
@@ -954,13 +1293,18 @@ impl Backend for Drm {
                 return Err(error);
             }
         };
-        // Room for it: the longest unused that the card is not showing.
+        // Room for it: the longest unused that the card is not showing, nor
+        // about to.
+        let flying = self.flying_direct();
         while self.direct.len() >= DIRECT_KEPT {
             let Some(at) = self
                 .direct
                 .iter()
                 .enumerate()
-                .filter(|(_, direct)| Some(direct.imported.handle()) != self.direct_shown)
+                .filter(|(_, direct)| {
+                    let handle = Some(direct.imported.handle());
+                    handle != self.direct_shown && handle != flying
+                })
                 .min_by_key(|(_, direct)| direct.used)
                 .map(|(at, _)| at)
             else {
@@ -990,6 +1334,7 @@ impl Backend for Drm {
         height: u32,
         pitch: u32,
     ) -> io::Result<()> {
+        self.settle();
         let imported = compositor_drm::Imported::new(&self.card, fd, width, height, pitch)?;
         // Shown the long way round, as the first frame is: a page flip needs
         // a mode already set, and the mode is set to another buffer now.
@@ -1006,6 +1351,7 @@ impl Backend for Drm {
         if self.adopted.is_none() {
             return Ok(());
         }
+        self.settle();
         // The buffer the next frame is not drawn into: one buffer copied
         // into is the only one, and of two flipped between, the front.
         let front = if self.copied {
@@ -1051,24 +1397,22 @@ impl Backend for Drm {
                 to.copy_from_slice(from);
             }
         }
-        let shown = self.cursors.get(self.next_cursor).and_then(Option::as_ref);
-        let result = self.card.set_cursor(&self.plan, shown, hot, at);
-        // The card now shows this one, and the call returned once it did:
-        // the other is no longer read, and takes the next image.
-        if result.is_ok() {
-            self.next_cursor ^= 1;
+        if self.flight.is_some() {
+            self.cursor_due = Some(CursorDue::Image(hot, at));
+            return Ok(());
         }
-        match result {
-            Err(error) if gone(&error) => {
-                self.lose();
-                Ok(())
-            }
-            result => self.refused(result),
-        }
+        self.show_cursor(hot, at)
     }
 
     fn move_cursor(&mut self, at: (i32, i32)) -> io::Result<()> {
         if self.lost.is_some() {
+            return Ok(());
+        }
+        if self.flight.is_some() {
+            self.cursor_due = Some(match self.cursor_due {
+                Some(CursorDue::Image(hot, _)) => CursorDue::Image(hot, at),
+                _ => CursorDue::Move(at),
+            });
             return Ok(());
         }
         match self.card.move_cursor(&self.plan, at) {
@@ -1084,6 +1428,9 @@ impl Backend for Drm {
         if self.lost.is_some() {
             return Ok(());
         }
+        // The loop draws nothing while a frame is out; anything else waits
+        // for it here, since the buffer about to be shown may be its.
+        self.settle();
         // A client's own buffer, shown directly: the card copies it, or
         // points its plane at it, and nothing of this screen's buffers is
         // read.
@@ -1097,21 +1444,15 @@ impl Backend for Drm {
             let Some(buffer) = self.buffers.get(self.back) else {
                 return Ok(());
             };
-            return match self.card.page_flip(&self.plan, buffer) {
-                Ok(()) => {
-                    self.direct_shown = None;
-                    if !self.copied {
-                        self.back = 1 - self.back;
-                    }
-                    self.frames = self.frames.saturating_add(1);
-                    Ok(())
-                }
-                Err(error) if gone(&error) => {
-                    self.lose();
-                    Ok(())
-                }
-                Err(error) => Err(error),
+            let call = Call::Flip {
+                crtc: self.plan.crtc,
+                framebuffer: buffer.framebuffer,
             };
+            let flight = Flight::Own {
+                flipped: !self.copied,
+                leaving_direct: true,
+            };
+            return self.send(flight, call);
         }
         if !self.direct.is_empty()
             && self
@@ -1132,76 +1473,79 @@ impl Backend for Drm {
                 None => return Ok(()),
             },
         };
-        let buffer = shown;
+        let framebuffer = shown.framebuffer();
         let flipped = !(self.copied || self.adopted.is_some());
-        let result = if !flipped {
-            let edge = |value: i64| u32::try_from(value.max(0)).unwrap_or(u32::MAX);
-            let clips: Vec<(u32, u32, u32, u32)> = drawn
-                .rects()
-                .iter()
-                .map(|rect| {
-                    (
-                        edge(rect.x),
-                        edge(rect.y),
-                        edge(rect.width),
-                        edge(rect.height),
-                    )
-                })
-                .collect();
-            // A frame that drew nothing has nothing to send, and an empty
-            // list would say "all of it".
-            if clips.is_empty() {
-                Ok(())
-            } else if self.adopted.is_some() {
-                // What the GPU drew is flushed by a thread of its own, the
-                // loop going on meanwhile (`crate::flush`): the drawing and
-                // the flush reach the host in order on one queue, so the
-                // next frame's drawing cannot tear this one. Not a copied
-                // dumb buffer, which the next frame is drawn into while the
-                // host may still be copying it.
-                if self.flushing.is_none() {
-                    self.flushing = self
-                        .card
-                        .flusher()
-                        .and_then(crate::flush::FlushThread::start)
-                        .ok();
-                }
-                match self.flushing.as_ref() {
-                    Some(thread) if thread.gone() => {
-                        Err(io::Error::from_raw_os_error(libc::ENODEV))
-                    }
-                    Some(thread) => {
-                        thread.flush(buffer.framebuffer(), &clips);
-                        match thread.refused() {
-                            Some(refusal) => Err(io::Error::other(refusal)),
-                            None => Ok(()),
-                        }
-                    }
-                    None => self.card.dirty(buffer, &clips),
-                }
-            } else {
-                self.card.dirty(buffer, &clips)
-            }
-        } else {
-            self.card.page_flip(&self.plan, buffer)
+        let flight = Flight::Own {
+            flipped,
+            leaving_direct: false,
         };
-        match result {
-            Ok(()) => {
-                if flipped {
-                    self.back = 1 - self.back;
-                }
-                self.frames = self.frames.saturating_add(1);
-                Ok(())
-            }
-            // The driver died. The compositor, its clients and the frame just
-            // drawn are all still good; only the card is not, until one is
-            // started again.
-            Err(error) if gone(&error) => {
-                self.lose();
-                Ok(())
-            }
-            Err(error) => Err(error),
+        if flipped {
+            let call = Call::Flip {
+                crtc: self.plan.crtc,
+                framebuffer,
+            };
+            return self.send(flight, call);
         }
+        let edge = |value: i64| u32::try_from(value.max(0)).unwrap_or(u32::MAX);
+        let clips: Vec<(u32, u32, u32, u32)> = drawn
+            .rects()
+            .iter()
+            .map(|rect| {
+                (
+                    edge(rect.x),
+                    edge(rect.y),
+                    edge(rect.width),
+                    edge(rect.height),
+                )
+            })
+            .collect();
+        // A frame that drew nothing has nothing to send, and an empty
+        // list would say "all of it".
+        if clips.is_empty() {
+            return self.land(flight, Ok(()));
+        }
+        if self.adopted.is_none() {
+            // A copied dumb buffer: the next frame is drawn into it, so it
+            // is a frame out like a flip until the host has copied it.
+            return self.send(flight, Call::Dirty { framebuffer, clips });
+        }
+        // What the GPU drew is flushed by a thread of its own, the loop
+        // going on meanwhile and nothing waiting for it (`crate::flush`):
+        // the drawing and the flush reach the host in order on one queue,
+        // so the next frame's drawing cannot tear this one.
+        if self.flushing.is_none() {
+            self.flushing = self
+                .card
+                .flusher()
+                .and_then(crate::flush::FlushThread::start)
+                .ok();
+        }
+        let result = match self.flushing.as_ref() {
+            Some(thread) if thread.gone() => Err(io::Error::from_raw_os_error(libc::ENODEV)),
+            Some(thread) => {
+                thread.flush(framebuffer, &clips);
+                match thread.refused() {
+                    Some(refusal) => Err(io::Error::other(refusal)),
+                    None => Ok(()),
+                }
+            }
+            None => self.card.dirty(&Framebuffer(framebuffer), &clips),
+        };
+        self.land(flight, result)
+    }
+
+    fn in_flight(&self) -> bool {
+        self.flight.is_some()
+    }
+
+    fn flight_fd(&self) -> Option<std::os::fd::RawFd> {
+        self.flight
+            .and(self.flipper.as_ref())
+            .map(|(thread, _)| thread.raw_fd())
+    }
+
+    fn landed(&mut self) -> Option<Landed> {
+        self.settled.take().or_else(|| self.take_flight(false))
     }
 
     fn lost(&self) -> bool {
@@ -1273,6 +1617,8 @@ impl Backend for Drm {
             self.plan.modes = plan.modes;
             return Ok(());
         }
+        // The frame out flips to a buffer about to be let go of.
+        self.settle();
         let first = compositor_drm::Dumb::new(&self.card, width, height)?;
         let second = compositor_drm::Dumb::new(&self.card, width, height)?;
         // Shown before anything old is let go: the card never points at a

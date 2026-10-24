@@ -347,7 +347,7 @@ fn run(shared: &Shared) {
 }
 
 /// A non-blocking pipe: its reading end and its writing end.
-fn pipe() -> Option<(OwnedFd, OwnedFd)> {
+pub(crate) fn pipe() -> Option<(OwnedFd, OwnedFd)> {
     let mut ends = [0; 2];
     #[expect(
         unsafe_code,
@@ -375,7 +375,7 @@ fn own(raw: RawFd) -> OwnedFd {
 
 /// Wake the loop: one byte down the pipe. A full pipe has a wake in it
 /// already.
-fn poke(wake: &OwnedFd) {
+pub(crate) fn poke(wake: &OwnedFd) {
     let byte = [1u8];
     #[expect(
         unsafe_code,
@@ -387,7 +387,7 @@ fn poke(wake: &OwnedFd) {
 }
 
 /// Empty the pipe, which is only ever wakes.
-fn drain(pipe: &OwnedFd) {
+pub(crate) fn drain(pipe: &OwnedFd) {
     let mut bytes = [0u8; 64];
     loop {
         #[expect(

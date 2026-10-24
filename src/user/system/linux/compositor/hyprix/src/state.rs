@@ -551,7 +551,9 @@ impl<'r> Compositor<'r> {
         }
         let backends: Vec<Box<dyn Backend>> = match options.headless {
             Some((width, height)) => vec![Box::new(
-                Headless::new(width, height).refusing(options.refuse_flips),
+                Headless::new(width, height)
+                    .refusing(options.refuse_flips)
+                    .slow(options.flip_takes, options.flip_hangs),
             )],
             None => open_screens(&rules)?,
         };
@@ -741,6 +743,7 @@ impl<'r> Compositor<'r> {
             return Ok(false);
         }
         self.notice_lost_cards();
+        self.land_frames();
         // The arrangement saved for the monitors there at start, once.
         if !self.restored {
             self.restored = true;
@@ -2664,6 +2667,9 @@ impl<'r> Compositor<'r> {
         // A held frame waits for the hold, not for the screen's refresh.
         let frame_wait = match self.held_until {
             Some(until) => Some(until.saturating_duration_since(Instant::now())),
+            // A frame still on its way to a card: the next is drawn once it
+            // has landed, which wakes the wait (`Backend::flight_fd`).
+            None if self.frames_out() => None,
             None => (self.owed || animating || self.settling)
                 .then(|| self.pace.until(Instant::now()))
                 .flatten(),
@@ -2788,6 +2794,12 @@ impl<'r> Compositor<'r> {
             self.screens
                 .iter()
                 .filter_map(|screen| screen.backend.raw_fd()),
+        );
+        // A frame on its way to a card: readable once it has landed.
+        fds.extend(
+            self.screens
+                .iter()
+                .filter_map(|screen| screen.backend.flight_fd()),
         );
         // A card with no screen on it, for the monitor plugged back in.
         fds.extend(self.parked.iter().map(ParkedCard::raw_fd));

@@ -478,7 +478,7 @@ Read when the program starts. "Set" = the program sets it for its children.
 | `FERRIX_FONT_DIRS` | compositor-text | font directories first | none | admin |
 | `FERRIX_GAME_MODE`, `FERRIX_GAME_MODE_APP` | set by launchers for a game-mode app; **read by nothing yet** | | | (output) |
 | `FERRIX_SEAT_FD`, `FERRIX_LOCK_FD`, `FERRIX_SESSION_TOKEN` | set by sessiond for hyprix | | | internal |
-| `HYPRIX_DIRECT_SCANOUT=0`, `HYPRIX_INPUT_THREAD=0` | hyprix | turn off direct scanout / the input thread | on | developer |
+| `HYPRIX_DIRECT_SCANOUT=0`, `HYPRIX_INPUT_THREAD=0`, `HYPRIX_SYNC_FLIP=1` | hyprix | turn off direct scanout / the input thread / the flipping thread (flips waited for on the loop) | on | developer |
 | `HYPRIX_INPUT_TRACE`, `HYPRIX_INPUT_AGES`, `HYPRIX_HOLD_FRAME_MS` | hyprix | traces, frame hold | off | test-only |
 | `SHELL` | term (`/bin/zinc`), getty (`/bin/sh`) | the shell started | | user-facing (Default shell) |
 | `TERM` | init (`vt220` for TTY services), login, su | | | — |

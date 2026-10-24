@@ -100,7 +100,12 @@ impl Compositor<'_> {
         {
             self.owed = true;
         }
+        // And not while a frame is still on its way to a card: its buffer
+        // is the card's until it lands, as a Wayland compositor draws after
+        // the flip's event. What happens meanwhile -- the pointer, a key, a
+        // client -- is kept, and drawn in the first frame after.
         if (self.owed || self.tally.drawn == 0 || animating || self.settling)
+            && !self.frames_out()
             && self.pace.due(Instant::now(), refresh_ns(&self.screens))
         {
             self.draw(now, animating, overlay_on, popups)?;
@@ -292,29 +297,21 @@ impl Compositor<'_> {
         if self.animations.busy(millis) {
             self.settling = true;
         }
-        // And only now each screen's flip, which waits for the host to show
-        // the frame: on QEMU's GL display that is the window's next repaint,
-        // on VNC a read of the whole screen back. Clients told their frame
-        // was done before it draw their next one meanwhile; told after it,
-        // a video's frames missed one compositor frame in three.
-        // A card that refused or timed out is a frame lost, not a screen:
-        // a driver that has gone is the backend's to find, and one that is
-        // only slow answers the next frame.
-        let period = refresh_ns(&self.screens);
+        // And only now each screen's flip, which the card answers once it
+        // has shown the frame: on QEMU's GL display at the window's next
+        // repaint, on VNC after a read of the whole screen back, on the
+        // Intel driver's card0 in the next vertical blank. Clients told
+        // their frame was done before it draw their next one meanwhile;
+        // told after it, a video's frames missed one compositor frame in
+        // three. A card's flip goes to a thread of its own and is answered
+        // through the wait (`land_frames`); one made here -- a headless
+        // screen, `HYPRIX_SYNC_FLIP=1` -- is answered at once.
         for (which, damage) in std::mem::take(&mut drew.flips) {
             if let Some(screen) = self.screens.get_mut(which) {
                 let began = Instant::now();
                 let flipped = crate::frame::flip(screen.backend.as_mut(), &damage);
-                // The first screen's blank paces the frames (`crate::pace`).
-                if which == 0 && flipped.is_ok() {
-                    self.pace.flipped(began, Instant::now(), period);
-                }
-                match flipped {
-                    Ok(()) => screen.said_dropped = false,
-                    Err(why) => {
-                        screen.drop_frame(&why, self.report);
-                        self.held_until = Some(Instant::now() + super::HOLD);
-                    }
+                if flipped.is_err() || !screen.backend.in_flight() {
+                    self.answered(which, flipped, began, Instant::now());
                 }
             }
         }
@@ -914,6 +911,65 @@ impl Compositor<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Whether a frame is still on its way to any screen's card: nothing is
+    /// drawn until it has landed.
+    pub(super) fn frames_out(&self) -> bool {
+        self.screens.iter().any(|screen| screen.backend.in_flight())
+    }
+
+    /// Take the answers of the frames that have landed since the last pass
+    /// (`Backend::landed`), as if each flip had returned just now.
+    pub(super) fn land_frames(&mut self) {
+        for which in 0..self.screens.len() {
+            while let Some(landed) = self
+                .screens
+                .get_mut(which)
+                .and_then(|screen| screen.backend.landed())
+            {
+                let flipped = landed.result.map_err(|error| error.to_string());
+                self.answered(which, flipped, landed.began, landed.ended);
+                // A card whose driver went under the frame: the screen is
+                // lost, and the frames that look for it are owed.
+                if let Some(screen) = self.screens.get_mut(which)
+                    && screen.backend.lost()
+                {
+                    screen.say_gone(self.report);
+                    self.owed = true;
+                }
+            }
+        }
+    }
+
+    /// What follows the card's answer to a frame on the screen at `which`,
+    /// handed over at `began` and answered at `ended`.
+    ///
+    /// The first screen's blank paces the frames (`crate::pace`). A card
+    /// that refused or timed out is a frame lost, not a screen: a driver
+    /// that has gone is the backend's to find, and one that is only slow
+    /// answers the next frame.
+    fn answered(
+        &mut self,
+        which: usize,
+        flipped: Result<(), String>,
+        began: Instant,
+        ended: Instant,
+    ) {
+        let period = refresh_ns(&self.screens);
+        let Some(screen) = self.screens.get_mut(which) else {
+            return;
+        };
+        if which == 0 && flipped.is_ok() {
+            self.pace.flipped(began, ended, period);
+        }
+        match flipped {
+            Ok(()) => screen.said_dropped = false,
+            Err(why) => {
+                screen.drop_frame(&why, self.report);
+                self.held_until = Some(Instant::now() + super::HOLD);
+            }
+        }
     }
 
     /// Count a frame that took `took` and drew what `drew` says, and say
