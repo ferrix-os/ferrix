@@ -185,6 +185,29 @@ struct Machine {
     devices: String,
     /// The volume's file in [`vm_dir`]: `--everything`'s is its own, kept.
     volume: &'static str,
+    /// `--nazuna-layout` ([`Layout::Nazuna`]): the boot display is an
+    /// emulated card's, not the 3060's, as nazuna's is its AMD iGPU's.
+    layout: Layout,
+}
+
+/// Which card the firmware boots on: the domain's display layout.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// No display but the 3060, whose option ROM is not run: OVMF draws
+    /// nowhere, and the kernel has no boot framebuffer.
+    Card,
+    /// nazuna's (`--nazuna-layout`): an emulated card (`bochs`) is the
+    /// primary display, so OVMF's GOP framebuffer, the kernel's console and
+    /// `efifb` are on it -- seen over VNC on the host's loopback, or with
+    /// `virsh screenshot` -- as nazuna's are on its iGPU (`0e:00.0`,
+    /// `boot_vga` 1). `rom`: the 3060's option ROM runs too
+    /// (`FERRIX_NAZUNA_ROM=1`), as AMI may run every card's GOP, which
+    /// shows whether the boot framebuffer stays the emulated card's and
+    /// none of the 3060's BAR1 is withheld.
+    Nazuna {
+        /// Whether the 3060's option ROM runs.
+        rom: bool,
+    },
 }
 
 /// `run-nvidia`'s machine: the card, the disks and the serial port alone.
@@ -193,6 +216,7 @@ const GATE_MACHINE: Machine = Machine {
     vcpus: 2,
     devices: String::new(),
     volume: VOLUME,
+    layout: Layout::Card,
 };
 
 /// The NVIDIA volume's file in [`vm_dir`].
@@ -300,11 +324,11 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
     <iommu model='intel'>
       <driver intremap='on' caching_mode='on' eim='off' aw_bits='48'/>
     </iommu>
-    <video><model type='none'/></video>
+{video}
     <memballoon model='none'/>
 {devices}    <hostdev mode='subsystem' type='pci' managed='no'>
       <source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source>
-      <rom bar='off'/>
+      <rom bar='{rom}'/>
     </hostdev>
   </devices>
   <qemu:commandline>
@@ -314,6 +338,17 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
 </domain>
 ",
         shared = SHARED.join(", "),
+        video = match machine.layout {
+            Layout::Card => "    <video><model type='none'/></video>".to_owned(),
+            Layout::Nazuna { .. } => "    <video><model type='bochs' vram='16384' primary='yes'/></video>\n    \
+                 <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>"
+                .to_owned(),
+        },
+        rom = if machine.layout == (Layout::Nazuna { rom: true }) {
+            "on"
+        } else {
+            "off"
+        },
         memory = machine.memory,
         vcpus = machine.vcpus,
         cputune = cputune(machine.vcpus),
@@ -1042,6 +1077,13 @@ pub(crate) fn run_desktop(image: &Path, args: &Args) -> Result<()> {
             VOLUME
         },
         vcpus: 8,
+        layout: if args.nazuna_layout {
+            Layout::Nazuna {
+                rom: std::env::var_os("FERRIX_NAZUNA_ROM").is_some(),
+            }
+        } else {
+            Layout::Card
+        },
         devices: format!(
             "    <interface type='network'>\n\
              \x20     <mac address='{CARDVM_MAC}'/>\n\
@@ -1272,6 +1314,7 @@ mod tests {
                 vcpus: 8,
                 devices: String::new(),
                 volume: VOLUME,
+                layout: Layout::Card,
             },
         );
         for (open, close) in [("<cputune>", "</cputune>"), ("<cpu ", "</cpu>")] {
@@ -1289,5 +1332,30 @@ mod tests {
         assert!(xml.contains("<vcpupin vcpu='1' cpuset='18'/>"));
         assert!(!xml.contains("<vcpupin vcpu='2'"));
         assert!(xml.contains("<topology sockets='1' dies='1' cores='1' threads='2'/>"));
+    }
+    /// nazuna's layout puts the boot display on an emulated card, seen on
+    /// the host's loopback alone, and leaves the 3060's option ROM off
+    /// unless asked; the card's own layout has no display but the 3060.
+    #[test]
+    fn nazunas_layout_boots_on_an_emulated_card() {
+        let machine = |layout| Machine {
+            memory: MEMORY,
+            vcpus: 8,
+            devices: String::new(),
+            volume: VOLUME,
+            layout,
+        };
+        let card = domain_xml(Path::new("/vm"), &machine(Layout::Card));
+        assert!(card.contains("<video><model type='none'/></video>"));
+        assert!(!card.contains("<graphics"));
+        assert!(card.contains("<rom bar='off'/>"));
+        let nazuna = domain_xml(Path::new("/vm"), &machine(Layout::Nazuna { rom: false }));
+        assert!(nazuna.contains("<model type='bochs' vram='16384' primary='yes'/>"));
+        assert!(
+            nazuna.contains("<graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>")
+        );
+        assert!(nazuna.contains("<rom bar='off'/>"));
+        let rom = domain_xml(Path::new("/vm"), &machine(Layout::Nazuna { rom: true }));
+        assert!(rom.contains("<rom bar='on'/>"));
     }
 }

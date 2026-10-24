@@ -169,6 +169,12 @@ pub(crate) struct Args {
     /// nvrm drives the card through NVKMS, and Chrome renders on NVIDIA's
     /// Vulkan, on the volume's glibc. Sets `--chrome`.
     pub(crate) nvidia: bool,
+    /// `--nazuna-layout`: with `--nvidia`, the domain boots as nazuna does
+    /// on bare metal: an emulated card is the firmware's display and the
+    /// kernel's console (`ferrix.fbcon`), the 3060 is not, and
+    /// `FERRIX_NAZUNA_EFIFB=1` lends that display to `efifb` too
+    /// (`crate::nvidia`'s `Layout::Nazuna`).
+    pub(crate) nazuna_layout: bool,
     /// `--session`: `flash --compositor`'s desktop runs as the user
     /// `ferrix` through `sessiond`, as `run-compositor --everything`'s does
     /// (`crate::session`): `--config`'s dotfiles seed the home disk once,
@@ -609,6 +615,21 @@ const ROOT_FLAGS: [&str; 5] = [
     "--persistent",
 ];
 
+/// The flags [`Args::switch`] sets, each on its own.
+const SWITCHES: &[&str] = &[
+    "--chrome",
+    "--login",
+    "--nvidia",
+    "--update",
+    "--nvme",
+    "--i686",
+    "--slots",
+    "--steam-preinstall",
+    "--wine",
+    "--vtd-aw48",
+    "--nazuna-layout",
+];
+
 impl Args {
     /// `--everything`: the flags it stands for, set as if each were given,
     /// but for `--gl` beside a `--no-gl`, before or after it.
@@ -844,6 +865,7 @@ impl Args {
             "--steam-preinstall" => self.steam_preinstall = true,
             "--wine" => self.wine = true,
             "--vtd-aw48" => self.vtd_aw48 = true,
+            "--nazuna-layout" => self.nazuna_layout = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -882,8 +904,7 @@ impl Args {
                 "--net" => args.net = true,
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
-                "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" | "--i686"
-                | "--slots" | "--steam-preinstall" | "--wine" | "--vtd-aw48" => args.switch(&item),
+                flag if SWITCHES.contains(&flag) => args.switch(flag),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;
