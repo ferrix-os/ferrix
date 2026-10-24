@@ -162,6 +162,11 @@ pub struct ToplevelOptions {
     pub min_size: (u32, u32),
     /// `xdg_toplevel.set_max_size`, the same.
     pub max_size: (u32, u32),
+    /// Who draws the window's frame, said through `xdg-decoration` when the
+    /// compositor has it: `Some(true)` the program itself (its own title
+    /// bar), `Some(false)` the compositor; `None` says nothing, as a
+    /// program that binds no decoration protocol.
+    pub own_frame: Option<bool>,
 }
 
 /// A rectangle in a surface's logical pixels.

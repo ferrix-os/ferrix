@@ -1000,7 +1000,8 @@ impl<'r> Compositor<'r> {
                             client.set_repeat_info(self.fixed.repeat.0, self.fixed.repeat.1);
                             // Where hyprix draws title bars (a floating
                             // desktop), a client that draws its own frame
-                            // keeps it, and gets no second bar.
+                            // keeps it, and gets no second bar; kept in step
+                            // with the option each frame (`draw`).
                             client.set_honour_client_frames(
                                 self.config.int("hyprix:titlebars").unwrap_or(0) != 0,
                             );
@@ -2425,8 +2426,11 @@ impl<'r> Compositor<'r> {
     }
 
     /// The windows that get a title bar from the compositor: with
-    /// `hyprix:titlebars` on, each floating window, not fullscreen, whose
-    /// client asked for the compositor's frame.
+    /// `hyprix:titlebars` on, each floating window, not fullscreen, that
+    /// asked for the compositor's frame, or said nothing about it and draws
+    /// none of its own (no window geometry inside its buffer: a terminal, a
+    /// pattern client). One that asked to draw its own and was told yes
+    /// (Chrome) gets none, so it has one bar, not two.
     pub(crate) fn title_bars_wanted(&self) -> Vec<crate::titlebar::Wanted> {
         if self.config.int("hyprix:titlebars").unwrap_or(0) == 0 {
             return Vec::new();
@@ -2439,10 +2443,11 @@ impl<'r> Compositor<'r> {
                     .workspace_of(window)
                     .and_then(|workspace| self.state.fullscreen(workspace))
                     .is_some_and(|(full, _)| full == window);
-                if !self.state.is_floating(window)
-                    || fullscreen
-                    || !slot.client.wants_server_frame(toplevel)
-                {
+                let cropped = slot.client.toplevel(toplevel).is_some_and(|top| {
+                    crate::frame::window_crop(slot.client(), top.surface).is_some()
+                });
+                let framed = crate::titlebar::gets_a_bar(slot.client.frame_wish(toplevel), cropped);
+                if !self.state.is_floating(window) || fullscreen || !framed {
                     continue;
                 }
                 let title = slot

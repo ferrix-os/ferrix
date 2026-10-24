@@ -286,6 +286,11 @@ pub struct Client {
     /// This crate's own bindings, by interface name.
     bound: BTreeMap<&'static str, (ObjectId, u32)>,
     outputs: BTreeMap<OutputId, OutputState>,
+    /// The `zxdg_decoration_manager_v1`, once a window said who draws its
+    /// frame.
+    decorations: Option<ObjectId>,
+    /// Each window's `zxdg_toplevel_decoration_v1`, by its toplevel.
+    frames: BTreeMap<ObjectId, ObjectId>,
     next_output: u32,
     surfaces: BTreeMap<SurfaceId, SurfaceState>,
     next_surface: u32,
@@ -344,6 +349,8 @@ impl Client {
             globals: Vec::new(),
             bound: BTreeMap::new(),
             outputs: BTreeMap::new(),
+            decorations: None,
+            frames: BTreeMap::new(),
             next_output: 1,
             surfaces: BTreeMap::new(),
             next_surface: 1,
@@ -716,6 +723,7 @@ impl Client {
         // asks again on every pass of its loop while one fails, and on the
         // N150 box (2026-10-24) each one it left was another empty tile.
         if let Err(error) = self.dress_toplevel(surface, toplevel, options) {
+            self.drop_frame(toplevel);
             self.destroy_object(toplevel, xdg_toplevel::request::DESTROY);
             self.destroy_object(xdg, xdg_surface::request::DESTROY);
             self.destroy_object(surface, wl_surface::request::DESTROY);
@@ -773,7 +781,54 @@ impl Client {
         if options.min_size != (0, 0) || options.max_size != (0, 0) {
             send_size_limits(self, toplevel, options.min_size, options.max_size)?;
         }
+        if let Some(own) = options.own_frame {
+            self.say_frame(toplevel, own)?;
+        }
         self.send(surface, wl_surface::request::COMMIT, &[])
+    }
+
+    /// Say through `xdg-decoration` who draws `toplevel`'s frame, before its
+    /// first commit; nothing where the compositor has no decoration manager.
+    fn say_frame(&mut self, toplevel: ObjectId, own: bool) -> Result<(), Error> {
+        use compositor_protocol::xdg_decoration::{
+            self, zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
+        };
+        let manager = match self.decorations {
+            Some(manager) => manager,
+            None => match self.bind(&xdg_decoration::ZXDG_DECORATION_MANAGER_V1, 1, None) {
+                Ok((manager, _)) => {
+                    self.decorations = Some(manager);
+                    manager
+                }
+                Err(_) => return Ok(()),
+            },
+        };
+        let decoration = self.make(&xdg_decoration::ZXDG_TOPLEVEL_DECORATION_V1, 1, Role::Quiet);
+        let _ = self.frames.insert(toplevel, decoration);
+        self.send(
+            manager,
+            zxdg_decoration_manager_v1::request::GET_TOPLEVEL_DECORATION,
+            &[Arg::NewId(decoration), Arg::Object(toplevel)],
+        )?;
+        let mode = if own {
+            zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+        } else {
+            zxdg_toplevel_decoration_v1::mode::SERVER_SIDE
+        };
+        self.send(
+            decoration,
+            zxdg_toplevel_decoration_v1::request::SET_MODE,
+            &[Arg::Uint(mode)],
+        )
+    }
+
+    /// Destroy `toplevel`'s decoration, which must go before the toplevel
+    /// (`zxdg_toplevel_decoration_v1`'s `orphaned`).
+    fn drop_frame(&mut self, toplevel: ObjectId) {
+        use compositor_protocol::xdg_decoration::zxdg_toplevel_decoration_v1;
+        if let Some(decoration) = self.frames.remove(&toplevel) {
+            self.destroy_object(decoration, zxdg_toplevel_decoration_v1::request::DESTROY);
+        }
     }
 
     /// Change a window's title (`xdg_toplevel.set_title`). Anything but a
@@ -970,6 +1025,7 @@ impl Client {
                 self.destroy_object(xdg, xdg_surface::request::DESTROY);
             }
             Kind::Toplevel { xdg, toplevel, .. } => {
+                self.drop_frame(toplevel);
                 self.destroy_object(toplevel, xdg_toplevel::request::DESTROY);
                 self.destroy_object(xdg, xdg_surface::request::DESTROY);
             }

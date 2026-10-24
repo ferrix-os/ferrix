@@ -53,6 +53,18 @@ pub use client::{
     Wanted, Workspace, WorkspaceRequest, format_of, offer_linear_only, relative_motion_message,
 };
 pub use globals::{Global, Globals};
+
+/// What a window said about who draws its frame
+/// ([`Client::frame_wish`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameWish {
+    /// The compositor: it asked for, or was told, `server_side`.
+    Server,
+    /// The window itself: it asked for `client_side` and was told yes.
+    Client,
+    /// Nothing: it bound no decoration protocol.
+    Unsaid,
+}
 pub use layer::{Anchors, Layer, LayerSurface, Margin};
 pub use role::Role;
 pub use shm::{Buffer, BufferError, FORMATS, Format, Pool, PoolKey};

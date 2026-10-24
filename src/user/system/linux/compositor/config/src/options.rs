@@ -292,6 +292,9 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     ("group:merge_floated_into_tiled_on_groupbar", Int(0)),
     ("group:merge_groups_on_drag", Int(1)),
     ("group:merge_groups_on_groupbar", Int(1)),
+    // hyprix's own (docs/DESKTOP.md §6.5): 0 draws no blur on a screen
+    // drawn in software, where it costs most of the frame.
+    ("hyprix:blur_in_software", Int(1)),
     // hyprix's own (docs/DESKTOP.md §2.2), not Hyprland's: a floating
     // window that draws its own frame -- client-side decorations, a window
     // geometry inside its buffer -- is drawn with no border, shadow or

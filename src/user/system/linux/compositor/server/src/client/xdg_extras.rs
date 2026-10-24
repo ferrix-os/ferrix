@@ -67,6 +67,32 @@ impl Client {
         self.configure_decoration(id);
     }
 
+    /// What `toplevel` said about its frame: that the compositor draws it
+    /// (asked or told so through `xdg-decoration` or KDE's protocol), that
+    /// it draws its own (asked for `client_side` and was told yes), or
+    /// nothing at all.
+    #[must_use]
+    pub fn frame_wish(&self, toplevel: ObjectId) -> crate::FrameWish {
+        let mut ours = self
+            .xdg_decorations
+            .iter()
+            .filter(|(_, top)| **top == toplevel)
+            .map(|(decoration, _)| decoration);
+        if let Some(decoration) = ours.next() {
+            return if self.client_frames.contains(decoration) {
+                crate::FrameWish::Client
+            } else {
+                crate::FrameWish::Server
+            };
+        }
+        let surface = self.toplevels.get(&toplevel).map(|top| top.surface);
+        if surface.is_some_and(|surface| self.kde_decorations.values().any(|on| *on == surface)) {
+            crate::FrameWish::Server
+        } else {
+            crate::FrameWish::Unsaid
+        }
+    }
+
     /// Whether `toplevel` asked for the compositor's frame -- through
     /// `xdg-decoration` or KDE's server decoration -- and so draws no title
     /// bar of its own: what a compositor that draws title bars draws one

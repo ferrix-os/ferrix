@@ -579,6 +579,22 @@ fn rule(
     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
 }
 
+/// Whether a floating window gets the compositor's title bar, from what
+/// it said about its frame and whether it draws one of its own (a window
+/// geometry inside its buffer, its shadow round it): one that asked for
+/// the compositor's (foot, a pattern client) does; one that asked to draw
+/// its own and was told yes (Chrome, the lode viewer) does not, so it has
+/// one bar rather than two; one that said nothing (the terminal, Settings,
+/// shelf, an X program) does unless it draws a frame of its own.
+#[must_use]
+pub const fn gets_a_bar(wish: compositor_server::FrameWish, draws_own_frame: bool) -> bool {
+    match wish {
+        compositor_server::FrameWish::Server => true,
+        compositor_server::FrameWish::Client => false,
+        compositor_server::FrameWish::Unsaid => !draws_own_frame,
+    }
+}
+
 /// A bar's id: the bar bit, the window, and a digest of what it shows.
 fn bar_id(want: &Wanted, focused: bool, width: i64, maximized: bool, scale: f64) -> WindowId {
     // A new style empties the drawn bars ([`Bars::restyle`]), so the
@@ -701,6 +717,28 @@ mod tests {
         assert_eq!(bars.hit((200.0, middle)), Some((WindowId(7), Hit::Bar)));
         assert_eq!(bars.hit((200.0, 99.0)), None);
         assert_eq!(bars.hit((200.0, 138.0)), None, "the window, not its bar");
+    }
+
+    /// Who gets a bar: the one that asked for the compositor's, the one
+    /// that said nothing and draws no frame; not the one that draws its own.
+    #[test]
+    fn a_bar_for_each_window_that_has_no_frame_of_its_own() {
+        use compositor_server::FrameWish;
+        assert!(super::gets_a_bar(FrameWish::Server, false), "foot");
+        assert!(super::gets_a_bar(FrameWish::Server, true), "asked for ours");
+        assert!(!super::gets_a_bar(FrameWish::Client, true), "Chrome");
+        assert!(
+            !super::gets_a_bar(FrameWish::Client, false),
+            "the lode viewer"
+        );
+        assert!(
+            super::gets_a_bar(FrameWish::Unsaid, false),
+            "the terminal, shelf"
+        );
+        assert!(
+            !super::gets_a_bar(FrameWish::Unsaid, true),
+            "a GTK window's own frame"
+        );
     }
 
     /// A bar's id is never a client's window's.

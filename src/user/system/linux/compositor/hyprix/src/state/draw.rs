@@ -189,6 +189,13 @@ impl Compositor<'_> {
         // of `self` for the frame, since the screens are drawn through it.
         let mut bars = std::mem::take(&mut self.bars);
         bars.restyle(&self.config);
+        // `hyprix:titlebars` is live (`hyprctl setting`, `keyword`,
+        // `reload`): a client asking to draw its own frame is told yes
+        // while the compositor draws bars, from its next `set_mode`.
+        let honour = self.config.int("hyprix:titlebars").unwrap_or(0) != 0;
+        for slot in &mut self.slots {
+            slot.client_mut().set_honour_client_frames(honour);
+        }
         let tiled = self.overview.on || self.switcher.on;
         if !tiled {
             let wanted = self.title_bars_wanted();
@@ -654,7 +661,13 @@ impl Compositor<'_> {
         // A locked screen draws no window, and a screen that is off
         // draws nothing at all: a plan says what is drawn, not what
         // the layout holds.
-        let scaled = self.style.at_scale(scale);
+        let mut scaled = self.style.at_scale(scale);
+        // `hyprix:blur_in_software = 0`: no blur on a screen drawn in
+        // software, where it is most of the frame (80 of 95 ms a frame on
+        // the 3060's nvidia-drm desktop, 2026-10-24); a GPU screen keeps it.
+        if screen.gpu.is_none() && self.config.int("hyprix:blur_in_software").unwrap_or(1) == 0 {
+            scaled.blur = None;
+        }
         let layout = if dark || self.lock.is_some() || prompting {
             compositor_layout::MonitorLayout {
                 windows: Vec::new(),
@@ -791,13 +804,27 @@ impl Compositor<'_> {
             drew.what.2.saturating_add(frame.screen.area()),
         );
         drew.from = frame.sources;
+        // The plan's rule, for the drawing: no blur in software where the
+        // configuration says so.
+        let unblurred;
+        let style = if screen.gpu.is_none()
+            && self.config.int("hyprix:blur_in_software").unwrap_or(1) == 0
+        {
+            unblurred = compositor_render::Style {
+                blur: None,
+                ..self.style
+            };
+            &unblurred
+        } else {
+            &self.style
+        };
         let mut target = crate::frame::Output {
             canvas: &mut screen.canvas,
             backdrop: &mut screen.backdrop,
             gpu: screen.gpu.as_mut(),
             backend: screen.backend.as_mut(),
             origin,
-            style: &self.style,
+            style,
             styles: with.drawn_with,
             decorations: with.decorations,
             scale,
