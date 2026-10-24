@@ -171,6 +171,32 @@ fn unisolated_interrupts_stop_the_hand_over_after_the_mark() {
     );
 }
 
+/// A unit held to interrupt remapping only -- by an RMRR, an IVMD, or a
+/// unit that does not translate -- answers bit 1 without bit 0: the GPU
+/// is not handed over, though its interrupts are isolated (`L.device.56`).
+///
+/// Verifies: L.device.56
+#[test]
+fn a_gpu_behind_a_remapping_only_unit_is_not_handed_over() {
+    let node = Fake {
+        isolation: Ok(gpu::INTERRUPTS_ISOLATED),
+        ..Fake::isolated(16)
+    };
+    let outcome = gpu::hand_over(&node);
+    assert_eq!(outcome, HandOver::Untranslated { isolation: 2 });
+    assert!(!outcome.starts());
+    assert_eq!(
+        node.asked(),
+        ["mark", "isolation"],
+        "marked first, as for unisolated interrupts; no budget raised for a GPU never started"
+    );
+    assert_eq!(*node.budget.borrow(), None);
+    assert_eq!(
+        format!("{}", outcome.line(CARD)),
+        "devmgr   gpu 01:00.0 not started: its DMA is not translated (device_isolation 0x2)"
+    );
+}
+
 #[test]
 fn an_unreadable_isolation_stops_the_hand_over() {
     let node = Fake {

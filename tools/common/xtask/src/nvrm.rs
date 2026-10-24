@@ -14,11 +14,11 @@
 //! Three boots, each judged by its lines:
 //!
 //! 1. **Handed over**, at 4 GiB, on the patched QEMU whose VT-d unit remaps
-//!    interrupts: devmgr marks the device, finds its interrupts isolated,
-//!    sets a pin budget (at 4 GiB, the floor cut to half the room, about
-//!    490 MiB of the RAM the kernel counts) and starts `nvrm-test`,
-//!    which reads its device from bootstrap, prints `device_isolation` with
-//!    bit 1, its budget -- the one devmgr set --, its apertures, the
+//!    interrupts: devmgr marks the device, finds its interrupts isolated
+//!    and its DMA translated (`device_isolation 0x3`), sets a pin budget
+//!    (at 4 GiB, the floor cut to half the room, about 490 MiB of the RAM
+//!    the kernel counts) and starts `nvrm-test`, which reads its device
+//!    from bootstrap, prints `device_isolation` with both bits, its budget -- the one devmgr set --, its apertures, the
 //!    configuration window, BAR0's first register, runs a thread, maps
 //!    and unmaps BAR0's first page through ferrix-nvos more times than a
 //!    mapping that outlived its unmap would allow, and idles.
@@ -408,8 +408,13 @@ fn judge_handed(lines: &[String]) -> Option<String> {
     let Some(place) = place_after(handed, "devmgr   gpu ").map(str::to_owned) else {
         return Some(format!("devmgr's line names no device: `{handed}`"));
     };
-    if !handed.contains("device_isolation 0x2") && !handed.contains("device_isolation 0x3") {
-        return Some(format!("devmgr's line does not show bit 1: `{handed}`"));
+    // Both bits: devmgr hands a GPU over only with its interrupts isolated
+    // and its DMA translated (`L.device.56`), and the kernel answers bit 0
+    // before any pin (`L.device.55`).
+    if !handed.contains("device_isolation 0x3") {
+        return Some(format!(
+            "devmgr's line does not show bits 0 and 1: `{handed}`"
+        ));
     }
     let Some(budget) = lines
         .iter()

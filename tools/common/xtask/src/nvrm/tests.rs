@@ -12,7 +12,7 @@ use super::{TOO_SMALL, UNISOLATED, judge_handed, judge_refused, place_after, rep
 // volume, which mounts after devmgr's report, so the report comes before the
 // core is loaded.
 const HANDED_KVM: &str = "\
-devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x3 (interrupts isolated); handing it to nvrm\n\
 devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
 nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
 nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
@@ -31,7 +31,7 @@ nvrm: skeleton up on 00:04.0; idle\n\
 
 // The same boot under TCG.
 const HANDED_TCG: &str = "\
-devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x3 (interrupts isolated); handing it to nvrm\n\
 devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
 nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
 nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
@@ -112,7 +112,9 @@ fn a_hand_over_without_bit_one_or_its_budget_fails() {
     assert!(why.contains("not the 488 MiB devmgr set"), "{why}");
     let run = HANDED_KVM.replace("pin budget 488 MiB, cut", "pin budget 128 MiB, cut");
     assert!(judge_handed(&lines(&run)).is_some());
-    let run = HANDED_KVM.replace("device_isolation 0x2 (", "device_isolation 0x1 (");
+    let run = HANDED_KVM.replace("device_isolation 0x3 (", "device_isolation 0x1 (");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace("device_isolation 0x3 (", "device_isolation 0x2 (");
     assert!(judge_handed(&lines(&run)).is_some());
 }
 

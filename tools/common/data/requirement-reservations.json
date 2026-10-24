@@ -33,13 +33,6 @@
       "purpose": "docs/AMD-VI.md, the AMD-Vi driver behind the iommu interface (consultant OK IF (1)-(13), ledger 3867, condition 7): the IVRS read and its fail-closed cases, one IVHD type per unit, unit acceptance and firmware hand-over, the blocked device table, Mode-3 domains, sequenced completion waits and failed units, unpin and map flushes, the event log, per-function interrupt tables, other interrupts refused, the console line, IVMD identity domains and holds, exclusion registers off, aliases unresolved, ferrix.amdvi=off"
     },
     {
-      "ids": ["L.device.55-56"],
-      "owner": "amd-vi",
-      "branch": "bugfix/gpu-gate-dma-translated",
-      "date": "2026-10-24",
-      "purpose": "The GPU hand-over requires translated DMA as well as isolated interrupts (AMD-Vi design review, ledger 3867, D9's urgent part): device_isolation answers bit 0 for the domain the device gets before any pin, and devmgr refuses a GPU whose DMA is untranslated"
-    },
-    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
