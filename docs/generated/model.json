@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b2b7f18d423886aff39aed98b2f689d8821d36c9d23e654f8d34b62b02b27ab0",
+  "digest": "1a3f48ce4e5994b194bfc1f231afbe9f594cb1341995ee87f032915d2bb27f72",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 142,
-    "elements": 7477,
+    "elements": 7482,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -38846,6 +38846,63 @@
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 984
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "aWaitEndsAtItsDeadline",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWaitEndsAtItsDeadline",
+                  "kind": "requirement",
+                  "shortName": "L.sched.92",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 986
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWaitEndsAtItsDeadline",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"wait_until_deadline shall return false once the monotonic clock passes deadline while ready stays false, and true as soon as a wake finds ready true.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 989
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWaitEndsAtItsDeadline",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"Stage 5's deadline case: a wait 20 ms out whose condition stays false returns false after its deadline and within a second of it, and a wait 10 s out whose condition a waker makes true and wakes returns true within a second; with the deadline's test skipped for the check's own waiting task the first case fails with its sentence, found by the checker's own sleep (removed for every wait, the boot hangs at stage 3; the crash hold's 2 s rests on it, docs/LOGGING.md section 21.7, ledger 3537 and 3545).\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 998
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWaitEndsAtItsDeadline",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.OBJ.11\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 999
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWaitEndsAtItsDeadline",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"sched::wait::WaitQueue::wait_until_deadline\", \"sched::wait::WaitQueue::wait_sliced\")",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1001
                       }
                     }
                   ]

@@ -35,6 +35,7 @@ pub mod btrfs_write_check;
 pub mod cgroupfs;
 pub mod check;
 pub(crate) mod console;
+pub(crate) mod crashes;
 pub mod data_disk;
 pub(crate) mod devfs;
 pub(crate) mod disk_file;

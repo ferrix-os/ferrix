@@ -87,9 +87,19 @@ const READ_SECTORS: u64 = 2;
 /// it: 64 sectors of 512 bytes are 32 KiB.
 const PARTITIONS: &[u8] = b"major minor  #blocks  name\n\n 254      250         32 ferrixcheck0\n";
 
-/// The character nodes, in the order `/dev` lists them.
-const STATIC_NODES: [&[u8]; 9] = [
-    b"null", b"zero", b"full", b"random", b"urandom", b"tty", b"console", b"ptmx", b"kmsg",
+/// The character nodes, in the order `/dev` lists them; `ferrix-crashes`
+/// is root:root 0400 (`fs::crashes`).
+const STATIC_NODES: [&[u8]; 10] = [
+    b"null",
+    b"zero",
+    b"full",
+    b"random",
+    b"urandom",
+    b"tty",
+    b"console",
+    b"ptmx",
+    b"kmsg",
+    b"ferrix-crashes",
 ];
 
 /// `shm`, which `/dev` lists after the disks and always: the one directory

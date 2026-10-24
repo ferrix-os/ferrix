@@ -3027,6 +3027,34 @@ pub static STAGE8_TIMERFD: Explanation = Explanation {
           src/kernel/src/sched/wait.rs",
 };
 
+/// For `check_crash_hold` in `stages_check.rs`, when the crash hold's check
+/// fails.
+// CHECKS-ONLY: for `check_crash_hold` in `stages_check.rs`.
+pub static STAGE8_CRASH_HOLD: Explanation = Explanation {
+    code: "FX-0895",
+    title: "the crash hold failed its self-check",
+    meaning: "`syscall::deliver::check_the_crash_hold` arms /dev/ferrix-crashes from a check \
+              process and makes faults through the fault path's own entry. Unarmed, a fault must \
+              end its process at once. Armed, a fatal fault must be held: its line read, its \
+              process shown as t (tracing stop), its other thread parked, not stopped, and not \
+              released by SIGCONT; done, SIGKILL, another thread's exit_group and the reader's \
+              close must each release it at once, and with no done the 2 s deadline must, \
+              every end by the fault's signal. Sixteen are held at once and a seventeenth is \
+              not, and counted; the reader's own process and one holding its description are \
+              never held (docs/LOGGING.md §21, crash-1 to crash-4, load-ring statements).",
+    causes: &[
+        "`fs::crashes::hold` waits without its deadline, or `CrashFile`'s drop does not \
+         release the held slots: the check's wait for an end times out.",
+        "`Process::end` does not take the held fault's signal, so a SIGKILL or an exit_group \
+         ends a held process by its own status.",
+        "`Process::must_park` does not count the hold, or `return_to_user` parks a held thread \
+         as a stop, which SIGCONT undoes.",
+        "The host stopped the emulator for longer than the check's one-second margin.",
+    ],
+    see: "src/kernel/src/fs/crashes.rs; src/kernel/src/syscall/deliver/hold_check.rs; \
+          src/kernel/src/syscall/deliver.rs; src/kernel/src/syscall/process.rs",
+};
+
 /// For `check_signalfd` in `stages_check.rs`, when the signalfd check fails.
 pub static STAGE8_SIGNALFD: Explanation = Explanation {
     code: "FX-0884",
@@ -3478,6 +3506,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_SMALL_NAMESPACES,
     &STAGE13_NETWORK_NAMESPACES,
     &STAGE13_PROC_ACCESS,
+    &STAGE8_CRASH_HOLD,
     &STAGE9_OBJECTS,
     &STAGE9_ALLOCATION,
     &STAGE9_REFUSALS,

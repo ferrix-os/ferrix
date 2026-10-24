@@ -25,6 +25,12 @@ pub const MESSAGE_ID_REPEAT: &str = "70b5f0e1d2c34a5b9c8d7e6f5a4b3c2e";
 /// How many of a process's last records a tombstone's tail spans.
 pub const TAIL: usize = 50;
 
+/// A collected crash's `BLOB_*` fields, names and values.
+pub type Parts = Vec<(String, Vec<u8>)>;
+
+/// How many collected crashes wait for their crash record.
+pub const COLLECTED_MAX: usize = 16;
+
 /// The most processes whose last records are kept track of.
 const PIDS_MAX: usize = 512;
 
@@ -69,6 +75,9 @@ pub struct Tombstones {
     seen: BTreeMap<String, Seen>,
     /// Per pid, the sequence numbers of its last [`TAIL`] records.
     tails: VecDeque<(u32, VecDeque<u64>)>,
+    /// Per pid, what the collector (`lode crashd`) read of it while the
+    /// kernel held it: the `BLOB_*` references its tombstone gets.
+    collected: VecDeque<(u32, Parts)>,
 }
 
 impl Tombstones {
@@ -79,7 +88,19 @@ impl Tombstones {
             full,
             seen: BTreeMap::new(),
             tails: VecDeque::new(),
+            collected: VecDeque::new(),
         }
+    }
+
+    /// The collector read process `pid` while it was held: `parts`, its
+    /// `BLOB_*` fields, go on the tombstone of its crash. At most
+    /// [`COLLECTED_MAX`] wait, the oldest given up.
+    pub fn collected(&mut self, pid: u32, parts: Parts) {
+        self.collected.retain(|(each, _)| *each != pid);
+        if self.collected.len() >= COLLECTED_MAX {
+            let _ = self.collected.pop_front();
+        }
+        self.collected.push_back((pid, parts));
     }
 
     /// After a restart, a tombstone or repeat record this boot already
@@ -154,6 +175,10 @@ impl Tombstones {
         });
         seen.count += 1;
         let pid: Option<u32> = crash.get_str("CRASH_PID").and_then(|pid| pid.parse().ok());
+        let parts = pid.and_then(|pid| {
+            let at = self.collected.iter().position(|(each, _)| *each == pid)?;
+            self.collected.remove(at).map(|(_, parts)| parts)
+        });
         if seen.count <= full {
             seen.last_full = seqnum;
             let count = seen.count;
@@ -163,7 +188,11 @@ impl Tombstones {
                     .find(|(each, _)| *each == pid)
                     .map(|(_, tail)| (tail.front().copied(), tail.back().copied()))
             });
-            return Some(full_record(crash, seqnum, boot, now, count, tail));
+            let mut record = full_record(crash, seqnum, boot, now, count, tail);
+            for (name, value) in parts.unwrap_or_default() {
+                record.push(&name, &value);
+            }
+            return Some(record);
         }
         if seen.count < seen.said.max(full) * 2 {
             return None;
@@ -264,4 +293,45 @@ pub fn parts(
         blobs.extend(blob);
     }
     (fields, blobs)
+}
+
+/// One line of `/dev/ferrix-crashes`, the kernel's hold (`docs/LOGGING.md`
+/// §21, step 2): `held PID TID SIGNAL CODE ADDRESS PC threads N unparked M
+/// dropped D`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Held {
+    /// The held process.
+    pub pid: u32,
+    /// Its faulting thread.
+    pub tid: u32,
+    /// The fault's signal.
+    pub signal: u32,
+    /// Its live threads.
+    pub threads: u32,
+    /// How many of the others had not parked when the line was written.
+    pub unparked: u32,
+    /// Faults before it the kernel did not hold, its queue being full.
+    pub dropped: u32,
+}
+
+/// A line read back, or `None` for one this reader does not know.
+#[must_use]
+pub fn parse_held(line: &[u8]) -> Option<Held> {
+    let text = core::str::from_utf8(line).ok()?;
+    let words: Vec<&str> = text.split_ascii_whitespace().collect();
+    if words.first() != Some(&"held") {
+        return None;
+    }
+    let after = |name: &str| -> Option<u32> {
+        let at = words.iter().position(|word| *word == name)?;
+        words.get(at + 1)?.parse().ok()
+    };
+    Some(Held {
+        pid: words.get(1)?.parse().ok()?,
+        tid: words.get(2)?.parse().ok()?,
+        signal: words.get(3)?.parse().ok()?,
+        threads: after("threads")?,
+        unparked: after("unparked")?,
+        dropped: after("dropped")?,
+    })
 }

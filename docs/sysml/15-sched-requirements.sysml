@@ -983,5 +983,22 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::task::Task::record_wakee",
                 "sched::task::Task::wakee_flips");
         }
+        requirement <'L.sched.92'> aWaitEndsAtItsDeadline : ItemLowLevel {
+            attribute :>> statement = "wait_until_deadline shall return false once
+                the monotonic clock passes deadline while ready stays false, and
+                true as soon as a wake finds ready true.";
+            attribute :>> criterion = "Stage 5's deadline case: a wait 20 ms out
+                whose condition stays false returns false after its deadline and
+                within a second of it, and a wait 10 s out whose condition a waker
+                makes true and wakes returns true within a second; with the
+                deadline's test skipped for the check's own waiting task the
+                first case fails with its sentence, found by the checker's own
+                sleep (removed for every wait, the boot hangs at stage 3; the
+                crash hold's 2 s rests on it, docs/LOGGING.md section 21.7,
+                ledger 3537 and 3545).";
+            attribute :>> parent = "H.OBJ.11";
+            attribute :>> unit = ("sched::wait::WaitQueue::wait_until_deadline",
+                "sched::wait::WaitQueue::wait_sliced");
+        }
     }
 }

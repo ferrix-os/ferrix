@@ -2495,3 +2495,60 @@ fn a_restarted_lode_goes_on_counting_a_storm() {
         "the sixth is not a full tombstone after a restart"
     );
 }
+
+#[test]
+fn a_held_line_reads_back_and_others_do_not() {
+    use crate::tombstone::{Held, parse_held};
+    assert_eq!(
+        parse_held(b"held 42 43 11 1 0x10 0x401000 threads 2 unparked 0 dropped 3\n"),
+        Some(Held {
+            pid: 42,
+            tid: 43,
+            signal: 11,
+            threads: 2,
+            unparked: 0,
+            dropped: 3,
+        })
+    );
+    assert_eq!(parse_held(b"done 42\n"), None);
+    assert_eq!(parse_held(b"held 42 43\n"), None);
+    assert_eq!(
+        parse_held(b"held x 43 11 1 0 0 threads 1 unparked 0 dropped 0\n"),
+        None
+    );
+}
+
+#[test]
+fn a_collected_crash_gives_its_blobs_to_its_tombstone_only() {
+    use crate::tombstone::Tombstones;
+    let boot = [0x33; 16];
+    let now = Now {
+        realtime_us: 1_700_000_000_000_000,
+        monotonic_us: 5,
+    };
+    let mut tombstones = Tombstones::new(5);
+    let crash = |pid: u32| {
+        let mut record = record(1, "signal pid ended");
+        record.push("CRASH_PID", alloc::format!("{pid}").as_bytes());
+        record.push("CRASH_COMM", b"lode");
+        record.push("CRASH_MODULE", b"/sbin/lode+0x10");
+        record.push("CRASH_SIGNAL", b"SIGSEGV");
+        record
+    };
+    let maps = (String::from("BLOB_MAPS"), Vec::from(&b"ab 12 text"[..]));
+    tombstones.collected(7, vec![maps.clone()]);
+    // Another pid's crash takes nothing of it.
+    let other = tombstones.for_crash(&crash(8), 1, &boot, now).unwrap();
+    assert_eq!(other.get("BLOB_MAPS"), None);
+    let own = tombstones.for_crash(&crash(7), 2, &boot, now).unwrap();
+    assert_eq!(own.get("BLOB_MAPS"), Some(&b"ab 12 text"[..]));
+    // Taken once: a later crash of a reused pid has none.
+    let again = tombstones.for_crash(&crash(7), 3, &boot, now).unwrap();
+    assert_eq!(again.get("BLOB_MAPS"), None);
+    // At most sixteen wait; the oldest goes.
+    for pid in 100..117 {
+        tombstones.collected(pid, vec![maps.clone()]);
+    }
+    let oldest = tombstones.for_crash(&crash(100), 4, &boot, now).unwrap();
+    assert_eq!(oldest.get("BLOB_MAPS"), None);
+}

@@ -310,6 +310,11 @@ QEMU can show: handed over at 4 GiB, refused for a budget too small at
 
 ## 4. When a driver dies
 
+A driver that dies by a fault of its own, while `lode crashd` holds
+`/dev/ferrix-crashes` open, is held up to 2 s before it ends
+(`docs/LOGGING.md` §21.7), so `TERMINATED` and the restart below can come
+up to 2 s later than its fault.
+
 A `TERMINATED` packet on `devmgr`'s port names the disk. The kernel's ring
 has already failed every outstanding read with `EIO` and unpublished the node
 (`docs/BLOCK-RING.md` §6.3), and the driver's handles have closed: its pins

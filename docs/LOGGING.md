@@ -2291,6 +2291,7 @@ architectures.
 | Event kinds configurable and reloadable | built | `events.conf`, `lode events`, `lode reload` (rules, alerts, events, retention, capture), which says what changed; `test-log` "reload" row |
 | Hang snapshot (`lode snapshot PID`) | built, landing | §18 "Hang snapshots"; `test-log` "box" row |
 | The image and command line on the boot record | built, landing | `BOOT_IMAGE`, `BOOT_CMDLINE`, `BOOT_DEPLOY` |
+| Tombstones' threads, maps and descriptors (step 2, the crash hold) | built, landing | §21.7; the boot's `crashes` line; `test-log` "collected" row; the consultant's OK IF, ledger 3545 (verdict 3546) |
 
 ### 20.6 Where logs still go that lode does not get (the audit, 2026-10-24)
 
@@ -2579,3 +2580,93 @@ answer. SIGHUP is not used: lode's control socket is root's and answers.
   (`tombstone-memory`). Blobs are not forwarded: `lode-upload` sends
   records, whose references a receiver can resolve only when blobs follow
   on their own stream (step 2's forwarding).
+
+### 21.7 Built: tombstones step 2, the crash hold (2026-10-24)
+
+Variant a of §21.3, with the consultant's OK IF (ledger lines 3501 and
+3524; the arming file is a device, not `/proc/ferrix/crashes`, since procfs
+files are snapshots made at open).
+
+* **The kernel** (`fs::crashes`, load ring, no core or item line). While a
+  root reader holds `/dev/ferrix-crashes` (char 1:13, root's 0400, opened
+  read-write by a caller privileged in the first user namespace, one at a
+  time, `EBUSY` for a second), a fatal fault of a program's own instruction
+  (`deliver::force_held`, reached only from `fault_signal`: seccomp's ends,
+  `kill`, limits and the OOM end are never held) parks the process -- a
+  third park beside a stop and a freeze: no parent told, `SIGCONT` and a
+  thaw do not release it, `/proc/<pid>/status` says `t (tracing stop)` --
+  and queues a line once the other threads have parked (200 ms at most):
+  `held PID TID SIGNAL CODE ADDRESS PC threads N unparked M dropped D`. The
+  faulting thread waits in the kernel until the reader writes `done PID`,
+  the reader's last close, an end from outside, another thread's exit, or
+  2 s from the fault; then the process ends as before, and the identity
+  line and the core's `ended by signal` line print in today's order.
+  **Every end while held takes the fault's signal** (`Process::end`):
+  `SIGKILL`, `cgroup.kill`, the OOM end and an `exit_group` included, so the
+  parent's `WTERMSIG`, `SIGCHLD` and the core's line agree. At most 16 are
+  held, in a ring that is never allocated; a fault past them is not held and
+  counted in the next line. Never held: the reader's own process, any
+  process whose descriptors hold the reader's description (a forked child,
+  one sent it over a socket), a process an `execve` has claimed, a thread
+  already leaving. A description in flight in a socket, or held by another
+  process, keeps the device armed; each hold is still bounded by its 2 s.
+  Unarmed, a fault reads one atomic more.
+* **The bound**: a crashing process's end, and so its restart by init or
+  `devmgr`, can come up to 2 s later while a collector runs
+  (MEMORY-AND-TIMING §2.2y, `docs/INIT.md` §5.4, `docs/DEVMGR.md` §4).
+* **The collector**: `lode crashd`, `lode-crashd.service` (root, enabled
+  on the desktop and in `test-log`), reads each held process's threads (as
+  `lode snapshot` does), `status`, `maps` and descriptors from `/proc`,
+  sends them to lode in one native-protocol record (`FERRIX_EVENT=
+  crash-collected`, at most 216 KiB of parts) and writes `done`. lode takes
+  the record only from uid 0, makes `COLLECTED_THREADS`, `_MAPS`, `_FDS` and
+  `_STATUS` blobs (always blobs, whatever their size, so a reader resolves
+  them one way), names them `BLOB_THREADS`, `BLOB_MAPS`, `BLOB_FDS` and
+  `BLOB_STATUS` on that record and on the crash's tombstone, which the
+  viewer reads through `read_blob`. A collector that stalls costs a crash
+  its parts, never its end; one that dies disarms the hold.
+* **What the hold promises** -- load-ring statements, uncertified, which
+  carry no item claim (the consultant, ledger 3537: an `L.*` id names item
+  code, and none of this is). Each is held by a sub-case of the boot's
+  `crashes` line (stage 8, FX-0895, `syscall::deliver::check_the_crash_hold`)
+  and a negative control run through `fleet/gate.sh control`, cited in the
+  landing message:
+  1. **crash-1**, the unarmed path unchanged: with the device closed a fatal
+     fault ends its process at once by its signal (case a; control: a
+     second's sleep before the hold's look).
+  2. **crash-2**, the hold and its release: armed, a fatal fault parks its
+     process -- both threads parked, not stopped, `t (tracing stop)`,
+     `SIGCONT` leaves it held -- and `done`, `SIGKILL`, another thread's
+     `exit_group(0)` and the reader's close each end it at once, the deadline
+     after 2 s, every end by the fault's signal (cases b, c, d, i, e, f;
+     controls: the deadline moved to 60 s, the close's release skipped while
+     any is held, the hold read as a stop -- caught by `status` -- and the
+     end's override of the status removed).
+  3. **crash-3**, the bound and the exclusions: sixteen held at once, a
+     seventeenth not and counted in the next line; a process holding the
+     reader's description and the reader's own process are not held (cases
+     h, 5d, g; control: the descriptor scan's answer ignored).
+  4. **crash-4**, one root reader: a read-only open `EINVAL`, a second open
+     `EBUSY`; a read is `EAGAIN` under `O_NONBLOCK` with nothing queued,
+     `ERESTARTSYS` when a signal ends its wait, `EINVAL` into a buffer too
+     small (the line kept); `done` for a pid not held, a malformed and a
+     partial line `EINVAL` (the open and errno cases; control: the second
+     open let through).
+
+  What it rests on in the item is cited, not traced again: `L.sched.35` (the
+  core records the end's status), `L.sched.22` (`may_block`, asserted at the
+  wait), `L.sched.92` (a wait ends at its deadline: the 2 s, with a sched
+  check and a control of its own: the deadline test skipped for the
+  check's own waiting task), and `trap.rs` unchanged under the
+  `L.trap.*` requirements. `test-log`'s "collected" row: the tombstones of
+  `lode fault-stub`'s crashes carry the three blobs, and the maps read back
+  through `lode blob`.
+* **Reviewed**: the consultant's final verdict, OK IF (1)-(6), ledger line
+  3545 (verdict 3546), after 3501, 3524-3527 and 3537-3538. About 520 kernel
+  lines of load code, against the ~150 3501 (11) foresaw: the per-open device,
+  the fixed ring and its errnos, and the release on every end took the rest.
+  A second thread faulting during its own process's hold takes a second slot
+  and line; `lode crashd` collects for both and ignores the second `done`'s
+  answer, and the first end releases the second.
+* **Not yet**: backtraces (step 2's stack capture, its own review), blobs
+  forwarded (§21.4), the blob row in `test-log-budget`.

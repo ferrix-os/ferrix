@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["L.sched.92"],
-      "owner": "lode",
-      "branch": "feature/lode-crashd",
-      "date": "2026-10-24",
-      "purpose": "wait_until_deadline ends at its deadline, which the crash hold's 2 s rests on (the consultant's ruling at ledger line 3537, condition 10'd): a sched check of its own and a control. L.crash.1-8 are given back: the hold is load-ring code, specified in docs/LOGGING.md section 21.7, and carries no item claim"
-    },
-    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",

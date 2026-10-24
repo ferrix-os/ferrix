@@ -509,6 +509,14 @@ impl Service {
 
     /// [`admit`] past the echoes: names, alerts, the limiter.
     fn admit_now(&mut self, mut record: Record, now: Now, batch: &mut Vec<Record>) {
+        // What the collector read of a held crash: its parts made blobs,
+        // for the record and for the crash's tombstone. Root's alone, by
+        // the sender's credentials.
+        if record.get_str("FERRIX_EVENT") == Some("crash-collected")
+            && record.get_str("_UID") == Some("0")
+        {
+            self.collected(&mut record);
+        }
         // Every record that names a process names it: its `_COMM`, `_EXE`
         // and `_CMDLINE` (`events.conf`'s process-names).
         if self.events.on("process-names")
@@ -591,6 +599,43 @@ impl Service {
             .append(more, &self.zone)
             .map_err(|()| Step::Segment)?;
         Ok(())
+    }
+
+    /// A `lode crashd` record: each `COLLECTED_<PART>` queued as a blob and
+    /// named `BLOB_<PART>` instead; the references wait for the crash's
+    /// tombstone (`docs/LOGGING.md` §21, step 2). The parts are blobs
+    /// whatever their size, so a reader resolves them one way.
+    fn collected(&mut self, record: &mut Record) {
+        let Some(pid) = record
+            .get_str("COLLECTED_PID")
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            return;
+        };
+        let mut parts = Vec::new();
+        for part in ["THREADS", "MAPS", "FDS", "STATUS"] {
+            let name = alloc::format!("COLLECTED_{part}");
+            let Some(bytes) = record.get(&name).map(Vec::from) else {
+                continue;
+            };
+            record.fields.retain(|field| field.name != name);
+            let reference = ferrix_lode_core::blob::Reference {
+                id: ferrix_lode_core::blob::id_of(&bytes),
+                size: bytes.len() as u64,
+                kind: String::from("text"),
+            };
+            let field = alloc::format!("{}{part}", ferrix_lode_core::blob::FIELD_PREFIX);
+            match self.blobs.submit(reference.id, "text", bytes) {
+                Ok(()) => {
+                    record.push(&field, reference.text().as_bytes());
+                    parts.push((field, reference.text().into_bytes()));
+                }
+                Err(why) => {
+                    record.push("BLOB_DROPPED", alloc::format!("{field}: {why}").as_bytes());
+                }
+            }
+        }
+        self.tombstones.collected(pid, parts);
     }
 
     /// The tombstones for the `crashes` of a batch stored as `seqnums`.

@@ -42,6 +42,7 @@
 mod borrow;
 mod borrow_check;
 mod check;
+mod deadline_check;
 pub mod direct;
 mod mark_check;
 mod preempt;

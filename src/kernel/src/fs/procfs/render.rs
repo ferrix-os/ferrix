@@ -1125,17 +1125,23 @@ impl Memory {
 ///   exited, was killed, or was killed while stopped; and for a leader that
 ///   has ended while other threads of its process run.
 /// * `T` while it is stopped by a signal, whatever its threads were doing.
+/// * `t` while a fault of it is held for `/dev/ferrix-crashes`.
 /// * `D` while the thread waits in `vfork` for its child to let go.
 /// * `R` for a thread that is running or waiting its turn, and `S` for one
 ///   waiting for something.
 ///
-/// `t` is a tracer's stop, and nothing traces a process here.
+/// `t` is otherwise a tracer's stop, and nothing traces a process here.
 fn state_of(process: &Process, tid: u32) -> State {
     if process.is_released() {
         return State::Zombie;
     }
     if process.is_stopped() {
         return State::Stopped;
+    }
+    // Held for a crash reader (`fs::crashes`): stopped as a tracer stops
+    // it, which no parent is told of.
+    if process.is_held() {
+        return State::TracingStop;
     }
     // The reader is running, whether or not its process lists it: one the
     // kernel runs for a check lists neither its thread nor its task.

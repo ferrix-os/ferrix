@@ -212,6 +212,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_drained_waiter_survives_its_last_look()?;
     a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     super::mark_check::run(topology)?;
+    super::deadline_check::run()?;
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;

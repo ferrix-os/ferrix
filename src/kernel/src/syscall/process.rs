@@ -240,6 +240,12 @@ pub(crate) struct Process {
     /// How many of its threads are parked by `cgroup.freeze`, waiting on
     /// their way back to user mode (`docs/CGROUPS.md` §11).
     parked: AtomicU32,
+    /// The fault signal it is held for while `/dev/ferrix-crashes` reads
+    /// it, or zero (`fs::crashes`): a third park, and the status every end
+    /// takes while it is set.
+    held: AtomicU32,
+    /// How many of its threads are parked by that hold.
+    held_parked: AtomicU32,
     /// Its user and group ids and supplementary groups. A lock of its own:
     /// `getuid` has no business waiting on a `brk`, and a `set*id` call must
     /// see and change every id it names at once.
@@ -472,6 +478,8 @@ impl Process {
             continue_report: AtomicBool::new(false),
             resumed: WaitQueue::new(),
             parked: AtomicU32::new(0),
+            held: AtomicU32::new(0),
+            held_parked: AtomicU32::new(0),
             // A process the kernel starts is root's. A fork child takes its
             // parent's instead, below.
             credentials: SpinLock::new(Credentials::root()),
@@ -1253,6 +1261,12 @@ impl Process {
         if self.ending.swap(true, Ordering::AcqRel) {
             return false;
         }
+        // A held process ends with its fault's signal, whoever ends it
+        // (LOGGING.md §21.7 crash-2): the parent, SIGCHLD and the core's line agree.
+        let (status, signal) = match self.held.load(Ordering::Acquire) {
+            0 => (status, signal),
+            held => (128 + held as i32, held),
+        };
         // The core stores `terminated` and posts `END` to every task, waking
         // and interrupting each (`object::process::Process::end_record`).
         self.core().end_record(status, signal);
@@ -1846,7 +1860,47 @@ impl Process {
     /// does not undo, that no parent is told of, and that a `SIGKILL` ends
     /// as it ends a stop.
     pub(crate) fn must_park(&self) -> bool {
-        self.is_stopped() || self.core().is_frozen()
+        self.is_stopped() || self.core().is_frozen() || self.is_held()
+    }
+
+    /// Whether a fault of it is held for `/dev/ferrix-crashes`: a park
+    /// `SIGCONT` and a thaw do not undo, no parent is told of, and every
+    /// end releases (`fs::crashes`).
+    pub(crate) fn is_held(&self) -> bool {
+        self.held.load(Ordering::Acquire) != 0
+    }
+
+    /// Hold it for the fault `signal` (non-zero), or let go with zero; its
+    /// other threads are sent to park, or woken from it.
+    pub(crate) fn set_held(&self, signal: u32) {
+        let posting = sched::work::posting();
+        self.held.store(signal, Ordering::Release);
+        if signal != 0 {
+            self.signalled.wake_all();
+            self.wake_other_tasks(sched::work::STOP);
+        } else {
+            self.resumed.wake_all();
+        }
+        drop(posting);
+    }
+
+    /// A thread of it parks for a hold (`true`), or leaves the park.
+    pub(crate) fn thread_held(&self, parked: bool) {
+        if parked {
+            let _ = self.held_parked.fetch_add(1, Ordering::AcqRel);
+        } else {
+            let _ = self
+                .held_parked
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+        }
+    }
+
+    /// Its live threads, and how many of them are parked by a hold.
+    pub(crate) fn held_threads(&self) -> (u32, u32) {
+        (
+            self.live_threads.load(Ordering::Acquire),
+            self.held_parked.load(Ordering::Acquire),
+        )
     }
 
     /// Look at its cgroup's freeze again: after it was made, moved, or its

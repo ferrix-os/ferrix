@@ -618,9 +618,35 @@ pub(super) fn check_madvise() {
     );
 }
 
+/// Stage 8's signal checks: signalfd's, then the crash hold's.
+pub(super) fn check_signals() {
+    check_signalfd();
+    check_crash_hold();
+}
+
+/// The crash hold's check (`fs::crashes`, `docs/LOGGING.md` §21): a fault
+/// held while `/dev/ferrix-crashes` is armed, released every way it can be,
+/// and not held otherwise.
+fn check_crash_hold() {
+    let held = match syscall::deliver::check_the_crash_hold() {
+        Ok(held) => held,
+        Err(problem) => fatal!(
+            catalog::STAGE8_CRASH_HOLD,
+            "stage 8 crash hold self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  crashes  a fault held while /dev/ferrix-crashes is armed and not otherwise; released \
+         by done in {} us, by SIGKILL, exit_group and the reader's close at once, by the \
+         deadline after {} ms, each by the fault's signal; {} held at once, {} more counted \
+         dropped; the reader's own and a sharer's faults not held",
+        held.done_micros, held.deadline_millis, held.held_at_once, held.dropped,
+    );
+}
+
 /// Stage 8's signalfd check: flags and masks, signals read and dequeued, and
 /// waiters woken by a signal's arrival.
-pub(super) fn check_signalfd() {
+fn check_signalfd() {
     let checked = match fs::signalfd_check::run() {
         Ok(checked) => checked,
         Err(problem) => fatal!(

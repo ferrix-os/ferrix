@@ -82,6 +82,19 @@ pub(crate) fn enabled() -> File {
     }
 }
 
+/// The crash collector's unit, shipped beside [`UNIT`].
+pub(crate) const CRASHD_UNIT: &str = "lode-crashd.service";
+
+/// The link that starts `lode-crashd.service` with `multi-user.target`: the
+/// kernel holds a crashing process for it (`docs/LOGGING.md` §21).
+pub(crate) fn crashd_enabled() -> File {
+    File {
+        path: format!("etc/ferrix/units/multi-user.target.wants/{CRASHD_UNIT}"),
+        mode: 0o777,
+        content: Content::Link(format!("/lib/ferrix/units/{CRASHD_UNIT}")),
+    }
+}
+
 /// What a desktop image says to lode: crash and app-error screenshots on,
 /// within lode's own spacing and retention (§19), and `events.conf` with
 /// every kind at its default, so a person sees what can be switched.
@@ -229,7 +242,7 @@ done
 # uploader, so its first tries fail and back off.
 up=/tmp/uploaded
 # The service: the lode that is neither the collector nor `lode alerts`.
-lode_pid() { for p in $($bb pidof lode); do $bb grep -q 'upload-stub\|alerts' /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
+lode_pid() { for p in $($bb pidof lode); do $bb grep -q 'upload-stub\|alerts\|crashd' /proc/$p/cmdline 2>/dev/null || { echo $p; return; }; done; }
 ( exec /bin/lode upload-stub 19532 $up ) > /tmp/upload-stub 2>&1 &
 upload_count() { n=$($bb grep -c '^MESSAGE=upload ' $up 2>/dev/null); echo ${n:-0}; }
 upload_wait() { i=0; until [ "$(upload_count)" -ge "$1" ]; do i=$((i+1)); [ $i -gt 400 ] && break; $bb usleep 100000; done; }
@@ -423,6 +436,12 @@ say "rejoined: $(/bin/lode -b --where 'crash = "*"' -o json | $bb grep -c '"CRAS
 i=0; while [ $i -lt 11 ]; do /bin/lode fault-stub > /dev/null 2>&1; i=$((i+1)); done
 $bb sleep 1
 stone=$(/bin/lode tombstones | $bb grep 'lode ended' | $bb head -n 1 | $bb awk '{print $1}')
+# The collector (§21 step 2): the kernel held each crash for lode crashd,
+# whose threads, maps and descriptors are blobs on the tombstone: four of
+# the five, the fifth (above) crashed while lode was down.
+maps=$(/bin/lode -b -o json | $bb grep '"TOMBSTONE":"1"' | $bb grep -o '"BLOB_MAPS":"[0-9a-f]*' | $bb sed 's/.*"//' | $bb tail -n 1)
+yes() { [ "$1" -gt 0 ] && echo yes || echo no; }
+say "collected: $(yes $(/bin/lode -b --where 'event = crash-collected' -o cat | $bb grep -c '^collected the crash of [0-9]* (lode): 1 thread(s), 0 unparked')) $(/bin/lode -b -o json | $bb grep '"TOMBSTONE":"1"' | $bb grep '"BLOB_THREADS":"' | $bb grep '"BLOB_FDS":"' | $bb grep -c '"BLOB_MAPS":"') $(yes $(/bin/lode blob $maps | $bb grep -c '/sbin/lode'))"
 say "tombstones: $(/bin/lode tombstones | $bb grep -c 'tombstone: lode ended by SIGSEGV') $(/bin/lode -b -t lode -o cat | $bb grep -c '^lode crashed again, 10 times') $(/bin/lode tombstone $stone | $bb grep -c '^-- the crash$\|^-- its last lines$') $(/bin/lode verify | $bb grep -c ' 0 missing')"
 # Alerts and top (step 3): the noisy flood above fired `flood` once, to
 # `lode alerts`; a crit line started a unit that lets lode start it; a unit
@@ -516,6 +535,7 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
         content: Content::Bytes(busybox),
     });
     files.push(enabled());
+    files.push(crashd_enabled());
     files.extend(crate::lode_net::carried(arch)?);
     files.push(File {
         path: format!("etc/ferrix/units/multi-user.target.wants/{UPLOAD_UNIT}"),
@@ -631,6 +651,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     }
     held(lines)?;
     attributed(lines)?;
+    collected(lines)?;
     vacuumed(lines)?;
     match said(lines, "lode-test: live:").and_then(|count| count.parse::<u32>().ok()) {
         Some(count) if count > 0 => {}
@@ -795,6 +816,21 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
         if got != want {
             return Err(format!("{why}: `{what} {got}`, wanted `{want}`"));
         }
+    }
+    Ok(())
+}
+
+/// Tombstones step 2 (`docs/LOGGING.md` §21.7): the kernel held each crash
+/// for `lode crashd`, and its parts are blobs on the tombstone.
+fn collected(lines: &[String]) -> std::result::Result<(), String> {
+    let (what, want) = ("lode-test: collected:", "yes 4 yes");
+    let got = said(lines, what).unwrap_or_default();
+    if got != want {
+        return Err(format!(
+            "the kernel did not hold a crash for lode crashd, its record did not say the thread, \
+             or the tombstones did not carry the threads, maps and descriptors as blobs that read \
+             back: `{what} {got}`, wanted `{want}`"
+        ));
     }
     Ok(())
 }
@@ -965,6 +1001,7 @@ lode-test: names: 1 1
 lode-test: box: 1 1 3 1
 lode-test: crash: 1
 lode-test: rejoined: 2
+lode-test: collected: yes 4 yes
 lode-test: tombstones: 5 1 1 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1

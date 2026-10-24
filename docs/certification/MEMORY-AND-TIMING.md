@@ -1722,6 +1722,35 @@ program waits on. At run time an identity domain adds to `Domain::pin`
 and `unpin` one comparison of each page against its RMRRs (one range on
 the N150), outside every lock.
 
+### 2.2y The crash hold (`fs::crashes`, load ring, 2026-10-24)
+
+Tombstones step 2 (`docs/LOGGING.md` §21.7; the consultant's OK IF, ledger
+lines 3501 and 3524). The hold is load-ring code; no core or item line
+changes, and nothing here is on a path the item's own bounds name.
+
+Time. **A fatal user fault may delay its process's end by at most 2 s
+while `/dev/ferrix-crashes` is armed; at most 16 processes are held at
+once.** The deadline is fixed at the fault (`HOLD_NANOS`, from the faulting
+thread's own `wait_until_deadline`, no new timer) and no read extends it.
+Within it the line waits at most `SETTLE_NANOS`, 200 ms, for the other
+threads to park. Unarmed, a fault reads one atomic more (crash-1). A
+crashing driver's or service's restart can therefore start up to 2 s later
+while a collector runs (`docs/INIT.md` and devmgr's restart, T0's driver
+restart); pid 1 is no exception.
+
+Locks. The ring is one `SpinLock` (`RING`) over a fixed array of 16 slots,
+held only to take, fill, read or free a slot -- never across a wake: the
+reader's close collects the held pids under it and wakes their processes
+after. The exclusion scan reads the faulting process's descriptor table
+under that table's own lock, bounded by `RLIMIT_NOFILE` entries, with no
+other lock held, and only while armed; it fails closed (a table that holds
+the reader's description is not held). The faulting thread waits with no
+lock held (a debug assertion on the preemption count).
+
+Memory. None on the fault path beyond today's `crash_identity`: the ring is
+static, the line is written on the stack (160 bytes). An open allocates its
+one small object (`fallible::try_arc`, `ENOMEM` leaves the device unarmed).
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

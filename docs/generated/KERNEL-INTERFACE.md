@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2377 declarations in the core's files, 174 in the item's; 65 checks-only.
+2378 declarations in the core's files, 174 in the item's; 66 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2066,7 +2066,7 @@ checks above is `pub` for raised checks (F3).
 | `Pin` | struct | item, load |  |
 | `PinBudget` | struct | - |  |
 | `Quarantine` | struct | - |  |
-| `Released` | struct | - | checks-only |
+| `Released` | struct | load | checks-only |
 | `Counts::budget` | field | item, load |  |
 | `Counts::kept` | field | item, load, bin |  |
 | `Counts::live` | field | item, load |  |
@@ -2294,6 +2294,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE7_SHARED_MEMORY` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE7_SYSCALLS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_BINDS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_CRASH_HOLD` | static | bin (checks) | checks-only |
 | `STAGE8_EPOLL` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_EVENTFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_FILESYSTEM` | static | bin |  |
@@ -2363,7 +2364,7 @@ checks above is `pub` for raised checks (F3).
 | `exit_leaving` | fn | load |  |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
-| `may_block` | fn | item |  |
+| `may_block` | fn | item, load |  |
 | `pending_group_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `preemption_held` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `prepare_user` | fn | load |  |

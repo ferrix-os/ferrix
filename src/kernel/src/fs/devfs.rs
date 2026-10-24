@@ -28,6 +28,10 @@
 //! daemon checks that what it was handed as `/dev/null` is 1:3 before writing
 //! to it. A node with the right name and the wrong number is a wrong answer.
 //!
+//! One number is Ferrix's own: `ferrix-crashes`, 1:13, root's alone (0400),
+//! the crash hold's reader (`fs::crashes`). Linux leaves 1:13 unassigned;
+//! should it assign it, the node moves.
+//!
 //! # Block devices
 //!
 //! Stage 11 mounts a btrfs volume from a disk a ring-3 driver serves, and
@@ -165,6 +169,9 @@ enum Behaviour {
     /// `/dev/kmsg`: every open reads the kernel log from its own place
     /// (`fs::kmsg`), so the node, like `ptmx`, is never the object.
     Kmsg,
+    /// `/dev/ferrix-crashes`: an open arms the crash hold (`fs::crashes`),
+    /// so the node, like `kmsg`, is never the object.
+    Crashes,
 }
 
 /// One node.
@@ -183,7 +190,7 @@ struct Device {
 }
 
 /// Every character node in `/dev`, in the order a listing reports it.
-static DEVICES: [Device; 9] = [
+static DEVICES: [Device; 10] = [
     Device {
         name: b"null",
         major: 1,
@@ -246,6 +253,13 @@ static DEVICES: [Device; 9] = [
         minor: fs::kmsg::MINOR,
         permissions: 0o644,
         behaviour: Behaviour::Kmsg,
+    },
+    Device {
+        name: b"ferrix-crashes",
+        major: 1,
+        minor: fs::crashes::MINOR,
+        permissions: 0o400,
+        behaviour: Behaviour::Crashes,
     },
 ];
 
@@ -1046,6 +1060,14 @@ impl Inode for Node {
             let file: Arc<dyn Inode> = fs::kmsg::KmsgFile::open()?;
             return Ok(Some(file));
         }
+        // An open of `/dev/ferrix-crashes` is the armed reader itself.
+        if self
+            .device()
+            .is_some_and(|device| device.behaviour == Behaviour::Crashes)
+        {
+            let file: Arc<dyn Inode> = fs::crashes::CrashFile::open()?;
+            return Ok(Some(file));
+        }
         // Every open of `/dev/ptmx` is a pair of its own, which is the whole
         // point of the multiplexer.
         if self
@@ -1094,7 +1116,7 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => console_inode().read_at(offset, buf),
             // The node is never the object: opening it makes a pair and
             // gives back the master, which is what reads and writes.
-            Behaviour::Ptmx | Behaviour::Kmsg => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes => Err(Errno::ENXIO),
         }
     }
 
@@ -1117,7 +1139,7 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => {
                 console_inode().write_at(offset, data, append)
             }
-            Behaviour::Ptmx | Behaviour::Kmsg => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes => Err(Errno::ENXIO),
         }
     }
 
@@ -1551,6 +1573,12 @@ pub(crate) fn attach_device(file: Arc<OpenFile>) -> Result<Arc<OpenFile>> {
         && file.inode().metadata().rdev == makedev(1, fs::kmsg::MINOR)
     {
         fs::kmsg::may_read()?;
+    }
+    // Arming the crash hold is root's, read-write, wherever its node is.
+    if file.kind() == FileType::CharDevice
+        && file.inode().metadata().rdev == makedev(1, fs::crashes::MINOR)
+    {
+        fs::crashes::may_open(file.readable(), file.writable())?;
     }
     match file.kind() {
         FileType::CharDevice => {}

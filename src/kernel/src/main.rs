@@ -592,7 +592,7 @@ fn check_filesystems(view: &BootView<'_>) {
     stages_check::check_eventfd();
     stages_check::check_timerfd();
     stages_check::check_program_files();
-    stages_check::check_signalfd();
+    stages_check::check_signals();
     stages_check::check_madvise();
     stages_check::check_cgroupfs();
 

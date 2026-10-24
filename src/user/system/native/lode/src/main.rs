@@ -23,6 +23,7 @@ mod blobs;
 mod capture;
 mod cli;
 mod control;
+mod crashd;
 mod crashes;
 mod front;
 mod handout;

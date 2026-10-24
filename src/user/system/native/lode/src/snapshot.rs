@@ -70,7 +70,7 @@ struct Taken {
 }
 
 /// One record's fields, in order.
-type Fields = Vec<(String, Vec<u8>)>;
+pub(crate) type Fields = Vec<(String, Vec<u8>)>;
 
 /// `lode snapshot PID [-n LINES] [--reason TEXT]`.
 pub(crate) fn snapshot(words: &[String]) -> i32 {
@@ -243,6 +243,34 @@ fn records_of(taken: &Taken, id: &str, reason: &str) -> (Vec<Fields>, String) {
     (records, printed)
 }
 
+/// Every thread of the process at `base`, a line each, as `lode snapshot`
+/// prints them: what `lode crashd` keeps as a crash's `BLOB_THREADS`.
+pub(crate) fn threads_text(base: &str) -> Vec<u8> {
+    let shown = |bytes: &[u8]| {
+        if bytes.is_empty() {
+            String::from("?")
+        } else {
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    };
+    let mut text = Vec::new();
+    for thread in threads_of(base) {
+        text.extend_from_slice(
+            alloc::format!(
+                "thread {} ({}) state {} in {} waiting at {}; {}\n",
+                thread.tid,
+                String::from_utf8_lossy(&thread.comm),
+                shown(&thread.state),
+                shown(&thread.syscall),
+                shown(&thread.wchan),
+                String::from_utf8_lossy(&thread.signals)
+            )
+            .as_bytes(),
+        );
+    }
+    text
+}
+
 /// Every thread of the process at `base`.
 fn threads_of(base: &str) -> Vec<Thread> {
     let Ok(fd) = sys::open(alloc::format!("{base}/task").as_bytes(), sys::O_RDONLY) else {
@@ -320,7 +348,7 @@ fn last_lines(pid: &str, count: usize) -> Vec<u8> {
 }
 
 /// `fields` as one datagram of systemd's native protocol.
-fn datagram(fields: &Fields) -> Vec<u8> {
+pub(crate) fn datagram(fields: &Fields) -> Vec<u8> {
     let mut out = Vec::new();
     for (name, value) in fields {
         out.extend_from_slice(name.as_bytes());

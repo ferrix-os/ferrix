@@ -642,6 +642,10 @@ begins at a start, holds while no more than the interval has passed since,
 and the first start after that begins the next, counting from one. Each restart doubles the delay, up to
 `RestartSec=` times 32. A restart always begins with an empty cgroup: a
 service's leftovers from its last run are killed before it starts again.
+While `lode crashd` holds `/dev/ferrix-crashes` open, a unit or a driver
+that ends by a fault of its own ends up to 2 s later, so its restart, by
+init or by `devmgr` (T0's driver restart included), can start up to 2 s
+later too (`docs/LOGGING.md` §21.7, MEMORY-AND-TIMING §2.2y).
 
 `devmgr` has the same problem with no clock. It restarts a display driver at
 most eight times, counted (`docs/DEVMGR.md` §4), through the same `Policy`
