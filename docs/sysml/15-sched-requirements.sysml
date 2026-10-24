@@ -365,10 +365,13 @@ package FerrixSchedRequirements {
                 answers yes with nothing held and no with a lock held, with
                 preemption off by hand and with interrupts masked; a lock another
                 processor holds for 20 ms, taken holding nothing, is counted as a
-                preemptible wait, and taken holding another lock is not. With the
-                rule made to answer no, test-stall's asserted phases fail (control
-                k1); with it made to answer yes in every state, this check fails
-                (control k-mask). On the host, ticket and preemptible waiters
+                preemptible wait, and taken holding another lock is not counted on
+                this processor. With the rule made to answer no, this check stops the
+                boot ("a task holding nothing, with interrupts on, may not wait
+                preemptibly", control k1); with lock() kept on the ticket and this
+                check passed over, test-stall's forkbig fails its bound (control
+                k1-row); with the rule made to answer yes in every state, this check
+                fails (control k-mask). On the host, ticket and preemptible waiters
                 together lose no increment (ferrix-sync).";
             attribute :>> parent = "H.SCHED.16";
             attribute :>> unit = "sched::preempt::Preempt::may_wait_preemptibly";
@@ -386,6 +389,20 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.16";
             attribute :>> unit = ("sched::preempt::Preempt::now_nanos",
                 "sched::preempt::Preempt::note_wait");
+        }
+        requirement <'L.sched.95'> theDeadAreFreedWithNoProcessorIdle : ItemLowLevel {
+            attribute :>> statement = "A task that ends while more than REAP_AHEAD dead
+                tasks wait for the reaper, and that may block, shall first free up to
+                REAP_BATCH of them, so that the dead waiting never number more than
+                REAP_AHEAD plus one for each processor ending a task, whether or not
+                any processor runs its idle task.";
+            attribute :>> criterion = "At boot (the stage-5 checks): with every other
+                processor held by a spinner and this one kept busy, 256 tasks made
+                and ended here one after another leave at most REAP_AHEAD plus the
+                processors' count waiting; with the ending task's reap removed, the
+                count grows past it and the check fails.";
+            attribute :>> parent = "H.SCHED.16";
+            attribute :>> unit = ("sched::reap_ahead", "sched::exit_counted");
         }
     }
 

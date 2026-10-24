@@ -270,15 +270,27 @@ fn a_lock_waits_preemptibly_only_holding_nothing(topology: &Topology) -> Result<
             }
             super::yield_now();
         }
-        let (waits, _) = preempt::preemptible_waits();
-        {
-            let outer = nest.then(|| OTHER.lock());
+        // Nested, the count is this processor's, read while the outer lock
+        // keeps this task here: no other task's wait can move it. Holding
+        // nothing, the task may move while it waits, so the sum is read; a
+        // wait of another task can only make that case pass, never fail.
+        let counted = if nest {
+            let outer = OTHER.lock();
+            let cpu = word_here().map_or(0, |(cpu, _, _)| cpu);
+            let (waits, _) = preempt::preemptible_waits_on(cpu);
             let mut guard = WAITED_FOR.lock();
             *guard = guard.wrapping_add(1);
             drop(guard);
+            let after = preempt::preemptible_waits_on(cpu).0;
             drop(outer);
-        }
-        let counted = preempt::preemptible_waits().0 != waits;
+            after != waits
+        } else {
+            let (waits, _) = preempt::preemptible_waits();
+            let mut guard = WAITED_FOR.lock();
+            *guard = guard.wrapping_add(1);
+            drop(guard);
+            preempt::preemptible_waits().0 != waits
+        };
         super::wait_until_gone(&holder, super::REAPER_PATIENCE_NANOS)?;
         match (nest, counted) {
             (false, false) => {

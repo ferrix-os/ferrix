@@ -205,6 +205,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     one_task()?;
     describes_itself()?;
     a_reaper_without_memory_frees_one_at_a_time(topology)?;
+    the_dead_are_freed_with_no_processor_idle(topology)?;
     a_dead_task_is_not_filed_as_a_sleeper()?;
     made_runnable_here_runs_without_another_interrupt()?;
     super::preempt_check::run(topology)?;
@@ -1344,6 +1345,97 @@ fn a_reaper_without_memory_frees_one_at_a_time(topology: &Topology) -> Result<()
         return Err("the reaper without memory did not free the dead tasks one at a time");
     }
     reap_to(allocations, "a reap without memory")
+}
+
+/// Tasks the busy-reaper check makes and lets end.
+const ENDING_TASKS: usize = 4 * super::REAP_AHEAD;
+
+/// The busy-reaper check's tasks that have run.
+static ENDED: AtomicU64 = AtomicU64::new(0);
+
+/// End at once.
+fn end_at_once(_argument: usize) {
+    let _ = ENDED.fetch_add(1, Ordering::AcqRel);
+}
+
+/// The dead are freed while no processor is idle (finding F-95, L.sched.95):
+/// with every other processor held by a spinner and this one kept busy by
+/// this task, [`ENDING_TASKS`] tasks made here one after another end, and the
+/// dead waiting for the reaper never number more than `REAP_AHEAD` plus one
+/// for each processor -- each ending task frees a batch first when too many
+/// wait. Without that, only an idle task frees them, and none is idle here.
+///
+/// Verifies: L.sched.95
+fn the_dead_are_freed_with_no_processor_idle(topology: &Topology) -> Result<(), &'static str> {
+    let me = super::current().ok_or("the checking task is not running")?;
+    let here = me.cpu();
+    HOLD.store(true, Ordering::Release);
+    HOLDING.store(0, Ordering::Release);
+    ENDED.store(0, Ordering::Release);
+    let mut holders = Vec::new();
+    for cpu in (0..topology.online()).filter(|&cpu| cpu != here) {
+        holders.push(super::spawn_on(
+            "check-hold",
+            hold,
+            0,
+            NICE_0_WEIGHT,
+            cpu,
+            CpuSet::of(cpu),
+        )?);
+    }
+    let outcome = end_while_held(here, holders.len() as u64);
+    HOLD.store(false, Ordering::Release);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while !holders.iter().all(|holder| holder.is_dead()) {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("a task holding a processor for the busy-reaper check never ended");
+        }
+        super::yield_now();
+    }
+    drop(holders);
+    let most = outcome?;
+    let bound = super::REAP_AHEAD + topology.online();
+    crate::console::println!(
+        "  reap     {ENDING_TASKS} tasks ended with no processor idle, at most {most} dead waiting \
+         (bound {bound})"
+    );
+    if most > bound {
+        return Err("the dead piled up while no processor was idle: nothing but the idle task freed them");
+    }
+    Ok(())
+}
+
+/// [`the_dead_are_freed_with_no_processor_idle`] once the other processors are
+/// held: make the ending tasks here, one after another, and answer the most
+/// dead seen waiting.
+fn end_while_held(here: usize, holders: u64) -> Result<usize, &'static str> {
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while HOLDING.load(Ordering::Acquire) < holders {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("a task holding a processor for the busy-reaper check never started");
+        }
+        super::yield_now();
+    }
+    let mut most = 0;
+    for made in 1..=ENDING_TASKS {
+        drop(super::spawn_on(
+            "check-end",
+            end_at_once,
+            0,
+            NICE_0_WEIGHT,
+            here,
+            CpuSet::of(here),
+        )?);
+        // Let it run and end before the next is made.
+        while ENDED.load(Ordering::Acquire) < made as u64 {
+            if crate::timer::now_nanos() >= deadline {
+                return Err("a task of the busy-reaper check never ran");
+            }
+            super::yield_now();
+        }
+        most = most.max(super::zombies_waiting());
+    }
+    Ok(most)
 }
 
 /// Whether the reaper check's holders keep spinning.

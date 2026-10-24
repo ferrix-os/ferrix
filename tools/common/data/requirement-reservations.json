@@ -194,7 +194,7 @@
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
     },
     {
-      "ids": ["H.SCHED.17", "L.sched.95", "L.user.163-168"],
+      "ids": ["H.SCHED.17", "L.user.163-168"],
       "owner": "sched-wake-latency",
       "branch": "bugfix/sched-wake-latency",
       "date": "2026-10-24",

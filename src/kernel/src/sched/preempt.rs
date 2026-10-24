@@ -319,23 +319,45 @@ unsafe impl ferrix_sync::PreemptControl for Preempt {
 
     fn note_wait(ticketed: bool) {
         let counter = if ticketed { &TICKETED_WAITS } else { &PREEMPTIBLE_WAITS };
-        let _ = counter.fetch_add(1, Ordering::Relaxed);
+        let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
+        if let Some(counter) = counter.get(cpu) {
+            let _ = counter.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 
+/// The most processors whose waits are counted apart.
+const WAIT_COUNTED: usize = 256;
+
 /// Lock waits made with the count at zero (`Preempt::may_wait_preemptibly`)
-/// that found the lock held: for the boot check and the controls.
-static PREEMPTIBLE_WAITS: AtomicUsize = AtomicUsize::new(0);
+/// that found the lock held, by the processor the wait was counted on: for
+/// the boot check, whose nested case reads its own processor's count while it
+/// holds a lock, so that no other task's wait anywhere can move it.
+static PREEMPTIBLE_WAITS: [AtomicUsize; WAIT_COUNTED] =
+    [const { AtomicUsize::new(0) }; WAIT_COUNTED];
 
 /// Of those, the ones whose patience ran out and that took a ticket.
-static TICKETED_WAITS: AtomicUsize = AtomicUsize::new(0);
+static TICKETED_WAITS: [AtomicUsize; WAIT_COUNTED] =
+    [const { AtomicUsize::new(0) }; WAIT_COUNTED];
 
-/// [`PREEMPTIBLE_WAITS`] and [`TICKETED_WAITS`], for a check.
+/// [`PREEMPTIBLE_WAITS`] and [`TICKETED_WAITS`] of processor `cpu`, for a
+/// check.
+pub(crate) fn preemptible_waits_on(cpu: usize) -> (usize, usize) {
+    let read = |counts: &[AtomicUsize; WAIT_COUNTED]| {
+        counts.get(cpu).map_or(0, |count| count.load(Ordering::Relaxed))
+    };
+    (read(&PREEMPTIBLE_WAITS), read(&TICKETED_WAITS))
+}
+
+/// [`preemptible_waits_on`] summed over every processor.
 pub(crate) fn preemptible_waits() -> (usize, usize) {
-    (
-        PREEMPTIBLE_WAITS.load(Ordering::Relaxed),
-        TICKETED_WAITS.load(Ordering::Relaxed),
-    )
+    let sum = |counts: &[AtomicUsize; WAIT_COUNTED]| {
+        counts
+            .iter()
+            .map(|count| count.load(Ordering::Relaxed))
+            .fold(0, usize::wrapping_add)
+    };
+    (sum(&PREEMPTIBLE_WAITS), sum(&TICKETED_WAITS))
 }
 
 /// [`Preempt`]'s two halves as functions, for the locks of the libraries
