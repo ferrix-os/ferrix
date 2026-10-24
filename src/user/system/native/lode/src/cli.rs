@@ -45,6 +45,9 @@ lode top [-b ...] [-n ROWS] [filters]
 lode top --live [SECONDS]            who writes most now, per second, every SECONDS (2)
 lode alerts                          follow the alerts lode says (`alert` rules)
 lode events                          the kinds of event and whether each is on (events.conf)
+lode tombstones [-b ...]             the crashes' tombstones, a line each
+lode tombstone SEQ|CURSOR [-b ...]   one whole: the crash, its last lines, its screenshot, its parts
+lode blob ID [-o FILE]               a blob's bytes (a screenshot, a backtrace) by its id
 lode snapshot PID [-n N] [--reason TEXT]
                                      what a process is doing, into the log: every thread's state,
                                      system call, wait and signals, its descriptors, its last lines
@@ -197,6 +200,9 @@ pub(crate) fn run() -> i32 {
         Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
         Some("alerts") => return crate::top::alerts(),
         Some("events") => return events(),
+        Some("tombstones") => return crate::crashes::list(rest.get(1..).unwrap_or_default()),
+        Some("tombstone") => return crate::crashes::show(rest.get(1..).unwrap_or_default()),
+        Some("blob") => return crate::crashes::blob(rest.get(1..).unwrap_or_default()),
         Some("snapshot") => return crate::snapshot::snapshot(rest.get(1..).unwrap_or_default()),
         Some("follow") => return crate::snapshot::follow(rest.get(1..).unwrap_or_default()),
         Some("reload") => {
@@ -1354,6 +1360,15 @@ fn verify(options: &Options) -> i32 {
             )
             .as_bytes(),
         );
+    }
+    // Every blob a record names is in the container (§21.4).
+    if !source.passed {
+        let stores: Vec<usize> = source.dirs.iter().map(|dir| dir.fd).collect();
+        let (said, well) = crate::crashes::verify(&stores, &load(&segments, None));
+        buffer.extend_from_slice(&said);
+        if !well {
+            status = 1;
+        }
     }
     if options.kernel_gaps {
         let boot = chosen_boot(options.boot.as_deref().unwrap_or(""), &boots(&segments));

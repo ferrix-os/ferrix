@@ -201,8 +201,13 @@ dependencies = [
 name = "ferrix-lode-core"
 version = "0.1.0"
 dependencies = [
+ "ferrix-slots",
  "ruzstd",
 ]
+
+[[package]]
+name = "ferrix-slots"
+version = "0.1.0"
 
 [[package]]
 name = "fiat-crypto"

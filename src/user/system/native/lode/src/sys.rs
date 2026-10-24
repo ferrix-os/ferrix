@@ -880,3 +880,29 @@ pub(crate) fn identity(fd: usize) -> Option<u64> {
     let minor = u32::from_ne_bytes(buf.get(140..144)?.try_into().ok()?);
     Some(inode ^ (u64::from(major) << 48) ^ (u64::from(minor) << 32))
 }
+
+/// When `name` in the directory `dir` was last changed, in seconds since
+/// 1970.
+pub(crate) fn mtime_at(dir: usize, name: &[u8]) -> Option<u64> {
+    const STATX_MTIME: usize = 0x40;
+    let path = c_path(name);
+    let mut buf = [0_u8; 256];
+    // SAFETY: `path` is NUL-terminated and `buf` 256 writable bytes, the
+    // size of `struct statx`, both for the call.
+    let _ = unsafe {
+        call(
+            numbers::STATX,
+            [
+                dir,
+                path.as_ptr() as usize,
+                0,
+                STATX_MTIME,
+                buf.as_mut_ptr() as usize,
+                0,
+            ],
+        )
+    }
+    .ok()?;
+    // `stx_mtime.tv_sec`, at byte 112.
+    u64::try_from(i64::from_ne_bytes(buf.get(112..120)?.try_into().ok()?)).ok()
+}

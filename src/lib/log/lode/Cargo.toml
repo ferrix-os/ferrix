@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 # Sealed segments' frames (docs/LOGGING.md §8.2); the btrfs crate uses it too.
 ruzstd = { version = "0.9.1", default-features = false }
+# SHA-256, which names a blob (docs/LOGGING.md §21.4).
+ferrix-slots.workspace = true
 
 [lints]
 workspace = true

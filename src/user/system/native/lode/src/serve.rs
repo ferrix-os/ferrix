@@ -169,12 +169,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let handout = Handout::open();
     let control = Control::open();
     let alerting = Alerting::open();
-    let journal = if persistent.is_some() {
-        store::PERSISTENT
-    } else {
-        store::VOLATILE
-    };
-    let capture = Capture::open(journal, &boot_id);
+    let capture = Capture::open();
     let dropped = sys::become_ids(UID, GID).is_ok();
     let zone = zone::local();
     let now = clocks();
@@ -185,6 +180,9 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         alerts,
         events,
     } = configuration(&mut said, now);
+    let tombstones = ferrix_lode_core::tombstone::Tombstones::new(u64::from(
+        events.count("tombstone").unwrap_or(5),
+    ));
     let mut store = Store {
         persistent: persistent.map(|dir| dir.fd),
         volatile: volatile.fd,
@@ -243,6 +241,9 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         alerts: Alerts::new(alerts),
         events,
         echoes: units::Echoes::default(),
+        blobs: crate::blobs::Blobs::new(),
+        blobs_swept: 0,
+        tombstones,
         alerting,
         identities: alloc::collections::VecDeque::new(),
     };
@@ -279,6 +280,12 @@ struct Service {
     events: Events,
     /// Echoed stream lines waiting for their copies as units' lines.
     echoes: units::Echoes,
+    /// The blob container.
+    blobs: crate::blobs::Blobs,
+    /// When it was last swept, monotonic microseconds.
+    blobs_swept: u64,
+    /// This boot's tombstones.
+    tombstones: ferrix_lode_core::tombstone::Tombstones,
     /// Their actions.
     alerting: Alerting,
     /// Who the processes a fault ended were, as the kernel said, until
@@ -410,35 +417,7 @@ impl Service {
             self.limiter.tick(now.monotonic_us, &mut batch);
             let urgent = batch.iter().any(|record| record.priority <= 2);
             let idle = batch.is_empty();
-            for record in &mut batch {
-                if record.realtime_us == 0 {
-                    record.realtime_us = now.realtime_of(record.monotonic_us);
-                }
-            }
-            let wanted: Vec<(usize, String)> = batch
-                .iter()
-                .enumerate()
-                .filter(|(_, record)| self.events.on("capture") && self.capture.wants(record))
-                .map(|(index, record)| {
-                    let text = String::from_utf8_lossy(record.message());
-                    (index, text.chars().take(160).collect())
-                })
-                .collect();
-            let seqnums = self
-                .store
-                .append(batch, &self.zone)
-                .map_err(|()| Step::Segment)?;
-            let mut more: Vec<Record> = Vec::new();
-            for (index, what) in wanted {
-                if let Some(&seqnum) = seqnums.get(index) {
-                    self.capture.ask(seqnum, &what, now, &mut more);
-                }
-            }
-            self.capture.serve(now, self.seat.sessions(), &mut more);
-            let _ = self
-                .store
-                .append(more, &self.zone)
-                .map_err(|()| Step::Segment)?;
+            self.store_batch(batch, now)?;
             if rotate {
                 self.store.rotate_all();
             }
@@ -451,6 +430,7 @@ impl Service {
                 .append(answered, &self.zone)
                 .map_err(|()| Step::Segment)?;
             let compressing = self.store.compress_some();
+            self.sweep_blobs(now);
             if closed(channel) {
                 self.store.sync_if(true, now.monotonic_us);
                 return Ok(());
@@ -541,6 +521,145 @@ impl Service {
             }
         }
         self.limiter.admit(record, now.monotonic_us, batch);
+    }
+
+    /// Store a batch: stamped, its blobs written first, then the records;
+    /// then what follows from them -- tombstones for its crashes and
+    /// screenshots asked for -- stored after.
+    fn store_batch(&mut self, mut batch: Vec<Record>, now: Now) -> Result<(), Step> {
+        for record in &mut batch {
+            if record.realtime_us == 0 {
+                record.realtime_us = now.realtime_of(record.monotonic_us);
+            }
+        }
+        let wanted: Vec<(usize, String)> = batch
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| self.events.on("capture") && self.capture.wants(record))
+            .map(|(index, record)| {
+                let text = String::from_utf8_lossy(record.message());
+                (index, text.chars().take(160).collect())
+            })
+            .collect();
+        // Which records name a process, and which are crashes, for the
+        // tombstones made once their sequence numbers are known.
+        let pids: Vec<Option<u32>> = batch
+            .iter()
+            .map(|record| record.get_str("_PID").and_then(|pid| pid.parse().ok()))
+            .collect();
+        let crashes: Vec<(usize, Record)> = batch
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| record.get_str("MESSAGE_ID") == Some(ingest::MESSAGE_ID_CRASH))
+            .map(|(index, record)| (index, record.clone()))
+            .collect();
+        // A batch's blobs are on disk before the records that name them.
+        self.flush_blobs(&mut batch, now);
+        let seqnums = self
+            .store
+            .append(batch, &self.zone)
+            .map_err(|()| Step::Segment)?;
+        let mut more: Vec<Record> = Vec::new();
+        for (pid, seqnum) in pids.iter().zip(&seqnums) {
+            if let Some(pid) = pid {
+                self.tombstones.stored(*pid, *seqnum);
+            }
+        }
+        if self.events.on("tombstone") {
+            self.tombstones_for(crashes, &seqnums, now, &mut more);
+        }
+        for (index, what) in wanted {
+            if let Some(&seqnum) = seqnums.get(index) {
+                self.capture.ask(seqnum, &what, now, &mut more);
+            }
+        }
+        self.capture.serve(now, self.seat.sessions(), &mut more);
+        self.flush_blobs(&mut more, now);
+        let _ = self
+            .store
+            .append(more, &self.zone)
+            .map_err(|()| Step::Segment)?;
+        Ok(())
+    }
+
+    /// The tombstones for the `crashes` of a batch stored as `seqnums`.
+    fn tombstones_for(
+        &mut self,
+        crashes: Vec<(usize, Record)>,
+        seqnums: &[u64],
+        now: Now,
+        out: &mut Vec<Record>,
+    ) {
+        let boot = self.store.header.boot_id;
+        for (index, crash) in crashes {
+            let Some(&seqnum) = seqnums.get(index) else {
+                continue;
+            };
+            out.extend(self.tombstones.for_crash(&crash, seqnum, &boot, now));
+        }
+    }
+
+    /// Mark and sweep the blob container, at most once an hour: every blob
+    /// the segments' summaries list, and the records of the segments being
+    /// written, is live; packs with nothing live go, packs half dead are
+    /// rewritten (`docs/LOGGING.md` §21.4).
+    fn sweep_blobs(&mut self, now: Now) {
+        if now.monotonic_us.saturating_sub(self.blobs_swept) < 3_600_000_000 {
+            return;
+        }
+        self.blobs_swept = now.monotonic_us;
+        let mut dirs = alloc::vec![Dir {
+            fd: self.store.volatile
+        }];
+        dirs.extend(self.store.persistent.map(|fd| Dir { fd }));
+        let mut live = alloc::collections::BTreeSet::new();
+        for segment in store::all_segments(&dirs) {
+            match store::summary(&segment) {
+                Some(summary) => live.extend(summary.blobs),
+                None => {
+                    let bytes = store::bytes(&segment, 0).unwrap_or_default();
+                    live.extend(
+                        segment::entries(&bytes)
+                            .0
+                            .iter()
+                            .flat_map(ferrix_lode_core::blob::references)
+                            .map(|(_, reference)| reference.id),
+                    );
+                }
+            }
+        }
+        let _ = self.blobs.sweep(&live, now.realtime_us / 1_000_000);
+    }
+
+    /// Write the queued blobs, the capture's included, to the pack in the
+    /// directory the store writes to; a record whose blob could not be
+    /// written says so (`BLOB_DROPPED`), never names what is not there.
+    fn flush_blobs(&mut self, batch: &mut [Record], _now: Now) {
+        let mut failed = Vec::new();
+        for (id, kind, bytes) in self.capture.take_blobs() {
+            if self.blobs.submit(id, &kind, bytes).is_err() {
+                failed.push(id);
+            }
+        }
+        let store = self.store.persistent.unwrap_or(self.store.volatile);
+        failed.extend(self.blobs.flush(store));
+        if failed.is_empty() {
+            return;
+        }
+        for record in batch.iter_mut() {
+            let names: Vec<String> = ferrix_lode_core::blob::references(record)
+                .into_iter()
+                .filter(|(_, reference)| failed.contains(&reference.id))
+                .map(|(name, _)| name)
+                .collect();
+            for name in names {
+                record.fields.retain(|field| field.name != name);
+                record.push(
+                    "BLOB_DROPPED",
+                    alloc::format!("{name}: not written").as_bytes(),
+                );
+            }
+        }
     }
 
     /// `lode reload`: the rules, the alerts and the events read again; what

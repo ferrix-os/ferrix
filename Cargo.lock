@@ -561,6 +561,7 @@ version = "0.1.0"
 name = "ferrix-lode-core"
 version = "0.1.0"
 dependencies = [
+ "ferrix-slots",
  "ruzstd",
 ]
 

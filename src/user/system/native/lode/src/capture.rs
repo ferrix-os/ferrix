@@ -9,19 +9,20 @@
 //! where EXPR` line of the file matches -- asks the seat's provider for a
 //! picture, at most one each [`SPACING_US`]. The record is stored first and
 //! never waits: the answer, or its absence, is a record of its own, linked
-//! by `CAPTURE_OF`, and an image is a file beside the journal, readable by
-//! exactly those who read the journal.
+//! by `CAPTURE_OF`, and an image is a blob in the store's blob container
+//! (`BLOB_SCREENSHOT`, §21.4), readable by exactly those who read the
+//! journal, kept and swept with the records that name it.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use ferrix_lode_capture::{FORMAT_QOI, Message};
+use ferrix_lode_core::blob;
 use ferrix_lode_core::filter::{self, Expr};
 use ferrix_lode_core::ingest::{self, Now};
 use ferrix_lode_core::record::Record;
 use ferrix_lode_core::session::Sessions;
 
-use crate::store::Dir;
 use crate::sys;
 
 /// The provider socket.
@@ -34,10 +35,6 @@ const SPACING_US: u64 = 10_000_000;
 const PATIENCE_US: u64 = 2_000_000;
 /// Time-outs in a row before a provider is dropped.
 const TIMEOUTS_MAX: u32 = 3;
-/// The most the captures may take on disk.
-const KEPT_MAX: u64 = 256 << 20;
-/// How long a capture is kept, in seconds.
-const KEPT_S: u64 = 7 * 86_400;
 /// `MESSAGE_ID` of a record about a capture.
 pub(crate) const MESSAGE_ID_CAPTURE: &str = "6c0a8e4f2d1b4a39b7e5c3a1f9d7b5e3";
 
@@ -73,10 +70,8 @@ pub(crate) struct Capture {
     on: bool,
     /// The listening socket.
     listener: Option<usize>,
-    /// The captures' directory.
-    dir: Option<usize>,
-    /// The boot, for file names.
-    boot: String,
+    /// Images waiting for the blob container.
+    blobs: Vec<(blob::BlobId, String, Vec<u8>)>,
     /// The connections.
     providers: Vec<Provider>,
     /// `capture where EXPR` lines.
@@ -88,9 +83,8 @@ pub(crate) struct Capture {
 }
 
 impl Capture {
-    /// Read the switch, and when on make the socket and the directory, as
-    /// root, beside `journal` (the store's own directory's path).
-    pub(crate) fn open(journal: &[u8], boot_id: &[u8; 16]) -> Capture {
+    /// Read the switch, and when on make the socket, as root.
+    pub(crate) fn open() -> Capture {
         let mut on = false;
         let mut rules = Vec::new();
         if let Some(bytes) = sys::read_small(CONFIG) {
@@ -108,13 +102,10 @@ impl Capture {
                 }
             }
         }
-        let mut boot = String::new();
-        ferrix_lode_core::segment::push_hex(&mut boot, boot_id);
         let mut capture = Capture {
             on,
             listener: None,
-            dir: None,
-            boot,
+            blobs: Vec::new(),
             providers: Vec::new(),
             rules,
             last: None,
@@ -126,15 +117,6 @@ impl Capture {
         capture.listener = sys::listen_at(SOCKET).ok();
         if capture.listener.is_some() {
             let _ = sys::chmod(SOCKET, 0o666);
-        }
-        let mut path = Vec::from(journal);
-        path.extend_from_slice(b"/captures");
-        if sys::mkdirat(sys::AT_FDCWD, &path, 0o2750).is_ok()
-            && let Ok(dir) = Dir::open(&path)
-        {
-            let _ = sys::fchown(dir.fd, crate::serve::UID, crate::serve::GID);
-            let _ = sys::fchmod(dir.fd, 0o2750);
-            capture.dir = Some(dir.fd);
         }
         capture
     }
@@ -364,52 +346,25 @@ impl Capture {
         }
     }
 
-    /// Write an image beside the journal, and the record that links it.
+    /// Queue an image for the blob container, and make the record that
+    /// names it (`BLOB_SCREENSHOT`); the service writes the blob before the
+    /// record (`docs/LOGGING.md` §21.4), so a reader never handles a path.
     fn keep(
-        &self,
+        &mut self,
         now: Now,
         pending: &Pending,
         provider: Option<&str>,
         (format, width, height): (u32, u32, u32),
         bytes: &[u8],
     ) -> Record {
-        let Some(dir) = self.dir else {
-            return said(
-                now,
-                pending.seqnum,
-                "none",
-                "there is no captures directory",
-                provider,
-            );
+        let kind = if format == FORMAT_QOI { "qoi" } else { "png" };
+        let id = blob::id_of(bytes);
+        let reference = blob::Reference {
+            id,
+            size: bytes.len() as u64,
+            kind: String::from(kind),
         };
-        let extension = if format == FORMAT_QOI { "qoi" } else { "png" };
-        let name = alloc::format!(
-            "{}-{:016x}-{}.{extension}",
-            self.boot,
-            pending.seqnum,
-            now.realtime_us / 1_000_000
-        );
-        let written = sys::openat(
-            dir,
-            name.as_bytes(),
-            sys::O_WRONLY | sys::O_CREAT | sys::O_EXCL | sys::O_CLOEXEC,
-            0o640,
-        )
-        .and_then(|fd| {
-            let result = sys::write_all(fd, bytes);
-            sys::close(fd);
-            result
-        });
-        if written.is_err() {
-            return said(
-                now,
-                pending.seqnum,
-                "none",
-                "the image could not be written",
-                provider,
-            );
-        }
-        vacuum(dir, now.realtime_us / 1_000_000);
+        self.blobs.push((id, String::from(kind), Vec::from(bytes)));
         let mut record = said(
             now,
             pending.seqnum,
@@ -421,13 +376,19 @@ impl Capture {
         record.push(
             "MESSAGE",
             alloc::format!(
-                "screenshot of the screen at record {}: captures/{name} ({width}x{height})",
-                pending.seqnum
+                "screenshot of the screen at record {} ({width}x{height}), blob {}",
+                pending.seqnum,
+                blob::hex(&id)
             )
             .as_bytes(),
         );
-        record.push("CAPTURE_FILE", alloc::format!("captures/{name}").as_bytes());
+        record.push("BLOB_SCREENSHOT", reference.text().as_bytes());
         record
+    }
+
+    /// The images queued since the last call, for the blob container.
+    pub(crate) fn take_blobs(&mut self) -> Vec<(blob::BlobId, String, Vec<u8>)> {
+        core::mem::take(&mut self.blobs)
     }
 }
 
@@ -446,33 +407,4 @@ fn said(now: Now, seqnum: u64, outcome: &str, why: &str, provider: Option<&str>)
         record.push("CAPTURE_PROVIDER", provider.as_bytes());
     }
     record
-}
-
-/// Remove captures older than [`KEPT_S`], then the oldest past [`KEPT_MAX`].
-fn vacuum(dir: usize, now_s: u64) {
-    let _ = sys::lseek(dir, 0, sys::SEEK_SET);
-    let mut files: Vec<(u64, Vec<u8>, u64)> = sys::list_dir(dir)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|name| {
-            let text = core::str::from_utf8(&name).ok()?;
-            let stem = text.rsplit_once('.')?.0;
-            let when: u64 = stem.rsplit_once('-')?.1.parse().ok()?;
-            let size = sys::openat(dir, &name, sys::O_RDONLY | sys::O_CLOEXEC, 0).map_or(0, |fd| {
-                let size = sys::lseek(fd, 0, sys::SEEK_END).unwrap_or(0);
-                sys::close(fd);
-                size as u64
-            });
-            Some((when, name, size))
-        })
-        .collect();
-    files.sort();
-    let mut total: u64 = files.iter().map(|(_, _, size)| size).sum();
-    for (when, name, size) in files {
-        if (now_s.saturating_sub(when) > KEPT_S || total > KEPT_MAX)
-            && sys::unlinkat(dir, &name).is_ok()
-        {
-            total = total.saturating_sub(size);
-        }
-    }
 }

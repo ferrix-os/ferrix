@@ -2496,3 +2496,50 @@ tombstone's cursor) to a crash record when one exists.
 screenshot record's cursor), `TOMBSTONE_REPEATS`, `TOMBSTONE_LAST`, and
 the blob references `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
 `BLOB_THREADS`, `BLOB_SCREENSHOT`, `BLOB_MEMORY` (step 2 fills these).
+
+### 21.5 Built: the blob container and tombstone step 1 (2026-10-24)
+
+* **The container** (`ferrix-lode-core` `blob`, lode `blobs.rs`):
+  `<store>/blobs/pack-<16 hex>.fxb`, entries as §21.4 says (SHA-256 id,
+  zstd unless the type is packed already, CRC-32C), an index written at
+  sealing (16 MiB), a scan for a pack without one. lode queues a blob
+  (bounded at 16 MiB) and writes and syncs the queue once, before the batch
+  whose records name it; a blob that could not be queued or written makes
+  its record say `BLOB_DROPPED` instead of naming it. The service sweeps
+  once an hour: live ids are those the segments' summaries list (a new
+  `BLB1` section, older readers skip it) and those the segments being
+  written name; a pack an hour old with nothing live goes, one less than
+  half live is rewritten.
+* **Screenshots are blobs.** `captures/` is gone: a stored capture's
+  record names `BLOB_SCREENSHOT=<id> <size> qoi|png`, and `lode blob ID`
+  gives the bytes. `CAPTURE_FILE` is no longer written.
+* **Tombstones, step 1** (`ferrix-lode-core` `tombstone`): for each crash
+  record, once stored, lode writes a tombstone (`TOMBSTONE=1`, the
+  `MESSAGE_ID` of §21.4, at err) with `TOMBSTONE_PID`, `_COMM`, `_EXE`,
+  `_CMDLINE`, `_SIGNAL`, `_ADDRESS`, `_PC`, `_TRAP`, `_MODULE`,
+  `_TOP_FRAME` (the module until a collector unwinds), `_UNIT`, `_SESSION`,
+  `_SIGNATURE`, `_OF` (the crash record's cursor), `_REPEATS`, and
+  `_TAIL_FIRST`/`_TAIL_LAST`, the cursors of the process's last 50 records.
+  A crash storm: per signature and boot, the first five (`events.conf`'s
+  `tombstone on err 5`) are full; after them a repeat record
+  (`MESSAGE_ID` ...3c2e, `TOMBSTONE_REPEATS`, `TOMBSTONE_FIRST`,
+  `TOMBSTONE_LAST`) each time the count doubles from ten. The boot's image
+  is on the boot record (`BOOT_IMAGE`), one per boot.
+* **Reading**: `lode tombstones` lists them; `lode tombstone SEQ|CURSOR`
+  prints one whole -- its fields, the crash record, its screenshot record
+  with whether the blob is there, the process's last lines, its blobs;
+  `lode blob ID [-o FILE]`; `lode verify` checks every reference against
+  the container and counts the blobs no record names.
+* `test-log` on all three architectures: "capture" reads the screenshot
+  back through `lode blob` (`qoif`); "tombstones": twelve crashes of one
+  signature are five tombstones and a counter at ten, `lode tombstone`
+  shows the crash, `lode verify` finds nothing missing. Host tests: packs,
+  torn tails, the index, references, summaries' ids, mark and sweep, the
+  storm's counts. test-log's own deadline is 300 s (armv7a's rows passed
+  120).
+* **Not yet** (steps 2 and 3): the collector (`lode-crashd` and the
+  kernel's hold) that fills `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
+  `BLOB_THREADS`; forwarding blobs on a second stream; the blob row in
+  `test-log-budget` (there is nothing to measure before the collector
+  writes blobs; the screenshot rate limit stands); the tombstone retention
+  class and `BlobMaxUse=`; `--blobs` on JSON output.

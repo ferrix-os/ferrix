@@ -2295,7 +2295,7 @@ fn an_echoed_stream_line_is_kept_once_as_the_streams() {
             .get("SYSLOG_IDENTIFIER"),
         Some(&b"web"[..])
     );
-    let mut late = other.clone();
+    let mut late = other;
     late.push("_KERNEL_SEQNUM", b"41");
     assert!(echoes.unit_line(late, 10, true).is_none());
     echoes.echoed(
@@ -2314,4 +2314,145 @@ fn an_echoed_stream_line_is_kept_once_as_the_streams() {
     );
     echoes.expire(10 + units::PAIR_US, &mut out);
     assert_eq!(out.len(), 1);
+}
+
+#[test]
+fn blobs_pack_read_back_and_sweep() {
+    use crate::blob::{self, Reference, Sweep};
+    let big: Vec<u8> = (0..20_000_u32)
+        .flat_map(|n| (n % 251).to_le_bytes())
+        .collect();
+    let small = b"maps: 3 lines".to_vec();
+    // Small parts are fields; big ones blobs, named by their hash.
+    let ((name, value), none) = blob::part("MAPS", "text", small.clone());
+    assert_eq!(
+        (name.as_str(), value.as_slice(), none),
+        ("MAPS", &small[..], None)
+    );
+    let ((name, value), some) = blob::part("SCREENSHOT", "qoi", big.clone());
+    assert_eq!(name, "BLOB_SCREENSHOT");
+    let (id, bytes) = some.unwrap();
+    assert_eq!(id, blob::id_of(&big));
+    let reference = Reference::parse(&value).unwrap();
+    assert_eq!(reference.size, big.len() as u64);
+    assert_eq!(reference.kind, "qoi");
+    // A pack of two, scanned and read back; a torn tail ends the scan.
+    let other = vec![7_u8; 9000];
+    let mut pack = blob::PACK_MAGIC.to_vec();
+    pack.extend(blob::encode_entry(&id, "qoi", &bytes));
+    pack.extend(blob::encode_entry(&blob::id_of(&other), "text", &other));
+    let entries = blob::scan(&pack);
+    assert_eq!(entries.len(), 2);
+    assert!(entries[1].length < 9000, "packed");
+    assert_eq!(blob::read(&pack, entries[0].offset).unwrap().1, big);
+    assert_eq!(
+        blob::read(&pack, entries[1].offset).unwrap(),
+        (String::from("text"), other)
+    );
+    let mut torn = pack.clone();
+    torn.truncate(torn.len() - 3);
+    assert_eq!(blob::scan(&torn).len(), 1);
+    // The index reads back; a damaged one does not.
+    let index = blob::encode_index(&entries);
+    assert_eq!(
+        blob::decode_index(&index).unwrap()[1],
+        (entries[1].id, entries[1].offset)
+    );
+    let mut bad = index;
+    bad[20] ^= 1;
+    assert_eq!(blob::decode_index(&bad), None);
+    // A record names its blob; a summary lists it for the sweep's marks.
+    let mut crash = record(1, "crashed");
+    crash.push(&name, &value);
+    assert_eq!(blob::references(&crash)[0].1.id, id);
+    let summary =
+        crate::summary::Summary::decode(&crate::summary::Summary::of(&[crash]).encode()).unwrap();
+    assert_eq!(summary.blobs, vec![id]);
+    // Mark and sweep.
+    let mut live = alloc::collections::BTreeSet::new();
+    assert_eq!(blob::sweep(&entries, &live, true), Sweep::Keep);
+    assert_eq!(blob::sweep(&entries, &live, false), Sweep::Remove);
+    let _ = live.insert(entries[1].id);
+    assert!(matches!(blob::sweep(&entries, &live, false), Sweep::Rewrite(kept) if kept.len() == 1));
+    let _ = live.insert(id);
+    assert_eq!(blob::sweep(&entries, &live, false), Sweep::Keep);
+}
+
+#[test]
+fn a_crash_storm_is_five_tombstones_and_a_few_counters() {
+    use crate::tombstone::{self, Tombstones};
+    let boot = [0x22; 16];
+    let now = Now {
+        realtime_us: 1_700_000_000_000_000,
+        monotonic_us: 5,
+    };
+    let mut tombstones = Tombstones::new(5);
+    let crash = |pid: u32| {
+        let mut record = record(1, "signal pid ended");
+        for (name, value) in [
+            ("CRASH_PID", alloc::format!("{pid}")),
+            ("CRASH_COMM", String::from("steamwebhelper")),
+            ("CRASH_PROGRAM", String::from("/steam/steamwebhelper")),
+            ("CRASH_MODULE", String::from("/steam/libcef.so+0x1a01a1")),
+            ("CRASH_SIGNAL", String::from("SIGTRAP")),
+        ] {
+            record.push(name, value.as_bytes());
+        }
+        record
+    };
+    // The process's last lines are linked by cursor.
+    for seq in 10..70 {
+        tombstones.stored(4284, seq);
+    }
+    let first = tombstones.for_crash(&crash(4284), 70, &boot, now).unwrap();
+    assert!(tombstone::is_tombstone(&first));
+    assert_eq!(first.get_str("TOMBSTONE_COMM"), Some("steamwebhelper"));
+    assert_eq!(
+        first.get_str("TOMBSTONE_TOP_FRAME"),
+        Some("/steam/libcef.so+0x1a01a1")
+    );
+    assert_eq!(
+        first.get_str("TOMBSTONE_OF").map(String::from),
+        Some(tombstone::cursor(70, &boot))
+    );
+    assert_eq!(
+        first.get_str("TOMBSTONE_TAIL_FIRST").map(String::from),
+        Some(tombstone::cursor(20, &boot))
+    );
+    assert_eq!(
+        first.get_str("TOMBSTONE_TAIL_LAST").map(String::from),
+        Some(tombstone::cursor(69, &boot))
+    );
+    // 146 crashes of one signature: five tombstones and four counters.
+    let mut full = 1;
+    let mut repeats = Vec::new();
+    for n in 2..=146_u64 {
+        if let Some(record) = tombstones.for_crash(&crash(5000 + n as u32), 100 + n, &boot, now) {
+            if record.get("TOMBSTONE").is_some() {
+                full += 1;
+            } else {
+                repeats.push(record.get_str("TOMBSTONE_REPEATS").map(String::from));
+            }
+        }
+    }
+    assert_eq!(full, 5);
+    assert_eq!(
+        repeats,
+        ["10", "20", "40", "80"]
+            .map(|n| Some(String::from(n)))
+            .to_vec()
+    );
+    // Another signature has its own five.
+    let mut other = crash(1);
+    other.push("CRASH_SIGNAL", b"SIGSEGV");
+    other
+        .fields
+        .retain(|field| !(field.name == "CRASH_SIGNAL" && field.value == b"SIGTRAP"));
+    assert!(
+        tombstones
+            .for_crash(&other, 900, &boot, now)
+            .unwrap()
+            .get("TOMBSTONE")
+            .is_some()
+    );
 }

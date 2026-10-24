@@ -43,7 +43,7 @@ pub struct Kind {
 
 /// Every kind, with its defaults: errors and crashes on, what could flood
 /// off.
-pub const KINDS: [Kind; 7] = [
+pub const KINDS: [Kind; 8] = [
     Kind {
         name: "window-opened",
         on: false,
@@ -87,6 +87,13 @@ pub const KINDS: [Kind; 7] = [
         what: "an app error takes a hang snapshot of the window's process (lode snapshot)",
     },
     Kind {
+        name: "tombstone",
+        on: true,
+        level: 3,
+        made_by: "lode",
+        what: "a crash's tombstone; a fourth word is how many a signature gets a boot (5)",
+    },
+    Kind {
         name: "capture",
         on: true,
         level: 6,
@@ -106,6 +113,8 @@ pub struct Setting {
     pub level: u8,
     /// Where it was set: `default`, or the file's path.
     pub from: String,
+    /// A count, for the kinds that take one (`tombstone`'s per signature).
+    pub count: Option<u32>,
 }
 
 /// Every kind's setting.
@@ -125,6 +134,7 @@ impl Default for Events {
                     on: kind.on,
                     level: kind.level,
                     from: String::from("default"),
+                    count: None,
                 })
                 .collect(),
         }
@@ -151,11 +161,15 @@ impl Events {
                 why: String::from(why),
             };
             let words: Vec<&str> = line.split_whitespace().collect();
-            let (name, state, given) = match words.as_slice() {
-                [name, state] => (*name, *state, None),
-                [name, state, given] => (*name, *state, Some(*given)),
-                _ => return Err(error("KIND on|off [LEVEL]")),
+            let (name, state, given, count) = match words.as_slice() {
+                [name, state] => (*name, *state, None, None),
+                [name, state, given] => (*name, *state, Some(*given), None),
+                [name, state, given, count] => (*name, *state, Some(*given), Some(*count)),
+                _ => return Err(error("KIND on|off [LEVEL [COUNT]]")),
             };
+            let count = count
+                .map(|word| word.parse::<u32>().map_err(|_| error("a count")))
+                .transpose()?;
             if !KINDS.iter().any(|kind| kind.name == name) {
                 return Err(error(
                     "not a kind of event lode knows (lode events lists them)",
@@ -173,9 +187,9 @@ impl Events {
                         .ok_or_else(|| error("a level"))
                 })
                 .transpose()?;
-            changes.push((String::from(name), on, level));
+            changes.push((String::from(name), on, level, count));
         }
-        for (name, on, level) in changes {
+        for (name, on, level, count) in changes {
             if let Some(setting) = self
                 .settings
                 .iter_mut()
@@ -184,6 +198,9 @@ impl Events {
                 setting.on = on;
                 if let Some(level) = level {
                     setting.level = level;
+                }
+                if count.is_some() {
+                    setting.count = count;
                 }
                 setting.from = String::from(from);
             }
@@ -207,6 +224,15 @@ impl Events {
             .iter()
             .find(|setting| setting.name == kind)
             .map_or(6, |setting| setting.level)
+    }
+
+    /// `kind`'s count, if one was set.
+    #[must_use]
+    pub fn count(&self, kind: &str) -> Option<u32> {
+        self.settings
+            .iter()
+            .find(|setting| setting.name == kind)
+            .and_then(|setting| setting.count)
     }
 
     /// `lode events`' table.

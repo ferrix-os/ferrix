@@ -29,6 +29,8 @@
 //! * [`upload`]: store-and-forward to a collector.
 //! * [`alert`]: rules with an action: a notification, a unit started.
 //! * [`events`]: which kinds of event the log takes, `events.conf`.
+//! * [`blob`]: the blob container beside the segments, for crashes' heavy parts.
+//! * [`tombstone`]: a crash's lean record and its links; crash storms cut short.
 //! * [`regex`]: `-g`'s regular expressions, in linear time.
 //! * [`units`]: units' output as init hands it over, paired with its
 //!   console copy.
@@ -42,6 +44,7 @@ extern crate alloc;
 
 pub mod access;
 pub mod alert;
+pub mod blob;
 pub mod compress;
 pub mod console;
 pub mod crc;
@@ -61,6 +64,7 @@ pub mod segment;
 pub mod session;
 pub mod summary;
 pub mod time;
+pub mod tombstone;
 pub mod units;
 pub mod upload;
 

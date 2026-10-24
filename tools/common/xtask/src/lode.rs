@@ -116,6 +116,7 @@ session-streams off
 crash-names     on
 process-names   on
 snapshot        on
+tombstone       on   err      5
 capture         on
 ";
 
@@ -346,7 +347,7 @@ i=0; until $bb grep -q "sent record" /tmp/stub; do i=$((i+1)); [ $i -gt 100 ] &&
 $bb usleep 500000
 seq_of() { /bin/lode -b --where "mark = \"$1\"" -o json | $bb sed 's/.*"__SEQNUM":"\([0-9]*\)".*/\1/' | $bb head -n 1; }
 s1=$(seq_of "capture me 1"); s2=$(seq_of "capture me 2")
-say "capture: $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s1\",\"CAPTURE\":\"none\"") $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s2\",\"CAPTURE\":\"stored\"") $($bb ls /var/log/journal/captures | $bb wc -l) $($bb head -c 4 /var/log/journal/captures/* 2>/dev/null) $($bb cat /tmp/wrong)"
+say "capture: $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s1\",\"CAPTURE\":\"none\"") $(/bin/lode -b -t lode -o json | $bb grep -c "\"CAPTURE_OF\":\"$s2\",\"CAPTURE\":\"stored\"") $(/bin/lode -b -t lode -o json | $bb grep -c '"BLOB_SCREENSHOT":"') $(/bin/lode blob $(/bin/lode -b -t lode -o json | $bb grep -o '"BLOB_SCREENSHOT":"[0-9a-f]*' | $bb sed 's/.*"//' | $bb head -n 1) | $bb head -c 4) $($bb cat /tmp/wrong)"
 $bb kill $stub
 /bin/lode session end 8
 /bin/lode rotate
@@ -401,6 +402,12 @@ say "box: $($bb grep -c '^snapshot .*: thread ' /tmp/snap) $(/bin/lode -b --wher
 /bin/lode fault-stub > /dev/null 2>&1
 $bb sleep 1
 say "crash: $(/bin/lode -b --where 'crash = "*"' -o json | $bb grep '"CRASH_CMDLINE":"/bin/lode fault-stub"' | $bb grep '"CRASH_EXE":"/sbin/lode"' | $bb grep -c '"CRASH_MODULE":"/sbin/lode+0x')"
+# Tombstones (§21): the crash above has one, which `lode tombstone` shows
+# whole; a storm of one signature is five tombstones and a counter at ten.
+i=0; while [ $i -lt 11 ]; do /bin/lode fault-stub > /dev/null 2>&1; i=$((i+1)); done
+$bb sleep 1
+stone=$(/bin/lode tombstones | $bb grep 'lode ended' | $bb head -n 1 | $bb awk '{print $1}')
+say "tombstones: $(/bin/lode tombstones | $bb grep -c 'tombstone: lode ended by SIGSEGV') $(/bin/lode -b -t lode -o cat | $bb grep -c '^lode crashed again, 10 times') $(/bin/lode tombstone $stone | $bb grep -c '^-- the crash$\|^-- its last lines$') $(/bin/lode verify | $bb grep -c ' 0 missing')"
 # Alerts and top (step 3): the noisy flood above fired `flood` once, to
 # `lode alerts`; a crit line started a unit that lets lode start it; a unit
 # that does not was refused, and said so.
@@ -467,8 +474,14 @@ fn test_units() -> Vec<File> {
 
 /// `cargo xtask test-log`.
 fn test_log(args: &Args) -> Result<()> {
+    // Its rows take two minutes on armv7a under TCG; the 120 s default
+    // stopped it at the last row.
+    let mut args = args.clone();
+    if !args.timeout_given {
+        args.timeout = 300;
+    }
     for arch in args.arches()? {
-        test_arch(arch, args)?;
+        test_arch(arch, &args)?;
     }
     Ok(())
 }
@@ -724,6 +737,12 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
              from the kernel's identity line",
         ),
         (
+            "lode-test: tombstones:",
+            "5 1 1 1",
+            "a crash storm was not five tombstones and a counter, `lode tombstone` did not show the \
+             crash, or `lode verify` found a blob missing",
+        ),
+        (
             "lode-test: alerts:",
             "1 1 1 1",
             "a flood alert was not said once to `lode alerts` and in the log, a start alert did not \
@@ -791,8 +810,8 @@ fn held(lines: &[String]) -> std::result::Result<(), String> {
         (
             "lode-test: capture:",
             "1 1 1 qoif provide-stub: refused",
-            "a crash screenshot was not none without a provider, one stored file from the proven \
-             provider, and a refusal for an unproven one",
+            "a crash screenshot was not none without a provider, one blob from the proven \
+             provider that `lode blob` gives back, and a refusal for an unproven one",
         ),
         (
             "lode-test: devlog:",
@@ -917,6 +936,7 @@ lode-test: streams: teed line 1 1 1 1 reloaded
 lode-test: names: 1 1
 lode-test: box: 1 1 3 1
 lode-test: crash: 1
+lode-test: tombstones: 5 1 1 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1
 lode-test: live: 2

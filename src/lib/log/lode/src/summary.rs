@@ -18,6 +18,8 @@
 //! 52 values: u8 field, u16 length, bytes, u64 count
 //!    then, since `lode top`: "SRC1", u32 sources, each u16 length, the
 //!    source's name, u64 records, u64 bytes of MESSAGE
+//!    then, since the blob container: "BLB1", u32 ids, each [32] blob id
+//!    its records name (docs/LOGGING.md §21.4: the sweep's marks)
 //! end u32 CRC-32C of everything before it
 //! ```
 //!
@@ -69,6 +71,9 @@ pub struct Summary {
     /// messages, for `lode top`; `None` in a summary written before it, or
     /// with too many sources.
     pub sources: Option<Vec<(Vec<u8>, u64, u64)>>,
+    /// Every blob the segment's records name, for the blob sweep's marks;
+    /// empty in a summary written before it.
+    pub blobs: Vec<crate::blob::BlobId>,
 }
 
 impl Summary {
@@ -106,6 +111,11 @@ impl Summary {
                     sources.push((source, 1, bytes));
                 } else {
                     summary.sources = None;
+                }
+            }
+            for (_, reference) in crate::blob::references(record) {
+                if !summary.blobs.contains(&reference.id) {
+                    summary.blobs.push(reference.id);
                 }
             }
             for (index, name) in FIELDS.iter().enumerate() {
@@ -172,6 +182,13 @@ impl Summary {
                 out.extend_from_slice(&bytes.to_le_bytes());
             }
         }
+        if !self.blobs.is_empty() {
+            out.extend_from_slice(b"BLB1");
+            out.extend_from_slice(&u32::try_from(self.blobs.len()).unwrap_or(0).to_le_bytes());
+            for id in &self.blobs {
+                out.extend_from_slice(id);
+            }
+        }
         let crc = crc32c(&out);
         out.extend_from_slice(&crc.to_le_bytes());
         out
@@ -197,6 +214,7 @@ impl Summary {
             levels: (*body.get(48)?, *body.get(49)?),
             values: None,
             sources: None,
+            blobs: Vec::new(),
         };
         let mut at = 52;
         if kept != u16::MAX {
@@ -218,7 +236,29 @@ impl Summary {
             summary.values = Some(values);
         }
         if body.get(at..at + 4) == Some(b"SRC1") {
-            summary.sources = sources_at(body, at + 4);
+            match sources_at(body, at + 4) {
+                Some((sources, end)) => {
+                    summary.sources = Some(sources);
+                    at = end;
+                }
+                None => return Some(summary),
+            }
+        }
+        if body.get(at..at + 4) == Some(b"BLB1")
+            && let Some(count) = body
+                .get(at + 4..at + 8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)
+        {
+            for index in 0..count as usize {
+                let start = at + 8 + index * 32;
+                if let Some(id) = body
+                    .get(start..start + 32)
+                    .and_then(|id| id.try_into().ok())
+                {
+                    summary.blobs.push(id);
+                }
+            }
         }
         Some(summary)
     }
@@ -283,9 +323,12 @@ impl Summary {
     }
 }
 
-/// The sources section's entries in `body` from `at`, after its tag;
-/// `None` for one cut short.
-fn sources_at(body: &[u8], mut at: usize) -> Option<Vec<(Vec<u8>, u64, u64)>> {
+/// A summary's sources: name, records, bytes.
+type Sources = Vec<(Vec<u8>, u64, u64)>;
+
+/// The sources section's entries in `body` from `at`, after its tag, and
+/// where it ends; `None` for one cut short.
+fn sources_at(body: &[u8], mut at: usize) -> Option<(Sources, usize)> {
     let count = u32::from_le_bytes(body.get(at..at + 4)?.try_into().ok()?);
     at += 4;
     let mut sources = Vec::new();
@@ -298,5 +341,5 @@ fn sources_at(body: &[u8], mut at: usize) -> Option<Vec<(Vec<u8>, u64, u64)>> {
         at += 16;
         sources.push((name, records, bytes));
     }
-    Some(sources)
+    Some((sources, at))
 }
