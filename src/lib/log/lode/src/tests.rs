@@ -104,6 +104,81 @@ fn a_scan_goes_on_from_an_offset() {
     assert_eq!(rest.records[0].record.seqnum, 2);
 }
 
+/// `bytes` read back to front in pages of `most`, oldest first.
+fn paged_back(bytes: &[u8], most: usize) -> Vec<u64> {
+    let mut end = bytes.len();
+    let mut pages: Vec<Vec<u64>> = Vec::new();
+    loop {
+        let (page, start) = segment::entries_before(bytes, end, most);
+        if page.is_empty() {
+            break;
+        }
+        assert!(page.len() <= most);
+        assert_eq!(page[0].offset, start);
+        pages.push(page.iter().map(|found| found.record.seqnum).collect());
+        end = start;
+    }
+    pages.into_iter().rev().flatten().collect()
+}
+
+#[test]
+fn a_segment_read_back_in_pages_is_what_a_scan_reads() {
+    let records: Vec<Record> = (1..=23).map(|n| record(n, "a line")).collect();
+    let bytes = segment_with(&records);
+    let scanned: Vec<u64> = segment::scan(&bytes, 0)
+        .unwrap()
+        .records
+        .iter()
+        .map(|found| found.record.seqnum)
+        .collect();
+    for most in [1, 2, 5, 23, 100] {
+        assert_eq!(paged_back(&bytes, most), scanned, "pages of {most}");
+    }
+    let (page, _) = segment::entries_before(&bytes, bytes.len(), 3);
+    assert_eq!(page[2].record.boot_id, [0xab; 16]);
+    assert_eq!(&*page[2].record.host, "box");
+    assert_eq!(page[2].record.fields, records[22].fields);
+}
+
+#[test]
+fn a_torn_tail_read_backwards_answers_nothing() {
+    let whole = segment_with(&[record(1, "one"), record(2, "two")]);
+    let second = segment::scan(&whole, 0).unwrap().records[1].offset;
+    for cut in second + 1..whole.len() {
+        let (page, start) = segment::entries_before(&whole[..cut], cut, 10);
+        assert!(page.is_empty(), "cut at {cut}");
+        assert_eq!(start, cut);
+    }
+}
+
+#[test]
+fn a_damaged_entry_stops_a_backward_read_after_the_entries_above_it() {
+    let mut bytes = segment_with(&[record(1, "one"), record(2, "two"), record(3, "three")]);
+    let second = segment::scan(&bytes, 0).unwrap().records[1].offset;
+    bytes[second + 30] ^= 1;
+    let (page, start) = segment::entries_before(&bytes, bytes.len(), 10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].record.seqnum, 3);
+    let (more, again) = segment::entries_before(&bytes, start, 10);
+    assert!(more.is_empty());
+    assert_eq!(again, start);
+}
+
+#[test]
+fn a_backward_read_answers_nothing_when_what_comes_before_end_is_not_older() {
+    // The entry at `end` is 2; the one before it 5: not below, so nothing,
+    // and the caller reads forwards instead.
+    let bytes = segment_with(&[record(5, "five"), record(2, "two")]);
+    let second = segment::scan(&bytes, 0).unwrap().records[0].length + header().encode().len();
+    let (page, start) = segment::entries_before(&bytes, second, 10);
+    assert!(page.is_empty());
+    assert_eq!(start, second);
+    // From the end, the walk stops where the sequence stops falling.
+    let (page, _) = segment::entries_before(&bytes, bytes.len(), 10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].record.seqnum, 2);
+}
+
 #[test]
 fn garbage_is_no_segment() {
     assert!(segment::scan(b"not a segment at all, nothing here", 0).is_none());

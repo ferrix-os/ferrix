@@ -263,6 +263,60 @@ pub fn scan(bytes: &[u8], from: usize) -> Option<Scanned> {
     })
 }
 
+/// Up to `most` entries ending at `end`, read backwards by each entry's
+/// trailing length, oldest first, and the first byte of the oldest
+/// returned: the next call's `end`, for a reader paging a segment from
+/// its newest record back (the lode viewer's scrollback). `end` is an
+/// entry boundary: the file's length, or what a call answered.
+///
+/// It stops, with what it found so far, at the header, at a length that
+/// runs before the header or whose leading copy differs, at a checksum
+/// that fails, and at a sequence number that does not fall going back --
+/// including the first one found, when an entry starts at `end`, against
+/// that entry's: a torn tail or a damaged entry then answers nothing, and
+/// the caller reads the segment forwards with [`scan`] instead. It never
+/// goes forwards, so it cannot loop on a damaged file. The records carry
+/// the segment's boot and host, as [`scan`]'s do.
+#[must_use]
+pub fn entries_before(bytes: &[u8], end: usize, most: usize) -> (Vec<Found>, usize) {
+    let mut found = Vec::new();
+    let Some((header, header_len)) = Header::decode(bytes) else {
+        return (found, end);
+    };
+    let host: Rc<str> = Rc::from(header.host.as_str());
+    let mut above = entry_at(bytes, end).map(|(record, _)| record.seqnum);
+    let mut at = end;
+    while found.len() < most && at > header_len {
+        let Some(length) = at
+            .checked_sub(4)
+            .and_then(|trailer| u32_at(bytes, trailer))
+            .and_then(|length| usize::try_from(length).ok())
+        else {
+            break;
+        };
+        let Some(start) = at.checked_sub(length).filter(|start| *start >= header_len) else {
+            break;
+        };
+        let Some((mut record, read)) = entry_at(bytes, start) else {
+            break;
+        };
+        if read != length || above.is_some_and(|above| record.seqnum >= above) {
+            break;
+        }
+        above = Some(record.seqnum);
+        record.boot_id = header.boot_id;
+        record.host = Rc::clone(&host);
+        found.push(Found {
+            record,
+            offset: start,
+            length,
+        });
+        at = start;
+    }
+    found.reverse();
+    (found, at)
+}
+
 /// The whole entries at the start of `bytes`, a segment's bytes from some
 /// entry's first byte on (what a follower reads past the last it saw), and
 /// how many bytes they take. The records have no boot or host: the caller
