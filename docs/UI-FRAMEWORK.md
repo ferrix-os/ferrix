@@ -726,9 +726,12 @@ still use the CPU, once per shape; drawing them on the GPU is left for a
 consumer that draws many.
 
 **How a window's frames reach the compositor, with no copy by the
-program.** In order: a linear image the device exports as a dmabuf,
-handed over with `zwp_linux_dmabuf_v1` (hyprix offers it beside an Intel
-or NVIDIA GPU and where it draws on the GPU; GNOME does); else the
+program.** In order: an image the device exports as a dmabuf, laid out
+by a DRM format modifier both the device and the compositor take (the
+compositor's `zwp_linux_dmabuf_v1` version 4 feedback, or version 3's
+`modifier` events; the driver chooses among them), handed over with that
+protocol (hyprix offers it beside an Intel or NVIDIA GPU and where it
+draws on the GPU; GNOME does); else the
 toolkit's `wl_shm` buffer itself, imported into the device
 (`VK_EXT_external_memory_host`) and drawn into where it lies when the
 device's linear rows match the buffer's (lavapipe pads rows to 64 bytes,
@@ -747,8 +750,12 @@ does not apply; the damage goes to the compositor directly.
 **Choosing it.** `TOLE_RENDERER=gpu` draws on any Vulkan device,
 lavapipe included; `auto` on a hardware one only; anything else, or
 nothing, on the CPU, which stays the default and the one every
-screenshot test compares against. `TOLE_GPU_DEVICE` picks a device by
-name. A program built without the `gpu` feature has no GPU code at all;
+screenshot test compares against. The device on the compositor's own
+DRM node (its feedback's main device, `VK_EXT_physical_device_drm`)
+comes first, so its dmabufs are taken without a copy between devices;
+`TOLE_GPU_DEVICE` picks one by name. The device is made on a thread of
+its own -- NVIDIA's driver takes over a second to start the first time
+-- and the window draws on the CPU until it is ready. A program built without the `gpu` feature has no GPU code at all;
 with it, a missing library, no device, or a device that fails
 mid-frame each draw on the CPU from then on, said once on standard
 error (`tole: drawing on the CPU: no Vulkan library: ...`). On Ferrix
@@ -1288,3 +1295,28 @@ more.
   callback with two frames in flight; choose the device the compositor
   names (`zwp_linux_dmabuf_v1` version 4's main device) -- mutter refused
   the RTX 3090's dmabuf on one of the screens and took RADV's.
+* **The GPU's pacing** (2026-10-24, the coordinator's follow-up to the
+  measurements above). Three changes in tole: (1) the device is made on a
+  thread while the first frames are drawn on the CPU: a window's first
+  frame no longer waits for the driver (NVIDIA's first start 1.46 s, then
+  220 ms; RADV and lavapipe 70 to 160 ms), and the demo says when its
+  renderer changes; (2) the device on the compositor's main device first,
+  and the dmabuf in a layout both take: mutter's main device on nazuna is
+  the Ryzen's (RADV), whose dmabufs it took at once, where it had
+  refused the RTX 3090's linear ones on its 2560-wide screens; hyprix
+  says LINEAR in version 3's events and takes lavapipe's; (3) a frame is
+  submitted and committed once drawn while the program goes on, rather
+  than waited for: the wait was a large part of a frame (headless, per
+  submit: NVIDIA 1.6 ms, RADV 10.7 ms, lavapipe 8.2 ms). The lode
+  viewer's million-record scroll test under a headless hyprix at 1920 x
+  1080 on lavapipe, the host at a load of 76: the window's loop spent a
+  median 3.6 ms on a frame, not 23.5, and steady scrolling missed 21
+  frames of 575 (3.7 %), not 214 of 338; flings missed 13 %, the reading
+  of pages under that load. Found on the way: the toolkit's own frame
+  request commits by itself once its buffers have been shown, and a
+  commit naming no damage is the whole surface to hyprix, so the
+  presenter asks for its frame callback on its own commit. Measuring on
+  nazuna's GNOME again waits for its screens: they were off (power save)
+  for the rest of the session, and mutter paints, and answers frame
+  callbacks, for no window then.
+

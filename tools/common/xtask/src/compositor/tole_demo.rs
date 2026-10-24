@@ -293,9 +293,18 @@ pub(super) fn test_tole_demo_gpu(arch: Arch, programs: &Programs, args: &Args) -
     Ok(())
 }
 
-/// What the demo said it drew with must hold `wanted`.
+/// What the demo last said it drew with must hold `wanted`. It says so as
+/// it comes up and again when that changes: the GPU is made on a thread
+/// while the first frames are drawn on the CPU (`docs/UI-FRAMEWORK.md`).
 fn judge_drawn_by(arch: Arch, said: &[String], wanted: &str) -> Result<()> {
-    match said.iter().find(|line| line.contains(UP)) {
+    if !said.iter().any(|line| line.contains(UP)) {
+        return Err(Error::new(format!("{arch}: the demo never said `{UP}`")));
+    }
+    match said
+        .iter()
+        .rev()
+        .find(|line| line.contains("tole-examples:") && line.contains("drawn by"))
+    {
         Some(line) if line.contains(wanted) => {
             println!("  {arch}: {}", line.trim());
             Ok(())
@@ -304,7 +313,9 @@ fn judge_drawn_by(arch: Arch, said: &[String], wanted: &str) -> Result<()> {
             "{arch}: the demo was not {wanted}: {}",
             line.trim()
         ))),
-        None => Err(Error::new(format!("{arch}: the demo never said `{UP}`"))),
+        None => Err(Error::new(format!(
+            "{arch}: the demo never said what it drew with"
+        ))),
     }
 }
 
