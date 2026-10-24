@@ -612,6 +612,18 @@ impl Canvas {
     /// rounded to the nearest byte -- so a shadow and a fill of the same
     /// colour agree.
     pub fn shadow(&mut self, rect: Rect, shadow: &Shadow, damage: &Damage) {
+        self.shadow_tabled_from(rect, shadow, damage, PIXELS_A_TABLE);
+    }
+
+    /// [`Canvas::shadow`], blending through tables only when the shadow's
+    /// box has more than `per_table` pixels for each table it can need.
+    pub(crate) fn shadow_tabled_from(
+        &mut self,
+        rect: Rect,
+        shadow: &Shadow,
+        damage: &Damage,
+        per_table: i64,
+    ) {
         if shadow.range <= 0 || shadow.color.alpha() == 0 || is_empty(rect) {
             return;
         }
@@ -648,7 +660,15 @@ impl Canvas {
             shadow.color.green(),
             shadow.color.red(),
         ];
-        if full.width < inset.saturating_mul(2) || full.height < inset.saturating_mul(2) {
+        // A table is 256 blends made before any pixel is drawn, and a band
+        // needs one for each of its rows or columns: `4 * inset` of them,
+        // and the middle's. A small shadow has fewer pixels than that, and
+        // every one of them blended on its own is cheaper -- a 0x0 tile's
+        // 10x10 shadow with `range 4` cost 20 us in tables and under one
+        // pixel by pixel (2026-10-24). The bytes are the same either way.
+        let tables = inset.saturating_mul(4).saturating_add(1);
+        let few = full.width.saturating_mul(full.height) <= tables.saturating_mul(per_table);
+        if few || full.width < inset.saturating_mul(2) || full.height < inset.saturating_mul(2) {
             for clip in clips {
                 for y in clip.y..clip.bottom() {
                     self.shadow_row(clip, y, full, &shape, shadow.color, alpha);
@@ -1339,6 +1359,14 @@ fn opaque_rows(surface: &Surface<'_>) -> Vec<u8> {
         })
         .collect()
 }
+
+/// How many of a shadow's pixels one blend table is worth: a table blends
+/// each of 256 levels of three channels, and a pixel blended on its own
+/// works out its alpha and blends three, so a table costs about as much as
+/// 128 to 180 pixels (measured on the host, 2026-10-24). A shadow with
+/// fewer pixels than this for each table it can need is blended pixel by
+/// pixel.
+const PIXELS_A_TABLE: i64 = 128;
 
 /// What a window's drop shadow is: Hyprland's `decoration:shadow:*`.
 ///

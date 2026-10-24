@@ -1253,11 +1253,14 @@ fn window<P: Painter>(
     // A fullscreen window has no decoration at all, as in Hyprland: its
     // shadow is off the screen but for what shows through its own alpha,
     // and that is the workspace's place, not a shadow's.
-    if let Some(shadow) = style
-        .shadow
-        .as_ref()
-        .filter(|_| own.shadow && own.decorate && !fullscreen(placed))
-    {
+    //
+    // Nor has a window of no size: the box a dwindle tile squeezed to 0x0
+    // is the border's width square, and its shadow a smudge of a few dozen
+    // pixels that costs the blend tables of a whole one -- on the N150 box
+    // (2026-10-24) a dozen such tiles were drawn every frame.
+    if let Some(shadow) = style.shadow.as_ref().filter(|_| {
+        own.shadow && own.decorate && !fullscreen(placed) && !crate::damage::is_empty(rect)
+    }) {
         let _shadow = Timer::start(Phase::Shadow);
         canvas.shadow(
             Rect::new(
