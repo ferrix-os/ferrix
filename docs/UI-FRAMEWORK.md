@@ -1128,3 +1128,18 @@ more.
   slideshow of a folder; video said, not chosen; the lock screen's. 27
   host tests. Next: each System page wired to the settings writer's rows
   as they land, "Not kept yet" until then.
+* **FileDialog split** (2026-10-24, the customer's review): the 816-line
+  `FileDialog` is a composition of twelve file controls in `Fx.Controls`
+  -- `SearchField` (the three modes, its menu, red on an error),
+  `Breadcrumbs`, `PlacesList` of `PlaceRow`s, `FileListRow` and
+  `FileTile`, `FilePreview`, `PatternHelp`, `ViewSwitch`, `UpButton`,
+  `CloseButton` and `SegmentedBar` -- and keeps its layout, keys and
+  foot (434 lines). None changes what it shows by itself: each says
+  what was pressed, so a `FolderListModel` or a program's own state
+  stays the one truth, and a list keeps its program's row type with the
+  shared control as its delegate. shelf draws its search, crumbs
+  (`FileEntry::named`, new), sidebar rows, list, grid and preview with
+  them; its tabs, tools, chips, disk, sortable heads and dialogs stay
+  its own. The API is unchanged, and the file chooser's two
+  screenshots and shelf's four are byte for byte what they were. 104
+  host tests in tole.
