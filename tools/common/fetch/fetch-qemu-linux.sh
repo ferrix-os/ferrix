@@ -84,7 +84,7 @@ jobs=${FERRIX_QEMU_JOBS:-$(nproc)}
         --enable-gtk --enable-opengl --enable-virglrenderer --enable-vnc \
         --enable-spice-protocol --enable-slirp \
         --enable-pa --enable-pipewire --enable-alsa \
-        --disable-docs --disable-user >"$work/configure.log" 2>&1 ||
+        --disable-docs --disable-user --disable-werror >"$work/configure.log" 2>&1 ||
         { tail -n 30 "$work/configure.log" >&2; exit 1; }
 )
 ninja -C "$src/build" -j "$jobs" qemu-system-x86_64 >"$work/build.log" 2>&1 ||

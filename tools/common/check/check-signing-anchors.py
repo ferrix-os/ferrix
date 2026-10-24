@@ -185,12 +185,19 @@ def closure_problems(graph: dict[str, list[str]], kernel: list[str], names: dict
 def metadata_graph() -> tuple[dict[str, list[str]], list[str], dict[str, str]]:
     """The workspace's resolved graph from `cargo metadata` (no build):
     normal and build edges only, every platform's."""
-    meta = json.loads(
-        subprocess.run(
-            ["cargo", "metadata", "--format-version", "1", "--offline"],
-            cwd=ROOT, check=True, capture_output=True, text=True,
-        ).stdout
+    # Offline first, as a check should be; where the registry's cache lacks a
+    # crate the lock file names (a fresh CI runner), resolving needs the
+    # index, so cargo is asked again online. The graph is the lock file's
+    # either way.
+    command = ["cargo", "metadata", "--format-version", "1"]
+    ran = subprocess.run(
+        command + ["--offline"], cwd=ROOT, capture_output=True, text=True,
     )
+    if ran.returncode != 0:
+        ran = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    if ran.returncode != 0:
+        sys.exit(f"check-signing-anchors: cargo metadata failed:\n{ran.stderr}")
+    meta = json.loads(ran.stdout)
     names = {p["id"]: p["name"] for p in meta["packages"]}
     kernel = [
         p["id"] for p in meta["packages"]
