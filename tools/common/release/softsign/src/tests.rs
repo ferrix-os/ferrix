@@ -204,7 +204,6 @@ fn an_unreadable_or_exhausted_state_is_refused() {
 /// (D2) A state directory that cannot be written: the advance fails, and
 /// nothing is signed.
 #[test]
-#[cfg(unix)]
 fn a_state_that_cannot_be_advanced_is_refused() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch();

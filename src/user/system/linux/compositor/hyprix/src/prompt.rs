@@ -204,6 +204,8 @@ struct Open {
     pressed: Vec<u32>,
     typed: Vec<u8>,
     closing: Option<(String, Instant)>,
+    /// Whether the frame has been told it is armed (its buttons live).
+    armed_told: bool,
 }
 
 impl Drop for Open {
@@ -435,6 +437,7 @@ impl Prompts {
                     // in a freed block (ledger 3636 (8), A3).
                     typed: Vec::with_capacity(MAX_SECRET),
                     closing: None,
+                    armed_told: false,
                 });
                 self.said.push("hyprix: a trusted prompt is up".to_owned());
                 self.changed();
@@ -669,10 +672,9 @@ impl Prompts {
     pub(crate) fn next_wake(&self) -> Option<Instant> {
         let open = self.open.as_ref().and_then(|open| match &open.closing {
             Some((_, until)) => Some(*until),
-            None => {
-                let armed = open.shown_at + ARMING;
-                (Instant::now() < armed).then_some(armed)
-            }
+            // Named until its redraw has been told, even once it is past:
+            // a late pass then wakes at once rather than never.
+            None => (!open.armed_told).then_some(open.shown_at + ARMING),
         });
         [open, self.notice_until].into_iter().flatten().min()
     }
@@ -694,12 +696,14 @@ impl Prompts {
             self.changed();
             changed = true;
         }
-        if let Some(open) = self.open.as_ref()
+        if let Some(open) = self.open.as_mut()
             && open.closing.is_none()
+            && !open.armed_told
             && now >= open.shown_at + ARMING
-            && now < open.shown_at + ARMING + Duration::from_millis(100)
         {
-            // The buttons are drawn live once it is armed.
+            // The buttons are drawn live once it is armed: told once, however
+            // late the pass after the arming runs.
+            open.armed_told = true;
             self.changed();
             changed = true;
         }

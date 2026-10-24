@@ -360,3 +360,20 @@ fn the_control_socket_changes_nothing_while_a_prompt_is_up() {
         );
     }
 }
+
+/// The arming's redraw is told exactly once, even when the pass after it
+/// runs long after: the wake stays named until then (the async-flip
+/// agent's finding).
+#[test]
+fn the_arming_is_told_once_however_late() {
+    let (mut prompts, sessiond) = pair();
+    say(&sessiond, &ask(1));
+    say(&sessiond, &ToSeat::Confirm { id: 1 });
+    assert!(prompts.read(false, true));
+    let armed = prompts.next_wake().unwrap();
+    // A pass five seconds late still tells it, and wakes no more after.
+    let late = armed + std::time::Duration::from_secs(5);
+    assert!(prompts.tick(late));
+    assert!(!prompts.tick(late));
+    assert_eq!(prompts.next_wake(), None);
+}
