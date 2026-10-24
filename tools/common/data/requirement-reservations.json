@@ -199,6 +199,13 @@
       "branch": "powerctl",
       "date": "2026-10-22",
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
+    },
+    {
+      "ids": ["H.SCHED.16-17", "L.sched.93-95", "L.user.163-168"],
+      "owner": "sched-wake-latency",
+      "branch": "bugfix/sched-wake-latency",
+      "date": "2026-10-24",
+      "purpose": "docs/PREEMPTIBLE-WAITS.md, F-95 (consultant OK IF (1)-(24), ledger 3950, condition 10): H.SCHED.16 a woken task of one job runs within the stated bound under another job's saturating ring-3 load, with L.sched for the preemptible wait rule, its fairness bound and the reaper's busy-processor share; H.SCHED.17 a spin-lock hold a ring-3 request causes is at most P pages of work, with one L.user per batched operation (give_back, take_down, take_range, Vmo::fork, detach)"
     }
   ]
 }
