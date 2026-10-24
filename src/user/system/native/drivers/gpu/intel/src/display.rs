@@ -75,6 +75,7 @@ mod hotplug;
 mod modeset;
 mod regs;
 mod surface;
+mod vblank;
 
 /// The port key the display control's signals arrive under, beside
 /// `serve::KEY_CONTROL` (1) and `serve::KEY_INTERRUPT` (2).
@@ -198,6 +199,15 @@ pub(crate) struct Display {
     apertures: u32,
     /// `ferrix.intelgpu.modeset=on`, where the command line says it.
     written: Option<modeset::Written>,
+    /// Pipe A's beam, where `FLUSH`es of the first scanout wait for its
+    /// blank ([`vblank`]); `None` copies at once.
+    beam: Option<vblank::Beam>,
+    /// The FLUSH waiting for the blank, and when the loop comes back for it.
+    pending: Option<vblank::Pending>,
+    flip_at: u64,
+    /// When the hotplug poll is due, in milliseconds; `u64::MAX` for never.
+    hotplug_at: u64,
+    tally: vblank::Tally,
 }
 
 /// What the second scanout starts with.
@@ -255,6 +265,7 @@ impl Display {
             }
         }
         let first_watch = regs.as_mut().and_then(hotplug::Watch::start);
+        let beam = beam(regs.as_mut(), first.height as u32);
         let (scanouts, modes, connectors) = hello_parts(&first, plane.connector, second.as_ref());
         let running = timing(first.width as u16, first.height as u16);
         if let Err(why) = introduce(
@@ -295,6 +306,11 @@ impl Display {
             device: None,
             apertures: 0,
             written: None,
+            beam,
+            pending: None,
+            flip_at: u64::MAX,
+            hotplug_at: u64::MAX,
+            tally: vblank::Tally::default(),
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -313,7 +329,8 @@ impl Display {
             return None;
         }
         if card.watches.iter().any(Option::is_some) {
-            schedule(now_ms());
+            card.hotplug_at = now_ms();
+            card.rearm();
         }
         Some(card)
     }
@@ -536,9 +553,43 @@ fn now_ms() -> u64 {
     ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1_000_000
 }
 
-/// The hotplug poll due at `at_ms`.
-fn schedule(at_ms: u64) {
-    crate::serve::WAKE_AT.store(at_ms.saturating_mul(1_000_000).max(1), Ordering::Relaxed);
+/// Nanoseconds of `CLOCK_MONOTONIC`.
+fn now_ns() -> u64 {
+    ferrix_rt::linux::monotonic_nanos().unwrap_or(0)
+}
+
+/// The loop's wake-up at `at_ns`.
+fn schedule(at_ns: u64) {
+    crate::serve::WAKE_AT.store(at_ns.max(1), Ordering::Relaxed);
+}
+
+/// Pipe A's beam, said, unless `ferrix.intelgpu.vblank=off` asks to copy
+/// each frame at once or the transcoder's numbers make no sense.
+fn beam(regs: Option<&mut regs::Regs>, height: u32) -> Option<vblank::Beam> {
+    if vblank_off() {
+        ferrix_rt::info!("intel: card0: copies at once (ferrix.intelgpu.vblank=off)");
+        return None;
+    }
+    let beam = regs.and_then(|regs| vblank::Beam::read(regs, height, REFRESH_HZ, now_ns()));
+    match beam.map(|beam| beam.timing()) {
+        Some((vactive, vtotal, frame_ns)) => ferrix_rt::info!(
+            "intel: card0: flips wait for pipe A's blank (lines {vactive} of {vtotal}, {frame_ns} ns a refresh)"
+        ),
+        None => ferrix_rt::info!("intel: card0: no beam to wait for; frames are copied at once"),
+    }
+    beam
+}
+
+/// `ferrix.intelgpu.vblank=off`: copy each frame the moment it comes, as
+/// before frames waited for the blank.
+fn vblank_off() -> bool {
+    let mut line = [0_u8; 4096];
+    crate::steps::read_cmdline(&mut line).is_some_and(|length| {
+        line.get(..length)
+            .unwrap_or_default()
+            .split(u8::is_ascii_whitespace)
+            .any(|word| word == b"ferrix.intelgpu.vblank=off")
+    })
 }
 
 impl Display {
@@ -546,9 +597,66 @@ impl Display {
     /// or the control channel's. `false` when the card is gone.
     pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>) -> bool {
         if key == KEY_HOTPLUG {
-            return self.poll_hotplug();
+            if self.pending.is_some() && self.flip_due().is_err() {
+                return false;
+            }
+            let alive = now_ms() < self.hotplug_at || self.poll_hotplug();
+            self.rearm();
+            return alive;
         }
         self.on_packet(port)
+    }
+
+    /// The loop's wake-up: the earlier of the hotplug poll and the blank a
+    /// FLUSH waits for, a spin's length before it.
+    fn rearm(&self) {
+        let hotplug = self.hotplug_at.saturating_mul(1_000_000);
+        let flip = self.pending.map_or(u64::MAX, |_| self.flip_at);
+        let at = hotplug.min(flip);
+        if at != u64::MAX {
+            schedule(at);
+        }
+    }
+
+    /// The FLUSH waiting for the blank, copied and answered if the blank
+    /// is near enough to spin for; otherwise the wake-up set for it.
+    fn flip_due(&mut self) -> Result<(), &'static str> {
+        let (Some(_), Some(beam), Some(regs)) =
+            (self.pending, self.beam.as_mut(), self.regs.as_mut())
+        else {
+            return self.finish_pending(false);
+        };
+        let mut left = beam.until_blank(regs, now_ns());
+        if left > vblank::SPIN_NS {
+            self.flip_at = now_ns() + left - vblank::SPIN_NS;
+            return Ok(());
+        }
+        // Spin the last stretch: a wake a little late would miss a blank
+        // of under a millisecond.
+        let give_up = now_ns() + vblank::SPIN_NS + 500_000;
+        while left > 0 && now_ns() < give_up {
+            core::hint::spin_loop();
+            left = beam.until_blank(regs, now_ns());
+        }
+        self.finish_pending(left > 0)
+    }
+
+    /// Copy the FLUSH waiting for the blank and answer it; `torn` when it
+    /// is copied outside the blank.
+    fn finish_pending(&mut self, torn: bool) -> Result<(), &'static str> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        self.flush(pending.buffer, pending.rect);
+        let now = now_ns();
+        self.tally.flip(now, now.saturating_sub(pending.at), torn);
+        if let Some(done) = self.tally.report(now) {
+            done.say();
+        }
+        self.reply(Message::Flipped {
+            sequence: pending.sequence,
+            status: Status::Ok,
+        })
     }
 
     /// Read each watched port's hot-plug state, tell the core of a
@@ -569,7 +677,7 @@ impl Display {
                 *change = changed;
             }
         }
-        schedule(next);
+        self.hotplug_at = next;
         for (scanout, change) in changes.into_iter().enumerate() {
             if let Some(connected) = change
                 && let Err(why) = self.changed(scanout, connected)
@@ -674,6 +782,12 @@ impl Display {
                         .next();
                     let message = Message::decode(bytes.get(..received.bytes).unwrap_or_default())
                         .map_err(|_| "a message that does not decode")?;
+                    // Whatever comes next is acted on after the FLUSH that
+                    // waits for the blank, as it was sent after it: that
+                    // one is copied now.
+                    if self.pending.is_some() {
+                        self.finish_pending(true)?;
+                    }
                     match message {
                         Message::Stop if vmo.is_none() => {
                             let _ = self.reply(Message::Stopped);
@@ -724,11 +838,27 @@ impl Display {
                 sequence,
                 rect,
             } => {
-                self.flush(buffer, rect);
-                self.reply(Message::Flipped {
+                // The first scanout's frame waits for pipe A's blank
+                // ([`vblank`]); another scanout's is copied at once.
+                let shown_first = self
+                    .outputs
+                    .first()
+                    .and_then(|output| output.as_ref())
+                    .and_then(|output| output.shown)
+                    .is_some_and(|(id, _)| id == buffer);
+                self.pending = Some(vblank::Pending {
+                    buffer,
                     sequence,
-                    status: Status::Ok,
-                })
+                    rect,
+                    at: now_ns(),
+                });
+                if shown_first && self.beam.is_some() {
+                    self.flip_due()?;
+                    self.rearm();
+                    Ok(())
+                } else {
+                    self.finish_pending(false)
+                }
             }
             Message::Detach { buffer } => {
                 let status = self.detach(buffer);
