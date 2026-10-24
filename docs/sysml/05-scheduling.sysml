@@ -33,6 +33,17 @@ package FerrixScheduling {
         doc /* The same, with interrupts masked for the duration through an
              * IrqControl implemented over each architecture's mask. */
     }
+    #implemented part def PreemptSpinLock :> TicketSpinLock {
+        doc /* The kernel's crate::sync::SpinLock: the holder kept on its CPU by
+             * the preemption count. Arrival order is acquisition order only
+             * for a waiter that holds something or has interrupts masked. A
+             * waiter that holds nothing and has interrupts on (L.sched.93)
+             * waits without a ticket and with its processor free, so that one
+             * program's waits cannot keep every processor from every other
+             * program (F-95); its wait is bounded instead by its patience, one
+             * slice, after which it takes a ticket, plus one hold per ticket
+             * ahead (L.sched.94). */
+    }
     #implemented part def Once;
     #writtenAhead part def RwSpinLock {
         doc /* Many readers or one writer, writer-preferring. Not yet reached. */

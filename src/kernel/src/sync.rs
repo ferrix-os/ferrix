@@ -10,7 +10,12 @@
 //!   waiter for a round of the run queue, and waiters switched out holding
 //!   tickets pass the stall on; the thousand-task check spent fifty seconds
 //!   in one such convoy. **Never block while holding one** — `schedule`
-//!   stops the machine if asked to switch with the count raised.
+//!   stops the machine if asked to switch with the count raised. Only the
+//!   holder keeps its processor, though: a task that holds nothing and has
+//!   interrupts on waits for one without a ticket and with its count at zero
+//!   (`sched::preempt::Preempt::may_wait_preemptibly`, finding F-95), so a
+//!   program whose threads contend one of its locks loses only its own time,
+//!   never every processor; past one slice of waiting it takes a ticket.
 //! * [`IrqSpinLock`] — for data an interrupt handler also touches. It masks
 //!   interrupts, which also keeps the holder on its processor.
 //! * The run queues' own locks are plain `ferrix_sync::SpinLock`s taken with

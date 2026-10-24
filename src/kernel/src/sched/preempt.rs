@@ -11,6 +11,16 @@
 //! lock that was plain; with the count, a holder is never switched out and
 //! the lock is held for the instructions it covers and no longer.
 //!
+//! **The count is the holder's, not the waiter's** (finding F-95, since
+//! 2026-10-24). A waiter that raised it too kept its processor from every
+//! other task for as long as it waited, and a program whose threads all
+//! waited for one of its own locks held every processor that way: woken
+//! tasks of other programs went unrun for seconds. So a task that holds
+//! nothing and has interrupts on ([`Preempt::may_wait_preemptibly`]) waits
+//! with the count at zero and no ticket, which passes no stall on if it is
+//! switched out, and takes a ticket only past its patience, one slice
+//! (`ferrix_sync::PreemptSpinLock::lock`).
+//!
 //! **A context with the count raised must not block** (FX-0503). The count
 //! belongs to the processor, and a task that slept with it raised would leave
 //! the processor unable to preempt whatever ran next, then lower the count on
@@ -57,7 +67,7 @@ use core::panic::Location;
 use core::sync::atomic::AtomicU32;
 #[cfg(target_pointer_width = "64")]
 use core::sync::atomic::AtomicU64;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use ferrix_sync::IrqControl;
 
@@ -283,6 +293,49 @@ unsafe impl ferrix_sync::PreemptControl for Preempt {
     fn enable() {
         enable_from(true);
     }
+
+    /// Only a task that holds nothing and has interrupts on (finding F-95,
+    /// `docs/PREEMPTIBLE-WAITS.md` §3 A, the consultant's condition (5)):
+    /// once the count is kept, this processor's whole count -- locks and
+    /// raises by hand -- at zero, and interrupts enabled. Such a task can be
+    /// switched out and moved at any instruction already
+    /// (`preempt_on_irq_exit`), so a wait that lowers its count adds no new
+    /// kind of switch point: the lowering makes the decision every guard's
+    /// drop makes (`enable_from` → `decide_deferred`). Anything else -- a
+    /// nested acquisition, a hand raise, an interrupt handler, a context with
+    /// interrupts masked -- waits on a ticket as before.
+    fn may_wait_preemptibly() -> bool {
+        counting() && count_here() == 0 && arch::interrupts_enabled()
+    }
+
+    fn now_nanos() -> u64 {
+        crate::timer::now_nanos()
+    }
+
+    /// One slice: a preemptible waiter starved this long by waiters that
+    /// keep their processors takes a ticket, so its wait is at most this plus
+    /// one hold for each ticket ahead of it (condition (6)).
+    const PATIENCE_NANOS: u64 = super::SLICE_NS;
+
+    fn note_wait(ticketed: bool) {
+        let counter = if ticketed { &TICKETED_WAITS } else { &PREEMPTIBLE_WAITS };
+        let _ = counter.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Lock waits made with the count at zero (`Preempt::may_wait_preemptibly`)
+/// that found the lock held: for the boot check and the controls.
+static PREEMPTIBLE_WAITS: AtomicUsize = AtomicUsize::new(0);
+
+/// Of those, the ones whose patience ran out and that took a ticket.
+static TICKETED_WAITS: AtomicUsize = AtomicUsize::new(0);
+
+/// [`PREEMPTIBLE_WAITS`] and [`TICKETED_WAITS`], for a check.
+pub(crate) fn preemptible_waits() -> (usize, usize) {
+    (
+        PREEMPTIBLE_WAITS.load(Ordering::Relaxed),
+        TICKETED_WAITS.load(Ordering::Relaxed),
+    )
 }
 
 /// [`Preempt`]'s two halves as functions, for the locks of the libraries

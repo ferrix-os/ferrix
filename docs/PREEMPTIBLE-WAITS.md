@@ -423,9 +423,59 @@ phase stays at 4 s, and the evidence that A is what helps rests on
 forkbig and `/proc` (190 s to 0.6 s, `baseh1` against `protoh1`), not on
 fault. k1 will be read on those phases.
 
+**Landing 2, A, as built:**
+- `ferrix_sync::PreemptSpinLock::lock` waits preemptibly when
+  `PreemptControl::may_wait_preemptibly` says so. The kernel's `Preempt`
+  says so when three things hold: counting has started, `count_here() == 0`
+  (locks and hand raises both), and interrupts are on (condition (5)).
+- `try_lock`, both `try_lock_masked`s, `IrqSpinLock`, the run queues'
+  plain locks and `lock_manually` are unchanged.
+- Library locks (`HookedPreempt`) keep the ticket: the hooks are
+  unchanged, and their locks (btrfs, the VFS) were not among the measured
+  stalls. A later landing may carry the rule through `PreemptHooks`.
+- **Why it adds no new kind of switch point.** The failed try's `enable`
+  is the same `enable_from` → `decide_deferred` every guard's drop makes.
+  With the count at zero and interrupts on, the task is preemptible at
+  every instruction anyway (`preempt_on_irq_exit`). The `disable` that
+  succeeds runs on the processor that later lets the lock go: nothing
+  between it and the acquisition can switch.
+- **Fairness, the preferred form of (6).** A waiter that has watched for
+  `PATIENCE_NANOS` (one slice, `SLICE_NS`) takes a ticket with its count
+  raised, and a try fails while any ticket is queued. So its wait is at
+  most W + (N-1)·Hmax. A nested waiter's is (N-1)·Hmax, as before.
+- **No second API.** The prototype's `lock_preemptible` and its 28
+  call-site edits are not in it, and no I1 code is.
+- **Requirements.** H.SCHED.16 (baselined: its check is the row), L.sched.93
+  (the boot check `a_lock_waits_preemptibly_only_holding_nothing`) and
+  L.sched.94 (ferrix-sync's host test). The reservation shrinks to
+  H.SCHED.17, L.sched.95 and L.user.163-168.
+- **test-stall asserts each load phase's wake.** The short bound is 100 ms;
+  the long one is 1,000 ms for bigunmap and forkbig until D. The `/proc`
+  reads stay reported: the futex phase's still take 0.1-1 s with A.
+- **Measured locally with A** (`row-A1`, `row-ab-A-2`, `row-ab-A-3`; host
+  load 52-125):
+
+  | phase | with A | develop (`row-dev1`, `row-dev2`) |
+  |---|---|---|
+  | forkbig | 109-277 ms | 1,431-6,441 ms |
+  | bigunmap | 58-183 ms | 125-286 ms |
+  | short phases | 22-84 ms, one wine run 195 ms in a run whose quiet was 50 ms | 12-69 ms |
+
+  `row-ab-A-1` and `row-ab-k1-1` stopped in stage 4's lock check ("no two
+  processors' increments overlapped"), a host-starvation flake that fired
+  with A and without it.
+- **Controls.**
+  - k1, the rule made to answer no: stops the boot in L.sched.93's check
+    ("a task holding nothing, with interrupts on, may not wait
+    preemptibly"), inside test-stall, in `row-ab-k1-2` and `-3`.
+  - k2, patience that never runs out: ferrix-sync's
+    `a_preemptible_waiter_is_served_within_its_patience_...` FAILED after
+    3 s.
+  - k-mask, the rule made to answer yes in every state: the same boot
+    check's nested, by-hand and masked cases.
+  - The gate.sh runs are cited in the commit.
+
 **Next:**
-- A, with its fairness bound, its controls k1, k2 and k-mask, and the
-  requirement ids reserved first.
 - Then the atomicity addendum for D, and the reaper's feedback: zombies are
   reaped only by idle tasks, so under a saturating load they pile up and
   lengthen `detach`'s hold.

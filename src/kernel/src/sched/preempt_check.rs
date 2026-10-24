@@ -65,6 +65,7 @@ pub(super) fn run(topology: &Topology) -> Result<(), &'static str> {
     an_underflow_is_refused()?;
     may_block_reads_its_own_count()?;
     a_failed_try_leaves_the_count()?;
+    a_lock_waits_preemptibly_only_holding_nothing(topology)?;
     the_count_survives_preemption_and_moves(topology)
 }
 
@@ -202,6 +203,107 @@ fn a_failed_try_leaves_the_count() -> Result<(), &'static str> {
         return Err("a successful try_lock did not raise the count by one for as long as it held");
     }
     Ok(())
+}
+
+/// How long the holder of the wait rule's check keeps its lock.
+const HOLD_NANOS: u64 = 20_000_000;
+
+/// Set by the wait rule's holder once it holds [`WAITED_FOR`].
+static HOLDING: AtomicBool = AtomicBool::new(false);
+
+/// The lock the wait rule's check contends.
+static WAITED_FOR: crate::sync::SpinLock<u64> = crate::sync::SpinLock::new(0);
+
+/// A lock is waited for preemptibly only by a task that holds nothing and has
+/// interrupts on (finding F-95, condition (5) of ledger 3950): the rule says
+/// so with nothing held, and says no with a lock held, with preemption off
+/// by hand and with interrupts masked; and a task holding nothing that takes
+/// a lock another processor holds is counted as a preemptible wait, where
+/// one holding another lock is not.
+///
+/// Verifies: L.sched.93
+fn a_lock_waits_preemptibly_only_holding_nothing(topology: &Topology) -> Result<(), &'static str> {
+    use ferrix_sync::PreemptControl;
+    static OTHER: crate::sync::SpinLock<u32> = crate::sync::SpinLock::new(0);
+    let rule = <preempt::Preempt as PreemptControl>::may_wait_preemptibly;
+    if !rule() {
+        return Err("a task holding nothing, with interrupts on, may not wait preemptibly");
+    }
+    let held = OTHER.lock();
+    let nested = rule();
+    drop(held);
+    super::preempt_disable();
+    let by_hand = rule();
+    super::preempt_enable();
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let masked = rule();
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    if nested {
+        return Err("a task holding a lock was let wait for another preemptibly");
+    }
+    if by_hand {
+        return Err("a task with preemption off by hand was let wait preemptibly");
+    }
+    if masked {
+        return Err("a task with interrupts masked was let wait preemptibly");
+    }
+    if topology.online() < 2 {
+        return Ok(());
+    }
+    // Contended: a holder on another processor keeps the lock HOLD_NANOS.
+    let me = word_here().map_or(0, |(cpu, _, _)| cpu);
+    let other = (me + 1) % topology.online();
+    for nest in [false, true] {
+        HOLDING.store(false, Ordering::Release);
+        let holder = super::spawn_on(
+            "check-wait-hold",
+            hold_waited_for,
+            0,
+            NICE_0_WEIGHT,
+            other,
+            CpuSet::of(other),
+        )?;
+        let began = crate::timer::now_nanos();
+        while !HOLDING.load(Ordering::Acquire) {
+            if crate::timer::now_nanos().saturating_sub(began) > PATIENCE_NANOS {
+                return Err("the wait rule check's holder never took its lock");
+            }
+            super::yield_now();
+        }
+        let (waits, _) = preempt::preemptible_waits();
+        {
+            let outer = nest.then(|| OTHER.lock());
+            let mut guard = WAITED_FOR.lock();
+            *guard = guard.wrapping_add(1);
+            drop(guard);
+            drop(outer);
+        }
+        let counted = preempt::preemptible_waits().0 != waits;
+        super::wait_until_gone(&holder, super::REAPER_PATIENCE_NANOS)?;
+        match (nest, counted) {
+            (false, false) => {
+                return Err("a task holding nothing waited for a held lock on its ticket");
+            }
+            (true, true) => {
+                return Err("a task holding a lock waited for another one preemptibly");
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// The wait rule check's holder: take [`WAITED_FOR`], say so, keep it
+/// [`HOLD_NANOS`].
+fn hold_waited_for(_: usize) {
+    let mut guard = WAITED_FOR.lock();
+    *guard = guard.wrapping_add(1);
+    HOLDING.store(true, Ordering::Release);
+    let began = crate::timer::now_nanos();
+    while crate::timer::now_nanos().saturating_sub(began) < HOLD_NANOS {
+        core::hint::spin_loop();
+    }
+    drop(guard);
 }
 
 /// Tasks a timer preempts and that move between processors take and let go

@@ -597,12 +597,12 @@ Real, and narrower than a WCET:
   the admission test valid at all.
 * **Bounded critical sections on the RT path**, by construction rather than by
   measurement.
-* **Preemptible kernel**, so a long section delays rather than blocks --
-  **except for the tasks that wait for it.** A task waiting for a kernel
-  spin lock waits with its preemption count raised, so a long hold stops
-  every processor whose task waits for that lock, and those processors make
-  no scheduling decision and wake none of their sleepers until it is let go
-  (F-95, open; §2.2y).
+* **Preemptible kernel**, so a long section delays rather than blocks. A
+  task that holds nothing and waits for a kernel spin lock waits with its
+  count at zero, so its processor goes on deciding and waking sleepers
+  (since F-95's second landing, §2.2y); **a long hold still stops its own
+  processor**, and any processor whose task waits for the lock from inside
+  another, until the holds are cut into bounded pieces (F-95, open).
   Taking and letting go of a kernel spin lock masks no interrupts on x86-64:
   the preemption count it raises is one `GS`-relative `xadd` in the
   processor's record (L.sched.20, since 2026-10-03). On AArch64 and ARMv7-A
@@ -1681,18 +1681,47 @@ is `log::record`'s, which takes no lock (L.console.35). Ledger 3366.
 
 ### 2.2y Waiting for a kernel spin lock, and the holds a program can ask for (F-95, 2026-10-24)
 
-**The wait.** `crate::sync::SpinLock` (`ferrix_sync::PreemptSpinLock`)
-raises the processor's preemption count and then waits for its ticket.
-Ticket order is arrival order, so each waiter waits out every hold queued
-ahead of it, and does so with the count raised: its processor makes no
-scheduling decision (`preempt_on_irq_exit` returns at once) and wakes none
-of its timed sleepers, which only that processor's own decision wakes
-(`choose_next` → `wake_sleepers`). With one multi-threaded program
-contending one of its locks, that is every processor at once. The
-interrupts still run and the waiting is charged to the waiting task, so
-nothing here is unaccounted; it is time every other job loses. No bound is
-stated for it today. `cargo xtask test-stall` measures it, reporting and not
-asserting (`docs/PREEMPTIBLE-WAITS.md` §5).
+**The wait, until 2026-10-24.** `crate::sync::SpinLock`
+(`ferrix_sync::PreemptSpinLock`) raised the processor's preemption count
+and then waited for its ticket. Ticket order is arrival order, so each
+waiter waited out every hold queued ahead of it with the count raised: its
+processor made no scheduling decision (`preempt_on_irq_exit` returns at
+once) and woke none of its timed sleepers, which only that processor's own
+decision wakes (`choose_next` → `wake_sleepers`). With one multi-threaded
+program contending one of its locks, that was every processor at once:
+woken tasks of every other job went unrun for as long (F-95).
+
+**The wait now** (L.sched.93, L.sched.94, H.SCHED.16). A task whose
+processor's whole count is zero and whose interrupts are on waits without a
+ticket: it tries the lock with the count raised, and on a failure lowers
+the count -- making the decision any interrupt asked for meanwhile, as every
+guard's drop does -- and watches the lock with the count at zero. Its
+processor decides and wakes sleepers as if the task were running its own
+code. Any other acquisition -- nested in another lock, under a raise by
+hand, with interrupts masked, in a handler -- waits on a ticket as before.
+The bounds, with N processors, a slice S (3 ms), the patience W (= S) and
+Hmax the longest hold of the lock:
+
+| Waiter | Its own wait | What it costs every other task |
+|---|---|---|
+| holding nothing, interrupts on | at most W + (N-1)·Hmax: once its patience runs out it takes a ticket, and a try fails while any ticket is queued | none while it watches; its processor's decisions for up to (N-1)·Hmax once its patience ran out and it holds a ticket |
+| nested, raised by hand, or masked | (N-1)·Hmax, as before | its processor's decisions, for that long |
+| the lock's holder | -- | its processor's decisions, for Hmax |
+
+So the woken task of another job waits at most S + W + N·Hmax of the
+holds its processor's task is in, plus FM-10's late answer of a shootdown
+turn (§2.2a): the row `cargo xtask test-stall` asserts it with Hmax a
+page's work where the load's holds are short (100 ms, host noise
+included), and 1 GiB's work where they are long (1,000 ms) until the long
+holds below are cut into pieces. A library lock (`ferrix_sync::HookedPreempt`)
+keeps the ticket for every waiter; the hooks carry no wait rule yet.
+
+**Every statement that rested on the ticket's order** (the consultant's
+condition (8)): ferrix-sync's module doc ("arrival order is acquisition
+order", "first come first served"), `PreemptSpinLock::lock`'s doc, and
+05-scheduling.sysml's TicketSpinLock, restated for `PreemptSpinLock` there;
+none in this document or the safety manual named the order, and §2.2a's
+shootdown turn already waits with `try_lock`.
 
 **The holds a ring-3 program can make long.** A census, started
 2026-10-24 and not yet complete; each is one hold of a spin lock over work

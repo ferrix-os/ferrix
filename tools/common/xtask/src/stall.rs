@@ -8,11 +8,16 @@
 //! `/proc` read of its load; this row compares each with the bound in
 //! [`BOUNDS`], the one place the bounds are written.
 //!
-//! **Reporting, not asserted.** No phase is asserted yet: F-95 is open, and
-//! develop keeps woken tasks off every processor for 280 ms to 190 s in the
-//! longer phases. A phase is asserted from the landing that brings it under
-//! its bound (`Bound::asserted`); until then its line says "reporting, not
-//! asserted", and the row verifies nothing.
+//! **What is asserted** (H.SCHED.16). Since F-95's second landing, a woken
+//! task's lateness is asserted in every load phase: within one slice and
+//! the host's noise where the load's holds are short, and within one hold
+//! of 1 GiB's work for each processor where they are long (bigunmap,
+//! forkbig) -- the bound a task waiting preemptibly gives, until the holds
+//! themselves are cut into bounded pieces (`docs/PREEMPTIBLE-WAITS.md` §3 D),
+//! which takes those two phases to the short bound. The `/proc` reads are
+//! reported and not asserted (`Bound::proc_asserted`): a read of a loaded
+//! process still waits 0.1-1 s in the futex phase, for a reason not yet
+//! found.
 //!
 //! **The noise rule.** A shared host can keep a virtual processor from
 //! running for a hundred milliseconds and more, which no kernel can answer
@@ -48,25 +53,40 @@ pub(crate) struct Bound {
     /// The most the slowest `/proc` read of its load may take, in
     /// milliseconds; `None` for a phase with no load.
     pub(crate) proc_ms: Option<u64>,
-    /// Whether the row fails when the phase is over its bound. A quiet
+    /// Whether the row fails when a canary woke past `wake_ms`. A quiet
     /// phase is never asserted: over its bound, it makes the run void.
     pub(crate) asserted: bool,
+    /// Whether the row fails when the `/proc` read took past `proc_ms`.
+    pub(crate) proc_asserted: bool,
 }
 
-/// Each phase's bound: one slice, plus the longest hold a ring-3 program can
-/// ask the kernel for, plus room for a shared host's noise. Linux 7.0 in the
-/// same QEMU shape measured 3-98 ms in every phase.
+/// Each phase's bound: one slice, plus a lock wait's patience (one slice),
+/// plus one hold for each processor of the work the load's requests cause,
+/// plus room for a shared host's noise. Linux 7.0 in the same QEMU shape
+/// measured 3-98 ms in every phase.
+///
+/// [`SHORT_MS`] where the load's holds are a page's work; [`LONG_MS`] where
+/// one hold is 1 GiB's (an unmap of it, a fork of a process that has it):
+/// 150-400 ms a hold under KVM (MEMORY-AND-TIMING §2.2y), and develop before
+/// F-95's fix measured 1.4-6.4 s there, and 190 s in a 15 s phase.
 pub(crate) const BOUNDS: &[Bound] = &[
     quiet("quiet"),
-    load("hog", 100),
-    load("futex", 100),
-    load("fault", 100),
-    load("wine", 100),
-    load("convoy", 100),
-    load("bigunmap", 150),
-    load("forkbig", 150),
+    load("hog", SHORT_MS),
+    load("futex", SHORT_MS),
+    load("fault", SHORT_MS),
+    load("wine", SHORT_MS),
+    load("convoy", SHORT_MS),
+    load("bigunmap", LONG_MS),
+    load("forkbig", LONG_MS),
     quiet("quiet2"),
 ];
+
+/// The bound where the load's holds are short, in milliseconds.
+const SHORT_MS: u64 = 100;
+
+/// The bound where one hold is 1 GiB's work, in milliseconds, until those
+/// holds are cut into bounded pieces.
+const LONG_MS: u64 = 1_000;
 
 /// A quiet phase's bound: over it, the run measured the host.
 const fn quiet(phase: &'static str) -> Bound {
@@ -75,16 +95,18 @@ const fn quiet(phase: &'static str) -> Bound {
         wake_ms: 100,
         proc_ms: None,
         asserted: false,
+        proc_asserted: false,
     }
 }
 
-/// A load phase's bound, not yet asserted.
+/// A load phase's bound: its canaries asserted, its `/proc` read reported.
 const fn load(phase: &'static str, wake_ms: u64) -> Bound {
     Bound {
         phase,
         wake_ms,
         proc_ms: Some(wake_ms),
-        asserted: false,
+        asserted: true,
+        proc_asserted: false,
     }
 }
 
@@ -188,12 +210,11 @@ fn run_once(arch: Arch, program: &std::path::Path, args: &Args) -> Result<Verdic
             )));
         };
         let proc_read = figure(&lines, bound.phase, "proc");
-        let mode = if bound.asserted {
-            "asserted"
-        } else if bound.proc_ms.is_none() {
-            "the host's floor"
-        } else {
-            "reporting, not asserted"
+        let mode = match (bound.proc_ms, bound.asserted, bound.proc_asserted) {
+            (None, ..) => "the host's floor",
+            (Some(_), true, true) => "asserted",
+            (Some(_), true, false) => "wake asserted, /proc reported",
+            (Some(_), false, _) => "reporting, not asserted",
         };
         println!(
             "  {arch}: stall {}: worst wake {wake:.2} ms late (bound {} ms){}, {mode}",
@@ -213,13 +234,14 @@ fn run_once(arch: Arch, program: &std::path::Path, args: &Args) -> Result<Verdic
 pub(crate) fn verdict(figures: &[(Bound, f64, Option<f64>)]) -> Verdict {
     let late = |bound: &Bound, wake: f64, proc_read: Option<f64>| {
         let mut why = Vec::new();
+        let proc_counts = bound.proc_asserted || bound.proc_ms.is_none();
         if wake > bound.wake_ms as f64 {
             why.push(format!(
                 "{} woke {wake:.2} ms > {} ms",
                 bound.phase, bound.wake_ms
             ));
         }
-        if let (Some(read), Some(limit)) = (proc_read, bound.proc_ms)
+        if let (true, Some(read), Some(limit)) = (proc_counts, proc_read, bound.proc_ms)
             && read > limit as f64
         {
             why.push(format!("{} /proc {read:.2} ms > {limit} ms", bound.phase));
@@ -295,6 +317,7 @@ mod tests {
             wake_ms: 100,
             proc_ms: (!quiet).then_some(100),
             asserted,
+            proc_asserted: asserted,
         }
     }
 
@@ -327,7 +350,23 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_asserted_while_f95_is_open() {
-        assert!(BOUNDS.iter().all(|bound| !bound.asserted));
+    fn every_load_phase_has_its_wake_asserted_and_no_proc_read_yet() {
+        for bound in BOUNDS {
+            assert_eq!(bound.asserted, bound.proc_ms.is_some(), "{}", bound.phase);
+            assert!(!bound.proc_asserted, "{}", bound.phase);
+        }
+    }
+
+    #[test]
+    fn a_reported_proc_read_does_not_fail_an_asserted_phase() {
+        let quiet = bound("quiet", false, true);
+        let phase = Bound {
+            proc_asserted: false,
+            ..bound("futex", true, false)
+        };
+        assert_eq!(
+            verdict(&[(quiet, 5.0, None), (phase, 50.0, Some(900.0))]),
+            Verdict::Within
+        );
     }
 }

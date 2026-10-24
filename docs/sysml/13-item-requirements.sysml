@@ -649,6 +649,21 @@ package FerrixItemRequirements {
                 window read as nothing (docs/DEBUG.md section 1.3).";
             attribute :>> parent = "G.1";
         }
+        requirement <'H.SCHED.16'> aWokenTaskRunsBesideAnotherJobsLoad : ItemHighLevel {
+            attribute :>> statement = "A task of one job, woken while a ring-3 load of
+                another job saturates every processor, shall be running within one
+                slice, plus the patience of a lock wait, plus one hold of a spin lock
+                that load's requests cause for each processor, of the moment it was
+                due: a task waiting for a kernel lock it does not hold shall not keep
+                its processor from other tasks while it waits (finding F-95,
+                docs/PREEMPTIBLE-WAITS.md).";
+            attribute :>> criterion = "cargo xtask test-stall: 10 ms sleepers, one
+                pinned to each processor and one free, beside each load phase, are
+                within the phase's bound in tools/common/xtask/src/stall.rs, in a
+                run whose quiet phases are within theirs; the phases not yet
+                asserted are named there and in docs/PREEMPTIBLE-WAITS.md section 7.";
+            attribute :>> parent = ("ASR-8", "O.QUOTA");
+        }
     }
 
     package Interrupts {

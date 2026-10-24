@@ -354,6 +354,39 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::preempt::Preempt::disable",
                 "sched::preempt::Preempt::enable");
         }
+        requirement <'L.sched.93'> aLockIsWaitedForPreemptiblyHoldingNothing : ItemLowLevel {
+            attribute :>> statement = "A preemption-disabling lock taken by a task
+                whose processor's whole count is zero, once the count is kept, and
+                whose interrupts are on shall be waited for with the count at zero:
+                tried with the count raised, and on a failure watched with it
+                lowered until it looks free; taken in any other state, it shall be
+                waited for on a ticket with the count raised, as before.";
+            attribute :>> criterion = "At boot (the preempt checks): the wait rule
+                answers yes with nothing held and no with a lock held, with
+                preemption off by hand and with interrupts masked; a lock another
+                processor holds for 20 ms, taken holding nothing, is counted as a
+                preemptible wait, and taken holding another lock is not. With the
+                rule made to answer no, test-stall's asserted phases fail (control
+                k1); with it made to answer yes in every state, this check fails
+                (control k-mask). On the host, ticket and preemptible waiters
+                together lose no increment (ferrix-sync).";
+            attribute :>> parent = "H.SCHED.16";
+            attribute :>> unit = "sched::preempt::Preempt::may_wait_preemptibly";
+        }
+        requirement <'L.sched.94'> aPreemptibleWaitIsBounded : ItemLowLevel {
+            attribute :>> statement = "A preemptible lock waiter that has watched for
+                its patience, one slice, shall take a ticket with the count raised,
+                so that its wait is at most the patience plus one hold for each
+                ticket ahead of it, however often other waiters take the lock.";
+            attribute :>> criterion = "ferrix-sync's host test: three holders that
+                take the lock again the moment they let it go never leave it free,
+                and a preemptible waiter beside them is served within its patience
+                and a second, having taken a ticket; with the patience never running
+                out, it is not served in 3 s and the test fails (control k2).";
+            attribute :>> parent = "H.SCHED.16";
+            attribute :>> unit = ("sched::preempt::Preempt::now_nanos",
+                "sched::preempt::Preempt::note_wait");
+        }
     }
 
     package RunningTask {

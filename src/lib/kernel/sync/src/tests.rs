@@ -1014,3 +1014,125 @@ fn a_hooked_lock_raises_the_installed_count_with_the_line_that_took_it() {
         "and after a try_lock's guard"
     );
 }
+
+/// A preemption count for the preemptible wait's tests (finding F-95): each
+/// thread says for itself whether it may wait preemptibly, and the patience
+/// is short enough for a host test to see it run out.
+struct PatientPreempt;
+
+std::thread_local! {
+    /// Whether this thread takes the preemptible wait.
+    static PREEMPTIBLE: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// The clock the patience is read against.
+fn test_clock() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
+
+static PATIENT_WAITS: AtomicUsize = AtomicUsize::new(0);
+static PATIENT_TICKETS: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: a test double; nothing here schedules.
+unsafe impl PreemptControl for PatientPreempt {
+    fn disable() {}
+    fn enable() {}
+    fn may_wait_preemptibly() -> bool {
+        PREEMPTIBLE.with(core::cell::Cell::get)
+    }
+    fn now_nanos() -> u64 {
+        test_clock()
+    }
+    const PATIENCE_NANOS: u64 = 20_000_000;
+    fn note_wait(ticketed: bool) {
+        let counter = if ticketed { &PATIENT_TICKETS } else { &PATIENT_WAITS };
+        let _ = counter.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Verifies: L.sched.93
+#[test]
+fn ticket_and_preemptible_waiters_together_agree_on_the_count() {
+    static LOCK: PreemptSpinLock<u64, PatientPreempt> = PreemptSpinLock::new(0);
+    const EACH: u64 = 20_000;
+    let threads: Vec<_> = (0..8)
+        .map(|index| {
+            thread::spawn(move || {
+                PREEMPTIBLE.with(|mode| mode.set(index % 2 == 0));
+                for _ in 0..EACH {
+                    let mut guard = LOCK.lock();
+                    // A read and a write, not one atomic step: two holders at
+                    // once lose an increment.
+                    let seen = *guard;
+                    core::hint::spin_loop();
+                    *guard = seen + 1;
+                }
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().expect("a counting thread panicked");
+    }
+    assert_eq!(*LOCK.lock(), 8 * EACH, "every increment, under one holder each");
+    assert!(
+        PATIENT_WAITS.load(Ordering::SeqCst) > 0,
+        "the preemptible waiters found the lock held and waited"
+    );
+}
+
+/// Verifies: L.sched.94
+#[test]
+fn a_preemptible_waiter_is_served_within_its_patience_against_holders_that_retake_at_once() {
+    static LOCK: PreemptSpinLock<u64, PatientPreempt> = PreemptSpinLock::new(0);
+    static STOP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+    // Three holders on the ticket that take the lock again the moment they
+    // let it go, so that it is never seen free: a waiter that only tries
+    // when it looks free would wait for as long as they run.
+    let greedy: Vec<_> = (0..3)
+        .map(|_| {
+            thread::spawn(|| {
+                while !STOP.load(Ordering::Relaxed) {
+                    let mut guard = LOCK.lock();
+                    *guard += 1;
+                    let until = test_clock() + 20_000;
+                    while test_clock() < until {
+                        core::hint::spin_loop();
+                    }
+                }
+            })
+        })
+        .collect();
+    while *LOCK.lock() < 100 {
+        thread::yield_now();
+    }
+    let tickets = PATIENT_TICKETS.load(Ordering::SeqCst);
+    let waiter = thread::spawn(|| {
+        PREEMPTIBLE.with(|mode| mode.set(true));
+        let began = test_clock();
+        drop(LOCK.lock());
+        test_clock() - began
+    });
+    // Long enough for a waiter with no patience to show it, and bounded, so
+    // that one never hangs the suite.
+    let deadline = test_clock() + 3_000_000_000;
+    while !waiter.is_finished() && test_clock() < deadline {
+        thread::sleep(std::time::Duration::from_millis(5));
+    }
+    STOP.store(true, Ordering::Relaxed);
+    let waited = waiter.join().expect("the waiter panicked");
+    for thread in greedy {
+        thread.join().expect("a holder panicked");
+    }
+    assert!(
+        waited < PatientPreempt::PATIENCE_NANOS + 1_000_000_000,
+        "the waiter waited {waited} ns, past its patience of {} ns and a second for the \
+         holders ahead of it",
+        PatientPreempt::PATIENCE_NANOS
+    );
+    assert!(
+        PATIENT_TICKETS.load(Ordering::SeqCst) > tickets,
+        "its patience ran out and it took a ticket"
+    );
+}

@@ -3097,8 +3097,17 @@ Annex D, IEC 61508-3 7.4.2.8-9), FM-8 and MEMORY-AND-TIMING §2.2's
 "preemptible kernel". F-89's box hang may share the cause; that is not
 shown.
 
-*Closes when* `test-stall` asserts every phase, fails on develop and passes
-with the fix, its controls k1 and k3 read FIRED, MEMORY-AND-TIMING states
+**What the second landing closed** (2026-10-24): a task that holds nothing
+now waits for a kernel spin lock with its processor free (L.sched.93,
+bounded by L.sched.94), and `test-stall` asserts wake-to-run in every load
+phase (H.SCHED.16): 100 ms where the load's holds are short, 1,000 ms where
+one hold is 1 GiB's work. What stays open: those long holds themselves,
+which still stop their holder's processor for 150-400 ms under KVM, and
+the `/proc` reads of a loaded process, which still take up to a second
+beside the futex load and are reported, not asserted.
+
+*Closes when* `test-stall` asserts every phase at the short bound, `/proc`
+included, fails on develop and passes with the fix, its controls k1 and k3 read FIRED, MEMORY-AND-TIMING states
 the wake-to-run and per-operation hold bounds with FM-8 and AoU-4 checked
 against them, and a box run of the landing hash goes into a BACKLOG
 hardware row with the canary figures (the consultant's (I4) and (23)).

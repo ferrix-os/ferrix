@@ -44,7 +44,14 @@
 //! * [`SpinLock`] — mutual exclusion, first come first served.
 //! * [`PreemptSpinLock`] — the same, with the holder kept on its CPU;
 //!   [`HookedPreempt`] keeps it there for a library that cannot name the
-//!   kernel, through the [`PreemptHooks`] the kernel installs.
+//!   kernel, through the [`PreemptHooks`] the kernel installs. **Not first
+//!   come first served for a waiter that holds nothing** (finding F-95): such
+//!   a waiter watches the lock without a ticket and with its processor free
+//!   for other tasks, and takes a ticket only once its patience runs out, so
+//!   its wait is bounded by the patience plus one hold per ticket ahead
+//!   ([`PreemptSpinLock::lock`]). A nested acquisition still waits on a
+//!   ticket in arrival order. A library lock ([`HookedPreempt`]) always
+//!   does: the hooks carry no wait rule yet.
 //! * [`IrqSpinLock`] — the same, with interrupts masked for the duration.
 //! * [`Once`] — run an initialiser exactly once, for globals set up at boot.
 //! * [`RwSpinLock`] — many readers or one writer, writer-preferring.
@@ -465,7 +472,35 @@ pub unsafe trait PreemptControl {
     fn disable();
     /// Let it be switched out again, once every `disable` is matched.
     fn enable();
+
+    /// Whether a task taking a lock now may wait for it preemptibly
+    /// ([`PreemptSpinLock::lock`]): it holds nothing that keeps it on its
+    /// processor -- no lock, no `disable` of its own -- and interrupts are
+    /// on, so that it can be switched out at any instruction anyway. `false`,
+    /// the default, keeps every acquisition on the ticket.
+    fn may_wait_preemptibly() -> bool {
+        false
+    }
+
+    /// A clock in nanoseconds, for [`PreemptControl::PATIENCE_NANOS`]; read
+    /// only by a preemptible wait, and only on its slow path.
+    fn now_nanos() -> u64 {
+        0
+    }
+
+    /// How long a preemptible waiter watches a lock before it takes a ticket
+    /// and waits in arrival order with preemption off: the bound on how long
+    /// the waiters that keep their processors can starve one that does not.
+    const PATIENCE_NANOS: u64 = 0;
+
+    /// Told `false` once for each preemptible wait that found the lock held,
+    /// and `true` again when its patience runs out and it takes a ticket:
+    /// for the kernel's counts, which its checks read.
+    fn note_wait(_ticketed: bool) {}
 }
+
+/// How many polls of a preemptible wait go between two reads of the clock.
+const PATIENCE_POLLS: u32 = 64;
 
 /// A [`SpinLock`] whose holder cannot be switched out while it holds it.
 ///
@@ -505,19 +540,77 @@ impl<T, P: PreemptControl> PreemptSpinLock<T, P> {
 }
 
 impl<T: ?Sized, P: PreemptControl> PreemptSpinLock<T, P> {
-    /// Keeps this task on its CPU and then takes the lock, in that order.
+    /// Takes the lock, and keeps this task on its CPU until the guard drops.
     ///
-    /// The order matters for the waiters too: a task spinning for its ticket
-    /// with preemption on could be switched out holding the ticket, which is
-    /// the second half of the convoy.
+    /// A task the [`PreemptControl`] says may wait preemptibly -- one that
+    /// holds nothing and has interrupts on -- waits without a ticket and
+    /// with its processor free ([`Self::lock_preemptibly`]). Any other keeps
+    /// itself on its CPU and then takes a ticket, in that order: a task
+    /// spinning for its ticket with preemption on could be switched out
+    /// holding the ticket, which is the second half of the convoy.
     #[must_use = "the task stays on its CPU until the guard is dropped"]
     #[track_caller]
     pub fn lock(&self) -> PreemptSpinLockGuard<'_, T, P> {
-        P::disable();
-        self.inner.acquire();
+        if P::may_wait_preemptibly() {
+            self.lock_preemptibly();
+        } else {
+            P::disable();
+            self.inner.acquire();
+        }
         PreemptSpinLockGuard {
             lock: self,
             not_send: PhantomData,
+        }
+    }
+
+    /// [`PreemptSpinLock::lock`] for a task that holds nothing and has
+    /// interrupts on (finding F-95, `docs/PREEMPTIBLE-WAITS.md`). Returns
+    /// with the lock held and the count raised, as the ticket path does.
+    ///
+    /// **The wait does not hold the processor.** It tries the lock with the
+    /// count raised, and on a failure lowers the count again -- making, at
+    /// that lowering, any decision an interrupt asked for meanwhile, as every
+    /// guard's drop does -- and watches the lock with the count at zero until
+    /// it looks free. A waiter holds no ticket, so being switched out while
+    /// it watches passes no stall to anyone, which is the convoy a ticket
+    /// waiter switched out would cause. Only the holder keeps preemption off.
+    ///
+    /// **And it is bounded.** A waiter that has watched for
+    /// [`PreemptControl::PATIENCE_NANOS`] takes a ticket with the count
+    /// raised. A try fails while any ticket is queued, so from then on it is
+    /// served in arrival order among the ticket holders, and no stream of
+    /// waiters that keep their processors can starve it: its wait is at most
+    /// the patience, plus one hold for each ticket ahead of it.
+    #[track_caller]
+    fn lock_preemptibly(&self) {
+        P::disable();
+        if self.inner.try_acquire() {
+            return;
+        }
+        P::enable();
+        P::note_wait(false);
+        let since = P::now_nanos();
+        let patient = |polls: &mut u32| {
+            *polls = polls.wrapping_add(1);
+            !polls.is_multiple_of(PATIENCE_POLLS)
+                || P::now_nanos().saturating_sub(since) < P::PATIENCE_NANOS
+        };
+        let mut polls = 0_u32;
+        loop {
+            while self.inner.is_locked() {
+                if !patient(&mut polls) {
+                    P::note_wait(true);
+                    P::disable();
+                    self.inner.acquire();
+                    return;
+                }
+                spin_loop();
+            }
+            P::disable();
+            if self.inner.try_acquire() {
+                return;
+            }
+            P::enable();
         }
     }
 
