@@ -1284,6 +1284,265 @@ def checks_only_items(files: list[str], read, problems: list[str] | None = None,
     return out
 
 
+
+# -- Removable crates (docs/KERNEL-CRATES.md section 6) ------------------------
+
+def _uncommented(source: str) -> str:
+    """`source` with its comments blanked and its string literals kept, length
+    kept: a cfg's value is a string literal, which `rustlex.mask` blanks."""
+    out: list[str] = []
+    pos = 0
+    for kind, start, end in rustlex.spans(source):
+        out.append(source[pos:start])
+        out.append(rustlex._blank(source[start:end]) if kind == "comment" else source[start:end])
+        pos = end
+    out.append(source[pos:])
+    return "".join(out)
+
+
+_ITEM_START = re.compile(r"^(?:pub(?:\([a-z]+\))?\s+)?(?:const|static|fn|use|struct|enum|impl|mod|type|trait|extern|unsafe|#\[)")
+
+
+def _item_attributes(code: str, at: int) -> list[str]:
+    """The outer attributes of the top-level item holding offset `at`: the
+    item starts at the nearest line, at or before `at`'s, that begins at
+    column 0 with an item keyword, and its attributes are the lines straight
+    above it back to a blank line or the end of the item before."""
+    line_end = code.find("\n", at)
+    lines = code[: len(code) if line_end < 0 else line_end].split("\n")
+    index = len(lines) - 1
+    while index >= 0 and not (_ITEM_START.match(lines[index]) and not lines[index].startswith("#[")):
+        index -= 1
+    above = index - 1
+    while above >= 0 and lines[above].strip() and not lines[above].rstrip().endswith((";", "}")):
+        above -= 1
+    block = "\n".join(lines[above + 1:index])
+    return [block] if block.lstrip().startswith("#[") else []
+
+
+def _admits(attributes: list[str], cfg_name: str, values: list[str]) -> set[str]:
+    """The values of the flag `cfg_name` under which an item with these
+    attributes is compiled: all of them unless a `#[cfg(..)]` names the flag
+    (an `all(..)` of it with other predicates counts as naming it)."""
+    admitted = set(values)
+    for text in attributes:
+        for cfg in re.finditer(r"#\[cfg\((.*?)\)\]", text, re.S):
+            body = cfg.group(1)
+            if "not(" in body or "any(" in body:
+                continue
+            named = re.findall(rf'\b{cfg_name}\s*=\s*"([a-z_]+)"', body)
+            if named:
+                admitted &= set(named)
+    return admitted
+
+
+_EXPORTING = re.compile(r"#\[(?:unsafe\()?\s*(?:no_mangle|export_name|used|link_section)\b")
+
+
+def removable_problems(removable: dict, read, crate_files: dict[str, list[str]], root: str,
+                       packages: dict[str, tuple[str, dict]], profiles: dict[str, dict],
+                       flag_values: dict[str, list[str]]) -> list[str]:
+    """Each removable crate against its record (ledger lines 3558 (9)-(11),
+    3623 (R1)-(R4), (R15)): its manifests, the composition root's references
+    and bindings, the load's interface and its call sites, and every profile's
+    dependency on it."""
+    problems: list[str] = []
+    for package, entry in sorted(removable.items()):
+        if package.startswith("//"):
+            continue
+        flag = entry.get("flag")
+        present = entry.get("present_when")
+        values = flag_values.get(flag, [])
+        if not values or present not in values:
+            problems.append(f"composition_root.removable.{package}: flag {flag!r} or value {present!r} is not declared")
+            continue
+        cfg_name = f"ferrix_{flag}"
+        symbol = entry.get("symbol", package.replace("-", "_"))
+        # The manifests: the crate depends on the load; only the binary on it.
+        own = packages.get(package)
+        if own is None:
+            problems.append(f"{package}: no such package")
+        elif "ferrix-kernel-load" not in own[1].get("dependencies", {}):
+            problems.append(f"{package}: does not depend on ferrix-kernel-load")
+        for other, (directory, cargo) in sorted(packages.items()):
+            if package in cargo.get("dependencies", {}) and other != "ferrix-kernel":
+                problems.append(f"{directory}: {other} depends on {package}; only the binary may")
+        binary = packages.get("ferrix-kernel")
+        if binary is not None and package not in binary[1].get("dependencies", {}):
+            problems.append(f"src/kernel: the binary's manifest does not list {package} (it is compiled in every build, ledger 3623 (R1))")
+        # No kernel file outside the root names the crate.
+        for rel in sorted(crate_files.get("kernel", [])):
+            if rel == root or rel in crate_files.get(package, []):
+                continue
+            source = read(rel)
+            if source is not None and re.search(rf"\b{symbol}\b", rustlex.mask(source)):
+                problems.append(f"{rel}: names {symbol}; only the composition root ({root}) may")
+        # The crate exports nothing a link would keep (R2).
+        for rel in sorted(crate_files.get(package, [])):
+            source = read(rel)
+            if source is None:
+                continue
+            for match in _EXPORTING.finditer(rustlex.mask(source)):
+                line = source.count("\n", 0, match.start()) + 1
+                problems.append(f"{rel}:{line}: {package} exports or keeps an item a link that does not name the crate "
+                                f"would still see (no_mangle, export_name, used, link_section; ledger 3623 (R2))")
+        source = read(root)
+        if source is None:
+            problems.append(f"{root}: cannot read the composition root")
+            continue
+        code = _uncommented(source)
+        masked = rustlex.mask(source)
+        # The root's references: each under the present value's cfg.
+        named_under: set[str] = set()
+        references = 0
+        for match in re.finditer(rf"\b{symbol}\b", masked):
+            references += 1
+            admitted = _admits(_item_attributes(code, match.start()), cfg_name, values)
+            line = source.count("\n", 0, match.start()) + 1
+            if admitted != {present}:
+                problems.append(f"{root}:{line}: names {symbol} under {sorted(admitted)}; only under "
+                                f"{cfg_name} = \"{present}\" (ledger 3558 (11))")
+            named_under |= admitted
+        if references == 0:
+            problems.append(f"{root}: never names {symbol}, so no {flag}={present} build links it")
+        # The lint the absent value leaves unfulfilled is expected there alone.
+        expect = entry.get("lint_expect")
+        if expect and not re.search(rf'#!\[cfg_attr\(\s*{cfg_name}\s*=\s*"(?:[a-z_]+)"\s*,\s*expect\(\s*{expect}\b', code):
+            problems.append(f"{root}: no crate-level expect({expect}) under {cfg_name} for the build that leaves {package} out (R3)")
+        # One binding per value, to the recorded path.
+        binding = entry.get("binding", {})
+        interface = entry.get("interface", "").split("::")[-1]
+        found_bindings: dict[str, list[str]] = defaultdict(list)
+        for match in re.finditer(rf"\bconst\s+[A-Z_]+\s*:\s*&[\w:]*\b{interface}\s*=\s*&([\w:]+)\s*;", code):
+            admitted = _admits(_item_attributes(code, match.start()), cfg_name, values)
+            for value in admitted:
+                found_bindings[value].append(match.group(1))
+        for value in values:
+            bound = found_bindings.get(value, [])
+            if len(bound) != 1:
+                problems.append(f"{root}: {len(bound)} bindings of {interface} for {flag}={value}; exactly one")
+            elif bound[0] != binding.get(value):
+                problems.append(f"{root}: {interface} for {flag}={value} is bound to {bound[0]}, "
+                                f"composition_root.removable says {binding.get(value)}")
+        # The interface: its recorded fields, no Default, its count, its calls.
+        defined_in = entry.get("defined_in")
+        definition = read(defined_in) if defined_in else None
+        if definition is None:
+            problems.append(f"composition_root.removable.{package}: cannot read {defined_in}")
+            continue
+        dmask = rustlex.mask(definition)
+        start = dmask.find(f"pub struct {interface} {{")
+        if start < 0:
+            problems.append(f"{defined_in}: defines no `pub struct {interface}`")
+        else:
+            body = dmask[start:_closing(dmask, dmask.index("{", start))]
+            fields = re.findall(r"\bpub\s+([a-z_][a-z0-9_]*)\s*:", body)
+            if fields != entry.get("fields", []):
+                problems.append(f"{defined_in}: {interface}'s fields are {fields}, the record says {entry.get('fields')}")
+            attributes = dmask[max(0, start - 300):start].split("\n\n")[-1]
+            if "Default" in attributes or re.search(rf"impl\s+Default\s+for\s+{interface}\b", dmask):
+                problems.append(f"{defined_in}: {interface} has a Default; it fails closed only through its absent binding")
+            count = re.search(r"pub const ENTRIES: usize = (\d+);", dmask)
+            if count is None or int(count.group(1)) != len(entry.get("fields", [])):
+                problems.append(f"{defined_in}: ENTRIES is not the record's {len(entry.get('fields', []))} fields (R15)")
+        callers = set()
+        literals = []
+        for rel in sorted(crate_files.get("kernel", [])):
+            text = read(rel)
+            if text is None:
+                continue
+            tmask = rustlex.mask(text)
+            if re.search(r"\bsetters::bound\(\)", tmask) and rel not in (root, defined_in):
+                callers.add(rel)
+            for match in re.finditer(rf"(?<![\w:])(?:[\w:]*::)?{interface}\s*\{{", tmask):
+                if tmask[max(0, match.start() - 7):match.start()].rstrip().endswith("struct"):
+                    continue
+                literals.append(rel)
+        if callers != set(entry.get("calls", [])):
+            problems.append(f"the files calling through {interface} are {sorted(callers)}, the record says "
+                            f"{sorted(entry.get('calls', []))}")
+        for rel in literals:
+            if rel != defined_in and rel not in crate_files.get(package, []):
+                problems.append(f"{rel}: builds a {interface}; only {defined_in}'s absent binding and {package} may")
+        # Every profile, buildable or not: its binary names the crate exactly
+        # when its value is the present one (3558 (11)).
+        for name, profile in sorted(profiles.items()):
+            value = profile.get("flags", {}).get(flag)
+            if value is None:
+                continue
+            if value == present and value not in named_under:
+                problems.append(f"profile {name}: {flag}={value}, and its binary would not depend on {package}")
+            if value != present and value in named_under:
+                problems.append(f"profile {name}: {flag}={value}, and its binary would depend on {package}")
+    return problems
+
+
+_REMOVABLE_RECORD = {"pkg-x": {"flag": "f", "present_when": "on", "interface": "hooks::Hooks", "defined_in": "hooks.rs",
+                               "binding": {"on": "pkg_x::HOOKS", "off": "hooks::ABSENT"}, "fields": ["a"],
+                               "calls": ["user.rs"], "lint_expect": "unused_crate_dependencies", "symbol": "pkg_x"}}
+_REMOVABLE_TREE = {
+    "main.rs": '#![cfg_attr(\n    ferrix_f = "off",\n    expect(unused_crate_dependencies, reason = "r")\n)]\n\n'
+               '#[cfg(ferrix_f = "on")]\nconst HOOKS: &hooks::Hooks = &pkg_x::HOOKS;\n'
+               '#[cfg(ferrix_f = "off")]\nconst HOOKS: &hooks::Hooks = &hooks::ABSENT;\n',
+    "hooks.rs": "pub struct Hooks {\n    pub a: fn(),\n}\npub const ENTRIES: usize = 1;\npub static ABSENT: Hooks = Hooks { a: || {} };\n"
+                "pub fn bound() -> &'static Hooks { &ABSENT }\n",
+    "user.rs": "fn u() { (crate::hooks::bound().a)() }\n",
+    "x/root.rs": "pub static HOOKS: Hooks = Hooks { a: f };\n",
+}
+_REMOVABLE_PACKAGES = {
+    "ferrix-kernel": ("src/kernel", {"dependencies": {"pkg-x": {}}}),
+    "ferrix-kernel-load": ("src/kernel/load", {"dependencies": {}}),
+    "pkg-x": ("src/kernel/x", {"dependencies": {"ferrix-kernel-load": {}}}),
+}
+_REMOVABLE_PROFILES = {"lo": {"flags": {"f": "off"}}, "hi": {"flags": {"f": "on"}}}
+
+
+def _removable_self_test() -> list[str]:
+    failures = []
+    files = {"kernel": ["main.rs", "hooks.rs", "user.rs"], "pkg-x": ["x/root.rs"]}
+    record = {k: dict(v, calls=["user.rs"]) for k, v in _REMOVABLE_RECORD.items()}
+    record["pkg-x"]["interface"] = "hooks::Hooks"
+    def run(tree=None, packages=None, profiles=None):
+        tree = {**_REMOVABLE_TREE, **(tree or {})}
+        # user.rs calls `hooks::bound()`, the record's own name for the accessor
+        tree = {k: v.replace("hooks::bound()", "setters::bound()") for k, v in tree.items()}
+        return removable_problems(record, tree.get, files, "main.rs", packages or _REMOVABLE_PACKAGES,
+                                  profiles or _REMOVABLE_PROFILES, {"f": ["off", "on"]})
+    found = run()
+    if found:
+        failures.append(f"removable: a tree that keeps the rule was refused: {found}")
+    main = _REMOVABLE_TREE["main.rs"]
+    for what, args, expect in [
+        ("a planted unconditional dependency", {"tree": {"main.rs": main + "use pkg_x as _;\n"}},
+         "would depend on pkg-x"),
+        ("a live binding to the absent one", {"tree": {"main.rs": main.replace("&pkg_x::HOOKS", "&hooks::ABSENT")}},
+         "would not depend on pkg-x"),
+        ("a reference from a load file", {"tree": {"user.rs": "fn u() { pkg_x::f(); (crate::setters::bound().a)() }\n"}},
+         "only the composition root"),
+        ("an exported item in the crate", {"tree": {"x/root.rs": "#[unsafe(no_mangle)]\npub fn e() {}\n"
+                                                                  "pub static HOOKS: Hooks = Hooks { a: f };\n"}},
+         "exports or keeps"),
+        ("the lint expectation missing", {"tree": {"main.rs": main.split("\n\n", 1)[1]}}, "no crate-level expect"),
+        ("a field not recorded", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"].replace(
+            "pub a: fn(),", "pub a: fn(),\n    pub b: fn(),")}}, "fields are"),
+        ("the count not the fields'", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"].replace(
+            "ENTRIES: usize = 1", "ENTRIES: usize = 2")}}, "ENTRIES is not"),
+        ("an unrecorded caller", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"],
+                                           "main.rs": main + "fn m() { (setters::bound().a)() }\n"}},
+         None),
+        ("a load manifest naming the crate", {"packages": {**_REMOVABLE_PACKAGES, "ferrix-kernel-load": (
+            "src/kernel/load", {"dependencies": {"pkg-x": {}}})}}, "only the binary may"),
+        ("a struct built outside the crate", {"tree": {"user.rs": "fn u() { let _ = Hooks { a: f }; (crate::setters::bound().a)() }\n"}},
+         "builds a Hooks"),
+    ]:
+        if expect is None:
+            continue
+        found = run(**args)
+        if not any(expect in problem for problem in found):
+            failures.append(f"removable: {what} passed ({found})")
+    return failures
+
+
 def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, str], read, exists,
                           members: dict[str, str]) -> list[str]:
     """The kernel's crates against their rings (ledger lines 1477 and 1531):
@@ -1752,7 +2011,7 @@ def self_test() -> list[str]:
     if modules.get(("sys", "inline")) is None or modules[("sys", "inline")].file != "sys/mod.rs":
         failures.append("resolver: inline module sys::inline not placed in sys/mod.rs")
     failures += _crate_self_test()
-    failures += _hook_self_test() + _policy_self_test()
+    failures += _hook_self_test() + _policy_self_test() + _removable_self_test()
     failures += _kernel_self_test()
     failures += _gpu_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
@@ -2461,6 +2720,31 @@ def judge_profile(name: str, profile: dict, flags: dict, manifest: dict) -> tupl
     return found + components, [f"profile {name}: level {profile.get('level')}, buildable"]
 
 
+
+def run_removable(manifest: dict, files: list[str], root: str | None) -> list[str]:
+    """[`removable_problems`] over the tree."""
+    removable = manifest.get("composition_root", {}).get("removable", {})
+    if not removable:
+        return []
+    read = lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace") \
+        if (KERNEL_SRC / rel).is_file() else None
+    entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
+    reached, _ = kernel_crate_files(entries, read, lambda rel: (KERNEL_SRC / rel).is_file(), files)
+    crate_files: dict[str, list[str]] = {"kernel": sorted(reached)}
+    for rel, crates in reached.items():
+        for crate in crates:
+            crate_files.setdefault(crate, []).append(rel)
+    with FLAG_FILE.open("rb") as handle:
+        flags = tomllib.load(handle).get("flags", {})
+    values = {name: list(flag.get("values", {})) for name, flag in flags.items()}
+    profiles = {}
+    for path in sorted(PROFILE_DIR.glob("*.toml")):
+        with path.open("rb") as handle:
+            profiles[path.stem] = tomllib.load(handle)
+    return removable_problems(removable, read, crate_files, root or "main.rs", workspace_packages(),
+                              profiles, values)
+
+
 def profile_rule(manifest: dict) -> tuple[list[str], list[str]]:
     """Every check above over the tree's files: (problems, notes)."""
     with FLAG_FILE.open("rb") as handle:
@@ -2764,6 +3048,17 @@ def main() -> int:
             file=sys.stderr,
         )
         for problem in policy_found:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+
+    removable_found = run_removable(manifest, files, root.get("file"))
+    if removable_found:
+        print(
+            f"item-boundary: {len(removable_found)} problem(s) with the removable crates\n"
+            f"  (composition_root.removable, docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623):",
+            file=sys.stderr,
+        )
+        for problem in removable_found:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 

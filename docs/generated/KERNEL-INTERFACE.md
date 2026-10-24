@@ -1939,7 +1939,7 @@ checks above is `pub` for raised checks (F3).
 | `Interrupt` | struct | item, load |  |
 | `Delivery::fire` | method | load |  |
 | `Interrupt::acknowledge` | method | item, load |  |
-| `Interrupt::bind` | method | item, load |  |
+| `Interrupt::bind` | method | item, load, bin |  |
 | `Interrupt::coalesces` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Interrupt::new` | method | item, load, bin |  |
 | `Interrupt::reads_masked` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2903,7 +2903,7 @@ checks above is `pub` for raised checks (F3).
 | `WindowPages::physical` | field | load, bin |  |
 | `WindowPages::whole` | field | load, bin |  |
 | `WindowPages::whole_len` | field | load |  |
-| `WindowPages::all` | method | item, load |  |
+| `WindowPages::all` | method | item, load, bin |  |
 
 ### `user::vmo`
 

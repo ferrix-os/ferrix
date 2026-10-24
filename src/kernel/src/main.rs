@@ -28,6 +28,18 @@
         reason = "linux_abi=off is build-only until the checks that run a Linux program are re-homed"
     )
 )]
+// A `runtime_settings = "fixed"` build names the removable crate
+// `ferrix-kernel-settings` nowhere, so that rustc never loads it and none of
+// it is linked (docs/KERNEL-CRATES.md §6; ledger 3558 (10), 3623 (R1), (R3)):
+// its manifest lists it in every build, and only this attribute's build
+// leaves it unused. A `live` build keeps the lint.
+#![cfg_attr(
+    ferrix_runtime_settings = "fixed",
+    expect(
+        unused_crate_dependencies,
+        reason = "runtime_settings=fixed leaves ferrix-kernel-settings out of the link"
+    )
+)]
 
 extern crate alloc;
 
@@ -53,6 +65,22 @@ const _: () = assert!(
     LOAD_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-load was compiled with other build flags than the binary"
 );
+#[cfg(ferrix_runtime_settings = "live")]
+const _: () = assert!(
+    ferrix_kernel_settings::SETTINGS_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-settings was compiled with other build flags than the binary"
+);
+
+// The run-time setting entries' binding (docs/KERNEL-CRATES.md §6; ledger
+// 3558 (9), 3623): the removable crate's in a `live` build, the load's
+// `ABSENT` in a `fixed` one, recorded in certification-item.json's
+// `composition_root.removable`. These, and the flag word's assert above, are
+// the only places the tree names `ferrix_runtime_settings` outside the flag
+// lists, and the only ones that name the crate.
+#[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
+const SETTERS: &setters::Setters = &ferrix_kernel_settings::SETTERS;
+#[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
+const SETTERS: &setters::Setters = &setters::ABSENT;
 
 #[cfg(ferrix_linux_abi = "on")]
 pub mod stages_check;
@@ -130,6 +158,30 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
     trap::set_quiet_syscall_filter(syscall::seccomp::check);
+    // The run-time setting entries, before the first user program, a boot
+    // check below.
+    bind_setters();
+}
+
+/// Register the build's run-time setting entries ([`SETTERS`]) and check
+/// that the load answers with them: by address, so that the crate's binding
+/// in a `live` build and `setters::ABSENT` in a `fixed` one cannot be
+/// mistaken for each other (ledger 3623 (R4)). A second registration stops
+/// the boot. Not gated by `ferrix.checks`: it costs one comparison.
+#[cfg(ferrix_linux_abi = "on")]
+fn bind_setters() {
+    if setters::bind(SETTERS).is_err() {
+        fatal!(
+            catalog::LOAD_REGISTRATION,
+            "the run-time setting entries were registered twice"
+        );
+    }
+    if !core::ptr::eq(setters::bound(), SETTERS) {
+        fatal!(
+            catalog::LOAD_REGISTRATION,
+            "the load does not answer with the run-time setting entries the build registered"
+        );
+    }
 }
 
 /// Without the Linux ABI (`linux_abi=off`, `docs/LINUX-ABI-SEPARATION.md`

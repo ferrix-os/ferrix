@@ -718,3 +718,248 @@ argued (`docs/backlog/p2.md`); the floor 84.0 with the statement proof
 (28 statements reached on 2026-09-27 and not now, all timed or machine
 paths). AArch64 and ARMv7-A are carried, not measured, until an Arm QEMU
 loads the plugin (`docs/backlog/p2.md`).
+
+## 6. Removable crates: a feature whose code a build can leave out
+
+**Built 2026-10-24 (settings-crate).** The certification consultant's
+rulings: ledger line 3558 (run-time settings per profile, (5) to (14)),
+amended by 3595 (crash capture its own feature, `crash_capture`, crate
+`ferrix-kernel-crash`); 3564 (fast's signed configuration, a later
+`config_updates` key, not built); and this design's review, **OK IF
+(R1)-(R21), ledger line 3623**. This section is the pattern both crates
+follow, and the first one, `ferrix-kernel-settings`, built with it.
+`BUILD-FLAGS.md` §3 has the flag and the image key, §5.1 the image
+manifest.
+
+### 6.1 The pattern
+
+A **removable crate** is a kernel library crate in the load ring that a
+build flag puts in or leaves out of the kernel binary. It is how a flag
+value that means "this code is absent" (3558 (5), Q2: absent code is
+neither dead nor deactivated, DO-178C §6.4.4.3c/d) is realised, and the
+flag is the configuration record of it (3558 addendum (a)).
+
+1. **The crate depends on `ferrix-kernel-load`, never the reverse** (and
+   on the core, for the flag word). No kernel crate but the binary lists
+   it, and only the binary's root names it (3558 (9)). Its root is
+   `src/kernel/src/kernel_<name>.rs`, its files under
+   `src/kernel/src/<name>/`, both in the load ring of
+   `certification-item.json`; it is a fifth entry of `kernel_crates`,
+   builds with the one build script (`src/kernel/build.rs`), and its flag
+   word is const-asserted equal to the binary's (K4). It defines no
+   `#[no_mangle]`, `export_name`, `#[used]` or `#[link_section]` item and no
+   link-time hook (3623 (R2)), so a link that does not name it keeps
+   nothing of it.
+2. **Load defines one small typed interface**, a struct of function
+   pointers in a load file of its own (`setters.rs`: `Setters`, twelve
+   fields, `ENTRIES = 12`), with no `Default` and no constructor; its two
+   bindings are statics, the crate's `SETTERS` and the load's **`ABSENT`**,
+   so they can be told apart by address. It is registered once at bring-up,
+   before the first user program (`setters::bind`, a second registration
+   refused), and read through one accessor (`setters::bound`), which
+   answers `ABSENT` before registration: the interface fails closed. Every
+   load call site goes through it, one call per site.
+3. **The composition root binds it** (`main.rs`):
+   ```rust
+   #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
+   const SETTERS: &setters::Setters = &ferrix_kernel_settings::SETTERS;
+   #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
+   const SETTERS: &setters::Setters = &setters::ABSENT;
+   ```
+   `bind_setters`, right after the system calls are registered, binds
+   `SETTERS` and requires `bound()` to be it by address, stopping the boot
+   under `LOAD_REGISTRATION` (FX-0006) otherwise or on a second
+   registration (3623 (R4)). That identity check sits inside
+   `bind_setters`, so a build whose root never calls `bind_setters` is
+   caught only by the boot checks that go through `bound()`: it fails
+   closed, a `live` build without its registration answering as `fixed`
+   does (EPERM). A check that holds without the call is owed before
+   `ferrix-kernel-crash` lands (`docs/backlog/p2.md`; ledger 3762 (2)).
+   The crate's flag-word assert is under
+   `cfg(ferrix_runtime_settings = "live")` too. Under `fixed` the binary
+   names the crate nowhere, so rustc never loads it and the linker never
+   sees it; the crate-level `#![cfg_attr(ferrix_runtime_settings = "fixed",
+   expect(unused_crate_dependencies, ..))]` is the one lint attribute that
+   build needs (3623 (R3)): `expect` is fulfilled there, and `live` builds
+   keep the lint under `-D warnings`.
+4. **The manifest records it**: `composition_root.removable`, one entry
+   per crate: `flag`, `present_when`, `interface`, `defined_in`, `absent`,
+   `binding` (one path per value of the flag), `fields`, `calls` (the load
+   files calling through the interface), `lint_expect`, `symbol` and
+   `absent_symbols` (the load's mechanisms only the crate calls).
+   `ferrix-kernel-crash` adds its own entry (`crash_capture`, `hold`, its
+   `CrashHook`, ...) and a line in xtask's `REMOVABLE`, and no new check code.
+5. **The checks are generic over that record** (3558 (11), 3595 (C4)):
+   * `check-item-boundary.py`'s `removable_problems` (ten self-test
+     cases): the crate depends on the load and only the binary on it, the
+     binary's manifest lists it; no kernel file but the root names it; the
+     crate exports nothing a link would keep; every reference to it in the
+     root sits under `cfg(ferrix_<flag> = "<present_when>")`; the
+     `lint_expect` attribute is there; each value of the flag has exactly
+     one binding, to the recorded path; the interface has exactly the
+     recorded fields, `ENTRIES` their count, no `Default`, no value built
+     outside `defined_in` and the crate; the files calling through it are
+     the recorded ones; and every profile file, buildable or not, is
+     refused if its value is not `present_when` and its binary would name
+     the crate, or if it is and would not.
+   * **The ELF is the dependency evidence of record** (3623 (R1)): Cargo
+     lists the crate in every build, since it has no way to make a
+     dependency conditional on a build-script `--cfg` without a feature,
+     which (10) excludes; whether a profile's binary depends on it is
+     defined by the root's cfgs, checked statically per profile above, and
+     proved by the linked ELF. `check-removable-symbols.py --elf K --crate
+     C --value V` (four self-test cases) reads `nm --demangle`: no symbol
+     of the crate, nor any of `absent_symbols`, in a kernel built with an
+     absent value; at least one of the crate's in one built with the
+     present value (its `SETTERS` static is always kept, its address
+     registered). `cargo xtask test-removable` links the release kernel
+     with each value on the three architectures, keeps each ELF under
+     `target/removable/` and runs the check on it.
+   * `check-build-flags.py` rule 6e (one self-test case): a cfg of a
+     recorded flag anywhere under `src/kernel` but `main.rs`,
+     `build_flags.rs`'s table and `kernel_core.rs`'s flag word is refused.
+   * The negative controls, each through `fleet/gate.sh control --expect`
+     and each to read `FIRED`, are listed with their logs in the landing
+     message: (a) a planted dependency, `use ferrix_kernel_settings as _;`
+     unconditional in `main.rs`; (b) a planted reference pulling the crate
+     into a fixed link, the ELF check; (c) a planted
+     `cfg(ferrix_runtime_settings = "live")` in a load file, rule 6e; (d)
+     the live binding bound to `ABSENT`; (e) `runtime_settings = "live"` in
+     `max.toml`, the profile rule, and `settings_writer = "present"` in
+     `fast.toml`, the image-key rule; (f) a planted `settingsd` in a
+     `settings_writer = "absent"` image, xtask's refusal; (g) a manifest
+     line that disagrees with the profile, `check-boot-line.py`; (h) a
+     planted `#[unsafe(no_mangle)]` item in the crate; (i) a live build
+     with the registration removed, the boot (the first boot check that
+     sets something through `bound()`, stage 8's `memfd_noexec` write, is
+     then refused `EPERM` and stops it); (j) one `ABSENT` field answering `Ok`, the stage
+     check below (3623 (R20)).
+6. **Cargo features stay at zero** (`kernel_cargo_features`, (10)), and
+   there is no second binary package.
+
+### 6.2 `ferrix-kernel-settings`: what moved
+
+The rule: **the entry by which a program changes a system setting,
+whole** -- the system call's handler or the file's write function, from
+its first argument check to its last effect -- so that in a `fixed` build
+the call answers `EPERM` at its dispatch, before any argument check, and
+none of the entry's code is in the binary (3623 (R5), (R10)). Kernel
+lines are on the landing tree against `develop` 6a60444a6, with doc
+comments; "code" counts lines that are neither blank nor comment (3623
+(R12)).
+
+| From (load) | What moved | To (`settings/`) | Lines (code) | Setters field | Live answers, where `fixed` answers `EPERM` first |
+|---|---|---|---:|---|---|
+| `syscall/system.rs` | `read_name`, `nameable`, `sys_sethostname`, `sys_setdomainname`, whole | `uts.rs` | 54 (34) | `sethostname`, `setdomainname` | `EPERM` without `CAP_SYS_ADMIN`, `EINVAL`, `EFAULT` |
+| `syscall/system.rs` | `sys_syslog`'s `CLEAR` (5) arm, and `READ_CLEAR` (4) whole: its buffer check, the read and the clear `read_all` did under its `clear` argument | `log.rs` | 29 (17) | `syslog_clear`, `syslog_read_clear` | after the call's privilege check: `EINVAL`, `EFAULT`, `ENOMEM` for 4 |
+| `syscall/system.rs` | `sys_reboot`'s `RESTART2` arm, whole, with the commits and the audit record it made before the `match` | `reboot.rs` | 42 (26) | `restart_with_word` | after the privilege check and the magic numbers: `EFAULT`, else the reset |
+| `syscall/time.rs` | `SETTOD_SECONDS_MAX`, `settable`, `sys_clock_settime`, `sys_settimeofday`, whole | `clock.rs` | 89 (62) | `clock_settime`, `settimeofday` | `EINVAL`, `EFAULT`, then `EPERM` without privilege |
+| `fs/procfs.rs` | `sysrq_trigger`, whole | `sysrq.rs` | 23 (12) | `sysrq_trigger` | the panic on `c` |
+| `fs/procfs/render.rs` | `set_hostname`, `set_domainname`, whole | `sysctl.rs` | 28 (17) | `sysctl_hostname`, `sysctl_domainname` | `EINVAL` |
+| `syscall/memfd.rs` | `set_noexec`, whole | `memfd_noexec.rs` | 40 (19) | `sysctl_memfd_noexec` | `EPERM` without `CAP_SYS_ADMIN`, `EINVAL` |
+| `fs/sysfs.rs` | `write`'s checks and requests: the name, the device, the unbind's driver, `devmgr::request` | `driver_bind.rs` | 30 (17) | `driver_bind` | `ENODEV`, `devmgr`'s answer |
+
+**The bodies.** `uts.rs`, `clock.rs`, `sysrq.rs`, `sysctl.rs` and
+`memfd_noexec.rs` hold their functions byte-identical to the removed
+lines but for `pub(crate)`/`pub(super)`/private to `pub` on the entry and
+`crate::fs::timerfd` to `ferrix_kernel_load::fs::timerfd` (the landing
+lists the script diff, 3623 (R21)). Three bodies changed shape, each said
+here: `log.rs` is new code around `read_all`, whose `clear` argument went
+(it now returns the next line's number, which `READ_CLEAR` clears to, and
+the clear mark's start when nothing was read, where a clear changes
+nothing); `reboot.rs` is the `RESTART2` arm byte-identical behind the
+three lines of commits and audit record `sys_reboot` made before its
+`match`, called after the privilege check and the magic numbers, so in
+`live` the commits, the record and the printed lines come in today's
+order, and a refused `fixed` call records nothing (3623 (R7));
+`driver_bind.rs` takes `(bus, driver, unbind, data)` where `write` took
+sysfs's private `Dir` and `Attr`, and `sysfs.rs` keeps a five-line `write`
+that matches a driver's `bind` or `unbind` and calls the entry (anything
+else stays `EACCES`). The load files keep one-line shims where a table
+needs a function at compile time (`procfs.rs`'s `sysrq_trigger`,
+`render.rs`'s `set_hostname`, `set_domainname`, and `set_memfd_noexec`,
+which still finds the writer and answers `EPERM` without one).
+
+**The load's side** (product): `setters.rs` 111 lines (49 code); call
+sites in `system.rs` (+25 / -88 with the moves), `time.rs` (+10 / -87),
+`procfs.rs` (+4 / -17), `render.rs` (+14 / -22), `sysfs.rs` (+5 / -21),
+`memfd.rs` (+1 / -33), `kernel_load.rs` (+2). Raised from `pub(crate)` or
+private to `pub` because the crate names them (no body changed): in
+`syscall/system.rs` `NAME_MAX`, `SetName`, `UtsNamespace` with its
+`owner`, `set_hostname` and `set_domainname`, `CLEARED`, `user_buffer`,
+`read_all`; in `syscall/time.rs` `TimeWidth`, `nanos_of`, `read_pair`,
+`set_realtime` (now documented); `syscall/process.rs`'s `Process`,
+`with_credentials`, `nsproxy`, `numbers`; `syscall/credentials.rs`'s
+`Credentials`, `holds`, `require_privilege`; `syscall/nsproxy.rs`'s
+`NsProxy`, its `uts`, `acting`; `syscall/pidns.rs`'s `PidNamespace`,
+`Numbers`, `namespace`, `memfd_noexec_floor`, `set_memfd_noexec`;
+`syscall/userns.rs`'s `UserNamespace`, `CAP_SYS_ADMIN`, `capable_over`;
+`syscall/memfd.rs`'s `SCOPE_NOEXEC_ENFORCED`; `fs/procfs.rs`'s `Kernel`;
+`fs/sysfs.rs`'s `device_named`; `fs/mod.rs`'s `timerfd` module and its
+`clock_was_set`. The item: `main.rs` +52 (the binding, `bind_setters`, the
+assert, the lint attribute) and `build_flags.rs` +8 (one `Flag`); the
+core: `kernel_core.rs` +2 (the flag word's two values). The crate's root
+is 74 lines (45 code).
+
+**What stays in the load, and who still calls it in a `fixed` binary**
+(3623 (R6)): `UtsNamespace::set_hostname` and `set_domainname`, and
+`timerfd::clock_was_set`, have no caller there and are `absent_symbols`
+of the ELF check; the `CLEARED` mark is read by `/dev/kmsg` and written
+by nothing; `pidns::set_memfd_noexec` keeps `fs/memfd_check.rs`'s boot
+check as its caller; `set_realtime` keeps the boot's reading of the
+real-time clock; `devmgr::request` is `devmgr`'s own (item);
+`power::request_boot_mode` and the stm32mp1 TAMP write keep
+`service_check.rs`'s check of a word no board knows.
+
+**The boot checks that call a moved entry** go through
+`setters::bound()`: `syscall/check.rs`'s `clock_settime` and
+`sethostname` checks and `fs/memfd_check.rs`'s `memfd_noexec` write
+(3623 (R8)); `fs/smallns_check.rs`'s programs set a hostname by the
+system call, so through the dispatch. **Statement settings-1** (a load
+statement in LOGGING.md §21.7's form, 3623 (R16)): *every entry of
+`setters::ABSENT` answers `EPERM` without reading an argument*; boot
+sub-case `syscall/check.rs`'s `check_absent_setters_refuse`, which calls
+each field directly in every build and requires `ENTRIES` answers;
+control (j). "A fixed kernel contains no setting entry" is a
+configuration statement the ELF check proves, not a requirement, and no
+`L` id is reserved: ids come only when a fixed profile claims it in the
+Security Target as FMT_MOF/FMT_SMF (3623 (R16)).
+
+**Checked against 3558's list and (8)** (3623 (R9)-(R11)):
+
+* **`adjtimex`, `clock_adjtime`: nothing moved.** They set nothing: every
+  adjustment is refused `EPERM` in every profile (`time.rs` `adjustment`).
+* **cgroupfs: does not move in this landing, and is a residual.**
+  cgroupfs writes set a kernel `Job`'s own `cpu.max`, `memory.max` and
+  `pids.max`, so in a `fixed` build whose kernel cgroupfs is reachable
+  root could change a job's budget at run time. The kernel cannot tell
+  init applying the image's budgets at a unit's start, or a delegated
+  subdivision ((8)), from that without a new mechanism (12). A claimed
+  fixed profile that reaches the kernel's cgroupfs needs a design review
+  of budget sealing first (`docs/backlog/p2.md`).
+* **sysfs `bind`/`unbind`: moved.** `devmgr`'s own matching stays ((8)).
+* **A child UTS or pid namespace's own name or scope moved too**: a
+  sandbox in a `fixed` build keeps its parent's names, and
+  `bwrap --hostname` is refused. That loses nothing a fixed image needs
+  but is a hardening loss for a sandbox that wanted its own name.
+* **How a fixed image's own values reach the kernel** without the entries
+  (its hostname, domainname, `memfd_noexec` scope, wall clock): boot words
+  from the verified image, `set_realtime` at boot or DeviceClock for the
+  time, or linuxd in M5. Owed before a fixed profile is buildable
+  (`docs/backlog/p2.md`; max and fast have `linux_abi=on`).
+* **`/dev/ferrix-crashes` and the crash hold**: `ferrix-kernel-crash`'s
+  (3595 (C2)), not this crate's.
+* **powerctl is still in a `fixed` kernel at this landing** (3623 (R13)),
+  deactivated by `ferrix.powerctl`, which no profile permits
+  (`POWERCTL.md` §5 states the mechanism). Its parts are core
+  (`arch/x86_64/powerctl.rs`, 920 lines, and `arch/mod.rs`'s wrappers) and
+  item (`discovery/powerctl.rs`, 55; `syscall/native.rs`'s `power_call`,
+  30; `main.rs`'s finder). **Step 2**, under its own boundary-move design
+  review before code: the item's `power_call` and the finder go through
+  native fields of `Setters` whose `ABSENT` answers `NOT_SUPPORTED`.
+* **linuxd's matching setters in `max`** are M5's (3558 (5)): noted, not
+  built.
+
+A `fixed` build is link-only (`test-removable`) until a `fixed` profile is
+buildable; its boot owes the boot checks above their `EPERM`
+expectations (`docs/backlog/p2.md`, 3623 (R14)).

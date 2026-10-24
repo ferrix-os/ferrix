@@ -66,7 +66,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // binary links. Any other package naming this script is refused.
     match std::env::var("CARGO_PKG_NAME")?.as_str() {
         "ferrix-kernel" => {}
-        "ferrix-kernel-core" | "ferrix-kernel-item" | "ferrix-kernel-load" => {
+        "ferrix-kernel-core"
+        | "ferrix-kernel-item"
+        | "ferrix-kernel-load"
+        | "ferrix-kernel-settings" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../build.rs");
             return Ok(());

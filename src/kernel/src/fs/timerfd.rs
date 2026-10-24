@@ -575,7 +575,7 @@ fn pass() -> (u64, bool) {
 
 /// `CLOCK_REALTIME` was set: cancel the timers that asked to be, waking their
 /// readers, and have the thread time the real-time deadlines again.
-pub(crate) fn clock_was_set() {
+pub fn clock_was_set() {
     let mut realtime = false;
     for timer in live() {
         if timer.cancel_for_clock_set() {

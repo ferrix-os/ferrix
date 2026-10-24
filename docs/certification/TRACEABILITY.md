@@ -24,7 +24,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Named by a low-level requirement | 2244 |
 | Accessors, covered by the requirement they serve | 1028 |
 | Check code in a product file | 82 |
-| Named by none | 938 |
+| Named by none | 939 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 

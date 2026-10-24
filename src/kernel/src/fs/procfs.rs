@@ -123,7 +123,6 @@ use ferrix_vfs::{
 };
 
 use crate::fs;
-use crate::panic::{catalog, fatal};
 use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::Process;
 use crate::syscall::registry;
@@ -131,7 +130,7 @@ use crate::syscall::{credentials, userns};
 
 /// What an entry's functions are handed at the top level: nothing, because a
 /// top-level file describes the kernel rather than a process.
-pub(crate) type Kernel = ();
+pub type Kernel = ();
 
 /// What a file in `/proc/<pid>/task/<tid>` is handed: the process, and which
 /// of its threads the directory is.
@@ -318,21 +317,9 @@ fn nothing(_: &Kernel) -> Result<Vec<u8>> {
     Ok(Vec::new())
 }
 
-/// `/proc/sysrq-trigger`: writing `c` panics the kernel, on purpose.
-///
-/// The one request of Linux's magic `SysRq` set that is implemented, because it
-/// is the one somebody working on the failure path needs: a way to reach the
-/// report, the backtrace, the screen and its QR code from a shell, without
-/// building a kernel with a fault in it. Linux looks only at the first byte,
-/// and so does this. Any other byte is accepted and does nothing.
-fn sysrq_trigger(_: &Kernel, data: &[u8]) -> Result<usize> {
-    if data.first() == Some(&b'c') {
-        fatal!(
-            catalog::SYSRQ_CRASH,
-            "panic requested through /proc/sysrq-trigger"
-        );
-    }
-    Ok(data.len())
+/// `/proc/sysrq-trigger`'s write, a run-time setting (`crate::setters`).
+fn sysrq_trigger(kernel: &Kernel, data: &[u8]) -> Result<usize> {
+    (crate::setters::bound().sysrq_trigger)(kernel, data)
 }
 
 /// A directory of `/proc` whose files only report, so a write to one is

@@ -62,7 +62,7 @@ const FIELD: usize = 65;
 
 /// The longest name `sethostname` accepts: `__NEW_UTS_LEN`, a field less its
 /// terminator.
-pub(crate) const NAME_MAX: usize = FIELD - 1;
+pub const NAME_MAX: usize = FIELD - 1;
 
 /// The system's name, `uname -s`; see the module documentation for why.
 pub(crate) const SYSNAME: &str = "Ferrix";
@@ -80,7 +80,7 @@ pub(crate) const VERSION: &str = "#1 Ferrix 0.1.0";
 
 /// A name set by `sethostname` or `setdomainname`: its bytes, NUL-padded, and
 /// how many of them were given.
-type SetName = ([u8; NAME_MAX], usize);
+pub type SetName = ([u8; NAME_MAX], usize);
 
 /// The host name before anything sets one.
 const HOSTNAME_DEFAULT: &str = "ferrix";
@@ -101,7 +101,7 @@ struct Names {
 
 /// A UTS namespace: a host name and a domain name (`docs/NAMESPACES.md` §12).
 #[derive(Debug)]
-pub(crate) struct UtsNamespace {
+pub struct UtsNamespace {
     /// What `/proc/<pid>/ns/uts` names.
     id: u64,
     /// The user namespace that was current when it was made: a holder of
@@ -160,7 +160,7 @@ impl UtsNamespace {
     }
 
     /// The user namespace that owns it.
-    pub(crate) fn owner(&self) -> &Arc<UserNamespace> {
+    pub fn owner(&self) -> &Arc<UserNamespace> {
         &self.owner
     }
 
@@ -197,7 +197,7 @@ impl UtsNamespace {
     /// # Errors
     ///
     /// `EINVAL` for a name past [`NAME_MAX`].
-    pub(crate) fn set_hostname(&self, name: &[u8]) -> Result<(), Errno> {
+    pub fn set_hostname(&self, name: &[u8]) -> Result<(), Errno> {
         let name = name_of(name)?;
         self.names.lock().node = Some(name);
         Ok(())
@@ -208,7 +208,7 @@ impl UtsNamespace {
     /// # Errors
     ///
     /// `EINVAL` for a name past [`NAME_MAX`].
-    pub(crate) fn set_domainname(&self, name: &[u8]) -> Result<(), Errno> {
+    pub fn set_domainname(&self, name: &[u8]) -> Result<(), Errno> {
         let name = name_of(name)?;
         self.names.lock().domain = Some(name);
         Ok(())
@@ -245,8 +245,8 @@ pub(crate) fn dispatch(
     process: &Process,
 ) -> Option<Result<usize, Errno>> {
     let answer = match call {
-        Syscall::Sethostname => sys_sethostname(process, a[0], int(a[1])),
-        Syscall::Setdomainname => sys_setdomainname(process, a[0], int(a[1])),
+        Syscall::Sethostname => (crate::setters::bound().sethostname)(process, a[0], int(a[1])),
+        Syscall::Setdomainname => (crate::setters::bound().setdomainname)(process, a[0], int(a[1])),
         Syscall::Getcpu => sys_getcpu(process, a[0], a[1]),
         Syscall::Syslog => sys_syslog(process, int(a[0]), a[1], int(a[2])),
         Syscall::Reboot => sys_reboot(process, a[0] as u32, a[1] as u32, a[2] as u32, a[3]),
@@ -284,49 +284,6 @@ pub(crate) fn sys_uname(process: &Process, at: u64) -> Result<usize, Errno> {
         }
     }
     uaccess::copy_to_user(process.space(), at, &buffer).map_err(|_| Errno::EFAULT)?;
-    Ok(0)
-}
-
-/// Read a name for `sethostname` or `setdomainname`.
-///
-/// `len` bytes exactly, NULs included, as `kernel/sys.c` copies them: the
-/// length is the caller's statement of what the name is.
-fn read_name(process: &Process, at: u64, len: i32) -> Result<SetName, Errno> {
-    let len = usize::try_from(len)
-        .ok()
-        .filter(|&len| len <= NAME_MAX)
-        .ok_or(Errno::EINVAL)?;
-    let mut bytes = [0_u8; NAME_MAX];
-    let name = bytes.get_mut(..len).ok_or(Errno::EINVAL)?;
-    uaccess::copy_from_user(process.space(), at, name).map_err(|_| Errno::EFAULT)?;
-    Ok((bytes, len))
-}
-
-/// The UTS namespace `process` is in, if it holds `CAP_SYS_ADMIN` over the
-/// user namespace that owns it: Linux's `ns_capable(uts_ns->user_ns,
-/// CAP_SYS_ADMIN)`. Root in the first namespace does; fake root does for the
-/// namespace it made and never for the first's.
-fn nameable(process: &Process) -> Result<Arc<UtsNamespace>, Errno> {
-    let uts = process.nsproxy().uts;
-    let allowed = process
-        .with_credentials(|held| userns::capable_over(held, uts.owner(), userns::CAP_SYS_ADMIN));
-    if allowed { Ok(uts) } else { Err(Errno::EPERM) }
-}
-
-/// `sethostname`: `CAP_SYS_ADMIN` over the namespace's owner, and at most 64
-/// bytes, or `EINVAL`.
-pub(crate) fn sys_sethostname(process: &Process, at: u64, len: i32) -> Result<usize, Errno> {
-    let uts = nameable(process)?;
-    let (bytes, len) = read_name(process, at, len)?;
-    uts.set_hostname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
-    Ok(0)
-}
-
-/// `setdomainname`: as `sethostname`, for the other field.
-pub(crate) fn sys_setdomainname(process: &Process, at: u64, len: i32) -> Result<usize, Errno> {
-    let uts = nameable(process)?;
-    let (bytes, len) = read_name(process, at, len)?;
-    uts.set_domainname(bytes.get(..len).ok_or(Errno::EINVAL)?)?;
     Ok(0)
 }
 
@@ -501,7 +458,7 @@ static READER: SpinLock<ReaderAt> = SpinLock::new(ReaderAt { seq: 0, partial: 0 
 
 /// The first line `SYSLOG_ACTION_CLEAR` left: `READ_ALL` and `/dev/kmsg`'s
 /// `SEEK_DATA` read nothing before it. Linux's `clear_seq`.
-static CLEARED: AtomicU64 = AtomicU64::new(0);
+pub static CLEARED: AtomicU64 = AtomicU64::new(0);
 
 /// The first line the last `SYSLOG_ACTION_CLEAR` left.
 pub(crate) fn cleared() -> u64 {
@@ -553,19 +510,18 @@ pub(crate) fn sys_syslog(
     match action {
         // Close, open, console off, console on.
         0 | 1 | 6 | 7 => Ok(0),
-        2..=4 => {
+        2 | 3 => {
             let Some(len) = user_buffer(buf, len)? else {
                 return Ok(0);
             };
             match action {
                 2 => read_waiting(process, buf, len),
-                _ => read_all(process, buf, len, action == 4),
+                _ => read_all(process, buf, len).map(|(done, _)| done),
             }
         }
-        5 => {
-            let _ = CLEARED.fetch_max(log::lines_begun(), Ordering::Relaxed);
-            Ok(0)
-        }
+        // The clears are run-time settings (`crate::setters`).
+        4 => (crate::setters::bound().syslog_read_clear)(process, buf, len),
+        5 => (crate::setters::bound().syslog_clear)(process),
         // Console level.
         8 if (1..=8).contains(&len) => Ok(0),
         9 => size_unread(),
@@ -576,7 +532,7 @@ pub(crate) fn sys_syslog(
 
 /// A read's buffer, checked as Linux checks it: `None` for a length of zero,
 /// which reads nothing.
-fn user_buffer(buf: u64, len: i32) -> Result<Option<usize>, Errno> {
+pub fn user_buffer(buf: u64, len: i32) -> Result<Option<usize>, Errno> {
     if buf == 0 || len < 0 {
         return Err(Errno::EINVAL);
     }
@@ -686,10 +642,10 @@ fn size_unread() -> Result<usize, Errno> {
     Ok(total)
 }
 
-/// `SYSLOG_ACTION_READ_ALL`, and with `clear` `READ_CLEAR`: the newest whole
+/// `SYSLOG_ACTION_READ_ALL`, and `READ_CLEAR`'s read: the newest whole
 /// lines kept since the last clear that fit in `len`, oldest first, as Linux's
 /// `syslog_print_all` finds them.
-fn read_all(process: &Process, buf: u64, len: usize, clear: bool) -> Result<usize, Errno> {
+pub fn read_all(process: &Process, buf: u64, len: usize) -> Result<(usize, u64), Errno> {
     let mut text = line_buffer()?;
     let from = CLEARED.load(Ordering::Relaxed);
     // How much every line from the clear on takes, then the first whose
@@ -704,7 +660,7 @@ fn read_all(process: &Process, buf: u64, len: usize, clear: bool) -> Result<usiz
         seq = line.seq.wrapping_add(1);
     }
     let Some(first) = first else {
-        return Ok(0);
+        return Ok((0, from));
     };
     // Lines the log dropped between the clear and the first it still keeps,
     // a chatty writer's doing, and the oldest the buffer has no room for:
@@ -759,10 +715,7 @@ fn read_all(process: &Process, buf: u64, len: usize, clear: bool) -> Result<usiz
         done += formatted;
         seq = line.seq.wrapping_add(1);
     }
-    if clear {
-        let _ = CLEARED.fetch_max(seq, Ordering::Relaxed);
-    }
-    Ok(done)
+    Ok((done, seq))
 }
 
 /// Park `SYSLOG_ACTION_READ`'s reader past the end of the log, so that a read
@@ -840,10 +793,12 @@ pub(crate) fn sys_reboot(
     if magic1 != REBOOT_MAGIC1 || !REBOOT_MAGIC2.contains(&magic2) {
         return Err(Errno::EINVAL);
     }
-    if matches!(
-        cmd,
-        command::POWER_OFF | command::HALT | command::RESTART | command::RESTART2
-    ) {
+    // A restart with a word for the firmware is a run-time setting
+    // (`crate::setters`): it makes the commits and the record below itself.
+    if cmd == command::RESTART2 {
+        return (crate::setters::bound().restart_with_word)(process, arg);
+    }
+    if matches!(cmd, command::POWER_OFF | command::HALT | command::RESTART) {
         crate::power::sync_disks();
         let action = match cmd {
             command::POWER_OFF => ferrix_audit::power::OFF,
@@ -870,24 +825,6 @@ pub(crate) fn sys_reboot(
         }
         command::RESTART => {
             println!("reboot: Restarting system");
-            let _ = crate::console::pstore::stop(Stop::Restart);
-            arch::reset()
-        }
-        command::RESTART2 => {
-            // Linux copies at most 255 bytes into a 256-byte buffer and cuts
-            // a longer word off there; a word with no NUL in that reach is
-            // EFAULT here instead, which no caller that means it will meet.
-            let mut word = Vec::new();
-            uaccess::copy_cstr_from_user(process.space(), arg, 255, &mut word)
-                .map_err(|_| Errno::EFAULT)?;
-            let word = core::str::from_utf8(&word).unwrap_or("");
-            println!("reboot: Restarting system with command '{word}'");
-            // Where the firmware reads a word, on the one machine that has
-            // one: a DK board's U-Boot, whose support registers with power.
-            match crate::power::request_boot_mode(word) {
-                Ok(what) => println!("reboot: {what}"),
-                Err(why) => println!("reboot: '{word}' changes nothing: {why}"),
-            }
             let _ = crate::console::pstore::stop(Stop::Restart);
             arch::reset()
         }

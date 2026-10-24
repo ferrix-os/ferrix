@@ -658,6 +658,111 @@ fn busybox_owns(
         || ports.iter().any(|file| file.path == path))
 }
 
+/// The bytes of the regular file `name` in the newc archive `archive`, by
+/// its headers alone: what the image carries, read back from the archive the
+/// image was given.
+pub(crate) fn entry_of<'a>(archive: &'a [u8], name: &str) -> Option<&'a [u8]> {
+    let field = |header: &[u8], index: usize| -> Option<usize> {
+        let text = core::str::from_utf8(header.get(6 + 8 * index..14 + 8 * index)?).ok()?;
+        usize::from_str_radix(text, 16).ok()
+    };
+    let pad = |at: usize| at.div_ceil(4) * 4;
+    let mut at = 0;
+    while let Some(header) = archive.get(at..at + 110) {
+        if header.get(..6) != Some(MAGIC) {
+            return None;
+        }
+        let (size, name_size) = (field(header, 6)?, field(header, 11)?);
+        let entry = archive.get(at + 110..at + 110 + name_size.checked_sub(1)?)?;
+        let data = pad(at + 110 + name_size);
+        if entry == b"TRAILER!!!" {
+            return None;
+        }
+        if entry == name.as_bytes() {
+            return archive.get(data..data + size);
+        }
+        at = pad(data + size);
+    }
+    None
+}
+
+/// Keep the image manifest `initramfs` carries as `build/<arch>/image-manifest`,
+/// for `check-boot-line.py` to compare with the profile (docs/BUILD-FLAGS.md
+/// §5.1; ledger 3623 (R19)). An archive without one leaves no file, which
+/// the comparison refuses.
+///
+/// # Errors
+///
+/// When the file cannot be written or removed.
+pub(crate) fn keep_image_manifest(arch: crate::paths::Arch, initramfs: &[u8]) -> Result<()> {
+    let kept = crate::paths::build_dir(arch).join("image-manifest");
+    match entry_of(initramfs, crate::flags::IMAGE_MANIFEST) {
+        Some(bytes) => std::fs::write(&kept, bytes)?,
+        None if kept.exists() => std::fs::remove_file(&kept)?,
+        None => {}
+    }
+    Ok(())
+}
+
+/// What the image says of itself, into `archive`: its host name, and its
+/// manifest for ring 3 (docs/BUILD-FLAGS.md §5.1), after refusing the
+/// settings writer in an image whose profile does not carry it (§3.1).
+///
+/// # Errors
+///
+/// As [`crate::flags::this_image`], [`refuse_settings_writer`] and the
+/// archive.
+fn add_identity(
+    archive: &mut Newc,
+    natives: &[native::Built],
+    ports: &[ports::File],
+) -> Result<()> {
+    archive.file("etc/hostname", 0o644, b"ferrix\n")?;
+    let (manifest, writer) = crate::flags::this_image()?;
+    refuse_settings_writer(natives, ports, &writer)?;
+    archive.file(crate::flags::IMAGE_MANIFEST, 0o644, manifest.as_bytes())
+}
+
+/// The programs and files of the settings writer (docs/SETTINGS-WRITER.md;
+/// docs/BUILD-FLAGS.md §3.1, `settings_writer`): settingsd and settingsctl
+/// by name wherever they are installed, and the `settings.*` authd policies.
+const SETTINGS_WRITER_PROGRAMS: [&str; 2] = ["settingsd", "settingsctl"];
+/// Where authd's policies are, of which the writer's are `settings.*`.
+const SETTINGS_POLICIES: &str = "etc/ferrix/auth/services/settings.";
+
+/// Refuse an image whose profile has `settings_writer = "absent"` and that
+/// carries any part of the writer (ledger 3558 (13), 3623 (R18)), as
+/// `drvupdated` is refused outside its test.
+///
+/// # Errors
+///
+/// When `writer` is `absent` and a native program or an installed file is
+/// one of them.
+fn refuse_settings_writer(
+    natives: &[native::Built],
+    ports: &[ports::File],
+    writer: &str,
+) -> Result<()> {
+    if writer != "absent" {
+        return Ok(());
+    }
+    let carried = natives
+        .iter()
+        .map(|built| built.name)
+        .chain(ports.iter().map(|file| file.path.as_str()))
+        .find(|path| {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            SETTINGS_WRITER_PROGRAMS.contains(&name) || path.starts_with(SETTINGS_POLICIES)
+        });
+    match carried {
+        Some(path) => Err(Error::new(format!(
+            "this image's profile has settings_writer = \"absent\", and it carries {path}, which is \
+             the settings writer's (docs/BUILD-FLAGS.md 3.1; the consultant's ledger 3558 (13))"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// [`build`], with the program's bytes rather than its path and no zinc.
 #[cfg(test)]
 fn build_with(program: Option<&[u8]>, natives: &[native::Built]) -> Result<Vec<u8>> {
@@ -689,7 +794,7 @@ fn build_with_shell(
     ] {
         archive.directory(name, permissions)?;
     }
-    archive.file("etc/hostname", 0o644, b"ferrix\n")?;
+    add_identity(&mut archive, natives, ports)?;
     let link = format!("{MARKER_PATH}.link");
     archive.hard_linked(&[MARKER_PATH, &link], 0o644, MARKER)?;
     archive.symlink(&format!("{MARKER_PATH}.symlink"), "initramfs")?;
@@ -870,6 +975,40 @@ mod tests {
         over.push(driver("y"));
         let refused = build_with(None, &over).expect_err("one more is refused");
         assert!(refused.to_string().contains("FX-1006"));
+    }
+
+    /// The settings writer goes only into an image whose profile has
+    /// `settings_writer = "present"` (ledger 3558 (13), 3623 (R18)): with
+    /// `absent`, settingsd, settingsctl and a `settings.*` authd policy are
+    /// each refused, and an image without them is not.
+    #[test]
+    fn an_absent_settings_writer_image_refuses_the_writer() {
+        let native = |name| native::Built {
+            name,
+            directory: "sbin",
+            bytes: b"\x7fELF".to_vec(),
+        };
+        let policy = ports::File {
+            path: "etc/ferrix/auth/services/settings.hostname".to_owned(),
+            mode: 0o644,
+            content: ports::Content::Bytes(b"Callers=root\n".to_vec()),
+        };
+        for natives in [[native("settingsd")], [native("settingsctl")]] {
+            let refused = refuse_settings_writer(&natives, &[], "absent").expect_err("refused");
+            assert!(refused.to_string().contains("the settings writer's"));
+        }
+        assert!(refuse_settings_writer(&[], std::slice::from_ref(&policy), "absent").is_err());
+        assert!(refuse_settings_writer(&[native("settingsd")], &[policy], "present").is_ok());
+        assert!(refuse_settings_writer(&[native("devmgr")], &[], "absent").is_ok());
+    }
+
+    /// An archive's manifest is read back from its own headers.
+    #[test]
+    fn the_image_manifest_is_read_back_from_the_archive() {
+        let archive = build_with(None, &[]).expect("an archive");
+        let manifest = entry_of(&archive, crate::flags::IMAGE_MANIFEST).expect("a manifest");
+        assert!(manifest.starts_with(b"format=1\nprofile="));
+        assert_eq!(entry_of(&archive, "etc/ferrix/no-such-file"), None);
     }
 
     /// `drvupdated` goes into `test-restart --update`'s images alone (the

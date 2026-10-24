@@ -70,7 +70,7 @@ use ferrix_vfs::{
 use ferrix_smbios::{Field, Smbios};
 
 use crate::device::{self, Location};
-use crate::discovery::devmgr::{self, Bus, Request};
+use crate::discovery::devmgr::{self, Bus};
 use crate::discovery::smbios;
 use crate::fs::devfs::{self, DiskInfo};
 use crate::fs::{self, procfs};
@@ -694,7 +694,7 @@ fn bus_of(index: usize) -> Option<Bus> {
 }
 
 /// The device node on `bus` called `wanted`.
-fn device_named(bus: Bus, wanted: &[u8]) -> Option<usize> {
+pub fn device_named(bus: Bus, wanted: &[u8]) -> Option<usize> {
     (0..device::devices().len())
         .find(|&index| bus_of(index) == Some(bus) && device_name(index).as_deref() == Some(wanted))
 }
@@ -1906,28 +1906,12 @@ fn render_input(out: &mut Vec<u8>, index: u32, attr: Attr) -> Result<()> {
 }
 
 /// A write of `data` to file `attr` of `dir`: only a driver's `bind` and
-/// `unbind` take one, and each is a request to `devmgr`.
-///
-/// What Linux checks before it asks a driver is checked here: the name must
-/// be a device on the driver's bus (`ENODEV`), and an unbind must be of this
-/// driver's device (`ENODEV`). Everything else is `devmgr`'s to answer.
+/// `unbind` take one, each a run-time setting (`crate::setters`).
 fn write(dir: Dir, attr: Attr, data: &[u8]) -> Result<usize> {
-    let Dir::Driver(bus, driver) = dir else {
+    let (Dir::Driver(bus, driver), Attr::Bind | Attr::Unbind) = (dir, attr) else {
         return Err(Errno::EACCES);
     };
-    let named = name::written(data).ok_or(Errno::ENODEV)?;
-    let device = device_named(bus, named).ok_or(Errno::ENODEV)?;
-    match attr {
-        Attr::Bind => devmgr::request(Request::Bind, device, driver)?,
-        Attr::Unbind => {
-            if devmgr::driver_of(device).map(|(at, _)| at) != Some(driver) {
-                return Err(Errno::ENODEV);
-            }
-            devmgr::request(Request::Unbind, device, driver)?;
-        }
-        _ => return Err(Errno::EACCES),
-    }
-    Ok(data.len())
+    (crate::setters::bound().driver_bind)(bus, driver, attr == Attr::Unbind, data)
 }
 
 // -- The inode -----------------------------------------------------------------

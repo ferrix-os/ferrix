@@ -103,6 +103,7 @@ members = [
     "src/kernel/core",
     "src/kernel/item",
     "src/kernel/load",
+    "src/kernel/settings",
 
     # Native user-space programs, built for the kernel's own targets and put
     # in the initramfs. Like the kernel they cannot be built or tested for the
@@ -223,6 +224,7 @@ ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-kernel-core = { path = "src/kernel/core" }
 ferrix-kernel-item = { path = "src/kernel/item" }
 ferrix-kernel-load = { path = "src/kernel/load" }
+ferrix-kernel-settings = { path = "src/kernel/settings" }
 ferrix-ustack = { path = "src/lib/kernel/ustack" }
 ferrix-vdso = { path = "src/lib/kernel/vdso" }
 ferrix-virtio = { path = "src/lib/drivers/virtio" }

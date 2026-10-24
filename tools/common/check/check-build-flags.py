@@ -358,6 +358,67 @@ def flag_word_problems(source: str, flag_file: dict, profiles: list[str]) -> lis
     return problems
 
 
+
+# Rule 6e (docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623 (R3)): a
+# removable crate's flag selects code in the composition root alone. Besides
+# main.rs, only the flag lists that name every declared value by rule 6 may
+# name it: build_flags.rs's table and kernel_core.rs's flag word.
+MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
+COMPOSITION_ROOT = "src/kernel/src/main.rs"
+
+
+def removable_flags() -> set[str]:
+    import json
+    with MANIFEST.open(encoding="utf-8") as handle:
+        removable = json.load(handle).get("composition_root", {}).get("removable", {})
+    return {entry["flag"] for name, entry in removable.items() if not name.startswith("//") and "flag" in entry}
+
+
+def composition_root_problems(rust_files: list[tuple[str, str]], flags: set[str]) -> list[str]:
+    """Rule 6e over (path, source) pairs."""
+    names = {f"ferrix_{flag}" for flag in flags}
+    allowed = {COMPOSITION_ROOT, KERNEL_TABLE, KERNEL_WORD}
+    problems = []
+    for rel, source in rust_files:
+        if not rel.startswith(KERNEL) or rel in allowed:
+            continue
+        for line, name in cfg_names(source):
+            if name in names:
+                problems.append(f"{rel}:{line}: names `{name}`, a removable crate's flag; only the composition "
+                                f"root ({COMPOSITION_ROOT}) selects code by it")
+    return problems
+
+
+def image_key_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
+    """Each profile's `image` table against the flag file's `image_keys`
+    (ledger 3623 (R17)): every key set, each value declared and allowed at
+    the profile's level, and what a value requires among the profile's flags."""
+    keys = flag_file.get("image_keys", {})
+    problems = []
+    for name, profile in sorted(profiles.items()):
+        image = profile.get("image", {})
+        level = profile.get("level")
+        flags = profile.get("flags", {})
+        for key in sorted(set(keys) - set(image)):
+            problems.append(f"profiles/{name}.toml: image key {key} is not set (rule 4)")
+        for key, value in sorted(image.items()):
+            declared = keys.get(key, {}).get("values", {})
+            if key not in keys:
+                problems.append(f"profiles/{name}.toml: image key {key} is not declared in build-flags.toml")
+                continue
+            if value not in declared:
+                problems.append(f"profiles/{name}.toml: image {key}={value} is not a declared value")
+                continue
+            if level not in declared[value].get("allows", []):
+                problems.append(f"profiles/{name}.toml: image {key}={value} does not allow level {level}")
+            for need in declared[value].get("requires", []):
+                flag, _, wanted = need.partition("=")
+                if flags.get(flag) != wanted:
+                    problems.append(f"profiles/{name}.toml: image {key}={value} requires {need}, "
+                                    f"the profile has {flag}={flags.get(flag)}")
+    return problems
+
+
 def rust_files() -> list[tuple[str, str]]:
     files = []
     for top in ("src", "tools"):
@@ -434,6 +495,27 @@ def self_test() -> list[str]:
     ]:
         if not flag_word_problems(broken, word_file, ["none"]):
             failures.append(f"the flag word check passed {what}")
+    rooted = [
+        ("src/kernel/src/main.rs", '#[cfg(ferrix_runtime_settings = "live")]\nconst A: u8 = 0;\n'),
+        ("src/kernel/src/build_flags.rs", 'const B: bool = cfg!(ferrix_runtime_settings = "live");\n'),
+        ("src/kernel/src/fs/x.rs", '#[cfg(ferrix_runtime_settings = "live")]\nfn x() {}\n'),
+        ("src/kernel/src/fs/y.rs", '#[cfg(ferrix_linux_abi = "on")]\nfn y() {}\n'),
+    ]
+    found = composition_root_problems(rooted, {"runtime_settings"})
+    if len(found) != 1 or "fs/x.rs" not in found[0]:
+        failures.append(f"rule 6e missed a removable flag's cfg outside the root, or refused the root or another flag: {found}")
+    keys = {"image_keys": {"w": {"values": {"absent": {"allows": ["sc4", "none"]},
+                                            "present": {"allows": ["none"], "requires": ["rs=live"]}}}}}
+    good = {"p": {"level": "none", "flags": {"rs": "live"}, "image": {"w": "present"}}}
+    if image_key_problems(keys, good):
+        failures.append(f"an image key that keeps the rule was refused: {image_key_problems(keys, good)}")
+    for what, profile, expect in [
+        ("present without its required flag", {"level": "none", "flags": {"rs": "fixed"}, "image": {"w": "present"}}, "requires"),
+        ("present at a level it does not allow", {"level": "sc4", "flags": {"rs": "live"}, "image": {"w": "present"}}, "does not allow"),
+        ("an unset key", {"level": "none", "flags": {}, "image": {}}, "is not set"),
+    ]:
+        if not any(expect in p for p in image_key_problems(keys, {"p": profile})):
+            failures.append(f"the image-key rule passed {what}")
     return failures
 
 
@@ -469,6 +551,22 @@ def main() -> int:
     if table:
         print("build-flags: the kernel's flag table does not follow the flag file:", file=sys.stderr)
         for problem in table:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+    rooted = composition_root_problems(files, removable_flags())
+    if rooted:
+        print("build-flags: a removable crate's flag read outside the composition root (rule 6e):", file=sys.stderr)
+        for problem in rooted:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+    profile_files = {}
+    for path in sorted((ROOT / "tools/common/data/profiles").glob("*.toml")):
+        with path.open("rb") as handle:
+            profile_files[path.stem] = tomllib.load(handle)
+    images = image_key_problems(flag_file, profile_files)
+    if images:
+        print("build-flags: the profiles' image keys do not follow the flag file:", file=sys.stderr)
+        for problem in images:
             print(f"    {problem}", file=sys.stderr)
         status = 1
     registry = flag_file.get("boot_options", {})

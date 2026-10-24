@@ -107,6 +107,7 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `ssbd` | `always`, `on_request` | Speculative Store Bypass Disable for every program (today), or per thread for programs that ask (§3.1) | `always` | `always` | `on_request` | `always` | `always`: all; `on_request`: `none` | `always` | M0 |
 | `smt` | `off`, `stibp` | `off`: the kernel runs one hardware thread per core (§3.1); `stibp`: sibling threads run, with STIBP or eIBRS/AutoIBRS's own cover | `off` | `stibp` | `stibp` | `stibp` | `off`: all; `stibp`: `sc2`, `present`, `none` | `stibp` (SMT runs today; AoU-11 asks the integrator to disable it only on MDS-affected parts) | M0 |
 | `runtime_trades` | `none`, `game_mode` | whether the image contains game mode's privileged, per-application run-time trades (§3.1); with `none` their code is absent | `none` | `none` | `game_mode` | `none` | `none`: all; `game_mode`: `none` | not built | with game mode's design |
+| `runtime_settings` | `fixed`, `live` | whether the kernel contains the entries by which a program changes a system setting at run time (`KERNEL-CRATES.md` §6.2: `sethostname`, `setdomainname`, `/proc/sys` writes, `clock_settime`, `settimeofday`, `syslog`'s clears, `/proc/sysrq-trigger`, sysfs `bind`/`unbind`, `reboot(RESTART2)`). `fixed`: the removable crate `ferrix-kernel-settings` is not linked and each entry answers `EPERM` at its dispatch, before any argument check; `live`: it is, and they act as today. **Not removed by `fixed` today**: powerctl (still in the kernel, deactivated by `ferrix.powerctl`, which no profile permits; step 2 moves it, with native entries answering `NOT_SUPPORTED`), and cgroupfs's budget writes (a residual: a claimed fixed profile reaching the kernel's cgroupfs needs a budget-sealing design review first). A `fixed` kernel is link-only until a fixed profile builds. With `personality=user` the Linux entries are linuxd's, which binds its own the same way (M5). Ledger 3558 (5), (9)-(11), 3623 | `fixed` | `fixed` | `live` | `live` | `fixed`: all; `live`: `present`, `none` | `live` (today's tree) | this landing |
 | `linux_abi` | `on`, `off` | whether the kernel offers the Linux ABI beside the native one (`LINUX-ABI-SEPARATION.md` §11.6-11.8); its levels are its placement's, `personality`. `off` compiles the Linux layer (`syscall`'s personality modules, `fs`, `net`, `interfaces`), `stages_check` and the check modules that run a Linux program out; it is build-only and boots nothing useful until that document's §7 rows land (§11.11), and `xtask check` builds it on every architecture | `on` | `on` | `on` | `on` | `on`: all, its level carried by `personality`; `off`: `none`, until a profile carries it with its own evidence, the board glue then classified or cut (ledger 3257 (1), 3208 (6)(g)) | `on` | §11.11 (build-only) |
 
 ### 3.1 The speculation flags' mechanisms (ledger 931)
@@ -174,6 +175,17 @@ Not flags, and why:
   drvupdated's D3 buildable without changing that value. It proposes two
   more image keys, `slot_signing` and `rollback`, each to come here with its
   own review. Nothing in this document changes until then.
+* **`settings_writer`** (`absent` | `present`; ledger 3558 (6), (13), 3595
+  (C3)) is image content beside it: whether the image carries `settingsd`,
+  `settingsctl`, the `settings.*` authd policies and lode reload's writer
+  (`SETTINGS-WRITER.md`). `absent` in `max` and `fast` (not read-only, not
+  refusing: absent, (13)), `present` in `present` and `desktop`. A profile
+  with `present` requires `runtime_settings=live`, and xtask refuses an
+  image with `absent` that carries any of those programs, as it refuses
+  `drvupdated` (`native::refuse_updater`); lode reload's writer is part of `lode` today, which xtask cannot refuse by name, so it becomes a program of its own (or a lode build value) before an `absent` image is built (`docs/backlog/p2.md`, 3623 (R18)). `check-build-flags.py` refuses `present` without `runtime_settings=live` and any key a profile leaves unset (3623 (R17)). `lode-crashd` is not in it; it
+  is `crash_collector`'s (3595 (C3)). Each value allows: `absent` all,
+  `present` `present` and `none`. `config_updates` (3564 (S11)) is a later
+  key of the same kind, not built.
 * **Criticality levels** (K17) are set per job at run time by the partition
   manager, not per build.
 * **Game mode** (the customer, 2026-10-11) is a privileged run-time trade on
@@ -343,6 +355,39 @@ build profile=fast level=sc2 personality=user fs=server mitigations=on partition
 The kernel computes every word of it from `cfg!` (rule 6). An ad-hoc build
 prints `profile=none level=none`.
 
+### 5.1 The image manifest
+
+Every image carries `/etc/ferrix/image-manifest`, written by xtask from the
+resolved build (the same `Resolved` that sets the kernel's cfgs) and the
+profile's `image` table, mode 0644, root's. It is what a ring-3 program
+reads to know what the image is, without the privilege `/dev/kmsg` needs
+(the Settings app, 3558 (14): "fixed by this build (profile max)").
+Lines of `key=value`, one per line, in this order, nothing else:
+
+```
+format=1
+profile=present
+level=present
+claim=yes
+runtime_settings=live
+driver_updates=absent
+settings_writer=present
+```
+
+`profile` and `level` are the build line's (`none` for an ad-hoc build,
+whose `claim` is `no`); then every flag the Settings app shows a page for
+(`runtime_settings` now, `crash_capture` with its crate), then every image
+key in the profile file's order. A reader ignores a key it does not know and treats a missing file or
+a `format` it does not know as "unknown", shown read-only, never as `live` (3623 (R19)). The file is a
+statement for ring 3, not evidence: the kernel's build line (rule 6) is
+what the gate compares and the audit record keeps, and `check-boot-line.py`
+also compares the manifest an image carries with the profile on every
+gated boot, so the two cannot disagree in a gated image: xtask reads the
+entry back out of the initramfs the image was given
+(`initramfs::keep_image_manifest`, into `build/<arch>/image-manifest`) and
+hands it to the check (`--manifest`). The Settings backend's reader is ring 3
+and reads only this file; the format changes only with `format`'s number.
+
 ## 6. What M0 builds
 
 Until M3 to M6 build the second values, most flags have one value only. M0
@@ -510,4 +555,16 @@ Design on branch `microkernel-plan`, 2026-10-13.
   `build_flag_word!` names every declared value, `check-build-flags.py`
   holds it to the flag file, each crate expands it into a word of its own,
   and the binary const-asserts the four words equal (K4).
+* **`runtime_settings`, `settings_writer` and the removable crate
+  (2026-10-24, branch `feature/settings-crate`)**: the consultant's rulings
+  3558 (5)-(14), amended by 3595 (the crash hold and `lode-crashd` leave
+  them for `crash_capture`/`crash_collector`); 3564's `config_updates` not
+  built. The flag's row (§3), the image key and its manifest (§3.1, §5.1),
+  and the crate (`KERNEL-CRATES.md` §6). Design review before code: **OK IF
+  (R1)-(R21), ledger line 3623**, each condition answered in
+  `KERNEL-CRATES.md` §6 and the landing message. Built: the flag (last in
+  the flag file's order, so `audit_words` packs 15 flags in bits 0 to 29
+  and the earlier flags keep their bits), every profile setting it and
+  both image keys, the image manifest, xtask's writer refusal,
+  `cargo xtask test-removable`, and the checks of §6.1.
 

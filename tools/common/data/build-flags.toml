@@ -162,6 +162,27 @@ why = "whether the kernel offers the Linux ABI beside its native ABI (LINUX-ABI-
 values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.off = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
+[flags.runtime_settings]
+why = "whether the kernel contains the entries by which a program changes a system setting at run time (KERNEL-CRATES.md §6.2): `fixed` leaves the removable crate ferrix-kernel-settings out of the binary and each entry answers EPERM at its dispatch; `live` links it (ledger 3558 (5), (9)-(11); 3623)"
+values.fixed = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.live = { allows = ["present", "none"], lands = "today", built = "yes" }
+
+# ---------------------------------------------------------------------------
+# The image keys: image content, not kernel code, which every profile names in
+# its `image` table (BUILD-FLAGS.md §3.1, "Not flags"). Each value allows
+# levels as a flag's does, and may require flag values of the build.
+# check-build-flags.py holds every profile to them (ledger 3623 (R17)).
+
+[image_keys.driver_updates]
+why = "whether the image carries drvupdated (DEVMGR.md §4.1)"
+values.absent = { allows = ["sc4", "present", "sc2", "none"] }
+values.test = { allows = ["none"] }
+
+[image_keys.settings_writer]
+why = "whether the image carries settingsd, settingsctl, the settings.* authd policies and lode reload's writer (SETTINGS-WRITER.md; ledger 3558 (6), (13), 3595 (C3))"
+values.absent = { allows = ["sc4", "present", "sc2", "none"] }
+values.present = { allows = ["present", "none"], requires = ["runtime_settings=live"] }
+
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any
 # option not declared here fails the gate (check-item-boundary.py, with a

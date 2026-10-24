@@ -9,7 +9,7 @@ level = "present"
 claim = "EAL5+, DO-178C DAL C, IEC 62304 Class C, EN 50716 SIL 2 (ledger 869), until M5's flip"
 claim_architectures = ["x86_64", "aarch64", "armv7a"]
 buildable_from = "today"
-image = { driver_updates = "absent" }
+image = { driver_updates = "absent", settings_writer = "present" }
 
 # Below-level values this profile uses by a dated exception (BF1, ledger
 # 914): today's item keeps its claim with the Linux layer and btrfs in ring 0
@@ -35,6 +35,7 @@ ssbd = "always"
 smt = "stibp"
 runtime_trades = "none"
 linux_abi = "on"
+runtime_settings = "live"
 
 # The boot options this configuration permits, by value (BF4). `*` is any one
 # word; a flag option is permitted as `true`. Anything not named is outside

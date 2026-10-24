@@ -8,7 +8,7 @@ level = "none"
 claim = "none"
 claim_architectures = []
 buildable_from = "today"
-image = { driver_updates = "absent" }
+image = { driver_updates = "absent", settings_writer = "present" }
 exceptions = []
 
 [flags]
@@ -26,6 +26,7 @@ ssbd = "on_request"
 smt = "stibp"
 runtime_trades = "game_mode"
 linux_abi = "on"
+runtime_settings = "live"
 
 # No claim, so every option the registry declares, with any of its values.
 [boot_options]

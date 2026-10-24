@@ -1240,6 +1240,11 @@ fn boot_line(arch: Arch, log: &Path, kernel: &Path, args: &Args) -> Result<()> {
         log.display().to_string(),
         "--kernel".to_owned(),
         kernel.display().to_string(),
+        "--manifest".to_owned(),
+        paths::build_dir(arch)
+            .join("image-manifest")
+            .display()
+            .to_string(),
     ];
     for (flag, value) in &args.sets {
         arguments.extend(["--set".to_owned(), format!("{flag}={value}")]);

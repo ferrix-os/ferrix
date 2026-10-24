@@ -264,6 +264,9 @@ pub(crate) struct Profile {
     pub(crate) values: Vec<(String, String)>,
     /// The `flag=value`s it uses below its level by a dated exception.
     pub(crate) exceptions: Vec<(String, String)>,
+    /// Its image keys (`image = { .. }`), in the file's order: what the
+    /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
+    pub(crate) image: Vec<(String, String)>,
 }
 
 impl Profile {
@@ -304,11 +307,19 @@ impl Profile {
                 }
             }
         }
+        let mut image = Vec::new();
+        for (key, value) in root.get("image").map(Value::entries).unwrap_or_default() {
+            let value = value
+                .as_str()
+                .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
+            image.push((key.clone(), value.to_owned()));
+        }
         Ok(Profile {
             name: name.to_owned(),
             level,
             values,
             exceptions,
+            image,
         })
     }
 }
@@ -670,6 +681,63 @@ pub(crate) fn command() -> Result<()> {
     Ok(())
 }
 
+/// Where every image carries its manifest (docs/BUILD-FLAGS.md §5.1).
+pub(crate) const IMAGE_MANIFEST: &str = "etc/ferrix/image-manifest";
+
+/// The flags the image manifest names, after `profile`, `level` and
+/// `claim`: those a ring-3 program shows a page for (§5.1).
+const MANIFEST_FLAGS: [&str; 1] = ["runtime_settings"];
+
+/// The image manifest of `resolved`, built from `profile` (its base
+/// profile, whose image keys an ad-hoc build keeps): `format=1`, the build
+/// line's profile and level, whether it carries a claim, the flags of
+/// [`MANIFEST_FLAGS`], then every image key, one `key=value` a line
+/// (docs/BUILD-FLAGS.md §5.1). `check-boot-line.py` compares it with the
+/// profile file on every gated boot.
+pub(crate) fn image_manifest(resolved: &Resolved, profile: &Profile) -> String {
+    let mut lines = vec![
+        "format=1".to_owned(),
+        format!("profile={}", resolved.profile),
+        format!("level={}", resolved.level),
+        format!(
+            "claim={}",
+            if resolved.profile == "none" {
+                "no"
+            } else {
+                "yes"
+            }
+        ),
+    ];
+    for flag in MANIFEST_FLAGS {
+        lines.push(format!(
+            "{flag}={}",
+            resolved.value(flag).unwrap_or("unknown")
+        ));
+    }
+    for (key, value) in &profile.image {
+        lines.push(format!("{key}={value}"));
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// This run's image manifest, and its `settings_writer` value.
+///
+/// # Errors
+///
+/// As [`this_run`] and [`Profile::load`].
+pub(crate) fn this_image() -> Result<(String, String)> {
+    let resolved = this_run()?;
+    let profile = Profile::load(&resolved.base)?;
+    let writer = profile
+        .image
+        .iter()
+        .find(|(key, _)| key == "settings_writer")
+        .map_or_else(|| "absent".to_owned(), |(_, value)| value.clone());
+    Ok((image_manifest(resolved, &profile), writer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Built, FlagFile, resolve, resolve_unbuilt};
@@ -764,7 +832,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!((off.profile.as_str(), off.level.as_str()), ("none", "none"));
-        assert!(off.cfg_words().ends_with("linux_abi=off"));
+        assert!(off.cfg_words().contains(" linux_abi=off"));
         assert!(off.boot_line().ends_with("; no claim"));
     }
 

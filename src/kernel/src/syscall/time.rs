@@ -20,7 +20,6 @@ use crate::arch;
 use crate::sched;
 use crate::sched::WaitQueue;
 use crate::syscall::attributes::int;
-use crate::syscall::credentials;
 use crate::syscall::process::Process;
 use crate::syscall::signal::RestartBlock;
 use crate::syscall::thread::Thread;
@@ -48,7 +47,7 @@ const CLOCK_TAI: u32 = 11;
 /// 32 bits on this 64-bit kernel too: [`TimeWidth::in_abi`] gives the two
 /// forms it passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TimeWidth {
+pub enum TimeWidth {
     /// Two `long`s: this architecture's pointer width.
     Native,
     /// Two 64-bit fields.
@@ -145,7 +144,10 @@ pub fn set_boot_time(info: &ferrix_bootinfo::BootInfo) -> Option<u64> {
     Some(nanos / NANOS)
 }
 
-fn set_realtime(target: u64) {
+/// Set the wall clock to `target` nanoseconds since the epoch: the boot's
+/// reading of the real-time clock, and `clock_settime`'s and
+/// `settimeofday`'s (`crate::setters`).
+pub fn set_realtime(target: u64) {
     let offset = i128::from(target) - i128::from(now_nanos());
     let offset = i64::try_from(offset).unwrap_or(if offset < 0 { i64::MIN } else { i64::MAX });
     // With the vDSO's copy, which programs read the clock through.
@@ -191,9 +193,15 @@ pub(crate) fn dispatch(
     let native = TimeWidth::Native.in_abi(abi);
     let wide = TimeWidth::Wide.in_abi(abi);
     let answer = match call {
-        Syscall::ClockSettime => sys_clock_settime(process, int(a[0]), a[1], native),
-        Syscall::ClockSettime64 => sys_clock_settime(process, int(a[0]), a[1], wide),
-        Syscall::Settimeofday => sys_settimeofday(process, a[0], a[1], native),
+        Syscall::ClockSettime => {
+            (crate::setters::bound().clock_settime)(process, int(a[0]), a[1], native)
+        }
+        Syscall::ClockSettime64 => {
+            (crate::setters::bound().clock_settime)(process, int(a[0]), a[1], wide)
+        }
+        Syscall::Settimeofday => {
+            (crate::setters::bound().settimeofday)(process, a[0], a[1], native)
+        }
         Syscall::Adjtimex => sys_adjtimex(process, a[0], native),
         Syscall::ClockAdjtime => sys_clock_adjtime(process, int(a[0]), a[1], native),
         Syscall::ClockAdjtime64 => sys_clock_adjtime(process, int(a[0]), a[1], wide),
@@ -380,7 +388,7 @@ pub(crate) fn write_pair(
 /// keeps only its low 32 bits, because that is what `get_timespec64` does
 /// there: the upper half is padding for a 32-bit program, and a libc may leave
 /// anything in it.
-pub(crate) fn read_pair(
+pub fn read_pair(
     process: &crate::object::process::Process,
     at: u64,
     width: TimeWidth,
@@ -408,7 +416,7 @@ pub(crate) fn read_pair(
 
 /// A `timespec` as nanoseconds, if it is valid: `timespec64_valid`, which
 /// refuses a negative second and a nanosecond field outside 0..10^9.
-pub(crate) fn nanos_of(seconds: i64, nanos: i64) -> Result<u64, Errno> {
+pub fn nanos_of(seconds: i64, nanos: i64) -> Result<u64, Errno> {
     let seconds = u64::try_from(seconds).map_err(|_| Errno::EINVAL)?;
     let nanos = u64::try_from(nanos)
         .ok()
@@ -697,85 +705,6 @@ pub(crate) fn sys_getrusage(
     put_words(&mut bytes, word, &fields);
     let usage = bytes.get(..word * 18).ok_or(Errno::EFAULT)?;
     uaccess::copy_to_user(process.space(), at, usage).map_err(|_| Errno::EFAULT)?;
-    Ok(0)
-}
-
-/// The latest second the wall clock may be set to: `TIME_SETTOD_SEC_MAX`,
-/// which is `KTIME_SEC_MAX` less thirty years of uptime, so that the clock
-/// cannot be set to where adding the uptime would overflow.
-const SETTOD_SECONDS_MAX: u64 = 9_223_372_036 - 30 * 365 * 24 * 3600;
-
-/// `timespec64_valid_settod`: valid, and not past [`SETTOD_SECONDS_MAX`].
-fn settable(seconds: i64, nanos: i64) -> Result<u64, Errno> {
-    if u64::try_from(seconds).is_ok_and(|seconds| seconds >= SETTOD_SECONDS_MAX) {
-        return Err(Errno::EINVAL);
-    }
-    nanos_of(seconds, nanos)
-}
-
-/// `clock_settime` and `clock_settime64`: only `CLOCK_REALTIME` may be set.
-///
-/// Every other clock is `EINVAL`, as Linux answers for a clock with no
-/// `clock_set` -- the monotonic clocks are defined by never being set. The
-/// clock is checked before the time is read, which is Linux's order.
-pub(crate) fn sys_clock_settime(
-    process: &Process,
-    clock: i32,
-    at: u64,
-    width: TimeWidth,
-) -> Result<usize, Errno> {
-    if u32::try_from(clock) != Ok(CLOCK_REALTIME) {
-        return Err(Errno::EINVAL);
-    }
-    let (seconds, nanos) = read_pair(process, at, width)?;
-    let target = settable(seconds, nanos)?;
-    // `CAP_SYS_TIME`, after the time is found settable, as Linux orders it.
-    credentials::require_privilege(process)?;
-    set_realtime(target);
-    crate::fs::timerfd::clock_was_set();
-    Ok(0)
-}
-
-/// `settimeofday`: set the real-time clock in microseconds, and check the
-/// timezone, which is accepted and not kept.
-///
-/// `kernel/time/time.c`'s order: the `timeval` is read and its microseconds
-/// checked (up to and including 1 000 000, which the next check then
-/// refuses), the timezone is read, the time is checked as a settable time,
-/// the timezone's minutes-west checked to within fifteen hours, and only then
-/// is anything set. Both pointers may be null. The `timeval` is `width`'s:
-/// an i386 program's is two 32-bit fields.
-pub(crate) fn sys_settimeofday(
-    process: &Process,
-    tv: u64,
-    tz: u64,
-    width: TimeWidth,
-) -> Result<usize, Errno> {
-    let time = if tv == 0 {
-        None
-    } else {
-        let (seconds, micros) = read_pair(process, tv, width)?;
-        if !(0..=1_000_000).contains(&micros) {
-            return Err(Errno::EINVAL);
-        }
-        Some((seconds, micros * 1_000))
-    };
-    let minutes_west = if tz == 0 {
-        None
-    } else {
-        Some(uaccess::get_u32(process.space(), tz)? as i32)
-    };
-    let target = time
-        .map(|(seconds, nanos)| settable(seconds, nanos))
-        .transpose()?;
-    if minutes_west.is_some_and(|minutes| !(-15 * 60..=15 * 60).contains(&minutes)) {
-        return Err(Errno::EINVAL);
-    }
-    credentials::require_privilege(process)?;
-    if let Some(target) = target {
-        set_realtime(target);
-        crate::fs::timerfd::clock_was_set();
-    }
     Ok(0)
 }
 
