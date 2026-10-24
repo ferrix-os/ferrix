@@ -51,7 +51,11 @@ allow-wildcard-paths = true
 # build, and the failure mode if one sneaks in transitively is a link error
 # thousands of symbols long. Naming them here turns that into one line.
 deny = [
-    { name = "libc", reason = "a freestanding kernel has no host libc; if this appears, a dependency turned on a std feature" },
+    # Through cpufeatures alone: it reads the auxiliary vector with libc on
+    # hosted Arm and Apple targets and on no freestanding one, and reaches the
+    # tree only through hbs-lms's sha2 and sha3, a dev-dependency of
+    # ferrix-sigverify for its host cross-check (docs/SIGNING.md §5.1).
+    { name = "libc", wrappers = ["cpufeatures"], reason = "a freestanding kernel has no host libc; if this appears, a dependency turned on a std feature" },
     { name = "winapi" },
     { name = "windows-sys" },
     { name = "getrandom", reason = "entropy comes from the kernel's own RNG, not from a host syscall shim" },

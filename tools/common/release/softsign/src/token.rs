@@ -17,7 +17,6 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use crate::lms::{self, Key, LMOTS_SHA256_N24_W4, N};
@@ -229,7 +228,7 @@ impl SoftToken {
     /// `release_anchors` (D1).
     pub fn open(root: &Path, release_anchors: Vec<Vec<u8>>) -> Result<SoftToken, Error> {
         fs::create_dir_all(root)?;
-        fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+        owner_only_directory(root)?;
         let root = root.canonicalize()?;
         if let Some(tree) = inside_git_tree(&root) {
             return Err(Error::InRepository(tree));
@@ -263,11 +262,10 @@ impl SoftToken {
     fn write_state(dir: &Path, state: &State) -> Result<(), Error> {
         let tmp = dir.join("state.tmp");
         {
-            let mut file = OpenOptions::new()
+            let mut file = owner_only(OpenOptions::new())
                 .write(true)
                 .create(true)
                 .truncate(true)
-                .mode(0o600)
                 .open(&tmp)
                 .map_err(|e| Error::State(format!("cannot write: {e}")))?;
             file.write_all(state.render().as_bytes())?;
@@ -298,11 +296,10 @@ impl SoftToken {
     }
 
     fn lock(dir: &Path) -> Result<File, Error> {
-        let lock = OpenOptions::new()
+        let lock = owner_only(OpenOptions::new())
             .write(true)
             .create(true)
             .truncate(false)
-            .mode(0o600)
             .open(dir.join("lock"))
             .map_err(|e| Error::State(format!("cannot lock: {e}")))?;
         lock.lock()
@@ -352,7 +349,7 @@ impl SoftToken {
             reason = "a key directory that already exists must not be reused, so only its own level is created"
         )]
         fs::create_dir(&dir)?;
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+        owner_only_directory(&dir)?;
         let _lock = SoftToken::lock(&dir)?;
         let key = Key { lms_type, id, seed };
         let tree = key.tree();
@@ -452,10 +449,9 @@ impl Token for SoftToken {
         )?;
         let signature = state.key.sign(q, data, &tree);
         {
-            let mut log = OpenOptions::new()
+            let mut log = owner_only(OpenOptions::new())
                 .append(true)
                 .create(true)
-                .mode(0o600)
                 .open(dir.join("log"))?;
             writeln!(
                 log,
@@ -470,4 +466,32 @@ impl Token for SoftToken {
         out.extend(signature);
         Ok(out)
     }
+}
+
+/// `options` making a file only its owner may read or write: mode 0600 on
+/// Unix. Elsewhere -- the host-test job on Windows builds every host crate
+/// -- the file takes its directory's access list; the soft signer holds
+/// development keys only (D1), and its keys and state are made on Unix.
+fn owner_only(options: OpenOptions) -> OpenOptions {
+    #[cfg(unix)]
+    let options = {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = options;
+        let _ = options.mode(0o600);
+        options
+    };
+    options
+}
+
+/// Make `dir` only its owner's: mode 0700 on Unix, as [`owner_only`] says
+/// of files.
+fn owner_only_directory(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }

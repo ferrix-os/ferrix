@@ -55,8 +55,8 @@
     "tools/common/release/softsign/src/lms.rs": "bcaa4788c52a51090991fbe82bde1953b4bfa5ead451b5cbde8f169493c09d3c",
     "tools/common/release/softsign/src/main.rs": "2861f8c1e8f8e2cce61d9ba7c0699d73b709fa80adc249957962ef0111006976",
     "tools/common/release/softsign/src/manifest.rs": "e2e71b0657c87b71269e5d8747ebd5b9495f81b8a02879768f95c6c7603980f7",
-    "tools/common/release/softsign/src/tests.rs": "664fa79398113d0cf9ba440572df9af3615e4543dcc764aeafb618f9c2cecd8c",
-    "tools/common/release/softsign/src/token.rs": "e9749ccadeae1a7c322a475680d4dca4292f096f3b4f6617a662a5b40729340f"
+    "tools/common/release/softsign/src/tests.rs": "79f89dcc6516b7718d27f08562872d0c91eb57fad32453a84192b543f2aabe1d",
+    "tools/common/release/softsign/src/token.rs": "92d4eafb9c0bf7d62db4393b70b88066aee487d4d09741dd907ebd3ea4ca9484"
   },
   "toolchain": "rustc 1.99.0-nightly (84b36a78a 2026-08-06)"
 }
