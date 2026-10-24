@@ -174,15 +174,15 @@ promotion's CI ends, and every 15 minutes as a fallback:
 GitHub request a review from the code owner on every promotion:
 `CODEOWNERS` is read from `main`, which carries `develop`'s file, and
 names the owner for everything. Its inbox filled with promotions, most of
-them superseded. `main`'s rules are split in two rulesets for this:
-
-* **protected main**: no deletion, no non-fast-forward, and the three
-  required checks (`CI result` from the GitHub Actions app, `flow/lane`,
-  `certification/verdict`) on any commit pushed. Nobody bypasses it, the
-  workflow included.
-* **main via promotion**: the pull-request rule, which the GitHub Actions
-  app (the workflow's token) bypasses. Anyone else still needs a pull
-  request to change `main`.
+them superseded. `main`'s one ruleset, **protected main**, holds no
+deletion, fast-forward only, and the three required checks (`CI result`
+from the GitHub Actions app, `flow/lane`, `certification/verdict`) on any
+commit pushed, and nobody bypasses it, the workflow included. So only a
+commit CI passed, with the lane and the verdict green, can reach `main`.
+There is no pull-request rule: GitHub refuses the Actions app as a bypass
+actor on a repository ruleset ("must be part of the ruleset source or owner
+organization"), and the three checks already hold everything that rule
+held; outside contributors have no write access in any case.
 
 Everything in the workflow uses its own token, so the push to `main`
 starts no push run there, and CI never runs a second time on `main` for a
@@ -335,15 +335,12 @@ what it would do.
     ([rulesets][gh-rulesets], [available rules][gh-rules]).
 * **`switch`**, at the switch: **`protected main`** keeps no deletion and
   fast-forward only, and gains the three required checks, not in strict
-  mode; nobody bypasses it. A second ruleset, **`main via promotion`**, adds
-  the pull-request rule (merge commits only, no approvals), which the
-  GitHub Actions app (integration 15368, the Promote workflow's token)
-  alone bypasses, so the workflow fast-forwards `main` to a promotion whose
-  checks passed and opens no pull request (2026-10-24). Running `switch`
-  again applies a changed rule set. It also sets the repository variable
-  `FLOW_PROMOTE=on`; the Promote and Nightly workflows do nothing without
-  it. `undo-switch` restores the old ruleset, deletes the second one and
-  removes the variable.
+  mode; nobody bypasses it. No pull-request rule (2026-10-24): the Promote
+  workflow fast-forwards `main` itself, and only a commit with the three
+  checks green gets in. Running `switch` again applies a changed rule set.
+  It also sets the repository variable `FLOW_PROMOTE=on`; the Promote and
+  Nightly workflows do nothing without it. `undo-switch` restores the old
+  ruleset and removes the variable.
 * **`show`** prints the current state.
 
 ## The switch, step by step

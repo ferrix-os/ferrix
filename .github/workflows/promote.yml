@@ -20,10 +20,9 @@ name: Promote
 # No pull request is opened. A promotion pull request requested a review from
 # the code owner on every promotion (CODEOWNERS is read from main, which
 # carries develop's file), and the owner's inbox filled with them
-# (customer, 2026-10-24). main's ruleset still demands the three checks on
-# the pushed commit and refuses anything but a fast-forward; only its
-# pull-request rule lets this workflow's token (the GitHub Actions app)
-# through, in a ruleset of its own.
+# (customer, 2026-10-24). main's ruleset demands the three checks on the
+# pushed commit (`CI result` only from the GitHub Actions app) and refuses
+# anything but a fast-forward; it has no pull-request rule.
 #
 # Everything here uses the workflow's own token, so the push to main starts
 # no push run there: CI ran once, on the promoted commit.
