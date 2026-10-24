@@ -174,7 +174,13 @@ unaccounted time. It does **not** provide a certified WCET, and
 `docs/ARCHITECTURE.md` §5 is explicit that no OS which also hosts a compiler
 can. An integrator whose safety requirement depends on a proven response time
 shall establish it by measurement on their own configuration and workload, and
-shall treat ASR-8 as unmet until they have. (Finding F-24.)
+shall treat ASR-8 as unmet until they have. (Finding F-24.) Nor does it
+yet bound how long one job can keep a woken task of another job off every
+processor: a task waiting for a kernel spin lock waits with preemption off,
+so a multi-threaded program contending one of its own locks held the
+N150's every core from every other program for 1 to 3 s, and a forking
+1 GiB process kept QEMU's processors off for minutes (finding F-95, open;
+[MEMORY-AND-TIMING.md](MEMORY-AND-TIMING.md) §2.2y).
 
 ### AoU-5 — the heap is not bounded per partition, and exhaustion outside the element is fatal
 The element allocates dynamically, and reports allocation failure at every
@@ -581,7 +587,9 @@ outside the element (SECURITY-TARGET A.FIRMWARE), is specified to:
   before the ESP's rescue files;
 * **P3** start a slot only if its header and every blob verify;
 * **P4** write only the control record's two blocks, inside a partition that
-  overlaps no other GPT entry;
+  overlaps no other GPT entry, and, on the ESP through firmware's FAT, the
+  previous kernel's log as `FERRIX/LASTKERNEL.TXT` and `.PRV`
+  (`docs/POSTMORTEM.md` §3.5);
 * **P5** begin a slot boot's command line with its slot words, and never
   truncate it.
 
@@ -718,7 +726,7 @@ cause.
 | FM-5 | A frame is reused without being cleared | ASR-5 violated, data disclosure | none at runtime | zeroed on allocation | zeroing is on allocation, not free (V-04) |
 | FM-6 | The element continues in a corrupt state | any ASR may be violated silently | invariant checks | safe state on detection | detection is not exhaustive |
 | FM-7 | A partition exhausts memory | calls that allocate fail with `NO_MEMORY` or `ENOMEM` for every partition; the safe state if the load's allocation fails | allocation failure, reported at every site in the element (gate and boot check) | a job's memory, object and task limits, refused at the limit while other jobs go on (`quota` boot line), the Linux personality's heap within the memory limit (`kmem` boot line, F-37); job limits on depth and descendants; capped queues | a partition in no limited job, whose page demand is refused at the kernel's watermark (`H.QUOTA.13`, `watermark` boot line) but whose heap-borne demand is not; per-task kernel memory and machine-wide tables with fixed bounds (V-05, low); the load's allocations are fatal (AoU-5) once heap-borne demand has used up the watermark's frames too; a kernel allocation of more than one frame on a fragmented machine; a shared btrfs mount's transaction aborts for every partition (T.EXHAUST path 6) |
-| FM-8 | A partition is starved of processor time | ASR-8 violated | none at runtime; the `quota` boot line checks one job's share against another's | EEVDF eligibility, EDF admission; a job's share of a contended processor is its weight's, whatever its task count | no WCET, so no bound is provable (AoU-4) |
+| FM-8 | A partition is starved of processor time | ASR-8 violated | none at runtime; the `quota` boot line checks one job's share against another's; `test-stall` reports woken tasks against a saturating load (reporting, not asserted) | EEVDF eligibility, EDF admission; a job's share of a contended processor is its weight's, whatever its task count, **except while its tasks wait for a kernel spin lock**: they wait with preemption off and every other job loses those processors for as long (F-95, open) | no WCET, so no bound is provable (AoU-4); F-95 holds the share claim false under lock contention until its fix lands |
 | FM-9 | Kernel stack overflow | page fault at the instruction that overflowed | **guard page below every kernel stack**, and a boot check that the guard is unmapped | `vmap` reserves an unmapped page on each side of every allocation; no recursion in the element | the loader-provided boot stack is not guarded (early boot only) |
 | FM-10 | A processor stops answering a TLB shootdown (x86-64) or a grace period (every architecture) | none while the wait lasts: nothing is freed and no narrowed permission relied on until every processor answers; then the safe state (FX-0001, FX-0002, FX-0003) | `smp::wait_for` and `take_turn`: two bounds, each a wall-clock floor **and** a count of the waiter's own polls, which stretches with the emulator's slowness: past the late bound (1 s for a shootdown, 5 s for a grace period) the answer is waited for and counted late (the `late` line, `L.smp.33`); past the stuck bound (10 s, 40 s for the turn) the safe state | the count is in guest units, so a slow machine is not called stuck; a processor a host stops running answers late and is waited for (2026-10-07: 257 late answers of 1.0 to 3.6 s, every one answered); a stuck processor answers no count and is still found | availability: while a processor answers late its waiter's processor runs nothing else, since the shootdown turn disables preemption, and other shootdowns queue for the turn for up to 40 s (ASR-8, AoU-4); a host that starves a virtual processor for more than 10 s still ends the wait: availability lost, never integrity |
 | FM-11 | Stored data is altered or lost: a torn commit, a write the device reordered, damage on the medium, a hostile image | ASR-9 violated: wrong bytes returned as a file's, or a volume that no longer mounts | a CRC-32C on every node and data sector, and each node's address and generation checked against its parent (`L.btrfs.31`, `L.btrfs.32`, `L.btrfs.70`, `L.btrfs.84`), its level and filesystem too, with no test of those two yet; the second copy read where the chunk keeps one | copy-on-write: nothing the last commit reaches is overwritten, and the superblock is written after a flush; a failed transaction is aborted and the volume reloaded read only at its last commit | deliberate alteration with matching checksums (AoU-15); a device that does not honour flush (AoU-16); log replay and orphan cleanup at mount are not measured against a full volume, and can still fail the mount there (`docs/BACKLOG.md`) |

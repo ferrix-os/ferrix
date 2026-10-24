@@ -29,6 +29,8 @@
 //! at the socket is root (`settingsd`, or the init that activated it), as
 //! `su` checks `authd` (U1): a server a user started is never told one.
 
+pub mod manifest;
+
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
@@ -127,12 +129,8 @@ impl Client {
         dry_run: bool,
     ) -> Result<Conversation, Refusal> {
         let unavailable = |what: String| Refusal::new(RefusalKind::Unavailable, what);
-        let fd = connect(&self.socket).map_err(|error| {
-            unavailable(format!(
-                "settingsd cannot be reached at {}: {error}",
-                self.socket.display()
-            ))
-        })?;
+        let fd = connect(&self.socket)
+            .map_err(|error| missing_writer(&error, &manifest::Manifest::read(), &self.socket))?;
         let listener = peer_uid(fd.as_raw_fd())
             .map_err(|error| unavailable(format!("cannot tell who listens: {error}")))?;
         if listener != self.listener_uid {
@@ -273,6 +271,26 @@ impl Conversation {
 }
 
 /// A connected `SOCK_SEQPACKET` socket to `path`.
+/// What a client says when `settingsd` cannot be reached: as the build says
+/// it when there is none (ledger 3636 (16)), never a silent no-op.
+fn missing_writer(error: &io::Error, manifest: &manifest::Manifest, socket: &Path) -> Refusal {
+    let missing = matches!(
+        error.raw_os_error(),
+        Some(libc::ENOENT | libc::ECONNREFUSED)
+    );
+    let text = if missing && manifest.writer_absent() {
+        manifest.fixed_text()
+    } else if missing {
+        "the settings service is not running".to_owned()
+    } else {
+        format!(
+            "settingsd cannot be reached at {}: {error}",
+            socket.display()
+        )
+    };
+    Refusal::new(RefusalKind::Unavailable, text)
+}
+
 fn connect(path: &Path) -> io::Result<OwnedFd> {
     let fd = seqpacket_socket()?;
     let address = unix_address(path)?;
@@ -354,6 +372,38 @@ pub fn receive(fd: RawFd, buffer: &mut [u8]) -> io::Result<&[u8]> {
     buffer
         .get(..got)
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))
+}
+
+#[cfg(test)]
+mod missing_tests {
+    use super::{RefusalKind, manifest::Manifest, missing_writer};
+    use std::path::Path;
+
+    /// Ledger 3636 (16): no settingsd is said as the build says it.
+    #[test]
+    fn no_settingsd_is_said_as_the_build_says() {
+        let gone = std::io::Error::from_raw_os_error(libc::ENOENT);
+        let absent = Manifest::parse(
+            "format=1\nprofile=max\nruntime_settings=fixed\nsettings_writer=absent\n",
+        );
+        let present = Manifest::parse(
+            "format=1\nprofile=present\nruntime_settings=live\nsettings_writer=present\n",
+        );
+        let socket = Path::new("/run/ferrix/settings");
+        let said = missing_writer(&gone, &absent, socket);
+        assert_eq!(said.kind, RefusalKind::Unavailable);
+        assert_eq!(said.text, "Fixed by this build (profile max)");
+        assert_eq!(
+            missing_writer(&gone, &present, socket).text,
+            "the settings service is not running"
+        );
+        let other = std::io::Error::from_raw_os_error(libc::EACCES);
+        assert!(
+            missing_writer(&other, &present, socket)
+                .text
+                .starts_with("settingsd cannot be reached")
+        );
+    }
 }
 
 #[cfg(test)]

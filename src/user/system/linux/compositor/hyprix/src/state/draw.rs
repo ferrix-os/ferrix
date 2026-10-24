@@ -55,6 +55,7 @@ impl Compositor<'_> {
         // its frames to its plane, or back, owes a frame that draws it or
         // takes it away.
         let pointer = (self.lock.is_none()
+            && !self.prompts.up()
             && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
@@ -99,7 +100,12 @@ impl Compositor<'_> {
         {
             self.owed = true;
         }
+        // And not while a frame is still on its way to a card: its buffer
+        // is the card's until it lands, as a Wayland compositor draws after
+        // the flip's event. What happens meanwhile -- the pointer, a key, a
+        // client -- is kept, and drawn in the first frame after.
         if (self.owed || self.tally.drawn == 0 || animating || self.settling)
+            && !self.frames_out()
             && self.pace.due(Instant::now(), refresh_ns(&self.screens))
         {
             self.draw(now, animating, overlay_on, popups)?;
@@ -133,6 +139,8 @@ impl Compositor<'_> {
         let millis = self.animation_clock(now);
         self.owed = false;
         self.settling = animating;
+        // The prompt's buttons are laid out again with the screens below.
+        self.prompts.begin_frame();
         // A pass that moves the animations is one of their ticks:
         // Hyprland keeps how long it was since the last.
         if animating {
@@ -142,8 +150,11 @@ impl Compositor<'_> {
             .screens(self.screens.iter().map(|screen| screen.name.as_str()));
         // The overview draws every window in a tile of its own in place of
         // where the layout keeps it (`crate::overview`).
+        // The switcher the same, in a row (`crate::switcher`).
         let mut outputs = if self.overview.on {
             crate::overview::outputs(&self.state, &self.overview)
+        } else if self.switcher.on {
+            crate::switcher::outputs(&self.state, &self.switcher)
         } else {
             self.state.layout()
         };
@@ -177,7 +188,8 @@ impl Compositor<'_> {
         // not in the overview, whose tiles are the windows alone. Taken out
         // of `self` for the frame, since the screens are drawn through it.
         let mut bars = std::mem::take(&mut self.bars);
-        if !self.overview.on {
+        let tiled = self.overview.on || self.switcher.on;
+        if !tiled {
             let wanted = self.title_bars_wanted();
             let scale = self
                 .screens
@@ -186,12 +198,27 @@ impl Compositor<'_> {
                 .fold(1.0_f64, f64::max);
             bars.decorate(&mut outputs, &mut drawn_with, &wanted, &self.state, scale);
         }
-        if self.overview.on {
-            // The hovered tile is outlined whatever its frame.
-            if let Some(hovered) = self.overview.hovered {
-                let style = drawn_with.entry(hovered).or_default();
+        if tiled {
+            // The hovered or picked tile is outlined whatever its frame,
+            // and a minimized window is dimmed: it is there to be found,
+            // and is not on the screen.
+            let (lit, dimmed) = if self.overview.on {
+                (self.overview.hovered, crate::overview::dimmed(&self.state))
+            } else {
+                (
+                    self.switcher.picked(),
+                    crate::switcher::dimmed(&self.state, &self.switcher),
+                )
+            };
+            if let Some(lit) = lit {
+                let style = drawn_with.entry(lit).or_default();
                 style.border = None;
                 style.decorate = true;
+            }
+            for window in dimmed {
+                let style = drawn_with.entry(window).or_default();
+                style.opacity =
+                    Some(style.opacity.unwrap_or(1.0) * crate::overview::MINIMIZED_OPACITY);
             }
         }
         let began = Instant::now();
@@ -270,29 +297,21 @@ impl Compositor<'_> {
         if self.animations.busy(millis) {
             self.settling = true;
         }
-        // And only now each screen's flip, which waits for the host to show
-        // the frame: on QEMU's GL display that is the window's next repaint,
-        // on VNC a read of the whole screen back. Clients told their frame
-        // was done before it draw their next one meanwhile; told after it,
-        // a video's frames missed one compositor frame in three.
-        // A card that refused or timed out is a frame lost, not a screen:
-        // a driver that has gone is the backend's to find, and one that is
-        // only slow answers the next frame.
-        let period = refresh_ns(&self.screens);
+        // And only now each screen's flip, which the card answers once it
+        // has shown the frame: on QEMU's GL display at the window's next
+        // repaint, on VNC after a read of the whole screen back, on the
+        // Intel driver's card0 in the next vertical blank. Clients told
+        // their frame was done before it draw their next one meanwhile;
+        // told after it, a video's frames missed one compositor frame in
+        // three. A card's flip goes to a thread of its own and is answered
+        // through the wait (`land_frames`); one made here -- a headless
+        // screen, `HYPRIX_SYNC_FLIP=1` -- is answered at once.
         for (which, damage) in std::mem::take(&mut drew.flips) {
             if let Some(screen) = self.screens.get_mut(which) {
                 let began = Instant::now();
                 let flipped = crate::frame::flip(screen.backend.as_mut(), &damage);
-                // The first screen's blank paces the frames (`crate::pace`).
-                if which == 0 && flipped.is_ok() {
-                    self.pace.flipped(began, Instant::now(), period);
-                }
-                match flipped {
-                    Ok(()) => screen.said_dropped = false,
-                    Err(why) => {
-                        screen.drop_frame(&why, self.report);
-                        self.held_until = Some(Instant::now() + super::HOLD);
-                    }
+                if flipped.is_err() || !screen.backend.in_flight() {
+                    self.answered(which, flipped, began, Instant::now());
                 }
             }
         }
@@ -307,7 +326,10 @@ impl Compositor<'_> {
                 display = self.fixed.display,
             ));
         }
-        if let Some(directory) = self.options.dump.as_ref() {
+        // P6: a frame that shows a trusted prompt is not written down.
+        if let Some(directory) = self.options.dump.as_ref()
+            && !self.prompts.up()
+        {
             dump(&mut self.screens, directory, self.tally.drawn)?;
         }
         Ok(())
@@ -367,7 +389,7 @@ impl Compositor<'_> {
         dark: bool,
         popups: &[crate::frame::Placed],
     ) -> Vec<crate::frame::Placed> {
-        if dark {
+        if dark || self.prompts.up() {
             Vec::new()
         } else if let Some(held) = self.lock.as_ref() {
             held.surfaces
@@ -608,15 +630,22 @@ impl Compositor<'_> {
         // draws its own and the compositor's arrow over it would be
         // two pointers.
         // And not where the screen's cursor plane shows it.
+        // Over a trusted prompt, the compositor's own arrow and never a
+        // client's picture of one (P1).
+        let prompting = self.prompts.up();
         let cursor = (!dark
-            && !screen.plane.on
+            && (!screen.plane.on || prompting)
             && self.lock.is_none()
             && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: with.cursor_at,
-            surface: cursor_surface(&self.slots, &self.focus),
-            shown: cursor_shown(&self.slots, &self.focus),
+            surface: if prompting {
+                None
+            } else {
+                cursor_surface(&self.slots, &self.focus)
+            },
+            shown: prompting || cursor_shown(&self.slots, &self.focus),
         });
         // The ramps a night-light set on this screen, applied to
         // the pixels on their way out.
@@ -625,7 +654,7 @@ impl Compositor<'_> {
         // draws nothing at all: a plan says what is drawn, not what
         // the layout holds.
         let scaled = self.style.at_scale(scale);
-        let layout = if dark || self.lock.is_some() {
+        let layout = if dark || self.lock.is_some() || prompting {
             compositor_layout::MonitorLayout {
                 windows: Vec::new(),
                 ..output.clone()
@@ -646,8 +675,13 @@ impl Compositor<'_> {
         // over everything but a screen that is off. Its boxes blur
         // what is behind them as it stands, which the damage has to
         // know to redraw them whole.
-        let picture = (with.overlay_on && which == 0 && !dark)
-            .then(|| self.overlay.picture(screen_began, scale));
+        let picture = if prompting && !dark {
+            let size = (width, height);
+            self.prompts.picture(size, scale, origin)
+        } else {
+            (with.overlay_on && which == 0 && !dark)
+                .then(|| self.overlay.picture(screen_began, scale))
+        };
         if scaled.blur.is_some()
             && let Some(picture) = picture.as_ref()
         {
@@ -666,7 +700,7 @@ impl Compositor<'_> {
             scale,
             style: scaled,
             dark,
-            locked: self.lock.is_some(),
+            locked: self.lock.is_some() || prompting,
             gamma,
             layout,
             blurred,
@@ -732,7 +766,15 @@ impl Compositor<'_> {
         };
         // What a screenshot of this frame blacks out, worked out from
         // what the frame is drawn from, so that the two are of one frame.
-        screen.hidden = super::unshared(&plan, &over, origin, scale);
+        // A trusted prompt's whole screen (P6).
+        screen.hidden = if plan.locked && self.prompts.up() {
+            vec![(
+                Rect::new(0, 0, i64::from(plan.size.0), i64::from(plan.size.1)),
+                compositor_render::Rounding::none(),
+            )]
+        } else {
+            super::unshared(&plan, &over, origin, scale)
+        };
         // And the clients' own pixels: where on this screen each
         // commit since the last frame landed.
         let heard = self.commits.on(&plan, &self.sources);
@@ -772,7 +814,7 @@ impl Compositor<'_> {
         };
         let result = if dark {
             crate::frame::draw_dark(&mut target, &frame.canvas)
-        } else if self.lock.is_some() {
+        } else if self.lock.is_some() || self.prompts.up() {
             // The lock's own surface is the first of `over`, which
             // is where the damage above expects it too: the drawing
             // and the damage read one list.
@@ -869,6 +911,65 @@ impl Compositor<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Whether a frame is still on its way to any screen's card: nothing is
+    /// drawn until it has landed.
+    pub(super) fn frames_out(&self) -> bool {
+        self.screens.iter().any(|screen| screen.backend.in_flight())
+    }
+
+    /// Take the answers of the frames that have landed since the last pass
+    /// (`Backend::landed`), as if each flip had returned just now.
+    pub(super) fn land_frames(&mut self) {
+        for which in 0..self.screens.len() {
+            while let Some(landed) = self
+                .screens
+                .get_mut(which)
+                .and_then(|screen| screen.backend.landed())
+            {
+                let flipped = landed.result.map_err(|error| error.to_string());
+                self.answered(which, flipped, landed.began, landed.ended);
+                // A card whose driver went under the frame: the screen is
+                // lost, and the frames that look for it are owed.
+                if let Some(screen) = self.screens.get_mut(which)
+                    && screen.backend.lost()
+                {
+                    screen.say_gone(self.report);
+                    self.owed = true;
+                }
+            }
+        }
+    }
+
+    /// What follows the card's answer to a frame on the screen at `which`,
+    /// handed over at `began` and answered at `ended`.
+    ///
+    /// The first screen's blank paces the frames (`crate::pace`). A card
+    /// that refused or timed out is a frame lost, not a screen: a driver
+    /// that has gone is the backend's to find, and one that is only slow
+    /// answers the next frame.
+    fn answered(
+        &mut self,
+        which: usize,
+        flipped: Result<(), String>,
+        began: Instant,
+        ended: Instant,
+    ) {
+        let period = refresh_ns(&self.screens);
+        let Some(screen) = self.screens.get_mut(which) else {
+            return;
+        };
+        if which == 0 && flipped.is_ok() {
+            self.pace.flipped(began, ended, period);
+        }
+        match flipped {
+            Ok(()) => screen.said_dropped = false,
+            Err(why) => {
+                screen.drop_frame(&why, self.report);
+                self.held_until = Some(Instant::now() + super::HOLD);
+            }
+        }
     }
 
     /// Count a frame that took `took` and drew what `drew` says, and say

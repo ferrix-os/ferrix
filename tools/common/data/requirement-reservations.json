@@ -12,11 +12,25 @@
   ],
   "reservations": [
     {
-      "ids": ["H.SIGN.1-6", "L.sigverify.1-24", "L.sha256.1-6"],
-      "owner": "product-signing",
-      "branch": "feature/sigverify",
+      "ids": ["L.iommu.99-100"],
+      "owner": "amd-vi",
+      "branch": "feature/amd-vi",
       "date": "2026-10-24",
-      "purpose": "docs/SIGNING.md, product signing (consultant OK IF, ledger 3667; customer decisions, ledger 3731): H.SIGN, the hazard-level family under ASR-7 (authenticity under the expected kind's anchors, the signed fields' binding, the security-version floor, revocation, fail-closed refusal with its reason, bounded time and memory); L.sigverify, one id per check of SIGNING.md section 8.1 for the ferrix-sigverify crate (manifest format, type codes, LM-OTS, LMS, HSS, anchor selection, binding, revocation, payload, time, stack); L.sha256 for ferrix-sha256 (SHA-256 and SHA-256/192); consultant OK IF, ledger 3738"
+      "purpose": "docs/AMD-VI.md section 9.1, decision D10 (consultant OK IF (1)-(5), ledger 3923, condition 4): an AMD-Vi unit's own PCI function is the unit (theUnitsOwnFunctionIsTheUnit), and an unnamed bus-0 host bridge with bus mastering off is the root complex (anUnnamedHostBridgeIsTheRootComplex); neither is given a domain or a vector, nor counted bypassing"
+    },
+    {
+      "ids": ["L.device.57-59"],
+      "owner": "amd-vi",
+      "branch": "feature/devmgr-isolation-gate",
+      "date": "2026-10-24",
+      "purpose": "docs/DMA-GATE.md, every bus master gated on isolation (the customer's decision, ledger 3905; consultant OK IF (1)-(9), ledger 3906): device_isolation's NO_DMA bit, ferrix.unisolated forwarded to devmgr said and audited, and devmgr's one admission rule"
+    },
+    {
+      "ids": ["L.iommu.79-98"],
+      "owner": "amd-vi",
+      "branch": "feature/amd-vi",
+      "date": "2026-10-24",
+      "purpose": "docs/AMD-VI.md, the AMD-Vi driver behind the iommu interface (consultant OK IF (1)-(13), ledger 3867, condition 7): the IVRS read and its fail-closed cases, one IVHD type per unit, unit acceptance and firmware hand-over, the blocked device table, Mode-3 domains, sequenced completion waits and failed units, unpin and map flushes, the event log, per-function interrupt tables, other interrupts refused, the console line, IVMD identity domains and holds, exclusion registers off, aliases unresolved, ferrix.amdvi=off"
     },
     {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
@@ -178,6 +192,13 @@
       "branch": "powerctl",
       "date": "2026-10-22",
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
+    },
+    {
+      "ids": ["H.SCHED.16-17", "L.sched.93-95", "L.user.163-168"],
+      "owner": "sched-wake-latency",
+      "branch": "bugfix/sched-wake-latency",
+      "date": "2026-10-24",
+      "purpose": "docs/PREEMPTIBLE-WAITS.md, F-95 (consultant OK IF (1)-(24), ledger 3950, condition 10): H.SCHED.16 a woken task of one job runs within the stated bound under another job's saturating ring-3 load, with L.sched for the preemptible wait rule, its fairness bound and the reaper's busy-processor share; H.SCHED.17 a spin-lock hold a ring-3 request causes is at most P pages of work, with one L.user per batched operation (give_back, take_down, take_range, Vmo::fork, detach)"
     }
   ]
 }

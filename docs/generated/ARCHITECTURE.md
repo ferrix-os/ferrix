@@ -120,8 +120,9 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
+| `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-26 files, 142 packages, 7482 elements, 217 relations. Model digest `068f439eb8edd0aa`.
+27 files, 146 packages, 7605 elements, 218 relations. Model digest `43d44f2929830e13`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4680,6 +4681,8 @@ flowchart LR
 | `L.quiesce.5` | `theWaitHasAnEnd` | — | — | — |
 | `L.device.27` | `aMarkedDeviceNeedsIsolatedInterrupts` | — | — | — |
 | `L.device.28` | `noVectorUnderAnothersSourceId` | — | — | — |
+| `L.device.55` | `isolationAnsweredBeforeAnyPin` | — | — | — |
+| `L.device.56` | `noGpuWithUntranslatedDma` | — | — | — |
 | `L.device.35` | `heldOffFunctionGetsItsTablePage` | — | — | — |
 | `L.device.36` | `heldOffMsixReadBack` | — | — | — |
 | `L.device.37` | `noMsiWhileMsixOn` | — | — | — |
@@ -4930,6 +4933,29 @@ flowchart LR
 | `L.init.1` | `pid1InItsOrder` | — | — | — |
 | `L.init.2` | `inputsFromTheBootArchiveOnly` | — | — | — |
 | `L.init.3` | `anInputThatCannotBeOneIsRefused` | — | — | — |
+| `H.SIGN.1` | `acceptedOnlyUnderTheExpectedKindsAnchor` | — | — | — |
+| `H.SIGN.2` | `signedFieldsBind` | — | — | — |
+| `H.SIGN.3` | `notBelowTheFloor` | — | — | — |
+| `H.SIGN.4` | `revokedKeysRefused` | — | — | — |
+| `H.SIGN.5` | `everythingElseRefusedByName` | — | — | — |
+| `H.SIGN.6` | `boundedTimeAndMemory` | — | — | — |
+| `L.sigverify.1` | `manifestStructure` | — | — | — |
+| `L.sigverify.2` | `onlyTheProductTypeCodes` | — | — | — |
+| `L.sigverify.3` | `lmsVerifiedAsRfc8554` | — | — | — |
+| `L.sigverify.4` | `hssVerifiedAsRfc8554` | — | — | — |
+| `L.sigverify.5` | `anchorOfTheExpectedKind` | — | — | — |
+| `L.sigverify.6` | `signedFieldsBound` | — | — | — |
+| `L.sigverify.7` | `floorHeld` | — | — | — |
+| `L.sigverify.8` | `revokedTreesRefused` | — | — | — |
+| `L.sigverify.13` | `selfRevocationRefused` | — | — | — |
+| `L.sigverify.14` | `revokedListReturned` | — | — | — |
+| `L.sigverify.9` | `payloadConfirmed` | — | — | — |
+| `L.sigverify.10` | `refusalsTotal` | — | — | — |
+| `L.sigverify.11` | `verifyTimeBound` | — | — | — |
+| `L.sigverify.12` | `verifyStackBound` | — | — | — |
+| `L.sha256.1` | `sha256AsFips180` | — | — | — |
+| `L.sha256.2` | `sha256InAnyPieces` | — | — | — |
+| `L.sha256.3` | `sha256Truncated192` | — | — | — |
 
 A design rule is upheld by a gate rather than allocated to a part, so the P and N families are expected to be verified but untraced. A goal requirement is traced by the dependency the stage that discharges it draws.
 

@@ -5,10 +5,11 @@ How a change reaches `main` (customer, 2026-10-23). In short:
 * The fleet lands on **`develop`**, as it landed on `main` before, through
   `land.sh` and `batch.sh`. The gate pool's rows run before the landing, as
   before.
-* **`main` moves only by pull request.** A workflow opens a promotion pull
-  request from `develop` to `main` on its own, CI runs once on it, and it
-  merges itself when its checks pass. Nobody clicks anything on the
-  owner's side.
+* **`main` moves only by promotion.** A workflow cuts a promotion branch
+  from `develop`, CI runs once on it, and the workflow fast-forwards `main`
+  to it when its checks pass. No pull request is opened, so the owner gets
+  no review request per promotion (customer, 2026-10-24). Nobody clicks
+  anything on the owner's side.
 * **Two lanes**, chosen by who opened the pull request, never by its branch
   name. The **owner lane** (the customer's account, the fleet, which pushes
   as it, and the repository's own workflows) is fully automatic. The
@@ -28,9 +29,9 @@ outdated branches were archived on 2026-10-23 (*Branch clean-up*).
 
 | Branch | What it is | Who moves it |
 |---|---|---|
-| `main` | What has passed CI and the certification verdict. Releases and tags are cut from it. | Promotion pull requests, which merge themselves. No direct pushes once the switch is made. |
+| `main` | What has passed CI and the certification verdict. Releases and tags are cut from it. | The Promote workflow, as a fast-forward to a promotion whose checks passed. No other pushes. |
 | `develop` | The integration branch. Every landing goes here. | The fleet, under `land.sh`. Outside pull requests also go here, after review. |
-| `promote/<sha>` | One promotion: `develop` at `<sha>`, as a pull request to `main`. | The Promote workflow. It is deleted when merged. |
+| `promote/<sha>` | One promotion: `develop` at `<sha>`, where CI runs before `main` moves to it. | The Promote workflow. It is deleted once `main` holds it, or once a newer promotion supersedes it. |
 | `feature/<what>` | New behaviour. | Its author. |
 | `bugfix/<what>` | A fix for something that is broken on `develop` or `main`. | Its author. |
 | `chore/<what>` | Tooling, CI, refactors, dependency bumps: no behaviour change. | Its author. |
@@ -149,34 +150,43 @@ them would block every promotion until the fleet signs.
 `.github/workflows/promote.yml` runs on every push to `develop`, when a
 promotion's CI ends, and every 15 minutes as a fallback:
 
-1. If a promotion pull request is open and its CI is still running, it
-   does nothing: the next promotion takes everything that lands in the
-   meantime. Once that run has ended and the promotion is still open (red,
-   its verdict waiting, or blocked for any other reason) and `develop` has
-   moved past it, the workflow closes it and promotes the new tip instead.
-   A promotion never holds back what landed after it, and a landing never
-   cancels a run halfway through.
-2. Otherwise, if `develop` has commits that `main` lacks, it cuts
-   `promote/<sha>` at `develop`'s tip and opens a pull request to `main`. It
-   posts that commit's `flow/lane` (owner lane) and its
-   `certification/verdict`, and dispatches `ci.yml` on the branch.
-3. It switches auto-merge on, with a **merge commit**. `develop` therefore
-   stays an ancestor of `main`, and the next promotion is always a clean
-   merge. A rebase or squash merge would give `main` new hashes for the same
-   commits, and the two branches would drift apart.
+1. A promotion branch `promote/<sha>` whose CI passed, whose `CI result`,
+   `flow/lane` and `certification/verdict` statuses are green, and that
+   `main` is an ancestor of, is pushed to `main` as a **fast-forward**, and
+   the branch is deleted. `main` then equals `develop` at `<sha>`: the same
+   hashes, no merge commit, and the next promotion is always a
+   fast-forward again.
+2. While a promotion's CI is running, nothing new starts: the next
+   promotion takes everything that lands in the meantime, and a landing
+   never cancels a run halfway through.
+3. A promotion whose CI ended and that cannot reach `main` (red, or its
+   verdict waiting or NOT-YET) stays while it carries `develop`'s tip, so a
+   late verdict still lets it through. Once `develop` has moved past it, it
+   is deleted and the new tip is promoted. A promotion never holds back
+   what landed after it.
+4. Otherwise, if `develop` has commits `main` lacks, the workflow cuts
+   `promote/<sha>` at `develop`'s tip, posts that commit's `flow/lane`
+   (owner lane) and its `certification/verdict`, and dispatches `ci.yml`
+   on the branch. CI's last job posts its verdict as the commit status
+   `CI result`.
 
-A run started by dispatch is not counted by the pull request's checks:
-GitHub leaves `workflow_dispatch` check suites out of them. So CI's last
-job also posts its verdict as the commit status `CI result`, with the
-workflow's token, which is the GitHub Actions app the ruleset names as the
-source (promotion #4 sat green and blocked until this, 2026-10-23).
+**No pull request** (customer, 2026-10-24). A promotion pull request made
+GitHub request a review from the code owner on every promotion:
+`CODEOWNERS` is read from `main`, which carries `develop`'s file, and
+names the owner for everything. Its inbox filled with promotions, most of
+them superseded. `main`'s one ruleset, **protected main**, holds no
+deletion, fast-forward only, and the three required checks (`CI result`
+from the GitHub Actions app, `flow/lane`, `certification/verdict`) on any
+commit pushed, and nobody bypasses it, the workflow included. So only a
+commit CI passed, with the lane and the verdict green, can reach `main`.
+There is no pull-request rule: GitHub refuses the Actions app as a bypass
+actor on a repository ruleset ("must be part of the ruleset source or owner
+organization"), and the three checks already hold everything that rule
+held; outside contributors have no write access in any case.
 
-Everything in the workflow uses its own token. A pull request opened with
-that token starts no `pull_request` workflows, and the merge it makes
-starts no push run ([GITHUB_TOKEN][gh-token]). The workflow therefore
-dispatches CI itself (dispatch is the exception), posts the two statuses
-itself, and CI never runs a second time on `main` for a commit that was
-already checked.
+Everything in the workflow uses its own token, so the push to `main`
+starts no push run there, and CI never runs a second time on `main` for a
+commit that was already checked ([GITHUB_TOKEN][gh-token]).
 
 ### Lead time
 
@@ -323,15 +333,14 @@ what it would do.
     code owner's approval of its last push. Repository administrators
     bypass it, so the fleet's landings still push straight to `develop`
     ([rulesets][gh-rulesets], [available rules][gh-rules]).
-* **`switch`**, at the switch: the **`main` ruleset** gains a pull-request
-  rule (merge commits only, no approvals) and the three required checks,
-  not in strict mode. A promotion carries `develop`, and the merge commit
-  of the last promotion is not in `develop`, so strict mode would make
-  every promotion update itself and run CI twice. Nobody bypasses it. It
-  also sets the repository variable `FLOW_PROMOTE=on`; the Promote and
-  Nightly workflows do nothing without it, so landing them early is
-  harmless. `undo-switch` restores the old ruleset and removes the
-  variable.
+* **`switch`**, at the switch: **`protected main`** keeps no deletion and
+  fast-forward only, and gains the three required checks, not in strict
+  mode; nobody bypasses it. No pull-request rule (2026-10-24): the Promote
+  workflow fast-forwards `main` itself, and only a commit with the three
+  checks green gets in. Running `switch` again applies a changed rule set.
+  It also sets the repository variable `FLOW_PROMOTE=on`; the Promote and
+  Nightly workflows do nothing without it. `undo-switch` restores the old
+  ruleset and removes the variable.
 * **`show`** prints the current state.
 
 ## The switch, step by step

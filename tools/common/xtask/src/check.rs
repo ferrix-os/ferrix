@@ -230,6 +230,44 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "line endings",
         &[&["tools/common/check/check-line-endings.py"]],
     ),
+    // No development signing key's private state in the tree
+    // (docs/SIGNING.md §6.4, the consultant's D5), with its planted control.
+    (
+        "development keys",
+        &[
+            &["tools/common/check/check-no-dev-keys.py"],
+            &["tools/common/check/check-no-dev-keys.py", "--self-test"],
+        ],
+    ),
+    // Product signing's verifier is proved by host tests: their statement
+    // and branch coverage, measured by host-coverage.py, must be current
+    // against the source and every gap argued (docs/SIGNING.md §8.5; the
+    // consultant's S1-e, ledger 3738), with its control.
+    (
+        "host coverage",
+        &[
+            &["tools/common/gen/host-coverage.py", "--check"],
+            &["tools/common/gen/host-coverage.py", "--self-test"],
+        ],
+    ),
+    // Product signing's anchors, families and dependency rules
+    // (docs/SIGNING.md S3; the consultant's D1), with their controls.
+    (
+        "signing anchors",
+        &[
+            &["tools/common/check/check-signing-anchors.py"],
+            &["tools/common/check/check-signing-anchors.py", "--self-test"],
+        ],
+    ),
+    // The host measurement stands for every target only while their
+    // product code has no target-dependent part (ledger 3803 (4)).
+    (
+        "no target cfg",
+        &[
+            &["tools/common/check/check-no-target-cfg.py"],
+            &["tools/common/check/check-no-target-cfg.py", "--self-test"],
+        ],
+    ),
     (
         "assembly allow-list",
         &[&["tools/common/check/check-asm-budget.py"]],

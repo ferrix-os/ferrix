@@ -616,7 +616,8 @@ fn serve_gpu(
             "intel: uapitrace: held waits, their answers, failed ioctls, and a wait unanswered for 2 s (ferrix.intelgpu.uapitrace)"
         );
     }
-    serve_nodes(device, location, firmware.plane, &port, &mut frontend)
+    let stat = steps.ioctlstat;
+    serve_nodes(device, location, firmware.plane, &port, &mut frontend, stat)
 }
 
 /// The MSI, bound to the serving loop's port under
@@ -1294,6 +1295,7 @@ fn serve_nodes<B: ferrix_intel_xelp::frontend::Backend>(
     plane: Option<m2::ScreenPlane>,
     port: &Port<Kernel>,
     frontend: &mut ferrix_intel_xelp::frontend::Frontend<B>,
+    ioctlstat: bool,
 ) -> Result<core::convert::Infallible, Step>
 where
     B::Memory: serve::AsVmo,
@@ -1320,6 +1322,9 @@ where
             }
         }
     };
+    if ioctlstat {
+        host.count_ioctls();
+    }
     match serve::serve(&mut host, port, frontend, &mut on_display) {
         Ok(never) => match never {},
         Err(stopped) => {

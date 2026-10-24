@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-sha256"
+description = "SHA-256 and SHA-256/192 (FIPS 180-4, RFC 9858 §2.1): the one hash the product signing verifier and the A/B slots use (docs/SIGNING.md §5.1)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

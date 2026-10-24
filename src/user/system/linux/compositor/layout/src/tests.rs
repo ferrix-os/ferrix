@@ -4568,6 +4568,12 @@ fn a_minimized_window_comes_back_when_it_is_focused() {
     focus(&mut state, 2);
     let _minimized = state.minimize(WindowId(2)).unwrap();
     assert!(state.is_minimized(WindowId(2)));
+    // And it is listed with the workspace it goes back to, which is how
+    // the overview and the switcher find it again.
+    assert_eq!(
+        state.minimized_windows(),
+        [(WindowId(2), state.active_workspace(M1).unwrap())]
+    );
     assert_eq!(rects(&state), [(1, r(100, 100, 640, 480))], "only 1 shows");
     assert_eq!(focused(&state), Some(1), "the focus fell back");
     // Minimizing again does nothing.
@@ -4575,6 +4581,7 @@ fn a_minimized_window_comes_back_when_it_is_focused() {
 
     focus(&mut state, 2);
     assert!(!state.is_minimized(WindowId(2)));
+    assert!(state.minimized_windows().is_empty());
     assert_eq!(
         rects(&state),
         [(1, r(100, 100, 640, 480)), (2, r(200, 200, 640, 480))],

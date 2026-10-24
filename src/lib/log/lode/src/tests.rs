@@ -104,6 +104,81 @@ fn a_scan_goes_on_from_an_offset() {
     assert_eq!(rest.records[0].record.seqnum, 2);
 }
 
+/// `bytes` read back to front in pages of `most`, oldest first.
+fn paged_back(bytes: &[u8], most: usize) -> Vec<u64> {
+    let mut end = bytes.len();
+    let mut pages: Vec<Vec<u64>> = Vec::new();
+    loop {
+        let (page, start) = segment::entries_before(bytes, end, most);
+        if page.is_empty() {
+            break;
+        }
+        assert!(page.len() <= most);
+        assert_eq!(page[0].offset, start);
+        pages.push(page.iter().map(|found| found.record.seqnum).collect());
+        end = start;
+    }
+    pages.into_iter().rev().flatten().collect()
+}
+
+#[test]
+fn a_segment_read_back_in_pages_is_what_a_scan_reads() {
+    let records: Vec<Record> = (1..=23).map(|n| record(n, "a line")).collect();
+    let bytes = segment_with(&records);
+    let scanned: Vec<u64> = segment::scan(&bytes, 0)
+        .unwrap()
+        .records
+        .iter()
+        .map(|found| found.record.seqnum)
+        .collect();
+    for most in [1, 2, 5, 23, 100] {
+        assert_eq!(paged_back(&bytes, most), scanned, "pages of {most}");
+    }
+    let (page, _) = segment::entries_before(&bytes, bytes.len(), 3);
+    assert_eq!(page[2].record.boot_id, [0xab; 16]);
+    assert_eq!(&*page[2].record.host, "box");
+    assert_eq!(page[2].record.fields, records[22].fields);
+}
+
+#[test]
+fn a_torn_tail_read_backwards_answers_nothing() {
+    let whole = segment_with(&[record(1, "one"), record(2, "two")]);
+    let second = segment::scan(&whole, 0).unwrap().records[1].offset;
+    for cut in second + 1..whole.len() {
+        let (page, start) = segment::entries_before(&whole[..cut], cut, 10);
+        assert!(page.is_empty(), "cut at {cut}");
+        assert_eq!(start, cut);
+    }
+}
+
+#[test]
+fn a_damaged_entry_stops_a_backward_read_after_the_entries_above_it() {
+    let mut bytes = segment_with(&[record(1, "one"), record(2, "two"), record(3, "three")]);
+    let second = segment::scan(&bytes, 0).unwrap().records[1].offset;
+    bytes[second + 30] ^= 1;
+    let (page, start) = segment::entries_before(&bytes, bytes.len(), 10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].record.seqnum, 3);
+    let (more, again) = segment::entries_before(&bytes, start, 10);
+    assert!(more.is_empty());
+    assert_eq!(again, start);
+}
+
+#[test]
+fn a_backward_read_answers_nothing_when_what_comes_before_end_is_not_older() {
+    // The entry at `end` is 2; the one before it 5: not below, so nothing,
+    // and the caller reads forwards instead.
+    let bytes = segment_with(&[record(5, "five"), record(2, "two")]);
+    let second = segment::scan(&bytes, 0).unwrap().records[0].length + header().encode().len();
+    let (page, start) = segment::entries_before(&bytes, second, 10);
+    assert!(page.is_empty());
+    assert_eq!(start, second);
+    // From the end, the walk stops where the sequence stops falling.
+    let (page, _) = segment::entries_before(&bytes, bytes.len(), 10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].record.seqnum, 2);
+}
+
 #[test]
 fn garbage_is_no_segment() {
     assert!(segment::scan(b"not a segment at all, nothing here", 0).is_none());
@@ -2576,4 +2651,88 @@ fn a_collected_crash_gives_its_blobs_to_its_tombstone_only() {
     }
     let oldest = fresh.for_crash(&crash(100), 4, &boot, now).unwrap();
     assert_eq!(oldest.get("BLOB_MAPS"), None);
+}
+
+#[test]
+fn the_loaders_last_kernel_file_gives_the_lines_lode_did_not_store() {
+    use crate::lastkernel::{self, mirrored_boot, unstored};
+    let file = [
+        "  pstore   at 0x4000000, 1 MiB: boot 7's kernel log, 120 bytes, 120 kept (unchecked)",
+        "  pstore   boot 7's last report: did not panic; its last line: c",
+        "  pstore   boot 7 ended: no stop was recorded",
+        "hello",
+        "a",
+        "hello",
+        "b",
+        "c",
+        "last words",
+        "hung here",
+        "",
+    ]
+    .join("\n");
+    let file = file.as_bytes();
+    let kept = lastkernel::parse(file).unwrap();
+    assert_eq!(kept.sequence, 7);
+    assert!(!kept.cut);
+    assert_eq!(kept.head.len(), 3);
+    assert_eq!(
+        kept.lines,
+        ["hello", "a", "hello", "b", "c", "last words", "hung here"]
+    );
+    // lode stored up to "c": the run found from the end, what follows new.
+    assert_eq!(
+        unstored(&kept, &["hello", "a", "hello", "b", "c"]).unwrap(),
+        ["last words", "hung here"]
+    );
+    // A repeated line alone does not mislead the match: "hello" at the end
+    // of what lode holds is matched with the lines before it.
+    assert_eq!(
+        unstored(&kept, &["hello", "a", "hello"]).unwrap(),
+        ["b", "c", "last words", "hung here"]
+    );
+    // All stored: nothing new.
+    assert!(unstored(&kept, &kept.lines.clone()).unwrap().is_empty());
+    // Nothing stored: all of it.
+    assert_eq!(unstored(&kept, &[]).unwrap().len(), 7);
+    // A message stored without the identifier the line began with.
+    let named_file = [
+        "  pstore   at 0x4000000, 1 MiB: boot 3's kernel log, 30 bytes, 30 kept (unchecked)",
+        "x",
+        "test: stored",
+        "test: unstored",
+        "",
+    ]
+    .join("\n");
+    let named = lastkernel::parse(named_file.as_bytes()).unwrap();
+    assert_eq!(
+        unstored(&named, &["x", "stored"]).unwrap(),
+        ["test: unstored"]
+    );
+    // Stored lines that are not there: nothing, rather than doubled.
+    assert_eq!(unstored(&kept, &["x", "y", "z"]), None);
+    // A wrapped ring's first line is a piece, and is dropped.
+    let wrapped = [
+        "  pstore   at 0x4000000, 1 MiB: boot 2's kernel log, 9000 bytes, 100 kept (unchecked)",
+        "lf line",
+        "whole",
+        "",
+    ]
+    .join("\n");
+    let wrapped = wrapped.as_bytes();
+    let kept = lastkernel::parse(wrapped).unwrap();
+    assert!(kept.cut);
+    assert_eq!(kept.lines, ["whole"]);
+    // Not the loader's file.
+    assert_eq!(lastkernel::parse(b"something else\n"), None);
+    // The kernel's line naming its own pstore boot.
+    assert_eq!(
+        mirrored_boot(
+            "  pstore   mirroring the log to 0x4000000, 1024 KiB, boot 7; 1186 bytes so far"
+        ),
+        Some(7)
+    );
+    assert_eq!(
+        mirrored_boot("  pstore   placement refused 5 made-up regions"),
+        None
+    );
 }

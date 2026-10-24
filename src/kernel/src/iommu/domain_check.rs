@@ -37,6 +37,15 @@ pub fn check_iommu() {
     if !crate::boot_checks::run() {
         return;
     }
+    // First, while no function's domain is made but by bring-up's own.
+    match check_isolation_before_pin() {
+        Ok(Some(line)) => println!("  iommu    {line}"),
+        Ok(None) => {}
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
     let domains = match check_domains(device::devices()) {
         Ok(report) => report,
         // A change refused for a write not cleaned fails the domains'
@@ -613,6 +622,71 @@ fn check_isolation_mark() -> Result<Option<alloc::string::String>, &'static str>
              ACCESS_DENIED",
             node.location(),
             isolated & DEVICE_ISOLATION_DMA_TRANSLATED as usize != 0
+        ))
+    })();
+    side.close_everything();
+    outcome.map(Some)
+}
+
+/// `L.device.55`: `device_isolation` asked of a PCI function whose domain
+/// no pin has made yet answers bit 0 for the domain the function is given,
+/// as devmgr asks it of a GPU before its driver starts: the domain is made
+/// by the answer, and bit 0 is set exactly when that domain is translated.
+/// `None` where every function's domain is made already.
+///
+/// # Errors
+///
+/// The answer did not make the domain, or did not say how it is translated.
+///
+/// Verifies: L.device.55
+fn check_isolation_before_pin() -> Result<Option<alloc::string::String>, &'static str> {
+    use ferrix_native_abi::nr;
+    use ferrix_native_abi::rights::Rights;
+    use ferrix_native_abi::types::DEVICE_ISOLATION_DMA_TRANSLATED;
+
+    let Some(node) = device::devices().iter().find(|node| {
+        node.pci_function().is_some() && node.reaches_memory() && node.domain_made().is_none()
+    }) else {
+        return Ok(None);
+    };
+    let side = object::check::Side::new()?;
+    let outcome = (|| {
+        let handle = side
+            .process
+            .with_handles(|table| {
+                table.insert(object::Object::Device(Arc::clone(node)), Rights::NONE)
+            })
+            .map_err(|_| "no room for a device handle")?;
+        let bits = side
+            .call(nr::DEVICE_ISOLATION, &[object::check::reg(handle)])
+            .map_err(|_| "device_isolation refused")?;
+        let said = bits & DEVICE_ISOLATION_DMA_TRANSLATED as usize != 0;
+        let Some(domain) = node.domain_made() else {
+            // No domain after the answer: either the node can be given none
+            // -- aliased, unresolved, its identity domain held -- and the
+            // answer must say untranslated, or the answer did not make it.
+            if node.domain().is_ok() {
+                return Err("device_isolation asked before any pin made no domain");
+            }
+            if said {
+                return Err("device_isolation said DMA translated for a node given no domain");
+            }
+            return Ok(alloc::format!(
+                "device_isolation asked of {} before any pin: {bits:#x}, a node that can be \
+                 given no domain",
+                node.location()
+            ));
+        };
+        if said != domain.translated() {
+            return Err(
+                "device_isolation asked before any pin did not answer for the domain the \
+                 device is given",
+            );
+        }
+        Ok(alloc::format!(
+            "device_isolation asked of {} before any pin: {bits:#x}, its domain made {}",
+            node.location(),
+            if said { "translated" } else { "untranslated" }
         ))
     })();
     side.close_everything();

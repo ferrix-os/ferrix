@@ -11,11 +11,18 @@
 //!    kernel refuses stops the launch. It comes first so that the kernel's
 //!    own guard is armed whatever `devmgr` decides next.
 //! 2. **Isolation**: `device_isolation` says the machine's interrupts are
-//!    isolated and this device's messages are remapped (bit 1). Without it
-//!    the GPU is not handed over at all: the kernel would refuse `nvrm` its
-//!    vectors and pins anyway, and a driver started only to be refused is a
-//!    launch that hides why. This is where F-57's closure is checked for the
-//!    `ferrix-3060` domain at N1's first boot.
+//!    isolated and this device's messages are remapped (bit 1), and that
+//!    an IOMMU translates its DMA (bit 0). Without bit 1 the GPU is not
+//!    handed over at all: the kernel would refuse `nvrm` its vectors and
+//!    pins anyway, and a driver started only to be refused is a launch that
+//!    hides why. This is where F-57's closure is checked for the
+//!    `ferrix-3060` domain at N1's first boot. Without bit 0 it is not
+//!    handed over either (`L.device.56`): a GPU executes what programs hand
+//!    it, so with its DMA untranslated -- a unit held to interrupt
+//!    remapping only, by an RMRR, an IVMD, or no translation -- one bad
+//!    page table entry is DMA anywhere, though its interrupts are isolated.
+//!    The kernel answers bit 0 for the domain the device gets before any
+//!    pin (`L.device.55`), so the answer is the driver's.
 //! 3. **The budget** ([`crate::budget`]): the pin budget is planned from
 //!    the kernel's ceiling and room and set with `device_set_limit`, before
 //!    the driver starts, since the kernel refuses a change under live pins.
@@ -111,6 +118,12 @@ pub enum HandOver {
         /// What `device_isolation` answered.
         isolation: u64,
     },
+    /// Not started: its interrupts are isolated, but no IOMMU translates
+    /// its DMA (`L.device.56`).
+    Untranslated {
+        /// What `device_isolation` answered.
+        isolation: u64,
+    },
     /// Not started: the ceiling or the room could not be read.
     LimitsUnread,
     /// Not started: the budget is [`GpuBudget::TooSmall`] or
@@ -135,6 +148,9 @@ pub fn hand_over(node: &impl Node) -> HandOver {
     };
     if isolation & INTERRUPTS_ISOLATED == 0 {
         return HandOver::Unisolated { isolation };
+    }
+    if isolation & DMA_TRANSLATED == 0 {
+        return HandOver::Untranslated { isolation };
     }
     let (Ok(ceiling), Ok(room)) = (node.ceiling(), node.room()) else {
         return HandOver::LimitsUnread;
@@ -260,6 +276,11 @@ impl fmt::Display for Line {
             HandOver::Unisolated { isolation } => write!(
                 f,
                 "devmgr   gpu {place} not started: its interrupts are not isolated \
+                 (device_isolation {isolation:#x})"
+            ),
+            HandOver::Untranslated { isolation } => write!(
+                f,
+                "devmgr   gpu {place} not started: its DMA is not translated \
                  (device_isolation {isolation:#x})"
             ),
             HandOver::LimitsUnread => write!(

@@ -358,7 +358,7 @@ mod tests {
         }
         // The shipped settings policies ask for a password, and a drop-in
         // may loosen them.
-        for service in ["settings.hostname", "settings.services"] {
+        for service in ["settings.hostname", "settings.services", "settings.time"] {
             let policy = load(&l, service, &mut |_| {}).unwrap();
             assert!(!policy.methods_none, "{service}");
             assert_eq!(policy.callers, Callers::Root, "{service}");
@@ -378,7 +378,7 @@ mod tests {
     fn the_shipped_policies_read_cleanly() {
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../services");
         let layers = [shipped];
-        for service in ["settings.hostname", "settings.services"] {
+        for service in ["settings.hostname", "settings.services", "settings.time"] {
             let mut warnings = Vec::new();
             let _ = load(&layers, service, &mut |w| warnings.push(w)).unwrap();
             assert!(warnings.is_empty(), "{service}: {warnings:?}");

@@ -3,7 +3,9 @@
 //! exactly what `docs/ARCHITECTURE.md` §7 says a driver gets, and makes a
 //! device safe again when its driver dies. `docs/DEVMGR.md` is the protocol.
 //!
-//! It drives nothing and reads no files. The kernel hands it, in DEVICES
+//! It drives nothing and reads one file: `/proc/cmdline`, only on a machine
+//! with a GPU, for the boot option that chooses the one `nvrm` drives
+//! ([`NVIDIA_OPTION`]). The kernel hands it, in DEVICES
 //! messages on its bootstrap channel, a job, every device node twice and
 //! every driver image as memory; `device_info` says what each device is; a
 //! table here, and nowhere in the kernel, says which driver it takes.
@@ -21,6 +23,7 @@ use ferrix_rt::log::Level;
 
 use ferrix_blkring::control::{Block, CONTROL_RIGHTS, DEVICE_RIGHTS, Message as Ring, Start};
 use ferrix_blkring::identity::DiskName;
+use ferrix_devmgr_proto::choice::{self, Chooser, Wanted};
 use ferrix_devmgr_proto::gpu::{self, HandOver, SetRefused, Unanswered};
 use ferrix_devmgr_proto::{
     ANSWER_BUSY, ANSWER_DONE, ANSWER_FAILED, ANSWER_NO_DEVICE, BUS_PCI, BUS_PLATFORM,
@@ -527,6 +530,9 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut count = 0_u32;
     let mut failed = 0_u32;
     let mut disks = 0_u32;
+    // Which GPU `nvrm` drives, chosen at the first one met: read from the
+    // command line only on a machine that has one.
+    let mut gpus: Option<Chooser> = None;
     let drv = Drivers::new(&job, &given.names, given.drivers, &given.images);
     for (index, pair) in given.devices.into_iter().take(given.count).enumerate() {
         let Some((device, keep)) = pair else {
@@ -555,6 +561,12 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             failed += 1;
             continue;
         };
+        // `nvrm` drives one GPU, never two: one not chosen stays unstarted,
+        // with its line, as a device nobody drives (not a failure).
+        if matches!(plan, Plan::Gpu(_)) && !chosen_gpu(gpus.get_or_insert_with(gpu_chooser), &info)
+        {
+            continue;
+        }
         // A GPU is handed over only once marked, isolated and budgeted,
         // through the handle devmgr keeps, which alone has `SET_LIMIT`. One
         // that is not stays unstarted, with its line, and counts as failed.
@@ -2083,6 +2095,76 @@ impl gpu::Node for GpuNode<'_> {
                 _ => SetRefused::Other,
             })
     }
+}
+
+/// The boot option that names the GPU `nvrm` drives, as `ssss:bb:dd.f` or
+/// `bb:dd.f` (`ferrix_devmgr_proto::choice`); without it, the first GPU
+/// met. Read by this program from `/proc/cmdline`, never by the kernel.
+const NVIDIA_OPTION: &str = "ferrix.nvidia";
+/// [`NVIDIA_OPTION`] as it starts its word.
+const NVIDIA_WORD: &[u8] = b"ferrix.nvidia=";
+
+/// The chooser of the one GPU, from the command line. Unreadable, it is
+/// said, and the first GPU met is the one.
+fn gpu_chooser() -> Chooser {
+    let mut line = [0_u8; 2048];
+    let wanted = match read_cmdline(&mut line) {
+        Some(len) => choice::wanted(line.get(..len).unwrap_or_default(), NVIDIA_WORD),
+        None => {
+            say(
+                Level::Warning,
+                format_args!(
+                    "devmgr   /proc/cmdline unreadable: no {NVIDIA_OPTION}, the first GPU met is nvrm's"
+                ),
+            );
+            Wanted::First
+        }
+    };
+    Chooser::new(wanted, NVIDIA_OPTION)
+}
+
+/// Whether the GPU `info` names is the one `nvrm` drives, said in its line.
+fn chosen_gpu(chooser: &mut Chooser, info: &DeviceInfo) -> bool {
+    let pick = chooser.pick(info.location);
+    let level = if pick.takes() {
+        Level::Info
+    } else {
+        Level::Notice
+    };
+    say(level, format_args!("{}", chooser.line(pick, info.location)));
+    pick.takes()
+}
+
+/// `/proc/cmdline` into `line`: its length, or `None`.
+fn read_cmdline(line: &mut [u8]) -> Option<usize> {
+    use ferrix_rt::linux::{self, numbers};
+    const AT_FDCWD: usize = (-100_isize) as usize;
+    const O_RDONLY: usize = 0;
+    let path = b"/proc/cmdline\0";
+    // SAFETY: `path` is NUL-terminated and borrowed for the call.
+    let fd = unsafe {
+        linux::call(
+            numbers::OPENAT,
+            [AT_FDCWD, path.as_ptr().addr(), O_RDONLY, 0, 0, 0],
+        )
+    }
+    .ok()?;
+    let mut len = 0;
+    while let Some(rest) = line.get_mut(len..) {
+        if rest.is_empty() {
+            break;
+        }
+        match linux::read(fd, rest) {
+            Ok(0) => break,
+            Ok(got) => len += got,
+            Err(_) => {
+                let _ = linux::close(fd);
+                return None;
+            }
+        }
+    }
+    let _ = linux::close(fd);
+    Some(len)
 }
 
 /// Hand the GPU `keep` names over to its driver, or say why not

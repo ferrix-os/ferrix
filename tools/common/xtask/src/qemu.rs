@@ -523,8 +523,9 @@ fn queue_problem(arch: Arch, lines: &[String]) -> Option<String> {
 /// What every x86-64 boot must print of interrupt remapping
 /// (`docs/NVIDIA.md` §12.3, N0g): the unit's bring-up with `CFIS` read back
 /// clear, check R9, R1 to R3, `L.device.28`, R10, R5, the stray deliveries,
-/// and R8, each by the words that say it held.
-const REMAP_LINES: [(&str, &str); 8] = [
+/// R8, and `L.device.55`'s `device_isolation` before any pin, each by the
+/// words that say it held.
+const REMAP_LINES: [(&str, &str); 9] = [
     (
         "remapping on (256 entries, xAPIC format), CFIS=0 read back",
         "the VT-d unit never said it remaps with compatibility format blocked",
@@ -556,6 +557,10 @@ const REMAP_LINES: [(&str, &str); 8] = [
     (
         "byte received while it was masked read by the service after its conversion",
         "the console's line was never serviced once after its conversion",
+    ),
+    (
+        "device_isolation asked of pci ",
+        "L.device.55's check never asked device_isolation of a node before any pin",
     ),
 ];
 

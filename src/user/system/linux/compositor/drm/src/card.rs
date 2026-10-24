@@ -1108,9 +1108,11 @@ impl Card {
     }
 
     /// A second descriptor on this card, for a thread of the compositor's
-    /// own to make its [`Card::dirty`] calls on: on a virtio-gpu each waits
-    /// until the host has shown the frame, which a compositor's loop should
-    /// not.
+    /// own to make its [`Card::dirty`] and [`Card::page_flip`] calls on: on
+    /// Ferrix each waits until the driver has shown the frame -- a
+    /// virtio-gpu's host, the Intel driver's next vertical blank -- which a
+    /// compositor's loop should not. The copy shares the open file, so it
+    /// is master when the card is.
     ///
     /// # Errors
     ///
@@ -1240,8 +1242,8 @@ impl Card {
     }
 }
 
-/// A second descriptor on a card, which makes [`Card::dirty`]'s call and no
-/// other ([`Card::flusher`]).
+/// A second descriptor on a card, which makes [`Card::dirty`]'s and
+/// [`Card::page_flip`]'s calls and no other ([`Card::flusher`]).
 #[derive(Debug)]
 pub struct Flusher {
     fd: OwnedFd,
@@ -1255,6 +1257,23 @@ impl Flusher {
     /// Whatever the card said; `ENODEV` once its driver has gone.
     pub fn dirty(&self, framebuffer: u32, clips: &[(u32, u32, u32, u32)]) -> io::Result<()> {
         dirty_on(self.fd.as_raw_fd(), framebuffer, clips)
+    }
+
+    /// [`Card::page_flip`] to the framebuffer `framebuffer` on the CRTC
+    /// `crtc`: what a compositor's flipping thread makes, since on Ferrix
+    /// the call returns once the driver has shown the frame.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the card said; `ENODEV` once its driver has gone.
+    pub fn page_flip(&self, crtc: u32, framebuffer: u32) -> io::Result<()> {
+        let mut flip = CrtcPageFlip {
+            crtc_id: crtc,
+            fb_id: framebuffer,
+            flags: drm::PAGE_FLIP_EVENT,
+            ..CrtcPageFlip::ZERO
+        };
+        ioctl_on(self.fd.as_raw_fd(), drm::IOCTL_MODE_PAGE_FLIP, &mut flip)
     }
 }
 

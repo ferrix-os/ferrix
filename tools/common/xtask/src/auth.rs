@@ -238,7 +238,12 @@ pub(crate) fn carried(arch: Arch, sabotage: Option<&str>) -> Result<Vec<File>> {
         // with their own password. In busybox's place.
         file("bin/su".to_owned(), 0o4755, read(&built.su)?),
     ];
+    // The settings writer's policies go with it (ledger 3558 (6)).
+    let writer = crate::settingsd::writer()?;
     for (name, bytes) in shipped(SERVICES)? {
+        if !writer && name.starts_with("settings.") {
+            continue;
+        }
         files.push(file(
             format!("lib/ferrix/auth/services/{name}"),
             0o644,

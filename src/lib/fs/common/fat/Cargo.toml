@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-fat"
+description = "FAT32, read only: a file read off a volume by path, every step bounded"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

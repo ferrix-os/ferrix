@@ -363,6 +363,7 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
         }
         None => DESKTOP_DEFAULTS.to_owned(),
     };
+    let defaults = nazuna_defaults(args, defaults)?;
     // The desktop a person watches boots as a board's does: with its
     // self-checks skipped, which only the `desktop` boot of the judged ones
     // is.
@@ -498,6 +499,31 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
 /// The serial port's shell on a board's desktop: busybox's, in a session of
 /// its own with the console as its terminal.
 const SERIAL_SHELL: &str = "/bin/busybox setsid -c /bin/busybox sh -i";
+
+/// nazuna's layout (`--nazuna-layout`): the kernel's console on the boot
+/// display, which is the emulated card's; `efifb` only when
+/// `FERRIX_NAZUNA_EFIFB` asks, since it would take card0 from nvrm's card
+/// (`crate::nvidia`'s `Layout::Nazuna`). Other boots keep `defaults`.
+fn nazuna_defaults(args: &Args, defaults: String) -> Result<String> {
+    if !args.nazuna_layout {
+        return Ok(defaults);
+    }
+    if !args.nvidia {
+        return Err(Error::new(
+            "--nazuna-layout is --nvidia's: the layout is the 3060 domain's",
+        ));
+    }
+    let efifb = std::env::var_os("FERRIX_NAZUNA_EFIFB").is_some();
+    println!(
+        "  nazuna layout: boot display on an emulated card (VNC on 127.0.0.1), ferrix.fbcon{}",
+        if efifb { " ferrix.efifb" } else { ", no efifb" }
+    );
+    Ok(format!(
+        "{} ferrix.fbcon{}\n",
+        defaults.trim_end(),
+        if efifb { " ferrix.efifb" } else { "" }
+    ))
+}
 
 /// The command-line options a desktop's image carries, in the file the loader
 /// reads after the card owner's `CMDLINE.TXT` (`FERRIX/DEFAULTS.TXT`).

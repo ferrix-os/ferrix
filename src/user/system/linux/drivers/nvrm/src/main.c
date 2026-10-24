@@ -39,14 +39,20 @@
  *     RTX 3060 at 29 Vulkan queues;
  *  8. says it is up, and sleeps until it is killed.
  *
+ * Beside that, from the moment it is up, a thread watches for the file
+ * that asks nvrm to quiesce its GPU before the machine goes away
+ * (docs/NVIDIA.md §13), and shuts the adapter down when it appears.
+ *
  * Every line goes to standard error, which is the console, in one write.
  * A step that fails says so and exits with its number.
  */
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "core-calls.h"
@@ -105,6 +111,10 @@ extern int nvrm_kms_init(void);
 extern int nvrm_kms_show(void);
 extern int nvrm_chardev_publish(const uint16_t *minors, uint32_t count);
 extern int nvrm_chardev_serve(void);
+extern int nvrm_chardev_quiesce(uint32_t patience_ms);
+extern int nvrm_kms_quiesce(void);
+extern int nvrm_gpu_stop(void);
+extern unsigned char nvos_thread_spawn(void (*run)(void *), void *argument);
 
 /* The device's place, as devmgr writes it: bb:dd.f. */
 static char place[16];
@@ -133,6 +143,128 @@ static int stop(enum step step, const char *what, long status)
 {
 	say("stopped: %s (status %ld)", what, status);
 	return (int)step;
+}
+
+/*
+ * The quiesce (docs/NVIDIA.md §13). Whoever is about to take the machine
+ * away -- xtask before it destroys the card's domain, a script before it
+ * ends -- creates QUIESCE_ASK, which only root can, and nvrm then leaves
+ * the GPU as NVIDIA's driver leaves it when its last file is closed:
+ *
+ *  1. the device files refuse every new request, the requests under way
+ *     are waited for, and every open file is closed, which frees its RM
+ *     clients as the death of their processes would;
+ *  2. NVKMS's device is released and freed, which shuts the heads down and
+ *     frees the display's channels;
+ *     (when requests are still under way after the wait of step 1, steps
+ *     2 and 3 are left out and the line says so);
+ *  3. the adapter is shut down (NVIDIA's nv_shutdown_adapter), which
+ *     unloads the GSP firmware.
+ *
+ * Each step says what it did, and the last line is `quiesce: done`, after
+ * which QUIESCE_DONE exists for a script to wait on. A GPU that does not
+ * answer cannot hold the machine: nothing waits on nvrm, the asker waits a
+ * bounded time of its own, and after QUIESCE_PATIENCE_S nvrm says which
+ * step it is stuck in. nvrm stays up afterwards, refusing its files.
+ */
+#define QUIESCE_ASK "/run/nvrm-quiesce"
+#define QUIESCE_DONE "/run/nvrm-quiesced"
+#define QUIESCE_POLL_MS 250
+#define QUIESCE_DRAIN_MS 3000
+#define QUIESCE_PATIENCE_S 20
+
+/* BAR0's first register once it is mapped, and whether an NVIDIA GPU was
+ * started on it. */
+static volatile const uint32_t *boot0;
+static volatile int gpu_started;
+
+/* The step the quiesce is in, and whether it is over, for the watchdog. */
+static const char *volatile quiesce_step = "nothing";
+static volatile int quiesce_over;
+
+static long long now_ms(void)
+{
+	struct timespec at = { 0, 0 };
+	(void)clock_gettime(CLOCK_MONOTONIC, &at);
+	return (long long)at.tv_sec * 1000 + at.tv_nsec / 1000000;
+}
+
+/* Say so when the quiesce has not ended in time; it is not interrupted,
+ * since a step cannot be abandoned half-way, and may still end. */
+static void quiesce_watchdog(void *unused)
+{
+	(void)unused;
+	for (int waited = 0; waited < QUIESCE_PATIENCE_S * 10; waited++) {
+		if (quiesce_over)
+			return;
+		usleep(100 * 1000);
+	}
+	if (!quiesce_over)
+		say("quiesce: not done after %d s, in %s; the GPU is left as "
+		    "it is", QUIESCE_PATIENCE_S, quiesce_step);
+}
+
+static void quiesce(void)
+{
+	long long began = now_ms();
+
+	say("quiesce: asked by %s", QUIESCE_ASK);
+	if (!gpu_started) {
+		say("quiesce: no GPU is started: nothing to shut down");
+	} else {
+		if (!nvos_thread_spawn(quiesce_watchdog, 0))
+			say("quiesce: no thread for the watchdog; going on "
+			    "without it");
+
+		quiesce_step = "the device files (requests under way)";
+		int closed = nvrm_chardev_quiesce(QUIESCE_DRAIN_MS);
+		if (closed < 0) {
+			/* NVIDIA shuts an adapter down only when nothing
+			 * holds it; a request still inside RM does. */
+			say("quiesce: the adapter was NOT shut down: requests "
+			    "are still under way, and NVKMS and the adapter "
+			    "are left as they are");
+		} else {
+			say("quiesce: the device files refuse requests; %d "
+			    "open file(s) closed", closed);
+
+			quiesce_step = "NVKMS (freeing its device)";
+			say("quiesce: NVKMS: %d device(s) released and freed",
+			    nvrm_kms_quiesce());
+
+			quiesce_step = "the adapter (rm_disable_adapter, "
+				       "rm_shutdown_adapter)";
+			int stopped = nvrm_gpu_stop();
+			if (stopped == 0)
+				say("quiesce: the adapter is shut down");
+			else
+				say("quiesce: the adapter was NOT shut down "
+				    "(step %d)", stopped);
+		}
+		if (boot0)
+			say("quiesce: NV_PMC_BOOT_0 reads 0x%08x", *boot0);
+	}
+	quiesce_over = 1;
+	say("quiesce: done in %lld ms", now_ms() - began);
+	int done = open(QUIESCE_DONE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (done >= 0)
+		(void)close(done);
+}
+
+/* Wait for QUIESCE_ASK, then quiesce, once. */
+static void quiesce_watch(void *unused)
+{
+	(void)unused;
+	while (access(QUIESCE_ASK, F_OK) != 0)
+		usleep(QUIESCE_POLL_MS * 1000);
+	quiesce();
+}
+
+static void quiesce_arm(void)
+{
+	if (!nvos_thread_spawn(quiesce_watch, 0))
+		say("quiesce: no thread to watch for %s; this GPU cannot be "
+		    "quiesced", QUIESCE_ASK);
 }
 
 /* Wait for the bootstrap channel to carry START, and take the device. */
@@ -191,6 +323,7 @@ static int bar0(uint32_t device, const struct nv_device_info *info)
 		if (nv_failed(at))
 			return stop(STEP_BAR0, "io_mapping_map refused BAR0", at);
 		uint32_t value = *(volatile const uint32_t *)at;
+		boot0 = (volatile const uint32_t *)at;
 		if (info->vendor_id == NVIDIA_VENDOR)
 			say("BAR0 mapped, %llu KiB; NV_PMC_BOOT_0 reads 0x%08x",
 			    (unsigned long long)(aperture.len >> 10), value);
@@ -417,6 +550,11 @@ int main(void)
 		else
 			say("NVKMS loaded; display test %d", nvrm_kms_show());
 
+		/* Armed only now: until nvrm_kms_show has returned, this
+		 * thread uses NVKMS's device with no lock. */
+		gpu_started = 1;
+		quiesce_arm();
+
 		/* The device files, for nvrm's life. */
 		int served = nvrm_chardev_serve();
 		return stop(STEP_CHARDEV, "the device files' control failed",
@@ -428,6 +566,7 @@ int main(void)
 		return status;
 
 	say("skeleton up on %s; idle", place);
+	quiesce_arm();
 	for (;;)
 		sleep(3600);
 }

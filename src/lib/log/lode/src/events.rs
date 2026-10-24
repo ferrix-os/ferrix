@@ -43,7 +43,7 @@ pub struct Kind {
 
 /// Every kind, with its defaults: errors and crashes on, what could flood
 /// off.
-pub const KINDS: [Kind; 8] = [
+pub const KINDS: [Kind; 9] = [
     Kind {
         name: "window-opened",
         on: false,
@@ -99,6 +99,13 @@ pub const KINDS: [Kind; 8] = [
         level: 6,
         made_by: "lode",
         what: "crashes and app errors take a screenshot (capture.conf's Capture= too)",
+    },
+    Kind {
+        name: "pstore-import",
+        on: true,
+        level: 5,
+        made_by: "lode",
+        what: "the loader's FERRIX/LASTKERNEL.TXT: the previous boot's last kernel lines lode had not stored",
     },
 ];
 

@@ -14,5 +14,11 @@ libc = "0.2.189"
 compositor-socket = { path = "../socket" }
 compositor-wire = { path = "../wire" }
 
+[features]
+# The trusted prompt's channel (docs/SETTINGS-WRITER.md §12): only in an
+# image whose settings writer is present (ledger 3636 (10)); hyprix's and
+# sessiond's features of the same name turn it on.
+settings-prompt = []
+
 [lints]
 workspace = true

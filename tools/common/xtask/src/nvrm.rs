@@ -14,14 +14,16 @@
 //! Three boots, each judged by its lines:
 //!
 //! 1. **Handed over**, at 4 GiB, on the patched QEMU whose VT-d unit remaps
-//!    interrupts: devmgr marks the device, finds its interrupts isolated,
-//!    sets a pin budget (at 4 GiB, the floor cut to half the room, about
-//!    490 MiB of the RAM the kernel counts) and starts `nvrm-test`,
-//!    which reads its device from bootstrap, prints `device_isolation` with
-//!    bit 1, its budget -- the one devmgr set --, its apertures, the
+//!    interrupts: devmgr marks the device, finds its interrupts isolated
+//!    and its DMA translated (`device_isolation 0x3`), sets a pin budget
+//!    (at 4 GiB, the floor cut to half the room, about 490 MiB of the RAM
+//!    the kernel counts) and starts `nvrm-test`, which reads its device
+//!    from bootstrap, prints `device_isolation` with both bits, its budget -- the one devmgr set --, its apertures, the
 //!    configuration window, BAR0's first register, runs a thread, maps
 //!    and unmaps BAR0's first page through ferrix-nvos more times than a
-//!    mapping that outlived its unmap would allow, and idles.
+//!    mapping that outlived its unmap would allow, and idles. `nvrm-hold`
+//!    then asks it to quiesce (`docs/NVIDIA.md` §13), and the skeleton says
+//!    it has no GPU to shut down and that it is done.
 //! 2. **Refused, budget too small**, at the default 512 MiB: an eighth of a
 //!    quarter of that is under the 256 MiB `nvrm` needs, and devmgr starts
 //!    nothing.
@@ -31,7 +33,7 @@
 //!
 //! In the two refusals no `nvrm` line may appear and the kernel's devmgr
 //! report counts one failed. The init of every boot is `nvrm-hold`, which
-//! only keeps the machine up.
+//! keeps the machine up and asks `nvrm` to quiesce.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -83,10 +85,20 @@ const STEPS: &[&str] = &[
     "a thread ran and was joined",
     "kernel mappings: ",
     "skeleton up on ",
+    "quiesce: asked by /run/nvrm-quiesce",
+    "quiesce: no GPU is started: nothing to shut down",
+    "quiesce: done in ",
 ];
 
-/// `nvrm`'s last line.
+/// `nvrm`'s line once it is up.
 const UP: &str = "nvrm: skeleton up on ";
+
+/// `nvrm`'s last line: `nvrm-hold` asks it to quiesce (`docs/NVIDIA.md`
+/// §13), and the skeleton, with no GPU to shut down, answers at once.
+const QUIESCED: &str = "nvrm: quiesce: done in ";
+
+/// How long after it is up `nvrm` has to answer the request.
+const QUIESCE_PATIENCE: Duration = Duration::from_secs(30);
 
 /// devmgr's refusal for unisolated interrupts.
 const UNISOLATED: &str = "not started: its interrupts are not isolated (device_isolation 0x";
@@ -360,10 +372,20 @@ fn run(arch: Arch, image: &Path, kernel: &Path, args: &Args, boot: &Boot) -> Res
     qemu::watch_then(arch, image, kernel, args, REPORTED, |at| {
         if boot.handed {
             let deadline = Instant::now() + UP_PATIENCE;
+            let stopped = |lines: &[String]| {
+                lines
+                    .iter()
+                    .any(|line| line.contains("nvrm: stopped") || line.contains(REFUSED))
+            };
             let _ = at.read_more(deadline, |lines| {
-                lines.iter().any(|line| {
-                    line.contains(UP) || line.contains("nvrm: stopped") || line.contains(REFUSED)
-                })
+                lines.iter().any(|line| line.contains(UP)) || stopped(lines)
+            })?;
+            // Up: nvrm-hold's request to quiesce is answered next.
+            let deadline = Instant::now() + QUIESCE_PATIENCE;
+            let _ = at.read_more(deadline, |lines| {
+                lines.iter().any(|line| line.contains(QUIESCED))
+                    || stopped(lines)
+                    || !lines.iter().any(|line| line.contains(UP))
             })?;
         } else {
             at.read_what_was_said(QUIET)?;
@@ -408,8 +430,13 @@ fn judge_handed(lines: &[String]) -> Option<String> {
     let Some(place) = place_after(handed, "devmgr   gpu ").map(str::to_owned) else {
         return Some(format!("devmgr's line names no device: `{handed}`"));
     };
-    if !handed.contains("device_isolation 0x2") && !handed.contains("device_isolation 0x3") {
-        return Some(format!("devmgr's line does not show bit 1: `{handed}`"));
+    // Both bits: devmgr hands a GPU over only with its interrupts isolated
+    // and its DMA translated (`L.device.56`), and the kernel answers bit 0
+    // before any pin (`L.device.55`).
+    if !handed.contains("device_isolation 0x3") {
+        return Some(format!(
+            "devmgr's line does not show bits 0 and 1: `{handed}`"
+        ));
     }
     let Some(budget) = lines
         .iter()

@@ -12,7 +12,7 @@ use super::{TOO_SMALL, UNISOLATED, judge_handed, judge_refused, place_after, rep
 // volume, which mounts after devmgr's report, so the report comes before the
 // core is loaded.
 const HANDED_KVM: &str = "\
-devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x3 (interrupts isolated); handing it to nvrm\n\
 devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
 nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
 nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
@@ -27,11 +27,14 @@ nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no
 nvrm: a thread ran and was joined\n\
 nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
 nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: quiesce: asked by /run/nvrm-quiesce\n\
+nvrm: quiesce: no GPU is started: nothing to shut down\n\
+nvrm: quiesce: done in 0 ms\n\
 ";
 
 // The same boot under TCG.
 const HANDED_TCG: &str = "\
-devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x2 (interrupts isolated); handing it to nvrm\n\
+devmgr   gpu 00:04.0: marked for isolated interrupts, device_isolation 0x3 (interrupts isolated); handing it to nvrm\n\
 devmgr   gpu 00:04.0: pin budget 488 MiB, cut from 1024 MiB: the 1 GiB floor yields to the kernel's ceiling (3904 MiB of RAM)\n\
 nvrm: started on 00:04.0, 1b36:0005 class 00ff00, 2 apertures, 0 vectors; its device over bootstrap\n\
 nvrm: device_isolation 0x3: interrupts isolated (bit 1), DMA translated\n\
@@ -46,6 +49,9 @@ nvrm: BAR0 mapped, 4 KiB; its register 0x0 reads 0x00000000 (the test device: no
 nvrm: a thread ran and was joined\n\
 nvrm: kernel mappings: 5000 mapped and unmapped in turn over 1 page of addresses, then 200 held at once and unmapped\n\
 nvrm: skeleton up on 00:04.0; idle\n\
+nvrm: quiesce: asked by /run/nvrm-quiesce\n\
+nvrm: quiesce: no GPU is started: nothing to shut down\n\
+nvrm: quiesce: done in 0 ms\n\
 ";
 
 // The default 512 MiB machine, KVM.
@@ -112,7 +118,9 @@ fn a_hand_over_without_bit_one_or_its_budget_fails() {
     assert!(why.contains("not the 488 MiB devmgr set"), "{why}");
     let run = HANDED_KVM.replace("pin budget 488 MiB, cut", "pin budget 128 MiB, cut");
     assert!(judge_handed(&lines(&run)).is_some());
-    let run = HANDED_KVM.replace("device_isolation 0x2 (", "device_isolation 0x1 (");
+    let run = HANDED_KVM.replace("device_isolation 0x3 (", "device_isolation 0x1 (");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace("device_isolation 0x3 (", "device_isolation 0x2 (");
     assert!(judge_handed(&lines(&run)).is_some());
 }
 
@@ -124,6 +132,19 @@ fn a_hand_over_missing_a_step_or_out_of_order_fails() {
     let run = HANDED_KVM.replace("started on 00:04.0", "started on 00:05.0");
     assert!(judge_handed(&lines(&run)).is_some());
     let run = format!("{HANDED_KVM}nvrm: stopped: io_mapping_map refused BAR0 (status -13)\n");
+    assert!(judge_handed(&lines(&run)).is_some());
+}
+
+#[test]
+fn a_hand_over_whose_quiesce_is_not_answered_fails() {
+    let run = HANDED_KVM.replace("nvrm: quiesce: done in 0 ms\n", "");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace("nvrm: quiesce: asked by /run/nvrm-quiesce\n", "");
+    assert!(judge_handed(&lines(&run)).is_some());
+    let run = HANDED_KVM.replace(
+        "nvrm: quiesce: no GPU is started: nothing to shut down\n",
+        "nvrm: quiesce: the adapter is shut down\n",
+    );
     assert!(judge_handed(&lines(&run)).is_some());
 }
 

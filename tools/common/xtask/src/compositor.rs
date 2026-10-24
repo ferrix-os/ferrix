@@ -89,6 +89,7 @@ mod pointer;
 mod protocols;
 mod run;
 mod settings;
+mod settings_prompt;
 mod steam_store;
 pub(crate) mod steam_window;
 mod tole_demo;
@@ -121,7 +122,8 @@ use machine::{test_desktop, test_driver_restart};
 use monitors::{test_edid, test_mode, test_modes, test_monitors, test_scale, test_transform};
 use pointer::{test_cursor, test_pointer};
 use protocols::{
-    test_bar, test_clipboard, test_lock, test_menu, test_screenshot, test_taskbar, test_typing,
+    test_bar, test_clipboard, test_lock, test_menu, test_minimize, test_screenshot, test_taskbar,
+    test_typing,
 };
 use user_desktop::{test_everything_desktop, test_fuzzel, test_fuzzel_user};
 
@@ -409,8 +411,15 @@ struct Programs {
 impl Programs {
     /// Build them all for `arch`.
     fn build(arch: Arch) -> Result<Self> {
+        // The trusted prompt is in hyprix and sessiond exactly where the
+        // settings writer is (docs/SETTINGS-WRITER.md §12.8).
+        let writer = crate::settingsd::writer()?;
+        let hyprix = build_with(arch, "hyprix", "hyprix", writer)?;
+        let sessiond = build_with(arch, "compositor-sessiond", "sessiond", writer)?;
+        crate::settingsd::check_prompt(&hyprix, writer)?;
+        crate::settingsd::check_prompt(&sessiond, writer)?;
         Ok(Self {
-            hyprix: build(arch, "hyprix", "hyprix")?,
+            hyprix,
             client: build(arch, "compositor-pattern", "pattern")?,
             ctl: build(arch, "compositor-ctl", "hyprctl")?,
             plug: build(arch, "compositor-plug", "plug")?,
@@ -424,7 +433,7 @@ impl Programs {
             loginctl: crate::apps::program(arch, "hypridle", "loginctl")?,
             reboot: build(arch, "compositor-reboot", "reboot")?,
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
-            sessiond: build(arch, "compositor-sessiond", "sessiond")?,
+            sessiond,
             notifyd: build(arch, "compositor-notifyd", "notifyd")?,
             wallpaper: build(arch, "compositor-wallpaper", "wallpaper")?,
         })
@@ -468,19 +477,34 @@ pub(crate) fn reboot_program(arch: Arch) -> Result<PathBuf> {
 
 /// Build one of the compositor's programs for `arch`, and say where it is.
 fn build(arch: Arch, package: &str, binary: &str) -> Result<PathBuf> {
+    build_with(arch, package, binary, true)
+}
+
+/// [`build`], with its default features -- the trusted prompt's, in hyprix
+/// and sessiond -- or without them, in a target directory of their own so
+/// the two builds never replace each other.
+fn build_with(arch: Arch, package: &str, binary: &str, defaults: bool) -> Result<PathBuf> {
     let target = crate::display::target(arch).ok_or_else(|| {
         Error::new(format!(
             "{arch} has no virtio-gpu in QEMU; the compositor test runs on x86_64 and aarch64"
         ))
     })?;
-    let target_dir = paths::target_dir().join("compositor").join("hyprix");
+    let target_dir = paths::target_dir().join("compositor").join(if defaults {
+        "hyprix"
+    } else {
+        "hyprix-no-prompt"
+    });
     println!("  building src/user/system/linux/compositor/{binary} for {target}");
     let program = target_dir.join(target).join("release").join(binary);
+    let mut args = vec!["build", "--release", "-p", package, "--target", target];
+    if !defaults {
+        args.push("--no-default-features");
+    }
     crate::builds::Build::cargo(
         format!("cargo build (src/user/system/linux/compositor/{binary}) --target {target}"),
         paths::workspace_root().join("src/user/system/linux/compositor"),
     )
-    .args(["build", "--release", "-p", package, "--target", target])
+    .args(args)
     .env("CARGO_TARGET_DIR", &target_dir)
     .output(&program)
     .run()?;
@@ -524,7 +548,16 @@ pub(crate) fn test_compositor(args: &Args) -> Result<()> {
                 let checked = first || name == ALWAYS_CHECKED;
                 let mut these = boot_args.clone();
                 these.checks_skipped = !checked;
+                // A boot that cannot run on this machine says so and boots
+                // nothing: its serial log is the last boot's, so neither it
+                // nor the first place is judged by it.
+                let serial = paths::build_dir(arch).join("serial.log");
+                let before = std::fs::metadata(&serial).and_then(|m| m.modified()).ok();
                 boot(arch, &programs, &these)?;
+                let after = std::fs::metadata(&serial).and_then(|m| m.modified()).ok();
+                if after.is_none() || after == before {
+                    continue;
+                }
                 judge_checks(arch, name, checked)?;
                 first = false;
                 boot_args.checks_skipped = true;
@@ -552,6 +585,7 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
         "hyprlock-unset",
         "hyprlock-session",
         "session-end",
+        "settings-prompt",
     ]) {
         let _ = crate::apps::program(arch, "hyprlock", "hyprlock")?;
         let _ = crate::auth::carried(arch, None)?;
@@ -578,6 +612,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     }
     if asked(&["tole-demo"]) {
         tole_demo::build_ahead(arch)?;
+    }
+    if asked(&["tole-demo-gpu"]) {
+        tole_demo::build_ahead_gpu(arch)?;
     }
     if asked(&["locked", "locked-held"]) {
         let _ = build(arch, "compositor-vptr", "vlock")?;
@@ -705,7 +742,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 54] = [
+const BOOTS: [(&str, Boot); 57] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -720,6 +757,7 @@ const BOOTS: [(&str, Boot); 54] = [
     ("clipboard", test_clipboard),
     ("submap", test_submap),
     ("taskbar", test_taskbar),
+    ("minimize", test_minimize),
     ("twin", test_twin),
     ("screenshot", test_screenshot),
     ("screenshot-unshared", test_screenshot_unshared),
@@ -750,10 +788,12 @@ const BOOTS: [(&str, Boot); 54] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("settings-prompt", settings_prompt::test_settings_prompt),
     ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),
     ("tole-demo", tole_demo::test_tole_demo),
+    ("tole-demo-gpu", tole_demo::test_tole_demo_gpu),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),

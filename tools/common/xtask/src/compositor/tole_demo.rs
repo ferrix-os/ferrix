@@ -11,6 +11,17 @@
 //! (`ext_data_control_v1`), undone with Ctrl+Z, and the combo box's
 //! list opened, taking the keys, and closed by Escape, giving them back.
 //! The demo says where the keys are after each change.
+//!
+//! The demos are a static program, as every Ferrix client is, and are
+//! asked to draw on the GPU (`TOLE_RENDERER=gpu`): a static program
+//! cannot load Vulkan, so the boot also requires that it said so and drew
+//! on the CPU -- the fallback a program without a GPU takes.
+//!
+//! `test-compositor --boot tole-demo-gpu` is the same demo drawn by tole's
+//! GPU renderer, on Mesa's lavapipe: built as a glibc program against the
+//! yserver volume's Debian sysroot and run from the volume (`/data`) by its
+//! loader, as yserver is, with lavapipe's ICD. It requires the demo to say
+//! it drew on lavapipe, and the same screen and keys.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -27,8 +38,27 @@ use crate::{Error, Result};
 /// The boot's `hyprland.conf`: the demo as the desktop comes up.
 const CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor --boot tole-demo`.
+env = TOLE_RENDERER,gpu
 exec-once = /bin/tole-examples controls-light --window
 ";
+
+/// The GPU boot's `hyprland.conf`: the glibc demos on the volume's loader,
+/// lavapipe their Vulkan.
+const CONFIG_GPU: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor --boot tole-demo-gpu`.
+env = TOLE_RENDERER,gpu
+env = VK_ICD_FILENAMES,/data/usr/share/vulkan/icd.d/lvp_icd.json
+exec-once = /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu /bin/tole-examples controls-light --window
+";
+
+/// What the static demos say when asked for the GPU.
+const FELL_BACK: &str = "tole: drawing on the CPU: no Vulkan library";
+
+/// What the demo says it drew with: the static one on the CPU, the glibc
+/// one on lavapipe.
+const DRAWN_ON_CPU: &str = "drawn by cpu";
+/// The same, on the GPU boot.
+const DRAWN_ON_LAVAPIPE: &str = "drawn by gpu: llvmpipe";
 
 /// What the demo says once its window has a size.
 const UP: &str = "tole-examples: controls-light is up";
@@ -102,6 +132,92 @@ fn build_examples(arch: Arch) -> Result<PathBuf> {
     Ok(program)
 }
 
+/// Build the demos as an x86-64 glibc program against the yserver volume's
+/// Debian sysroot, so they run on its glibc and load its Mesa.
+fn build_examples_gnu() -> Result<PathBuf> {
+    let sysroot = paths::volume_directory("yserver")?.join("sysroot");
+    if !sysroot.join("usr/lib/x86_64-linux-gnu/libc.so.6").is_file() {
+        return Err(Error::new(format!(
+            "{} has no glibc: tools/common/fetch/fetch-yserver.sh makes the sysroot",
+            sysroot.display()
+        )));
+    }
+    let target = "x86_64-unknown-linux-gnu";
+    let target_dir = paths::target_dir().join("tole-gnu");
+    println!(
+        "  building tole's demos for {target} against {}",
+        sysroot.display()
+    );
+    let program = target_dir
+        .join(target)
+        .join("release")
+        .join("tole-examples");
+    // The sysroot's libraries first: the C compiler adds its own install's
+    // library directories outside the sysroot, which hold the host's
+    // glibc, newer than the volume's.
+    let flags = format!(
+        "-C link-arg=--sysroot={0} -L native={0}/usr/lib/x86_64-linux-gnu",
+        sysroot.display()
+    );
+    crate::builds::Build::cargo(
+        format!("cargo build (tole-examples) --target {target}"),
+        paths::workspace_root().join("src/user/system/linux/tole"),
+    )
+    .args([
+        "build",
+        "--release",
+        "-p",
+        "tole-examples",
+        "--target",
+        target,
+    ])
+    .env("CARGO_TARGET_DIR", &target_dir)
+    .env("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", flags)
+    .output(&program)
+    .run()?;
+    Ok(program)
+}
+
+/// Build what the GPU boot carries ahead of the first boot, when it will
+/// run.
+pub(super) fn build_ahead_gpu(arch: Arch) -> Result<()> {
+    if gpu_volume(arch).is_some() {
+        let _ = build_examples_gnu()?;
+    }
+    Ok(())
+}
+
+/// The yserver volume, which holds lavapipe, when the GPU boot can run on
+/// `arch`; why not said when it cannot.
+fn gpu_volume(arch: Arch) -> Option<PathBuf> {
+    if arch != Arch::X86_64 {
+        println!(
+            "  {arch}: tole-demo-gpu skipped: the yserver volume, which holds lavapipe, is x86-64"
+        );
+        return None;
+    }
+    // Only the volume's glibc and Mesa are used, which every yserver
+    // volume holds, so it need not hold the yserver commit pinned.
+    let directory = match std::env::var_os("FERRIX_YSERVER_VOLUME") {
+        Some(directory) => Ok(PathBuf::from(directory)),
+        None => paths::volume_directory("yserver"),
+    };
+    match directory.map(|d| d.join("yserver.img")) {
+        Ok(image) if image.is_file() => Some(image),
+        Ok(image) => {
+            println!(
+                "  {arch}: tole-demo-gpu skipped: {} is not there (tools/common/fetch/fetch-yserver.sh makes it)",
+                image.display()
+            );
+            None
+        }
+        Err(why) => {
+            println!("  {arch}: tole-demo-gpu skipped: {why}");
+            None
+        }
+    }
+}
+
 /// Build what the boot carries ahead of the first boot (`build_ahead`).
 pub(super) fn build_ahead(arch: Arch) -> Result<()> {
     let _ = build_examples(arch)?;
@@ -110,8 +226,12 @@ pub(super) fn build_ahead(arch: Arch) -> Result<()> {
 
 /// The demos' program and the tree's Inter, which they draw with.
 fn carried(arch: Arch) -> Result<Carried> {
-    let program = build_examples(arch)?;
-    let bytes = std::fs::read(&program)
+    carried_program(&build_examples(arch)?)
+}
+
+/// `program` as `/bin/tole-examples`, and the tree's Inter.
+fn carried_program(program: &std::path::Path) -> Result<Carried> {
+    let bytes = std::fs::read(program)
         .map_err(|error| Error::new(format!("{}: {error}", program.display())))?;
     let mut ports = vec![File {
         path: "bin/tole-examples".to_owned(),
@@ -140,9 +260,73 @@ fn carried(arch: Arch) -> Result<Carried> {
     })
 }
 
-/// The demo's boot.
+/// The demo's boot: the static demos, asked for the GPU, drawing on the
+/// CPU.
 pub(super) fn test_tole_demo(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (image, kernel) = judged_image(arch, programs, CONFIG, carried(arch)?, None, args)?;
+    let said = run_demo(arch, &image, &kernel, args)?;
+    if !said.iter().any(|line| line.contains(FELL_BACK)) {
+        return Err(Error::new(format!(
+            "{arch}: the static demo, asked for the GPU, never said `{FELL_BACK}`"
+        )));
+    }
+    judge_drawn_by(arch, &said, DRAWN_ON_CPU)?;
+    println!("  {arch}: asked for the GPU, the static demo said why not and drew on the CPU");
+    Ok(())
+}
+
+/// The GPU boot: the glibc demos on lavapipe from the yserver volume.
+///
+/// Skipped, and said, where it cannot run: on an architecture other than
+/// x86-64, whose volume it is, or on a machine without the volume.
+pub(super) fn test_tole_demo_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let Some(volume) = gpu_volume(arch) else {
+        return Ok(());
+    };
+    let mut args = args.clone();
+    args.data_image = Some(volume);
+    let carried = carried_program(&build_examples_gnu()?)?;
+    let (image, kernel) = judged_image(arch, programs, CONFIG_GPU, carried, None, &args)?;
+    let said = run_demo(arch, &image, &kernel, &args)?;
+    judge_drawn_by(arch, &said, DRAWN_ON_LAVAPIPE)?;
+    println!("  {arch}: tole's GPU renderer drew the demo on lavapipe");
+    Ok(())
+}
+
+/// What the demo last said it drew with must hold `wanted`. It says so as
+/// it comes up and again when that changes: the GPU is made on a thread
+/// while the first frames are drawn on the CPU (`docs/UI-FRAMEWORK.md`).
+fn judge_drawn_by(arch: Arch, said: &[String], wanted: &str) -> Result<()> {
+    if !said.iter().any(|line| line.contains(UP)) {
+        return Err(Error::new(format!("{arch}: the demo never said `{UP}`")));
+    }
+    match said
+        .iter()
+        .rev()
+        .find(|line| line.contains("tole-examples:") && line.contains("drawn by"))
+    {
+        Some(line) if line.contains(wanted) => {
+            println!("  {arch}: {}", line.trim());
+            Ok(())
+        }
+        Some(line) => Err(Error::new(format!(
+            "{arch}: the demo was not {wanted}: {}",
+            line.trim()
+        ))),
+        None => Err(Error::new(format!(
+            "{arch}: the demo never said what it drew with"
+        ))),
+    }
+}
+
+/// Boot `image`, drive the demo and judge its screen; answers what the
+/// guest said.
+fn run_demo(
+    arch: Arch,
+    image: &std::path::Path,
+    kernel: &std::path::Path,
+    args: &Args,
+) -> Result<Vec<String>> {
     let port = free_port()?;
     let mut qemu_args = args.clone();
     qemu_args.display = true;
@@ -154,7 +338,7 @@ pub(super) fn test_tole_demo(arch: Arch, programs: &Programs, args: &Args) -> Re
         said = drive(arch, port, &dump, watching)?;
         Ok(())
     };
-    let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
+    let _ = crate::qemu::watch_then(arch, image, kernel, &qemu_args, EITHER, hook)?;
     judge_still_running(arch, &said)?;
     let bytes =
         std::fs::read(&dump).map_err(|error| Error::new(format!("{}: {error}", dump.display())))?;
@@ -180,7 +364,7 @@ pub(super) fn test_tole_demo(arch: Arch, programs: &Programs, args: &Args) -> Re
          {accent} of its accent (the screen is {})",
         dump.display()
     );
-    Ok(())
+    Ok(said)
 }
 
 /// Drive the boot, and answer everything the guest said.

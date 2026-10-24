@@ -278,6 +278,11 @@ pub(crate) fn run(arch: Arch, files: &BoardFiles, args: &Args) -> Result<()> {
     // The same archive an image carries, pid 1's inputs included, so a board
     // unpacks what QEMU does, less the programs' symbols.
     let initramfs = card_initramfs(arch, &kernel.initramfs(initramfs)?)?;
+    // A card's loader and initramfs, as final: no development signing key
+    // in a claimed profile's (docs/SIGNING.md 6.4, D1).
+    let loader_bytes = std::fs::read(loader)
+        .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;
+    crate::signing::refuse_in_image(&loader_bytes, &initramfs)?;
     let initramfs_target = target.join(INITRD_PATH);
     std::fs::write(&initramfs_target, &initramfs)
         .map_err(|error| Error::new(format!("writing {}: {error}", initramfs_target.display())))?;

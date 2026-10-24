@@ -353,10 +353,12 @@ impl ToServer {
                 w.text(request.name())?;
                 match request {
                     Request::SetHostname { name } => w.text(name)?,
-                    Request::ServiceEnablePersistent { unit, enabled } => {
+                    Request::ServiceEnablePersistent { unit, enabled, now } => {
                         w.text(unit)?;
                         w.flag(*enabled);
+                        w.flag(*now);
                     }
+                    Request::SetTimezone { zone } => w.text(zone)?,
                 }
                 w.done()
             }
@@ -389,7 +391,9 @@ impl ToServer {
                     "service-enable-persistent" => Request::ServiceEnablePersistent {
                         unit: r.text()?,
                         enabled: r.flag()?,
+                        now: r.flag()?,
                     },
+                    "set-timezone" => Request::SetTimezone { zone: r.text()? },
                     _ => return Err(DecodeError::Request),
                 };
                 ToServer::Request { dry_run, request }

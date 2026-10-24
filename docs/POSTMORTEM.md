@@ -307,16 +307,21 @@ and every other `FERRIX-` in it made `FERRIX_` (Q6). The quoted line is
 **untrusted text** (L1): whatever the previous boot's programs printed to
 the console, or RAM firmware scribbled on.
 
-Then the whole text, by where the loader was started from -- **not yet**:
-PM3 lands without either (the consultant's ruling on deviation (c), ledger
-line 1238), and each comes to the consultant as its own review before its
-landing (P10, line 1202 C3):
+Then the whole text, by where the loader was started from (each its own
+review, P10; the consultant's ruling on deviation (c), ledger line 1238):
 
-* **A disk boot** (ESP or slot): `FERRIX/LASTKERNEL.TXT` on the ESP, the
-  previous one moved to `LASTKERNEL.PRV`, headed by the two lines above,
-  through PM2's `Services::replace_file`. Owed with PM2 (branch
-  `postmortem`), which is not on main: PM3 lands the extraction and the
-  console lines, and the file write is one call that lands with or after PM2.
+* **A disk boot** (ESP or slot): **built** (2026-10-24, the customer's path A
+  for lode's import, `docs/LOGGING.md` §5). `FERRIX/LASTKERNEL.TXT` on the
+  loader's own volume, the previous one moved to `LASTKERNEL.PRV` first,
+  headed by the report's lines above (as printed, `FERRIX-` defused, one a
+  line) and then the region's whole text, oldest first, through
+  `Services::replace_file` (PM2's, taken from the archived WIP 925ff2b05:
+  delete, create, write, close; no `SetInfo`). One line says it was kept and
+  how many bytes, or why not; a volume firmware will not write is that line
+  and the boot goes on. `test-postmortem`'s record case reads the file off
+  the image's ESP with `ferrix-fat`, the reader lode imports it with, and
+  requires the head lines to be boot 2's loader's and the rest boot 1's
+  region text byte for byte. The rest of PM2, `BOOTLOG.TXT`, is not built.
 * **A netboot** (iPXE with `REPORT.TXT`): the last 32 KiB of the text sent as
   a second report, name `LASTKERNEL.TXT`, through netboot-pm's generic
   `(name, bytes)` sender (its 64 KiB per-report limit). Owed with

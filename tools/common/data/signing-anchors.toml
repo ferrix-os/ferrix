@@ -1,0 +1,38 @@
+# The trust anchors of product signing (docs/SIGNING.md §3.3, §4.1, §6).
+#
+# Each anchor is an HSS public key (RFC 8554 §6.1: `L`, then the LMS public
+# key), 52 bytes as hex, with the kind it verifies and its anchor id.
+#
+# [release.*]      product keys: anchor ids 0 and 1 per kind, generated
+#                  inside an HSM. None exists yet: no HSM is bought until the
+#                  first claimed release with signed updates (§12 Q2).
+# [development.*]  the soft signer's keys (§6.4): anchor ids 0x8000 (32768)
+#                  and up, never in a claimed profile's image (the
+#                  consultant's D1, ledger 3731). Their private state is in
+#                  ~/.local/share/ferrix/signing-dev/ on the host that made
+#                  them, never in this tree (D5); a key committed by mistake
+#                  is replaced here with a new key and a new id.
+#
+# tools/common/check/check-signing-anchors.py validates this file in
+# `cargo xtask check`, and xtask refuses an image of a claimed profile that
+# carries a development key's bytes.
+#
+# Integers are decimal: xtask's TOML reader takes no hex.
+
+[development.slot]
+kind = "slot"
+anchor_id = 32768
+public_key = "000000010000000c000000074eb97450c1ce5969feb96f8f4914f0c82b729fe60f74cdfcb52c4848046ae3c11e8cdb2664c0b354"
+made = "2026-10-24, ferrix-softsign keygen dev-slot --height 15, on nazuna"
+
+[development.config]
+kind = "config"
+anchor_id = 32769
+public_key = "000000010000000c00000007a2b2e510978b46d3fd4cbf789a62ed9f456a31dac93f5a1156f0f7260fb251f5b823e7655b674a4b"
+made = "2026-10-24, ferrix-softsign keygen dev-config --height 15, on nazuna"
+
+[development.driver]
+kind = "driver"
+anchor_id = 32770
+public_key = "000000010000000c00000007f8b9fdf561e778cfb3b30de16bb66091e76d5f008c139e2239a504a2bfb1a7ef17299fc3c521f84c"
+made = "2026-10-24, ferrix-softsign keygen dev-driver --height 15, on nazuna"

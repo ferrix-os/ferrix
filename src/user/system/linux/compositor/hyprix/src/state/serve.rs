@@ -605,7 +605,11 @@ impl Compositor<'_> {
                 maximized,
                 fullscreen,
             } => {
-                if let Some((_, window)) = slot.windows.iter().find(|(top, _)| *top == toplevel) {
+                // One not yet laid out is acted on at its first commit, from
+                // what the server keeps of it.
+                if let Some((_, window)) = slot.windows.iter().find(|(top, _)| *top == toplevel)
+                    && self.state.workspace_of(*window).is_some()
+                {
                     effects.asked_states.push((*window, maximized, fullscreen));
                 }
             }
@@ -630,7 +634,9 @@ impl Compositor<'_> {
             // float, xdg_dialog` says the same thing by hand, and this
             // is the protocol saying it for itself.
             Event::ToplevelModal { toplevel, modal } => {
-                if let Some((_, window)) = slot.windows.iter().find(|(top, _)| *top == toplevel) {
+                if let Some((_, window)) = slot.windows.iter().find(|(top, _)| *top == toplevel)
+                    && self.state.workspace_of(*window).is_some()
+                {
                     effects.modals.push((*window, modal));
                 }
             }
@@ -650,31 +656,86 @@ impl Compositor<'_> {
                     self.injected.push(input);
                 }
             }
+            // A window the client has made: its id now, so that what the
+            // client says of it before its first commit is known to be
+            // its, and its place in the layout at that commit
+            // (`open_at_first_commit`).
             Event::ToplevelCreated { toplevel, .. } => {
                 let window = WindowId(u64::from(self.next_window));
                 self.next_window = self.next_window.saturating_add(1);
-                // A window with nowhere to go -- no monitor while a card
-                // is coming back -- is that window's trouble, not every
-                // other client's: it stays out of the layout, and its
-                // client goes on.
-                match self.state.open_new_window(window) {
-                    Ok(_) => slot.windows.push((toplevel, window)),
-                    Err(error) => (self.report)(&format!(
-                        "hyprix: a client's window could not be placed: {error:?}"
-                    )),
-                }
-                effects.changed = true;
+                slot.windows.push((toplevel, window));
             }
             Event::SurfaceCommitted { surface, change } => {
                 let left = effects.commits_left.entry(surface).or_default();
                 *left = left.saturating_sub(1);
                 let superseded = *left > 0;
-                self.surface_committed(index, surface, change, superseded);
+                self.surface_committed(index, surface, change, superseded, effects);
                 effects.changed = true;
             }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Put the window whose surface is `surface` into the layout at its
+    /// first commit, if it is not there already.
+    ///
+    /// A window is laid out from its first commit and not from
+    /// `get_toplevel`, as Hyprland lays out none before it maps. A toplevel
+    /// that never commits is not a window anybody can see, and tiled it was
+    /// an empty box that took half of what was left of the screen from
+    /// every window after it. On the N150 box (2026-10-24) a terminal
+    /// opened after a game had a dozen empty tiles beside it, hundreds more
+    /// squeezed to 0x0 under them, and was given 0x0 itself; `hyprctl` knew
+    /// of one window. yserver's client runtime leaves a toplevel behind
+    /// whenever making a window fails after `get_toplevel`, and yserver asks
+    /// again on the next pass of its loop. Such a toplevel is still the
+    /// client's, kept in its slot, so that destroying it or the client
+    /// going takes it away.
+    ///
+    /// What the client asked of it before -- fullscreen, maximized, modal
+    /// -- had no window to act on then (`take_event` keeps it back), and
+    /// the server's record of it is acted on now.
+    fn open_at_first_commit(&mut self, index: usize, surface: ObjectId, effects: &mut Effects) {
+        let Some(slot) = self.slots.get(index) else {
+            return;
+        };
+        let Some((toplevel, window)) = slot
+            .windows
+            .iter()
+            .find(|(top, _)| {
+                slot.client
+                    .toplevel(*top)
+                    .is_some_and(|state| state.surface == surface)
+            })
+            .copied()
+        else {
+            return;
+        };
+        if self.state.workspace_of(window).is_some() {
+            return;
+        }
+        // A window with nowhere to go -- no monitor while a card is coming
+        // back -- is that window's trouble, not every other client's: it
+        // stays out of the layout, unconfigured, and is placed at its next
+        // first commit.
+        if let Err(error) = self.state.open_new_window(window) {
+            (self.report)(&format!(
+                "hyprix: a client's window could not be placed: {error:?}"
+            ));
+            return;
+        }
+        effects.changed = true;
+        if let Some(top) = slot.client.toplevel(toplevel) {
+            if top.maximized || top.fullscreen {
+                effects
+                    .asked_states
+                    .push((window, top.maximized, top.fullscreen));
+            }
+            if top.modal {
+                effects.modals.push((window, true));
+            }
+        }
     }
 
     /// A surface of the connection at `index` committed: a window's first
@@ -688,7 +749,11 @@ impl Compositor<'_> {
         surface: ObjectId,
         change: compositor_server::Committed,
         superseded: bool,
+        effects: &mut Effects,
     ) {
+        if change.buffer.is_none() {
+            self.open_at_first_commit(index, surface, effects);
+        }
         let Some(slot) = self.slots.get_mut(index) else {
             return;
         };
@@ -702,6 +767,7 @@ impl Compositor<'_> {
                         .is_some_and(|state| state.surface == surface)
                 })
                 .copied()
+            && self.state.workspace_of(window).is_some()
         {
             // The first commit of a window asks to be
             // configured, and is where Hyprland applies the

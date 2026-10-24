@@ -814,6 +814,7 @@ pub(crate) fn desktop_files(
     // and the event kinds at their defaults, written out to be changed.
     files.push(crate::lode::enabled());
     files.push(crate::lode::crashd_enabled());
+    files.push(crate::lode::pstore_enabled());
     files.extend(crate::lode::desktop_settings());
     // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
     // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is

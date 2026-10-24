@@ -15,3 +15,7 @@
 # when asked (x-vendor-id, x-device-id, x-class-code), so test-intel-uapi
 # can boot a stand-in for Alder Lake-N's GPU, which QEMU does not emulate.
 0006-pci-testdev-stand-in-for-another-device-s-identity.patch
+# 0007: amd-iommu's events carry their address, the whole requester ID and
+# the RW flag, and a refused interrupt request is logged, as the AMD-Vi
+# row's checks read them (docs/AMD-VI.md section 1.6).
+0007-amd_iommu-log-events-as-the-specification-lays-them-out.patch

@@ -2845,9 +2845,18 @@ fn set_isolated_mark(node: &DeviceNode, value: u64) -> Result<usize, Errno> {
 
 /// `device_isolation`: how the device is isolated, as
 /// `DEVICE_ISOLATION_*` bits (`L.device.27`).
+///
+/// Bit 0 answers for the domain the device has, made here if no pin has
+/// made it yet: devmgr asks before it starts the driver, while nothing is
+/// pinned, and the domain is the node's for life, so the answer is the one
+/// the driver's pins will get (`L.device.55`). A node that can be given no
+/// domain -- one reaching no memory, a function whose identity domain is
+/// held -- answers 0. A refused or yielded node's domain may be made too,
+/// which widens nothing: a domain maps only what is pinned into it, and
+/// such a node is given no pins.
 fn device_isolation(process: &Process, device: Handle) -> Result<usize, Errno> {
     let node = device_in(process, device, Rights::NONE)?;
-    let translated = node.domain_made().is_some_and(|domain| domain.translated());
+    let translated = node.domain().is_ok_and(|domain| domain.translated());
     let mut bits = 0;
     if translated {
         bits |= types::DEVICE_ISOLATION_DMA_TRANSLATED;

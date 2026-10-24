@@ -6,14 +6,18 @@
 //! anyone is asked, and the password reaches no audit line or answer.
 
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ferrix_auth_client::{Person, Verdict, send_packet};
 use ferrix_settings_proto::{MAX_RECORD, RefusalKind, Request, ToClient, ToServer};
 
+use compositor_seat::prompt::{FromSeat, Secret as SeatSecret, ToSeat};
+
 use crate::authority::Authority;
 use crate::conversation::{self, Context, Peer};
+use crate::identity::{Identify, Program};
 use crate::requests::{Init, System};
 
 const PASSWORD: &str = "correct horse settings";
@@ -70,6 +74,23 @@ impl Init for Switches {
         self.0.lock().unwrap().push((unit.to_owned(), enabled));
         Ok(vec![format!("linked {unit}")])
     }
+
+    fn run(&self, unit: &str, start: bool) -> Result<Vec<String>, String> {
+        let verb = if start { "start" } else { "stop" };
+        self.0
+            .lock()
+            .unwrap()
+            .push((format!("{verb}:{unit}"), start));
+        if FAIL_START.with(std::cell::Cell::get) {
+            return Err(format!("{unit} failed to start"));
+        }
+        Ok(Vec::new())
+    }
+}
+
+thread_local! {
+    /// Whether the scripted init refuses a start, for this test's thread.
+    static FAIL_START: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// How the scripted client answers a prompt.
@@ -176,7 +197,168 @@ fn root(name: &str) -> PathBuf {
     )
     .unwrap();
     std::fs::write(root.join("etc/hostname"), "ferrix\n").unwrap();
+    // The allow-lists, naming settingsctl, a root-owned -- here the test's
+    // own uid's -- file nobody else may write (S3).
+    for dir in ["", "etc", "bin", "lib", "lib/ferrix", "lib/ferrix/settings"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+        std::fs::set_permissions(root.join(dir), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    for program in ["bin/settingsctl", "bin/zinc"] {
+        std::fs::write(root.join(program), "").unwrap();
+        std::fs::set_permissions(root.join(program), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    std::fs::write(
+        root.join(crate::apps::FILE),
+        "hostname = /bin/settingsctl\nservices = /bin/settingsctl\ntime = /bin/settingsctl\n",
+    )
+    .unwrap();
+    let zones = root.join("usr/share/zoneinfo");
+    std::fs::create_dir_all(zones.join("Europe")).unwrap();
+    std::fs::write(zones.join("UTC"), "TZif2 utc\nUTC0\n").unwrap();
+    std::fs::write(
+        zones.join("Europe/Berlin"),
+        "TZif2 berlin\nCET-1CEST,M3.5.0,M10.5.0/3\n",
+    )
+    .unwrap();
+    std::fs::write(zones.join("Europe/Bogus"), "not a zone\n").unwrap();
+    std::fs::write(root.join("etc/secret"), "TZif2 but outside\n").unwrap();
+    std::os::unix::fs::symlink("../../../etc/secret", zones.join("Escape")).unwrap();
+    std::os::unix::fs::symlink("/usr/share/zoneinfo/UTC", root.join("etc/localtime")).unwrap();
     root
+}
+
+/// The test's uid: what "root-owned" means under a test's root.
+fn me() -> u32 {
+    // SAFETY: getuid cannot fail.
+    unsafe { libc::getuid() }
+}
+
+/// Who asked: `/bin/settingsctl` started at tick 7, the same each time it
+/// is looked up -- or, scripted, a list of answers in turn.
+#[derive(Default)]
+struct Asker(Mutex<Vec<Option<Program>>>);
+
+fn program(exe: &str, start: u64) -> Option<Program> {
+    Some(Program {
+        exe: exe.to_owned(),
+        start,
+        parent: "/bin/zinc".to_owned(),
+    })
+}
+
+impl Identify for Asker {
+    fn of(&self, _pid: i32) -> Option<Program> {
+        let mut turns = self.0.lock().unwrap();
+        if turns.len() > 1 {
+            return turns.remove(0);
+        }
+        turns
+            .first()
+            .cloned()
+            .unwrap_or_else(|| program("/bin/settingsctl", 7))
+    }
+}
+
+/// What the stand-in for the seat does.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SeatDoes {
+    /// Types this test's password and allows.
+    Types,
+    /// Allows a prompt with no field.
+    Allows,
+    /// Cancels.
+    Cancels,
+    /// Says `busy` to the hello.
+    Busy,
+}
+
+/// The seat: `sessiond` and the compositor in one, on the prompt socket
+/// under the test's root; and every record it heard, by its first word.
+struct Seat {
+    heard: Arc<Mutex<Vec<String>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+fn seat(root: &Path, does: SeatDoes) -> Seat {
+    std::fs::create_dir_all(root.join("lib/ferrix/units")).unwrap();
+    std::fs::write(
+        root.join("lib/ferrix/units/hyprix.service"),
+        "[Service]\nExecStart=/bin/sessiond --user ferrix -- /bin/hyprix\n",
+    )
+    .unwrap();
+    let listener = crate::seat::listen(&root.join("prompt"));
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&heard);
+    let thread = std::thread::spawn(move || {
+        let connection = crate::seat::accept(&listener);
+        let fd = connection.as_raw_fd();
+        let mut buffer = vec![0_u8; 4096];
+        let send = |record: &FromSeat| send_packet(fd, &record.encode().unwrap()).unwrap();
+        while let Some(packet) = ferrix_auth_client_receive(fd, &mut buffer) {
+            let record = ToSeat::decode(packet).unwrap();
+            let word = format!("{record:?}");
+            kept.lock()
+                .unwrap()
+                .push(word.split([' ', '{']).next().unwrap().to_owned());
+            match (record, does) {
+                (ToSeat::Hello { .. }, SeatDoes::Busy) => {
+                    send(&FromSeat::Unable("busy".to_owned()));
+                }
+                (ToSeat::Hello { uid: 1000 }, _) => send(&FromSeat::Ready),
+                (ToSeat::Hello { .. }, _) => send(&FromSeat::Unable("not-here".to_owned())),
+                (ToSeat::Question { id, .. }, SeatDoes::Types) => send(&FromSeat::Answer {
+                    id,
+                    secret: SeatSecret::new(PASSWORD.as_bytes()).unwrap(),
+                }),
+                (ToSeat::Confirm { id }, SeatDoes::Allows | SeatDoes::Types) => {
+                    send(&FromSeat::Allow { id });
+                }
+                (ToSeat::Question { id, .. } | ToSeat::Confirm { id }, _) => {
+                    send(&FromSeat::Deny {
+                        id,
+                        why: "cancelled".to_owned(),
+                    });
+                }
+                (ToSeat::Close { .. }, _) => return,
+                _ => {}
+            }
+        }
+    });
+    Seat {
+        heard,
+        thread: Some(thread),
+    }
+}
+
+impl Seat {
+    fn heard(mut self) -> Vec<String> {
+        // The seat's thread ends at the close, or when settingsd hangs up.
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
+        self.heard.lock().unwrap().clone()
+    }
+}
+
+/// The context a test's settingsd runs with.
+fn context(root: &Path, script: &Arc<Script>, switches: Switches, asker: Asker) -> Context {
+    Context {
+        system: System {
+            root: root.to_path_buf(),
+            live: false,
+            init: Box::new(switches),
+        },
+        authority: Box::new(Shared(Arc::clone(script))),
+        passwd: root.join("etc/passwd"),
+        writing: Mutex::new(()),
+        identify: Box::new(asker),
+        prompt: root.join("prompt"),
+        trusted_uid: me(),
+        listener_uid: me(),
+        cancelled: Mutex::new(std::collections::HashMap::new()),
+        prompts: std::sync::atomic::AtomicU64::new(1),
+    }
 }
 
 fn run(
@@ -191,16 +373,7 @@ fn run(
     let script = Arc::new(script);
     let switches = Switches::default();
     let recorded = Arc::clone(&switches.0);
-    let context = Context {
-        system: System {
-            root: root.clone(),
-            live: false,
-            init: Box::new(switches),
-        },
-        authority: Box::new(Shared(Arc::clone(&script))),
-        passwd: root.join("etc/passwd"),
-        writing: Mutex::new(()),
-    };
+    let context = context(&root, &script, switches, Asker::default());
     let (ours, theirs) = pair();
     let other = std::thread::spawn(move || client(theirs, request, dry_run, answers));
     let answer = conversation::serve(ours.as_raw_fd(), peer, &context);
@@ -265,7 +438,8 @@ fn an_acceptance_for_the_peer_writes_the_name() {
         .flatten()
         .map(|entry| entry.file_name())
         .collect();
-    assert_eq!(names.len(), 2, "{names:?}");
+    // passwd, hostname, and what the zones' tests put there.
+    assert_eq!(names.len(), 4, "{names:?}");
 }
 
 #[test]
@@ -388,6 +562,7 @@ fn an_invalid_request_is_refused_before_anyone_is_asked() {
         Request::ServiceEnablePersistent {
             unit: "auth.socket".to_owned(),
             enabled: true,
+            now: true,
         },
         false,
         accepts(1000, "ferrix"),
@@ -462,6 +637,7 @@ fn a_switch_asks_init_once_it_is_allowed() {
     let request = Request::ServiceEnablePersistent {
         unit: "sshd.service".to_owned(),
         enabled: true,
+        now: false,
     };
     let run = run(
         "switch",
@@ -539,4 +715,458 @@ fn the_password_reaches_no_audit_line_and_no_answer() {
     for run in &runs {
         assert!(!format!("{:?}", run.answer).contains(PASSWORD));
     }
+}
+
+/// One request through the seat: the seat doing `does`, `authd` scripted
+/// by `script`, `asker` saying who asked. The answer, what the seat heard
+/// and what `authd` was asked.
+fn on_seat(
+    name: &str,
+    script: Script,
+    does: Option<SeatDoes>,
+    asker: Asker,
+) -> (ToClient, Vec<String>, usize, String) {
+    let root = root(name);
+    let seat = does.map(|does| seat(&root, does));
+    if does.is_none() {
+        // A seat account whose desktop is not running: the unit, no socket.
+        std::fs::create_dir_all(root.join("lib/ferrix/units")).unwrap();
+        std::fs::write(
+            root.join("lib/ferrix/units/hyprix.service"),
+            "ExecStart=/bin/sessiond --user ferrix -- /bin/hyprix\n",
+        )
+        .unwrap();
+    }
+    let script = Arc::new(script);
+    let context = context(&root, &script, Switches::default(), asker);
+    let (ours, theirs) = pair();
+    let other = std::thread::spawn(move || client(theirs, hostname("box"), false, Client::Answers));
+    let answer = conversation::serve(ours.as_raw_fd(), FERRIX, &context);
+    drop(ours);
+    other.join().unwrap();
+    let heard = seat.map(Seat::heard).unwrap_or_default();
+    let asked = script.asked.lock().unwrap().len();
+    let name_now = std::fs::read_to_string(root.join("etc/hostname")).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    (answer, heard, asked, name_now)
+}
+
+/// S4, S5: the seat's account is asked in the prompt, and the password the
+/// person typed there is what reaches authd; the client hears only how it
+/// ended.
+#[test]
+fn a_seat_account_is_asked_on_the_seat() {
+    let (answer, heard, asked, name) = on_seat(
+        "seat",
+        accepts(1000, "ferrix"),
+        Some(SeatDoes::Types),
+        Asker::default(),
+    );
+    assert_eq!(
+        answer,
+        ToClient::Done {
+            changed: true,
+            text: "the computer is called box (was ferrix)".to_owned()
+        }
+    );
+    assert_eq!(heard, ["Hello", "Ask", "Question", "Close"]);
+    assert_eq!(asked, 1);
+    assert_eq!(name, "box\n");
+    let said = crate::audit::SAID.lock().unwrap().clone();
+    assert!(
+        said.iter().any(|line| line
+            .contains("program=/bin/settingsctl account=ferrix auth=seat+password result=done")),
+        "{said:?}"
+    );
+}
+
+/// `Methods=none` on the seat: authd asks nothing, and the person still
+/// says yes before anything is made; a Cancel makes nothing and pauses that
+/// program's asking (S6).
+#[test]
+fn an_acceptance_with_no_question_waits_for_allow() {
+    let none = || Script {
+        verdict: Some(Ok(Verdict::Accepted {
+            uid: 1000,
+            account: "ferrix".to_owned(),
+        })),
+        prompt: false,
+        ..Script::default()
+    };
+    let (answer, heard, _, name) = on_seat(
+        "seat-allow",
+        none(),
+        Some(SeatDoes::Allows),
+        Asker::default(),
+    );
+    assert!(matches!(answer, ToClient::Done { .. }), "{answer:?}");
+    assert_eq!(heard, ["Hello", "Ask", "Confirm", "Close"]);
+    assert_eq!(name, "box\n");
+    let (answer, heard, _, name) = on_seat(
+        "seat-cancel",
+        none(),
+        Some(SeatDoes::Cancels),
+        Asker::default(),
+    );
+    match answer {
+        ToClient::Refused(refusal) => assert_eq!(refusal.kind, RefusalKind::Cancelled),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(heard, ["Hello", "Ask", "Confirm", "Close"]);
+    assert_eq!(name, "ferrix\n");
+}
+
+/// T10's host half: a denial of the password field makes nothing.
+#[test]
+fn a_denied_field_makes_nothing() {
+    let (answer, _, _, name) = on_seat(
+        "seat-deny",
+        accepts(1000, "ferrix"),
+        Some(SeatDoes::Cancels),
+        Asker::default(),
+    );
+    assert!(matches!(answer, ToClient::Refused(_)), "{answer:?}");
+    assert_eq!(name, "ferrix\n");
+}
+
+/// T5's host half: a seat account with no desktop, or a busy seat, is
+/// refused before authd is asked -- never relayed to the client.
+#[test]
+fn a_seat_account_with_no_seat_to_ask_is_refused() {
+    let (answer, _, asked, name) =
+        on_seat("seat-none", accepts(1000, "ferrix"), None, Asker::default());
+    match answer {
+        ToClient::Refused(refusal) => {
+            assert_eq!(refusal.kind, RefusalKind::Unavailable);
+            assert!(
+                refusal.text.contains("no desktop is running"),
+                "{}",
+                refusal.text
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(asked, 0);
+    assert_eq!(name, "ferrix\n");
+    let (answer, _, asked, _) = on_seat(
+        "seat-busy",
+        accepts(1000, "ferrix"),
+        Some(SeatDoes::Busy),
+        Asker::default(),
+    );
+    assert!(
+        matches!(answer, ToClient::Refused(ref r) if r.kind == RefusalKind::Unavailable),
+        "{answer:?}"
+    );
+    assert_eq!(asked, 0);
+}
+
+/// S3: a program off the list, or one that is not the program that
+/// connected, is refused before anyone is asked.
+#[test]
+fn only_a_listed_program_bound_to_its_connection_asks() {
+    let zinc = Asker(Mutex::new(vec![program("/bin/zinc", 7)]));
+    let (answer, heard, asked, name) = on_seat("seat-zinc", accepts(1000, "ferrix"), None, zinc);
+    assert!(
+        matches!(answer, ToClient::Refused(ref r) if r.kind == RefusalKind::NotPermitted),
+        "{answer:?}"
+    );
+    assert!(heard.is_empty(), "{heard:?}");
+    assert_eq!(asked, 0);
+    assert_eq!(name, "ferrix\n");
+    let changed = Asker(Mutex::new(vec![
+        program("/bin/settingsctl", 7),
+        program("/bin/settingsctl", 8),
+    ]));
+    let (answer, _, asked, _) = on_seat("seat-changed", accepts(1000, "ferrix"), None, changed);
+    match answer {
+        ToClient::Refused(refusal) => assert!(
+            refusal.text.contains("not the one that connected"),
+            "{}",
+            refusal.text
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(asked, 0);
+}
+
+/// Ledger 3636 (2): an account with no seat is relayed to its client, but
+/// an acceptance nobody typed anything for is refused and makes nothing.
+#[test]
+fn a_relayed_acceptance_with_no_question_is_refused() {
+    let run = run(
+        "relay-none",
+        FERRIX,
+        hostname("box"),
+        false,
+        Script {
+            verdict: Some(Ok(Verdict::Accepted {
+                uid: 1000,
+                account: "ferrix".to_owned(),
+            })),
+            prompt: false,
+            ..Script::default()
+        },
+        Client::Answers,
+    );
+    assert_eq!(run.refused(), RefusalKind::NotPermitted);
+    assert_eq!(run.hostname(), "ferrix\n");
+    let said = crate::audit::SAID.lock().unwrap().clone();
+    assert!(
+        said.iter().any(|line| line.contains("result=needs-seat")),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn now_starts_or_stops_the_unit_after_its_links() {
+    let on = run(
+        "now-on",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        on.answer,
+        ToClient::Done {
+            changed: true,
+            text: "sshd.service is on for every boot, and started".to_owned()
+        }
+    );
+    assert_eq!(
+        *on.switches.lock().unwrap(),
+        [
+            ("sshd.service".to_owned(), true),
+            ("start:sshd.service".to_owned(), true)
+        ]
+    );
+    let off = run(
+        "now-off",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.socket".to_owned(),
+            enabled: false,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        *off.switches.lock().unwrap(),
+        [
+            ("sshd.socket".to_owned(), false),
+            ("stop:sshd.socket".to_owned(), false)
+        ]
+    );
+    // Refused: nothing is asked of init at all.
+    let refused = run(
+        "now-refused",
+        GUEST,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        Script {
+            verdict: Some(Ok(Verdict::Unavailable("guest is not in wheel".to_owned()))),
+            ..Script::default()
+        },
+        Client::Answers,
+    );
+    assert_eq!(refused.refused(), RefusalKind::NotPermitted);
+    assert!(refused.switches.lock().unwrap().is_empty());
+    // A start init refuses: the boot's setting is kept, and said so.
+    FAIL_START.with(|fail| fail.set(true));
+    let failed = run(
+        "now-failed",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    FAIL_START.with(|fail| fail.set(false));
+    // The record says the boot's setting changed and the start did not, and
+    // init was asked for the link before the start.
+    let said = crate::audit::SAID.lock().unwrap().clone();
+    assert!(
+        said.iter()
+            .any(|line| line.contains("result=start-failed before=- after=on")),
+        "{said:?}"
+    );
+    assert_eq!(
+        failed.switches.lock().unwrap().first(),
+        Some(&("sshd.service".to_owned(), true))
+    );
+    match &failed.answer {
+        ToClient::Refused(refusal) => {
+            assert_eq!(refusal.kind, RefusalKind::Failed);
+            assert!(
+                refusal.text.starts_with(
+                    "sshd.service is on for every boot, but init did not start it now"
+                ),
+                "{}",
+                refusal.text
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_zone_links_localtime_and_writes_the_footer() {
+    let zone = |name: &str| Request::SetTimezone {
+        zone: name.to_owned(),
+    };
+    let done = run(
+        "zone",
+        FERRIX,
+        zone("Europe/Berlin"),
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        done.answer,
+        ToClient::Done {
+            changed: true,
+            text: "the time zone is Europe/Berlin".to_owned()
+        }
+    );
+    assert_eq!(
+        std::fs::read_link(done.root.join("etc/localtime")).unwrap(),
+        Path::new("/usr/share/zoneinfo/Europe/Berlin")
+    );
+    assert_eq!(
+        std::fs::read_to_string(done.root.join("etc/TZ")).unwrap(),
+        "CET-1CEST,M3.5.0,M10.5.0/3\n"
+    );
+    let dry = run(
+        "zone-dry",
+        GUEST,
+        zone("Europe/Berlin"),
+        true,
+        Script::default(),
+        Client::Answers,
+    );
+    assert_eq!(
+        dry.answer,
+        ToClient::Done {
+            changed: true,
+            text: "would use the time zone Europe/Berlin; it uses UTC".to_owned()
+        }
+    );
+    assert!(!dry.root.join("etc/TZ").exists());
+    // No such zone, a file that is not one, and a link out of the
+    // directory: refused before anyone is asked, nothing written.
+    for (name, bad) in [
+        ("zone-none", "Mars/Olympus"),
+        ("zone-bogus", "Europe/Bogus"),
+        ("zone-escape", "Escape"),
+        ("zone-path", "../../../etc/secret"),
+    ] {
+        let refused = run(
+            name,
+            FERRIX,
+            zone(bad),
+            false,
+            accepts(1000, "ferrix"),
+            Client::Answers,
+        );
+        assert_eq!(refused.refused(), RefusalKind::Invalid, "{bad}");
+        assert_eq!(refused.asked(), 0, "{bad}");
+        assert_eq!(
+            std::fs::read_link(refused.root.join("etc/localtime")).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC"),
+            "{bad}"
+        );
+    }
+}
+
+/// Ledger 3636 (1), A6: a prompt listener that is not root is refused before
+/// a byte goes to it, and a session unit settingsd cannot read refuses
+/// every request before anyone is asked -- each end to end through
+/// `serve()`.
+#[test]
+fn a_seat_settingsd_cannot_trust_or_cannot_read_refuses() {
+    for (name, wrong_listener) in [("seat-listener", true), ("seat-unreadable", false)] {
+        let root = root(name);
+        let seat = wrong_listener.then(|| seat(&root, SeatDoes::Types));
+        if !wrong_listener {
+            std::fs::create_dir_all(root.join("lib/ferrix/units/hyprix.service.d")).unwrap();
+        }
+        let script = Arc::new(accepts(1000, "ferrix"));
+        let mut context = context(&root, &script, Switches::default(), Asker::default());
+        if wrong_listener {
+            // The listener is the test's uid: say root is someone else.
+            context.listener_uid = me() + 1;
+        }
+        let (ours, theirs) = pair();
+        let other =
+            std::thread::spawn(move || client(theirs, hostname("box"), false, Client::Answers));
+        let answer = conversation::serve(ours.as_raw_fd(), FERRIX, &context);
+        drop(ours);
+        other.join().unwrap();
+        let heard = seat.map(Seat::heard).unwrap_or_default();
+        match &answer {
+            ToClient::Refused(refusal) => {
+                assert!(
+                    matches!(
+                        refusal.kind,
+                        RefusalKind::Unavailable | RefusalKind::NotPermitted
+                    ),
+                    "{name}: {refusal:?}"
+                );
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+        assert!(heard.is_empty(), "{name}: the listener heard {heard:?}");
+        assert_eq!(script.asked.lock().unwrap().len(), 0, "{name}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("etc/hostname")).unwrap(),
+            "ferrix\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// Ledger 3636 (16): a request this settingsd does not know is answered
+/// `unsupported` with words, never silently.
+#[test]
+fn an_unknown_request_is_unsupported_and_said_so() {
+    let root = root("unknown-request");
+    let script = Arc::new(Script::default());
+    let context = context(&root, &script, Switches::default(), Asker::default());
+    let (ours, theirs) = pair();
+    // A REQUEST record naming a request this build has not got.
+    let mut packet = vec![1_u8, ferrix_settings_proto::VERSION, 0];
+    let name = b"set-moon-phase";
+    packet.extend_from_slice(&u16::try_from(name.len()).unwrap().to_le_bytes());
+    packet.extend_from_slice(name);
+    send_packet(theirs.as_raw_fd(), &packet).unwrap();
+    let answer = conversation::serve(ours.as_raw_fd(), FERRIX, &context);
+    match answer {
+        ToClient::Refused(refusal) => {
+            assert_eq!(refusal.kind, RefusalKind::Unsupported);
+            assert!(
+                refusal.text.starts_with("this settingsd knows only"),
+                "{}",
+                refusal.text
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }

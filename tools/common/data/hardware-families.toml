@@ -1,0 +1,49 @@
+# The hardware families a signed manifest names (docs/SIGNING.md §1.4).
+#
+# A manifest's `family` field (u32) is one of these ids. The high byte is
+# the architecture: 0x01 x86-64, 0x02 AArch64, 0x03 ARMv7-A, as the
+# manifest's `arch` byte gives it; the low byte numbers the family, 0x01
+# being the architecture's generic one. A claimed profile accepts only the
+# families its claim names, with no fallback to the generic one; a profile
+# without a claim accepts its own family, then the generic one of its arch
+# (§1.4). `recognised_by` is the rule the loader identifies the family by,
+# which slice S4 implements.
+#
+# Integers are decimal: xtask's TOML reader takes no hex. Validated by
+# tools/common/check/check-signing-anchors.py in `cargo xtask check`.
+
+[family.x86_64-uefi-pc]
+id = 257            # 0x0101
+arch = "x86_64"
+generic = true
+recognised_by = "arch; UEFI"
+
+[family.x86_64-n150]
+id = 258            # 0x0102
+arch = "x86_64"
+generic = false
+recognised_by = "SMBIOS processor and board strings of the SOYO M4 Pro (ferrix-smbios)"
+
+[family.aarch64-uefi-virt]
+id = 513            # 0x0201
+arch = "aarch64"
+generic = true
+recognised_by = "arch; SMBIOS system QEMU"
+
+[family.aarch64-pixel7]
+id = 514            # 0x0202
+arch = "aarch64"
+generic = false
+recognised_by = "its own loader (src/boot/vendor/google/pixel7); no slot path (§7.3)"
+
+[family.armv7a-uefi-virt]
+id = 769            # 0x0301
+arch = "armv7a"
+generic = true
+recognised_by = "arch; SMBIOS system QEMU"
+
+[family.armv7a-stm32mp157]
+id = 770            # 0x0302
+arch = "armv7a"
+generic = false
+recognised_by = "the device tree's st,stm32mp157 compatible (the DK1)"

@@ -683,23 +683,67 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// [`Error::Missing`] without `xdg_wm_base`.
+    /// [`Error::Missing`] without `xdg_wm_base`, or a request that cannot
+    /// be written -- a title with a NUL in it, or one too long for a
+    /// message. Nothing of the window is left on either side then.
     pub fn toplevel(&mut self, options: &ToplevelOptions) -> Result<SurfaceId, Error> {
         let (base, version) = self.global("xdg_wm_base")?;
         let id = self.new_surface_id();
         let surface = self.create_surface(id)?;
         let xdg = self.make(&xdg_shell::XDG_SURFACE, version, Role::XdgSurface(id));
-        self.send(
+        if let Err(error) = self.send(
             base,
             xdg_wm_base::request::GET_XDG_SURFACE,
             &[Arg::NewId(xdg), Arg::Object(surface)],
-        )?;
+        ) {
+            self.destroy_object(surface, wl_surface::request::DESTROY);
+            return Err(error);
+        }
         let toplevel = self.make(&xdg_shell::XDG_TOPLEVEL, version, Role::Toplevel(id));
-        self.send(
+        if let Err(error) = self.send(
             xdg,
             xdg_surface::request::GET_TOPLEVEL,
             &[Arg::NewId(toplevel)],
-        )?;
+        ) {
+            self.destroy_object(xdg, xdg_surface::request::DESTROY);
+            self.destroy_object(surface, wl_surface::request::DESTROY);
+            return Err(error);
+        }
+        // A window that could not be finished is taken down again, in the
+        // order the protocol destroys one: the compositor has already been
+        // sent `get_toplevel`, and a toplevel nobody destroys is the
+        // compositor's to keep for as long as the connection lasts. yserver
+        // asks again on every pass of its loop while one fails, and on the
+        // N150 box (2026-10-24) each one it left was another empty tile.
+        if let Err(error) = self.dress_toplevel(surface, toplevel, options) {
+            self.destroy_object(toplevel, xdg_toplevel::request::DESTROY);
+            self.destroy_object(xdg, xdg_surface::request::DESTROY);
+            self.destroy_object(surface, wl_surface::request::DESTROY);
+            return Err(error);
+        }
+        let _ = self.surfaces.insert(
+            id,
+            SurfaceState::new(
+                surface,
+                Kind::Toplevel {
+                    xdg,
+                    toplevel,
+                    options: options.clone(),
+                    pending: (0, 0),
+                },
+            ),
+        );
+        Ok(id)
+    }
+
+    /// What a new window says before its first commit -- its parent, title,
+    /// app id and size limits -- and that commit.
+    fn dress_toplevel(
+        &mut self,
+        surface: ObjectId,
+        toplevel: ObjectId,
+        options: &ToplevelOptions,
+    ) -> Result<(), Error> {
         // Before the first commit, where a compositor decides whether the
         // window floats.
         if let Some(Kind::Toplevel {
@@ -729,20 +773,7 @@ impl Client {
         if options.min_size != (0, 0) || options.max_size != (0, 0) {
             send_size_limits(self, toplevel, options.min_size, options.max_size)?;
         }
-        self.send(surface, wl_surface::request::COMMIT, &[])?;
-        let _ = self.surfaces.insert(
-            id,
-            SurfaceState::new(
-                surface,
-                Kind::Toplevel {
-                    xdg,
-                    toplevel,
-                    options: options.clone(),
-                    pending: (0, 0),
-                },
-            ),
-        );
-        Ok(id)
+        self.send(surface, wl_surface::request::COMMIT, &[])
     }
 
     /// Change a window's title (`xdg_toplevel.set_title`). Anything but a

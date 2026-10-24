@@ -420,7 +420,11 @@ is dropped (`kms/render/wl_direct.rs` in the fork;
 intervals went from about 17 and 42 ms in turn (sd 12) to 29 to 30 ms (sd
 0.8 to 0.9) at the same 33 to 34 frames a second; with frame generation
 off nothing is held. Every volume built over yserver's tree is made again
-for the pin.
+for the pin. The next pin, 5cd1bad4, ends a title at a NUL: a Zenity
+window of ProtonFixes had one in `_NET_WM_NAME`, hyprix refused its
+`set_title`, and the server made the window again on every pass of its
+loop, 112 times in a minute, each leaving hyprix an empty tile. A window
+the compositor refuses is now tried again once a second.
 
 2026-10-22: **an Intel client's frame reaches hyprix without a copy.**
 `fetch-yserver.sh` pins the fork at ab63f4b1. The card-less Wayland

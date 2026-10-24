@@ -11,6 +11,10 @@
 //!   way back on a machine where showing it directly misbehaves, and the
 //!   "before" of a measurement. Hyprland's own `render:direct_scanout`
 //!   stays its KMS-plane option with its default of 0, which this is not.
+//! * `HYPRIX_SYNC_FLIP=1`: a card's page flips and dirty flushes are made
+//!   on the loop and waited for, as before they went to a thread of their
+//!   own (`crate::flush::FlipThread`): the "before" of a measurement, and
+//!   the way back where the thread misbehaves.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -38,4 +42,10 @@ pub(crate) fn direct_scanout() -> bool {
 pub(crate) fn trace_input() -> bool {
     static TRACE: OnceLock<bool> = OnceLock::new();
     *TRACE.get_or_init(|| std::env::var("HYPRIX_INPUT_TRACE").is_ok_and(|value| value == "1"))
+}
+
+/// Whether flips are made on the loop and waited for (`HYPRIX_SYNC_FLIP=1`).
+pub(crate) fn sync_flip() -> bool {
+    static SYNC: OnceLock<bool> = OnceLock::new();
+    *SYNC.get_or_init(|| std::env::var("HYPRIX_SYNC_FLIP").is_ok_and(|value| value == "1"))
 }

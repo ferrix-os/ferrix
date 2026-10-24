@@ -195,7 +195,10 @@ impl Pending {
 /// Answer a request `Pending::read` says is ready, and close.
 ///
 /// Gives back the requests that change something, which the caller runs: this
-/// function holds no compositor.
+/// function holds no compositor. While `prompting` -- a trusted prompt is up
+/// (`docs/SETTINGS-WRITER.md` §12.4, ledger 3636 (6)) -- every request that
+/// would change something is refused and nothing is given back; the
+/// answers that only describe say nothing of the prompt.
 ///
 /// # Errors
 ///
@@ -205,6 +208,7 @@ pub fn serve(
     snapshot: &Snapshot,
     plugins: &mut crate::plugins::Plugins,
     settings: Option<&Path>,
+    prompting: bool,
 ) -> std::io::Result<Vec<compositor_ipc::Reply>> {
     let Pending {
         mut stream, line, ..
@@ -228,12 +232,17 @@ pub fn serve(
         // `setting` and `settings`: the Settings app's file, which only
         // the compositor knows the place of.
         if let Some(answered) = crate::settings::answer(&request, settings) {
+            if prompting && answered.then.is_some() {
+                answer.push_str(REFUSED_WHILE_PROMPTING);
+                continue;
+            }
             answer.push_str(&answered.answer);
             todo.extend(answered.then);
             continue;
         }
         match compositor_ipc::answer(&request, snapshot, compositor_ipc::Version::default()) {
             compositor_ipc::Reply::Text(text) => answer.push_str(&text),
+            _ if prompting => answer.push_str(REFUSED_WHILE_PROMPTING),
             other => {
                 // Hyprland answers `ok` for a request that did something and
                 // leaves the doing to the compositor; so does this, unless
@@ -249,6 +258,10 @@ pub fn serve(
     stream.flush()?;
     Ok(todo)
 }
+
+/// The answer to a request that would change something while a trusted
+/// prompt is up.
+const REFUSED_WHILE_PROMPTING: &str = "refused: a system prompt is up\n";
 
 /// Describe the compositor for an answer.
 ///

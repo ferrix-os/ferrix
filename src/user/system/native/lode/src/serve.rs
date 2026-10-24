@@ -123,6 +123,9 @@ struct Store {
     classes: Vec<Class>,
     /// A writer per class and owner, made when it first has a record.
     writers: Vec<Slot>,
+    /// This boot's writers, set aside while records of another boot are
+    /// written ([`Store::append_to_boot`]): still active to the vacuum.
+    parked: Vec<Slot>,
     /// The next record's sequence number.
     next: u64,
     /// The header every new segment gets, but its first sequence number.
@@ -184,17 +187,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let tombstones = ferrix_lode_core::tombstone::Tombstones::new(u64::from(
         events.count("tombstone").unwrap_or(5),
     ));
-    let mut store = Store {
-        persistent: persistent.map(|dir| dir.fd),
-        volatile: volatile.fd,
-        writers: Vec::new(),
-        classes,
-        next: 1,
-        header: new_header(boot_id),
-        synced_at: 0,
-        to_compress: Vec::new(),
-        compressing: None,
-    };
+    let mut store = Store::new(persistent.map(|dir| dir.fd), volatile.fd, classes, boot_id);
     let sequence = store.take_up(&mut said);
     store.summarise_old();
     store.compress_old();
@@ -248,6 +241,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             blobs
         },
         blobs_swept: 0,
+        pstore: Some((0, 0)),
         tombstones,
         alerting,
         identities: alloc::collections::VecDeque::new(),
@@ -291,6 +285,9 @@ struct Service {
     blobs_swept: u64,
     /// This boot's tombstones.
     tombstones: ferrix_lode_core::tombstone::Tombstones,
+    /// The pstore import's tries: how many, and the next's monotonic time;
+    /// `None` once it is done.
+    pstore: Option<(u32, u64)>,
     /// Their actions.
     alerting: Alerting,
     /// Who the processes a fault ended were, as the kernel said, until
@@ -445,6 +442,7 @@ impl Service {
                 .map_err(|()| Step::Segment)?;
             let compressing = self.store.compress_some();
             self.sweep_blobs(now);
+            self.import_pstore(now);
             if closed(channel) {
                 self.store.sync_if(true, now.monotonic_us);
                 return Ok(());
@@ -646,6 +644,97 @@ impl Service {
             };
             out.extend(self.tombstones.for_crash(&crash, seqnum, &boot, now));
         }
+    }
+
+    /// The pstore import (`docs/LOGGING.md` §5): the loader's
+    /// `FERRIX/LASTKERNEL.TXT`, its lines lode did not store imported as the
+    /// end of the boot whose kernel named that pstore boot, from the copy
+    /// `lode pstore-fetch` (root's) leaves. Looked for every 5 s for 2 min,
+    /// as the fetch waits for the disk; once a copy is read, or the time is
+    /// up, never again this run. Off with
+    /// `events.conf`'s `pstore-import off`.
+    fn import_pstore(&mut self, now: Now) {
+        let Some((tries, next)) = self.pstore else {
+            return;
+        };
+        if now.monotonic_us < next {
+            return;
+        }
+        if !self.events.on("pstore-import") || tries >= 36 {
+            self.pstore = None;
+            return;
+        }
+        self.pstore = Some((tries + 1, now.monotonic_us.saturating_add(5_000_000)));
+        // `lode pstore-fetch`'s copy: root reads the disk, lode the copy.
+        let Some(bytes) = sys::read_small(crate::pstore::COPY) else {
+            return;
+        };
+        self.pstore = None;
+        let record = match self.import_kept(&bytes, now) {
+            Ok(Some(record)) => record,
+            Ok(None) => return,
+            Err(why) => ferrix_lode_core::lastkernel::not_imported(&why, now),
+        };
+        self.say_pstore(record, now);
+    }
+
+    /// Store the import's own `record`, in this boot.
+    fn say_pstore(&mut self, record: Record, now: Now) {
+        let _ = self.store_batch(alloc::vec![record], now);
+    }
+
+    /// Import the file's `bytes`: the record that says what was imported,
+    /// `None` when it was imported already, or why it was not.
+    fn import_kept(&mut self, bytes: &[u8], now: Now) -> Result<Option<Record>, String> {
+        use ferrix_lode_core::lastkernel;
+        let kept = lastkernel::parse(bytes)
+            .ok_or_else(|| String::from("it does not begin with the loader's report"))?;
+        let mut dirs = alloc::vec![Dir {
+            fd: self.store.volatile
+        }];
+        dirs.extend(self.store.persistent.map(|fd| Dir { fd }));
+        let (boot, segments) = previous_boot(&dirs, self.store.header.boot_id)
+            .ok_or_else(|| String::from("lode holds no boot before this one"))?;
+        let BootTail {
+            tail,
+            said,
+            imported,
+            last,
+        } = boot_tail(&segments);
+        let hex: String = boot
+            .iter()
+            .map(|byte| alloc::format!("{byte:02x}"))
+            .collect();
+        if imported {
+            return Ok(None);
+        }
+        if said != Some(kept.sequence) {
+            return Err(alloc::format!(
+                "it is pstore boot {}'s, and the boot before this one ({hex}) said {}",
+                kept.sequence,
+                said.map_or_else(
+                    || String::from("no pstore boot"),
+                    |n| alloc::format!("boot {n}")
+                )
+            ));
+        }
+        let stored: Vec<&str> = tail.iter().map(|(_, message)| message.as_str()).collect();
+        let lines = lastkernel::unstored(&kept, &stored).ok_or_else(|| {
+            alloc::format!("lode's last kernel lines of boot {hex} are not in it")
+        })?;
+        let at = Now {
+            realtime_us: last.realtime_us.saturating_add(1),
+            monotonic_us: last.monotonic_us.saturating_add(1),
+        };
+        let count = lines.len();
+        let records = lastkernel::records(&lines, kept.sequence, at);
+        if count > 0 {
+            let _ = self
+                .store
+                .append_to_boot(boot, records, &self.zone)
+                .map_err(|()| String::from("the store could not be written"))?;
+        }
+        Ok(Some(lastkernel::said(count, kept.sequence, &hex, now)))
     }
 
     /// Mark and sweep the blob container, at most once an hour: every blob
@@ -1349,6 +1438,50 @@ impl Store {
         Ok(self.writers.len() - 1)
     }
 
+    /// A store in `volatile` and, when there is one, `persistent`, with
+    /// `classes`, for boot `boot_id`: no writer yet.
+    fn new(
+        persistent: Option<usize>,
+        volatile: usize,
+        classes: Vec<Class>,
+        boot_id: [u8; 16],
+    ) -> Store {
+        Store {
+            persistent,
+            volatile,
+            writers: Vec::new(),
+            parked: Vec::new(),
+            classes,
+            next: 1,
+            header: new_header(boot_id),
+            synced_at: 0,
+            to_compress: Vec::new(),
+            compressing: None,
+        }
+    }
+
+    /// Write `records` as records of the earlier boot `boot`: segments of
+    /// their own, headed with that boot, numbered on after this boot's, and
+    /// sealed at once (`docs/LOGGING.md` §5, the pstore import). This boot's
+    /// writers are set aside meanwhile, still active to the vacuum.
+    fn append_to_boot(
+        &mut self,
+        boot: [u8; 16],
+        records: Vec<Record>,
+        zone: &Zone,
+    ) -> Result<usize, ()> {
+        self.parked = core::mem::take(&mut self.writers);
+        let own = self.header.boot_id;
+        self.header.boot_id = boot;
+        let written = self.append(records, zone);
+        while !self.writers.is_empty() {
+            self.seal(self.writers.len() - 1);
+        }
+        self.header.boot_id = own;
+        self.writers = core::mem::take(&mut self.parked);
+        written.map(|seqnums| seqnums.len())
+    }
+
     /// Seal the segment of writer `at`: synced and closed, the next record
     /// of its class and owner begins another.
     fn seal(&mut self, at: usize) {
@@ -1542,6 +1675,7 @@ impl Store {
         let active: Vec<&str> = self
             .writers
             .iter()
+            .chain(&self.parked)
             .map(|slot| slot.writer.name.as_str())
             .collect();
         let mut dirs = alloc::vec![(self.volatile, RUNTIME_MAX)];
@@ -1694,4 +1828,95 @@ fn cut(segment: &store::Segment, good: usize, length: usize, said: &mut Vec<Reco
         ),
         clocks(),
     ));
+}
+
+/// The newest boot `dirs` hold before `own`, and its segments, by their
+/// first sequence numbers.
+fn previous_boot(dirs: &[Dir], own: [u8; 16]) -> Option<([u8; 16], Vec<store::Segment>)> {
+    let mut boots: Vec<([u8; 16], Vec<store::Segment>)> = Vec::new();
+    for each in store::all_segments(dirs) {
+        let Some(header) = store::header(&each) else {
+            continue;
+        };
+        if header.boot_id == own {
+            continue;
+        }
+        match boots.iter_mut().find(|(boot, _)| *boot == header.boot_id) {
+            Some((_, segments)) => segments.push(each),
+            None => boots.push((header.boot_id, alloc::vec![each])),
+        }
+    }
+    let first = |each: &store::Segment| store::header(each).map_or(0, |header| header.first_seqnum);
+    boots.sort_by_key(|(_, segments)| segments.iter().map(first).max().unwrap_or(0));
+    let (boot, mut segments) = boots.pop()?;
+    segments.sort_by_key(first);
+    Some((boot, segments))
+}
+
+/// What the pstore import needs of a boot's records.
+struct BootTail {
+    /// Its last kernel-log records, `_KERNEL_SEQNUM` and message, in order.
+    tail: Vec<(u64, String)>,
+    /// The pstore boot its kernel said it mirrors to.
+    said: Option<u64>,
+    /// Whether it holds an import already.
+    imported: bool,
+    /// Its last record's times.
+    last: Now,
+}
+
+/// [`BootTail`] of the boot whose `segments` these are.
+fn boot_tail(segments: &[store::Segment]) -> BootTail {
+    let mut found = BootTail {
+        tail: Vec::new(),
+        said: None,
+        imported: false,
+        last: Now {
+            realtime_us: 0,
+            monotonic_us: 0,
+        },
+    };
+    for each in segments {
+        let bytes = store::bytes(each, 0).unwrap_or_default();
+        for scanned in segment::scan(&bytes, 0)
+            .map(|scanned| scanned.records)
+            .unwrap_or_default()
+        {
+            take_into(&mut found, &scanned.record);
+        }
+    }
+    found.tail.sort_unstable_by_key(|(seq, _)| *seq);
+    found
+}
+
+/// One record of the boot, into what [`boot_tail`] gathers: every record
+/// read from the kernel log, the kernel's own lines and programs' console
+/// output alike, kept in the kernel's order (classes keep segments of their
+/// own), the newest eight.
+fn take_into(found: &mut BootTail, record: &Record) {
+    if record.realtime_us > found.last.realtime_us {
+        found.last = Now {
+            realtime_us: record.realtime_us,
+            monotonic_us: record.monotonic_us,
+        };
+    }
+    if record.get("_TRANSPORT") == Some(b"pstore") {
+        found.imported = true;
+        return;
+    }
+    let Some(seq) = record
+        .get_str("_KERNEL_SEQNUM")
+        .and_then(|seq| seq.parse::<u64>().ok())
+    else {
+        return;
+    };
+    let message = String::from_utf8_lossy(record.message()).into_owned();
+    if found.said.is_none() {
+        found.said = ferrix_lode_core::lastkernel::mirrored_boot(&message);
+    }
+    found.tail.push((seq, message));
+    if found.tail.len() > 16 {
+        found.tail.sort_unstable_by_key(|(seq, _)| *seq);
+        let _ = found.tail.drain(..found.tail.len() - 8);
+    }
 }

@@ -106,6 +106,9 @@ pub(crate) struct Steps {
     /// Hold render and GT forcewake for the driver's life
     /// (`ferrix.intelgpu.fwhold`), as before forcewake was taken per access.
     pub(crate) fwhold: bool,
+    /// The render node's ioctl counts every 10 s
+    /// (`ferrix.intelgpu.ioctlstat`, `serve::IoctlStats`).
+    pub(crate) ioctlstat: bool,
 }
 
 /// The command-line words, as the kernel's command line says them.
@@ -119,6 +122,7 @@ const WORDS: Words<'static> = Words {
     freqtest: b"ferrix.intelgpu.freqtest",
     uapitrace: b"ferrix.intelgpu.uapitrace",
     fwhold: b"ferrix.intelgpu.fwhold",
+    ioctlstat: b"ferrix.intelgpu.ioctlstat",
 };
 
 /// The driver stopped before a step, as asked.
@@ -134,7 +138,7 @@ impl Steps {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         ferrix_rt::info!(
-            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}, fwhold {}",
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}, fwhold {}, ioctlstat {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
             Show(options.reset_seconds),
@@ -144,6 +148,7 @@ impl Steps {
             if options.freqtest { "on" } else { "off" },
             if options.uapitrace { "on" } else { "off" },
             if options.fwhold { "on" } else { "off" },
+            if options.ioctlstat { "on" } else { "off" },
         );
         if options.reset_refused {
             ferrix_rt::warn!(
@@ -166,6 +171,7 @@ impl Steps {
             freqtest: options.freqtest,
             uapitrace: options.uapitrace,
             fwhold: options.fwhold,
+            ioctlstat: options.ioctlstat,
         }
     }
 

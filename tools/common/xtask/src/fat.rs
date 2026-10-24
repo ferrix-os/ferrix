@@ -578,6 +578,9 @@ pub(crate) fn write_image_carrying(
 
     let loader_bytes = std::fs::read(loader)
         .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;
+    // Every image's loader and initramfs, as final: no development signing
+    // key in a claimed profile's (docs/SIGNING.md 6.4, D1).
+    crate::signing::refuse_in_image(&loader_bytes, initramfs)?;
     let stripped;
     let kernel = if STRIP_KERNEL.load(Ordering::Relaxed) {
         stripped = crate::flash::stripped_kernel(kernel);

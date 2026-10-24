@@ -12,6 +12,10 @@ use core::fmt;
 /// `service-enable-persistent`.
 pub const SWITCHABLE_UNITS: &[&str] = &["sshd.service", "sshd.socket"];
 
+/// The longest time zone name, `America/Argentina/ComodRivadavia` and its
+/// kind with room to spare.
+const ZONE_MAX: usize = 64;
+
 /// The longest host name, as Linux's `HOST_NAME_MAX`.
 const HOST_NAME_MAX: usize = 64;
 
@@ -28,12 +32,19 @@ pub enum Request {
         name: String,
     },
     /// Start `unit` at every boot, or stop doing so: init's `enable` or
-    /// `disable` (B1, B6).
+    /// `disable` (B1), and with `now` start or stop it at once too (B6).
     ServiceEnablePersistent {
         /// One of [`SWITCHABLE_UNITS`].
         unit: String,
         /// On or off.
         enabled: bool,
+        /// Start it now as well, or stop it now.
+        now: bool,
+    },
+    /// Use the time zone `zone` of `/usr/share/zoneinfo` (B3).
+    SetTimezone {
+        /// Its name: `Europe/Berlin`, `UTC`.
+        zone: String,
     },
 }
 
@@ -45,6 +56,8 @@ pub enum Area {
     Hostname,
     /// Services started at boot.
     Services,
+    /// The time zone (the clock is B3's later half, parked).
+    Time,
 }
 
 impl Area {
@@ -54,6 +67,17 @@ impl Area {
         match self {
             Area::Hostname => "settings.hostname",
             Area::Services => "settings.services",
+            Area::Time => "settings.time",
+        }
+    }
+
+    /// Its name, as the allow-lists and the audit name it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Area::Hostname => "hostname",
+            Area::Services => "services",
+            Area::Time => "time",
         }
     }
 }
@@ -70,7 +94,8 @@ impl fmt::Display for Invalid {
 
 impl Request {
     /// Every request's wire name, in the order of their kinds.
-    pub const NAMES: &'static [&'static str] = &["set-hostname", "service-enable-persistent"];
+    pub const NAMES: &'static [&'static str] =
+        &["set-hostname", "service-enable-persistent", "set-timezone"];
 
     /// The request's wire name.
     #[must_use]
@@ -78,6 +103,7 @@ impl Request {
         match self {
             Request::SetHostname { .. } => "set-hostname",
             Request::ServiceEnablePersistent { .. } => "service-enable-persistent",
+            Request::SetTimezone { .. } => "set-timezone",
         }
     }
 
@@ -87,6 +113,7 @@ impl Request {
         match self {
             Request::SetHostname { .. } => Area::Hostname,
             Request::ServiceEnablePersistent { .. } => Area::Services,
+            Request::SetTimezone { .. } => Area::Time,
         }
     }
 
@@ -109,7 +136,39 @@ impl Request {
                     )))
                 }
             }
+            Request::SetTimezone { zone } => valid_zone(zone),
         }
+    }
+}
+
+/// Whether `zone` is a time zone's name: 1 to 64 bytes of `/`-separated
+/// parts, each ASCII letters, digits, `_`, `+` and `-`, none empty and none
+/// starting with `-` or a dot -- so no path, no `..`, nothing absolute.
+/// Whether such a zone exists is the machine's to say.
+///
+/// # Errors
+///
+/// What is wrong with it, in words for a person.
+pub fn valid_zone(zone: &str) -> Result<(), Invalid> {
+    let shown = printable(zone);
+    if zone.is_empty() || zone.len() > ZONE_MAX {
+        return Err(Invalid(format!(
+            "{shown} is not a time zone: a zone's name is 1 to {ZONE_MAX} characters"
+        )));
+    }
+    let good = zone.split('/').all(|part| {
+        !part.is_empty()
+            && !part.starts_with('-')
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-'))
+    });
+    if good {
+        Ok(())
+    } else {
+        Err(Invalid(format!(
+            "{shown} is not a time zone: a zone is named like Europe/Berlin"
+        )))
     }
 }
 

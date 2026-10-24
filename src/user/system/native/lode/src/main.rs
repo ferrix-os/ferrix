@@ -28,6 +28,7 @@ mod crashes;
 mod front;
 mod handout;
 mod heap;
+mod pstore;
 mod seat;
 mod serve;
 mod snapshot;

@@ -1,33 +1,35 @@
 name: Promote
 
 # Moves what landed on develop to main without anyone clicking
-# (docs/REPO-FLOW.md, "Promotion"). On every push to develop, and every 15
-# minutes in case a promotion merged with nothing landing after it:
+# (docs/REPO-FLOW.md, "Promotion"). On every push to develop, when a
+# promotion's CI ends, and every 15 minutes as a fallback:
 #
-#   1. if a promotion pull request is still open, do nothing: it carries the
-#      develop commit it was cut at, and the next one takes everything after;
-#   2. if develop has commits main lacks, cut branch promote/<sha> at
-#      develop's tip, open a pull request from it to main, and post its
+#   1. if a promotion branch promote/<sha> has CI green, its `flow/lane` and
+#      `certification/verdict` green, and main is an ancestor of it, push it
+#      to main as a fast-forward and delete the branch;
+#   2. if a promotion's CI is still running, do nothing: the next promotion
+#      takes everything that lands in the meantime;
+#   3. otherwise, if develop has commits main lacks and no promotion carries
+#      develop's tip, cut promote/<sha> at develop's tip, post its
 #      `flow/lane` (owner: only trusted pushers reach develop) and its
-#      `certification/verdict` (cert-verdict.py over main..develop);
-#   3. start ci.yml on that branch with workflow_dispatch, and switch on
-#      auto-merge with a merge commit, so main merges the moment the
-#      required checks pass and develop stays an ancestor of main.
+#      `certification/verdict` (cert-verdict.py over main..develop), and
+#      start ci.yml on it with workflow_dispatch. A promotion whose CI ended
+#      and that cannot reach main (red, its verdict waiting) is superseded:
+#      its branch is deleted once develop has moved past it.
 #
-# Everything here uses the workflow's own token. A pull request that token
-# opens starts no pull_request workflows (GitHub's rule against loops), which
-# is why step 3 dispatches CI by hand -- dispatch is the exception -- and why
-# this job posts the two statuses itself. The merge that auto-merge makes is
-# also the token's, so it starts no push run on main: CI ran once, on the
-# promoted commit, and is not repeated on main.
+# No pull request is opened. A promotion pull request requested a review from
+# the code owner on every promotion (CODEOWNERS is read from main, which
+# carries develop's file), and the owner's inbox filled with them
+# (customer, 2026-10-24). main's ruleset demands the three checks on the
+# pushed commit (`CI result` only from the GitHub Actions app) and refuses
+# anything but a fast-forward; it has no pull-request rule.
+#
+# Everything here uses the workflow's own token, so the push to main starts
+# no push run there: CI ran once, on the promoted commit.
 
 on:
   push:
     branches: [develop]
-  # When a promotion's CI ends, the next promotion starts at once instead of
-  # at the next landing or the next quarter hour: the simulation over the
-  # landings of 2026-10-09..22 put the median lead time at 34 minutes this
-  # way (docs/REPO-FLOW.md, "Lead time").
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -38,7 +40,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
   statuses: write
   actions: write   # dispatch ci.yml
 
@@ -60,92 +61,61 @@ jobs:
           ref: develop
           fetch-depth: 0
 
-      - name: Open a promotion if none is open
+      - name: Advance main, or start a promotion
         env:
           GH_TOKEN: ${{ github.token }}
-          VERDICT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -eu
-          git fetch -q origin main develop
-          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
-            # Auto-merge acts a few seconds after the last check; wait for it
-            # (at most two minutes) so the open promotion is not mistaken for
-            # one still running.
-            for _ in $(seq 24); do
-              n=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-                    --json headRefName --jq '[.[] | select(.headRefName | startswith("promote/"))] | length')
-              [ "$n" = 0 ] && break; sleep 5
-            done
-            git fetch -q origin main develop
-          fi
-          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-                   --json number,headRefName,headRefOid \
-                   --jq '[.[] | select(.headRefName | startswith("promote/"))][0] // empty | "\(.number) \(.headRefOid) \(.headRefName)"')
-          if [ -n "$open" ]; then
-            read -r onum osha obranch <<<"$open"
-            # While the open promotion's CI runs, it is left alone: replacing
-            # it on every landing would cancel each run before it ended, and
-            # no promotion would ever merge. Once that run has ended and the
-            # promotion is still open -- red, its verdict waiting or NOT-YET,
-            # or blocked for any other reason -- a develop that has moved past
-            # it supersedes it: close it and promote the new tip, so a
-            # promotion never holds back what landed after it (#4 sat green
-            # and BLOCKED while six landings waited, 2026-10-23).
-            running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$obranch" \
-                        --json status --jq '[.[] | select(.status != "completed")] | length')
-            if [ "$(git rev-parse origin/develop)" = "$osha" ]; then
-              echo "promotion #$onum already carries develop's tip"; exit 0
-            elif [ "$running" != 0 ]; then
-              echo "promotion #$onum is running CI; the next one takes what lands meanwhile"; exit 0
+          R="$GITHUB_REPOSITORY"
+          git fetch -q --prune origin '+refs/heads/main:refs/remotes/origin/main' \
+            '+refs/heads/develop:refs/remotes/origin/develop' '+refs/heads/promote/*:refs/remotes/origin/promote/*'
+          status_ok() { # status_ok SHA CONTEXT
+            [ "$(gh api "repos/$R/commits/$1/status" \
+                  --jq "[.statuses[] | select(.context == \"$2\")][0].state // \"none\"")" = success ]
+          }
+          ci_state() { # ci_state BRANCH -> running|success|failed|none
+            gh run list --repo "$R" --workflow ci.yml --branch "$1" --limit 1 \
+              --json status,conclusion --jq '.[0] // empty | if .status != "completed" then "running" elif .conclusion == "success" then "success" else "failed" end'
+          }
+          running=0
+          for b in $(git branch -r --format='%(refname:lstrip=3)' | grep '^promote/' | sort -r || true); do
+            sha=$(git rev-parse "origin/$b")
+            if git merge-base --is-ancestor "$sha" origin/main; then
+              git push -q origin --delete "$b" || true; continue
             fi
-            gh pr close "$onum" --repo "$GITHUB_REPOSITORY" --delete-branch \
-               --comment "Superseded by a promotion of develop's newer tip: this one's CI has ended and it did not merge."
-          fi
+            state=$(ci_state "$b"); state=${state:-none}
+            if [ "$state" = running ]; then running=1; echo "$b: CI running"; continue; fi
+            if [ "$state" = success ] && status_ok "$sha" "CI result" && status_ok "$sha" flow/lane \
+               && status_ok "$sha" certification/verdict && git merge-base --is-ancestor origin/main "$sha"; then
+              git push origin "$sha:refs/heads/main"
+              echo "main advanced to $b"
+              git push -q origin --delete "$b" || true
+              git fetch -q origin '+refs/heads/main:refs/remotes/origin/main'
+              continue
+            fi
+            # Ended and cannot reach main (red, verdict waiting or NOT-YET).
+            # It stays while it carries develop's tip, so the verdict can
+            # still arrive; once develop has moved on, a newer one replaces it.
+            if [ "$sha" != "$(git rev-parse origin/develop)" ]; then
+              echo "$b: CI $state, superseded by develop's newer tip"
+              git push -q origin --delete "$b" || true
+            else
+              echo "$b: CI $state, carries develop's tip; waiting for a fix or a verdict"
+            fi
+          done
+          git fetch -q --prune origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heads/promote/*:refs/remotes/origin/promote/*'
+          [ "$running" = 0 ] || exit 0
+          tip=$(git rev-parse origin/develop); short=${tip:0:9}
           ahead=$(git rev-list --count origin/main..origin/develop)
           if [ "$ahead" = 0 ]; then echo "develop has nothing main lacks"; exit 0; fi
-          tip=$(git rev-parse origin/develop); short=${tip:0:9}
-          branch="promote/$short"
-          git push origin "$tip:refs/heads/$branch"
-          {
-            echo "Promotes develop at $short to main: $ahead commits."
-            echo
-            echo "Opened by the Promote workflow (docs/REPO-FLOW.md). It merges itself when"
-            echo "\`CI result\`, \`flow/lane\` and \`certification/verdict\` pass."
-            echo
-            echo '```'
-            git log --no-merges --format='%h %s' origin/main..origin/develop | head -100
-            echo '```'
-          } > "$RUNNER_TEMP/body.md"
-          # The title says what is promoted: the landing's own subject, or with
-          # several the first ones and how many more, cut to fit a line. The
-          # merge commit on main takes the same words (--subject below).
-          title=$(git log --reverse --no-merges --format='%s' origin/main..origin/develop | python3 -c '
-          import sys
-          s = [l.strip() for l in sys.stdin if l.strip()]
-          t = s[0] if s else "Promote develop"
-          for i, x in enumerate(s[1:], 1):
-              more = len(s) - i
-              cand = t + "; " + x
-              if len(cand) + len(f" (+{more - 1} more)") > 120:
-                  t += f" (+{more} more)"
-                  break
-              t = cand
-          print(t[:250])')
-          url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
-                  --title "$title" --body-file "$RUNNER_TEMP/body.md")
-          num=${url##*/}
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$tip" -f state=success \
+          if git rev-parse -q --verify "origin/promote/$short" >/dev/null; then
+            echo "promote/$short already carries develop's tip"; exit 0
+          fi
+          git push -q origin "$tip:refs/heads/promote/$short"
+          gh api -X POST "repos/$R/statuses/$tip" -f state=success \
              -f context=flow/lane -f "description=owner lane: promotion of develop"
           python3 tools/common/release/cert-verdict.py "origin/main..$tip" --lane owner --post "$tip"
           base=$(git merge-base origin/main "$tip")
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch" -f "base=$base"
-          gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --merge --subject "$title (#$num)"
-          echo "opened $url"
-
-      - name: Drop merged promotion branches
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for b in $(git branch -r --format='%(refname:lstrip=3)' | grep '^promote/' || true); do
-            if git merge-base --is-ancestor "origin/$b" origin/main; then git push origin --delete "$b" || true; fi
-          done
+          gh workflow run ci.yml --repo "$R" --ref "promote/$short" -f "base=$base"
+          echo "promote/$short started: $ahead commits"
+          git log --no-merges --format='  %h %s' origin/main.."$tip" | head -40

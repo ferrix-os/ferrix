@@ -22,12 +22,15 @@
 //! pointer is by then.
 //!
 //! A card whose flip waits for the screen's vertical blank -- the Intel
-//! driver's card0 copies a frame in the blank and answers then -- holds the
-//! loop in the flip until that blank. Drawn on a grid of its own, the loop
-//! drew at any point of the screen's refresh and then waited up to a whole
-//! one in the flip. So a flip that waited ([`WAITED`]) sets the grid by the
-//! blank it ended in, as a KMS compositor draws when the vblank event of
-//! its last flip comes (wlroots' `wlr_output` frame event, Hyprland's
+//! driver's card0 copies a frame in the blank and answers then -- answers
+//! the flip in that blank. Drawn on a grid of its own, the loop drew at any
+//! point of the screen's refresh and then waited up to a whole one for the
+//! answer: in the flip, until flips went to a thread of their own
+//! (`crate::flush::FlipThread`), and since then for the frame to land
+//! before the next is drawn. So a flip that waited ([`WAITED`]) sets the
+//! grid by the blank it ended in, timed on the thread, as a KMS compositor
+//! draws when the vblank event of its last flip comes (wlroots'
+//! `wlr_output` frame event, Hyprland's
 //! `CMonitorFrameScheduler::onFrame`): the next frame is drawn [`LEAD`]
 //! before the next blank, and the clients are told that blank is when it
 //! is shown (`wp_presentation_feedback.presented`).

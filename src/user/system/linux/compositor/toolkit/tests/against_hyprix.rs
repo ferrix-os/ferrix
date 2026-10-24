@@ -217,6 +217,58 @@ fn a_window_is_tiled_by_the_compositor_and_drawn_there() {
     );
 }
 
+/// A window that cannot be made -- here a title with a NUL in it, which
+/// the wire cannot carry -- is an error and leaves nothing behind: the
+/// objects already sent are destroyed in the protocol's order, so the
+/// compositor does not end the client, and the next window is tiled alone.
+/// yserver retries a window that failed on every pass of its loop, and each
+/// toplevel left over was an empty tile on the N150 box (2026-10-24).
+#[test]
+fn a_window_that_cannot_be_made_leaves_nothing_behind() {
+    let (answer, _) = with_compositor("toplevel-failed", 3000, |socket| {
+        let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+        let mut failed = 0;
+        for _ in 0..5 {
+            if client
+                .toplevel(&ToplevelOptions {
+                    title: "bad\0title".to_owned(),
+                    ..ToplevelOptions::default()
+                })
+                .is_err()
+            {
+                failed += 1;
+            }
+        }
+        let window = client
+            .toplevel(&ToplevelOptions {
+                title: "kept".to_owned(),
+                ..ToplevelOptions::default()
+            })
+            .map_err(|error| error.to_string())?;
+        let mut size = None;
+        until(&mut client, Duration::from_secs(2), |_, event| {
+            if let Event::Configure {
+                surface,
+                width,
+                height,
+            } = event
+                && *surface == window
+            {
+                size = Some((*width, *height));
+            }
+            size.is_some()
+        })?;
+        Ok::<_, String>((failed, size))
+    });
+    let (failed, size) = answer.expect("the client was not ended by the compositor");
+    assert_eq!(failed, 5, "a title with a NUL in it should fail to be sent");
+    let (width, height) = size.expect("configured");
+    assert!(
+        width > WIDTH / 2 && height > HEIGHT / 2,
+        "the window was tiled beside what the failed ones left: {width}x{height}"
+    );
+}
+
 /// Lock, draw a colour on the lock surface, and either unlock or leave
 /// the lock held when the client goes; the last frame and what the client
 /// saw come back.

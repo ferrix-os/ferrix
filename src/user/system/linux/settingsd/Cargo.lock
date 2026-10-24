@@ -3,6 +3,27 @@
 version = 4
 
 [[package]]
+name = "compositor-seat"
+version = "0.1.0"
+dependencies = [
+ "compositor-socket",
+ "compositor-wire",
+ "libc",
+]
+
+[[package]]
+name = "compositor-socket"
+version = "0.1.0"
+dependencies = [
+ "compositor-wire",
+ "libc",
+]
+
+[[package]]
+name = "compositor-wire"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-auth-client"
 version = "0.1.0"
 dependencies = [
@@ -52,6 +73,7 @@ dependencies = [
 name = "settingsd"
 version = "0.1.0"
 dependencies = [
+ "compositor-seat",
  "ferrix-auth-client",
  "ferrix-auth-proto",
  "ferrix-settings-proto",

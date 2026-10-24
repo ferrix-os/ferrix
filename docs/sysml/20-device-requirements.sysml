@@ -660,6 +660,35 @@ package FerrixDeviceRequirements {
             attribute :>> unit = ("iommu::remapping::route",
                 "arch::x86_64::msi::msi_allocate", "iommu::name_functions_without_vectors");
         }
+        requirement <'L.device.55'> isolationAnsweredBeforeAnyPin : ItemLowLevel {
+            attribute :>> statement = "device_isolation shall answer bit 0 for
+                the domain the device is given, making it if no pin has, so that
+                a manager asking before the driver starts is answered as the
+                driver's pins will be; a node that can be given no domain shall
+                answer 0.";
+            attribute :>> criterion = "Stage 10's check, on every architecture,
+                asks device_isolation of a PCI function whose domain is not yet
+                made: the domain is then made and bit 0 equals its translation, or,
+                for a node that can be given no domain, bit 0 is clear. On x86-64,
+                behind the translating VT-d unit, it reads bit 0, and test-boot
+                requires the check's line there. With the answer taken from a
+                domain already made the check panics.";
+            attribute :>> parent = "H.DMA.9";
+            attribute :>> unit = "syscall::native::device_isolation";
+        }
+        requirement <'L.device.56'> noGpuWithUntranslatedDma : ItemLowLevel {
+            attribute :>> statement = "devmgr shall hand a GPU to its driver only
+                when device_isolation answers both bits: its interrupts isolated
+                and its DMA translated. A GPU whose interrupts are isolated and
+                whose DMA is not -- a unit held to interrupt remapping only -- shall
+                not be started, with its line.";
+            attribute :>> criterion = "devmgr-proto's host test: device_isolation
+                0x2 stops the hand-over after the mark, with no budget raised and
+                the line naming untranslated DMA; with the check removed it fails.
+                test-nvrm's handed-over boot requires devmgr's line to read 0x3.";
+            attribute :>> parent = ("H.DMA.9", "H.DEV.1");
+            attribute :>> unit = "syscall::native::device_isolation";
+        }
         requirement <'L.device.35'> heldOffFunctionGetsItsTablePage : ItemLowLevel {
             attribute :>> statement = "A PCI function in the build's MSI-preferred
                 list (ferrix_pci::msix::MSI_PREFERRED, exactly 1F0A:6801) with both an

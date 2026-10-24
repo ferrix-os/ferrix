@@ -44,7 +44,7 @@ device-tree parser, a btrfs implementation and a TCP stack.
 
 ## 2. Host-side crates — tools, not SOUP
 
-The 21 external crates below are in `Cargo.lock` and build,
+The 39 external crates below are in `Cargo.lock` and build,
 test or package the item without being part of it. 62304 does not
 reach them; they are classified as tools in [TOOLS.md](TOOLS.md) under
 EN 50716 §6.7 and DO-330, where the question is whether a defect could
@@ -54,13 +54,22 @@ put an undetected error into the product.
 |---|---|---|
 | `adler2` | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
 | `allocator-api2` | 0.2.21 | MIT OR Apache-2.0 |
+| `block-buffer` | 0.10.4 | MIT OR Apache-2.0 |
 | `byteorder` | 1.5.0 | Unlicense OR MIT |
+| `cfg-if` | 1.0.5 | MIT OR Apache-2.0 |
+| `cpufeatures` | 0.2.17 | MIT OR Apache-2.0 |
+| `crypto-common` | 0.1.7 | MIT OR Apache-2.0 |
+| `digest` | 0.10.7 | MIT OR Apache-2.0 |
 | `equivalent` | 1.0.2 | Apache-2.0 OR MIT |
 | `foldhash` | 0.2.0 | Zlib |
 | `g2gen` | 1.2.2 | MIT/Apache-2.0 |
 | `g2p` | 1.2.2 | MIT/Apache-2.0 |
 | `g2poly` | 1.2.2 | MIT/Apache-2.0 |
+| `generic-array` | 0.14.7 | MIT |
 | `hashbrown` | 0.17.1 | MIT OR Apache-2.0 |
+| `hbs-lms` | 0.1.1 | Apache-2.0 |
+| `keccak` | 0.1.6 | Apache-2.0 OR MIT |
+| `libc` | 0.2.191 | MIT OR Apache-2.0 |
 | `lru` | 0.18.4 | MIT |
 | `lzokay-native` | 0.1.0 | MIT |
 | `miniz_oxide` | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
@@ -69,10 +78,19 @@ put an undetected error into the product.
 | `quote` | 1.0.47 | MIT OR Apache-2.0 |
 | `rqrr` | 0.11.0 | (MIT OR Apache-2.0) AND ISC |
 | `ruzstd` | 0.9.1 | MIT |
+| `sha2` | 0.10.9 | MIT OR Apache-2.0 |
+| `sha3` | 0.10.9 | MIT OR Apache-2.0 |
+| `signature` | 1.6.4 | Apache-2.0 OR MIT |
+| `subtle` | 2.6.1 | BSD-3-Clause |
 | `syn` | 2.0.119 | MIT OR Apache-2.0 |
 | `thiserror` | 1.0.69 | MIT OR Apache-2.0 |
 | `thiserror-impl` | 1.0.69 | MIT OR Apache-2.0 |
+| `tinyvec` | 1.13.3 | Zlib OR Apache-2.0 OR MIT |
+| `typenum` | 1.20.1 | MIT OR Apache-2.0 |
 | `unicode-ident` | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
+| `version_check` | 0.9.5 | MIT/Apache-2.0 |
+| `zeroize` | 1.9.1 | Apache-2.0 OR MIT |
+| `zeroize_derive` | 1.5.0 | Apache-2.0 OR MIT |
 
 Advisories against all of them are checked on every run of
 `cargo deny check` (`deny.toml`), whose `advisories.ignore` list is

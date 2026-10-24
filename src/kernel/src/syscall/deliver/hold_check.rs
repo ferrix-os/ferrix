@@ -438,12 +438,7 @@ fn ring_cases(file: Arc<OpenFile>, f: &Process, report: &mut Report) -> Result<(
     report.deadline_millis = took / 1_000_000;
 
     // (h) Sixteen at once; the seventeenth not held, and counted.
-    let mut held = Vec::new();
-    for _ in 0..SLOTS {
-        let process = faulting(faulter, None)?;
-        let _ = held_line(&file, &process)?;
-        held.push(process);
-    }
+    let mut held = full_ring(&file)?;
     let extra = faulting(faulter, None)?;
     if !ended_by_fault(&extra, after(AT_ONCE_NANOS)) {
         return Err("(h) a seventeenth fault at once was held");
@@ -475,6 +470,31 @@ fn ring_cases(file: Arc<OpenFile>, f: &Process, report: &mut Report) -> Result<(
         return Err("(e) the reader's close did not release every held process at once");
     }
     Ok(())
+}
+
+/// (h)'s sixteen held processes, all held at once. On a slow machine (TCG)
+/// the first hold's 2 s can pass before the sixteenth fault is made, which
+/// frees a slot, so the ring is not full and a seventeenth would rightly be
+/// held: then they are waited out and the ring filled again, three times at
+/// most.
+#[inline(never)]
+fn full_ring(file: &Arc<OpenFile>) -> Result<Vec<Arc<Process>>, &'static str> {
+    for _ in 0..3 {
+        let mut held = Vec::new();
+        for _ in 0..SLOTS {
+            let process = faulting(faulter, None)?;
+            let _ = held_line(file, &process)?;
+            held.push(process);
+        }
+        if held.iter().all(|process| process.is_held()) {
+            return Ok(held);
+        }
+        let deadline = after(HOLD_NANOS.saturating_add(MARGIN_NANOS));
+        if !held.iter().all(|process| ended_by_fault(process, deadline)) {
+            return Err("(h) a held process outlived its deadline while the ring filled");
+        }
+    }
+    Err("(h) sixteen faults could not be held at once within one hold's 2 s")
 }
 
 /// A blocking read with a signal pending for the reader: `ERESTARTSYS`, the

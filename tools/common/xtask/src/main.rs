@@ -149,6 +149,7 @@ mod keyboard;
 mod lode;
 mod lode_budget;
 mod lode_net;
+mod lode_pstore;
 mod lode_remote;
 mod machine_check;
 mod n150;
@@ -192,9 +193,11 @@ mod sha256;
 mod shader_cache;
 mod shell;
 mod shm;
+mod signing;
 mod slot_image;
 mod smbios;
 mod ssh;
+mod stall;
 mod start_page;
 mod steam;
 mod steamcmd;
@@ -568,6 +571,7 @@ const TASKS: &[&[Task]] = &[
     jobs::TASKS,
     lode::TASKS,
     lode_budget::TASKS,
+    lode_pstore::TASKS,
     lode_remote::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,
@@ -594,6 +598,7 @@ const TASKS: &[&[Task]] = &[
     settingsd::TASKS,
     shader_cache::TASKS,
     slot_image::TASKS,
+    stall::TASKS,
     steamcmd::TASKS,
     symbolize::TASKS,
     sysfs::TASKS,

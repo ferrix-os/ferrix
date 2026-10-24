@@ -416,12 +416,36 @@ writing to standard error, as today.
 (`_TRANSPORT=devmgr`, `MESSAGE_ID` per kind, `_FERRIX_DRIVER`, the exit
 cause), so "which driver died, when, and how" is `lode -t devmgr`.
 
-**The last boot's kernel log**, from pstore. When the loader has written
-`FERRIX/LASTKERNEL.TXT` for a boot that ended without `lode` storing its
-last lines, `lode` imports the lines it does not have -- matched by the
-boot's audit id and the kernel sequence -- as records of *that* boot
-(`_TRANSPORT=pstore`), as `systemd-pstore` does. `lode -b -1` then
-ends with what the machine said before it hung or panicked.
+**The last boot's kernel log**, from pstore (**built**, 2026-10-24, the
+customer's path A of §21.10). Each boot's loader keeps the previous boot's
+region as the ESP's `FERRIX/LASTKERNEL.TXT` (`docs/POSTMORTEM.md` §3.5).
+`lode-pstore.service`, root's one-shot (`lode pstore-fetch`), finds the ESP
+-- a GUID partition table's EFI system partition through `ferrix-partition`,
+or a FAT32 disk with no table -- reads the file read only through
+`ferrix-fat` (at most 1 MiB + 1 KiB), waiting up to 2 min for the disk's
+driver, and copies it to `/run/log/lastkernel.txt`, lode's, 0600: lode is
+uid 91 by then and opens no disk. lode then imports the lines it did not
+store as records of *that* boot (`_TRANSPORT=pstore`, `PSTORE_BOOT`,
+`PSTORE_LINE`), as `systemd-pstore` does, written as a sealed segment of
+that boot after its own:
+
+* **which boot**: the newest boot lode holds before this one, only if its
+  kernel said `pstore   mirroring the log to ..., boot N;` for the file's N;
+* **which lines**: lode's last three kernel-log records of that boot, in
+  `_KERNEL_SEQNUM` order, found together in the file's text from its end
+  (a record's message may lack the identifier the line began with); what
+  follows is new. A file that holds none of them is not imported, rather
+  than doubled; a boot that has `pstore` records already is not again.
+* one record in this boot says what was imported, or why not
+  (`MESSAGE_ID=4f6c1b2d9a8e4c37b5d0e1f2a3b4c5d6`, `PSTORE_IMPORTED`).
+
+`lode -b -1` then ends with what the machine said before it hung or
+panicked. `events.conf`'s `pstore-import off` turns the import off; an
+image without `lode-pstore.service` has no fetch and no disk read.
+`test-log-pstore` (x86-64): boot 1 stores a line, stops lode and writes its
+last words; the gate resets the machine with RAM kept; boot 2 imports, and
+`lode -b -1` ends with boot 1's last line, its last words once and the
+stored line once.
 
 **Programs that write only files** (Steam's `console_log.txt`, a game's
 logs in its Wine prefix): a file source watched with inotify, configured
@@ -1185,7 +1209,7 @@ OTLP outputs.
 | 6 | sessions: `sessiond` and hyprix give each program a stream; yserver, Proton and DXVK scripts; alerts' `notify` | 3 | `test-desktop`: waybar's and foot's lines under their own identifiers |
 | 7 | drivers: `logproto` client in the driver library with `INTEREST`, `devmgr` hands ends and re-hands after a restart, `freqlog` moved, `devmgr-events` import | 6 | `test-devmgr`: a driver's line with `_FERRIX_DRIVER`; a `lode` kill during driver logging loses no line |
 | 8 | `lode-upload` (journal-upload export, RFC 5424, JSON lines, OTLP) and `lode-receive`, cursors, back-off, verified TLS, `--merge` | 8 | `test-net`: upload to the host's `systemd-journal-remote`, read back by the host's own `journalctl`; the destination down for a minute loses nothing |
-| 9 | file sources; pstore import | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
+| 9 | file sources; pstore import (built: `test-log-pstore`) | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
 | 10 | the N150 box run (§17.2) | 3 | box |
 | 11 | the write budget (§8.3) | 2 | `test-log` part E |
 | 2a | session ids (§19.1): the piece that owns seat0 issues a session id and a random token per session, tells lode on the root-only `/run/lode/seat`, hands the compositor the token beside the card; lode stamps records with `_SESSION_ID`, `lode -s ID` | 5 | host tests; `test-compositor`: a session's records carry its id, a second session a new one |
@@ -1751,6 +1775,79 @@ run time, which a static Ferrix program cannot.
 * Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
   and dragging the brush's edges.
 
+### The viewer's scrollback: a boot read in pages (design, 2026-10-24)
+
+The customer's ask: open a log of any length at its newest records at once,
+load older ones in pages before they scroll into view, let pages far out of
+view go so memory stays bounded, keep following the live tail, and make a
+jump (a search hit, a time, a crash link) load only the page around its
+target. The acceptance: a million records on nazuna, first paint within a
+few hundred ms, memory bounded, scrolling at the display's rate on tole's
+GPU renderer.
+
+**Today** the viewer reads every segment whole into one `Log`, about 1 KB a
+record: a million records took 847 ms to make into the log, besides reading
+the store, and 1 GB resident. Everything indexes that one vector (the
+table's lines, the selection, the query's hits, the crashes, the Overview's
+charts), and it shows one boot at a time, in time order.
+
+**The unit is the boot, read by pages.** lode seals a segment at a new boot,
+so a boot is a run of segments (one class or several, interleaved by
+sequence number). On opening, only the segments' headers and summaries are
+read (record counts, sequence and time ranges): that gives each boot's
+length without decoding it. A page is up to 4,096 records; a segment is
+read from its end backwards with `segment::entries_before` (lode-core,
+agreed with the lode agent), a sealed one expanded first, and pages of a
+boot's several classes are merged by sequence number. The viewer holds a
+window of pages -- at most 16, 65,536 records -- and the raw bytes of only
+the segments the window touches.
+
+**The table spans the whole boot.** Its rows are the unloaded older
+records (counted, from the summaries), the window's lines, and the unloaded
+newer ones; a row not loaded is drawn as an empty row of the row height, so
+the scroll bar is the boot's and nothing jumps when a page arrives, which
+replaces the empty rows above with as many real ones. When the view comes
+within two pages of the window's edge, the next page is read -- one page a
+frame at most, about 4 ms -- and the farthest page past 16 is let go. The
+selection and the open rows are kept by sequence number, not by index, so
+they survive a page coming or going.
+
+**The live tail** is the window holding the boot's newest page: following
+appends there as today, and lets the oldest page go once the window is
+full. **A jump** finds its target's segment from the summaries' ranges and
+makes the page around it the window.
+
+**What reads more than the window**, in later steps: a query over the boot
+(the window's matches at once, older pages searched in the background a few
+a frame, the match count growing); the Overview's charts, facets and the
+crash list (counted over the boot's pages in the background, the counts
+kept, the records not); a JSONL file, paged by its lines' offsets. Until
+each step, that view reads the whole boot as today.
+
+**Steps.** (1) lode-core's `entries_before` (built). (2) The paged store
+under the Logs table: open at the newest page, scroll older pages in, let
+far ones go, live tail, jumps by sequence number; the million-record
+acceptance on nazuna. (3) Queries and facets over the boot in the
+background. (4) The Overview's and crashes' counts in the background.
+(5) JSONL files by offsets.
+
+**Built: steps 1 and 2 (2026-10-24).** lode-core's `entries_before`, and
+in the viewer `paged.rs` (the pager) and `scrollback.rs` (the table over
+it), for a store of more than 200,000 records; a shorter one is read whole
+as before, and `LODE_VIEWER_WHOLE=1` reads any whole. On a store of
+1,005,000 records in 13 segments of lode's 16 MiB (`--import` now seals at
+that size): opening on Logs took 1.62 s and 1.1 GB resident read whole,
+0.28 s and 142 MB paged; scrolling the whole boot up and back with steady
+wheel steps and flings in a real window on nazuna kept 65,536 records held
+and 185 to 320 MB resident throughout. A page step costs about 10 ms
+(reading 2, the log 3, the table's lines 5): pages are spliced at the
+window's end rather than sorted into it, each record's kernel sequence
+number is read once, and records let go are freed a slice per step. The
+selection and open lines come back with their page. What the steps after
+it cover -- a query, the facets, the Overview and crashes over the whole
+boot -- see the records read so far; the count line says how many of the
+boot's those are.
+
 ### The write budget, as built (§8.3)
 
 `cargo xtask test-log-budget` (x86-64 by default, KVM): init with lode's
@@ -2212,7 +2309,7 @@ architectures.
 |---|---|---|---|---:|
 | 5 | Sources: kmsg, `/dev/log`, native socket, stdout streams | built | `front.rs`; `test-log` "front: 1 1 1 1 0" | 0 |
 | 5 | Drivers' `logproto` with `INTEREST`; `devmgr` hands ends | missing | plan step 7 | 6 |
-| 5 | pstore: the last boot's panic | missing | plan step 9 | 3 |
+| 5 | pstore: the last boot's end | built | §5; `test-log-pstore`; `test-postmortem`'s LASTKERNEL check | 0 |
 | 5 | File sources (ad-hoc logs moved over, §13.1) | missing | plan step 9 | 2 |
 | 6 | One filter language everywhere | built | §20.1 #3 | 0 |
 | 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
@@ -2304,7 +2401,7 @@ Ferrix image where something writes a log, and whether lode has it.
 | The kernel log, drivers' prints | the kernel, ring-3 drivers on standard error | yes | `/dev/kmsg`, from its first record |
 | Units' standard output and error | every unit | yes | init's pipes, trusted (§18 "Users' own records and units' runs") |
 | `devmgr`'s DIED/RESTARTED events | `devmgr-events` | partly | `devmgr`'s own lines reach the kernel log; the event socket itself is not read (plan step 7) |
-| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP; plan step 9 imports it as `lode -b -1`'s end |
+| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP, imported as `lode -b -1`'s end (§5, built) |
 | Firmware and EFI logs | the firmware, the loader | partly | the loader's lines are the kernel log's first; the firmware's own (UEFI's console, TF-A's) are not kept anywhere on Ferrix |
 | `/tmp/yserver.log` | the desktop's X server | yes, landing | `lode cat -t yserver --tee` |
 | `/tmp/steam.log` | Steam's `desktop.sh` | yes, landing | `lode cat -t steam --tee` |

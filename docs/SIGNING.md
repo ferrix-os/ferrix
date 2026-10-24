@@ -300,6 +300,21 @@ less size than n = 32.
 50 ms on the DK1 at 650 MHz, the 3× budget with room for the parse. The
 measured worst case on the board replaces the estimate before any claim.
 
+**Measured (S2, 2026-10-24, `MEMORY-AND-TIMING.md` §2.2z).** On the DK1 at
+650 MHz, in U-Boot's state as the loader runs:
+
+* RFC 9858 A.4 (H20, W4, 435 chain steps) verifies in 7.65 ms cold and
+  7.62 ms warm.
+* A full manifest whose body was chosen to need 555 steps verifies in
+  9.56 ms cold and 9.55 ms warm.
+* The upper bound computed from those two measured points, all 765
+  steps (not itself measured), is 12.9 ms for L = 1 and 25.9 ms for
+  L = 2, inside the 50 ms bound.
+* One SHA-256 call costs 3.07× eBACS's, slightly over the assumed 3×.
+  The bound holds with a 3.9× margin.
+* SHA-256 over 32 MiB took 6.59 s (127.7 cycles per byte, 4.5× eBACS's).
+  That is the slot hashing's cost in S4, not the signature's.
+
 ## 3. (P3) State custody in the HSM
 
 ### 3.1 What the HSM must be
@@ -702,7 +717,7 @@ There are three kinds of image, and they never mix:
 
 | Image | Its anchor table | Its manifests' profile byte | Its build line |
 |---|---|---|---|
-| Shipped (release) image of a named profile | release anchors only | the profile's own | `profile=<name> level=<level>` |
+| Shipped (release) image of a claimed profile (level other than `none`) | release anchors only | the profile's own | `profile=<name> level=<level>` |
 | Development image (no profile) | development anchors | 0xFF | `profile=none level=none`, as today |
 | **The signing gate's image** (§8.4) | development anchors in place of the release table | the named profile under test, so that the profile check is exercised as shipped | `profile=<name> level=none anchors=development`, and **no claim** |
 
@@ -717,16 +732,21 @@ There are three kinds of image, and they never mix:
   byte, outside `.ferrix_anchors` and the PE checksum and Authenticode
   fields. A difference anywhere else fails the gate. Its control is a
   one-byte change outside the section, which must read FIRED.
-* **No shipped loader holds a development anchor.** A check over every
-  release image's loader, `init` and `devmgr` (`check-signing-anchors.py`,
-  slice S3) searches them for every development public key's 52 bytes. A
-  hit fails the release. Its control is a release build with one
-  development anchor planted, which must read FIRED.
-* xtask refuses to put a development anchor into a named profile's shipped
-  image at all. Only the gate's relink produces one, and only under the
-  gate's output directory. The gate check of (D1), a development anchor
-  planted in a claimed profile's image, must be refused, and its control
-  must read FIRED (`check-signing-anchors.py`, above).
+* **What S3 refuses, from today (D1).** At build time, xtask refuses the
+  UEFI loader and every initramfs of an image of a **claimed profile** (any
+  level other than `none`) that holds a development key. It checks at the
+  two points every image's loader and uncompressed initramfs pass through
+  after their last change: `fat::write_image_carrying` for every image,
+  and `flash` for a card. It also checks the loader as it is built. The
+  match is a key's tree root `T`, its last 24 bytes, which any anchor
+  table carries whatever layout it gives the rest. S4's tables keep `T`
+  contiguous. `check-signing-anchors.py --scan` applies the same rule to
+  any file. A planted root was refused in a real image build, and the
+  control read FIRED (as-built, S3).
+* **What comes with S4's tables.** The release-image scan of the loader,
+  `init` and `devmgr`, with its planted-release control. Also the gate's
+  relinked loader: it is the only image of a claimed profile that may
+  carry a development anchor, and only under the gate's output directory.
 
 | Decision | Choice | Reason |
 |---|---|---|
@@ -1008,18 +1028,23 @@ one host test, or one boot sub-case, and a negative control.
 
 ### 8.2 Test vectors
 
-* RFC 8554 Appendix F, test cases 1 and 2 (SHA-256/256, `L = 2`). They show
-  the HSS and LMS structure. They are refused by type code in the product
-  set, and run through a test-only widening of the allowed codes that is
-  compiled under `cfg(test)` alone.
-* RFC 9858 Appendix A.1 (SHA-256/192, W8) and **A.4 (SHA-256/192, W4)**:
-  A.4 is in the product set.
+* RFC 8554 Appendix F, Test Case 1 (SHA-256/256, `L = 2`): **a refusal by
+  type code and level count only**. The verifier computes only 24-byte
+  hashes (`N` is fixed at 24), so a SHA-256/256 signature is never verified,
+  only refused (ledger 3803 (6)).
+* RFC 9858 Appendix A.1 (SHA-256/192, W8, H5), which verifies only through
+  the test-only wide set compiled under `cfg(test)`, and **A.4 (SHA-256/192,
+  W4, H20, `L = 1`)**, which is the product set itself.
 * NIST ACVP LMS vectors [18], `LMS-sigVer-1.0` and `LMS-sigVer-SP800-208` in
-  usnistgov/ACVP-Server's `gen-val/json-files`: every SHA-256/192 W4 case
-  with M24_H10, H15 or H20, valid and invalid.
-* Signatures the development signer makes, cross-checked against `hbs-lms`
-  with its type codes mapped (§5.1). The cross-check is a second, independent
-  implementation, not a vector source.
+  usnistgov/ACVP-Server's `gen-val/json-files`: all 16 sample cases, run
+  through the same code in the wide set. **The published sample has no
+  N24_W4 case with M24_H10, H15 or H20**: its sets are M24_H5/N24_W1 and
+  M24_H10/N24_W2. ACVP vectors for the product set itself are owed before
+  the first claimed release (`docs/backlog/p2.md`, the row "ACVP vectors
+  for the product LMS set").
+* Signatures the development signer makes, and those of `hbs-lms` 0.1.1
+  with its type codes mapped (§5.1). The cross-check is a second,
+  independent implementation, not a vector source.
 
 ### 8.3 Negative tests, one per field, each with a control
 
@@ -1250,8 +1275,8 @@ slices, reserved the same way.
 | S0 | This design; the consultant's verdict; the reservation landing | — | 2 |
 | S1 | `ferrix-sha256` (new; `ferrix-slots` moves onto it in S4); `ferrix-sigverify` (format, LM-OTS, LMS, HSS, policy), its host tests, vectors, controls, fuzz target and coverage; `ferrix-softsign`, the development soft signer (§6.4) | S0; the reservation of §10.4 | 8 |
 | S2 | The DK1 measurement of §2.3 and `MEMORY-AND-TIMING.md`'s bound | S1; the product owner's OK for the board | 2 |
-| S3 | The anchors file and its generated tables; xtask's refusal of development anchors in claimed images, `check-signing-anchors.py` and the gate relink; the hardware-family registry; the kernel-symbol and no-signing-dependency checks | S1 | 3 |
-| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
+| S3 | The anchors file; xtask's refusal of development keys in claimed images and of the verifier in any kernel; `check-signing-anchors.py`; the hardware-family registry; the kernel-closure and no-signing-dependency rules | S1 | 3 |
+| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; the generated anchor tables in the loader, `init` and `devmgr`, with the release-image scan; the gate's relinked loader and its byte comparison; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
 | S5 | TPM floors: the installer's provisioning (owner and lockout authorisations, `ownerPolicy`), the loader's `TPMA_PERMANENT` check, read, raise and lock through TCG2, the words; `bootctl sync`; `test-ab-boot` S4-S11 with `swtpm`; the check on the N150's PTT | S4; §12 Q10; the consultant's re-review of §7.2; the product owner's OK for the box | 8 |
 | S6 | The PKCS #11 module backend of the `Token` trait, the signature log repository, the runbook of §4, the HSM acceptance test | the HSMs, bought for the first claimed release with signed updates (§12 Q2) | 5 |
 | S7 | Revocation manifests (kind 4) in the loader | S5 | 3 |
@@ -1410,3 +1435,160 @@ what will change. **Before code:** the reservation landing of §10.4 before
 S1, and a design re-review of the rewritten §7.2 before any S5 code (3667
 (2)). S1 may start beside §4's re-review (3731). Its code review checks it
 against the re-reviewed design.
+
+**Slice S1, as built (2026-10-24, branch `feature/sigverify`).** Three
+crates were built, along with their evidence, the model's part 26 and
+check wiring.
+
+*`ferrix-sha256`* (`src/lib/crypto/sha256`) is a copy of `ferrix-slots`'
+SHA-256 with SHA-256/192 added. Its message schedule was rewritten so that
+every index is a constant. `ferrix-slots` moves onto it in S4.
+
+*`ferrix-sigverify`* (`src/lib/crypto/sigverify`) holds the manifest and
+LMS/HSS verification.
+
+* The algorithms are written once for every SHA-256/192 set. The public
+  entry points hold every key and signature to the product set of §2.1.
+  The wider set (W1, W2, W8, H5) is compiled under `cfg(test)` only, so
+  that RFC 9858 A.1 and NIST's ACVP samples run through the same code.
+* Both crates are classified `item`. They are complete subsystems in the
+  traceability report, so a new function no requirement names fails the
+  gate. Both deny `clippy::arithmetic_side_effects`, with each bounded
+  operation argued at its site. They contain no allocation, no recursion
+  and no `unsafe`.
+* Their requirements are `H.SIGN.1-6` (parent ASR-7), `L.sigverify.1-14`
+  and `L.sha256.1-3`. The other reserved ids were released. `H.SIGN.6`,
+  `L.sigverify.11` (time) and `L.sigverify.12` (stack) are in the baseline
+  until S2 and S4 measure them.
+
+*`ferrix-softsign`* (`tools/common/release/softsign`) is the soft signer of
+§6.4, a host tool. It is in no ring and not a normal dependency of any item
+crate (a dev-dependency of `ferrix-sigverify`'s tests). It reproduces RFC
+9858 A.4's one-time signature from its seed, byte for byte.
+
+**Evidence.**
+
+* Vectors:
+  * RFC 9858 A.4, which is the product set itself, with every single-bit
+    flip refused;
+  * RFC 9858 A.1, in the test-only wide set;
+  * RFC 8554 Test Case 1, refused by its codes and level count only;
+  * all 16 NIST ACVP LMS sigVer sample cases, in the wide set: the sample
+    has no case of the product set, and those vectors are owed (§8.2);
+  * NIST CAVP SHA256 ShortMsg, LongMsg and Monte;
+  * a two-level HSS signature;
+  * the `hbs-lms` 0.1.1 cross-check, with its type codes mapped.
+* Manifests: every byte of a good block changed is refused, each field is
+  refused by its name, and each bound field one off is refused, as is each
+  case of §7.4 (a)-(b).
+* Fuzzing: `sigverify_manifest`, seeded with a signed block, ran 300 s
+  (6.9 million runs) with no crash. `cargo xtask check` does not build it;
+  CI's fuzz job builds, replays and searches it with every other target,
+  and a backlog row (`docs/backlog/p2.md`) owes building it in `check`.
+* Coverage: under the host tests, every line and every branch outcome
+  of both crates (`docs/certification/host-coverage.json`). `--check`
+  runs in `check`. It refuses evidence that is stale against the product
+  files or against any test input (the tests, the vectors, the soft
+  signer). A measured control, an untested branch added, was refused by
+  name. `check-no-target-cfg.py` holds that the product code has no
+  target-dependent part, so the host measurement stands for every
+  target.
+* A configuration or driver manifest checked with no subject is refused
+  (`NoSubject`).
+* Soft-signer tests: a restored state is refused, a crash after the commit
+  skips the leaf, an unreadable or exhausted state is refused, a release
+  key is refused, and a key directory inside a git tree is refused. The
+  PKCS #11 constants are pinned.
+* Each comparison's negative control runs through `fleet/gate.sh control`.
+  The logs are cited in the landing commit.
+
+The consultant's code review of S1 is **OK IF (1)-(8)**, ledger line
+3803, folded in before landing:
+
+1. the subject fails closed for configuration and driver manifests;
+2. a control for every comparison;
+3. the coverage evidence tied to the test inputs, with a measured control;
+4. the target-cfg check;
+5. the fuzz build recorded as owed;
+6. §8.2 and the requirements made true;
+7. `L.sigverify.8` split into `.8`, `.13` and `.14`;
+8. the rows and controls on the landing hash.
+
+The review accepted three things as they stand: no reverse cross-check is
+owed, the S3 deferrals stand while S3 comes before S4, and the time and
+stack requirements stay in the baseline.
+
+**Slice S3, as built (2026-10-24, branch `feature/signing-s3`).** S3
+builds the rules that keep development keys and the verifier where they
+belong, ahead of S4's loader, which will be the first program to carry an
+anchor.
+
+*The anchors file*, `tools/common/data/signing-anchors.toml`:
+
+* `[release.*]` is empty: no product key exists until the HSMs (§12 Q2).
+* `[development.*]` holds three soft-signer keys, `LMS_SHA256_M24_H15`
+  with `LMOTS_SHA256_N24_W4`, `L = 1`, one per kind:
+  * slot, anchor id 0x8000;
+  * config, anchor id 0x8001;
+  * driver, anchor id 0x8002.
+* Their private state is in `~/.local/share/ferrix/signing-dev/` on
+  nazuna (D5).
+
+*The hardware-family registry*, `tools/common/data/hardware-families.toml`,
+holds §1.4's six families. It gives each one's id and architecture, which
+family is its architecture's generic one, and the rule the loader will
+recognise it by (S4).
+
+*`check-signing-anchors.py`*, in `cargo xtask check` with its self-test.
+
+* It validates both files. Release ids are 0 or 1, development ids
+  0x8000 and up. Every key is 52 bytes of the product set, and no key is
+  given twice or in both sections. Every family id is in its
+  architecture's range, with one generic family each.
+* It refuses a package that depends on the soft signer as more than a
+  dev-dependency, and a kernel package that depends on the verifier.
+* `--scan` refuses any file holding a development key.
+
+*xtask's refusals*, in `tools/common/xtask/src/signing.rs`:
+
+* Every kernel xtask builds is refused if it holds the verifier's or the
+  soft signer's name: their crate names, as symbols carry them, and their
+  source paths, as debug information and panic locations carry them. That
+  is §5.2's kernel check.
+  * It was shown to fire on a real build: a kernel package given a real
+    dependency on `ferrix-sigverify` and one call into it, built as the
+    shipped x86-64 release kernel, was refused for holding
+    `ferrix_sigverify` (`~/.local/share/ferrix/signing-bench/kernel-scan-integration-*.log`).
+  * The countermeasure is still the dependency rule below. The scan is its
+    backstop.
+* The loader and every initramfs of a claimed profile's image are refused
+  if they hold a development key's tree root `T`. This is D1, at the two
+  points every image passes through (§6.4).
+* No image carries an anchor until S4.
+
+*`check-signing-anchors.py`* walks every `src/kernel` package's normal and
+build dependency closure (`cargo metadata`, every platform). It refuses
+any path to the verifier or the signer, naming it. Its self-test plants an
+indirect path (a kernel package, then a library, then the verifier).
+
+*Left to S4, by design:* the generated anchor tables in the loader, init
+and `devmgr`, and the gate's relinked loader with its byte comparison
+(§6.4). Development private keys exist only on nazuna, so a gate that
+signs runs there. Keys for CI would be **a new class of development key**,
+which owes a design review at S4, with D1-D5 applying.
+
+S3 and the record of S2 had the consultant's review **OK IF (1)-(13)**,
+ledger line 3843, folded in before landing.
+
+* **S3**, conditions (1)-(8):
+  * the kernel rule walks the whole dependency closure;
+  * the development-key check runs where every image's loader and
+    initramfs are final;
+  * the match is by the root `T`;
+  * integration controls: the kernel scan on a real release build, and
+    a planted root in an image;
+  * a control on the same-key-in-both-sections rule;
+  * §6.4 and §10.5 made true.
+* **S2**, conditions (9)-(13): the figures tied to their run, the worst
+  case stated as a computed bound, AB-BOOT's ARMv7-A hashing cost, and
+  `L.sigverify.11` left in the baseline, with a backlog row.

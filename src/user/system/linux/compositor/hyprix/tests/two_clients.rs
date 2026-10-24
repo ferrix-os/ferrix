@@ -3638,3 +3638,545 @@ fn the_wallpaper_follows_its_lines_and_is_kept() {
         "the kept lines: {second:?}"
     );
 }
+
+/// The expected image `name` beside the renderer's, as `(red, green, blue)`
+/// bytes; or, with `COMPOSITOR_RENDER_BLESS` set and no such image yet, the
+/// screen's frame once it has stopped changing, written as that image --
+/// which fails the test, as every blessing does, so that it is looked at
+/// before it is committed. To bless one again, delete it first.
+///
+/// For the pictures only the compositor draws -- the overview's tiles --
+/// which `src/user/system/linux/compositor/render` has no layout to bless
+/// from. `cargo xtask test-compositor --boot minimize` requires the same
+/// images of the guest.
+fn compositor_picture(ends: &Ends, name: &str) -> Vec<u8> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let path = directory.join(format!("{name}.xrle"));
+    if std::env::var_os(compositor_render::golden::BLESS).is_some() && !path.exists() {
+        let mut last = Vec::new();
+        let mut same_since = std::time::Instant::now();
+        let frame = until(&format!("{name}: the screen still"), || {
+            let frame = newest_frame(&ends.frames).ok_or("no frame yet")?;
+            if frame != last {
+                last = frame;
+                same_since = std::time::Instant::now();
+                return Err("still changing".to_owned());
+            }
+            if same_since.elapsed() < Duration::from_secs(2) {
+                return Err("not still for long enough".to_owned());
+            }
+            Ok(frame)
+        });
+        let xrgb: Vec<u8> = frame
+            .chunks_exact(3)
+            .flat_map(|rgb| [rgb[2], rgb[1], rgb[0], 0xFF])
+            .collect();
+        compositor_render::golden::check_in(&directory, name, WIDTH, HEIGHT, &xrgb);
+    }
+    image(&path)
+}
+
+/// A minimized window can be found again, by both of the ways a person
+/// looks for it (`docs/DESKTOP.md` §1.2).
+///
+/// A taskbar minimizes `one` through `zwlr_foreign_toplevel_handle_v1`,
+/// and the screen is the picture of `two` alone. The overview then shows
+/// both: `one` in the grid, dimmed. Picked there -- `overview prev`, which
+/// is the `Left` key, and `overview pick`, which is `Return` -- it comes
+/// back and is focused, beside `two` where a new window would be. Then the
+/// taskbar minimizes it again and brings it back with `unset_minimized`,
+/// which is a taskbar's click on a minimized entry.
+#[test]
+fn a_minimized_window_is_found_again_in_the_overview_and_the_taskbar() {
+    let desk = Desk::new("minimized", "");
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let alone = image(&data.join("one-client-alone.xrle"));
+    let swapped = image(&data.join("dwindle-two-clients-swapped.xrle"));
+    let (line, asked) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        let _ = frame_until(ends, "the two windows drawn", is_picture(&expected()));
+        let socket = ends.socket.clone();
+        let taskbar = |want| compositor_lswt::run(&socket, &want);
+        let mut asked = Vec::new();
+
+        asked.push(taskbar(compositor_lswt::Want::Minimize("one".to_owned())));
+        let _ = frame_until(ends, "one minimized, two alone", is_picture(&alone));
+        let _ = ends.ask("dispatch overview on");
+        let overview = compositor_picture(ends, "overview-one-minimized");
+        let _ = frame_until(ends, "the overview with one dimmed", is_picture(&overview));
+        let _ = ends.ask("dispatch overview prev");
+        let picked = compositor_picture(ends, "overview-one-minimized-picked");
+        let _ = frame_until(ends, "the minimized one picked", is_picture(&picked));
+        let _ = ends.ask("dispatch overview pick");
+        let _ = frame_until(ends, "one back from the overview", is_picture(&swapped));
+
+        asked.push(taskbar(compositor_lswt::Want::Minimize("one".to_owned())));
+        let _ = frame_until(ends, "one minimized again", is_picture(&alone));
+        asked.push(taskbar(compositor_lswt::Want::List));
+        asked.push(taskbar(compositor_lswt::Want::Unminimize("one".to_owned())));
+        let _ = frame_until(ends, "one back from the taskbar", is_picture(&swapped));
+        ends.stop();
+        for window in windows {
+            let _ = window.join();
+        }
+        asked
+    })
+    .expect("the compositor ran");
+    let said: Vec<String> = asked
+        .into_iter()
+        .flat_map(|lines| lines.unwrap_or_else(|why| panic!("the taskbar: {why}; {line}")))
+        .collect();
+    for wanted in [
+        "lswt: minimized \"one\"",
+        // Listed while minimized, and marked so.
+        "lswt: rocks.magical.pattern \"one\" [minimized]",
+        "lswt: unminimized \"one\"",
+    ] {
+        assert!(
+            said.iter().any(|said| said.contains(wanted)),
+            "the taskbar never said `{wanted}`: {said:?}"
+        );
+    }
+}
+
+/// The window switcher lists a minimized window and brings it back:
+/// `switcher next`, which `ALT+Tab` runs, picks the window focused before
+/// the focused one -- here the minimized `one` -- and `switcher pick`,
+/// which letting go of `ALT` does, restores and focuses it.
+#[test]
+fn the_switcher_brings_a_minimized_window_back() {
+    let desk = Desk::new("switcher", "");
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let alone = image(&data.join("one-client-alone.xrle"));
+    let swapped = image(&data.join("dwindle-two-clients-swapped.xrle"));
+    let (_, ()) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        let _ = frame_until(ends, "the two windows drawn", is_picture(&expected()));
+        let _ = ends.ask("dispatch focuswindow title:^(one)$");
+        let _ = ends.ask("dispatch minimize");
+        let _ = frame_until(ends, "one minimized, two alone", is_picture(&alone));
+        let _ = ends.ask("dispatch switcher next");
+        let _ = frame_until(ends, "the switcher up", |frame| {
+            if compare(frame, &alone).0 == 0 {
+                Err("still the desktop".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        let _ = ends.ask("dispatch switcher pick");
+        let _ = frame_until(ends, "one back from the switcher", is_picture(&swapped));
+        ends.stop();
+        for window in windows {
+            let _ = window.join();
+        }
+    })
+    .expect("the compositor ran");
+}
+
+// ---------------------------------------------------------------------------
+// Toplevels that never commit
+//
+// On the N150 box (2026-10-24), after a game under yserver ended, the screen
+// showed a terminal and about ten empty tiles, each smaller than the last,
+// and a terminal opened after that was given 0x0. `hyprctl clients` listed
+// only the terminals and `hyprctl workspaces` said one window: the tiles
+// were toplevels yserver had made and never committed. Its client runtime
+// sent `get_toplevel`, failed a request after it, and made the window again
+// on the next pass of its loop, over and over. Each was tiled the moment it
+// was made, and none was ever a window.
+// ---------------------------------------------------------------------------
+
+/// The ids the never-committing client gives its objects.
+mod bare {
+    use compositor_wire::ObjectId;
+
+    pub(super) const DISPLAY: ObjectId = ObjectId(1);
+    pub(super) const REGISTRY: ObjectId = ObjectId(2);
+    pub(super) const SYNC: ObjectId = ObjectId(3);
+    pub(super) const COMPOSITOR: ObjectId = ObjectId(4);
+    pub(super) const SHELL: ObjectId = ObjectId(5);
+    /// The `wl_display.sync` after the toplevels are made: its `done` says
+    /// the compositor has read them.
+    pub(super) const MADE: ObjectId = ObjectId(6);
+    /// The same after their first commits.
+    pub(super) const COMMITTED: ObjectId = ObjectId(7);
+    /// The first toplevel's `wl_surface`; its `xdg_surface` and
+    /// `xdg_toplevel` are the two ids after it, and the next toplevel's
+    /// surface the one after those.
+    pub(super) const FIRST: u32 = 10;
+
+    /// Toplevel `at`'s surface, `xdg_surface` and `xdg_toplevel`.
+    pub(super) const fn ids(at: u32) -> (ObjectId, ObjectId, ObjectId) {
+        let surface = FIRST + at * 3;
+        (
+            ObjectId(surface),
+            ObjectId(surface + 1),
+            ObjectId(surface + 2),
+        )
+    }
+}
+
+/// What the never-committing client does once its toplevels are made.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Bare {
+    /// Nothing more: as yserver's failed windows, made and left.
+    Never,
+    /// Ask to be fullscreen, wait until the compositor has read that, and
+    /// only then commit: a game asking before its window exists.
+    FullscreenFirst,
+}
+
+/// What the never-committing client knows.
+struct Barer {
+    count: u32,
+    then: Bare,
+    globals: std::collections::BTreeMap<String, u32>,
+    /// Whether the compositor has read everything it is to do.
+    read: bool,
+    /// How many `xdg_surface.configure`s it was sent.
+    configured: u32,
+}
+
+impl Barer {
+    /// The interface an object of this client's speaks, so an event for it
+    /// can be decoded.
+    fn interface(&self, id: ObjectId) -> Option<&'static Interface> {
+        let last = bare::ids(self.count).0.0;
+        Some(match id {
+            bare::DISPLAY => &WL_DISPLAY,
+            bare::REGISTRY => &WL_REGISTRY,
+            bare::SYNC | bare::MADE | bare::COMMITTED => &WL_CALLBACK,
+            bare::SHELL => &xdg_shell::XDG_WM_BASE,
+            ObjectId(id) if (bare::FIRST..last).contains(&id) => match (id - bare::FIRST) % 3 {
+                0 => &WL_SURFACE,
+                1 => &xdg_shell::XDG_SURFACE,
+                _ => &xdg_shell::XDG_TOPLEVEL,
+            },
+            _ => return None,
+        })
+    }
+
+    /// Bind what a window needs and make the toplevels, each a surface, an
+    /// `xdg_surface` and a toplevel with a title -- and, if it is to, asking
+    /// to be fullscreen -- with no commit; then ask to hear they were read.
+    fn make(&self, out: &mut Writer) {
+        for (interface, id, version) in [
+            ("wl_compositor", bare::COMPOSITOR, 6u32),
+            ("xdg_wm_base", bare::SHELL, 6),
+        ] {
+            let name = self
+                .globals
+                .get(interface)
+                .copied()
+                .unwrap_or_else(|| panic!("the compositor offers no {interface}"));
+            send(
+                out,
+                bare::REGISTRY,
+                wl_registry::request::BIND,
+                &[ArgType::Uint, ArgType::AnyNewId],
+                &[
+                    Arg::Uint(name),
+                    Arg::AnyNewId {
+                        interface,
+                        version,
+                        id,
+                    },
+                ],
+            );
+        }
+        for at in 0..self.count {
+            let (surface, xdg, toplevel) = bare::ids(at);
+            send(
+                out,
+                bare::COMPOSITOR,
+                wl_compositor::request::CREATE_SURFACE,
+                &[ArgType::NewId],
+                &[Arg::NewId(surface)],
+            );
+            send(
+                out,
+                bare::SHELL,
+                xdg_wm_base::request::GET_XDG_SURFACE,
+                &[ArgType::NewId, ArgType::Object { nullable: false }],
+                &[Arg::NewId(xdg), Arg::Object(surface)],
+            );
+            send(
+                out,
+                xdg,
+                xdg_surface::request::GET_TOPLEVEL,
+                &[ArgType::NewId],
+                &[Arg::NewId(toplevel)],
+            );
+            send(
+                out,
+                toplevel,
+                xdg_toplevel::request::SET_TITLE,
+                &[ArgType::Str { nullable: false }],
+                &[Arg::Str(Some("never committed"))],
+            );
+            if self.then == Bare::FullscreenFirst {
+                send(
+                    out,
+                    toplevel,
+                    xdg_toplevel::request::SET_FULLSCREEN,
+                    &[ArgType::Object { nullable: true }],
+                    &[Arg::Object(ObjectId(0))],
+                );
+            }
+        }
+        send(
+            out,
+            bare::DISPLAY,
+            wl_display::request::SYNC,
+            &[ArgType::NewId],
+            &[Arg::NewId(bare::MADE)],
+        );
+    }
+
+    /// The toplevels read: as yserver's failed windows, left -- or, read in
+    /// a pass of their own, committed only now.
+    fn made(&mut self, out: &mut Writer) {
+        if self.then == Bare::Never {
+            self.read = true;
+            return;
+        }
+        for at in 0..self.count {
+            send(out, bare::ids(at).0, wl_surface::request::COMMIT, &[], &[]);
+        }
+        send(
+            out,
+            bare::DISPLAY,
+            wl_display::request::SYNC,
+            &[ArgType::NewId],
+            &[Arg::NewId(bare::COMMITTED)],
+        );
+    }
+
+    /// Answer one event.
+    fn event(
+        &mut self,
+        sender: ObjectId,
+        opcode: u16,
+        args: &[Arg<'_>],
+        out: &mut Writer,
+    ) -> Result<(), String> {
+        match (sender, opcode) {
+            (bare::DISPLAY, wl_display::event::ERROR) => {
+                let text = args.get(2).and_then(Arg::as_str).unwrap_or("");
+                return Err(format!("bare: refused: {text}"));
+            }
+            (bare::REGISTRY, wl_registry::event::GLOBAL) => {
+                if let (Some(name), Some(interface)) = (
+                    args.first().and_then(Arg::as_uint),
+                    args.get(1).and_then(Arg::as_str),
+                ) {
+                    let _ = self.globals.insert(interface.to_owned(), name);
+                }
+            }
+            (bare::SYNC, wl_callback::event::DONE) => self.make(out),
+            (bare::MADE, wl_callback::event::DONE) => self.made(out),
+            (bare::COMMITTED, wl_callback::event::DONE) => self.read = true,
+            (bare::SHELL, xdg_wm_base::event::PING) => {
+                let serial = args.first().and_then(Arg::as_uint).unwrap_or(0);
+                send(
+                    out,
+                    bare::SHELL,
+                    xdg_wm_base::request::PONG,
+                    &[ArgType::Uint],
+                    &[Arg::Uint(serial)],
+                );
+            }
+            (_, xdg_surface::event::CONFIGURE)
+                if self
+                    .interface(sender)
+                    .is_some_and(|interface| interface.name == "xdg_surface") =>
+            {
+                self.configured += 1;
+                let serial = args.first().and_then(Arg::as_uint).unwrap_or(0);
+                send(
+                    out,
+                    sender,
+                    xdg_surface::request::ACK_CONFIGURE,
+                    &[ArgType::Uint],
+                    &[Arg::Uint(serial)],
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+/// A client that makes `count` toplevels, each with a surface and a title,
+/// and does `then` with them; it says on `made` once the compositor has
+/// read all of it, and stays until the compositor goes.
+fn bare_toplevels(
+    socket: &Path,
+    count: u32,
+    then: Bare,
+    made: &std::sync::mpsc::Sender<()>,
+) -> String {
+    let stream = std::os::unix::net::UnixStream::connect(socket)
+        .unwrap_or_else(|error| panic!("connecting to {}: {error}", socket.display()));
+    let mut connection = Connection::new(stream).expect("a connection");
+    let mut out = Writer::new();
+    send(
+        &mut out,
+        bare::DISPLAY,
+        wl_display::request::GET_REGISTRY,
+        &[ArgType::NewId],
+        &[Arg::NewId(bare::REGISTRY)],
+    );
+    send(
+        &mut out,
+        bare::DISPLAY,
+        wl_display::request::SYNC,
+        &[ArgType::NewId],
+        &[Arg::NewId(bare::SYNC)],
+    );
+    let mut state = Barer {
+        count,
+        then,
+        globals: std::collections::BTreeMap::new(),
+        read: false,
+        configured: 0,
+    };
+    let started = std::time::Instant::now();
+    let mut said = false;
+    while started.elapsed() < BACKSTOP {
+        if state.read && !said {
+            said = true;
+            let _ = made.send(());
+        }
+        match connection.receive() {
+            Ok(_) => {}
+            Err(RecvError::WouldBlock) => std::thread::sleep(Duration::from_millis(2)),
+            Err(RecvError::Closed) => break,
+            Err(error) => return format!("reading: {error:?}"),
+        }
+        let bytes = connection.bytes().to_vec();
+        let fds = connection.fds();
+        let mut reader = Reader::new(&bytes, &fds);
+        while !reader.is_done() {
+            let Ok(header) = reader.peek() else {
+                break;
+            };
+            let Some(method) = state
+                .interface(header.sender)
+                .and_then(|interface| interface.event(header.opcode))
+            else {
+                return format!(
+                    "bare: an event it cannot read, {} on {}",
+                    header.opcode, header.sender.0
+                );
+            };
+            let Ok((_, args)) = reader.read(method.signature) else {
+                break;
+            };
+            if let Err(why) = state.event(header.sender, header.opcode, &args, &mut out) {
+                return why;
+            }
+        }
+        let consumed = reader.consumed();
+        if consumed > 0 {
+            connection.consume(consumed, 0);
+        }
+        if !out.is_empty() {
+            let (queued, handed) = out.take();
+            if connection.send(&queued, &handed).is_err() {
+                break;
+            }
+        }
+    }
+    format!(
+        "bare: {count} toplevels, {} configures{}",
+        state.configured,
+        if said { "" } else { ", never read" }
+    )
+}
+
+/// Start [`bare_toplevels`] on `ends`' socket and wait until the compositor
+/// has read what it did.
+fn bare_client(ends: &Ends, count: u32, then: Bare) -> std::thread::JoinHandle<String> {
+    let socket = ends.socket.clone();
+    let (made, read) = std::sync::mpsc::channel();
+    let client = std::thread::spawn(move || bare_toplevels(&socket, count, then, &made));
+    until("the bare toplevels read", || {
+        if read.try_recv().is_ok() {
+            Ok(())
+        } else if client.is_finished() {
+            panic!("the bare client stopped first")
+        } else {
+            Err("not yet".to_owned())
+        }
+    });
+    client
+}
+
+/// Toplevels a client made and never committed take no room: a window that
+/// opens after a dozen of them is tiled alone, at the whole of the screen
+/// inside the gaps, and `hyprctl` counts one window. Until the layout took a
+/// window at its first commit, each was an empty tile and the window opened
+/// after them was squeezed into what was left (the N150 box, 2026-10-24).
+#[test]
+fn toplevels_that_never_commit_take_no_room_from_a_window() {
+    let desk = Desk::new("never-committed", "");
+    let (line, (windows, workspaces, bare)) = running(&desk, &desk.dumping(), move |ends| {
+        let bare = bare_client(ends, 12, Bare::Never);
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        let windows = ends.ask("j/clients");
+        let workspaces = ends.ask("workspaces");
+        ends.stop();
+        let _ = one.join();
+        (windows, workspaces, bare.join())
+    })
+    .expect("the compositor ran");
+    let bare = bare.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(bare.starts_with("bare: 12 toplevels"), "{bare}");
+    assert!(
+        bare.contains(" 0 configures"),
+        "a toplevel that never committed was configured: {bare}"
+    );
+    assert_eq!(windows.matches("\"address\"").count(), 1, "{windows}");
+    assert!(
+        windows.contains("\"size\": [982, 726]"),
+        "the window opened after twelve bare toplevels was not given the whole screen \
+         inside the gaps:\n{windows}\nthe compositor said {line}"
+    );
+    assert!(workspaces.contains("windows: 1"), "{workspaces}");
+}
+
+/// A toplevel that asked to be fullscreen before its first commit is
+/// fullscreen once it commits: the layout takes it then, and what it asked
+/// before is acted on from what the server kept of it.
+#[test]
+fn a_window_that_asks_for_fullscreen_before_its_first_commit_gets_it() {
+    let desk = Desk::new("fullscreen-first", "");
+    let (_, (workspaces, bare)) = running(&desk, &desk.options(), move |ends| {
+        let bare = bare_client(ends, 1, Bare::FullscreenFirst);
+        let workspaces = until("the bare window fullscreen", || {
+            let answer = ends.ask("workspaces");
+            if answer.contains("hasfullscreen: 1") {
+                Ok(answer)
+            } else {
+                Err(answer)
+            }
+        });
+        ends.stop();
+        (workspaces, bare.join())
+    })
+    .expect("the compositor ran");
+    let bare = bare.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(bare.starts_with("bare: 1 toplevels"), "{bare}");
+    assert!(
+        !bare.contains(" 0 configures"),
+        "the window was never configured: {bare}"
+    );
+    assert!(workspaces.contains("windows: 1"), "{workspaces}");
+}

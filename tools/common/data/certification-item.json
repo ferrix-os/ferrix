@@ -451,7 +451,19 @@
         "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
-      "ferrix-smbios": {
+    "ferrix-sha256": {
+        "ring": "item",
+        "path": "src/lib/crypto/sha256",
+        "below": "byte slices its caller lends; no trait, no allocation, no dependency",
+        "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify (docs/SIGNING.md section 5.1); ferrix-slots moves onto it in slice S4"
+    },
+    "ferrix-sigverify": {
+        "ring": "item",
+        "path": "src/lib/crypto/sigverify",
+        "below": "ferrix-sha256, and byte slices its caller lends: the 4 KiB manifest block, the anchors and the revoked trees; no trait, no allocation",
+        "above": "manifest::verify, Verified::check_payload and Verified::revoked, and lms::hss_verify: verify-only LMS/HSS (RFC 8554, RFC 9858, SP 800-208) and the signed manifest of docs/SIGNING.md, for the UEFI loader, init's configuration verifier and devmgr; no profile links it into ring 0 (SIGNING.md section 5.2)"
+    },
+    "ferrix-smbios": {
         "ring": "item",
         "path": "src/lib/platform/smbios",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",

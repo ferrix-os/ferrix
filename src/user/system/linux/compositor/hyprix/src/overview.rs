@@ -3,9 +3,12 @@
 //! One key (`overview toggle`, which Ferrix light binds to `SUPER`) shows
 //! every window of each monitor's workspace side by side, scaled to fit a
 //! grid, with the monitor's other workspaces as a strip of thumbnails above
-//! it. A click on a window focuses it and closes the overview, a click on a
-//! thumbnail goes to that workspace and window, a click on nothing or
-//! `Escape` closes it.
+//! it. A minimized window is in its workspace's grid too, after the others
+//! and dimmed, since the overview is where a person looks for a window
+//! that is gone from the screen. A click on a window, or `Return` on the
+//! one the arrow keys or `Tab` picked, focuses it -- bringing a minimized
+//! one back -- and closes the overview; a click on a thumbnail goes to that
+//! workspace and window, a click on nothing or `Escape` closes it.
 //!
 //! It is a way of drawing and of reading the pointer, not a layout: the
 //! windows keep their places and their clients are told nothing. The frame
@@ -18,12 +21,17 @@ use compositor_layout::{MonitorId, MonitorLayout, Placed, Rect, State, WindowId,
 use crate::seat::Action;
 
 /// Whether the overview is up, and which window the pointer is over.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Overview {
     /// Whether it is shown.
     pub on: bool,
-    /// The window under the pointer, drawn with a highlight.
+    /// The window under the pointer, or the one the keys picked, drawn
+    /// with a highlight.
     pub hovered: Option<WindowId>,
+    /// Keys whose press the overview took, so that their release is taken
+    /// too, even once it has closed: a `Return` that picked a window would
+    /// otherwise reach that window as a release it never saw pressed.
+    pub eaten: Vec<u16>,
 }
 
 /// One window's place in the overview.
@@ -37,6 +45,8 @@ pub struct Tile {
     pub rect: Rect,
     /// Whether it is in the strip of other workspaces rather than the grid.
     pub thumbnail: bool,
+    /// Whether it is minimized: in its workspace's grid, drawn dimmed.
+    pub minimized: bool,
 }
 
 /// The space between tiles, and round the grid, in logical pixels.
@@ -53,6 +63,21 @@ const BTN_LEFT: u32 = 0x110;
 
 /// `KEY_ESC`.
 const KEY_ESC: u16 = 1;
+
+/// The keys that pick: `KEY_ENTER` and `KEY_KPENTER`.
+const PICK: [u16; 2] = [28, 96];
+
+/// The keys that pick the window before the picked one: `KEY_UP` and
+/// `KEY_LEFT`.
+const BACK: [u16; 2] = [103, 105];
+
+/// The keys that pick the window after it: `KEY_TAB`, `KEY_RIGHT` and
+/// `KEY_DOWN`.
+const ON: [u16; 3] = [15, 106, 108];
+
+/// How much of a minimized window shows in the overview: enough to know it
+/// by, faint enough to see it is not on the screen.
+pub const MINIMIZED_OPACITY: f32 = 0.5;
 
 /// Rectangles for windows of `sizes` laid out in a grid inside `area`, in
 /// the order given: as many columns as the square root of the count rounded
@@ -108,7 +133,7 @@ pub fn grid(area: Rect, sizes: &[(i64, i64)], gap: i64) -> Vec<Rect> {
 
 /// A window of `size` scaled to fit `cell` keeping its shape, never larger
 /// than it is, centred in it.
-fn fit(cell: Rect, (width, height): (i64, i64)) -> Rect {
+pub(crate) fn fit(cell: Rect, (width, height): (i64, i64)) -> Rect {
     let (width, height) = (width.max(1), height.max(1));
     #[expect(
         clippy::cast_precision_loss,
@@ -206,6 +231,7 @@ pub fn tiles(state: &State) -> Vec<(MonitorId, Vec<Tile>)> {
                         workspace,
                         rect,
                         thumbnail: true,
+                        minimized: false,
                     });
                 }
                 x = x.saturating_add(box_width).saturating_add(GAP);
@@ -213,12 +239,26 @@ pub fn tiles(state: &State) -> Vec<(MonitorId, Vec<Tile>)> {
         }
 
         // The grid: the shown workspace's windows, in the order they were
-        // opened, below the strip.
+        // opened, below the strip; then the ones minimized from it, which
+        // wait on a workspace nothing shows and have no other place to be
+        // found.
         if let Some(active) = active {
-            let shown: Vec<_> = listing
+            let minimized: Vec<WindowId> = state
+                .minimized_windows()
+                .into_iter()
+                .filter(|(_, back)| *back == active)
+                .map(|(window, _)| window)
+                .collect();
+            let mut shown: Vec<_> = listing
                 .iter()
                 .filter(|listed| listed.workspace == active)
+                .filter(|listed| !minimized.contains(&listed.placed.window))
                 .collect();
+            shown.extend(
+                listing
+                    .iter()
+                    .filter(|listed| minimized.contains(&listed.placed.window)),
+            );
             let top = usable
                 .y
                 .saturating_add(strip_height)
@@ -239,6 +279,7 @@ pub fn tiles(state: &State) -> Vec<(MonitorId, Vec<Tile>)> {
                     workspace: active,
                     rect,
                     thumbnail: false,
+                    minimized: minimized.contains(&listed.placed.window),
                 });
             }
         }
@@ -281,6 +322,42 @@ pub fn outputs(state: &State, overview: &Overview) -> Vec<MonitorLayout> {
         .collect()
 }
 
+/// The windows the overview draws dimmed, at [`MINIMIZED_OPACITY`]: the
+/// minimized ones in a grid.
+#[must_use]
+pub fn dimmed(state: &State) -> Vec<WindowId> {
+    tiles(state)
+        .into_iter()
+        .flat_map(|(_, tiles)| tiles)
+        .filter(|tile| tile.minimized)
+        .map(|tile| tile.window)
+        .collect()
+}
+
+/// The window the keys pick after `from` -- or before it, `back` -- among
+/// the grids' tiles, wrapping: the first or the last when nothing is
+/// picked yet.
+fn step(state: &State, from: Option<WindowId>, back: bool) -> Option<WindowId> {
+    let order: Vec<WindowId> = tiles(state)
+        .into_iter()
+        .flat_map(|(_, tiles)| tiles)
+        .filter(|tile| !tile.thumbnail)
+        .map(|tile| tile.window)
+        .collect();
+    let count = order.len();
+    if count == 0 {
+        return None;
+    }
+    let at = from.and_then(|window| order.iter().position(|held| *held == window));
+    let next = match (at, back) {
+        (None, false) => 0,
+        (None, true) => count - 1,
+        (Some(at), false) => (at + 1) % count,
+        (Some(at), true) => at.checked_sub(1).unwrap_or(count - 1),
+    };
+    order.get(next).copied()
+}
+
 /// The tile at `point`, the topmost where two overlap.
 #[must_use]
 pub fn hit(state: &State, point: (i64, i64)) -> Option<Tile> {
@@ -291,6 +368,29 @@ pub fn hit(state: &State, point: (i64, i64)) -> Option<Tile> {
         .rfind(|tile| {
             x >= tile.rect.x && x < tile.rect.right() && y >= tile.rect.y && y < tile.rect.bottom()
         })
+}
+
+/// `overview toggle|on|off|next|prev|pick`: the last three are the keys'
+/// `Tab`, `Left` and `Return`, for a script or a bind. Gives whether
+/// anything changed.
+pub fn dispatch_in(argument: &str, overview: &mut Overview, state: &mut State) -> bool {
+    match argument.trim() {
+        "next" | "prev" if overview.on => {
+            let picked = step(state, overview.hovered, argument.trim() == "prev");
+            let changed = picked != overview.hovered;
+            overview.hovered = picked;
+            changed
+        }
+        "pick" if overview.on => match overview.hovered {
+            Some(window) => {
+                let _ = state.focus_window(window);
+                dispatch("off", overview)
+            }
+            None => false,
+        },
+        "next" | "prev" | "pick" => false,
+        _ => dispatch(argument, overview),
+    }
 }
 
 /// `overview toggle|on|off`. Gives whether anything changed.
@@ -309,9 +409,10 @@ pub fn dispatch(argument: &str, overview: &mut Overview) -> bool {
 }
 
 /// Take the input while the overview is up: the pointer highlights and
-/// picks, `Escape` closes, and nothing reaches a client. Binds still run,
-/// so the key that opened it closes it. Gives the actions left over and
-/// whether the overview or the layout changed.
+/// picks, the arrow keys and `Tab` highlight, `Return` picks, `Escape`
+/// closes, and nothing reaches a client. Binds still run, so the key that
+/// opened it closes it. Gives the actions left over and whether the
+/// overview or the layout changed.
 pub fn take_input(
     actions: Vec<Action>,
     overview: &mut Overview,
@@ -319,7 +420,24 @@ pub fn take_input(
     pointer: (f64, f64),
 ) -> (Vec<Action>, bool) {
     if !overview.on {
-        return (actions, false);
+        // The release of a key the overview took, after it closed.
+        if overview.eaten.is_empty() {
+            return (actions, false);
+        }
+        let kept = actions
+            .into_iter()
+            .filter(|action| match action {
+                Action::Key {
+                    code,
+                    pressed: false,
+                } => {
+                    let at = overview.eaten.iter().position(|held| held == code);
+                    at.map(|at| overview.eaten.remove(at)).is_none()
+                }
+                _ => true,
+            })
+            .collect();
+        return (kept, false);
     }
     #[expect(
         clippy::cast_possible_truncation,
@@ -349,9 +467,37 @@ pub fn take_input(
                 changed |= dispatch("off", overview);
             }
             Action::Key {
-                code: KEY_ESC,
+                code,
                 pressed: true,
-            } => changed |= dispatch("off", overview),
+            } => {
+                // The keys it acts on, whose release would otherwise reach
+                // the window they focused. Every other key was never the
+                // overview's to keep, and is dropped as it always was.
+                let acts = code == KEY_ESC
+                    || PICK.contains(&code)
+                    || BACK.contains(&code)
+                    || ON.contains(&code);
+                if acts && !overview.eaten.contains(&code) {
+                    overview.eaten.push(code);
+                }
+                if code == KEY_ESC {
+                    changed |= dispatch("off", overview);
+                } else if PICK.contains(&code) {
+                    changed |= dispatch_in("pick", overview, state);
+                } else if BACK.contains(&code) {
+                    changed |= dispatch_in("prev", overview, state);
+                } else if ON.contains(&code) {
+                    changed |= dispatch_in("next", overview, state);
+                }
+            }
+            Action::Key {
+                code,
+                pressed: false,
+            } => {
+                if let Some(at) = overview.eaten.iter().position(|held| *held == code) {
+                    let _ = overview.eaten.remove(at);
+                }
+            }
             Action::Dispatch { .. } | Action::Modifiers(_) => kept.push(action),
             _ => {}
         }
@@ -474,6 +620,95 @@ mod tests {
             (0.0, 0.0),
         );
         assert!(kept.is_empty() && changed && !overview.on);
+    }
+
+    /// A minimized window is in its workspace's grid, after the others and
+    /// marked; the strip does not have it, since it is on no workspace a
+    /// monitor shows.
+    #[test]
+    fn a_minimized_window_is_in_its_workspaces_grid_and_dimmed() {
+        let mut state = desktop();
+        let _ = state.focus_window(WindowId(1)).unwrap();
+        let _ = state.minimize(WindowId(1)).unwrap();
+        let all = tiles(&state);
+        let grid: Vec<_> = all[0].1.iter().filter(|tile| !tile.thumbnail).collect();
+        assert_eq!(
+            grid.iter()
+                .map(|tile| (tile.window, tile.minimized))
+                .collect::<Vec<_>>(),
+            [(WindowId(2), false), (WindowId(1), true)]
+        );
+        assert_eq!(super::dimmed(&state), [WindowId(1)]);
+        assert!(
+            all[0]
+                .1
+                .iter()
+                .filter(|tile| tile.thumbnail)
+                .all(|tile| tile.window == WindowId(3))
+        );
+    }
+
+    /// A click on a minimized window's tile brings it back and focuses it.
+    #[test]
+    fn a_click_on_a_minimized_tile_restores_it() {
+        let mut state = desktop();
+        let _ = state.focus_window(WindowId(1)).unwrap();
+        let _ = state.minimize(WindowId(1)).unwrap();
+        let mut overview = Overview::default();
+        let _ = dispatch("on", &mut overview);
+        let tile = tiles(&state)[0]
+            .1
+            .iter()
+            .find(|tile| tile.minimized)
+            .copied()
+            .unwrap();
+        #[expect(clippy::cast_precision_loss, reason = "a test's screen")]
+        let at = (
+            (tile.rect.x + tile.rect.width / 2) as f64,
+            (tile.rect.y + tile.rect.height / 2) as f64,
+        );
+        let (_, changed) = take_input(
+            vec![Action::Button {
+                button: 0x110,
+                pressed: true,
+            }],
+            &mut overview,
+            &mut state,
+            at,
+        );
+        assert!(changed && !overview.on);
+        assert!(!state.is_minimized(WindowId(1)));
+        assert_eq!(state.focused_window(), Some(WindowId(1)));
+    }
+
+    /// The keys: `Left` with nothing picked picks the last tile -- the
+    /// minimized one -- `Tab` the next, wrapping, and `Return` restores the
+    /// picked window; its release is taken too, after the overview closed.
+    #[test]
+    fn the_arrow_keys_pick_and_return_restores() {
+        let mut state = desktop();
+        let _ = state.focus_window(WindowId(1)).unwrap();
+        let _ = state.minimize(WindowId(1)).unwrap();
+        let mut overview = Overview::default();
+        let _ = dispatch("on", &mut overview);
+        let key = |code: u16, pressed: bool| vec![Action::Key { code, pressed }];
+        let (_, changed) = take_input(key(105, true), &mut overview, &mut state, (0.0, 0.0));
+        assert!(changed);
+        assert_eq!(overview.hovered, Some(WindowId(1)), "Left picks the last");
+        let _ = take_input(key(105, false), &mut overview, &mut state, (0.0, 0.0));
+        let _ = take_input(key(15, true), &mut overview, &mut state, (0.0, 0.0));
+        assert_eq!(overview.hovered, Some(WindowId(2)), "Tab wraps");
+        let _ = take_input(key(15, true), &mut overview, &mut state, (0.0, 0.0));
+        assert_eq!(overview.hovered, Some(WindowId(1)));
+        let (_, changed) = take_input(key(28, true), &mut overview, &mut state, (0.0, 0.0));
+        assert!(changed && !overview.on);
+        assert!(!state.is_minimized(WindowId(1)));
+        assert_eq!(state.focused_window(), Some(WindowId(1)));
+        let (kept, _) = take_input(key(28, false), &mut overview, &mut state, (0.0, 0.0));
+        assert!(kept.is_empty(), "the Return's release reached a client");
+        // And a key it never took still reaches one.
+        let (kept, _) = take_input(key(30, false), &mut overview, &mut state, (0.0, 0.0));
+        assert_eq!(kept, key(30, false));
     }
 
     /// One window is centred at its own size; one too large is scaled down

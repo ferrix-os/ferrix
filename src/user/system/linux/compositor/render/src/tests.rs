@@ -826,6 +826,78 @@ fn a_shadow_fades_out_over_its_range_and_no_further() {
     );
 }
 
+/// A small shadow is blended pixel by pixel rather than through tables,
+/// which cost more than its pixels do; the bytes are the same either way,
+/// for every size from a 0x0 tile's to one past where the tables take over,
+/// square and rounded, near and far range, and under a partial damage.
+#[test]
+fn a_shadow_is_the_same_bytes_tabled_or_pixel_by_pixel() {
+    let mut partial = Damage::new();
+    partial.add(Rect::new(30, 30, 37, 23));
+    partial.add(Rect::new(90, 70, 50, 41));
+    for (radius, range) in [(0, 4), (10, 4), (12, 12), (0, 20)] {
+        let shadow = crate::Shadow {
+            rounding: Rounding::circle(radius),
+            range,
+            power: 3,
+            color: Color(0xEE1A_1A1A),
+            offset: (2, 3),
+        };
+        for size in [(2, 2), (1, 7), (9, 9), (20, 13), (40, 40), (97, 61)] {
+            for damage in [Damage::full(200, 160), partial.clone()] {
+                let rect = Rect::new(50, 40, size.0, size.1);
+                let mut tabled = canvas(200, 160);
+                tabled.shadow_tabled_from(rect, &shadow, &damage, 0);
+                let mut each = canvas(200, 160);
+                each.shadow_tabled_from(rect, &shadow, &damage, i64::MAX);
+                assert!(
+                    pixels(&tabled) == pixels(&each),
+                    "a {size:?} shadow at range {range}, rounding {radius} differs"
+                );
+                assert!(
+                    pixels(&tabled) != pixels(&canvas(200, 160)),
+                    "a {size:?} shadow drew nothing"
+                );
+            }
+        }
+    }
+}
+
+/// A window of no size -- a dwindle tile squeezed to 0x0 -- has no shadow:
+/// only its border's square is drawn, and the pixels around it are the
+/// background's.
+#[test]
+fn a_window_of_no_size_casts_no_shadow() {
+    let (_, mut layout) = two_clients();
+    layout.windows.truncate(1);
+    let placed = layout.windows.first_mut().unwrap();
+    placed.rect = Rect::new(500, 300, 0, 0);
+    placed.border = 1;
+    let mut with = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let full = Damage::full(WIDTH, HEIGHT);
+    let _ = render(
+        &mut with,
+        &layout,
+        (0, 0),
+        &plain_style(),
+        &BTreeMap::new(),
+        &full,
+    );
+    let mut without = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let _ = render(
+        &mut without,
+        &layout,
+        (0, 0),
+        &unshadowed(),
+        &BTreeMap::new(),
+        &full,
+    );
+    assert!(
+        with.data() == without.data(),
+        "a 0x0 window's shadow was drawn"
+    );
+}
+
 /// `decoration:dim_inactive` lays black over a window that is not focused,
 /// and over no other.
 #[test]

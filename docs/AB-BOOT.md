@@ -163,7 +163,32 @@ the record's states.
 ```
 
 The loader **writes nothing but one block of the control partition**, at the
-byte offset of one copy, and only in step 5. The block address is computed
+byte offset of one copy, and only in step 5 -- and, outside the slots and the
+control partition, the previous kernel's log as the ESP's two files
+`FERRIX/LASTKERNEL.TXT` and `.PRV` (`docs/POSTMORTEM.md` §3.5).
+
+What those two files cost the ESP (the consultant, ledger line 3693, (1)):
+
+* **Space.** At most 2 x (1 MiB + 1 KiB) beside the loader, kernel and
+  rescue files, of an ESP the installer makes 64 MiB (`docs/INSTALLER.md`).
+  The slots are raw partitions of their own, so a slot update never needs
+  ESP space and is not starved by them; a full ESP fails the write with one
+  line and the boot goes on.
+* **Power lost mid-write.** The files are written through firmware's FAT
+  driver (delete, create, write, close), which A.FIRMWARE trusts. Power lost
+  inside that can leave the ESP's FAT inconsistent: in the worst case a
+  damaged directory or table makes the ESP's own files -- the loader, the
+  rescue kernel -- unreadable to firmware. The slots and the control record
+  are on other partitions and unaffected, but the loader that reads them is
+  on the ESP. Residual risk, accepted for the reference configuration's
+  disks: a write of about 1 MiB a boot, against the many-minute run between
+  boots; the integrator who will not take it sets `ferrix.pstore=off`, which
+  writes nothing (VULNERABILITY-ANALYSIS V-17).
+* **Wear.** One boot after an `ferrix.pstore=on` boot writes up to about
+  2 MiB to the ESP (the old file moved, the new one written) and two
+  directory updates: on an SD card or eMMC board, about 2 MiB of writes a
+  boot, a few hundred times a day at the most for a machine that reboots
+  that often. The block address is computed
 by a pure function of the GPT entry, the copy index and the block size, and
 checked inside the control partition's range -- a range the scan already
 proved overlaps no other entry -- before the call.
@@ -196,7 +221,11 @@ command line as they do to `CMDLINE.TXT` (SAFETY-MANUAL).
 
 Cost: one GPT read, two record reads, one write + flush + read for a trial,
 and SHA-256 over the kernel and initramfs (measured in §9's gate, expected
-well under a second at hundreds of MB/s).
+well under a second at hundreds of MB/s on x86-64). **Not so on ARMv7-A:**
+`ferrix-sha256` hashes at 127.7 cycles per byte on the DK1's Cortex-A7 at
+650 MHz, about 6.6 s per 32 MiB (`docs/certification/MEMORY-AND-TIMING.md`
+§2.2z, 2026-10-24). A backlog row owes S4 the DK1's slot-hash cost before
+any DK1 boot-time claim.
 
 ## 5. `bootctl` (ab-sys builds it; the rules it must keep)
 
@@ -285,7 +314,8 @@ What the item's documents gain:
 
 * **A.FIRMWARE** names the slot path: the loader delivers the image of the
   slot the control record selects, verified against the slot header's
-  SHA-256 digests, and writes nothing but one block of the control partition.
+  SHA-256 digests, and writes nothing but one block of the control partition
+  and the ESP's two `FERRIX/LASTKERNEL` files.
 * **V-12** stays true and gains a sentence: the slot hashes detect a torn or
   misdirected write and are no integrity claim against an attacker -- whoever
   writes a slot writes its header. No secure or measured boot is claimed.
@@ -315,7 +345,8 @@ statement, and §9 names the gate case or control for each):
   the ESP's rescue files);
 * **P3** a slot is started only if it verifies (§2);
 * **P4** the loader writes only the control partition's two record blocks,
-  inside a range that overlaps no other GPT entry;
+  inside a range that overlaps no other GPT entry, and the ESP's two
+  `FERRIX/LASTKERNEL` files through firmware's FAT;
 * **P5** a slot boot's command line begins with the loader's slot words and
   is never truncated.
 
