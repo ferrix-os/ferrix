@@ -179,6 +179,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         classes,
         alerts,
         events,
+        blob_quota,
     } = configuration(&mut said, now);
     let tombstones = ferrix_lode_core::tombstone::Tombstones::new(u64::from(
         events.count("tombstone").unwrap_or(5),
@@ -241,7 +242,11 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         alerts: Alerts::new(alerts),
         events,
         echoes: units::Echoes::default(),
-        blobs: crate::blobs::Blobs::new(),
+        blobs: {
+            let mut blobs = crate::blobs::Blobs::new();
+            blobs.quota = blob_quota;
+            blobs
+        },
         blobs_swept: 0,
         tombstones,
         alerting,
@@ -303,6 +308,8 @@ struct Configuration {
     alerts: Vec<Alert>,
     /// Which kinds of event are on.
     events: Events,
+    /// The blob container's quota.
+    blob_quota: u64,
 }
 
 /// The rules, the retention classes, the alerts and the events, with a
@@ -312,12 +319,14 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
     let mut alerts = Vec::new();
     let mut classes = retention::defaults();
     let mut events = Events::default();
+    let mut blob_quota = retention::BLOB_QUOTA;
     let Ok(dir) = Dir::open(CONFIG) else {
         return Configuration {
             rules,
             classes,
             alerts,
             events,
+            blob_quota,
         };
     };
     let mut names = sys::list_dir(dir.fd).unwrap_or_default();
@@ -337,6 +346,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
                 })
                 .err()
         } else if name == b"retention.conf" {
+            blob_quota = retention::blob_quota(&text);
             retention::parse(&text).map(|read| classes = read).err()
         } else if name == b"events.conf" {
             events.apply(&text, "/etc/ferrix/lode.d/events.conf").err()
@@ -363,6 +373,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
         classes,
         alerts,
         events,
+        blob_quota,
     }
 }
 
@@ -667,6 +678,9 @@ impl Service {
         self.limiter.flush(now.monotonic_us, &mut said);
         let configuration = configuration(&mut said, now);
         let rules = configuration.rules.len();
+        self.blobs.quota = configuration.blob_quota;
+        // A new quota is kept at the next turn of the loop, not in an hour.
+        self.blobs_swept = 0;
         let alerts = configuration.alerts.len();
         self.limiter = Limiter::new(configuration.rules);
         self.alerts = Alerts::new(configuration.alerts);
@@ -676,9 +690,7 @@ impl Service {
             .settings
             .iter()
             .filter(|new| !self.events.settings.contains(new))
-            .map(|new| {
-                alloc::format!("{} {}", new.name, if new.on { "on" } else { "off" })
-            })
+            .map(|new| alloc::format!("{} {}", new.name, if new.on { "on" } else { "off" }))
             .collect();
         self.events = configuration.events;
         // Retention classes: what is being written is sealed under the old
@@ -692,7 +704,11 @@ impl Service {
         let capture = self.capture.reload();
         let text = alloc::format!(
             "reloaded: {rules} rule(s), {alerts} alert(s); retention {}; capture {capture}; events {}",
-            if classes_changed { "changed, segments sealed" } else { "unchanged" },
+            if classes_changed {
+                "changed, segments sealed"
+            } else {
+                "unchanged"
+            },
             if changed.is_empty() {
                 String::from("unchanged")
             } else {

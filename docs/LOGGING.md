@@ -2558,3 +2558,24 @@ and triggers change at once, except that a capture off at start needs a
 restart to be turned on (its socket is made as root). `test-log`'s
 "reload" row switches an event kind and the classes and reads the
 answer. SIGHUP is not used: lode's control socket is root's and answers.
+
+### 21.6 Built: tombstones step 3, retention and privacy (2026-10-24)
+
+* **Quota.** `retention.conf`'s `blobs max SIZE` (256 MiB without one,
+  `retention::blob_quota`) bounds the container; past it the sweep evicts
+  the oldest sealed packs, named or not, after the mark and sweep. A
+  record whose blob was evicted reads `expired, or never written` in `lode
+  tombstone`; `lode verify` says such references and fails only on a blob
+  that does not read back to its id (a damaged pack). `lode reload` takes
+  a new quota and sweeps at once.
+* **Retention.** Tombstones are records at err, so the default `errors`
+  class keeps them a year in 256 MiB, as crash records; a `retention.conf`
+  can give them a class of their own (`class tombstones where tombstone =
+  1 keep 2y`). Five full tombstones a signature a boot (`events.conf`).
+* **Privacy.** The container is the store's (`lode:adm`, packs 0640, the
+  directory 2750), readable by exactly who reads the journal; `lode blob`
+  reads through the same directories the reader may open. Memory bytes are
+  not captured at all until step 2's variant b, and then off by default
+  (`tombstone-memory`). Blobs are not forwarded: `lode-upload` sends
+  records, whose references a receiver can resolve only when blobs follow
+  on their own stream (step 2's forwarding).

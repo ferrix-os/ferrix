@@ -2456,3 +2456,12 @@ fn a_crash_storm_is_five_tombstones_and_a_few_counters() {
             .is_some()
     );
 }
+
+#[test]
+fn the_blob_quota_is_a_retention_line() {
+    use crate::retention::{self, BLOB_QUOTA};
+    assert_eq!(retention::blob_quota(""), BLOB_QUOTA);
+    let text = "class errors where priority <= err keep 1y\nblobs max 64M\n";
+    assert_eq!(retention::blob_quota(text), 64 << 20);
+    assert_eq!(retention::parse(text).unwrap().len(), 1);
+}

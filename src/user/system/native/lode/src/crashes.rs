@@ -121,7 +121,11 @@ fn describe_blobs(record: &Record, stores: &[usize], text: &mut Vec<u8>) {
                 reference.size,
                 reference.kind,
                 blob::hex(&reference.id),
-                if there { "" } else { " (missing)" }
+                if there {
+                    ""
+                } else {
+                    " (expired, or never written)"
+                }
             )
             .as_bytes(),
         );
@@ -181,7 +185,9 @@ pub(crate) fn blob(words: &[String]) -> i32 {
 }
 
 /// `lode verify`'s blob check: every reference against the container,
-/// and blobs no record names. Lines to print and whether all is well.
+/// and blobs no record names. Lines to print and whether all is well: a
+/// pack is damaged when a blob in it does not read back to its id. A
+/// named blob that is gone is said, not a failure: the quota evicts.
 pub(crate) fn verify(stores: &[usize], records: &[Record]) -> (Vec<u8>, bool) {
     let present: Vec<(BlobId, String, blob::Entry)> = blobs::all(stores);
     let have: BTreeSet<BlobId> = present.iter().map(|(id, _, _)| *id).collect();
@@ -195,7 +201,8 @@ pub(crate) fn verify(stores: &[usize], records: &[Record]) -> (Vec<u8>, bool) {
                 missing += 1;
                 text.extend_from_slice(
                     alloc::format!(
-                        "record {}: {name} names blob {}, which is not in the container\n",
+                        "record {}: {name} names blob {}, which is not in the container \
+                         (expired by the quota, or never written)\n",
                         record.seqnum,
                         blob::hex(&reference.id)
                     )
@@ -205,6 +212,15 @@ pub(crate) fn verify(stores: &[usize], records: &[Record]) -> (Vec<u8>, bool) {
         }
     }
     let orphans = have.difference(&named).count();
+    let damaged = present
+        .iter()
+        .filter(|(id, _, _)| blobs::find(stores, id).is_none())
+        .count();
+    if damaged > 0 {
+        text.extend_from_slice(
+            alloc::format!("blobs: {damaged} do not read back to their ids\n").as_bytes(),
+        );
+    }
     text.extend_from_slice(
         alloc::format!(
             "blobs: {} in the container, {} named, {missing} missing, {orphans} named by no record \
@@ -214,5 +230,5 @@ pub(crate) fn verify(stores: &[usize], records: &[Record]) -> (Vec<u8>, bool) {
         )
         .as_bytes(),
     );
-    (text, missing == 0)
+    (text, damaged == 0)
 }

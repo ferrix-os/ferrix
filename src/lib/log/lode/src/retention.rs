@@ -73,7 +73,8 @@ pub fn parse(text: &str) -> Result<Vec<Class>, RuleError> {
     let mut classes = Vec::new();
     for (index, raw) in text.lines().enumerate() {
         let line = raw.split_once('#').map_or(raw, |(before, _)| before).trim();
-        if line.is_empty() {
+        // `blobs max SIZE` is the blob container's quota, [`blob_quota`].
+        if line.is_empty() || line.starts_with("blobs ") {
             continue;
         }
         let error = |why: &str| RuleError {
@@ -306,3 +307,20 @@ pub fn span_seconds(text: &str) -> Option<u64> {
     }
     Some(total)
 }
+
+/// The blob container's quota (`docs/LOGGING.md` §21.4): `blobs max SIZE`
+/// in `retention.conf`, 256 MiB without one.
+#[must_use]
+pub fn blob_quota(text: &str) -> u64 {
+    text.lines()
+        .rev()
+        .find_map(|raw| {
+            let line = raw.split_once('#').map_or(raw, |(before, _)| before).trim();
+            line.strip_prefix("blobs max ")
+                .and_then(|size| bytes(size.trim()))
+        })
+        .unwrap_or(BLOB_QUOTA)
+}
+
+/// The blob container's quota without a `blobs max` line.
+pub const BLOB_QUOTA: u64 = 256 << 20;

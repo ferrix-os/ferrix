@@ -53,6 +53,8 @@ pub(crate) struct Blobs {
     /// Bytes written to packs since the service started, for the write
     /// budget's row.
     pub(crate) written: u64,
+    /// The most the packs may take (`retention.conf`'s `blobs max`).
+    pub(crate) quota: u64,
 }
 
 impl Blobs {
@@ -66,6 +68,7 @@ impl Blobs {
             queued: 0,
             known: BTreeSet::new(),
             written: 0,
+            quota: ferrix_lode_core::retention::BLOB_QUOTA,
         }
     }
 
@@ -245,7 +248,49 @@ impl Blobs {
             let _ = sys::unlinkat(dir, text.replace(".fxb", ".idx").as_bytes());
             removed += 1;
         }
-        removed
+        removed + self.evict(dir)
+    }
+
+    /// Past the quota, the oldest sealed packs go, named or not: a record
+    /// whose blob went reads `blob expired` (`lode tombstone`, `verify`).
+    fn evict(&mut self, dir: usize) -> usize {
+        let open = self.open.as_ref().map(|open| open.name.clone());
+        let mut packs: Vec<(u64, Vec<u8>, u64)> = sys::list_dir(dir)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|name| name.ends_with(b".fxb"))
+            .map(|name| {
+                let size =
+                    sys::openat(dir, &name, sys::O_RDONLY | sys::O_CLOEXEC, 0).map_or(0, |fd| {
+                        let size = sys::lseek(fd, 0, sys::SEEK_END).unwrap_or(0) as u64;
+                        sys::close(fd);
+                        size
+                    });
+                (sys::mtime_at(dir, &name).unwrap_or(0), name, size)
+            })
+            .collect();
+        packs.sort();
+        let mut total: u64 = packs.iter().map(|(_, _, size)| size).sum();
+        let mut evicted = 0;
+        for (_, name, size) in packs {
+            if total <= self.quota {
+                break;
+            }
+            if open.as_deref().map(str::as_bytes) == Some(name.as_slice()) {
+                continue;
+            }
+            for (id, _) in pack_entries(dir, &name) {
+                let _ = self.known.remove(&id);
+            }
+            let _ = sys::unlinkat(dir, &name);
+            let mut index = name.clone();
+            index.truncate(index.len() - 4);
+            index.extend_from_slice(b".idx");
+            let _ = sys::unlinkat(dir, &index);
+            total = total.saturating_sub(size);
+            evicted += 1;
+        }
+        evicted
     }
 }
 
