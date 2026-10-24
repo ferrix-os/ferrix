@@ -55,6 +55,7 @@ pub mod filter;
 pub mod format;
 pub mod ingest;
 pub mod kmsg;
+pub mod lastkernel;
 pub mod limit;
 pub mod protocols;
 pub mod record;

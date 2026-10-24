@@ -208,7 +208,68 @@ fn across_a_reset(
     let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
     let region = std::fs::read(&saved)
         .map_err(|error| Error::new(format!("reading {}: {error}", saved.display())))?;
-    judge(arch, &boot_1, &region, &after)
+    judge(arch, &boot_1, &region, &after)?;
+    let disk = read(&image)?;
+    if let Some(problem) = kept_file_problem(&disk, &region, &after) {
+        return Err(Error::new(format!("{arch}: {problem}")));
+    }
+    println!("  {arch}: boot 2's loader kept boot 1's log in FERRIX/LASTKERNEL.TXT on the ESP");
+    Ok(())
+}
+
+/// Why the ESP's `FERRIX/LASTKERNEL.TXT`, which boot 2's loader wrote, is
+/// not the report lines it printed followed by boot 1's region text, if it
+/// is not (`docs/POSTMORTEM.md` §3.5). Read with `ferrix-fat`, the reader
+/// `lode` imports it with.
+fn kept_file_problem(disk: &[u8], region: &[u8], after: &[String]) -> Option<String> {
+    let mut volume = match ferrix_fat::Volume::open(disk) {
+        Ok(volume) => volume,
+        Err(why) => return Some(format!("the image's ESP does not read as FAT32: {why:?}")),
+    };
+    let file = match volume.read_file("FERRIX/LASTKERNEL.TXT", 4 << 20) {
+        Ok(file) => file,
+        Err(why) => return Some(format!("FERRIX/LASTKERNEL.TXT does not read: {why:?}")),
+    };
+    let header: &[u8; HEADER_BYTES] = region.get(..HEADER_BYTES)?.try_into().ok()?;
+    let found = pstore::validate(header, region.len() as u64).ok()?;
+    let ring = region.get(pstore::HEADER as usize..)?;
+    let (first, second) = Text::of(ring, &found).parts();
+    let mut text = first.to_vec();
+    text.extend_from_slice(second);
+    let Some(head) = file
+        .len()
+        .checked_sub(text.len())
+        .and_then(|at| file.get(..at))
+    else {
+        return Some(format!(
+            "FERRIX/LASTKERNEL.TXT holds {} bytes, fewer than boot 1's log's {}",
+            file.len(),
+            text.len()
+        ));
+    };
+    if file.get(head.len()..) != Some(text.as_slice()) {
+        return Some(
+            "FERRIX/LASTKERNEL.TXT does not end with boot 1's log as the region held it".into(),
+        );
+    }
+    let head = String::from_utf8_lossy(head);
+    let said: Vec<&str> = after
+        .iter()
+        .map(|line| line.trim_end())
+        .filter(|line| line.contains("  pstore   ") && line.contains("boot 1"))
+        .filter(|line| !line.contains("LASTKERNEL"))
+        .collect();
+    for line in head.lines() {
+        if !said.iter().any(|each| each.ends_with(line.trim_end())) {
+            return Some(format!(
+                "FERRIX/LASTKERNEL.TXT's head line `{line}` is not one boot 2's loader printed"
+            ));
+        }
+    }
+    if !head.contains("last report: panicked:") {
+        return Some("FERRIX/LASTKERNEL.TXT's head does not quote boot 1's panic".into());
+    }
+    None
 }
 
 /// The physical address boot 1's kernel said it mirrors to.
@@ -430,6 +491,22 @@ fn region_problem(boot_1: &[String], region: &[u8]) -> Option<String> {
     None
 }
 
+/// Where `serial` goes on after `line`, if `line` is `sent` and the serial
+/// lines from `from` run together: a record cuts an open line on the port,
+/// not in the log (722824a8d).
+fn joined_through(line: &str, sent: &str, serial: &[String], from: usize) -> Option<usize> {
+    if sent.is_empty() || !line.starts_with(sent) {
+        return None;
+    }
+    let mut joined = String::from(sent);
+    let mut ahead = from;
+    while joined.len() < line.len() {
+        joined.push_str(serial.get(ahead)?.trim_end_matches('\r'));
+        ahead += 1;
+    }
+    (joined == line).then_some(ahead)
+}
+
 /// Why `recorded`, the region's whole lines, is not `serial` from its start
 /// in order with only unlogged lines skipped, if it is not.
 fn matches_serial(recorded: &[&str], serial: &[String]) -> Option<String> {
@@ -445,6 +522,13 @@ fn matches_serial(recorded: &[&str], serial: &[String]) -> Option<String> {
             next += 1;
             let sent = sent.trim_end_matches('\r');
             if sent == *line {
+                break;
+            }
+            // A record cuts an open line on the port, not in the log
+            // (722824a8d): the region's line is that serial line and the
+            // ones after it, run together.
+            if let Some(after) = joined_through(line, sent, serial, next) {
+                next = after;
                 break;
             }
             if !unlogged(sent) {

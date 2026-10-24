@@ -581,7 +581,9 @@ outside the element (SECURITY-TARGET A.FIRMWARE), is specified to:
   before the ESP's rescue files;
 * **P3** start a slot only if its header and every blob verify;
 * **P4** write only the control record's two blocks, inside a partition that
-  overlaps no other GPT entry;
+  overlaps no other GPT entry, and, on the ESP through firmware's FAT, the
+  previous kernel's log as `FERRIX/LASTKERNEL.TXT` and `.PRV`
+  (`docs/POSTMORTEM.md` §3.5);
 * **P5** begin a slot boot's command line with its slot words, and never
   truncate it.
 

@@ -149,6 +149,7 @@ mod keyboard;
 mod lode;
 mod lode_budget;
 mod lode_net;
+mod lode_pstore;
 mod lode_remote;
 mod machine_check;
 mod n150;
@@ -569,6 +570,7 @@ const TASKS: &[&[Task]] = &[
     jobs::TASKS,
     lode::TASKS,
     lode_budget::TASKS,
+    lode_pstore::TASKS,
     lode_remote::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,

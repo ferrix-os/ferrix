@@ -16,8 +16,10 @@ bench = false
 [dependencies]
 ferrix-linux-abi.workspace = true
 ferrix-lode-capture.workspace = true
+ferrix-fat.workspace = true
 ferrix-lode-core.workspace = true
 ferrix-native-abi.workspace = true
+ferrix-partition.workspace = true
 ferrix-rt.workspace = true
 # init's control records, for an alert's `start` (docs/LOGGING.md §7.4).
 ferrix-svc-proto.workspace = true

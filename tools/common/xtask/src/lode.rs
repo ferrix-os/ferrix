@@ -95,6 +95,20 @@ pub(crate) fn crashd_enabled() -> File {
     }
 }
 
+/// The pstore import's fetch, shipped beside [`UNIT`].
+pub(crate) const PSTORE_UNIT: &str = "lode-pstore.service";
+
+/// The link that starts `lode-pstore.service` with `multi-user.target`:
+/// root copies the loader's `FERRIX/LASTKERNEL.TXT` for lode to import as
+/// the previous boot's end (`docs/LOGGING.md` §5).
+pub(crate) fn pstore_enabled() -> File {
+    File {
+        path: format!("etc/ferrix/units/multi-user.target.wants/{PSTORE_UNIT}"),
+        mode: 0o777,
+        content: Content::Link(format!("/lib/ferrix/units/{PSTORE_UNIT}")),
+    }
+}
+
 /// What a desktop image says to lode: crash and app-error screenshots on,
 /// within lode's own spacing and retention (§19), and `events.conf` with
 /// every kind at its default, so a person sees what can be switched.

@@ -104,6 +104,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-fat"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-fdt"
 version = "0.1.0"
 
@@ -128,6 +132,7 @@ dependencies = [
  "ferrix-display-modes",
  "ferrix-displayctl",
  "ferrix-elf",
+ "ferrix-fat",
  "ferrix-fdt",
  "ferrix-frame",
  "ferrix-inputctl",

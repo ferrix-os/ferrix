@@ -111,6 +111,35 @@ pub(crate) fn ensure_blank(arch: Arch) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Write the blank fixture back over the `vdc` [`ensure_blank`] attached, in
+/// the file QEMU holds open: for a gate that resets one QEMU, as a warm
+/// reset does, so the next boot's stage 12 check starts from the fixture as
+/// every boot's does (`test-log-pstore`). Only while the guest is paused.
+///
+/// # Errors
+///
+/// The fixture being malformed, or the disk not writable.
+pub(crate) fn rewrite_blank_in_place(arch: Arch) -> Result<()> {
+    use std::io::Write as _;
+    let directory = paths::build_dir(arch);
+    let path = directory.join(BLANK_FILE_NAME);
+    let partial = directory.join(format!("{BLANK_FILE_NAME}.{}.again", std::process::id()));
+    write_packed(&partial, BLANK)
+        .map_err(|error| Error::new(format!("writing {}: {error}", partial.display())))?;
+    let bytes = std::fs::read(&partial);
+    let _ = std::fs::remove_file(&partial);
+    let bytes =
+        bytes.map_err(|error| Error::new(format!("reading {}: {error}", partial.display())))?;
+    let mut disk = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(|error| Error::new(format!("opening {}: {error}", path.display())))?;
+    disk.write_all(&bytes)
+        .and_then(|()| disk.set_len(bytes.len() as u64))
+        .and_then(|()| disk.sync_all())
+        .map_err(|error| Error::new(format!("rewriting {}: {error}", path.display())))
+}
+
 /// A fresh copy of the blank fixture at `build/<arch>/<name>`, apart from the one
 /// [`ensure_blank`] attaches as `vdc`: a volume for a test to attach at
 /// `/data` and read back on a later boot (`init_file`'s `reboot(2)` check).

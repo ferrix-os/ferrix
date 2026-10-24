@@ -12,9 +12,10 @@ use core::ptr;
 use ferrix_bootinfo::PAGE_SIZE;
 
 use crate::uefi::protocols::{
-    BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_READ, FILE_POSITION_END, FileProtocol,
-    GRAPHICS_OUTPUT_GUID, GraphicsOutput, IPXE_DOWNLOAD_GUID, IpxeDownload, LOADED_IMAGE_GUID,
-    LoadedImage, RNG_GUID, Rng, SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
+    BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_CREATE, FILE_MODE_READ, FILE_MODE_WRITE,
+    FILE_POSITION_END, FileProtocol, GRAPHICS_OUTPUT_GUID, GraphicsOutput, IPXE_DOWNLOAD_GUID,
+    IpxeDownload, LOADED_IMAGE_GUID, LoadedImage, RNG_GUID, Rng, SIMPLE_FILE_SYSTEM_GUID,
+    SimpleFileSystem,
 };
 use crate::uefi::tables::{
     AllocateType, BootServices, MemoryDescriptor, MemoryType, SystemTable, Time,
@@ -541,8 +542,19 @@ impl Services {
     /// smaller than the allocation whenever the file is not a whole number of
     /// pages.
     pub(crate) fn read_file(&self, path: &str, kind: MemoryType) -> Result<(Allocation, u64)> {
+        self.read_file_within(path, kind, u64::MAX)
+    }
+
+    /// [`Services::read_file`], refused before any allocation for a file of
+    /// more than `most` bytes.
+    pub(crate) fn read_file_within(
+        &self,
+        path: &str,
+        kind: MemoryType,
+        most: u64,
+    ) -> Result<(Allocation, u64)> {
         let root = self.open_volume()?;
-        let file = match self.open_file(root, path) {
+        let file = match self.open_file(root, path, FILE_MODE_READ) {
             Ok(file) => file,
             Err(error) => {
                 // A missing file is an answer a caller may expect -- the
@@ -559,6 +571,18 @@ impl Services {
         };
 
         let size = self.file_size(file)?;
+        if size > most {
+            // SAFETY: firmware returned `file` from `open`, so it is live.
+            let handle = unsafe { &*file };
+            // SAFETY: `file` is open and is closed exactly once, here.
+            let _ = unsafe { (handle.close)(file) };
+            // SAFETY: firmware returned `root` from `open_volume`, so it is
+            // live.
+            let volume = unsafe { &*root };
+            // SAFETY: `root` is open and is closed exactly once, here.
+            let _ = unsafe { (volume.close)(root) };
+            return Err(BootError::plain("a file larger than its reader takes"));
+        }
         let allocation = self.allocate("allocating for a file", size.max(1), kind)?;
 
         // SAFETY: firmware returned this handle from `open`, so it is a live
@@ -592,6 +616,65 @@ impl Services {
         let _ = unsafe { (volume.close)(root) };
 
         Ok((allocation, size))
+    }
+
+    /// Make `path` on the loader's own volume hold exactly `parts`, one after
+    /// the other: delete it if it is there, create it, write, close. Only the
+    /// previous kernel's log calls this (`pstore.rs`), for its own files under
+    /// `FERRIX/` (`docs/POSTMORTEM.md` §3.5); on a volume firmware will not
+    /// write, as a netboot's, it is an error the caller says and goes on.
+    pub(crate) fn replace_file(&self, path: &str, parts: &[&[u8]]) -> Result<()> {
+        let root = self.open_volume()?;
+        let written = self.replace_under(root, path, parts);
+        // SAFETY: firmware returned `root` from `open_volume`, so it is a live
+        // `FileProtocol`.
+        let volume = unsafe { &*root };
+        // SAFETY: `root` is open and is closed exactly once, here.
+        let _ = unsafe { (volume.close)(root) };
+        written
+    }
+
+    /// [`Services::replace_file`] under an open root directory.
+    fn replace_under(&self, root: *mut FileProtocol, path: &str, parts: &[&[u8]]) -> Result<()> {
+        // FAT through UEFI has no truncate short of `SetInfo`: delete first.
+        if let Ok(old) = self.open_file(root, path, FILE_MODE_READ | FILE_MODE_WRITE) {
+            // SAFETY: firmware returned `old` from `open`, so it is live.
+            let handle = unsafe { &*old };
+            // SAFETY: `delete` closes `old` whatever it returns, so it is not
+            // used again.
+            let status = unsafe { (handle.delete)(old) };
+            check("deleting a file to replace it", status)?;
+        }
+        let file = self.open_file(
+            root,
+            path,
+            FILE_MODE_READ | FILE_MODE_WRITE | FILE_MODE_CREATE,
+        )?;
+        // SAFETY: firmware returned `file` from `open`, so it is live until it
+        // is closed below.
+        let handle = unsafe { &*file };
+        let mut written = Ok(());
+        for part in parts {
+            let mut len = part.len();
+            // SAFETY: `part` is `len` readable bytes, and `len` is a live
+            // local firmware writes the count it wrote into.
+            let status = unsafe { (handle.write)(file, &raw mut len, part.as_ptr()) };
+            written = check("writing a file", status).and_then(|()| {
+                if len == part.len() {
+                    Ok(())
+                } else {
+                    Err(BootError::plain("a file was written short"))
+                }
+            });
+            if written.is_err() {
+                break;
+            }
+        }
+        // SAFETY: `file` is open and is closed exactly once, here; closing
+        // flushes it.
+        let closed = unsafe { (handle.close)(file) };
+        written?;
+        check("closing a written file", closed)
     }
 
     /// Where firmware loaded this program, and how many bytes of it there are.
@@ -629,8 +712,13 @@ impl Services {
         Ok(root)
     }
 
-    /// Open one file under `root`.
-    fn open_file(&self, root: *mut FileProtocol, path: &str) -> Result<*mut FileProtocol> {
+    /// Open one file under `root`, in `mode`.
+    fn open_file(
+        &self,
+        root: *mut FileProtocol,
+        path: &str,
+        mode: u64,
+    ) -> Result<*mut FileProtocol> {
         let mut wide = [0u16; MAX_PATH];
         widen(path, &mut wide)?;
 
@@ -639,8 +727,7 @@ impl Services {
         let directory = unsafe { &*root };
         // SAFETY: `wide` is NUL terminated by `widen`, and `file` is a live
         // local for firmware to write the new handle into.
-        let status =
-            unsafe { (directory.open)(root, &raw mut file, wide.as_ptr(), FILE_MODE_READ, 0) };
+        let status = unsafe { (directory.open)(root, &raw mut file, wide.as_ptr(), mode, 0) };
         check("opening a file", status)?;
         Ok(file)
     }

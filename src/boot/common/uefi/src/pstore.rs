@@ -14,6 +14,7 @@ use crate::console::println;
 use crate::events;
 use crate::load::{DirectMap, describe};
 use crate::services::{Allocation, Services};
+use crate::uefi::Status;
 use crate::uefi::tables::MemoryType;
 
 /// The longest piece of the previous kernel's text a line of the report
@@ -67,7 +68,8 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
     let mut opened = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
-            report(region, &found);
+            let lines = report(region, &found);
+            keep_as_files(services, region, &found, &lines);
             // Kept in the event log before the fresh header lets it go
             // (POSTMORTEM §4, E2); a failed append keeps the region as it
             // is, still allocated so the kernel never uses its pages, and
@@ -146,48 +148,156 @@ fn choose(services: &Services, direct: DirectMap) -> Option<u64> {
     chosen
 }
 
-/// Say what the previous kernel left: how much, and its last report.
-fn report(region: Allocation, found: &Found) {
-    println!(
+/// The ring of `region`: its bytes after the header page.
+///
+/// # Safety
+///
+/// `region` is the loader's own allocation of `pstore::LEN` bytes, identity
+/// mapped under boot services, and nothing writes its ring while the borrow
+/// lives: the fresh header is written after the report and the files.
+unsafe fn ring(region: Allocation) -> &'static [u8] {
+    // SAFETY: as the caller promises.
+    unsafe {
+        core::slice::from_raw_parts(
+            (region.address + pstore::HEADER) as *const u8,
+            pstore::CAPACITY as usize,
+        )
+    }
+}
+
+/// The report's lines, kept to head the file with: a fixed buffer, since
+/// the loader prints before it may allocate for a file.
+struct Lines {
+    /// The bytes.
+    bytes: [u8; REPORT_MOST],
+    /// How many are used.
+    used: usize,
+}
+
+/// The most the report's lines take.
+const REPORT_MOST: usize = 1024;
+
+impl core::fmt::Write for Lines {
+    fn write_str(&mut self, text: &str) -> core::fmt::Result {
+        let end = self.used.saturating_add(text.len()).min(REPORT_MOST);
+        let room = end - self.used;
+        if let (Some(to), Some(from)) = (
+            self.bytes.get_mut(self.used..end),
+            text.as_bytes().get(..room),
+        ) {
+            to.copy_from_slice(from);
+        }
+        self.used = end;
+        Ok(())
+    }
+}
+
+impl Lines {
+    /// One report line: printed, and kept.
+    fn say(&mut self, line: core::fmt::Arguments<'_>) {
+        use core::fmt::Write as _;
+        let start = self.used;
+        let _ = self.write_fmt(line);
+        let _ = self.write_str("\n");
+        let said = self
+            .bytes
+            .get(start..self.used.saturating_sub(1))
+            .unwrap_or_default();
+        println!("{}", as_text(said));
+    }
+}
+
+/// Say what the previous kernel left: how much, and its last report; the
+/// lines said, to head its file.
+fn report(region: Allocation, found: &Found) -> Lines {
+    let mut lines = Lines {
+        bytes: [0; REPORT_MOST],
+        used: 0,
+    };
+    lines.say(format_args!(
         "  pstore   at {:#x}, 1 MiB: boot {}'s kernel log, {} bytes, {} kept (unchecked)",
         region.address,
         found.sequence,
         found.written,
         found.kept()
-    );
-    // SAFETY: the ring is the region's bytes after the header page, the
-    // loader's own allocation, and nothing writes them while this borrow
-    // lives: the fresh header is written after `report` returns.
-    let ring = unsafe {
-        core::slice::from_raw_parts(
-            (region.address + pstore::HEADER) as *const u8,
-            pstore::CAPACITY as usize,
-        )
-    };
-    let text = Text::of(ring, found);
+    ));
+    // SAFETY: the region is the loader's own, and nothing writes its ring
+    // until the fresh header after the report and the files.
+    let text = Text::of(unsafe { ring(region) }, found);
     let mut shown = [0u8; SHOWN];
     if let Some(line) = text.last_line_after(PANIC_MARKER) {
         let count = text.shown_into(line, SHOWN, &mut shown);
-        println!(
+        lines.say(format_args!(
             "  pstore   boot {}'s last report: panicked: {}",
             found.sequence,
             as_text(shown.get(..count).unwrap_or_default())
-        );
+        ));
     } else if let Some(line) = text.last_line() {
         let count = text.shown_into(line, SHOWN, &mut shown);
-        println!(
+        lines.say(format_args!(
             "  pstore   boot {}'s last report: did not panic; its last line: {}",
             found.sequence,
             as_text(shown.get(..count).unwrap_or_default())
-        );
+        ));
     } else {
-        println!("  pstore   boot {}'s log is empty", found.sequence);
+        lines.say(format_args!(
+            "  pstore   boot {}'s log is empty",
+            found.sequence
+        ));
     }
-    println!(
+    lines.say(format_args!(
         "  pstore   boot {} ended: {}",
         found.sequence,
         found.ended()
-    );
+    ));
+    lines
+}
+
+/// Where the previous kernel's log is kept on the loader's own volume, and
+/// the one before it (`docs/POSTMORTEM.md` §3.5), for `lode` to import as the
+/// end of that boot (`docs/LOGGING.md` §5).
+const LAST: &str = "FERRIX/LASTKERNEL.TXT";
+const PREVIOUS: &str = "FERRIX/LASTKERNEL.PRV";
+
+/// Move the file read as `old`, `len` bytes, to [`PREVIOUS`], and free it.
+fn move_aside(services: &Services, old: Allocation, len: u64) {
+    // SAFETY: `read_file_within` read `len` bytes into the allocation it
+    // made, which is the loader's alone until it is freed below.
+    let bytes = unsafe { core::slice::from_raw_parts(old.address as *const u8, len as usize) };
+    if let Err(error) = services.replace_file(PREVIOUS, &[bytes]) {
+        println!("  pstore   {PREVIOUS} not written: {error}");
+    }
+    let _ = services.free("freeing the previous log file", old);
+}
+
+/// Keep the previous kernel's log as [`LAST`], headed by the report's
+/// `lines`, the file there before moved to [`PREVIOUS`]. A failure is one
+/// line and the boot goes on: a netboot's volume is read only.
+fn keep_as_files(services: &Services, region: Allocation, found: &Found, lines: &Lines) {
+    // At most what this loader writes: a larger file is not one of its own,
+    // and is not read whole to move it.
+    let most = pstore::CAPACITY + REPORT_MOST as u64;
+    match services.read_file_within(LAST, MemoryType::LOADER_DATA, most) {
+        Ok((old, len)) => move_aside(services, old, len),
+        Err(error) if error.status == Some(Status::NOT_FOUND) => {}
+        Err(error) => println!("  pstore   {LAST} not moved to {PREVIOUS}: {error}"),
+    }
+    // SAFETY: the region is the loader's own, and nothing writes its ring
+    // until the fresh header after this.
+    let text = Text::of(unsafe { ring(region) }, found);
+    let (first, second) = text.parts();
+    let head = lines.bytes.get(..lines.used).unwrap_or_default();
+    match services.replace_file(LAST, &[head, first, second]) {
+        Ok(()) => println!(
+            "  pstore   boot {}'s kernel log kept in {LAST}, {} bytes",
+            found.sequence,
+            head.len() + first.len() + second.len()
+        ),
+        Err(error) => println!(
+            "  pstore   boot {}'s kernel log not kept in {LAST}: {error}",
+            found.sequence
+        ),
+    }
 }
 
 /// Bytes `pstore::shown` produced, which are ASCII, as text.

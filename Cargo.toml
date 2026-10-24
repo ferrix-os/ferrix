@@ -44,6 +44,7 @@ members = [
     "src/lib/fs/btrfs/write",
     "src/lib/fs/common/cpio",
     "src/lib/fs/common/partition",
+    "src/lib/fs/common/fat",
     "src/lib/kernel/crng",
     "src/lib/kernel/seccomp",
     "src/lib/crypto/argon2",
@@ -196,6 +197,7 @@ ferrix-btrfs-vfs = { path = "src/lib/fs/btrfs/vfs" }
 ferrix-btrfs-write = { path = "src/lib/fs/btrfs/write" }
 ferrix-cpio = { path = "src/lib/fs/common/cpio" }
 ferrix-partition = { path = "src/lib/fs/common/partition" }
+ferrix-fat = { path = "src/lib/fs/common/fat" }
 ferrix-crng = { path = "src/lib/kernel/crng" }
 ferrix-seccomp = { path = "src/lib/kernel/seccomp" }
 ferrix-argon2 = { path = "src/lib/crypto/argon2" }

@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 ferrix-acpi = { path = "../../lib/platform/acpi" }
 ferrix-cpio = { path = "../../lib/fs/common/cpio" }
+ferrix-fat = { path = "../../lib/fs/common/fat" }
 ferrix-argon2 = { path = "../../lib/crypto/argon2" }
 ferrix-auth-proto = { path = "../../lib/proto/auth-proto" }
 ferrix-elf = { path = "../../lib/platform/elf" }
@@ -327,6 +328,13 @@ bench = false
 [[bin]]
 name = "sigverify_manifest"
 path = "fuzz_targets/sigverify_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fat_read"
+path = "fuzz_targets/fat_read.rs"
 test = false
 doc = false
 bench = false

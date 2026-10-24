@@ -346,6 +346,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-fat"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-fbtext"
 version = "0.1.0"
 
@@ -604,10 +608,12 @@ version = "0.1.0"
 name = "ferrix-lode"
 version = "0.1.0"
 dependencies = [
+ "ferrix-fat",
  "ferrix-linux-abi",
  "ferrix-lode-capture",
  "ferrix-lode-core",
  "ferrix-native-abi",
+ "ferrix-partition",
  "ferrix-rt",
  "ferrix-svc-proto",
 ]
@@ -1325,6 +1331,7 @@ dependencies = [
  "ferrix-displayctl",
  "ferrix-elf",
  "ferrix-eventlog",
+ "ferrix-fat",
  "ferrix-native-abi",
  "ferrix-netwire",
  "ferrix-partition",

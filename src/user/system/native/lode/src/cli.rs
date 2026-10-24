@@ -206,6 +206,7 @@ pub(crate) fn run() -> i32 {
         Some("snapshot") => return crate::snapshot::snapshot(rest.get(1..).unwrap_or_default()),
         Some("follow") => return crate::snapshot::follow(rest.get(1..).unwrap_or_default()),
         Some("crashd") => return crate::crashd::run(),
+        Some("pstore-fetch") => return crate::pstore::fetch(),
         Some("reload") => {
             return crate::admin::ask(&Options {
                 ask: Some(crate::control::Request::Reload),

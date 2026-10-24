@@ -416,12 +416,36 @@ writing to standard error, as today.
 (`_TRANSPORT=devmgr`, `MESSAGE_ID` per kind, `_FERRIX_DRIVER`, the exit
 cause), so "which driver died, when, and how" is `lode -t devmgr`.
 
-**The last boot's kernel log**, from pstore. When the loader has written
-`FERRIX/LASTKERNEL.TXT` for a boot that ended without `lode` storing its
-last lines, `lode` imports the lines it does not have -- matched by the
-boot's audit id and the kernel sequence -- as records of *that* boot
-(`_TRANSPORT=pstore`), as `systemd-pstore` does. `lode -b -1` then
-ends with what the machine said before it hung or panicked.
+**The last boot's kernel log**, from pstore (**built**, 2026-10-24, the
+customer's path A of §21.10). Each boot's loader keeps the previous boot's
+region as the ESP's `FERRIX/LASTKERNEL.TXT` (`docs/POSTMORTEM.md` §3.5).
+`lode-pstore.service`, root's one-shot (`lode pstore-fetch`), finds the ESP
+-- a GUID partition table's EFI system partition through `ferrix-partition`,
+or a FAT32 disk with no table -- reads the file read only through
+`ferrix-fat` (at most 1 MiB + 1 KiB), waiting up to 2 min for the disk's
+driver, and copies it to `/run/log/lastkernel.txt`, lode's, 0600: lode is
+uid 91 by then and opens no disk. lode then imports the lines it did not
+store as records of *that* boot (`_TRANSPORT=pstore`, `PSTORE_BOOT`,
+`PSTORE_LINE`), as `systemd-pstore` does, written as a sealed segment of
+that boot after its own:
+
+* **which boot**: the newest boot lode holds before this one, only if its
+  kernel said `pstore   mirroring the log to ..., boot N;` for the file's N;
+* **which lines**: lode's last three kernel-log records of that boot, in
+  `_KERNEL_SEQNUM` order, found together in the file's text from its end
+  (a record's message may lack the identifier the line began with); what
+  follows is new. A file that holds none of them is not imported, rather
+  than doubled; a boot that has `pstore` records already is not again.
+* one record in this boot says what was imported, or why not
+  (`MESSAGE_ID=4f6c1b2d9a8e4c37b5d0e1f2a3b4c5d6`, `PSTORE_IMPORTED`).
+
+`lode -b -1` then ends with what the machine said before it hung or
+panicked. `events.conf`'s `pstore-import off` turns the import off; an
+image without `lode-pstore.service` has no fetch and no disk read.
+`test-log-pstore` (x86-64): boot 1 stores a line, stops lode and writes its
+last words; the gate resets the machine with RAM kept; boot 2 imports, and
+`lode -b -1` ends with boot 1's last line, its last words once and the
+stored line once.
 
 **Programs that write only files** (Steam's `console_log.txt`, a game's
 logs in its Wine prefix): a file source watched with inotify, configured
@@ -1185,7 +1209,7 @@ OTLP outputs.
 | 6 | sessions: `sessiond` and hyprix give each program a stream; yserver, Proton and DXVK scripts; alerts' `notify` | 3 | `test-desktop`: waybar's and foot's lines under their own identifiers |
 | 7 | drivers: `logproto` client in the driver library with `INTEREST`, `devmgr` hands ends and re-hands after a restart, `freqlog` moved, `devmgr-events` import | 6 | `test-devmgr`: a driver's line with `_FERRIX_DRIVER`; a `lode` kill during driver logging loses no line |
 | 8 | `lode-upload` (journal-upload export, RFC 5424, JSON lines, OTLP) and `lode-receive`, cursors, back-off, verified TLS, `--merge` | 8 | `test-net`: upload to the host's `systemd-journal-remote`, read back by the host's own `journalctl`; the destination down for a minute loses nothing |
-| 9 | file sources; pstore import | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
+| 9 | file sources; pstore import (built: `test-log-pstore`) | 4 | `test-log` part G: a forced panic, then `lode -b -1` ends with it |
 | 10 | the N150 box run (§17.2) | 3 | box |
 | 11 | the write budget (§8.3) | 2 | `test-log` part E |
 | 2a | session ids (§19.1): the piece that owns seat0 issues a session id and a random token per session, tells lode on the root-only `/run/lode/seat`, hands the compositor the token beside the card; lode stamps records with `_SESSION_ID`, `lode -s ID` | 5 | host tests; `test-compositor`: a session's records carry its id, a second session a new one |
@@ -2285,7 +2309,7 @@ architectures.
 |---|---|---|---|---:|
 | 5 | Sources: kmsg, `/dev/log`, native socket, stdout streams | built | `front.rs`; `test-log` "front: 1 1 1 1 0" | 0 |
 | 5 | Drivers' `logproto` with `INTEREST`; `devmgr` hands ends | missing | plan step 7 | 6 |
-| 5 | pstore: the last boot's panic | missing | plan step 9 | 3 |
+| 5 | pstore: the last boot's end | built | §5; `test-log-pstore`; `test-postmortem`'s LASTKERNEL check | 0 |
 | 5 | File sources (ad-hoc logs moved over, §13.1) | missing | plan step 9 | 2 |
 | 6 | One filter language everywhere | built | §20.1 #3 | 0 |
 | 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
@@ -2377,7 +2401,7 @@ Ferrix image where something writes a log, and whether lode has it.
 | The kernel log, drivers' prints | the kernel, ring-3 drivers on standard error | yes | `/dev/kmsg`, from its first record |
 | Units' standard output and error | every unit | yes | init's pipes, trusted (§18 "Users' own records and units' runs") |
 | `devmgr`'s DIED/RESTARTED events | `devmgr-events` | partly | `devmgr`'s own lines reach the kernel log; the event socket itself is not read (plan step 7) |
-| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP; plan step 9 imports it as `lode -b -1`'s end |
+| The panic log in pstore | the kernel at a panic | no | `FERRIX/LASTKERNEL.TXT` on the ESP, imported as `lode -b -1`'s end (§5, built) |
 | Firmware and EFI logs | the firmware, the loader | partly | the loader's lines are the kernel log's first; the firmware's own (UEFI's console, TF-A's) are not kept anywhere on Ferrix |
 | `/tmp/yserver.log` | the desktop's X server | yes, landing | `lode cat -t yserver --tee` |
 | `/tmp/steam.log` | Steam's `desktop.sh` | yes, landing | `lode cat -t steam --tee` |

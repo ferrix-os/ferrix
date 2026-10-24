@@ -1,0 +1,15 @@
+# lode pstore-fetch: the previous boot's end, for lode to import
+# (docs/LOGGING.md §5). Root's, as a raw block device opens only for root:
+# it finds the ESP, reads the loader's FERRIX/LASTKERNEL.TXT off it read
+# only, and copies it to /run/log/lastkernel.txt, lode's alone (0600),
+# waiting up to 2 min for the disk's driver; lode, which is uid 91 by then,
+# imports from the copy and never opens a disk. Not started unless an image
+# enables it (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Copy the loader's last kernel log for lode
+After=lode.service
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/lode pstore-fetch
+TimeoutStartSec=180
