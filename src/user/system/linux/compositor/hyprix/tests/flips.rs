@@ -96,6 +96,19 @@ impl Desk {
         hangs: Option<Duration>,
         test: impl FnOnce(&Self) -> T,
     ) -> (String, T) {
+        self.run_configured("", takes, hangs, test)
+    }
+
+    /// [`Desk::run`] with `lines` as the compositor's configuration.
+    fn run_configured<T>(
+        &self,
+        lines: &str,
+        takes: Duration,
+        hangs: Option<Duration>,
+        test: impl FnOnce(&Self) -> T,
+    ) -> (String, T) {
+        let config = self.work.join("hyprland.conf");
+        std::fs::write(&config, lines).expect("a configuration");
         let instance = self
             .control
             .parent()
@@ -107,6 +120,7 @@ impl Desk {
             headless: Some((WIDTH, HEIGHT)),
             instance: Some(instance),
             deadline: Some(u64::try_from(BACKSTOP.as_millis()).expect("milliseconds")),
+            config: Some(config),
             flip_takes: Some(takes),
             flip_hangs: hangs,
             ..Options::default()
@@ -299,6 +313,63 @@ fn input_is_carried_out_while_a_stuck_card_hangs_a_flip() {
     assert!(
         frames(&line) >= 2,
         "no frame was drawn after the hung one: {line}"
+    );
+}
+
+/// A move that comes while the loop sleeps with nothing to do -- no frame
+/// owed, no flip out -- is carried out at once, without a second event to
+/// wake it: the input's descriptor is in the wait.
+#[test]
+fn an_idle_loop_carries_out_input_at_once() {
+    const MOVES: u32 = 10;
+    let desk = Desk::new("flip-idle-input");
+    let (line, took) = desk.run(FLIP, None, |desk| {
+        let mut pointer = VirtualPointer::connect(&desk.socket);
+        (1..=MOVES)
+            .map(|n| {
+                // Long past the last move's frame and its flip.
+                std::thread::sleep(FLIP * 4);
+                desk.carried_out(&mut pointer, place(n))
+            })
+            .collect::<Vec<_>>()
+    });
+    let middle = median(&took);
+    say(&format!(
+        "moves into an idle loop carried out in {took:?}, median {middle:?}; {line}"
+    ));
+    assert!(
+        middle < PROMPT,
+        "a move into an idle loop waited: median {middle:?} of {took:?}"
+    );
+}
+
+/// A frame the loop owes itself by the clock -- `debug:overlay`'s every
+/// 200 ms, with nothing else happening -- is drawn when it is due, flip
+/// out or not: the timer is in the wait's timeout, and a landed flip wakes
+/// it through its pipe.
+#[test]
+fn an_idle_loop_wakes_for_its_own_timer() {
+    const IDLE: Duration = Duration::from_secs(2);
+    let desk = Desk::new("flip-idle-timer");
+    let (_, counted) = desk.run_configured("debug:overlay = 1\n", FLIP, None, |desk| {
+        // The first frame is up; nothing more is sent from here on.
+        until("the first frame", || {
+            desk.has_said("headless 640x480").then_some(())
+        });
+        std::thread::sleep(IDLE);
+        desk.said
+            .lock()
+            .expect("the log")
+            .iter()
+            .filter_map(|line| line.strip_prefix("hyprix: frames "))
+            .filter_map(|rest| rest.split_whitespace().next()?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+    });
+    // Ten due in two seconds, and the line a second counts them.
+    assert!(
+        counted >= 5,
+        "the overlay's timer drew {counted} frames in {IDLE:?} of an idle loop"
     );
 }
 
