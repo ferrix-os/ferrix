@@ -145,7 +145,7 @@ fn program(arch: Arch, app: &str, path: &str) -> Result<crate::ports::File> {
 /// A Yoru boot's configuration and what its image carries: the theme as
 /// `run-compositor` sources it, the dock, and with `launcher` fuzzel and
 /// the applications it lists.
-fn desktop(arch: Arch, args: &Args, launcher: bool) -> Result<(String, Carried)> {
+pub(super) fn desktop(arch: Arch, args: &Args, launcher: bool) -> Result<(String, Carried)> {
     let themed = Args {
         theme: Some("yoru".to_owned()),
         config: None,
