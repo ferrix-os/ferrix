@@ -1,6 +1,6 @@
 # Product signing: one LMS/HSS scheme for slots, configuration and drivers
 
-Version 1, written 2026-10-24 by product-signing. **A design for review, before
+Version 2, written 2026-10-24 by product-signing. **A design for review, before
 any code.** Nothing here is built. Nothing in another document changes its
 claims because of it (the pointers in `AB-BOOT.md` and `BUILD-FLAGS.md` say
 what will change).
@@ -21,7 +21,8 @@ signed configuration for `fast` (ledger
 SHA-256 alone, an authenticity check. The consultant's design verdict on
 the scheme was **NOT YET until a design covers (P1) to (P10)** (ledger line
 3608). The sections below take them one at a time. Each ends in a table of
-its decisions. §12 lists the open questions for the customer.
+its decisions. §12 records the customer's answers to the questions
+version 1 asked.
 
 **What it is not.** It is not measured boot. It does not attest to a
 remote party. It does not change how firmware verifies the loader: UEFI
@@ -37,15 +38,15 @@ verifier (§5).
 | **System slot** | 1 | One A/B slot image: its header, then the kernel, initramfs and command line (`AB-BOOT.md` §2). Also the ESP's rescue image in a signed configuration (§9.2) | The UEFI loader, before it starts the slot (AB-BOOT §4, step 5); `bootctl try` first, as an early refusal with no claim | The slot partition's second 4 KiB block (slot header version 2, §1.3) |
 | **Configuration package** | 2 | One configuration package of 3564's (S1)-(S6): the typed, bounded data `fast` applies at a boot (S7) | init's configuration verifier, before any unit reads the configuration (3564 (S12)) | The package file's first 4 KiB |
 | **Driver image** | 3 | One native driver image that `drvupdated` hands to `devmgr` (`DEVMGR.md` §4.1) | `devmgr`, on its own copy of the VMO, before step 1 of "what devmgr checks" | The first 4 KiB of the bytes the client sends after its 48-byte header |
-| *Revocation* | 4 | A list of revoked lower trees of one kind (§7.4) | The verifier of the kind it names | A file next to that kind's anchors (§7.4) |
+| *Revocation* | 4 | A list of revoked keys (trees) of one kind (§7.4) | The verifier of the kind it names | A file next to that kind's anchors (§7.4) |
 
 **One format, one verifier.** The four kinds share the manifest below and one
 verifier crate (§5). They differ only in four things: the anchor set that
 verifies them, the kind code the caller expects, the meaning of `subject`, and
 what `payload_sha256` covers.
 
-**A key per kind.** Kinds 1, 2 and 3 each have their own HSS root keys, each
-with its own root public key (§3.3). An anchor names the kind it verifies.
+**A key per kind.** Kinds 1, 2 and 3 each have their own keys, two per kind,
+each with its own public key (§3.3, §4.1). An anchor names the kind it verifies.
 The verifier takes its anchor set from the caller's expected kind, never
 from the kind field in the manifest. So a signature of kind 1, 2 or 3 fails
 under another of those kinds' keys before any field is read. That holds
@@ -54,7 +55,7 @@ cannot, because the code is signed. The kind field in the signed bytes is a
 second, independent separation.
 
 **Kind 4 is the exception.** A revocation manifest is signed under its
-target kind's roots (§3.3, §7.4), so a revocation of kind k and a manifest
+target kind's keys (§3.3, §7.4), so a revocation of kind k and a manifest
 of kind k share one anchor set. **Only the signed kind field separates
 them.** The verifier therefore checks the kind before anything else of the
 body is used. §8.1's sig-bind names both directions as cases: a slot
@@ -93,7 +94,7 @@ message `M` (RFC 8554 §6.2), with the randomiser `C` HSS itself prepends
 160  target_kind       u16                  revocation kind only: the kind whose trees it revokes
 162  revoked_count     u16                  revocation kind only, at most 20
 164  zero              [u8; 12]
-176  revoked           [[u8; 16]; 20]       revocation kind only: the lower trees' identifiers I
+176  revoked           [[u8; 16]; 20]       revocation kind only: the revoked trees' identifiers I
 496  zero              [u8; 16]
 512  sig_len           u32                  at most 3532 (§2.2)
 516  signature         [u8; sig_len]        an HSS signature, RFC 8554 §6.2
@@ -109,7 +110,8 @@ A manifest **verifies** only when all of these hold:
 * every LMS and LM-OTS type code in it is one of §2's allowed set, and the
   level count `Nspk + 1` equals the anchor's `L`;
 * the signature verifies under the anchor `(expected kind, anchor_id)`;
-* no lower tree's `I` in the signature is revoked for this kind (§7.4);
+* no tree's `I` in the signature (with `L = 1`, the key's own) is revoked
+  for this kind (§7.4);
 * kind, profile, arch, family and `subject` equal what the caller expects;
 * `security_version` is at least the caller's floor for this kind (§7).
 
@@ -187,7 +189,7 @@ The rule is fixed in the registry and the profile file, not in code.
 | Decision | Choice | Reason |
 |---|---|---|
 | Formats | One 4 KiB manifest block for every kind; the signed message is its first 512 bytes | One parser and one verifier to qualify; a fixed size keeps the parse free of allocation |
-| Domain separation | A separate HSS root per kind, chosen by the caller's expected kind; the kind is also signed | A signature of one kind cannot verify as another under any field value |
+| Domain separation | Separate keys per kind, chosen by the caller's expected kind; the kind is also signed | A signature of one kind cannot verify as another under any field value |
 | Bound fields | kind, security version, payload digest and length, profile, arch, hardware family, subject, anchor | (P1)'s list, plus `subject` so that a driver image cannot be put on another driver, and `anchor_id` so that the anchor lookup is signed |
 | Slot binding | `payload_sha256` = the slot header's seal | Authenticates the three blobs through hashes the loader already checks |
 | Driver check | `devmgr` on its own copy | The only copy with no time-of-check-to-time-of-use window |
@@ -196,15 +198,26 @@ The rule is fixed in the registry and the profile file, not in code.
 
 ### 2.1 The choice
 
+**Decided by the customer (2026-10-24, ledger lines 3719 and 3731, §12
+Q1):** plain LMS, one tree per key, `L = 1`, with **two independent keys
+per kind**. HSS 10/15, this design's first proposal, stays a later option:
+the verifier accepts both, so a move to HSS costs a new key, not a new
+format (§4.3).
+
 | Item | Choice | From |
 |---|---|---|
 | Hash | SHA-256/192 (SHA-256 truncated to 192 bits, `n = m = 24`) | SP 800-208 §4.2 [1]; code points RFC 9858 [4]; CNSA 2.0 recommends SHA-256/192 for LMS [5] |
 | LM-OTS | `LMOTS_SHA256_N24_W4`, type 0x00000007: `n = 24`, `w = 4`, `p = 51` | SP 800-208 Table 3; RFC 9858 Table 1 |
-| LMS, top level | `LMS_SHA256_M24_H10`, type 0x0000000B: 1,024 leaves | SP 800-208 Table 4; RFC 9858 Table 2 |
-| LMS, bottom level | `LMS_SHA256_M24_H15`, type 0x0000000C: 32,768 leaves | as above |
-| HSS levels | `L = 2` | RFC 8554 §6; SP 800-208 §7.1 (distributed lower trees, §4) |
-| Signature | 3,172 bytes | RFC 9858 Table 3, row "15/10, W=4"; recomputed below |
-| Allowed in the verifier | LM-OTS: N24_W4 only; LMS: M24_H10, M24_H15, M24_H20; `L` 1 or 2 | The smallest set that carries this choice and §12 Q1's alternative (`L = 1`, H20). Every other code is refused |
+| LMS | `LMS_SHA256_M24_H20`, type 0x0000000D: 1,048,576 leaves | SP 800-208 Table 4; RFC 9858 Table 2 |
+| HSS levels | `L = 1`: the HSS encoding of RFC 8554 §6 with `Nspk = 0`, so that the format is the same if a later key has `L = 2` | RFC 8554 §6; SP 800-208 §7 (independent keys on different modules, its first option) |
+| Signature | 1,744 bytes (4 bytes of `Nspk`, then 1,740 of LMS signature) | RFC 9858 Table 3, row "20, W=4"; recomputed below |
+| Keys per kind | two, `anchor_id` 0 and 1, each generated in its own module at its own site | §4 |
+| Allowed in the verifier | LM-OTS: N24_W4 only; LMS: M24_H10, M24_H15, M24_H20; `L` 1 or 2 | This choice, and HSS 10/15 as the later option. Every other code is refused |
+
+**What CNSA 2.0 says.** As quoted, the CNSA 2.0 FAQ approves LMS and XMSS
+from SP 800-208 for national security systems, and excludes HSS and XMSS^MT
+(source 5). `L = 1` keeps that open. None of Ferrix's four certification
+targets requires CNSA 2.0 (ledger 3719 Q1).
 
 The SHA-256/192 code points were "TBD" in SP 800-208's Tables 3 and 4. They
 were assigned by RFC 9858 (October 2025) and are in IANA's LMS registry [6].
@@ -213,26 +226,24 @@ hash and the slot hashes (§5.2).
 
 ### 2.2 Tree height against the signature count
 
-**Budget per kind.** The lifetime ceiling is **2^20 = 1,048,576 signatures**
-per kind and root, over a key life of 25 years: 115 a day. A release signs
-one slot manifest per (profile, arch, family) it ships, which is at most 4 ×
-6 = 24 today. It also signs one manifest per driver image and configuration
-package it ships. Even daily releases of every slot combination use 24 of
-the 115. And product releases are not daily: development builds use
-development anchors that are never in a claimed image (§6.4).
+**Budget per key** (§12 Q7): **2^20 = 1,048,576 signatures** per key, over
+a key life of 25 years: 115 a day. With two keys per kind that is 2^21 per
+kind. A release signs one slot manifest per (profile, arch, family) it
+ships, which is at most 4 × 6 = 24 today. It also signs one manifest per
+driver image and configuration package it ships, and the revocation
+manifests and re-signing of §7.4. Even daily releases of every slot
+combination use 24 of the 115. Product releases are not daily, and CI,
+nightly and gate images never use a product key: they use development keys
+(§6.4). **An alarm fires at 50%** of a key's leaves (`CKA_HSS_KEYS_REMAINING`
+below 2^19, read by the signing tooling before and after every signature,
+§3.4), which is when its successor is generated and its anchor ships
+(§4.2).
 
-| Configuration | Capacity per root | Margin over 2^20 | Lower trees | Signatures per lower tree |
-|---|---|---|---|---|
-| **HSS 10/15 (chosen)** | 2^25 = 33,554,432 | 32× per root; 64× with both roots of the kind | 1,024 | 32,768 |
-| LMS H20 (`L = 1`, §12 Q1) | 2^20 | 1× per key; n× with n keys | none | 1,048,576 |
-| HSS 20/20 (largest allowed) | 2^40 | far above | 2^20 | 2^20 |
-
-The top tree's 1,024 leaves sign only lower-tree public keys (SP 800-208
-§7). At 115 signatures a day, a lower tree of 32,768 lasts nine months. 1,024
-of them outlast the key by orders of magnitude. The binding limit is
-therefore not the top tree but the HSMs' lifetime, which §4 covers.
-Generating one lower tree costs the HSM about 2^15 × 767 ≈ 25 million hash
-calls, once, at its ceremony.
+| Configuration | Capacity per key | Per kind | Notes |
+|---|---|---|---|
+| **LMS H20, `L = 1` (chosen)** | 2^20 | 2^21 with two keys | one key generation of about 2^20 × 767 ≈ 800 million hash calls per key, once, in its module |
+| HSS 10/15 (the later option) | 2^25 | 2^26 | needs a top-tree module and certifying ceremonies (§4.3) |
+| LMS H25 | 2^25 | — | not used: a key generation 32 times longer, for no need (ledger 3719 Q7) |
 
 ### 2.3 Signature size and verify time on the slowest target
 
@@ -255,10 +266,10 @@ it in slice S2.
 
 | Parameters (`L`, heights, `w`) | Signature (bytes) | Worst-case chain calls | Worst case, eBACS cost | Worst case, 3× budget | Host check (2 × H5, Ryzen 9 9900X, mean) |
 |---|---|---|---|---|---|
-| **2, 10/15, W4, n=24 (chosen)** | **3,172** | 1,530 | 4.85 M cycles = **7.5 ms** | **22 ms** | 35 µs |
+| 2, 10/15, W4, n=24 (the later HSS option) | 3,172 | 1,530 | 4.85 M cycles = 7.5 ms | 22 ms | 35 µs |
 | 2, 10/15, W8, n=24 | 1,972 | 13,260 | 40.5 M = 62 ms | 187 ms | 258 µs |
 | 2, 10/15, W4, n=32 | 5,236 | 2,010 | 6.4 M = 9.8 ms | 29 ms | 46 µs |
-| 1, 20, W4, n=24 | 1,744 | 765 | 2.5 M = 3.8 ms | 11 ms | 18 µs (H5) |
+| **1, 20, W4, n=24 (chosen)** | **1,744** | 765 | 2.46 M cycles = **3.8 ms** | **11 ms** | 18 µs (H5) |
 | 2, 20/20, W4, n=24 (largest allowed) | 3,532 | 1,530 | 4.9 M = 7.5 ms | 23 ms | — |
 
 The signature sizes are RFC 9858 Table 3's, recomputed from RFC 8554 §4-§6.
@@ -266,15 +277,16 @@ The host column measures `hbs-lms` 0.1.1 [8] verifying 24 signatures of
 200-byte messages, 20 times each, built `--release`. It uses the same
 parameters as the row, but with H5 trees, so that key generation stays
 short. A taller tree adds only h tree hashes, which is under 3% of the total
-here. On that host one 47-byte SHA-256 call takes 36 ns, so the chosen row's
-35 µs is about 980 calls: the analytic mean (two levels of about 51 × 7.5
-chain calls, plus K, Q and the tree) within 10%. The program and its output
+here. On that host one 47-byte SHA-256 call takes 36 ns, so the two-level
+row's 35 µs is about 980 calls, and the chosen one-level row's 18 µs about
+half that: the analytic mean (about 51 × 7.5 chain calls per level, plus K,
+Q and the tree) within 10%. The program and its output
 are in `~/.local/share/ferrix/signing-bench/`, outside the tree. No
 dependency was added.
 
 **W4 rather than W8.** W8 saves 1,200 bytes per signature, which no kind
 needs: the block has 4,096 bytes. It costs about eight times the verify time
-and the HSM's signing time. W4 also keeps the DK1's bound under 25 ms, a
+and the HSM's signing time. W4 also keeps the DK1's bound near 11 ms, a
 fraction of what the loader already spends hashing a slot's blobs. At the
 same 28.24 cycles per byte, a 32 MiB kernel and initramfs take 1.46 s at
 650 MHz.
@@ -297,7 +309,7 @@ measured worst case on the board replaces the estimate before any claim.
 | Key generation and signing only in a hardware module validated to FIPS 140-2 or 140-3 **level 3 or higher** physical security, in an approved mode with no bypass | SP 800-208 §8.1 | The CMVP certificate, which must list LMS key generation and signature generation (§12 Q2) |
 | The private key is never exported, and the entropy source is inside the module | SP 800-208 §8.1 | Certificate and security policy; the module's LMS key is created non-extractable, and its backup feature is off for it (§4) |
 | The leaf index `q` is incremented and **stored in non-volatile memory before a signature is released** or another request accepted | SP 800-208 §8.1, §9.1 | The security policy's statement. A power-cut test at acceptance: cut power during a signing loop, power on, and check that no `q` repeats and at most one is skipped |
-| Each tree's root is signed by its parent **once**, and the signature is stored | SP 800-208 §8.1, footnote 9 | The ceremony record (§3.4) keeps each lower tree's signed public key. The pipeline never asks for it again |
+| A tree's root is signed by its parent **once** (only if HSS is ever used, §4.3) | SP 800-208 §8.1, footnote 9 | Not applicable with `L = 1`: no key has a parent |
 
 Vendors that state LMS/HSS signing with the state kept in the module (to be
 re-checked against CMVP at procurement):
@@ -314,18 +326,26 @@ after every signature (§3.4).
 ### 3.2 Custodians
 
 Signing needs an **m-of-n quorum** of named custodians, at least 2 of 3, on
-the HSM's own authentication (smart cards or PINs). The custodians, their
+the HSM's own authentication (smart cards or PINs): from the first claimed
+release, the customer and two external custodians under contract (§12 Q3).
+Until then only development keys exist, and single-person custody is a
+stated residual. The custodians, their
 roles and their changes are a configuration item under configuration
 management, as 3564 (S4) asks. Key ceremonies need the quorum plus a witness
-who is not a custodian. Who the custodians are is §12 Q3.
+who is not a custodian: the independent assessor (§12 Q3).
 
-### 3.3 Roots and anchors
+### 3.3 Keys and anchors
 
-Each kind has **two roots**, `anchor_id` 0 and 1. Each is an HSS key whose
-top tree is in its own HSM, at its own site. Both roots of each kind are
-anchors in every image (§6). Three kinds and the revocation kind's three
-targets share these: revocations of kind k are signed under kind k's roots.
-That makes **six HSS roots**.
+Each kind has **two keys**, `anchor_id` 0 and 1, each an LMS key (`L = 1`)
+in its own module at its own site (§4.1). Both keys of each kind are
+anchors in every image that verifies the kind (§6). Revocations of kind k
+are signed under kind k's keys. That makes **six product keys**, in two
+modules. In the text below, "root" means one of these keys.
+
+**When the modules exist** (§12 Q2). No HSM is bought until the first
+claimed release with signed updates. Until then no product key exists,
+only development keys in the soft signer (§6.4), and no claimed image is
+released with signed updates.
 
 ### 3.4 The signature log
 
@@ -333,12 +353,12 @@ Each signature appends one line to the **signature log**, a git repository
 of its own (`ferrix-os/signing-log`, private, signed commits, under
 configuration management). A line holds:
 
-`time, kind, anchor_id, lower tree I, q, manifest SHA-256 (bytes 0..512), payload SHA-256, release, custodians`
+`time, kind, anchor_id, key I, q, manifest SHA-256 (bytes 0..512), payload SHA-256, release, custodians`
 
 The pipeline (§8.6) checks before it publishes:
 
 * the `(I, q)` pair is new in the log. A **repeat is an incident**. It is
-  reported to the customer, the lower tree is revoked (§7.4), and nothing
+  reported to the customer, the key is revoked (§7.4), and nothing
   signed with it after the repeat ships;
 * `q` is above every `q` logged for that `I`, so a module that went back is
   seen;
@@ -353,88 +373,83 @@ The pipeline (§8.6) checks before it publishes:
 
 ## 4. (P4) Backup without reuse
 
-Nothing in this scheme copies private state. SP 800-208 §7 forbids the
-export it would need, and a restored backup is exactly the reuse §1.2 of
-that document warns of. Resilience comes from **more keys**, never from
-copies:
+**Rewritten for `L = 1`** (the customer's decision, ledger 3731; the
+consultant's small re-review of this section is asked for there). Nothing
+in this scheme copies private state. SP 800-208 §8.1 forbids the export it
+would need, and a restored backup is exactly the reuse its §1.2 warns of.
+Resilience comes from **more keys**, never from copies.
 
-1. **Lower trees in several HSMs** (SP 800-208 §7.1). At the root's ceremony
-   its HSM, T, makes the top tree. Each signing HSM, S1 and S2 at site A and
-   S3 at site B, generates its own lower trees. T signs each lower tree's
-   public key once. The signed public keys are not secret: they are kept in
-   the pipeline's store and in the ceremony record. Each S signs ordinary
-   manifests with its own lower trees. The pipeline joins an LMS signature
-   with its lower tree's signed public key into the HSS signature (§7.1 of
-   SP 800-208 describes the joining device as non-cryptographic). The first
-   ceremony certifies **64 lower trees per root**, about 2 million
-   signatures, 16 to 32 per signing HSM. The rest of T's 1,024 leaves stay
-   for later ceremonies.
+### 4.1 Two independent keys per kind
 
-   **How the composition is made with PKCS #11 3.1 [11].** Every module holds
-   only **single-level** keys, `CKK_HSS` with `CKA_HSS_LEVELS = 1`, and signs
-   with `CKM_HSS`:
+SP 800-208 §7 gives this as its first option: "create multiple stateful HBS
+keys on different cryptographic modules and then configure clients to
+accept signatures created using any of these keys".
 
-   * T's key uses `LMS_SHA256_M24_H10`.
-   * Each lower key in S uses `LMS_SHA256_M24_H15`.
-   * Both use `LMOTS_SHA256_N24_W4`.
+* Each kind has **two keys**, `anchor_id` 0 and 1. Each is an LMS key
+  (`L = 1`, H20) generated inside its own module, at its own site: module A
+  holds key 0 of every kind, and module B holds key 1. That makes **three
+  kinds × two keys = six product keys** in two modules. Revocations of kind k
+  are signed under kind k's keys (§1.1, §7.4).
+* **Both anchors of each kind are in every image** that verifies that kind
+  (§6.1), so a manifest signed with either key verifies on every device.
+* A release signs each manifest with **one** key, never both: one artifact,
+  one signature. Normally that is key 0, with key 1 as the standby. Each key
+  is used from its own module only, so no leaf can be used twice across
+  modules.
+* There is no top tree, no lower-tree ceremony and no composition. The
+  HSM's own `CKM_HSS` signature with `Nspk = 0` is the manifest's signature
+  as it stands.
 
-   The pipeline builds the two-level key and its signatures in four steps.
+| Anchors in an image | Kind 1 (slot) | Kind 2 (config) | Kind 3 (driver) |
+|---|---|---|---|
+| The UEFI loader | product keys 0 and 1 (revocation of kind 1 uses them too) | — | — |
+| init's configuration verifier | — | product keys 0 and 1 | — |
+| `devmgr` | — | — | product keys 0 and 1 |
 
-   1. **The lower tree's public key.** S's HSS public key is
-      `u32str(1) || pub[1]`. The pipeline strips the leading `u32str(1)`,
-      leaving S's LMS public key
-      `pub[1] = u32str(lms type) || u32str(ots type) || I || T[1]`
-      (RFC 8554 §5.3).
-   2. **Certifying it.** At the ceremony, T signs those 48 bytes as its
-      message, once (SP 800-208 footnote 9). T returns the HSS signature
-      `u32str(0) || sig[0]`. The pipeline strips the `u32str(0)` (Nspk = 0),
-      leaving the LMS signature `sig[0]`. The pair `sig[0] || pub[1]` is
-      exactly RFC 8554 §6.2's `signed_pub_key[0]`.
-   3. **Signing a manifest.** S signs bytes 0..512 and returns
-      `u32str(0) || sig[1]`. The pipeline strips it to `sig[1]` and joins
-      `u32str(1) || sig[0] || pub[1] || sig[1]`. That is RFC 8554 §6.2's HSS
-      signature with Nspk = 1.
-   4. **The anchor.** The anchor is `u32str(2) || pub[0]`, where `pub[0]` is
-      T's LMS public key, likewise stripped of its `u32str(1)`. That is the
-      HSS public key of a two-level key.
+Six product anchors in all, each 52 bytes (`u32str(1) || u32str(lms type)
+|| u32str(ots type) || I || T[1]`). The development anchors of §6.4 are
+separate keys with their own ids.
 
-   RFC 8554 §6.3's verification checks `sig[0]` over `pub[1]` under
-   `pub[0]`, then `sig[1]` over the message under `pub[1]`, which is
-   exactly what steps 1 to 3 made. So the joined key is an ordinary HSS key
-   to the verifier, and no module ever holds a level it did not generate.
-   The pipeline is non-cryptographic: it only strips and concatenates, as
-   SP 800-208 §7.1 describes. Slice S6's acceptance test does all of this
-   on the purchased modules, verifies the joined signatures with
-   `ferrix-sigverify` (host build), and checks them against RFC 8554's
-   encoding byte by byte. A module that cannot export the bare public key
-   or sign a 48-byte message with a single-level key cannot be used for
-   this, and §12 Q2 asks for that capability.
-2. **Two roots per kind** (SP 800-208 §7, last paragraph). The top-tree HSM
-   T is the single point of failure for new lower trees, so each kind has a
-   second root at the other site. Losing T loses no signing ability until
-   the lower trees it already certified are spent.
-3. **No shared index range of one tree.** The consultant's alternative, an
-   index range of one top tree per HSM, would need that tree's seed in
-   several HSMs. That is the copy §8.1 forbids. So this design does not use
-   it.
+### 4.2 Loss, exhaustion and compromise
 
-**Procedures** (written as a runbook with slice S6; every step under the
-quorum, logged):
+Every step runs under the quorum (§3.2, from the first claimed release) and
+is logged. The runbook is written with slice S6.
 
 | Event | Procedure | Lost | What devices need |
 |---|---|---|---|
-| A signing HSM fails or is lost | Retire its lower trees in the store. Revoke them (§7.4) only if loss of custody is suspected | Its unspent leaves | Nothing: other lower trees verify under the same root |
-| A lower tree is exhausted | Switch to the next certified lower tree. A ceremony certifies more on T once fewer than 16 remain unused | Nothing | Nothing |
-| The top-tree HSM T of a root fails | Keep signing with that root's certified lower trees. Plan the root's replacement | No new lower trees for that root | Nothing until its lower trees run out; the other root still serves |
-| A root's top tree passes 75% of its leaves, or its HSM is gone and its lower trees run low | Generate a new root at a ceremony and ship it as an anchor (§6.2) a release ahead of need | Nothing | An update that carries the new anchor |
-| Suspected compromise or a repeated `(I, q)` | Revoke the lower tree (§7.4). For a root: ship anchors without it (§6.2) and raise the floor (§7) | The tree or root | A revocation file, or a new loader (slot kind) or slot (other kinds) |
-| A vendor's state-aware backup | Not used until assessed against this section. A scheme that splits leaves between modules without copying a seed (Utimaco's "OTS-preserving framework" is offered as one [12]) may replace step 1, by a change to this document | — | — |
+| A module fails or is lost | Sign with the kind's other key (key 1, in module B). Generate a replacement key in a new module, and ship its anchor in the next loader (kind 1) or slot (kinds 2, 3). Revoke the lost key (§7.4) only if loss of custody is suspected | The lost key's unspent leaves | Nothing at once: the other key verifies everywhere. The replacement anchor arrives with an update |
+| A key reaches 50% of its leaves (the alarm) | Generate its successor in the same module, ship the successor's anchor a release ahead of need, and switch once the anchor is in the field | Nothing | An update that carries the new anchor |
+| A key is exhausted | Not reached in operation: the 50% alarm comes first. A module refuses to sign with an exhausted key (SP 800-208 §8.1) | — | — |
+| Both modules lost at once | No signing until a new key's anchor reaches devices. Kind 1 needs a new loader, written by the installer; kinds 2 and 3 then need a slot release signed under the new kind-1 key | Signing, for that time | A new loader, then a slot |
+| Suspected compromise or a repeated `(I, q)` | Revoke the key by its `I` (§7.4), signed under the kind's other key; ship anchors without it (§6.2) and raise the floor (§7) | That key | A revocation file, or a new loader (kind 1) or slot (other kinds) |
+| A compromised key has already revoked the other key (§7.4 (c)) | Treat as "both modules lost": new keys in new modules, their anchors in a new loader written by the installer, then a slot release under the new kind-1 key | Both keys of the kind | A new loader, then a slot |
+| A vendor's state-aware backup | Not used until assessed against this section, by a change to this document. Utimaco's "OTS-preserving framework" [12] is one such scheme | — | — |
+
+**The upgrade path** (ledger 3719 Q2). Each module added later gets new keys
+of its own, whose anchors ship in the next loader or initramfs release. Old
+keys keep verifying until they are retired.
+
+### 4.3 HSS later, if wanted
+
+If a later key should be HSS 10/15, as this design first proposed, the
+format and the verifier need no change: `L = 2` and M24_H10/H15 are already
+in the allowed set (§2.1). Such a key would bring the top-tree module and
+the certifying composition that version 1 of this section described (each
+lower tree's bare LMS public key signed once by the top tree's
+single-level `CKM_HSS` key, joined by the pipeline into RFC 8554 §6.2's
+`signed_pub_key`), under a change to this document and its own review.
+
+**Index ranges of one tree in several modules are never used.** They would
+need the tree's seed in each of those modules, which is the copy §8.1
+forbids. The consultant withdrew that alternative at ledger 3667.
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Resilience | Lower trees in separate HSMs at two sites, each certified once by its root's top tree; two roots per kind | SP 800-208 §7 and §7.1; no private state is copied |
-| Index ranges in one tree | Not used | They need the seed in several modules, which §8.1 forbids |
-| Loss and exhaustion | The runbook above; new roots reach devices as anchors | (P4) |
+| Resilience | Two independent LMS H20 keys per kind, in two modules at two sites; both anchors in every image; one signature per artifact | SP 800-208 §7, first option; no private state is copied; no top-tree single point of failure |
+| Succession | 50% alarm, then the successor's anchor ships a release ahead of need | §12 Q7; an anchor change needs an update |
+| Index ranges in one tree | Never | They need the seed in several modules, which §8.1 forbids |
+| HSS | A later option, with no format change | The verifier accepts `L = 2` already |
+
 
 ## 5. (P5) The verifier crate
 
@@ -506,21 +521,19 @@ with it.
 `below` and `above`, and the ring carries the level. The manifest's own comment ("A crate may
 name a level of its own") has no field behind it yet. So the crate takes the
 item ring's level, `present` today, and moves with the ring as `fast`'s and
-`max`'s levels are built. Which level the crate must finally reach is §12
-Q9's answer:
-
-* If `max` takes signed slot updates, the level is **`sc4`**: DAL A
-  objectives, MC/DC coverage, SC 4 / ASIL D.
-* If `max` is updated only by a fresh install, and the verifier ships in
-  `fast` and `present`, it needs both `sc2` and `present`, which are
-  incomparable (BUILD-FLAGS §4).
+`max`'s levels are built. **The level it must reach is decided** (§12 Q9):
+`max` gets no signed updates until its claim is built (M7), so the
+verifier ships in `fast` and `present` and needs both **`sc2` and
+`present`**, which are incomparable (BUILD-FLAGS §4), with statement and
+branch coverage. An **`sc4`** verifier (DAL A-like structural coverage,
+MC/DC, independence) is an M7 work item, needed before any `max` product is
+fielded.
 
 If the crate ever needs a level the ring does not carry, the `"level"` key
 becomes a new schema field, with its change to `check-item-boundary.py`, a
-self-test, and its own review. It is not assumed here. The design
-recommends the second answer until `max`'s claim is built (M7), with `sc4`
-as the crate's target from its first line: MC/DC-ready structure, no
-recursion and bounded loops. The crate depends on nothing but
+self-test, and its own review. It is not assumed here. `sc4` stays the
+crate's target from its first line: MC/DC-ready structure, no recursion
+and bounded loops. The crate depends on nothing but
 `ferrix-sha256` and `core`, so no upward reference results.
 
 **The enforcement points.** The claim rests on the callers as much as on the
@@ -558,10 +571,9 @@ platform firmware ─UEFI Secure Boot: X.509 db / dbx, Authenticode─▶ the Fe
       initramfs ─────────────────────────────────▶ devmgr (driver anchors compiled in)           ─▶ driver image
 ```
 
-* **Slot anchors** (two roots of kind 1, plus the slot revocation floor
-  rule) are compiled into the UEFI loader, from
+* **Slot anchors** (the two keys of kind 1) are compiled into the UEFI loader, from
   `tools/common/data/signing-anchors.toml` through a generated `const`. An
-  anchor is an HSS public key, RFC 8554 §6.1: `L`, the top tree's types, `I`
+  anchor is an HSS public key, RFC 8554 §6.1: `L`, the key's types, `I`
   and root, 52 bytes for n = 24. It is tagged with its kind and
   `anchor_id`.
 * **Config and driver anchors** are compiled into init's verifier and into
@@ -593,7 +605,8 @@ customer ruled out: no artifact is signed twice. The firmware's link and
 this scheme's links are different artifacts.
 
 The integrator enrols Ferrix's `db` certificate, or Ferrix ships a loader
-signed under a key the platform already trusts (§12 Q4). Its key lives in
+signed under a key the platform already trusts. The customer chose the
+first: integrators enrol Ferrix's own `db` certificate (§12 Q4). Its key lives in
 the same HSMs, under the same quorum. It is a classical key (RSA-2048 or
 better, as firmware supports).
 
@@ -618,14 +631,72 @@ record carries that word (FAU_GEN.1 b), as it carries the build line.
 says. But the claim is stated as absent, and the line says why. The
 SAFETY-MANUAL AoU (§10.3) states the same condition for the integrator.
 
-### 6.4 Development builds
+### 6.4 Development builds and the soft signer
 
-Gates and development images need signatures without an HSM. So **development
-anchors** exist: software LMS keys generated by a host tool,
-`tools/common/release/dev-sign` (new, slice S3). They are listed by their
-public keys in `signing-anchors.toml`'s `[development]` table. A development
-key's state lives in a file and may be reused, which is exactly why no
-shipped image trusts one.
+**During development, signing uses software keys only** (the customer,
+2026-10-24; the consultant's OK IF (D1)-(D5), ledger 3731). There is no HSM
+and no FPGA until the first claimed release with signed updates (§12 Q2).
+Gates, CI, nightly and development images are signed by the **soft
+signer**, `ferrix-softsign` (`tools/common/release/softsign`, a host
+program, slice S1). **It is never used for a release** (D4).
+
+**What it is.**
+
+* **(D3) The same surface as the product path.** Its interface is the
+  subset of PKCS #11 3.1 the pipeline uses with an HSM [11]:
+  * `C_GenerateKeyPair` with `CKM_HSS_KEY_PAIR_GEN` (0x4032), the key type
+    `CKK_HSS` (0x46) and the attributes `CKA_HSS_LEVELS`,
+    `CKA_HSS_LMS_TYPE` and `CKA_HSS_LMOTS_TYPE`;
+  * `C_GetAttributeValue` for `CKA_VALUE` (the HSS public key) and
+    `CKA_HSS_KEYS_REMAINING`;
+  * `C_Sign` with `CKM_HSS` (0x4033).
+
+  The constants are pkcs11t.h 3.01's. The tooling talks to a `Token` trait
+  with exactly these operations. The soft signer is one implementation, and
+  a PKCS #11 module loaded from a library path (slice S6) is the other, so
+  moving to an HSM changes the configured module and the anchors, not the
+  tooling. It signs the same 512 manifest bytes in the same 4 KiB block as
+  the product path, and its signatures are RFC 8554 HSS signatures with
+  `Nspk = 0`, exactly as an HSM's are.
+* **(D2) The HSM's state rule, in software.** A key's private state is one
+  file: the seed, `I`, the parameter types and the next leaf `q`. The
+  signer holds an exclusive lock (`flock`) on it while it signs. To sign,
+  it:
+  1. reads `q`;
+  2. writes `q + 1` to a temporary file, `fsync`s it, renames it over the
+     state file, and `fsync`s the directory;
+  3. only then computes and releases the signature with leaf `q`.
+
+  A crash may skip a leaf, never reuse one. The signer refuses to sign if
+  it cannot read the state, lock it, or advance it, and if `q` has reached
+  `2^h`. It also appends `(I, q, manifest SHA-256)` to a local signature
+  log beside the state, `fsync`ed before the signature is released. It
+  refuses when the state's `q` is not above every `q` that log holds for
+  `I`. So a restored older state file is refused. A test does exactly that:
+  restore an older copy of the state, ask for a signature, and expect a
+  refusal. **Residual, stated for development:** the log sits beside the
+  state, so restoring the whole key directory restores both, and the soft
+  signer cannot see it (ledger 3738 (4)). The state directory is local to
+  one host, never on a network file system. Neither matters for a release,
+  which the soft signer never signs. An HSM keeps both inside its boundary.
+* **(D1) Its keys are development keys only.** Development keys have kind
+  roots of their own and anchor ids of their own, `0x8000` and up, distinct
+  from every product key's 0 and 1. They are listed by public key in
+  `signing-anchors.toml`'s `[development]` table. The soft signer generates
+  its own keys and has no import, so it cannot hold a product key: those are
+  generated non-extractable inside an HSM. Before each signature it also
+  refuses a key whose public key appears in the `[release]` table.
+* **(D5) No private key in the repository or an image.** Development
+  private state lives outside the tree, in
+  `~/.local/share/ferrix/signing-dev/`, mode 0600. A check refuses any file
+  in the tree that parses as soft-signer state. A development key committed
+  by mistake is revoked by replacing its development anchor: new key, new
+  anchor id, and the old anchor deleted from `[development]`.
+* **Its tree.** Development keys default to `LMS_SHA256_M24_H10` (1,024
+  signatures), so that one key generation takes about a second. H15 and
+  H20 are accepted for tests of the product heights. The tree's nodes are
+  cached beside the state, which is public data, so that a signature needs
+  only the one-time signature's hashes.
 
 There are three kinds of image, and they never mix:
 
@@ -653,16 +724,19 @@ There are three kinds of image, and they never mix:
   development anchor planted, which must read FIRED.
 * xtask refuses to put a development anchor into a named profile's shipped
   image at all. Only the gate's relink produces one, and only under the
-  gate's output directory.
+  gate's output directory. The gate check of (D1), a development anchor
+  planted in a claimed profile's image, must be refused, and its control
+  must read FIRED (`check-signing-anchors.py`, above).
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Slot anchors | Compiled into the UEFI loader; two roots | The loader is the first Ferrix code that runs, and the one Secure Boot verifies |
+| Slot anchors | Compiled into the UEFI loader; two keys | The loader is the first Ferrix code that runs, and the one Secure Boot verifies |
 | Config and driver anchors | Compiled into init's verifier and `devmgr`, inside the signed initramfs | `devmgr` reads no files; the anchors are as authentic as the slot |
 | Handover | Secure Boot's Authenticode verifies the loader; the loader verifies LMS | UEFI has no LMS; no artifact is signed twice |
 | Residual | The firmware's classical chain is outside this scheme; with Secure Boot off there is no root | Stated in A.FIRMWARE and VULNERABILITY-ANALYSIS (§10.3) |
 | Firmware state | `SecureBoot` and `SetupMode` on the loader's line, in its words and in the start-up audit record; the authenticity claim needs `on` and `user` | FAU_GEN.1 b; the claim's condition is visible per boot |
-| Development | Development anchors only in development images (profile 0xFF) and the gate's relinked loader (`level=none anchors=development`); a byte comparison outside the anchor section, and a search of shipped images, each with a control | Gates can sign; a shipped image never trusts a reusable key |
+| Development | Development anchors only in development images (profile 0xFF) and the gate's relinked loader (`level=none anchors=development`); a byte comparison outside the anchor section, and a search of shipped images, each with a control | Gates can sign; a shipped image never trusts a development key |
+| Soft signer | `ferrix-softsign`: the PKCS #11 3.1 HSS subset, `q` committed before release, a reuse check against its own log, development keys only, never for a release | The customer's decision; ledger 3731 (D1)-(D5) |
 
 ## 7. (P7) Revocation and anti-rollback
 
@@ -755,7 +829,13 @@ the N150's PTT and with `swtpm` in the gate, through the product owner:
 
 If any of these does not hold on a family, §7.3 states that family's
 rollback claim as **absent** until a mechanism that holds is designed and
-reviewed (§12 Q10).
+reviewed.
+
+**Only on a dedicated claimed install** (§12 Q10). The installer takes the
+owner and lockout authorisations only when the person installing chooses a
+claimed profile on a dedicated machine, explicitly, at install time. A
+dual-boot or desktop install never takes them, and its anti-rollback is
+stated absent (`ferrix.rollback=absent`).
 
 **Who writes them: the loader alone,** before `ExitBootServices`, through
 `EFI_TCG2_PROTOCOL.SubmitCommand` [17].
@@ -794,8 +874,11 @@ release that raises a carried floor also raises the slot's own
 `security_version`. Otherwise an older slot with the same security version
 but a lower carried floor could be booted to undo it. The cost is cadence:
 a configuration's floor rises only at a slot release, not at the
-configuration's own good trial. A ring-3 TPM path that would raise it
-earlier is §12 Q8.
+configuration's own good trial. The customer chose this cadence (§12 Q8).
+**The residual window is stated:** until the next slot release, a
+configuration or driver package can be rolled back to the floor the current
+slot carries. A ring-3 TPM path comes only if field data asks for it, under
+its own review.
 
 **What the A/B fallback becomes.** Once `floor[1]` rises, the other slot,
 still holding the older release, is below it and is refused as a fallback.
@@ -846,10 +929,11 @@ claims (§10.1), and a family without storage is not among them.
 
 ### 7.4 Revoking a key
 
-* **A lower tree** is revoked by a **revocation manifest** (kind 4). Its
-  `target_kind` names the kind, and its `revoked` field lists up to 20 lower
-  trees' `I`. It is signed under that kind's roots, and its
-  `security_version` is the revocation epoch.
+* **A key** is revoked by a **revocation manifest** (kind 4). Its
+  `target_kind` names the kind, and its `revoked` field lists up to 20
+  trees' `I`: with `L = 1`, the keys' own identifiers, and with a later HSS
+  key, its lower trees'. It is signed under that kind's **other** key, and
+  its `security_version` is the revocation epoch.
   * For **kind 1**, the loader reads it from `FERRIX/REVOKED.SIG` on the ESP.
     Its floor is the kind-4 counter (§7.2). A floor above zero with no file
     at or above it fails closed (§9.1), so deleting the file does not undo
@@ -859,10 +943,31 @@ claims (§10.1), and a family without storage is not among them.
     applies in memory on every boot.
   * For **kinds 2 and 3**, the revocation manifests are part of the slot
     image's initramfs, covered by its signature and its floor.
-* **A root** is retired by anchors without it (§6.2) and a raised floor.
-* A revoked tree's past signatures fail at once wherever the list is
-  applied. The release process re-signs whatever must keep booting with a
-  tree that is not revoked before it publishes the revocation.
+* **A key** is retired for good by anchors without it (§6.2) and a raised
+  floor.
+* A revoked key's past signatures fail at once wherever the list is
+  applied. Before it publishes the revocation, the release process re-signs
+  under the other key whatever must keep booting.
+
+**Revocation between peer keys** (ledger 3738 (1)). With `L = 1` a kind's
+two keys are peers: whoever holds either can sign a revocation of the
+other. So:
+
+* **(a) A revocation that lists its own signing key's `I` is refused.**
+  A key never revokes itself, so a revocation always comes from the other
+  key.
+* **(b) The list in force applies to the revocation file itself.** When
+  `REVOKED.SIG` (or a kind-2/3 revocation in the initramfs) is verified,
+  the list already in force applies: the compiled-in list, and the last
+  revocation applied whose epoch the floor holds. A newer file signed by a
+  key that is already revoked is therefore refused, and so is any later
+  revocation it would carry.
+* **(c) The residual.** If one key is compromised and the attacker has
+  already signed with it a revocation of the other key, the kind is left
+  with no unrevoked key. Recovery is only the "both modules lost" path of
+  §4.2. VULNERABILITY-ANALYSIS gets this row with slice S7.
+* **(d)** §8.1 checks (a) and (b) with a row each, and §8.3 lists both as
+  negative tests.
 
 | Decision | Choice | Reason |
 |---|---|---|
@@ -892,7 +997,9 @@ one host test, or one boot sub-case, and a negative control.
 | sig-hss | HSS verification per RFC 8554 §6.3, with `Nspk + 1 = L` | host: vectors |
 | sig-anchor | The anchor set is the caller's expected kind's, never the manifest's | host: kind-1 signature against kind-2 anchors |
 | sig-bind | kind, profile, arch, family, subject and floor equal the caller's | host: each field wrong by one; a slot manifest presented where a revocation of kind 1 is expected, and a revocation of kind 1 presented as a slot (they share kind 1's anchors, §1.1) |
-| sig-revoke | A signature through a revoked lower tree is refused | host |
+| sig-revoke | A signature by a revoked key (or through a revoked tree) is refused | host |
+| sig-revoke-self | A revocation listing its own signing key's `I` is refused | host |
+| sig-revoke-chain | A revocation signed by a key the list in force already revokes is refused | host |
 | sig-payload | The caller's payload digest equals `payload_sha256`, and `payload_len` matches | host and boot: AB-BOOT case 4's flipped byte |
 | sig-time | One verify is at most 50 ms on the DK1 at 650 MHz | DK1 measurement of the worst-case signature (S2); `MEMORY-AND-TIMING.md` |
 | sig-stack | One verify uses at most S bytes of stack and no heap, S from the build's stack report | the stack report of the loader's and `devmgr`'s builds; `MEMORY-AND-TIMING.md` |
@@ -928,6 +1035,8 @@ field is known. Then, one by one:
 * the wrong kind, profile, arch, family and subject;
 * `security_version` at floor − 1, and the floor itself (accepted);
 * a revoked `I`;
+* a revocation listing its own signing key (§7.4 (a));
+* a revocation signed by an already revoked key (§7.4 (b));
 * a payload one byte short or long.
 
 Each of the verifier's comparisons gets a source sabotage run by
@@ -980,8 +1089,8 @@ gate's image may carry them, by a gate-only exception named in `ITEM.md`:
 
 The signing pipeline, `tools/common/release/sign` (slice S6), builds the
 manifest from the release's artifacts, sends bytes 0..512 to the HSM over
-PKCS #11, joins the HSS signature, writes the block and appends the
-signature log. It is a tool whose output becomes product data:
+PKCS #11, writes the block and appends the signature log. It is a tool
+whose output becomes product data:
 
 * class T3 under IEC 61508-3 7.4.4 [19];
 * TI2 under ISO 26262-8 clause 11 [20]: a wrong digest, kind or profile
@@ -1000,6 +1109,12 @@ independent check of the output. The one error the device cannot detect is
 prevent (§3.1: the CMVP-validated state handling, and the power-cut
 acceptance test), and the log's to detect (§3.4), with revocation (§7.4) as
 the reaction. `TOOLS.md` gets both rows.
+
+**The soft signer** (§6.4) is a development tool, classified in `TOOLS.md`
+with no qualification beyond that row (ledger 3731 (D4)). Its output is
+checked by the same independent verifier on the device (TD1), and it never
+signs a release. Its state rule and reuse check are tested anyway, so that
+the custody protocol is exercised before any HSM exists (D2).
 
 | Decision | Choice | Reason |
 |---|---|---|
@@ -1074,7 +1189,7 @@ slot); and a fallback refused below the floor after a raise.
 
 | Key | Values | `max` | `fast` | `present` | `desktop` | Note |
 |---|---|---|---|---|---|---|
-| `slot_signing` (image, new) | `off`, `required` | `required` if §12 Q9 says signed slot updates, else `off` with no slot path | `required` | `required` once S4 lands, a dated change | `off` | Says whether the loader refuses header version 1 and the unsigned rescue files |
+| `slot_signing` (image, new) | `off`, `required` | `off` until M7, with no slot path: `max` is updated by a fresh install (§12 Q9) | `required` | `required` once S4 lands, a dated change | `off` | Says whether the loader refuses header version 1 and the unsigned rescue files |
 | `rollback` (image, new) | `absent`, `tpm` | per claimed family | per claimed family | `tpm` on the families that have it | `absent` | A profile names the families its rollback claim covers |
 | `config_updates` (3564 (S11)) | `absent`, `signed` | `absent` (3564 Q4) | `absent` until (S1)-(S6) exist, then `signed` as a dated change | not set by this design | not set | This design is the signing half of (S4) only |
 | `driver_updates` | `absent`, … | `absent` | `absent` | `absent` | `absent` | D3 becomes buildable; the reference configuration stays `absent` (3564 (S11)); a live driver swap is a live change |
@@ -1115,26 +1230,30 @@ its row and review, as `driver_updates` is.
 ### 10.4 Requirement ids
 
 None are written here. Before the first code slice, a docs-only landing
-reserves **`H.SIGN.1-6`** and **`L.sigverify.1-24`** in
+reserves **`H.SIGN.1-6`**, **`L.sigverify.1-24`** and **`L.sha256.1-6`** in
 `tools/common/data/requirement-reservations.json`, under the lock and with
 the consultant's review (CONVENTIONS, "Requirement ids are reserved before
 they are written"). `H.SIGN` is the hazard-level family: authenticity,
-binding, anti-rollback, revocation, fail-closed and audit. `L.sigverify`
-holds §8.1's rows. Neither prefix is used on `develop` at 6a60444a6. Each
-later slice (loader, init, `devmgr`) reserves its own `L.*` ids the same
-way.
+binding, anti-rollback, revocation, fail-closed and audit, each stating the
+verifier's own decision. Its parent is `ASR-7` alone (ledger 3738 (7)):
+O.VALIDATE is the system-call boundary's objective and does not fit. S4
+adds the update objective, its threat, FCS_COP.1/SigVer and FPT_TUD_EXT.1,
+and re-parents H.SIGN then. `L.sigverify` holds §8.1's rows, and `L.sha256`
+holds `ferrix-sha256`'s. None of the three prefixes is used on `develop`.
+What the loader, init and `devmgr` do with a refusal gets ids in their own
+slices, reserved the same way.
 
 ### 10.5 Slices
 
 | | Slice | Needs first | Points |
 |---|---|---|---|
 | S0 | This design; the consultant's verdict; the reservation landing | — | 2 |
-| S1 | `ferrix-sha256` moved out of `ferrix-slots`; `ferrix-sigverify` (format, LM-OTS, LMS, HSS, policy), its host tests, vectors, controls and fuzz target; the hardware-family registry; the kernel-symbol and no-signing-dependency checks | S0 | 8 |
+| S1 | `ferrix-sha256` (new; `ferrix-slots` moves onto it in S4); `ferrix-sigverify` (format, LM-OTS, LMS, HSS, policy), its host tests, vectors, controls, fuzz target and coverage; `ferrix-softsign`, the development soft signer (§6.4) | S0; the reservation of §10.4 | 8 |
 | S2 | The DK1 measurement of §2.3 and `MEMORY-AND-TIMING.md`'s bound | S1; the product owner's OK for the board | 2 |
-| S3 | `dev-sign` and development anchors; xtask's refusal of development anchors in claimed images | S1 | 3 |
+| S3 | The anchors file and its generated tables; xtask's refusal of development anchors in claimed images, `check-signing-anchors.py` and the gate relink; the hardware-family registry; the kernel-symbol and no-signing-dependency checks | S1 | 3 |
 | S4 | The loader: header version 2, the slot and rescue paths, refusal lines; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
 | S5 | TPM floors: the installer's provisioning (owner and lockout authorisations, `ownerPolicy`), the loader's `TPMA_PERMANENT` check, read, raise and lock through TCG2, the words; `bootctl sync`; `test-ab-boot` S4-S11 with `swtpm`; the check on the N150's PTT | S4; §12 Q10; the consultant's re-review of §7.2; the product owner's OK for the box | 8 |
-| S6 | The signing pipeline, the signature log, the runbook of §4, the HSM acceptance test | the HSM (§12 Q2) | 5 |
+| S6 | The PKCS #11 module backend of the `Token` trait, the signature log repository, the runbook of §4, the HSM acceptance test | the HSMs, bought for the first claimed release with signed updates (§12 Q2) | 5 |
 | S7 | Revocation manifests (kind 4) in the loader | S5 | 3 |
 | S8 | init's configuration verifier | 3564 (S1)-(S6) | theirs |
 | S9 | `devmgr`'s check (D3) | S1, S3 | 3 |
@@ -1159,7 +1278,7 @@ way.
    multitree algorithms HSS and XMSSMT are not allowed" (wolfSSL, "CNSA 2.0
    Update Part 3: LMS and XMSS", https://www.wolfssl.com/cnsa-2-0-update-part-3-lms-and-xmss-2/;
    SemiWiki, "NSA releases update to CNSA 2.0"). The primary text is to be
-   read before §12 Q1 is answered.
+   read before relying on CNSA 2.0 (§12 Q1).
 6. IANA, *Leighton-Micali Signatures (LMS)* registry,
    https://www.iana.org/assignments/leighton-micali-signatures/.
 7. eBACS, hash function results for `armeabi-berry2` (Cortex-A7, BCM2836,
@@ -1200,56 +1319,31 @@ way.
 Local copies of 1, 2, 4, 6 and 7, with the benchmark, are in
 `~/.local/share/ferrix/signing-bench/`.
 
-## 12. Open questions for the customer
+## 12. The customer's answers (2026-10-24)
 
-1. **HSS (`L = 2`) or plain LMS (`L = 1`)?** Your decision says LMS/HSS, and
-   this design uses HSS 10/15 for its backup story (SP 800-208 §7.1). But
-   the CNSA 2.0 FAQ, as quoted (source 5), allows LMS and XMSS but **not
-   HSS or XMSS^MT** for US national security systems. If Ferrix is to meet
-   CNSA 2.0, the alternative is `L = 1`, `LMS_SHA256_M24_H20`: one key per
-   HSM, each an anchor, with 1,048,576 signatures per key, 1,744-byte
-   signatures and 11 ms on the DK1. Backup then comes from several
-   independent keys (SP 800-208 §7, first option). The verifier accepts
-   both, so the format does not change. Which: HSS 10/15 (recommended
-   unless CNSA 2.0 matters), or LMS H20?
-2. **Which HSM, and how many?** At least three signing modules and two
-   top-tree modules over two sites (§4), FIPS 140 level 3 or higher with LMS
-   on the CMVP certificate. The modules must be able to sign a 48-byte
-   message with a single-level key and export its bare LMS public key (§4,
-   step 1's composition). Candidates: Utimaco u.trust Se-Series with
-   Quantum Protect, Thales Luna. Who buys and hosts them?
-3. **Who are the custodians** (at least 2 of 3) and the ceremony witness?
-4. **Secure Boot.** Should integrators enrol Ferrix's own `db` certificate,
-   or should Ferrix get its loader signed under a key platforms already
-   trust? And do you accept the residual of §6.3, that the firmware's link
-   is classical?
-5. **Boards without storage.** Do you accept "anti-rollback absent" on the
-   DK1, the Pixel 7 and every QEMU target? Or do you want either of the
-   persistent, irreversible paths: fusing a counter into the DK1's OTP, or
-   re-locking the Pixel 7 with an AVB custom key? Each is a write to the
-   device that only you can allow.
-6. **Which AArch64 board carries `max`'s and `fast`'s claim?** It needs
-   rollback storage: a TPM 2.0, or RPMB through OP-TEE. None of the AArch64
-   boards Ferrix runs on today has storage it can use.
-7. **The budget.** Is 2^20 signatures per kind over 25 years (115 a day)
-   right for Ferrix's release cadence? It counts every signature, including
-   revocation manifests and the re-signing a tree revocation forces (§7.4).
-8. **Config and driver floors at slot cadence** (§7.2), or a ring-3 TPM path
-   later that raises them at their own good trial? The design recommends
-   slot cadence: no TPM driver, and the loader as the only writer.
-9. **Does `max` take signed slot updates**, which puts the verifier at `sc4`?
-   Or is `max` updated only by a fresh install until its claim is built,
-   which puts the verifier at `sc2` and `present` (§5.3)?
-10. **May the installer take the TPM's owner and lockout authorisations?**
-    The rollback claim of §7.2 needs it: the installer sets both to random
-    values it does not keep, restricts the owner hierarchy by policy, and
-    disables the OS-side clear. Another operating system on the same machine
-    could then not reclaim the TPM's owner hierarchy without a clear at the
-    machine. And the claim holds only against an attacker without physical
-    access: a clear confirmed at the machine and root's re-provisioning is a
-    rollback. If you decline, or if S5 shows a TPM does not keep these
-    protections, anti-rollback is **absent on every family** until another
-    mechanism is designed.
+The questions of version 1 were answered by the customer on 2026-10-24.
+Every answer takes the consultant's recommendation (ledger lines 3719 and
+3731).
+
+| | Question | Answer | Where it acts |
+|---|---|---|---|
+| Q1 | HSS 10/15 or plain LMS? | **Plain LMS, `L = 1`, `LMS_SHA256_M24_H20`**, two independent keys per kind in two modules. Moving to HSS later costs a new key, not a format change. Read the primary NSA text before relying on CNSA 2.0 | §2.1, §4 |
+| Q2 | Which HSM, how many? | **None until the first claimed release with signed updates.** Development uses software keys (§6.4). Then two FIPS 140-3 level 3 modules with LMS on their CMVP certificate (confirmed before purchase), at two sites. Each module added later gets new keys of its own | §3.3, §4.2, slice S6 |
+| Q3 | Custodians | From then: 2 of 3, the customer and two external custodians under contract, with the independent assessor as witness. Until then, **single-person custody is a stated residual**, acceptable while no claimed release exists | §3.2 |
+| Q4 | Secure Boot | Integrators **enrol Ferrix's own `db` certificate**, stated as an AoU. No shim and no Microsoft CA for now. The classical firmware link is a stated residual | §6.3, §10.3 |
+| Q5 | Boards without storage | **Anti-rollback absent** on the DK1, the Pixel 7 and every QEMU target. No fuses, no relock | §7.3 |
+| Q6 | The AArch64 claim board | A Lock-mode Cortex-A78AE platform (MICROKERNEL.md's: an AMD VEK385, an NXP S32N7, or the integrator's SoC), bought when a project funds it. Whether its security subsystem offers a usable monotonic counter or RPMB is confirmed with the vendor before purchase. To bring the mechanism up before then, any cheap board with eMMC RPMB and upstream OP-TEE, checked before buying; no claim rests on it | §7.3 |
+| Q7 | The budget | **2^20 per key**, so 2^21 per kind, with an **alarm at 50%** of a key's leaves. CI, nightly and gate images never use a product key. No H25 | §2.2, §4.2 |
+| Q8 | Config and driver floors | **Only with slot releases.** The residual window, in which a configuration or driver package can be rolled back to the floor the current slot carries until the next slot release, is stated. A ring-3 TPM path only if field data asks for it, under its own review | §7.2 |
+| Q9 | Signed slot updates for `max` | **None until `max`'s claim is built (M7).** `max` is updated by a fresh install, so the verifier stays at `sc2` and `present`. An `sc4` verifier is an M7 work item, needed before any `max` product is fielded | §5.3, §10.1 |
+| Q10 | Taking the TPM's owner and lockout authorisations | **Yes, but only on installs of a claimed profile on a dedicated machine**, chosen explicitly at install time. A dual-boot or desktop install does not take them, and its anti-rollback is stated absent. The clear-at-the-machine residual is accepted as the Security Target's physical-protection assumption and a SAFETY-MANUAL AoU | §7.2, §10.3 |
+
+**Added by the customer:** during development, signing uses software keys
+in a soft signer behind the same PKCS #11 interface the design uses for
+HSMs, so that the later switch is configuration only. Its one-time-key
+state lives in a locked file, committed with `fsync` before a signature is
+released, and it can never use a product key (§6.4, ledger 3731
+(D1)-(D5)).
 
 ## 13. Where it stands
 
@@ -1265,7 +1359,8 @@ brief at line 3608. The conditions are folded in above:
 4. the gate's development-anchor image defined exactly (§6.4);
 5. classification through the item ring's level, and the enforcement
    points (§5.3);
-6. the PKCS #11 composition of lower trees (§4);
+6. the PKCS #11 composition of lower trees (§4), superseded in version 2
+   by independent keys; it survives only in §4.3, for a later HSS key;
 7. `sig-time` and `sig-stack` as two checks (§8.1);
 8. the chain-call bound in place of "the same work" (§8.5);
 9. the Pixel 7's missing authenticity claim, and no generic family in a
@@ -1277,14 +1372,41 @@ brief at line 3608. The conditions are folded in above:
 12. this record.
 
 The review **withdrew** (P4)'s alternative of an index range per HSM in one
-tree (§4, step 3), and **moved** (P5)'s counting driver check from
+tree (§4.3), and **moved** (P5)'s counting driver check from
 `drvupdated` to `devmgr` (§1.3). Lesser points C1 (the "floor raise
 pending" line) and C3 (revocations in the budget) are taken in. C2 (the
 eBACS machine's clock) is as written: S2's measurement supersedes the
 estimate.
 
+**Version 2 (2026-10-24, the same day).** The customer answered §12, taking
+every recommendation of ledger line 3719. The consultant recorded the
+decisions and passed the soft signer **OK IF (D1)-(D5)** (ledger line
+3731). Version 2 folds them in:
+
+* `L = 1`, `LMS_SHA256_M24_H20`, with two keys per kind (§2.1, §2.2);
+* §4 rewritten for independent keys, with the anchor count;
+* the soft signer (§6.4);
+* §12 answered.
+
+The consultant's re-review of version 2 is **OK IF (1)-(5)**, and of the
+id reservation **OK IF (6)-(8)**, ledger line 3738, folded in:
+
+1. revocation between peer keys (§7.4 (a)-(d), §4.2's new row, §8.1, §8.3);
+2. §4.2's first row names the kind's other key;
+3. the text left from version 1 (§5.3's level stated as decided, §6.1, this
+   section's item 6);
+4. the soft signer's whole-directory restore stated as a development
+   residual, with its state on one host (§6.4);
+5. this record.
+
+The reservation adds `L.sha256` for `ferrix-sha256`, and `H.SIGN`'s parent
+is `ASR-7` alone (§10.4). Lesser points C1, what reads
+`CKA_HSS_KEYS_REMAINING` (§2.2), and C2, the state on one host (§6.4), are
+taken in.
+
 No code and no requirement ids, and no document's claims change.
 `AB-BOOT.md` and `BUILD-FLAGS.md` carry a pointer to this document saying
-what will change. **Before code:** the answers to §12; a design re-review
-of the rewritten §7.2 before any S5 code (3667 (2)); and the reservation
-landing of §10.4 before S1.
+what will change. **Before code:** the reservation landing of §10.4 before
+S1, and a design re-review of the rewritten §7.2 before any S5 code (3667
+(2)). S1 may start beside §4's re-review (3731). Its code review checks it
+against the re-reviewed design.

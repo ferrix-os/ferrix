@@ -23,5 +23,9 @@ ferrix-native-abi = { path = "../../../../../lib/proto/native-abi" }
 # The audit record's layout, for the reader (docs/certification/AUDIT.md §4).
 ferrix-audit = { path = "../../../../../lib/proto/audit" }
 
+# The computer's name, checked by the same rules settingsd writes it with
+# (docs/SETTINGS-WRITER.md §4, B2; ledger 3636 (18)).
+ferrix-settings-proto = { path = "../../settingsd/proto" }
+
 [lints]
 workspace = true
