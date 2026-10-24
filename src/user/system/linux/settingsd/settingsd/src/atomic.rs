@@ -46,10 +46,64 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> io::Result<(
     written.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))
 }
 
+/// Point the link `path` at `target`: a link made beside it under a
+/// temporary name, renamed over `path`, and the directory `fsync`ed, so a
+/// reader sees the old link or the new one. On an error the temporary link
+/// is removed and `path` is as it was.
+///
+/// # Errors
+///
+/// The first call that failed, with the path it was about.
+pub(crate) fn link_atomic(path: &Path, target: &Path) -> io::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a path with no directory"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a path with no file name"))?;
+    let mut temporary_name = std::ffi::OsString::from(".");
+    temporary_name.push(name);
+    temporary_name.push(format!(".settingsd-{}", std::process::id()));
+    let temporary = dir.join(temporary_name);
+    let _ = std::fs::remove_file(&temporary);
+    let linked = (|| {
+        std::os::unix::fs::symlink(target, &temporary)?;
+        std::fs::rename(&temporary, path)?;
+        File::open(dir)?.sync_all()
+    })();
+    if linked.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    linked.map_err(|error| io::Error::new(error.kind(), format!("{}: {error}", path.display())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn a_link_is_replaced_whole_and_nothing_is_left_beside_it() {
+        let dir = std::env::temp_dir().join(format!("settingsd-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("localtime");
+        std::fs::write(&path, "a file\n").unwrap();
+        link_atomic(&path, Path::new("/usr/share/zoneinfo/UTC")).unwrap();
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC")
+        );
+        link_atomic(&path, Path::new("/usr/share/zoneinfo/Europe/Berlin")).unwrap();
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            Path::new("/usr/share/zoneinfo/Europe/Berlin")
+        );
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert!(link_atomic(&dir.join("no/such"), Path::new("x")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_file_is_replaced_whole_and_nothing_is_left_beside_it() {

@@ -272,6 +272,15 @@ fn test_files(shell: &[u8], busybox: Vec<u8>) -> Result<Vec<File>> {
         ),
         bytes("etc/hostname", 0o644, &format!("{BOOT_NAME}\n")),
     ];
+    // Two zones from the host's tzdata, for set-timezone (B3).
+    for zone in ["UTC", "Europe/Berlin"] {
+        let from = Path::new("/usr/share/zoneinfo").join(zone);
+        files.push(File {
+            path: format!("usr/share/zoneinfo/{zone}"),
+            mode: 0o644,
+            content: Content::Bytes(read(&from)?),
+        });
+    }
     for path in ["bin/sh", "bin/zinc"] {
         files.push(File {
             path: path.to_owned(),
@@ -287,7 +296,8 @@ fn test_files(shell: &[u8], busybox: Vec<u8>) -> Result<Vec<File>> {
     // busybox's `su` in place of Ferrix's: root becomes a user without a
     // password, so each request is asked as that user.
     for applet in [
-        "su", "cat", "cp", "grep", "hostname", "ls", "mkdir", "printf", "sleep",
+        "su", "cat", "cp", "grep", "hostname", "ls", "mkdir", "pidof", "printf", "readlink",
+        "sleep",
     ] {
         files.push(File {
             path: format!("bin/{applet}"),
@@ -346,7 +356,8 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
     }
     println!(
         "  {arch}: settingsd refused guest outside wheel and a wrong password, renamed the \
-         machine and enabled sshd.service for ferrix, refused a unit and a program not on its \
+         machine, set the time zone, and started and stopped sshd.service for \
+         ferrix, refused a unit, a zone and a program not on its \
          lists, changed nothing on a dry run, made nothing on a Methods=none relay, and \
          logged every request and no password"
     );
@@ -450,6 +461,8 @@ fn session(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     outsider(at, failures)?;
     wrong_password(at, failures)?;
     administrator(at, failures)?;
+    clock_and_zone(at, failures)?;
+    now_switch(at, failures)?;
     off_the_list(at, failures)?;
     unlisted_program(at, failures)?;
     dry_run(at, failures)?;
@@ -565,6 +578,113 @@ fn administrator(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()
     {
         failures.push(format!(
             "ferrix with its password did not enable sshd.service: {switched:?} link {link}"
+        ));
+    }
+    Ok(())
+}
+
+/// B3's time zone: ferrix sets it with its password, guest is refused, and
+/// a zone that is a path or is not there is refused. (`set-time`, B3's
+/// other half, is parked: ledger 3636 (19).)
+fn clock_and_zone(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let refused = run(
+        at,
+        &as_user("guest", Some(GUEST_PASSWORD), "set-timezone Europe/Berlin"),
+        "t1",
+    )?;
+    if answer(&refused, "settingsctl: ")
+        != Some("settingsctl: refused: not-permitted: guest is not in wheel")
+    {
+        failures.push(format!(
+            "set-timezone did not refuse guest outside wheel: {refused:?}"
+        ));
+    }
+    let zone = run(
+        at,
+        &as_user(
+            "ferrix",
+            Some(FERRIX_PASSWORD),
+            "set-timezone Europe/Berlin",
+        ),
+        "z1",
+    )?;
+    let link = run(
+        at,
+        "echo \"$m-zone $(readlink /etc/localtime) $(cat /etc/TZ)\"",
+        "z2",
+    )?;
+    if answer(&zone, "settingsctl: ") != Some("settingsctl: done: the time zone is Europe/Berlin")
+        || answer(&link, "z2-zone ")
+            != Some("z2-zone /usr/share/zoneinfo/Europe/Berlin CET-1CEST,M3.5.0,M10.5.0/3")
+    {
+        failures.push(format!(
+            "set-timezone did not link /etc/localtime and write /etc/TZ: {zone:?} {link:?}"
+        ));
+    }
+    for (marker, bad) in [("z3", "../../etc/shadow"), ("z4", "Mars/Olympus")] {
+        let other = run(
+            at,
+            &as_user(
+                "ferrix",
+                Some(FERRIX_PASSWORD),
+                &format!("--as-given set-timezone {bad}"),
+            ),
+            marker,
+        )?;
+        let link = run(
+            at,
+            "echo \"$m-zone $(readlink /etc/localtime)\"",
+            &format!("{marker}l"),
+        )?;
+        let invalid = answer(&other, "settingsctl: ")
+            .is_some_and(|line| line.starts_with("settingsctl: refused: invalid: "));
+        if !invalid
+            || answer(&link, &format!("{marker}l-zone "))
+                != Some(&format!("{marker}l-zone /usr/share/zoneinfo/Europe/Berlin") as &str)
+        {
+            failures.push(format!(
+                "settingsd took a zone that is no zone here: {bad} {other:?} {link:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// B6: `now` starts the stand-in sshd at once after its link, and stops it.
+fn now_switch(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let on = run(
+        at,
+        &as_user(
+            "ferrix",
+            Some(FERRIX_PASSWORD),
+            "service-enable-persistent sshd.service on now",
+        ),
+        "s1",
+    )?;
+    let running = run(at, "echo \"$m-running $(pidof sleep)\"", "s2")?;
+    let off = run(
+        at,
+        &as_user(
+            "ferrix",
+            Some(FERRIX_PASSWORD),
+            "service-enable-persistent sshd.service off now",
+        ),
+        "s3",
+    )?;
+    let stopped = run(at, "sleep 1; echo \"$m-running $(pidof sleep)x\"", "s4")?;
+    let link = linked(at, SSHD_LINK, "s5")?;
+    let started =
+        answer(&running, "s2-running ").is_some_and(|line| line.len() > "s2-running ".len());
+    if answer(&on, "settingsctl: ")
+        != Some("settingsctl: done: sshd.service is on for every boot, and started")
+        || !started
+        || answer(&off, "settingsctl: ")
+            != Some("settingsctl: done: sshd.service is off for every boot, and stopped")
+        || answer(&stopped, "s4-running ") != Some("s4-running x")
+        || link
+    {
+        failures.push(format!(
+            "now did not start and stop sshd.service: {on:?} {running:?} {off:?} {stopped:?} link {link}"
         ));
     }
     Ok(())

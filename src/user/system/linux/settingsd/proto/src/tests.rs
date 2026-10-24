@@ -3,7 +3,7 @@
 
 use crate::{
     DecodeError, MAX_RECORD, MAX_TEXT, Refusal, RefusalKind, Request, SWITCHABLE_UNITS, Secret,
-    ToClient, ToServer, valid_hostname,
+    ToClient, ToServer, valid_hostname, valid_zone,
 };
 
 fn requests() -> Vec<Request> {
@@ -14,10 +14,15 @@ fn requests() -> Vec<Request> {
         Request::ServiceEnablePersistent {
             unit: "sshd.service".to_owned(),
             enabled: true,
+            now: false,
         },
         Request::ServiceEnablePersistent {
             unit: "sshd.socket".to_owned(),
             enabled: false,
+            now: true,
+        },
+        Request::SetTimezone {
+            zone: "Europe/Berlin".to_owned(),
         },
     ]
 }
@@ -78,7 +83,7 @@ fn every_request_name_decodes() {
     for request in requests() {
         assert!(Request::NAMES.contains(&request.name()));
     }
-    assert_eq!(Request::NAMES.len(), 2, "a new request needs a case above");
+    assert_eq!(Request::NAMES.len(), 3, "a new request needs a case above");
 }
 
 #[test]
@@ -231,6 +236,7 @@ fn only_the_listed_units_may_be_switched() {
         let request = Request::ServiceEnablePersistent {
             unit: (*unit).to_owned(),
             enabled: true,
+            now: true,
         };
         assert!(request.validate().is_ok(), "{unit}");
     }
@@ -244,6 +250,7 @@ fn only_the_listed_units_may_be_switched() {
         let request = Request::ServiceEnablePersistent {
             unit: unit.to_owned(),
             enabled: true,
+            now: false,
         };
         assert!(request.validate().is_err(), "{unit}");
     }
@@ -260,7 +267,46 @@ fn each_area_has_its_own_service() {
         [
             "settings.hostname",
             "settings.services",
-            "settings.services"
+            "settings.services",
+            "settings.time"
         ]
     );
+}
+
+#[test]
+fn a_zone_is_a_name_and_never_a_path() {
+    for good in [
+        "UTC",
+        "Europe/Berlin",
+        "America/Argentina/Buenos_Aires",
+        "Etc/GMT+5",
+        "Etc/GMT-14",
+    ] {
+        assert!(valid_zone(good).is_ok(), "{good}");
+    }
+    for bad in [
+        "",
+        "/etc/shadow",
+        "../../etc/shadow",
+        "Europe/../../../etc/passwd",
+        "Europe//Berlin",
+        "Europe/",
+        ".hidden",
+        "Europe/.Berlin",
+        "-rf",
+        "Europe/Ber lin",
+        "Europe/Berlin\n",
+        "Eur\u{f6}pe",
+        &"a".repeat(65),
+    ] {
+        assert!(valid_zone(bad).is_err(), "{bad}");
+        assert!(
+            Request::SetTimezone {
+                zone: bad.to_owned()
+            }
+            .validate()
+            .is_err(),
+            "{bad}"
+        );
+    }
 }

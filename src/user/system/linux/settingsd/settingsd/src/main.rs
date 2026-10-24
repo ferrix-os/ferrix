@@ -109,10 +109,11 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|| under(&options.root, ferrix_settings_proto::SOCKET));
     let listener =
         listener(&socket).map_err(|e| format!("cannot listen on {}: {e}", socket.display()))?;
+    let live = options.root == Path::new("/");
     let context = Arc::new(Context {
         system: System {
             root: options.root.clone(),
-            live: options.root == Path::new("/"),
+            live,
             init: Box::new(Control::at(
                 options
                     .control

@@ -74,6 +74,23 @@ impl Init for Switches {
         self.0.lock().unwrap().push((unit.to_owned(), enabled));
         Ok(vec![format!("linked {unit}")])
     }
+
+    fn run(&self, unit: &str, start: bool) -> Result<Vec<String>, String> {
+        let verb = if start { "start" } else { "stop" };
+        self.0
+            .lock()
+            .unwrap()
+            .push((format!("{verb}:{unit}"), start));
+        if FAIL_START.with(std::cell::Cell::get) {
+            return Err(format!("{unit} failed to start"));
+        }
+        Ok(Vec::new())
+    }
+}
+
+thread_local! {
+    /// Whether the scripted init refuses a start, for this test's thread.
+    static FAIL_START: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// How the scripted client answers a prompt.
@@ -193,9 +210,21 @@ fn root(name: &str) -> PathBuf {
     }
     std::fs::write(
         root.join(crate::apps::FILE),
-        "hostname = /bin/settingsctl\nservices = /bin/settingsctl\n",
+        "hostname = /bin/settingsctl\nservices = /bin/settingsctl\ntime = /bin/settingsctl\n",
     )
     .unwrap();
+    let zones = root.join("usr/share/zoneinfo");
+    std::fs::create_dir_all(zones.join("Europe")).unwrap();
+    std::fs::write(zones.join("UTC"), "TZif2 utc\nUTC0\n").unwrap();
+    std::fs::write(
+        zones.join("Europe/Berlin"),
+        "TZif2 berlin\nCET-1CEST,M3.5.0,M10.5.0/3\n",
+    )
+    .unwrap();
+    std::fs::write(zones.join("Europe/Bogus"), "not a zone\n").unwrap();
+    std::fs::write(root.join("etc/secret"), "TZif2 but outside\n").unwrap();
+    std::os::unix::fs::symlink("../../../etc/secret", zones.join("Escape")).unwrap();
+    std::os::unix::fs::symlink("/usr/share/zoneinfo/UTC", root.join("etc/localtime")).unwrap();
     root
 }
 
@@ -409,7 +438,8 @@ fn an_acceptance_for_the_peer_writes_the_name() {
         .flatten()
         .map(|entry| entry.file_name())
         .collect();
-    assert_eq!(names.len(), 2, "{names:?}");
+    // passwd, hostname, and what the zones' tests put there.
+    assert_eq!(names.len(), 4, "{names:?}");
 }
 
 #[test]
@@ -532,6 +562,7 @@ fn an_invalid_request_is_refused_before_anyone_is_asked() {
         Request::ServiceEnablePersistent {
             unit: "auth.socket".to_owned(),
             enabled: true,
+            now: true,
         },
         false,
         accepts(1000, "ferrix"),
@@ -606,6 +637,7 @@ fn a_switch_asks_init_once_it_is_allowed() {
     let request = Request::ServiceEnablePersistent {
         unit: "sshd.service".to_owned(),
         enabled: true,
+        now: false,
     };
     let run = run(
         "switch",
@@ -884,6 +916,183 @@ fn a_relayed_acceptance_with_no_question_is_refused() {
         said.iter().any(|line| line.contains("result=needs-seat")),
         "{said:?}"
     );
+}
+
+#[test]
+fn now_starts_or_stops_the_unit_after_its_links() {
+    let on = run(
+        "now-on",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        on.answer,
+        ToClient::Done {
+            changed: true,
+            text: "sshd.service is on for every boot, and started".to_owned()
+        }
+    );
+    assert_eq!(
+        *on.switches.lock().unwrap(),
+        [
+            ("sshd.service".to_owned(), true),
+            ("start:sshd.service".to_owned(), true)
+        ]
+    );
+    let off = run(
+        "now-off",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.socket".to_owned(),
+            enabled: false,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        *off.switches.lock().unwrap(),
+        [
+            ("sshd.socket".to_owned(), false),
+            ("stop:sshd.socket".to_owned(), false)
+        ]
+    );
+    // Refused: nothing is asked of init at all.
+    let refused = run(
+        "now-refused",
+        GUEST,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        Script {
+            verdict: Some(Ok(Verdict::Unavailable("guest is not in wheel".to_owned()))),
+            ..Script::default()
+        },
+        Client::Answers,
+    );
+    assert_eq!(refused.refused(), RefusalKind::NotPermitted);
+    assert!(refused.switches.lock().unwrap().is_empty());
+    // A start init refuses: the boot's setting is kept, and said so.
+    FAIL_START.with(|fail| fail.set(true));
+    let failed = run(
+        "now-failed",
+        FERRIX,
+        Request::ServiceEnablePersistent {
+            unit: "sshd.service".to_owned(),
+            enabled: true,
+            now: true,
+        },
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    FAIL_START.with(|fail| fail.set(false));
+    // The record says the boot's setting changed and the start did not, and
+    // init was asked for the link before the start.
+    let said = crate::audit::SAID.lock().unwrap().clone();
+    assert!(
+        said.iter()
+            .any(|line| line.contains("result=start-failed before=- after=on")),
+        "{said:?}"
+    );
+    assert_eq!(
+        failed.switches.lock().unwrap().first(),
+        Some(&("sshd.service".to_owned(), true))
+    );
+    match &failed.answer {
+        ToClient::Refused(refusal) => {
+            assert_eq!(refusal.kind, RefusalKind::Failed);
+            assert!(
+                refusal.text.starts_with(
+                    "sshd.service is on for every boot, but init did not start it now"
+                ),
+                "{}",
+                refusal.text
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_zone_links_localtime_and_writes_the_footer() {
+    let zone = |name: &str| Request::SetTimezone {
+        zone: name.to_owned(),
+    };
+    let done = run(
+        "zone",
+        FERRIX,
+        zone("Europe/Berlin"),
+        false,
+        accepts(1000, "ferrix"),
+        Client::Answers,
+    );
+    assert_eq!(
+        done.answer,
+        ToClient::Done {
+            changed: true,
+            text: "the time zone is Europe/Berlin".to_owned()
+        }
+    );
+    assert_eq!(
+        std::fs::read_link(done.root.join("etc/localtime")).unwrap(),
+        Path::new("/usr/share/zoneinfo/Europe/Berlin")
+    );
+    assert_eq!(
+        std::fs::read_to_string(done.root.join("etc/TZ")).unwrap(),
+        "CET-1CEST,M3.5.0,M10.5.0/3\n"
+    );
+    let dry = run(
+        "zone-dry",
+        GUEST,
+        zone("Europe/Berlin"),
+        true,
+        Script::default(),
+        Client::Answers,
+    );
+    assert_eq!(
+        dry.answer,
+        ToClient::Done {
+            changed: true,
+            text: "would use the time zone Europe/Berlin; it uses UTC".to_owned()
+        }
+    );
+    assert!(!dry.root.join("etc/TZ").exists());
+    // No such zone, a file that is not one, and a link out of the
+    // directory: refused before anyone is asked, nothing written.
+    for (name, bad) in [
+        ("zone-none", "Mars/Olympus"),
+        ("zone-bogus", "Europe/Bogus"),
+        ("zone-escape", "Escape"),
+        ("zone-path", "../../../etc/secret"),
+    ] {
+        let refused = run(
+            name,
+            FERRIX,
+            zone(bad),
+            false,
+            accepts(1000, "ferrix"),
+            Client::Answers,
+        );
+        assert_eq!(refused.refused(), RefusalKind::Invalid, "{bad}");
+        assert_eq!(refused.asked(), 0, "{bad}");
+        assert_eq!(
+            std::fs::read_link(refused.root.join("etc/localtime")).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC"),
+            "{bad}"
+        );
+    }
 }
 
 /// Ledger 3636 (1), A6: a prompt listener that is not root is refused before

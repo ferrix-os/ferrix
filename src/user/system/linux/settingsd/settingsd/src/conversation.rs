@@ -176,14 +176,29 @@ fn apply(peer: Peer, request: &Request, plan: &Plan, told: &Told, context: &Cont
             }
         }
         Err(refusal) => {
-            record(
-                peer,
-                request,
-                told,
-                refusal.kind.name(),
-                &plan.before,
-                &plan.after,
-            );
+            // `now` whose links were made and whose start or stop was not:
+            // the boot's setting did change, and the record says that.
+            let partial = match &plan.action {
+                requests::Action::Service {
+                    enabled, now: true, ..
+                } if refusal.text.contains(requests::service::PARTIAL) => Some(if *enabled {
+                    ("start-failed", "on")
+                } else {
+                    ("stop-failed", "off")
+                }),
+                _ => None,
+            };
+            match partial {
+                Some((result, after)) => record(peer, request, told, result, &plan.before, after),
+                None => record(
+                    peer,
+                    request,
+                    told,
+                    refusal.kind.name(),
+                    &plan.before,
+                    &plan.after,
+                ),
+            }
             ToClient::Refused(refusal)
         }
     }

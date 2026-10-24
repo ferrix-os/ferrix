@@ -116,14 +116,14 @@ and clocks" without loosening "accounts".
 |---|---|---|---|---|---|---|
 | `set-hostname` | name | 1-64 bytes; dot-separated labels of 1-63 ASCII letters, digits and `-`, no label starting or ending with `-` (RFC 1123) | `/etc/hostname` (`name\n`, 0644) | `sethostname` | `hostname` | **B1 (built)** |
 | `service-enable-persistent` | unit, enabled | the unit is one of the compiled list a Settings page may switch: `sshd.service`, `sshd.socket` | init's `enable`/`disable` (links under `/etc/ferrix/units`) | none: next boot (`now` is B6's to add) | `services` | **B1 (built)** |
-| `set-time` | seconds since the epoch | within 2000..2200 | none | `clock_settime(CLOCK_REALTIME)` | `time` | B3 |
-| `set-timezone` | zone name | a file under `/usr/share/zoneinfo` by name, no `..`, no `/` at the start | `/etc/localtime` link, `/etc/TZ` | none | `time` | B3 |
+| `set-time` | seconds since the epoch | within 2000..2200 | none | `clock_settime(CLOCK_REALTIME)` | `time` | B3, **parked**: `authd`'s throttle keeps wall-clock time (ledger 3636 (19)) |
+| `set-timezone` | zone name | a file under `/usr/share/zoneinfo` by name, no `..`, no `/` at the start | `/etc/localtime` link, `/etc/TZ` (the zone's POSIX footer, which lode reads) | none | `time` | **B3 (built)** |
 | `user-add` | name, full name, type (standard/administrator) | name as `useradd`'s; not taken; uid from the free range, never reused; never uid 0, a system account or the auth store | `/etc/passwd`, `/etc/group` (both atomic, one lock) | none | `users` | B4, design review first |
 | `user-remove` | name | exists, uid >= 1000, not the caller's own last administrator | the same | none | `users` | B4 |
 | `user-set-type` | name, type | as above; never removes the last member of `wheel` | `/etc/group` | none | `users` | B4 |
 | `user-auto-login` | name or none | exists, uid >= 1000 | sessiond's file (B4 names it) | none | `users` | B4 |
 | `set-boot-word` | key, value or none | a closed list of keys and values generated at build time from the **`present` profile** (`tools/common/data/profiles/present.toml`), with a check that fails when they disagree; **no key whose permitted value is `*`** (`ferrix.init`, `ferrix.root`, `ferrix.onexit`, `console`, `drm.edid_firmware`) can be set; "none" only for a key whose default is the reference value; no permit table, no request. So a Settings page sets no boot word `present` does not permit | `\FERRIX\CMDLINE.TXT` on the EFI system partition, the one key replaced, every other word kept; B5's design says what the loader does with a truncated or missing file after a crash | none: next boot | `boot` | B5, design review first |
-| `service-enable-persistent` for `sshd` | as B1 | as B1 | as B1 | B6 adds `now` (start or stop as well) | `services` | B6 |
+| `service-enable-persistent` for `sshd` | as B1 | as B1 | as B1 | with `now`, init's `start` or `stop` once the links are made; a failed start keeps the link and says so | `services` | **B6 (built)** |
 
 Rules every request keeps:
 
@@ -450,6 +450,20 @@ IF (1)-(4), ledger line 3686, on design review 3636 (18).
 design OK IF (1)-(20), ledger 3636; code OK IF (A1)-(A8), ledger 3779.
 The customer answered 3636 (3) on 2026-10-24: the password relay for
 accounts with no seat stays, as built (§12.7).
+
+2026-10-24: **B3's time zone and B6 built**: `set-timezone` (a name from
+the image's `/usr/share/zoneinfo` that resolves inside it and starts
+`TZif`; `/etc/localtime` linked atomically, `/etc/TZ` written with the
+zone's POSIX footer) and `service-enable-persistent ... now` (the link
+first, then init's start or stop; a failed start keeps the link and says
+so). Both go through §12's prompt; their areas are in the shipped list,
+`settings.time` is a new policy. **`set-time` is parked** on
+`park/settings-set-time`: ledger 3636 (19) asks every timer of the trust
+chain to run on the monotonic clock, and `authd`'s throttle keeps
+wall-clock milliseconds in its store (`authd/src/server.rs` `now_ms`), so
+moving the clock would move the throttle. Code review OK IF (B1)-(B3), ledger line 3792 (verdict 3794): it lands
+with §12 or after it; a `now` whose start fails is recorded
+`result=start-failed` with the boot's setting as `after`.
 
 ## 12. The trusted prompt and the per-area allow-lists
 

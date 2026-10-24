@@ -7,6 +7,7 @@
 
 pub(crate) mod hostname;
 pub(crate) mod service;
+pub(crate) mod time;
 
 use std::path::PathBuf;
 
@@ -59,6 +60,17 @@ pub(crate) enum Action {
         unit: String,
         /// On or off.
         enabled: bool,
+        /// Started or stopped now too.
+        now: bool,
+    },
+    /// `set-timezone`.
+    Zone {
+        /// Its name.
+        zone: String,
+        /// Its file, as `/etc/localtime` will name it.
+        target: PathBuf,
+        /// Its POSIX footer, for `/etc/TZ`.
+        footer: Option<String>,
     },
 }
 
@@ -70,7 +82,10 @@ pub(crate) enum Action {
 pub(crate) fn plan(request: &Request, system: &System) -> Result<Plan, Refusal> {
     match request {
         Request::SetHostname { name } => hostname::plan(name, system),
-        Request::ServiceEnablePersistent { unit, enabled } => Ok(service::plan(unit, *enabled)),
+        Request::ServiceEnablePersistent { unit, enabled, now } => {
+            Ok(service::plan(unit, *enabled, *now))
+        }
+        Request::SetTimezone { zone } => time::plan_zone(zone, system),
     }
 }
 
@@ -83,6 +98,11 @@ pub(crate) fn plan(request: &Request, system: &System) -> Result<Plan, Refusal> 
 pub(crate) fn apply(plan: &Plan, system: &System) -> Result<String, Refusal> {
     match &plan.action {
         Action::Hostname(name) => hostname::apply(name, plan, system),
-        Action::Service { unit, enabled } => service::apply(unit, *enabled, system),
+        Action::Service { unit, enabled, now } => service::apply(unit, *enabled, *now, system),
+        Action::Zone {
+            zone,
+            target,
+            footer,
+        } => time::apply_zone(zone, target, footer.as_deref(), system),
     }
 }

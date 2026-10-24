@@ -27,7 +27,7 @@ mod tests;
 
 pub use ferrix_auth_proto::Secret;
 pub use record::{DecodeError, Packet, Refusal, RefusalKind, ToClient, ToServer, Unencodable};
-pub use request::{Area, Invalid, Request, SWITCHABLE_UNITS, valid_hostname};
+pub use request::{Area, Invalid, Request, SWITCHABLE_UNITS, valid_hostname, valid_zone};
 
 /// Where `settingsd` listens.
 pub const SOCKET: &str = "/run/ferrix/settings";

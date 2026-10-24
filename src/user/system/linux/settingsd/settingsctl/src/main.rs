@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! settingsctl [--dry-run] [--as-given] set-hostname NAME
-//! settingsctl [--dry-run] [--as-given] service-enable-persistent UNIT on|off
+//! settingsctl [--dry-run] [--as-given] service-enable-persistent UNIT on|off [now]
+//! settingsctl [--dry-run] [--as-given] set-timezone ZONE
 //! ```
 //!
 //! It prints `settingsctl: done: TEXT`, `settingsctl: would: TEXT` or
@@ -20,7 +21,8 @@ use ferrix_auth_client::Terminal;
 use ferrix_settings_client::{Client, Conversation, Outcome, Refusal, Request, Step};
 
 const USAGE: &str = "usage: settingsctl [--dry-run] [--as-given] set-hostname NAME\n       \
-                     settingsctl [--dry-run] [--as-given] service-enable-persistent UNIT on|off";
+                     settingsctl [--dry-run] [--as-given] service-enable-persistent UNIT on|off [now]\n       \
+                     settingsctl [--dry-run] [--as-given] set-timezone ZONE";
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -69,17 +71,24 @@ fn main() -> ExitCode {
 fn parse(arguments: &[String]) -> Option<Request> {
     match arguments {
         [verb, name] if verb == "set-hostname" => Some(Request::SetHostname { name: name.clone() }),
-        [verb, unit, state] if verb == "service-enable-persistent" => {
+        [verb, unit, state, rest @ ..] if verb == "service-enable-persistent" => {
             let enabled = match state.as_str() {
                 "on" => true,
                 "off" => false,
                 _ => return None,
             };
+            let now = match rest {
+                [] => false,
+                [word] if word == "now" => true,
+                _ => return None,
+            };
             Some(Request::ServiceEnablePersistent {
                 unit: unit.clone(),
                 enabled,
+                now,
             })
         }
+        [verb, zone] if verb == "set-timezone" => Some(Request::SetTimezone { zone: zone.clone() }),
         _ => None,
     }
 }
@@ -133,7 +142,22 @@ mod tests {
             parse(&words("service-enable-persistent sshd.service off")),
             Some(Request::ServiceEnablePersistent {
                 unit: "sshd.service".to_owned(),
-                enabled: false
+                enabled: false,
+                now: false
+            })
+        );
+        assert_eq!(
+            parse(&words("service-enable-persistent sshd.socket on now")),
+            Some(Request::ServiceEnablePersistent {
+                unit: "sshd.socket".to_owned(),
+                enabled: true,
+                now: true
+            })
+        );
+        assert_eq!(
+            parse(&words("set-timezone Europe/Berlin")),
+            Some(Request::SetTimezone {
+                zone: "Europe/Berlin".to_owned()
             })
         );
         for bad in [
@@ -141,6 +165,10 @@ mod tests {
             "set-hostname",
             "set-hostname a b",
             "service-enable-persistent sshd.service maybe",
+            "service-enable-persistent sshd.service on later",
+            "service-enable-persistent sshd.service on now now",
+            "set-time 1900000000",
+            "set-timezone",
             "write-file /etc/shadow x",
         ] {
             assert_eq!(parse(&words(bad)), None, "{bad}");

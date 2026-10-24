@@ -1,6 +1,7 @@
 //! `service-enable-persistent` (B1, B6): init's `enable` or `disable` for a
 //! unit on [`ferrix_settings_proto::SWITCHABLE_UNITS`], asked over init's
-//! control socket as `svc` asks it. init makes the links; this asks.
+//! control socket as `svc` asks it, and with `now` its `start` or `stop`
+//! after. init makes the links and runs the unit; this asks.
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -11,6 +12,10 @@ use ferrix_svc_proto::control::{Answer, Call, Framer};
 
 use super::{Action, Plan, System};
 
+/// What a refusal's words hold when the boot's setting was made and the
+/// start or stop was not: the audit then says so (ledger 3792, B2).
+pub(crate) const PARTIAL: &str = ", but init did not ";
+
 /// init, as far as a unit's links go.
 pub(crate) trait Init: Send + Sync {
     /// Enable `unit`, or disable it: init's notes on success, its refusal
@@ -20,6 +25,14 @@ pub(crate) trait Init: Send + Sync {
     ///
     /// What init said, or why it could not be asked.
     fn switch(&self, unit: &str, enabled: bool) -> Result<Vec<String>, String>;
+
+    /// Start `unit` now, or stop it: init's notes on success, its refusal
+    /// otherwise.
+    ///
+    /// # Errors
+    ///
+    /// What init said, or why it could not be asked.
+    fn run(&self, unit: &str, start: bool) -> Result<Vec<String>, String>;
 }
 
 /// init's control socket.
@@ -37,11 +50,25 @@ impl Control {
 
 impl Init for Control {
     fn switch(&self, unit: &str, enabled: bool) -> Result<Vec<String>, String> {
-        let call = if enabled {
+        self.call(&if enabled {
             Call::Enable(unit.to_owned())
         } else {
             Call::Disable(unit.to_owned())
-        };
+        })
+    }
+
+    fn run(&self, unit: &str, start: bool) -> Result<Vec<String>, String> {
+        self.call(&if start {
+            Call::Start(unit.to_owned())
+        } else {
+            Call::Stop(unit.to_owned())
+        })
+    }
+}
+
+impl Control {
+    /// Ask init `call`, and read its answer to the end.
+    fn call(&self, call: &Call) -> Result<Vec<String>, String> {
         let mut stream = UnixStream::connect(&self.socket)
             .map_err(|error| format!("init cannot be reached: {error}"))?;
         stream
@@ -77,18 +104,29 @@ impl Init for Control {
 }
 
 /// What switching `unit` would do. Whether it is on now is not asked: init
-/// makes no link that is there already and removes none that is not.
-pub(super) fn plan(unit: &str, enabled: bool) -> Plan {
+/// makes no link that is there already and removes none that is not, and
+/// starts nothing that runs and stops nothing that does not.
+pub(super) fn plan(unit: &str, enabled: bool, now: bool) -> Plan {
     let state = if enabled { "on" } else { "off" };
+    let would = match (now, enabled) {
+        (false, _) => format!("would turn {unit} {state} for every boot"),
+        (true, true) => format!("would turn {unit} on for every boot and start it now"),
+        (true, false) => format!("would turn {unit} off for every boot and stop it now"),
+    };
     Plan {
         action: Action::Service {
             unit: unit.to_owned(),
             enabled,
+            now,
         },
         changed: true,
-        would: format!("would turn {unit} {state} for every boot"),
+        would,
         before: String::new(),
-        after: state.to_owned(),
+        after: if now {
+            format!("{state} now")
+        } else {
+            state.to_owned()
+        },
     }
 }
 
@@ -98,16 +136,38 @@ pub(super) fn plan(unit: &str, enabled: bool) -> Plan {
 ///
 /// [`RefusalKind::Unavailable`] when init cannot be reached,
 /// [`RefusalKind::Failed`] when it refused.
-pub(super) fn apply(unit: &str, enabled: bool, system: &System) -> Result<String, Refusal> {
+/// With `now`, init is asked to start or stop it once the links are made;
+/// a refusal then is [`RefusalKind::Failed`] saying the boot's setting was
+/// kept.
+pub(super) fn apply(
+    unit: &str,
+    enabled: bool,
+    now: bool,
+    system: &System,
+) -> Result<String, Refusal> {
     let state = if enabled { "on" } else { "off" };
     match system.init.switch(unit, enabled) {
-        Ok(_) => Ok(format!("{unit} is {state} for every boot")),
+        Ok(_) => {}
         Err(why) if why.starts_with("init cannot be reached") => {
-            Err(Refusal::new(RefusalKind::Unavailable, why))
+            return Err(Refusal::new(RefusalKind::Unavailable, why));
         }
+        Err(why) => {
+            return Err(Refusal::new(
+                RefusalKind::Failed,
+                format!("init did not turn {unit} {state}: {why}"),
+            ));
+        }
+    }
+    if !now {
+        return Ok(format!("{unit} is {state} for every boot"));
+    }
+    let verb = if enabled { "start" } else { "stop" };
+    match system.init.run(unit, enabled) {
+        Ok(_) if enabled => Ok(format!("{unit} is on for every boot, and started")),
+        Ok(_) => Ok(format!("{unit} is off for every boot, and stopped")),
         Err(why) => Err(Refusal::new(
             RefusalKind::Failed,
-            format!("init did not turn {unit} {state}: {why}"),
+            format!("{unit} is {state} for every boot{PARTIAL}{verb} it now: {why}"),
         )),
     }
 }
