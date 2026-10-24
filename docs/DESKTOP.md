@@ -743,7 +743,7 @@ notifications beyond the toast. Both are made in its tokens (§6.2).
 | Focus mode | `decoration:dim_inactive` through `hyprctl keyword` | reused |
 | Dock and bar, sidebars, palette, cheat sheet, wallpaper picker, toasts | **`yoru-shell`**, a new app on tole: layer-shell surfaces (dock at the bottom with its exclusive zone, a sidebar per edge, an overlay for the palette, sheet and picker), hyprix's IPC sockets for workspaces, clients and events as waybar's hyprland modules read them | new; tole gains layer-shell windows |
 | Launcher | fuzzel in Nocturne colours first (its `fuzzel.ini`); the full palette (windows and actions) in `yoru-shell` after | reused, then new |
-| Switcher, overview | hyprix's own (1d, ALT+Tab), drawn in Nocturne | restyled |
+| Switcher, overview | hyprix's own (1d, SUPER+Tab), drawn in Nocturne | restyled |
 | Scratchpad | a special workspace with a terminal, slid from the top | reused |
 | Clipboard history | `yoru-shell` reading the selection through `ext_data_control_v1` | new |
 | Lock | hyprlock with a Nocturne `hyprlock.conf` | reused |
@@ -763,7 +763,7 @@ boot that screenshots it:
 
 | Slice | What | Points |
 |---|---|---|
-| Y1 | tokens: `yoru.conf` (floating, rounding, shadows, glow border, blur, curves, Alt binds), themable title bars, the Nocturne wallpaper, Phosphor vendored; Yoru the default of `--everything` and the desktop image; boot `yoru` | 5 |
+| Y1 | tokens: `yoru.conf` (floating, rounding, shadows, glow border, blur, curves) and its keys, themable title bars, the Nocturne wallpaper, Phosphor vendored; Yoru the default of `--everything` and the desktop image; boot `yoru` | 5 |
 | Y2 | the dock: tole layer-shell windows; `yoru-shell` with workspaces, launchers, tools, pomodoro, clock; boot `yoru-dock` | 8 |
 | Y3 | the launcher: fuzzel in Nocturne; then the palette in `yoru-shell` | 3 + 5 |
 | Y4 | widget sidebars: clock and calendar, quick settings, to-do | 8 |
@@ -776,29 +776,30 @@ Measured on the GPU path where it costs: the dock's and sidebars' blur
 (`layerrule = blur`), the focused window's glow, and the workspace slide,
 as frame times from hyprix's frame statistics with and without each.
 
-### 6.4 Open questions
+### 6.4 The questions, answered (the customer, 2026-10-24)
 
-1. **Alt as the Yoru key.** Alt+letter binds take those keys from every
-   program (a terminal's Alt+B, an editor's Alt+F). The theme binds them as
-   the design does, with SUPER doing the same; should Alt alone be dropped
-   for SUPER?
-2. **A person's own configuration.** `--everything` uses
-   `~/.config/hypr/hyprland.conf` where it exists. Yoru is sourced first and
-   that file after it, so its lines win; Yoru's dock starts only where the
-   file starts no bar of its own. `--theme yoru|ferrix-light|own` overrides.
-   Is that the precedence wanted?
-3. **The launchers.** The design's Terminal, Editor, Browser, Notes and
-   Files: Ferrix has `term`/foot and Chrome; Editor, Notes and Files have no
-   app yet. Until they do the dock shows what is installed.
-4. **Weather** needs a network source; the design shows sample data.
-5. **The mascot**: the FX mark, or a picture the person chooses.
+1. **SUPER is the Yoru key, never Alt.** Alt+letter binds would take
+   those keys from every program (a terminal's Alt+B, an editor's Alt+F),
+   so Yoru binds none, and no Ctrl key either: the palette is `SUPER
+   Space`, the workspaces `SUPER 1-4`, snapping `SUPER+arrows`, the
+   scratchpad `SUPER S`. The design's `Alt` hints are drawn as `Super`.
+2. **A person's own configuration wins.** Yoru is sourced first and their
+   `hyprland.conf` after it; their own binds are the only ones (Yoru's
+   keys are left out); the dock starts only where their file starts no
+   bar; `--theme` overrides.
+3. **The dock shows only what is installed**: the terminal always, the
+   browser, Files (shelf) and Settings where the image has their desktop
+   entries.
+4. **Weather is Open-Meteo, strictly opt-in** (§6.6).
+5. **The dock's round button is the FX mark**, with the person's own
+   picture as a setting.
 
 ### 6.5 Where it stands
 
 **Y1, the tokens, is built** (5 points estimated):
 
-* `hyprix/themes/yoru.conf` (the look) and `yoru-keys.conf` (Alt as the
-  Yoru key, SUPER doing the same): floating, rounding 8, the focused
+* `hyprix/themes/yoru.conf` (the look) and `yoru-keys.conf` (SUPER as the
+  Yoru key; Alt bound at first, dropped on the customer's answer, §6.4): floating, rounding 8, the focused
   window's accent-600 ring, its deep drop shadow and accent glow, a lighter
   shadow elsewhere, blur for the shell's layers, Nocturne's curve, the
   ground `#161826`;
@@ -873,7 +874,12 @@ dock's blur is three quarters of the frame. A guest drawing in software
 A host test also checks that the glow and the inactive shadow are the same
 picture on the GPU as in software.
 
-Left of Y2: the dock's tooltips, its popovers (the stash) and the `Bar`
+On the answers to §6.4: no Alt or Ctrl bind in `yoru-keys.conf` (the
+theme's test refuses one), the dock's hints say `Super`, Files is shelf,
+and the shell has the weather's opt-in rule (§6.6) and its test.
+
+Left of Y2: the FX mark in the round button (a search glyph for now),
+the dock's tooltips, its popovers (the stash) and the `Bar`
 layout; auto-tile, the shortcut sheet, clipboard and wallpaper tools come
 with their slices (Y5 to Y7); the clock is UTC or `TZ=UTC±h`, as waybar's.
 
@@ -881,10 +887,29 @@ with their slices (Y5 to Y7); the clock is UTC or `TZ=UTC±h`, as waybar's.
 estimated): `hyprix/themes/yoru-fuzzel.ini`, fuzzel drawn as the design's
 command palette -- a card on the surface high on the screen, Phosphor's
 search glyph as its prompt in accent-300, the picked row tinted with the
-accent, Inter, radius 14 -- which `Ctrl K`, `Alt Space` and the dock's
+accent, Inter, radius 14 -- which `SUPER Space` and the dock's
 search start fuzzel with (`--config`); a person's own `fuzzel.ini` is what
 their own binds use. `test-compositor --boot yoru-launcher` opens it over
 the Yoru desktop and judges its card
 (`~/.local/share/ferrix/yoru/shots/Y3-yoru-launcher-1024x768.png`). The
 palette's second half -- windows, actions and workspaces beside the
 applications, in `yoru-shell` -- is still to come (5 points).
+
+### 6.6 Privacy: the weather
+
+The design's weather widget (Y4) asks Open-Meteo, on these terms (the
+customer, 2026-10-24), which `yoru-shell`'s `weather.rs` holds before any
+widget exists:
+
+* **Off by default.** No network request of any kind until the person
+  turns weather on *and* types a location. Nothing is asked at start, and
+  there is no "detect my location": no IP-based geolocation, ever.
+* **What goes where.** The coordinates, rounded to one decimal (about
+  10 km), to `api.open-meteo.com`; or the place's name as typed to
+  Open-Meteo's geocoding host, `geocoding-api.open-meteo.com`. The
+  setting says so in those words. Nothing else is sent.
+* **Kept locally.** The location is in the person's own settings file and
+  nowhere else; turning weather off stops every request.
+* **Checked.** A host test holds that an unconfigured shell, one turned
+  off with a location kept, and one on with no location make no request,
+  and that coordinates leave rounded.

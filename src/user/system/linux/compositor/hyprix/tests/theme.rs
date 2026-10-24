@@ -63,6 +63,13 @@ fn yoru_parses_floats_and_styles_its_frames() {
     assert!(bars.title_left);
     assert_eq!(bars.disc.a, 0, "no disc behind the buttons");
     for bind in &config.binds {
+        // SUPER is the Yoru key (the customer, 2026-10-24): no bind may take
+        // a program's Alt or Ctrl keys.
+        assert_eq!(
+            bind.mods.0 & (compositor_config::Mods::ALT | compositor_config::Mods::CTRL),
+            0,
+            "{bind:?} takes a program's Alt or Ctrl key"
+        );
         if let compositor_config::Key::Sym(name) = &bind.key {
             assert!(
                 compositor_xkb::code_of(name).is_some(),
