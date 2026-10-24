@@ -1748,6 +1748,113 @@ Not yet, in §12.8's order:
   start from the default image today.
 * **The box run** (§12.8): needs step 2.
 
+## 13. What the ring-3 driver's ioctls cost (2026-10-24)
+
+Every ioctl a program makes on `/dev/dri/renderD128` goes to the kernel's
+chardev core, which forwards it undecoded to the driver process as a REQUEST
+on its control channel (§4.2). The driver copies the argument in and out
+with `chardev::copy_in` and `copy_out`, and answers with `chardev::reply`.
+This section measures what that costs while Endfield runs in the world on
+the N150 (1024x600, FSR3 frame generation on, about 42 frames shown a second
+from about 21 rendered).
+
+### 13.1 The counter
+
+`ferrix.intelgpu.ioctlstat` turns on `serve::IoctlStats`. It is a driver
+word, ring 3 only, and adds no kernel lines. Every 10 s the driver logs:
+
+* one line with the totals: ioctls a second, the driver's time inside them
+  as a share of a core, the loop's busy share (time not in `port_wait`),
+  and the copies, their bytes and the replies;
+* one line per ioctl number: calls, calls held to answer later, the average
+  time from reading the request to the end of the call, the part of that
+  time before the reply went, and the longest call;
+* a warning whenever one pass of the loop stays awake for 100 ms or more,
+  naming what woke it (requests, the interrupt, card0, a deadline) and the
+  last ioctl.
+
+Off, it costs one branch per ioctl. On, it costs two `clock_gettime` calls
+per ioctl and two per loop pass.
+
+### 13.2 What the game asks for
+
+Endfield in the world, develop c48da44c0 plus the counter
+(main-e415b6957). These are seven 10 s windows. The driver process's own
+CPU, from `/proc/4/stat` over 62 s, was 26.3 % of one core (6.6 % of the
+machine); 78 % of that is user time.
+
+| ioctl | calls/s | held/s | driver µs per call | of it before the reply | longest µs | share of the driver's ioctl time |
+|---|---:|---:|---:|---:|---:|---:|
+| `SYNCOBJ_TIMELINE_WAIT` (0xca) | 361 | 192 | 52.0 | 5.1 | 965 | 27 % |
+| `I915_GET_RESET_STATS` (0x72) | 236 | 0 | 55.0 | 6.9 | 1276 | 18 % |
+| `SYNCOBJ_RESET` (0xc4) | 167 | 0 | 52.1 | 8.3 | 1216 | 12 % |
+| `SYNCOBJ_WAIT` (0xc3) | 125 | 5 | 48.7 | 8.7 | 830 | 9 % |
+| `I915_GEM_EXECBUFFER2` (0x69) | 104 | 0 | 118.3 | 66.8 | 876 | 17 % |
+| `SYNCOBJ_CREATE` (0xbf) | 42 | 0 | 91.2 | 9.2 | 799 | 5 % |
+| `SYNCOBJ_FD_TO_HANDLE` (0xc2) | 42 | 0 | 59.6 | 11.1 | 864 | 4 % |
+| `SYNCOBJ_DESTROY` (0xc0) | 42 | 0 | 48.1 | 6.5 | 1393 | 3 % |
+| `SYNCOBJ_HANDLE_TO_FD` (0xc1) | 42 | 0 | 86.2 | 39.7 | 859 | 5 % |
+| **all** | **1161** | | | | | 7.1 % of a core in calls; loop busy 27.9 % |
+
+That is about 28 ioctls per frame shown and about 56 per frame rendered:
+five execbuffers and some 17 syncobj waits per rendered frame. The 1.3 ms
+longest calls are the driver being preempted while 4 busy cores run the
+game. The morning image (ca955ad6a plus the counter) gave the same picture:
+1255 ioctls/s, 8.1 % of a core in calls, 22.8 % of a core for the process.
+
+### 13.3 One call, end to end
+
+The box tools' `tk/ioctl/rt.py` (`~/.local/share/ferrix/n150-linux/box`) runs Python's `fcntl.ioctl` in a loop and takes
+the best of 5 runs of 20,000 calls. It compares `DRM_IOCTL_GET_CAP` on
+renderD128, which is forwarded to the driver, with `FIONREAD` on a socket,
+which the kernel answers. The caller's time is a perf_counter mean per
+call. The driver's own figures come from the counter, over the same calls.
+
+| | caller, per call | driver, to the reply | driver, after the reply |
+|---|---:|---:|---:|
+| box idle | 23.4 µs (socket ioctl 1.5) | 2.9 µs | 18.6 µs |
+| game running (cutscene, ~29 fps) | 66-78 µs (socket ioctl 1.7-1.9) | | 40 µs in all |
+
+The driver's span (21.4 µs at idle) is close to the caller's (23.4 µs), and
+it is not inside it: `Frontend::ioctl` answers and then runs `fence::settle`.
+The program is already woken while the driver settles, and its next call
+waits behind the settle. So a stream of trivial ioctls costs:
+
+* the forwarding: the kernel's enqueue, the driver's wake, the copies and
+  the reply, about 23.4 - 18.6 - 2.9 = **about 2 µs**, which matches the
+  native round trip measured on 2026-10-01 (2.6-6.5 µs);
+* the driver's work before the reply: 3-9 µs;
+* **the settle after the previous call: about 19 µs at idle and 40-45 µs
+  with the game running**, the largest part.
+
+`fence::settle` runs after every ioctl and walks the front end's fixed
+tables whole: `Slab::iter` visits all N slots, 1024 requests and 2048
+kernel fences among them, several times per settle. A settle only after
+the calls and interrupts that can change a fence, or slabs that skip empty
+ranges, should take most of it away. That has not been tried yet.
+
+### 13.4 The estimate, corrected
+
+The estimate before this measurement was "a few dozen ioctls a frame and
+1-3 % of a core". The count holds: 28 per frame shown, 56 per frame
+rendered. The cost does not:
+
+* the driver process takes 23-26 % of a core;
+* 7-8 % of a core is inside the ioctls themselves;
+* the rest is the loop's other work (settles, interrupts, card0's copies and
+  vblank waits).
+
+The IPC itself is a small part. At 2 µs a call and 1161 calls a second it
+is about 0.25 % of a core. The per-call settle is most of it.
+
+### 13.5 Linux i915 on the same box
+
+Not measured. It would need Steam, Proton and the game installed on the
+box's inspection Linux, plus bpftrace or perf there, and the inspection
+Linux carries none of them. That costs hours of setup and a 120 GB game
+copy. A microbench of `GET_CAP` alone would be cheap, but it says nothing
+about i915's settle, because i915 has none per ioctl.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out

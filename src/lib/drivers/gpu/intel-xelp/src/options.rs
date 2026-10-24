@@ -32,6 +32,9 @@ pub struct Words<'a> {
     /// Hold forcewake for the driver's life rather than per access: the
     /// whole word.
     pub fwhold: &'a [u8],
+    /// Count the render node's ioctls by type, with the time each took the
+    /// driver, and say the counts every 10 s: the whole word.
+    pub ioctlstat: &'a [u8],
 }
 
 /// The longest a restart may wait: an hour.
@@ -62,6 +65,8 @@ pub struct Options {
     pub uapitrace: bool,
     /// Forcewake held for the driver's life.
     pub fwhold: bool,
+    /// The ioctl counts.
+    pub ioctlstat: bool,
 }
 
 /// The words of `line` the driver reads. A `stop=` that is not a number is
@@ -84,6 +89,8 @@ pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
             options.uapitrace = true;
         } else if word == words.fwhold {
             options.fwhold = true;
+        } else if word == words.ioctlstat {
+            options.ioctlstat = true;
         } else if let Some(value) = word.strip_prefix(words.freq) {
             options.freq_mhz = number(value).filter(|&mhz| mhz > 0);
         } else if let Some(value) = word.strip_prefix(words.stop) {
@@ -132,6 +139,7 @@ mod tests {
                 freqtest: b"ferrix.intelgpu.freqtest",
                 uapitrace: b"ferrix.intelgpu.uapitrace",
                 fwhold: b"ferrix.intelgpu.fwhold",
+                ioctlstat: b"ferrix.intelgpu.ioctlstat",
             },
         )
     }
@@ -177,6 +185,8 @@ mod tests {
         assert_eq!(parse(b"ferrix.intelgpu.freqlog").freq_mhz, None);
         assert!(parse(b"ferrix.intelgpu.fwhold").fwhold);
         assert!(!parse(b"ferrix.intelgpu.fwholdx").fwhold);
+        assert!(parse(b"ferrix.intelgpu.ioctlstat").ioctlstat);
+        assert!(!parse(b"ferrix.intelgpu.fwhold").ioctlstat);
     }
 
     #[test]
