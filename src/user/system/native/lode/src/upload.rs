@@ -7,13 +7,16 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use ferrix_lode_core::blob::BlobId;
 use ferrix_lode_core::upload;
 
 use crate::{cli, sys};
 
 /// `lode upload-stub PORT FILE`: a collector on `127.0.0.1:PORT` that
 /// appends each request's body to FILE and answers 200 -- or 503 while
-/// `FILE.refuse` exists, keeping nothing. A test peer.
+/// `FILE.refuse` exists, keeping nothing. A blob (`docs/LOGGING.md`
+/// §21.4) is checked against its id, 400 when it is not the id's, and
+/// said as a line `BLOB <id> <type> <size>` in `FILE.blobs`. A test peer.
 pub(crate) fn stub(words: &[String]) -> i32 {
     let [port, file] = words else {
         return cli::usage("upload-stub PORT FILE");
@@ -43,7 +46,7 @@ pub(crate) fn stub(words: &[String]) -> i32 {
             if let Some((start, length)) = upload::request_head(&request)
                 && request.len() >= start + length
             {
-                break request.get(start..start + length).map(Vec::from);
+                break split(&request, start, length);
             }
             match sys::read(fd, &mut chunk) {
                 Ok(0) | Err(_) => break None,
@@ -54,10 +57,24 @@ pub(crate) fn stub(words: &[String]) -> i32 {
             Some(_) if sys::read_small(&refuse).is_some() => {
                 b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"
             }
-            Some(body) => {
+            Some((Some(Err(_)), _)) => b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
+            Some((blob, body)) => {
+                let (path, kept_bytes) = match blob {
+                    Some(Ok((id, kind))) => (
+                        alloc::format!("{file}.blobs"),
+                        alloc::format!(
+                            "BLOB {} {kind} {}\n",
+                            ferrix_lode_core::blob::hex(&id),
+                            body.len()
+                        )
+                        .into_bytes(),
+                    ),
+                    _ => (file.clone(), body),
+                };
+                let body = kept_bytes;
                 let kept = sys::openat(
                     sys::AT_FDCWD,
-                    file.as_bytes(),
+                    path.as_bytes(),
                     sys::O_WRONLY | sys::O_CREAT | sys::O_APPEND | sys::O_CLOEXEC,
                     0o644,
                 )
@@ -77,4 +94,18 @@ pub(crate) fn stub(words: &[String]) -> i32 {
         let _ = sys::write_all(fd, answer);
         sys::close(fd);
     }
+}
+
+/// A whole request's body, and for a blob what its head says of it, its
+/// bytes checked against its id.
+type Taken = (Option<Result<(BlobId, String), String>>, Vec<u8>);
+
+/// The body of `request`, whose head ends at `start`, `length` bytes.
+fn split(request: &[u8], start: usize, length: usize) -> Option<Taken> {
+    let head = request.get(..start)?;
+    let body = Vec::from(request.get(start..start + length)?);
+    let blob = upload::header(head, "Content-Type")
+        .is_some_and(|kind| kind.starts_with(upload::BLOB_CONTENT_TYPE));
+    let checked = blob.then(|| upload::parse_blob(head, &body));
+    Some((checked, body))
 }

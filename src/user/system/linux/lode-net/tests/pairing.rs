@@ -249,3 +249,73 @@ fn our_provider_and_ring_s_talk_both_ways() {
     post(ring_port, &ours, &records(1, 2)).unwrap();
     assert_eq!(stored(&other), [1, 2]);
 }
+
+/// A blob sent after its records is kept in that machine's container,
+/// once, and read back by id; bytes that are not the id's are refused.
+#[test]
+fn a_blob_is_kept_once_and_checked_against_its_id() {
+    let root = scratch("blob-kept");
+    let paired = Pki::at(&root)
+        .pair("box", &["localhost".to_owned()])
+        .unwrap();
+    let port = start(&root, false);
+    let client =
+        lode_net::tls::client(&paired.ca, Some((&paired.client_cert, &paired.client_key))).unwrap();
+    post(port, &client, &records(1, 1)).unwrap();
+    let line = format!("r https://localhost:{port}/upload export ca=/unused");
+    let destination = upload::parse_config(&line).unwrap().remove(0);
+    assert_eq!(destination.blobs, upload::Blobs::Small);
+    let maps = b"00400000-00401000 r-xp 00000000 00:00 0 /sbin/lode\n".repeat(100);
+    let id = ferrix_lode_core::blob::id_of(&maps);
+    let machine = "0123456789abcdef0123456789abcdef";
+    let send = |bytes: &[u8]| {
+        let request = upload::blob_request(&destination.url, &id, "text", bytes, machine, "box");
+        lode_net::upload::send(&destination, Some(&client), &request)
+    };
+    send(&maps).unwrap();
+    // Sent again after a lost answer: held already, not written twice.
+    send(&maps).unwrap();
+    let store = root.join(machine);
+    let packs: Vec<_> = std::fs::read_dir(store.join(store::BLOBS))
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(packs.len(), 1);
+    let pack = std::fs::read(packs[0].path()).unwrap();
+    assert_eq!(ferrix_lode_core::blob::scan(&pack).len(), 1);
+    let (kind, bytes) = store::blob(std::slice::from_ref(&store), &id).unwrap();
+    assert_eq!((kind.as_str(), bytes), ("text", maps.clone()));
+    // Bytes that are not the id's.
+    assert_eq!(send(b"something else").unwrap_err(), "answered 400");
+}
+
+/// `blobs=` on a destination's line, and which parts `small` sends.
+#[test]
+fn a_destination_says_which_blobs_it_takes() {
+    let parse = |line: &str| upload::parse_config(line).map(|mut each| each.remove(0));
+    assert_eq!(
+        parse("a http://localhost/ json").unwrap().blobs,
+        upload::Blobs::None
+    );
+    assert_eq!(
+        parse("a http://localhost/ json blobs=all").unwrap().blobs,
+        upload::Blobs::All
+    );
+    assert_eq!(
+        parse("a http://localhost/upload export blobs=none")
+            .unwrap()
+            .blobs,
+        upload::Blobs::None
+    );
+    assert!(parse("a http://localhost/ export blobs=some").is_err());
+    let small = parse("a http://localhost/upload export").unwrap();
+    let reference = |size: u64| ferrix_lode_core::blob::Reference {
+        id: [0; 32],
+        size,
+        kind: String::from("text"),
+    };
+    assert!(small.wants_blob("BLOB_MAPS", &reference(9000)));
+    assert!(!small.wants_blob("BLOB_MAPS", &reference(upload::SMALL_BLOB_MAX + 1)));
+    assert!(!small.wants_blob("BLOB_SCREENSHOT", &reference(9000)));
+    assert!(!small.wants_blob("BLOB_MEMORY", &reference(9000)));
+}

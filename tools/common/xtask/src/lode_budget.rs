@@ -14,6 +14,11 @@
 //! the same sync of the same ten lines, so the ratio does not change with
 //! the length, and the gate stays short.
 //!
+//! Then a crash storm (§21.4): 100 crashes of `lode fault-stub`, each held
+//! for and read by `lode crashd`, must make five tombstones and add to the
+//! blob container at most five times what the first crash added -- a
+//! storm's later crashes write no blobs.
+//!
 //! x86-64 by default (KVM): the ratio is the store's and the file
 //! system's, not the processor's; `--arch` runs another.
 
@@ -112,6 +117,16 @@ while [ $n -lt 20000 ]; do
 done
 $bb sleep 7
 say "fast end"
+# A crash storm (§21.4): 100 crashes of one signature, each held for and
+# read by lode crashd, write at most five tombstones' worth of blobs.
+blobs() { n=$($bb cat /data/journal/blobs/*.fxb 2>/dev/null | $bb wc -c); echo ${n:-0}; }
+b0=$(blobs)
+/bin/lode fault-stub > /dev/null 2>&1
+$bb sleep 2
+b1=$(blobs)
+n=1; while [ $n -lt 100 ]; do /bin/lode fault-stub > /dev/null 2>&1; n=$((n+1)); done
+$bb sleep 3
+say "storm blobs: $b0 $b1 $(blobs) $(/bin/lode tombstones | $bb grep -c 'tombstone: lode ended') $(/bin/lode -b --where 'event = crash-collected' -o cat | $bb wc -l)"
 say "lost: $(/bin/lode verify --kernel -b | $bb tail -n 1)"
 say "stored: $(/bin/lode -b -t load -o cat | $bb wc -l)"
 say done
@@ -171,6 +186,7 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
             content: Content::Bytes(busybox),
         },
         crate::lode::enabled(),
+        crate::lode::crashd_enabled(),
         link("etc/ferrix/units/getty@.service", "/dev/null"),
         link("var/log/journal", "/data/journal"),
         bytes("etc/ferrix/lode.d/budget.rules", 0o644, RULES),
@@ -321,6 +337,7 @@ fn judge(lines: &[String], readings: &[u64]) -> std::result::Result<String, Stri
     if !lost.contains(" 0 said lost") || !lost.contains("unsaid gaps: none") {
         return Err(format!("the load was not all stored: `{lost}` ({figures})"));
     }
+    storm(&said("budget: storm blobs:")).map_err(|why| format!("{why} ({figures})"))?;
     let stored = said("budget: stored:");
     if stored != (SLOW_LINES + FAST_LINES).to_string() {
         return Err(format!(
@@ -361,6 +378,40 @@ fn ratios(
     } else {
         Err(summary)
     }
+}
+
+/// The storm's figures, `B0 B1 B100 TOMBSTONES COLLECTED`: the container's
+/// bytes before, after the first crash and after the hundredth; five
+/// tombstones, the collector's records there (a storm's are folded, as any
+/// repeated line is: their parts reach the tombstones before the fold), and
+/// at most five first crashes' worth of blobs.
+fn storm(said: &str) -> std::result::Result<(), String> {
+    let figures: Vec<u64> = said
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect();
+    let [before, first, last, tombstones, collected] = figures[..] else {
+        return Err(format!("the storm's figures did not read: `{said}`"));
+    };
+    let one = first.saturating_sub(before);
+    let all = last.saturating_sub(before);
+    if one == 0 {
+        return Err(format!("the storm's first crash wrote no blob: `{said}`"));
+    }
+    if tombstones != 5 || collected == 0 {
+        return Err(format!(
+            "the storm made {tombstones} tombstone(s) of 5, and the collector's records number \
+             {collected}: `{said}`"
+        ));
+    }
+    if all > one.saturating_mul(5) {
+        return Err(format!(
+            "100 crashes of one signature wrote {all} bytes of blobs, over five tombstones' worth \
+             ({} bytes, five times the first crash's {one}): `{said}`",
+            one.saturating_mul(5)
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

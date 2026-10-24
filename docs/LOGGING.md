@@ -2291,7 +2291,8 @@ architectures.
 | Event kinds configurable and reloadable | built | `events.conf`, `lode events`, `lode reload` (rules, alerts, events, retention, capture), which says what changed; `test-log` "reload" row |
 | Hang snapshot (`lode snapshot PID`) | built, landing | §18 "Hang snapshots"; `test-log` "box" row |
 | The image and command line on the boot record | built, landing | `BOOT_IMAGE`, `BOOT_CMDLINE`, `BOOT_DEPLOY` |
-| Tombstones' threads, maps and descriptors (step 2, the crash hold) | built, landing | §21.7; the boot's `crashes` line; `test-log` "collected" row; the consultant's OK IF, ledger 3545 (verdict 3546) |
+| Tombstones' threads, maps and descriptors (step 2, the crash hold) | built | §21.7; the boot's `crashes` line; `test-log` "collected" row; the consultant's OK IF, ledger 3545 (verdict 3546); develop abc82f5d5 |
+| Blobs forwarded behind their records; a storm's blobs in the write budget | built, landing | §21.8; `test-log` "blobs sent" row; `test-log-budget`'s storm |
 
 ### 20.6 Where logs still go that lode does not get (the audit, 2026-10-24)
 
@@ -2619,11 +2620,13 @@ files are snapshots made at open).
   `lode snapshot` does), `status`, `maps` and descriptors from `/proc`,
   sends them to lode in one native-protocol record (`FERRIX_EVENT=
   crash-collected`, at most 216 KiB of parts) and writes `done`. lode takes
-  the record only from uid 0, makes `COLLECTED_THREADS`, `_MAPS`, `_FDS` and
-  `_STATUS` blobs (always blobs, whatever their size, so a reader resolves
-  them one way), names them `BLOB_THREADS`, `BLOB_MAPS`, `BLOB_FDS` and
-  `BLOB_STATUS` on that record and on the crash's tombstone, which the
-  viewer reads through `read_blob`. A collector that stalls costs a crash
+  the record only from uid 0 and keeps its `COLLECTED_THREADS`, `_MAPS`,
+  `_FDS` and `_STATUS` for the crash's tombstone (the record keeps
+  `COLLECTED_PARTS` and `COLLECTED_BYTES`). A full tombstone makes them
+  blobs (always blobs, whatever their size, so a reader resolves them one
+  way) and names them `BLOB_THREADS`, `BLOB_MAPS`, `BLOB_FDS` and
+  `BLOB_STATUS`, which the viewer reads through `read_blob`; a storm's
+  later crashes, which get no full tombstone, write none (§21.8). A collector that stalls costs a crash
   its parts, never its end; one that dies disarms the hold.
 * **What the hold promises** -- load-ring statements, uncertified, which
   carry no item claim (the consultant, ledger 3537: an `L.*` id names item
@@ -2668,5 +2671,46 @@ files are snapshots made at open).
   A second thread faulting during its own process's hold takes a second slot
   and line; `lode crashd` collects for both and ignores the second `done`'s
   answer, and the first end releases the second.
-* **Not yet**: backtraces (step 2's stack capture, its own review), blobs
-  forwarded (§21.4), the blob row in `test-log-budget`.
+* **Not yet**: backtraces (step 2's stack capture, its own review); blobs
+  forwarded and the blob row in `test-log-budget` came after (§21.8).
+
+### 21.8 Built: blobs forwarded, and a storm's blobs in the budget (2026-10-24)
+
+The rest of §21.4's forwarding and write budget; ring 3 only, no kernel
+line.
+
+* **The second stream.** `lode-upload` sends each destination its blobs
+  behind its records: only when that destination's records are caught up,
+  only blobs of records it has acknowledged, one `POST` a blob to the URL's
+  path with `/blob` after it (`Content-Type: application/vnd.ferrix.blob`,
+  `X-Lode-Blob: <id> <type>`), with a cursor of its own
+  (`/var/lib/ferrix/lode-upload/<name>.blobs`). The newest 4096 ids sent
+  are not sent again; a blob gone from the store (expired) is said and
+  passed. A destination that answers a blob 404, 405 or 415 takes none:
+  said once, and its records go on alone -- so a `systemd-journal-remote`
+  destination costs one refused request.
+* **Which.** `blobs=small|all|none` on a destination's line: `small`, an
+  `export` line's default, sends no screenshot and no memory bytes and
+  nothing over 1 MiB; `none` is a `json` line's default.
+* **The receiver.** `lode-receive` checks each blob's SHA-256 against the id
+  it is sent as (400 otherwise) and keeps it once in that machine's
+  container, `<root>/<machine>/blobs/pack-<16 hex>.fxb`, synced before its
+  `200`, a pack at most 16 MiB; readers scan its packs, which have no index.
+  "On demand where the receiver can ask back" is not built.
+* **A storm writes no more blobs.** A collected crash's parts wait in lode
+  (sixteen crashes at most) and become blobs only for a full tombstone, so
+  the hundred crashes of one signature write five crashes' blobs.
+  `test-log-budget`'s storm: 100 `lode fault-stub` crashes, each held for
+  and read by `lode crashd`, make five tombstones and add at most five
+  times the first crash's bytes to the container (measured 4375 bytes for
+  100 crashes, the first 1271, on x86-64).
+* **Checks.** `test-log`'s "blobs sent" row: the tombstones go to the
+  collector's second line (`where TOMBSTONE = 1`), and their maps blob
+  reaches it after them, once, checked against its id, beside the other
+  small parts. Host tests: the receiver keeps a blob once and refuses bytes
+  that are not its id's; `blobs=` and which parts `small` sends; a crash
+  past its signature's five full tombstones owes no blob.
+* **Not yet**: the pstore import (§5; it waits for the loader's
+  `LASTKERNEL.TXT`, `docs/POSTMORTEM.md` §3.5, which nothing writes yet),
+  backtraces (step 2's stack capture, its own review).
+

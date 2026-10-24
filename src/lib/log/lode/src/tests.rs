@@ -2520,6 +2520,7 @@ fn a_held_line_reads_back_and_others_do_not() {
 
 #[test]
 fn a_collected_crash_gives_its_blobs_to_its_tombstone_only() {
+    use crate::blob::{self, Reference};
     use crate::tombstone::Tombstones;
     let boot = [0x33; 16];
     let now = Now {
@@ -2535,20 +2536,44 @@ fn a_collected_crash_gives_its_blobs_to_its_tombstone_only() {
         record.push("CRASH_SIGNAL", b"SIGSEGV");
         record
     };
-    let maps = (String::from("BLOB_MAPS"), Vec::from(&b"ab 12 text"[..]));
+    let maps = (String::from("MAPS"), Vec::from(&b"ab 12 /sbin/lode"[..]));
     tombstones.collected(7, vec![maps.clone()]);
     // Another pid's crash takes nothing of it.
     let other = tombstones.for_crash(&crash(8), 1, &boot, now).unwrap();
     assert_eq!(other.get("BLOB_MAPS"), None);
+    assert!(tombstones.owed().is_empty());
+    // Its own names the blob, and owes it, once.
     let own = tombstones.for_crash(&crash(7), 2, &boot, now).unwrap();
-    assert_eq!(own.get("BLOB_MAPS"), Some(&b"ab 12 text"[..]));
+    let reference = Reference::parse(own.get("BLOB_MAPS").unwrap()).unwrap();
+    assert_eq!(reference.id, blob::id_of(b"ab 12 /sbin/lode"));
+    let owed = tombstones.owed();
+    assert_eq!(owed.len(), 1);
+    assert_eq!(owed[0].1, reference.id);
+    assert_eq!(owed[0].3, b"ab 12 /sbin/lode");
+    assert!(tombstones.owed().is_empty());
     // Taken once: a later crash of a reused pid has none.
     let again = tombstones.for_crash(&crash(7), 3, &boot, now).unwrap();
     assert_eq!(again.get("BLOB_MAPS"), None);
-    // At most sixteen wait; the oldest goes.
-    for pid in 100..117 {
+    // Past the signature's five full tombstones, a collected crash owes
+    // nothing: a storm writes no more blobs (the write budget).
+    for pid in 20..22 {
         tombstones.collected(pid, vec![maps.clone()]);
+        let _ = tombstones.for_crash(&crash(pid), u64::from(pid), &boot, now);
     }
-    let oldest = tombstones.for_crash(&crash(100), 4, &boot, now).unwrap();
+    assert_eq!(
+        tombstones.owed().len(),
+        2,
+        "the fourth and fifth crashes, full"
+    );
+    tombstones.collected(30, vec![maps.clone()]);
+    let past = tombstones.for_crash(&crash(30), 30, &boot, now);
+    assert!(past.is_none_or(|record| record.get("BLOB_MAPS").is_none()));
+    assert!(tombstones.owed().is_empty());
+    // At most sixteen wait; the oldest goes.
+    let mut fresh = Tombstones::new(5);
+    for pid in 100..117 {
+        fresh.collected(pid, vec![maps.clone()]);
+    }
+    let oldest = fresh.for_crash(&crash(100), 4, &boot, now).unwrap();
     assert_eq!(oldest.get("BLOB_MAPS"), None);
 }

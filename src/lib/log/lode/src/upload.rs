@@ -26,6 +26,13 @@
 //!   collector elsewhere is reached through an ssh tunnel until TLS is built.
 //! * Records of the auth and authpriv facilities and of `auth.service` are
 //!   never sent unless the line says `auth`.
+//! * Blobs (`docs/LOGGING.md` §21.4) follow their records on a second,
+//!   lower-priority stream, one `POST` a blob to the URL's path with
+//!   `/blob` after it, once the records that name them are acknowledged:
+//!   `blobs=small` (an `export` line's default) sends the small ones --
+//!   backtraces, maps, descriptor lists, at most [`SMALL_BLOB_MAX`] each,
+//!   no screenshot and no memory -- `blobs=all` every one, `blobs=none`
+//!   (a `json` line's default) none.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -204,7 +211,39 @@ pub struct Destination {
     pub tls: Option<TlsFiles>,
     /// What goes; everything when `None`.
     pub filter: Option<Expr>,
+    /// Which blobs follow the records.
+    pub blobs: Blobs,
 }
+
+/// Which blobs a destination is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blobs {
+    /// None.
+    None,
+    /// The small parts of a crash: no screenshot, no memory, at most
+    /// [`SMALL_BLOB_MAX`].
+    Small,
+    /// Every one.
+    All,
+}
+
+impl Blobs {
+    /// `blobs=`'s word.
+    fn parse(word: &str) -> Result<Blobs, String> {
+        match word {
+            "none" => Ok(Blobs::None),
+            "small" => Ok(Blobs::Small),
+            "all" => Ok(Blobs::All),
+            other => Err(alloc::format!("blobs={other}: small, all or none")),
+        }
+    }
+}
+
+/// The largest blob `blobs=small` sends.
+pub const SMALL_BLOB_MAX: u64 = 1024 * 1024;
+
+/// The parts `blobs=small` never sends, whatever their size.
+const LARGE_PARTS: [&str; 2] = ["SCREENSHOT", "MEMORY"];
 
 impl Destination {
     /// Whether `record` goes to it.
@@ -212,6 +251,20 @@ impl Destination {
     pub fn wants(&self, record: &Record) -> bool {
         (self.auth || !is_auth(record))
             && self.filter.as_ref().is_none_or(|expr| expr.matches(record))
+    }
+
+    /// Whether the blob a record names in `field` (`BLOB_<PART>`), as
+    /// `reference`, follows it to this destination.
+    #[must_use]
+    pub fn wants_blob(&self, field: &str, reference: &crate::blob::Reference) -> bool {
+        let part = field
+            .strip_prefix(crate::blob::FIELD_PREFIX)
+            .unwrap_or(field);
+        match self.blobs {
+            Blobs::None => false,
+            Blobs::All => true,
+            Blobs::Small => !LARGE_PARTS.contains(&part) && reference.size <= SMALL_BLOB_MAX,
+        }
     }
 }
 
@@ -272,6 +325,7 @@ pub fn parse_config(text: &str) -> Result<Vec<Destination>, String> {
             "/"
         };
         let mut auth = false;
+        let mut blobs = None;
         let (mut ca, mut cert, mut key) = (None, None, None);
         for word in words.get(3..).unwrap_or_default() {
             match word.split_once('=') {
@@ -285,9 +339,12 @@ pub fn parse_config(text: &str) -> Result<Vec<Destination>, String> {
                 Some(("key", file)) if key.is_none() && !file.is_empty() => {
                     key = Some(String::from(file));
                 }
+                Some(("blobs", which)) if blobs.is_none() => {
+                    blobs = Some(Blobs::parse(which).map_err(|why| error(&why))?);
+                }
                 _ => {
                     return Err(error(&alloc::format!(
-                        "{word}: after the format, auth, ca=, cert=, key= or where EXPR"
+                        "{word}: after the format, auth, ca=, cert=, key=, blobs= or where EXPR"
                     )));
                 }
             }
@@ -311,6 +368,11 @@ pub fn parse_config(text: &str) -> Result<Vec<Destination>, String> {
             auth,
             tls,
             filter,
+            blobs: blobs.unwrap_or(if format == Format::Export {
+                Blobs::Small
+            } else {
+                Blobs::None
+            }),
         });
     }
     Ok(out)
@@ -340,31 +402,99 @@ pub const MACHINE_HEADER: &str = "X-Lode-Machine-Id";
 /// The sender's host name.
 pub const HOST_HEADER: &str = "X-Lode-Hostname";
 
+/// The header that names a blob's id and type: `<64 hex> <type>`.
+pub const BLOB_HEADER: &str = "X-Lode-Blob";
+
+/// A blob's content type.
+pub const BLOB_CONTENT_TYPE: &str = "application/vnd.ferrix.blob";
+
 /// One `POST` of `body` to `url`, the connection closed after, saying it
 /// is from `machine` (32 hex digits, or empty for none) named `host`.
 #[must_use]
 pub fn request(url: &Url, format: Format, body: &[u8], machine: &str, host: &str) -> Vec<u8> {
-    let clean = |text: &str| -> String {
-        text.chars()
-            .filter(char::is_ascii_graphic)
-            .take(64)
-            .collect()
-    };
+    post(
+        &url.path,
+        url,
+        format.content_type(),
+        "",
+        body,
+        machine,
+        host,
+    )
+}
+
+/// One `POST` of a blob, `bytes` of type `kind` named `id`, to `url`'s
+/// path with `/blob` after it.
+#[must_use]
+pub fn blob_request(
+    url: &Url,
+    id: &crate::blob::BlobId,
+    kind: &str,
+    bytes: &[u8],
+    machine: &str,
+    host: &str,
+) -> Vec<u8> {
+    let path = alloc::format!("{}/blob", url.path.trim_end_matches('/'));
+    let extra = alloc::format!(
+        "{BLOB_HEADER}: {} {}\r\n",
+        crate::blob::hex(id),
+        clean(kind, 16)
+    );
+    post(&path, url, BLOB_CONTENT_TYPE, &extra, bytes, machine, host)
+}
+
+/// `text`'s printable ASCII, at most `most` characters.
+fn clean(text: &str, most: usize) -> String {
+    text.chars()
+        .filter(char::is_ascii_graphic)
+        .take(most)
+        .collect()
+}
+
+/// A `POST` of `body` to `path` on `url`'s host, with `extra` headers
+/// (each ending `\r\n`).
+fn post(
+    path: &str,
+    url: &Url,
+    content_type: &str,
+    extra: &str,
+    body: &[u8],
+    machine: &str,
+    host: &str,
+) -> Vec<u8> {
     let mut out = alloc::format!(
-        "POST {} HTTP/1.1\r\nHost: {}:{}\r\nUser-Agent: lode-upload\r\nContent-Type: {}\r\n\
-         Content-Length: {}\r\n{MACHINE_HEADER}: {}\r\n{HOST_HEADER}: {}\r\n\
-         Connection: close\r\n\r\n",
-        url.path,
+        "POST {path} HTTP/1.1\r\nHost: {}:{}\r\nUser-Agent: lode-upload\r\nContent-Type: \
+         {content_type}\r\nContent-Length: {}\r\n{MACHINE_HEADER}: {}\r\n{HOST_HEADER}: {}\r\n\
+         {extra}Connection: close\r\n\r\n",
         url.host,
         url.port,
-        format.content_type(),
         body.len(),
-        clean(machine),
-        clean(host)
+        clean(machine, 64),
+        clean(host, 64)
     )
     .into_bytes();
     out.extend_from_slice(body);
     out
+}
+
+/// A blob `POST`'s id and type, from its `head`, if `body` is the blob
+/// the head names: its SHA-256 the id.
+///
+/// # Errors
+///
+/// Why it is not: no or a malformed header, or bytes that are not the id's.
+pub fn parse_blob(head: &[u8], body: &[u8]) -> Result<(crate::blob::BlobId, String), String> {
+    let value = header(head, BLOB_HEADER).ok_or_else(|| String::from("no X-Lode-Blob"))?;
+    let (id, kind) = value.split_once(' ').unwrap_or((value, ""));
+    let id = crate::blob::parse_id(id).ok_or_else(|| String::from("a malformed blob id"))?;
+    if kind.is_empty() || kind.len() > 16 || !kind.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(String::from("a malformed blob type"));
+    }
+    if crate::blob::id_of(body) != id {
+        return Err(String::from("bytes that are not the blob they name"));
+    }
+    Ok((id, String::from(kind)))
 }
 
 /// The status of an HTTP response that begins `bytes`, once its status

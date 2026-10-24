@@ -140,6 +140,7 @@ pub(crate) const UPLOAD_UNIT: &str = "lode-upload.service";
 const UPLOAD_CONF: &str = "\
 # test-log's collector (tools/common/xtask/src/lode.rs).
 stub http://127.0.0.1:19532/upload export where id = \"uploadme\"
+crashes http://127.0.0.1:19532/upload export where TOMBSTONE = 1
 ";
 
 /// The flood's unit: after lode, its output through init's log pipe.
@@ -442,6 +443,11 @@ stone=$(/bin/lode tombstones | $bb grep 'lode ended' | $bb head -n 1 | $bb awk '
 maps=$(/bin/lode -b -o json | $bb grep '"TOMBSTONE":"1"' | $bb grep -o '"BLOB_MAPS":"[0-9a-f]*' | $bb sed 's/.*"//' | $bb tail -n 1)
 yes() { [ "$1" -gt 0 ] && echo yes || echo no; }
 say "collected: $(yes $(/bin/lode -b --where 'event = crash-collected' -o cat | $bb grep -c '^collected the crash of [0-9]* (lode): 1 thread(s), 0 unparked')) $(/bin/lode -b -o json | $bb grep '"TOMBSTONE":"1"' | $bb grep '"BLOB_THREADS":"' | $bb grep '"BLOB_FDS":"' | $bb grep -c '"BLOB_MAPS":"') $(yes $(/bin/lode blob $maps | $bb grep -c '/sbin/lode'))"
+# Blobs forwarded (§21.4): the tombstones go to the collector's `crashes`
+# line, and their small blobs after them, each once and checked by the
+# collector against its id.
+i=0; until $bb grep -q "^BLOB $maps " $up.blobs 2>/dev/null; do i=$((i+1)); [ $i -gt 200 ] && break; $bb usleep 100000; done
+say "blobs sent: $(yes $($bb grep -c "^BLOB $maps text " $up.blobs 2>/dev/null)) $($bb grep -c "^BLOB $maps " $up.blobs 2>/dev/null) $($bb grep -c '^BLOB ' $up.blobs 2>/dev/null | $bb awk '{print ($1 >= 3) ? "yes" : "no"}')"
 say "tombstones: $(/bin/lode tombstones | $bb grep -c 'tombstone: lode ended by SIGSEGV') $(/bin/lode -b -t lode -o cat | $bb grep -c '^lode crashed again, 10 times') $(/bin/lode tombstone $stone | $bb grep -c '^-- the crash$\|^-- its last lines$') $(/bin/lode verify | $bb grep -c ' 0 missing')"
 # Alerts and top (step 3): the noisy flood above fired `flood` once, to
 # `lode alerts`; a crit line started a unit that lets lode start it; a unit
@@ -652,6 +658,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     held(lines)?;
     attributed(lines)?;
     collected(lines)?;
+    blobs_sent(lines)?;
     vacuumed(lines)?;
     match said(lines, "lode-test: live:").and_then(|count| count.parse::<u32>().ok()) {
         Some(count) if count > 0 => {}
@@ -835,6 +842,21 @@ fn collected(lines: &[String]) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Blobs forwarded (`docs/LOGGING.md` §21.4): a tombstone's maps reached
+/// the collector after it, once, checked against its id, beside its other
+/// small parts.
+fn blobs_sent(lines: &[String]) -> std::result::Result<(), String> {
+    let (what, want) = ("lode-test: blobs sent:", "yes 1 yes");
+    let got = said(lines, what).unwrap_or_default();
+    if got != want {
+        return Err(format!(
+            "a tombstone's blobs did not follow it to the collector, once each: `{what} {got}`, \
+             wanted `{want}`"
+        ));
+    }
+    Ok(())
+}
+
 /// journalctl's `--vacuum-time`: sealed segments removed and each said,
 /// one closing line a store directory, and the removal in the log.
 fn vacuumed(lines: &[String]) -> std::result::Result<(), String> {
@@ -1002,6 +1024,7 @@ lode-test: box: 1 1 3 1
 lode-test: crash: 1
 lode-test: rejoined: 2
 lode-test: collected: yes 4 yes
+lode-test: blobs sent: yes 1 yes
 lode-test: tombstones: 5 1 1 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1
