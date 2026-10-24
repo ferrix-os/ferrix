@@ -250,6 +250,15 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/gen/host-coverage.py", "--self-test"],
         ],
     ),
+    // Product signing's anchors, families and dependency rules
+    // (docs/SIGNING.md S3; the consultant's D1), with their controls.
+    (
+        "signing anchors",
+        &[
+            &["tools/common/check/check-signing-anchors.py"],
+            &["tools/common/check/check-signing-anchors.py", "--self-test"],
+        ],
+    ),
     // The host measurement stands for every target only while their
     // product code has no target-dependent part (ledger 3803 (4)).
     (

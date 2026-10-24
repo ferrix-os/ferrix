@@ -192,6 +192,7 @@ mod sha256;
 mod shader_cache;
 mod shell;
 mod shm;
+mod signing;
 mod slot_image;
 mod smbios;
 mod ssh;

@@ -300,6 +300,7 @@ less size than n = 32.
 50 ms on the DK1 at 650 MHz, the 3× budget with room for the parse. The
 measured worst case on the board replaces the estimate before any claim.
 
+
 ## 3. (P3) State custody in the HSM
 
 ### 3.1 What the HSM must be
@@ -702,7 +703,7 @@ There are three kinds of image, and they never mix:
 
 | Image | Its anchor table | Its manifests' profile byte | Its build line |
 |---|---|---|---|
-| Shipped (release) image of a named profile | release anchors only | the profile's own | `profile=<name> level=<level>` |
+| Shipped (release) image of a claimed profile (level other than `none`) | release anchors only | the profile's own | `profile=<name> level=<level>` |
 | Development image (no profile) | development anchors | 0xFF | `profile=none level=none`, as today |
 | **The signing gate's image** (§8.4) | development anchors in place of the release table | the named profile under test, so that the profile check is exercised as shipped | `profile=<name> level=none anchors=development`, and **no claim** |
 
@@ -717,16 +718,21 @@ There are three kinds of image, and they never mix:
   byte, outside `.ferrix_anchors` and the PE checksum and Authenticode
   fields. A difference anywhere else fails the gate. Its control is a
   one-byte change outside the section, which must read FIRED.
-* **No shipped loader holds a development anchor.** A check over every
-  release image's loader, `init` and `devmgr` (`check-signing-anchors.py`,
-  slice S3) searches them for every development public key's 52 bytes. A
-  hit fails the release. Its control is a release build with one
-  development anchor planted, which must read FIRED.
-* xtask refuses to put a development anchor into a named profile's shipped
-  image at all. Only the gate's relink produces one, and only under the
-  gate's output directory. The gate check of (D1), a development anchor
-  planted in a claimed profile's image, must be refused, and its control
-  must read FIRED (`check-signing-anchors.py`, above).
+* **What S3 refuses, from today (D1).** At build time, xtask refuses the
+  UEFI loader and every initramfs of an image of a **claimed profile** (any
+  level other than `none`) that holds a development key. It checks at the
+  two points every image's loader and uncompressed initramfs pass through
+  after their last change: `fat::write_image_carrying` for every image,
+  and `flash` for a card. It also checks the loader as it is built. The
+  match is a key's tree root `T`, its last 24 bytes, which any anchor
+  table carries whatever layout it gives the rest. S4's tables keep `T`
+  contiguous. `check-signing-anchors.py --scan` applies the same rule to
+  any file. A planted root was refused in a real image build, and the
+  control read FIRED (as-built, S3).
+* **What comes with S4's tables.** The release-image scan of the loader,
+  `init` and `devmgr`, with its planted-release control. Also the gate's
+  relinked loader: it is the only image of a claimed profile that may
+  carry a development anchor, and only under the gate's output directory.
 
 | Decision | Choice | Reason |
 |---|---|---|
@@ -1255,8 +1261,8 @@ slices, reserved the same way.
 | S0 | This design; the consultant's verdict; the reservation landing | — | 2 |
 | S1 | `ferrix-sha256` (new; `ferrix-slots` moves onto it in S4); `ferrix-sigverify` (format, LM-OTS, LMS, HSS, policy), its host tests, vectors, controls, fuzz target and coverage; `ferrix-softsign`, the development soft signer (§6.4) | S0; the reservation of §10.4 | 8 |
 | S2 | The DK1 measurement of §2.3 and `MEMORY-AND-TIMING.md`'s bound | S1; the product owner's OK for the board | 2 |
-| S3 | The anchors file and its generated tables; xtask's refusal of development anchors in claimed images, `check-signing-anchors.py` and the gate relink; the hardware-family registry; the kernel-symbol and no-signing-dependency checks | S1 | 3 |
-| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
+| S3 | The anchors file; xtask's refusal of development keys in claimed images and of the verifier in any kernel; `check-signing-anchors.py`; the hardware-family registry; the kernel-closure and no-signing-dependency rules | S1 | 3 |
+| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; the generated anchor tables in the loader, `init` and `devmgr`, with the release-image scan; the gate's relinked loader and its byte comparison; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
 | S5 | TPM floors: the installer's provisioning (owner and lockout authorisations, `ownerPolicy`), the loader's `TPMA_PERMANENT` check, read, raise and lock through TCG2, the words; `bootctl sync`; `test-ab-boot` S4-S11 with `swtpm`; the check on the N150's PTT | S4; §12 Q10; the consultant's re-review of §7.2; the product owner's OK for the box | 8 |
 | S6 | The PKCS #11 module backend of the `Token` trait, the signature log repository, the runbook of §4, the HSM acceptance test | the HSMs, bought for the first claimed release with signed updates (§12 Q2) | 5 |
 | S7 | Revocation manifests (kind 4) in the loader | S5 | 3 |
@@ -1497,3 +1503,78 @@ The consultant's code review of S1 is **OK IF (1)-(8)**, ledger line
 The review accepted three things as they stand: no reverse cross-check is
 owed, the S3 deferrals stand while S3 comes before S4, and the time and
 stack requirements stay in the baseline.
+
+**Slice S3, as built (2026-10-24, branch `feature/signing-s3`).** S3
+builds the rules that keep development keys and the verifier where they
+belong, ahead of S4's loader, which will be the first program to carry an
+anchor.
+
+*The anchors file*, `tools/common/data/signing-anchors.toml`:
+
+* `[release.*]` is empty: no product key exists until the HSMs (§12 Q2).
+* `[development.*]` holds three soft-signer keys, `LMS_SHA256_M24_H15`
+  with `LMOTS_SHA256_N24_W4`, `L = 1`, one per kind:
+  * slot, anchor id 0x8000;
+  * config, anchor id 0x8001;
+  * driver, anchor id 0x8002.
+* Their private state is in `~/.local/share/ferrix/signing-dev/` on
+  nazuna (D5).
+
+*The hardware-family registry*, `tools/common/data/hardware-families.toml`,
+holds §1.4's six families. It gives each one's id and architecture, which
+family is its architecture's generic one, and the rule the loader will
+recognise it by (S4).
+
+*`check-signing-anchors.py`*, in `cargo xtask check` with its self-test.
+
+* It validates both files. Release ids are 0 or 1, development ids
+  0x8000 and up. Every key is 52 bytes of the product set, and no key is
+  given twice or in both sections. Every family id is in its
+  architecture's range, with one generic family each.
+* It refuses a package that depends on the soft signer as more than a
+  dev-dependency, and a kernel package that depends on the verifier.
+* `--scan` refuses any file holding a development key.
+
+*xtask's refusals*, in `tools/common/xtask/src/signing.rs`:
+
+* Every kernel xtask builds is refused if it holds the verifier's or the
+  soft signer's name: their crate names, as symbols carry them, and their
+  source paths, as debug information and panic locations carry them. That
+  is §5.2's kernel check.
+  * It was shown to fire on a real build: a kernel package given a real
+    dependency on `ferrix-sigverify` and one call into it, built as the
+    shipped x86-64 release kernel, was refused for holding
+    `ferrix_sigverify` (`~/.local/share/ferrix/signing-bench/kernel-scan-integration-*.log`).
+  * The countermeasure is still the dependency rule below. The scan is its
+    backstop.
+* The loader and every initramfs of a claimed profile's image are refused
+  if they hold a development key's tree root `T`. This is D1, at the two
+  points every image passes through (§6.4).
+* No image carries an anchor until S4.
+
+*`check-signing-anchors.py`* walks every `src/kernel` package's normal and
+build dependency closure (`cargo metadata`, every platform). It refuses
+any path to the verifier or the signer, naming it. Its self-test plants an
+indirect path (a kernel package, then a library, then the verifier).
+
+*Left to S4, by design:* the generated anchor tables in the loader, init
+and `devmgr`, and the gate's relinked loader with its byte comparison
+(§6.4). Development private keys exist only on nazuna, so a gate that
+signs runs there. Keys for CI would be **a new class of development key**,
+which owes a design review at S4, with D1-D5 applying.
+
+S3 and the record of S2 had the consultant's review **OK IF (1)-(13)**,
+ledger line 3843, folded in before landing.
+
+* **S3**, conditions (1)-(8):
+  * the kernel rule walks the whole dependency closure;
+  * the development-key check runs where every image's loader and
+    initramfs are final;
+  * the match is by the root `T`;
+  * integration controls: the kernel scan on a real release build, and
+    a planted root in an image;
+  * a control on the same-key-in-both-sections rule;
+  * §6.4 and §10.5 made true.
+* **S2**, conditions (9)-(13): the figures tied to their run, the worst
+  case stated as a computed bound, AB-BOOT's ARMv7-A hashing cost, and
+  `L.sigverify.11` left in the baseline, with a backlog row.

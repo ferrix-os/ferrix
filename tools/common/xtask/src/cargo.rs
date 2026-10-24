@@ -29,6 +29,9 @@ pub(crate) fn build_loader(arch: Arch, release: bool) -> Result<PathBuf> {
         .output(&made)
         .run()?;
     let made = artifact(made)?;
+    let loader = std::fs::read(&made)
+        .map_err(|error| Error::new(format!("reading {}: {error}", made.display())))?;
+    crate::signing::refuse_development_anchors("the UEFI loader", &loader)?;
     if !arch.loader_is_elf() {
         return Ok(made);
     }
@@ -319,7 +322,9 @@ fn carries(archive: &[u8], inputs: &[(&'static str, Vec<u8>)]) -> Result<()> {
 pub(crate) fn build_kernel(arch: Arch, release: bool) -> Result<Kernel> {
     let (build, made) = kernel(arch, release)?;
     build.output(&made).run()?;
-    Ok(Kernel::plain(artifact(made)?))
+    let made = artifact(made)?;
+    crate::signing::refuse_verifier_in_kernel_file(&made)?;
+    Ok(Kernel::plain(made))
 }
 
 /// Compile, before images for several architectures are made one after

@@ -30,7 +30,7 @@
 //! for every crate (the static relocation model), which stays a target
 //! rustflag ([`crate::cargo`]).
 
-mod toml;
+pub(crate) mod toml;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
