@@ -47,6 +47,7 @@
 #![forbid(unsafe_code)]
 
 pub mod budget;
+pub mod choice;
 pub mod gpu;
 pub mod isolation;
 
@@ -471,3 +472,6 @@ mod isolation_tests;
 
 #[cfg(test)]
 mod gpu_tests;
+
+#[cfg(test)]
+mod choice_tests;
