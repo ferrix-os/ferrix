@@ -169,7 +169,11 @@ Not flags, and why:
   (`MICROKERNEL.md` §3). Until then it stays the boot option it is.
 * **`driver_updates`** (whether the image carries `drvupdated`) is image
   content, not kernel code. It stays in `reference_configuration` and each
-  profile names its value: `absent` in `max` and `fast`.
+  profile names its value: `absent` in `max` and `fast`. The product
+  signing design (`docs/SIGNING.md` §10.1, 2026-10-24, for review) makes
+  drvupdated's D3 buildable without changing that value. It proposes two
+  more image keys, `slot_signing` and `rollback`, each to come here with its
+  own review. Nothing in this document changes until then.
 * **Criticality levels** (K17) are set per job at run time by the partition
   manager, not per build.
 * **Game mode** (the customer, 2026-10-11) is a privileged run-time trade on

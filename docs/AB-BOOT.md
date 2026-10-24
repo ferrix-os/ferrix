@@ -9,6 +9,14 @@ on-disk formats both halves share; the user-space half (`bootctl`, the
 installer's layout, `test-install --slots`) is ab-sys's, built on the crate
 named in §3.
 
+**Signed slots are designed, not built** (`docs/SIGNING.md`, 2026-10-24, for
+the consultant's review). When they land, a slot header gains version 2
+with an LMS/HSS-signed manifest in its second 4 KiB, the loader refuses an
+unsigned slot or rescue image where the profile requires signing, and a
+TPM 2.0 floor stops older releases. §1, §2, §4 steps 5 and 7, §6, §8 and §9
+then change. Until then everything below stands as written: slots verify
+by SHA-256 alone, with no authenticity claim.
+
 ## 1. What it is, and what it is not
 
 * Two **system slots**, A and B, raw partitions each holding what the ESP's
