@@ -9,6 +9,12 @@
 //! before it was sent -- is `ferrix_lode_core::upload`'s; this is the
 //! reading, the sockets, TLS and the waiting.
 //!
+//! Blobs (`docs/LOGGING.md` §21.4) follow on a second stream a
+//! destination at a time, behind the records: only when its records are
+//! caught up, only blobs of records it has acknowledged, one `POST` each,
+//! with a cursor of its own (`<name>.blobs`). A destination that answers
+//! a blob 404, 405 or 415 takes none, and is sent records alone.
+//!
 //! It starts as root, reads its keys and makes its state directory, then
 //! becomes uid [`UID`] in `adm`, which may read the log and nothing else of
 //! it.
@@ -18,6 +24,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::collections::VecDeque;
+
+use ferrix_lode_core::blob::{self, BlobId, Reference};
 use ferrix_lode_core::record::Record;
 use ferrix_lode_core::segment;
 use ferrix_lode_core::time::Zone;
@@ -157,7 +166,35 @@ struct Upload {
     backoff: Backoff,
     /// No try before this.
     next_try: Instant,
+    /// Its blob stream.
+    blobs: BlobStream,
 }
+
+/// The blobs that follow one destination's records.
+#[derive(Debug)]
+struct BlobStream {
+    /// The last record whose blobs it was sent.
+    cursor: u64,
+    /// Where that is kept.
+    path: PathBuf,
+    /// Its reader, behind the records'.
+    reader: Reader,
+    /// The blobs to send, in order, each with its record's sequence number.
+    queue: VecDeque<(u64, Reference)>,
+    /// The last record whose blobs are queued.
+    through: u64,
+    /// Blobs it was sent, the newest [`SENT_MAX`], not sent again.
+    sent: VecDeque<BlobId>,
+    /// Set when it answered that it takes no blobs.
+    off: bool,
+    /// The wait after failures.
+    backoff: Backoff,
+    /// No try before this.
+    next_try: Instant,
+}
+
+/// How many blob ids a destination remembers as sent.
+const SENT_MAX: usize = 4096;
 
 /// This machine, as uploads name it.
 #[derive(Debug, Clone, Default)]
@@ -241,6 +278,12 @@ pub fn run(args: &[String]) -> i32 {
             let cursor = std::fs::read(&path)
                 .ok()
                 .and_then(|bytes| upload::read_cursor(&bytes));
+            let blob_path = Path::new(upload::STATE).join(format!("{}.blobs", destination.name));
+            let blob_cursor = std::fs::read(&blob_path)
+                .ok()
+                .and_then(|bytes| upload::read_cursor(&bytes))
+                .or(cursor)
+                .unwrap_or(0);
             say(&format!(
                 "sending to {} ({}://{}:{}{}), {}",
                 destination.name,
@@ -265,6 +308,20 @@ pub fn run(args: &[String]) -> i32 {
                 pending: Vec::new(),
                 backoff: Backoff::default(),
                 next_try: Instant::now(),
+                blobs: BlobStream {
+                    cursor: blob_cursor,
+                    path: blob_path,
+                    reader: Reader {
+                        high: blob_cursor,
+                        ..Reader::default()
+                    },
+                    queue: VecDeque::new(),
+                    through: blob_cursor,
+                    sent: VecDeque::new(),
+                    off: false,
+                    backoff: Backoff::default(),
+                    next_try: Instant::now(),
+                },
             }
         })
         .collect();
@@ -272,7 +329,13 @@ pub fn run(args: &[String]) -> i32 {
     loop {
         let mut busy = false;
         for each in &mut uploads {
-            busy |= pass(each, &dirs, &zone, &identity);
+            let more = pass(each, &dirs, &zone, &identity);
+            busy |= more;
+            // Blobs only behind caught-up records: a screenshot never
+            // delays a line.
+            if !more && each.pending.is_empty() {
+                busy |= pass_blobs(each, &dirs, &identity);
+            }
         }
         if !busy {
             std::thread::sleep(IDLE);
@@ -394,6 +457,122 @@ fn pass(each: &mut Upload, dirs: &[PathBuf], zone: &Zone, identity: &Identity) -
             ));
             false
         }
+    }
+}
+
+/// One turn of a destination's blob stream: queue the blobs of the
+/// records it has acknowledged, or send the next one. Whether there is more
+/// to do at once.
+fn pass_blobs(each: &mut Upload, dirs: &[PathBuf], identity: &Identity) -> bool {
+    let stream = &mut each.blobs;
+    if each.destination.blobs == upload::Blobs::None || stream.off {
+        return false;
+    }
+    let now = Instant::now();
+    if now < stream.next_try {
+        return false;
+    }
+    let acknowledged = each.cursor.unwrap_or(0);
+    if stream.queue.is_empty() {
+        if stream.through >= acknowledged {
+            return false;
+        }
+        let mut records = Vec::new();
+        stream.reader.more(dirs, &mut records);
+        if stream.reader.high > acknowledged {
+            // Read past what the records' stream has sent: read again from
+            // there next time, the written segment from its start.
+            stream.reader.high = acknowledged;
+            stream.reader.seen.clear();
+            stream.reader.places.clear();
+        }
+        let mut through = stream.through;
+        for record in records
+            .iter()
+            .filter(|record| record.seqnum > stream.through && record.seqnum <= acknowledged)
+        {
+            through = through.max(record.seqnum);
+            if !each.destination.wants(record) {
+                continue;
+            }
+            for (field, reference) in blob::references(record) {
+                if each.destination.wants_blob(&field, &reference) {
+                    stream.queue.push_back((record.seqnum, reference));
+                }
+            }
+        }
+        stream.through = through;
+        if stream.queue.is_empty() {
+            keep_blob_cursor(&each.destination.name, stream, through);
+            return false;
+        }
+    }
+    let Some((seqnum, reference)) = stream.queue.front().cloned() else {
+        return false;
+    };
+    if !stream.sent.contains(&reference.id) {
+        let Some((kind, bytes)) = store::blob(dirs, &reference.id) else {
+            say(&format!(
+                "{}: blob {} of record {seqnum} is not in the store (expired or missing); not sent",
+                each.destination.name,
+                blob::hex(&reference.id)
+            ));
+            let _ = stream.queue.pop_front();
+            return true;
+        };
+        let request = upload::blob_request(
+            &each.destination.url,
+            &reference.id,
+            &kind,
+            &bytes,
+            &identity.machine,
+            &identity.host,
+        );
+        match send(&each.destination, each.tls.as_ref(), &request) {
+            Ok(()) => {
+                stream.backoff.succeed();
+                if stream.sent.len() >= SENT_MAX {
+                    let _ = stream.sent.pop_front();
+                }
+                stream.sent.push_back(reference.id);
+            }
+            Err(why)
+                if ["answered 404", "answered 405", "answered 415"].contains(&why.as_str()) =>
+            {
+                say(&format!(
+                    "{}: {why} to a blob: it takes no blobs; records are sent alone",
+                    each.destination.name
+                ));
+                stream.off = true;
+                return false;
+            }
+            Err(why) => {
+                let wait = stream.backoff.fail();
+                stream.next_try = now + Duration::from_millis(wait);
+                say(&format!(
+                    "{}: a blob: {why}; trying again in {} s",
+                    each.destination.name,
+                    wait / 1000
+                ));
+                return false;
+            }
+        }
+    }
+    let _ = stream.queue.pop_front();
+    if stream.queue.is_empty() {
+        let through = stream.through;
+        keep_blob_cursor(&each.destination.name, stream, through);
+    }
+    true
+}
+
+/// The blob stream sent everything of the records through `through`.
+fn keep_blob_cursor(name: &str, stream: &mut BlobStream, through: u64) {
+    stream.cursor = through;
+    if store::replace(&stream.path, format!("{through}\n").as_bytes()).is_err() {
+        say(&format!(
+            "{name}: the blob cursor could not be kept; blobs sent again after a restart"
+        ));
     }
 }
 

@@ -25,8 +25,13 @@ pub const MESSAGE_ID_REPEAT: &str = "70b5f0e1d2c34a5b9c8d7e6f5a4b3c2e";
 /// How many of a process's last records a tombstone's tail spans.
 pub const TAIL: usize = 50;
 
-/// A collected crash's `BLOB_*` fields, names and values.
+/// A collected crash's parts: each part's name (`MAPS`, ...) and its bytes,
+/// made blobs only when the crash gets a full tombstone.
 pub type Parts = Vec<(String, Vec<u8>)>;
+
+/// A blob a full tombstone names, to be written before it: the field, the
+/// id, the type and the bytes.
+pub type Owed = (String, crate::blob::BlobId, String, Vec<u8>);
 
 /// How many collected crashes wait for their crash record.
 pub const COLLECTED_MAX: usize = 16;
@@ -76,8 +81,10 @@ pub struct Tombstones {
     /// Per pid, the sequence numbers of its last [`TAIL`] records.
     tails: VecDeque<(u32, VecDeque<u64>)>,
     /// Per pid, what the collector (`lode crashd`) read of it while the
-    /// kernel held it: the `BLOB_*` references its tombstone gets.
+    /// kernel held it: the parts its tombstone makes blobs.
     collected: VecDeque<(u32, Parts)>,
+    /// The blobs the tombstones made since the last [`Tombstones::owed`].
+    owed: Vec<Owed>,
 }
 
 impl Tombstones {
@@ -89,11 +96,20 @@ impl Tombstones {
             seen: BTreeMap::new(),
             tails: VecDeque::new(),
             collected: VecDeque::new(),
+            owed: Vec::new(),
         }
     }
 
-    /// The collector read process `pid` while it was held: `parts`, its
-    /// `BLOB_*` fields, go on the tombstone of its crash. At most
+    /// The blobs the full tombstones made since the last call name, to be
+    /// written before those tombstones are: a storm's repeats, and a crash
+    /// past its signature's full tombstones, make none (`docs/LOGGING.md`
+    /// §21.4, the write budget).
+    pub fn owed(&mut self) -> Vec<Owed> {
+        core::mem::take(&mut self.owed)
+    }
+
+    /// The collector read process `pid` while it was held: `parts` become
+    /// blobs named on the tombstone of its crash, if it gets one. At most
     /// [`COLLECTED_MAX`] wait, the oldest given up.
     pub fn collected(&mut self, pid: u32, parts: Parts) {
         self.collected.retain(|(each, _)| *each != pid);
@@ -189,8 +205,15 @@ impl Tombstones {
                     .map(|(_, tail)| (tail.front().copied(), tail.back().copied()))
             });
             let mut record = full_record(crash, seqnum, boot, now, count, tail);
-            for (name, value) in parts.unwrap_or_default() {
-                record.push(&name, &value);
+            for (part, bytes) in parts.unwrap_or_default() {
+                let reference = crate::blob::Reference {
+                    id: crate::blob::id_of(&bytes),
+                    size: bytes.len() as u64,
+                    kind: String::from("text"),
+                };
+                let field = alloc::format!("{}{part}", crate::blob::FIELD_PREFIX);
+                record.push(&field, reference.text().as_bytes());
+                self.owed.push((field, reference.id, reference.kind, bytes));
             }
             return Some(record);
         }

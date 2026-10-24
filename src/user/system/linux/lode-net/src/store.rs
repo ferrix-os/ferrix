@@ -5,6 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
+use ferrix_lode_core::blob;
 use ferrix_lode_core::compress;
 use ferrix_lode_core::record::Record;
 use ferrix_lode_core::segment::{self, Header};
@@ -336,4 +337,135 @@ pub fn now_us() -> u64 {
         .map_or(0, |since| {
             u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
         })
+}
+
+/// The blob container's directory under a store directory, as lode's.
+pub const BLOBS: &str = "blobs";
+
+/// The packs of the blob containers beside `dirs`, newest name last.
+fn packs(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir.join(BLOBS)) else {
+            continue;
+        };
+        let mut found: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("pack-") && name.ends_with(".fxb"))
+            })
+            .collect();
+        found.sort();
+        out.extend(found);
+    }
+    out
+}
+
+/// The blob `id` from the containers beside `dirs`: its type and bytes,
+/// checked against the id; `None` when no pack holds it whole.
+#[must_use]
+pub fn blob(dirs: &[PathBuf], id: &blob::BlobId) -> Option<(String, Vec<u8>)> {
+    for pack in packs(dirs) {
+        let index = fs::read(pack.with_extension("idx"))
+            .ok()
+            .and_then(|bytes| blob::decode_index(&bytes));
+        let offset = match index {
+            Some(index) => index
+                .iter()
+                .find(|(each, _)| each == id)
+                .map(|(_, offset)| *offset),
+            None => None,
+        };
+        let Ok(bytes) = fs::read(&pack) else {
+            continue;
+        };
+        let offset = offset.or_else(|| {
+            blob::scan(&bytes)
+                .into_iter()
+                .find(|entry| entry.id == *id)
+                .map(|entry| entry.offset)
+        });
+        if let Some(found) = offset.and_then(|offset| blob::read(&bytes, offset)) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// A machine's blob container, as the receiver keeps it: packs appended to
+/// and synced a blob at a time, a new one past [`blob::PACK_MAX`]. A
+/// reader without an index scans a pack, so none is written.
+#[derive(Debug)]
+pub struct BlobWriter {
+    /// The container's directory.
+    dir: PathBuf,
+    /// The ids it holds.
+    known: std::collections::BTreeSet<blob::BlobId>,
+    /// The pack being appended to, and its length.
+    open: Option<(File, u64)>,
+}
+
+impl BlobWriter {
+    /// The container of the store at `store`, its ids read from its packs.
+    ///
+    /// # Errors
+    ///
+    /// A directory that cannot be made.
+    pub fn open(store: &Path) -> std::io::Result<BlobWriter> {
+        let dir = store.join(BLOBS);
+        fs::create_dir_all(&dir)?;
+        let mut known = std::collections::BTreeSet::new();
+        for pack in packs(&[store.to_owned()]) {
+            if let Ok(bytes) = fs::read(&pack) {
+                known.extend(blob::scan(&bytes).into_iter().map(|entry| entry.id));
+            }
+        }
+        Ok(BlobWriter {
+            dir,
+            known,
+            open: None,
+        })
+    }
+
+    /// Whether it holds `id`.
+    #[must_use]
+    pub fn has(&self, id: &blob::BlobId) -> bool {
+        self.known.contains(id)
+    }
+
+    /// Keep `bytes`, of type `kind`, as `id` (checked by the caller), synced
+    /// before it returns; a blob held already is not written again.
+    ///
+    /// # Errors
+    ///
+    /// A pack that cannot be made, written or synced.
+    pub fn keep(&mut self, id: &blob::BlobId, kind: &str, bytes: &[u8]) -> std::io::Result<()> {
+        if self.known.contains(id) {
+            return Ok(());
+        }
+        let entry = blob::encode_entry(id, kind, bytes);
+        let full = self.open.as_ref().is_some_and(|(_, size)| {
+            size.saturating_add(entry.len() as u64) > blob::PACK_MAX as u64
+        });
+        if full || self.open.is_none() {
+            let name = format!("pack-{}.fxb", blob::hex(id).get(..16).unwrap_or_default());
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .append(true)
+                .open(self.dir.join(name))?;
+            file.write_all(&blob::PACK_MAGIC)?;
+            self.open = Some((file, blob::PACK_MAGIC.len() as u64));
+        }
+        let Some((file, size)) = self.open.as_mut() else {
+            return Err(std::io::Error::other("no pack"));
+        };
+        file.write_all(&entry)?;
+        file.sync_data()?;
+        *size = size.saturating_add(entry.len() as u64);
+        let _ = self.known.insert(*id);
+        Ok(())
+    }
 }

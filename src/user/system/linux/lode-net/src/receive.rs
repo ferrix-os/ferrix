@@ -10,6 +10,10 @@
 //! <root>/.receive.lock      held while `lode-receive run` is
 //! ```
 //!
+//! A blob (`docs/LOGGING.md` §21.4) comes as a `POST` of its own, its
+//! SHA-256 checked against the id it is sent as, and is kept in that
+//! machine's blob container, `<root>/<dir>/blobs/`, once.
+//!
 //! A record is kept once. The store's highest sequence number and its
 //! boots say which records it has, so an upload sent again after a lost
 //! answer stores nothing twice; a machine whose store began again (a lower
@@ -29,7 +33,7 @@ use ferrix_lode_core::record::Record;
 use ferrix_lode_core::upload;
 
 use crate::pki::Pki;
-use crate::store::Writer;
+use crate::store::{BlobWriter, Writer};
 
 /// The default port, journal-remote's.
 pub const PORT: u16 = upload::DEFAULT_PORT;
@@ -60,6 +64,8 @@ pub struct Receiver {
     pki: Pki,
     /// The machines open, by directory name.
     machines: Mutex<HashMap<String, Machine>>,
+    /// Their blob containers, by directory name.
+    blobs: Mutex<HashMap<String, BlobWriter>>,
 }
 
 impl Receiver {
@@ -70,6 +76,7 @@ impl Receiver {
             root: root.to_owned(),
             pki: Pki::at(root),
             machines: Mutex::new(HashMap::new()),
+            blobs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -97,13 +104,14 @@ impl Receiver {
             },
             None => None,
         };
-        let records = match upload::header(head, "Content-Type") {
-            Some(kind) if kind.starts_with("application/vnd.fdo.journal") => {
-                upload::parse_export(body)
-            }
-            Some(kind)
-                if kind.starts_with("application/x-ndjson")
-                    || kind.starts_with("application/json") =>
+        let kind = upload::header(head, "Content-Type").unwrap_or_default();
+        if kind.starts_with(upload::BLOB_CONTENT_TYPE) {
+            return self.take_blob(head, body, paired.as_deref());
+        }
+        let records = match kind {
+            kind if kind.starts_with("application/vnd.fdo.journal") => upload::parse_export(body),
+            kind if kind.starts_with("application/x-ndjson")
+                || kind.starts_with("application/json") =>
             {
                 upload::parse_json_lines(body)
             }
@@ -113,24 +121,10 @@ impl Receiver {
             Ok(records) => records,
             Err(why) => return (400, why),
         };
-        let host = clean(upload::header(head, upload::HOST_HEADER).unwrap_or_default());
-        let id = upload::header(head, upload::MACHINE_HEADER).unwrap_or_default();
-        let (dir, machine_id) = match ferrix_lode_core::segment::parse_id(id) {
-            Some(machine_id) if id.len() == 32 => (id.to_ascii_lowercase(), machine_id),
-            _ if !host.is_empty() => (format!("host-{host}"), [0; 16]),
-            _ => match &paired {
-                Some(name) => (format!("host-{name}"), [0; 16]),
-                None => return (400, String::from("no machine id and no host name")),
-            },
+        let (dir, machine_id, host, label) = match self.machine(head, paired.as_deref()) {
+            Ok(found) => found,
+            Err(answer) => return answer,
         };
-        let label = self.root.join(&dir).join("machine");
-        if let Ok(text) = fs::read_to_string(&label)
-            && let Some(was) = text.lines().find_map(|line| line.strip_prefix("paired="))
-            && Some(was) != paired.as_deref()
-            && !was.is_empty()
-        {
-            return (403, format!("{dir} was paired as {was}"));
-        }
         let Ok(mut machines) = self.machines.lock() else {
             return (500, String::from("the receiver's state is poisoned"));
         };
@@ -178,6 +172,74 @@ impl Receiver {
         );
         let _ = crate::store::replace(&label, text.as_bytes());
         (200, format!("{dir}: {count} record(s) kept"))
+    }
+
+    /// Which machine a request is from: its directory, its machine id, its
+    /// host name and its label's path; the answer to give when it may not
+    /// send (a machine paired under another name) or names none.
+    #[allow(
+        clippy::type_complexity,
+        reason = "four parts of one answer, used once each"
+    )]
+    fn machine(
+        &self,
+        head: &[u8],
+        paired: Option<&str>,
+    ) -> Result<(String, [u8; 16], String, PathBuf), (u16, String)> {
+        let host = clean(upload::header(head, upload::HOST_HEADER).unwrap_or_default());
+        let id = upload::header(head, upload::MACHINE_HEADER).unwrap_or_default();
+        let (dir, machine_id) = match ferrix_lode_core::segment::parse_id(id) {
+            Some(machine_id) if id.len() == 32 => (id.to_ascii_lowercase(), machine_id),
+            _ if !host.is_empty() => (format!("host-{host}"), [0; 16]),
+            _ => match paired {
+                Some(name) => (format!("host-{name}"), [0; 16]),
+                None => return Err((400, String::from("no machine id and no host name"))),
+            },
+        };
+        let label = self.root.join(&dir).join("machine");
+        if let Ok(text) = fs::read_to_string(&label)
+            && let Some(was) = text.lines().find_map(|line| line.strip_prefix("paired="))
+            && Some(was) != paired
+            && !was.is_empty()
+        {
+            return Err((403, format!("{dir} was paired as {was}")));
+        }
+        Ok((dir, machine_id, host, label))
+    }
+
+    /// Take one blob: kept in its machine's container once its bytes are
+    /// the id's, and synced before the `200`.
+    fn take_blob(&self, head: &[u8], body: &[u8], paired: Option<&str>) -> (u16, String) {
+        let (id, kind) = match upload::parse_blob(head, body) {
+            Ok(found) => found,
+            Err(why) => return (400, why),
+        };
+        let (dir, _, _, _) = match self.machine(head, paired) {
+            Ok(found) => found,
+            Err(answer) => return answer,
+        };
+        let Ok(mut blobs) = self.blobs.lock() else {
+            return (500, String::from("the receiver's state is poisoned"));
+        };
+        let writer = match blobs.entry(dir.clone()) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                match BlobWriter::open(&self.root.join(&dir)) {
+                    Ok(writer) => entry.insert(writer),
+                    Err(error) => return (503, format!("{dir}: {error}")),
+                }
+            }
+        };
+        let had = writer.has(&id);
+        if let Err(error) = writer.keep(&id, &kind, body) {
+            return (503, format!("{dir}: {error}"));
+        }
+        let id = ferrix_lode_core::blob::hex(&id);
+        if had {
+            (200, format!("{dir}: blob {id} held already"))
+        } else {
+            (200, format!("{dir}: blob {id} kept, {} bytes", body.len()))
+        }
     }
 }
 
