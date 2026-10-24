@@ -307,6 +307,9 @@ jobs:
   ferrousli:
     name: ferrousli
     runs-on: ubuntu-latest
+    env:
+      # The libc-test commit the math tests are gated against (below).
+      LIBC_TEST_COMMIT: 7b95dfa5f5d5ca4d949221e0228ccc290bacc14e
     steps:
       - uses: actions/checkout@v6
 
@@ -325,16 +328,47 @@ jobs:
 
       # ferrousli's math tests judge every function against libc-test's
       # tables, read from a checkout at FERROUSLI_LIBC_TEST, never copied
-      # (src/user/system/linux/ferrousli/src/math/mtest.rs). This is the commit the landings are
-      # gated against; move it here and in mtest.rs together.
+      # (src/user/system/linux/ferrousli/src/math/mtest.rs). LIBC_TEST_COMMIT, the job's, is the
+      # commit the landings are gated against; move it there and in mtest.rs together.
+      #
+      # The checkout is cached by that commit, and fetched from repo.or.cz
+      # only on a miss, three tries apart: the host was unreachable for a
+      # whole run on 2026-10-24 (curl 28 after 135 s, runs 40073599117 and
+      # 40082126852), which failed promotions that changed nothing of
+      # ferrousli. The hash is checked after a restore as after a clone.
+      - name: Restore libc-test's tables
+        id: libc-test-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ferrix/libc-test
+          key: libc-test-${{ env.LIBC_TEST_COMMIT }}
+
       - name: Fetch libc-test's tables
-        env:
-          LIBC_TEST_COMMIT: 7b95dfa5f5d5ca4d949221e0228ccc290bacc14e
+        if: steps.libc-test-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --quiet https://repo.or.cz/libc-test.git "$RUNNER_TEMP/libc-test"
-          git -C "$RUNNER_TEMP/libc-test" checkout --quiet --detach "$LIBC_TEST_COMMIT"
-          test "$(git -C "$RUNNER_TEMP/libc-test" rev-parse HEAD)" = "$LIBC_TEST_COMMIT"
-          echo "FERROUSLI_LIBC_TEST=$RUNNER_TEMP/libc-test" >> "$GITHUB_ENV"
+          dir="$HOME/.cache/ferrix/libc-test"
+          for try in 1 2 3; do
+            rm -rf "$dir"
+            if git clone --quiet https://repo.or.cz/libc-test.git "$dir"; then
+              break
+            fi
+            [ "$try" = 3 ] && exit 1
+            sleep 60
+          done
+          git -C "$dir" checkout --quiet --detach "$LIBC_TEST_COMMIT"
+
+      - name: Keep libc-test's tables
+        if: steps.libc-test-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ferrix/libc-test
+          key: libc-test-${{ env.LIBC_TEST_COMMIT }}
+
+      - name: Use libc-test's tables
+        run: |
+          dir="$HOME/.cache/ferrix/libc-test"
+          test "$(git -C "$dir" rev-parse HEAD)" = "$LIBC_TEST_COMMIT"
+          echo "FERROUSLI_LIBC_TEST=$dir" >> "$GITHUB_ENV"
 
       - name: cargo xtask check-ferrousli
         run: cargo xtask check-ferrousli
