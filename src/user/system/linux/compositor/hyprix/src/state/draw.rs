@@ -226,7 +226,7 @@ impl Compositor<'_> {
             now,
             self.tally.drawn.saturating_add(1),
             refresh_ns(&self.screens),
-            self.pace.drawn(),
+            self.pace.shown(),
         );
         // And sent now, not when the pass ends: queued, they would wait for
         // the drawing below, 2-3 ms of a 120 Hz frame's 8.3 that the client
@@ -278,9 +278,16 @@ impl Compositor<'_> {
         // A card that refused or timed out is a frame lost, not a screen:
         // a driver that has gone is the backend's to find, and one that is
         // only slow answers the next frame.
+        let period = refresh_ns(&self.screens);
         for (which, damage) in std::mem::take(&mut drew.flips) {
             if let Some(screen) = self.screens.get_mut(which) {
-                match crate::frame::flip(screen.backend.as_mut(), &damage) {
+                let began = Instant::now();
+                let flipped = crate::frame::flip(screen.backend.as_mut(), &damage);
+                // The first screen's blank paces the frames (`crate::pace`).
+                if which == 0 && flipped.is_ok() {
+                    self.pace.flipped(began, Instant::now(), period);
+                }
+                match flipped {
                     Ok(()) => screen.said_dropped = false,
                     Err(why) => {
                         screen.drop_frame(&why, self.report);

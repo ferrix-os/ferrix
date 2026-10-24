@@ -3518,7 +3518,13 @@ fn frames_done(
     // a client deriving its vsync from these times -- Chrome's BeginFrames,
     // a video's cadence -- sees one refresh after another, not the loop's
     // jitter.
+    // On a grid set by the screen's blank (`crate::pace`) the time is the
+    // blank to come, which the frame is drawn for.
     let at = match due {
+        Some(due) if due > Instant::now() => after(
+            now_monotonic(),
+            due.saturating_duration_since(Instant::now()),
+        ),
         Some(due) => before(
             now_monotonic(),
             Instant::now().saturating_duration_since(due),
@@ -5422,6 +5428,16 @@ fn before((seconds, nanos): (u64, u32), by: Duration) -> (u64, u32) {
     let total = total.saturating_sub(by.as_nanos());
     (
         u64::try_from(total / 1_000_000_000).unwrap_or(0),
+        u32::try_from(total % 1_000_000_000).unwrap_or(0),
+    )
+}
+
+/// `(seconds, nanos)` moved on by `by`.
+fn after((seconds, nanos): (u64, u32), by: Duration) -> (u64, u32) {
+    let total = u128::from(seconds) * 1_000_000_000 + u128::from(nanos);
+    let total = total.saturating_add(by.as_nanos());
+    (
+        u64::try_from(total / 1_000_000_000).unwrap_or(u64::MAX),
         u32::try_from(total % 1_000_000_000).unwrap_or(0),
     )
 }
