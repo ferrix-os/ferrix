@@ -445,6 +445,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | `test-compositor`'s Settings step missed both its Returns once at host load 35 (2026-10-23, hyprix-gnome cad58e30c) after fl-001's fix; the next tip passed. [more](backlog/flakes.md#fl-075) | open | 18 |
 | nvos's host test `timer::tests::a_timer_fires_once_and_a_cancelled_one_never` failed once in `check` at host load 42 (2026-10-24, minimized-restore ed553b158, a compositor change); 3 of 3 reruns passed. [more](backlog/flakes.md#fl-080) | open | 19 |
 | Endfield's start on the N150 reaches the world 5 of 11 times (2026-10-24; debug-logging yserver worse), and under a game load woken programs on every processor waited 0.9-3.2 s while syscalls and the kernel's own timers kept time; the Intel driver was once out 65 s. Tally starts here. [more](backlog/flakes.md#fl-081) | open | 5 |
+| The N150's YT6801 did not take its link back after a cable swap while Ferrix ran (2026-10-24): ARP to the box failed for 25+ min with the plug on, until a cold start. Detect link loss and renegotiate. [more](backlog/flakes.md#fl-082) | open | 3 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
