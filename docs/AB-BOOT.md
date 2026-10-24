@@ -196,7 +196,11 @@ command line as they do to `CMDLINE.TXT` (SAFETY-MANUAL).
 
 Cost: one GPT read, two record reads, one write + flush + read for a trial,
 and SHA-256 over the kernel and initramfs (measured in §9's gate, expected
-well under a second at hundreds of MB/s).
+well under a second at hundreds of MB/s on x86-64). **Not so on ARMv7-A:**
+`ferrix-sha256` hashes at 127.7 cycles per byte on the DK1's Cortex-A7 at
+650 MHz, about 6.6 s per 32 MiB (`docs/certification/MEMORY-AND-TIMING.md`
+§2.2z, 2026-10-24). A backlog row owes S4 the DK1's slot-hash cost before
+any DK1 boot-time claim.
 
 ## 5. `bootctl` (ab-sys builds it; the rules it must keep)
 

@@ -1751,6 +1751,103 @@ Memory. None on the fault path beyond today's `crash_identity`: the ring is
 static, the line is written on the stack (160 bytes). An open allocates its
 one small object (`fallible::try_arc`, `ENOMEM` leaves the device unarmed).
 
+### 2.2z Product signing's verifier (`ferrix-sigverify`, item, 2026-10-24)
+
+`docs/SIGNING.md` §2.3 and §8.5. These are the verifier's own bounds,
+`L.sigverify.11` (time) and `L.sigverify.12` (stack). No kernel path
+reaches the verifier: the loader, init and `devmgr` call it from S4 on.
+
+Memory. **No allocation.** Every buffer is one the caller lends, the
+largest being the 4 KiB block. The verifier's own state is a few SHA-256
+states and 26-byte digit strings on the stack. The stack bound in bytes
+comes from the loader's build in S4; until then `L.sigverify.12` stays in
+the traceability baseline.
+
+Time. The work is bounded by the type codes. For the product set it is
+at most p × (2^w − 1) = 765 Winternitz steps per level, plus the K, Q and
+h tree hashes.
+
+**Measured on the DK1 (slice S2, 2026-10-24).** The board is an
+STM32MP157D (Cortex-A7), its MPU at 650 MHz as U-Boot reports and the
+cycle counter confirms (650,001 kHz against the 24 MHz generic timer).
+The program ran from U-Boot's prompt with `go`, so it ran in the state
+the UEFI loader runs in: U-Boot's MMU, I-cache on, D-cache write-through.
+The verifier was built as the product builds it (`opt-level = 2`, fat
+LTO, one codegen unit, frame pointers). PMCCNTR counted every cycle.
+Cold means the first call after the program was loaded; warm is the min,
+mean and max of the 10 calls after it.
+
+**What was measured, exactly.** This was a manual board run, not a gate
+row (board use: the customer's approval of 2026-10-24, "DK1 is plugged in
+and can be tested", relayed by the product owner).
+
+* The source was `ferrix-sigverify` and `ferrix-sha256` as landed in
+  546080e4b. Their files are byte-identical on this landing.
+* The build used Rust 1.97.1 for `armv7a-none-eabi`, with
+  `-C relocation-model=static -C force-frame-pointers=yes` and the
+  product's release codegen. It was linked at 0xC4000000 and made a raw
+  binary of SHA-256
+  `8397512cfb9d5a91d92a7ee12b3be807bb0fdaf41a5f68bd6dbc1d6e932aaca3`.
+* The figures are the third run in the console log (lines 498-522 of
+  `console-2026-10-24.log`). Two earlier runs were not used: one carried
+  a placeholder in place of the chosen manifest, so it verified nothing;
+  the other ran stale instructions, because `loady` does not invalidate
+  the I-cache, and stopped on a data abort that reset the board. The
+  cited run invalidated the I-cache first (`icache off; icache on`).
+* "Cold" is the first call after the program was loaded over serial. It
+  may be warmer than a boot from the card. The board ran on a 500 mA
+  supply, which U-Boot warned about; at the confirmed 650 MHz this does
+  not change cycle counts.
+
+| Case | Chain steps | Cold | Warm (min / mean / max) |
+|---|---|---|---|
+| RFC 9858 A.4, `hss_verify` (H20, W4, L = 1) | 435 | 4,971,405 cycles = 7.65 ms | 4,956,373 / 4,956,413 / 4,956,612 cycles = 7.62 ms |
+| A full 4 KiB manifest `verify`, H20 W4 L = 1, its body chosen from 2 million as needing the most steps | 555 | 6,214,025 cycles = 9.56 ms | 6,210,449 / 6,210,478 / 6,210,696 cycles = 9.55 ms |
+
+From the two cases, one Winternitz step costs about 10,450 cycles (one
+47-byte SHA-256 call measured 9,356 cycles on its own), and the fixed part
+(K, Q, the 20 tree hashes and the parse) costs about 0.41 M cycles.
+
+**The upper bound for one level, computed from those two measured points
+and not itself measured**, is all 765 steps: about 8.4 M cycles,
+**12.9 ms**. It is conservative on two counts:
+
+* the slope includes the manifest body's own hash, which the second case
+  has and the first has not;
+* the checksum keeps any valid signature below 765 steps.
+
+A two-level key (an HSS option, §4.3) would take about twice that,
+25.9 ms. **The bound is 50 ms.** It holds with a margin of 3.9× for the
+chosen L = 1, and 1.9× for L = 2. The design's estimate was 7.5 ms at
+eBACS's SHA-256 cost. One SHA-256 call here costs 9,356 cycles against
+eBACS's 3,044, slightly over the 3× slowdown the budget assumed; the
+bound still holds with a 3.9× margin.
+
+`L.sigverify.11` stays in the traceability baseline (ledger 3843 (12)).
+This one manual run, with its extrapolated worst case, does not verify
+it. It leaves the baseline in a later landing that brings:
+
+* the bench into the tree, with a TOOLS.md row and its load, run and
+  parse script;
+* the criterion rewritten to "measured at 555 steps or more in the
+  loader's cache state, with the 765-step bound computed from the measured
+  step cost and fixed part, under 50 ms with a margin of at least 2";
+* a run on matching sources.
+
+A backlog row (`docs/backlog/p2.md`) owes that.
+
+**SHA-256 throughput over 32 MiB of DRAM:** 6.594 s, 127.7 cycles per
+byte, against eBACS's 28.24. That is 4.5×, and it is the cost of hashing
+a slot's blobs, not of the signature. A 32 MiB kernel and initramfs takes
+about 6.6 s to hash in the ARMv7-A loader, which AB-BOOT's §4 cost line
+("well under a second") does not hold on this board. It is S4's concern,
+and a faster SHA-256 is its own work item.
+
+The program and its data, the raw binary with its SHA-256, and the board's
+console log are kept in `~/.local/share/ferrix/signing-bench/dk1-s2/`.
+The board was not written: the program went over the serial line with
+`loady`, and the board was left booted as it was found.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

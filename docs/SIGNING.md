@@ -300,6 +300,20 @@ less size than n = 32.
 50 ms on the DK1 at 650 MHz, the 3× budget with room for the parse. The
 measured worst case on the board replaces the estimate before any claim.
 
+**Measured (S2, 2026-10-24, `MEMORY-AND-TIMING.md` §2.2z).** On the DK1 at
+650 MHz, in U-Boot's state as the loader runs:
+
+* RFC 9858 A.4 (H20, W4, 435 chain steps) verifies in 7.65 ms cold and
+  7.62 ms warm.
+* A full manifest whose body was chosen to need 555 steps verifies in
+  9.56 ms cold and 9.55 ms warm.
+* The upper bound computed from those two measured points, all 765
+  steps (not itself measured), is 12.9 ms for L = 1 and 25.9 ms for
+  L = 2, inside the 50 ms bound.
+* One SHA-256 call costs 3.07× eBACS's, slightly over the assumed 3×.
+  The bound holds with a 3.9× margin.
+* SHA-256 over 32 MiB took 6.59 s (127.7 cycles per byte, 4.5× eBACS's).
+  That is the slot hashing's cost in S4, not the signature's.
 
 ## 3. (P3) State custody in the HSM
 
