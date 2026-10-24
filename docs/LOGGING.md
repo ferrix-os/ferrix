@@ -1751,6 +1751,62 @@ run time, which a static Ferrix program cannot.
 * Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
   and dragging the brush's edges.
 
+### The viewer's scrollback: a boot read in pages (design, 2026-10-24)
+
+The customer's ask: open a log of any length at its newest records at once,
+load older ones in pages before they scroll into view, let pages far out of
+view go so memory stays bounded, keep following the live tail, and make a
+jump (a search hit, a time, a crash link) load only the page around its
+target. The acceptance: a million records on nazuna, first paint within a
+few hundred ms, memory bounded, scrolling at the display's rate on tole's
+GPU renderer.
+
+**Today** the viewer reads every segment whole into one `Log`, about 1 KB a
+record: a million records took 847 ms to make into the log, besides reading
+the store, and 1 GB resident. Everything indexes that one vector (the
+table's lines, the selection, the query's hits, the crashes, the Overview's
+charts), and it shows one boot at a time, in time order.
+
+**The unit is the boot, read by pages.** lode seals a segment at a new boot,
+so a boot is a run of segments (one class or several, interleaved by
+sequence number). On opening, only the segments' headers and summaries are
+read (record counts, sequence and time ranges): that gives each boot's
+length without decoding it. A page is up to 4,096 records; a segment is
+read from its end backwards with `segment::entries_before` (lode-core,
+agreed with the lode agent), a sealed one expanded first, and pages of a
+boot's several classes are merged by sequence number. The viewer holds a
+window of pages -- at most 16, 65,536 records -- and the raw bytes of only
+the segments the window touches.
+
+**The table spans the whole boot.** Its rows are the unloaded older
+records (counted, from the summaries), the window's lines, and the unloaded
+newer ones; a row not loaded is drawn as an empty row of the row height, so
+the scroll bar is the boot's and nothing jumps when a page arrives, which
+replaces the empty rows above with as many real ones. When the view comes
+within two pages of the window's edge, the next page is read -- one page a
+frame at most, about 4 ms -- and the farthest page past 16 is let go. The
+selection and the open rows are kept by sequence number, not by index, so
+they survive a page coming or going.
+
+**The live tail** is the window holding the boot's newest page: following
+appends there as today, and lets the oldest page go once the window is
+full. **A jump** finds its target's segment from the summaries' ranges and
+makes the page around it the window.
+
+**What reads more than the window**, in later steps: a query over the boot
+(the window's matches at once, older pages searched in the background a few
+a frame, the match count growing); the Overview's charts, facets and the
+crash list (counted over the boot's pages in the background, the counts
+kept, the records not); a JSONL file, paged by its lines' offsets. Until
+each step, that view reads the whole boot as today.
+
+**Steps.** (1) lode-core's `entries_before` (built). (2) The paged store
+under the Logs table: open at the newest page, scroll older pages in, let
+far ones go, live tail, jumps by sequence number; the million-record
+acceptance on nazuna. (3) Queries and facets over the boot in the
+background. (4) The Overview's and crashes' counts in the background.
+(5) JSONL files by offsets.
+
 ### The write budget, as built (§8.3)
 
 `cargo xtask test-log-budget` (x86-64 by default, KVM): init with lode's
