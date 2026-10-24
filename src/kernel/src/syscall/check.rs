@@ -13097,12 +13097,21 @@ fn check_getrusage_counts(process: &Process) -> Result<(), &'static str> {
             core::hint::spin_loop();
         }
         let after = micros(&usage(1)?);
-        let wall_micros = crate::timer::now_nanos().saturating_sub(wall_start) / 1_000;
+        let wall_nanos = crate::timer::now_nanos().saturating_sub(wall_start);
         let moved = after.saturating_sub(before);
         if moved < 1_000 {
             return Err("getrusage(RUSAGE_THREAD) did not count the time the thread ran");
         }
-        if moved > wall_micros {
+        // To the reply's own precision. `ru_utime` and `ru_stime` are each
+        // cut to the microsecond, as Linux cuts them, so a reading is up to
+        // 2 us short of the time it stands for, and the difference of two can
+        // exceed the time between them by up to 2 us less a nanosecond: in
+        // nanoseconds, `moved` stands for less than its value plus 2 us, and
+        // the wall must not be shorter than that. Under KVM the two charges
+        // sit a microsecond or less inside the wall's two readings, so a
+        // bound in whole microseconds failed boots on correct counts
+        // (`moved` 2004 against 2005 of wall, 5023 against 5023, on nazuna).
+        if moved.saturating_mul(1_000) >= wall_nanos.saturating_add(2_000) {
             return Err("getrusage(RUSAGE_THREAD) counted more time than passed on the wall clock");
         }
         // The check runs in a task of the kernel's, not one of the process's
