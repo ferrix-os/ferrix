@@ -29,7 +29,8 @@
 //! | ferrix with its password renames the machine (`/etc/hostname` and `hostname`) and enables `sshd.service` (its link) | |
 //! | a unit not on the list, sent as given, is refused by settingsd itself | N3: the unit list is skipped |
 //! | a dry run as guest says what would change and changes nothing | |
-//! | `Methods=none` in a drop-in for `settings.hostname` lets ferrix in with no prompt, and still refuses guest | |
+//! | `Methods=none` in a drop-in for `settings.hostname`, relayed to the console, makes nothing (needs the seat), and still refuses guest | T6: the needs-seat refusal removed |
+//! | a program not on the area's list is refused | T3: the list check skipped |
 //! | `Methods=none` in a drop-in for a root-only wheel service that is not a settings one still asks for the password | N4: authd's bound is removed |
 //! | the audit lines are in `svc log settings.service`, and hold no password | |
 
@@ -88,6 +89,59 @@ const MECHANISM_POLICY: &str = "[Service]\nDescription=test-settings' other mech
 /// The drop-in that asks for no password.
 const NO_PASSWORD: &str = "[Service]\nMethods=none\n";
 
+/// Whether this run's images carry the settings writer -- `settingsd`,
+/// `settingsctl`, the lists and the trusted prompt -- by the profile's
+/// `settings_writer` image key (ledger 3558 (6), 3636 (10); the image
+/// manifest's value, `crate::flags::this_image`).
+///
+/// # Errors
+///
+/// As [`crate::flags::this_image`].
+pub(crate) fn writer() -> Result<bool> {
+    Ok(crate::flags::this_image()?.1 == "present")
+}
+
+/// The word the trusted prompt's code carries in hyprix and sessiond
+/// (`compositor_seat::prompt::PROMPT_FD_VARIABLE`): there exactly when the
+/// settings writer is (§12.8).
+pub(crate) const PROMPT_MARK: &[u8] = b"FERRIX_PROMPT_FD";
+
+/// Refuse a compositor program whose trusted prompt disagrees with the
+/// image's settings writer, either way (ledger 3636 (10)).
+///
+/// # Errors
+///
+/// The mismatch, named.
+pub(crate) fn check_prompt(program: &Path, writer: bool) -> Result<()> {
+    let bytes = read(program)?;
+    let has = bytes
+        .windows(PROMPT_MARK.len())
+        .any(|window| window == PROMPT_MARK);
+    match (writer, has) {
+        (true, false) => Err(Error::new(format!(
+            "{} has no trusted prompt, but this image's settings writer is present \
+             (docs/SETTINGS-WRITER.md §12.8)",
+            program.display()
+        ))),
+        (false, true) => Err(Error::new(format!(
+            "{} carries the trusted prompt, but this image's settings writer is absent \
+             (docs/SETTINGS-WRITER.md §12.8)",
+            program.display()
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// The areas' lists of the programs that may ask (§12.5, S3), as the image
+/// ships them.
+const APPS: &str = "\
+# Which programs may ask settingsd for each area (docs/SETTINGS-WRITER.md
+# §12.5): area = program..., absolute paths to root-owned files.
+hostname = /bin/settings /bin/settingsctl
+time = /bin/settings /bin/settingsctl
+services = /bin/settings /bin/settingsctl
+";
+
 /// The programs of `src/user/system/linux/settingsd/` for one architecture.
 #[derive(Debug)]
 pub(crate) struct Built {
@@ -137,6 +191,9 @@ fn read(path: &Path) -> Result<Vec<u8>> {
 ///
 /// A build that fails, or a unit that cannot be read.
 pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
+    if !writer()? {
+        return Ok(Vec::new());
+    }
     let Some(built) = built(arch)? else {
         return Ok(Vec::new());
     };
@@ -148,6 +205,7 @@ pub(crate) fn carried(arch: Arch) -> Result<Vec<File>> {
     let mut files = vec![
         file("sbin/settingsd", 0o755, read(&built.settingsd)?),
         file("bin/settingsctl", 0o755, read(&built.settingsctl)?),
+        file("lib/ferrix/settings/apps", 0o644, APPS.as_bytes().to_vec()),
     ];
     for name in ["settings.socket", "settings.service"] {
         let bytes = read(&paths::workspace_root().join(UNITS).join(name))?;
@@ -229,7 +287,7 @@ fn test_files(shell: &[u8], busybox: Vec<u8>) -> Result<Vec<File>> {
     // busybox's `su` in place of Ferrix's: root becomes a user without a
     // password, so each request is asked as that user.
     for applet in [
-        "su", "cat", "grep", "hostname", "ls", "mkdir", "printf", "sleep",
+        "su", "cat", "cp", "grep", "hostname", "ls", "mkdir", "printf", "sleep",
     ] {
         files.push(File {
             path: format!("bin/{applet}"),
@@ -288,9 +346,9 @@ fn test_arch(arch: Arch, args: &Args) -> Result<()> {
     }
     println!(
         "  {arch}: settingsd refused guest outside wheel and a wrong password, renamed the \
-         machine and enabled sshd.service for ferrix, refused a unit not on its list, changed \
-         nothing on a dry run, took Methods=none for settings.hostname alone, and logged \
-         every request and no password"
+         machine and enabled sshd.service for ferrix, refused a unit and a program not on its \
+         lists, changed nothing on a dry run, made nothing on a Methods=none relay, and \
+         logged every request and no password"
     );
     Ok(())
 }
@@ -393,6 +451,7 @@ fn session(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     wrong_password(at, failures)?;
     administrator(at, failures)?;
     off_the_list(at, failures)?;
+    unlisted_program(at, failures)?;
     dry_run(at, failures)?;
     no_password(at, failures)?;
     audit(at, failures)?;
@@ -533,6 +592,27 @@ fn off_the_list(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()>
     Ok(())
 }
 
+/// A program that is not on the area's list -- settingsctl's own bytes at
+/// another path -- is refused before anyone is asked (§12.5, S3; T3).
+fn unlisted_program(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
+    let _ = run(at, "cp /bin/settingsctl /tmp/unlisted", "u0")?;
+    let other = run(
+        at,
+        &format!("su ferrix -c \"echo '{FERRIX_PASSWORD}' | /tmp/unlisted set-hostname unlisted\""),
+        "u1",
+    )?;
+    let names = names(at, "u2")?;
+    let refused = answer(&other, "settingsctl: ").is_some_and(|line| {
+        line == "settingsctl: refused: not-permitted: /tmp/unlisted may not ask to change the computer's name"
+    });
+    if !refused || names.as_deref() != Some("box box") {
+        failures.push(format!(
+            "a program off the list was not refused: {other:?} names {names:?}"
+        ));
+    }
+    Ok(())
+}
+
 /// A dry run as guest says what would change, and changes nothing.
 fn dry_run(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let would = run(
@@ -552,9 +632,10 @@ fn dry_run(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// `Methods=none`: for settings.hostname, ferrix with no password, guest
-/// still refused; for another root-only wheel service, a password is still
-/// asked (N4).
+/// `Methods=none`: for settings.hostname, relayed to a console that is no
+/// seat, nothing is made -- an acceptance nobody typed anything for needs
+/// the seat (ledger 3636 (2); T6) -- and guest is still refused; for another
+/// root-only wheel service, a password is still asked (N4).
 fn no_password(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let _ = run(
         at,
@@ -568,15 +649,19 @@ fn no_password(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> 
     let named = run(at, &as_user("ferrix", None, "set-hostname nopass"), "n2")?;
     let refused = run(at, &as_user("guest", None, "set-hostname nopass2"), "n3")?;
     let names = names(at, "n4")?;
-    if answer(&named, "settingsctl: ")
-        != Some("settingsctl: done: the computer is called nopass (was box)")
-        || answer(&refused, "settingsctl: ")
-            != Some("settingsctl: refused: not-permitted: guest is not in wheel")
-        || names.as_deref() != Some("nopass nopass")
+    let needs_seat = answer(&named, "settingsctl: ").is_some_and(|line| {
+        line.starts_with("settingsctl: refused: not-permitted: needs the desktop")
+    });
+    if !needs_seat || names.as_deref() != Some("box box") {
+        failures.push(format!(
+            "a Methods=none relay changed the computer's name: {named:?} names {names:?}"
+        ));
+    }
+    if answer(&refused, "settingsctl: ")
+        != Some("settingsctl: refused: not-permitted: guest is not in wheel")
     {
         failures.push(format!(
-            "Methods=none for settings.hostname did not let ferrix in alone: {named:?} \
-             {refused:?} names {names:?}"
+            "Methods=none for settings.hostname let guest past wheel: {refused:?}"
         ));
     }
     let other = run(
@@ -600,7 +685,7 @@ fn audit(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
         &format!(
             "echo \"$m-refused $(svc log settings.service -n 200 | grep -c 'account=guest auth=- result=not-permitted') \
              au-password $(svc log settings.service -n 200 | grep -c 'account=ferrix auth=password result=done') \
-             au-none $(svc log settings.service -n 200 | grep -c 'account=ferrix auth=none result=done') \
+             au-none $(svc log settings.service -n 200 | grep -c 'account=ferrix auth=none result=needs-seat') \
              au-secret $(svc log settings.service -n 200 | grep -c -e '{FERRIX_PASSWORD}' -e '{GUEST_PASSWORD}')\""
         ),
         "au",
@@ -620,6 +705,25 @@ fn audit(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// Ledger 3636 (10): a compositor program is refused when its trusted
+    /// prompt and the image's settings writer disagree, either way.
+    #[test]
+    fn a_prompt_that_disagrees_with_the_writer_is_refused() {
+        let dir = std::env::temp_dir().join(format!("xtask-prompt-mark-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let with = dir.join("with");
+        let without = dir.join("without");
+        std::fs::write(&with, b"\x7fELF..FERRIX_PROMPT_FD..").unwrap();
+        std::fs::write(&without, b"\x7fELF..nothing..").unwrap();
+        assert!(super::check_prompt(&with, true).is_ok());
+        assert!(super::check_prompt(&without, false).is_ok());
+        let absent = super::check_prompt(&with, false).unwrap_err().to_string();
+        assert!(absent.contains("carries the trusted prompt"), "{absent}");
+        let present = super::check_prompt(&without, true).unwrap_err().to_string();
+        assert!(present.contains("has no trusted prompt"), "{present}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::{FERRIX_PASSWORD, GUEST_PASSWORD, NO_PASSWORD, WRONG_PASSWORD, as_user};
 
     /// Each password is typed inside single quotes inside double ones.

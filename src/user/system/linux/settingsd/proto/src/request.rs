@@ -56,6 +56,15 @@ impl Area {
             Area::Services => "settings.services",
         }
     }
+
+    /// Its name, as the allow-lists and the prompt name it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Area::Hostname => "hostname",
+            Area::Services => "services",
+        }
+    }
 }
 
 /// Why a request breaks its own rules: a line for a person.

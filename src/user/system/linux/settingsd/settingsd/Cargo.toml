@@ -16,6 +16,9 @@ ferrix-auth-client = { path = "../../auth/client" }
 ferrix-auth-proto = { path = "../../../../../lib/proto/auth-proto" }
 # init's control records, for service-enable-persistent.
 ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
+# The trusted prompt's records (docs/SETTINGS-WRITER.md §12.6), which
+# sessiond relays to the compositor.
+compositor-seat = { path = "../../compositor/seat", features = ["settings-prompt"] }
 
 [lints]
 workspace = true

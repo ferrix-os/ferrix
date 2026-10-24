@@ -7,6 +7,12 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-24 (customer, through the coordinator)** **settingsd keeps
+  the password relay for accounts with no seat** (ledger 3636 (3),
+  `docs/SETTINGS-WRITER.md` §12.7): a console or ssh user is asked at their
+  terminal, as `su` asks, and an acceptance with no password typed is
+  refused; the desktop's own account is answered only in the trusted
+  prompt.
 * **2026-10-23 (customer, through the coordinator)** **tole is a
   repository of its own**, https://github.com/ferrix-os/tole, a component
   checked out at `src/user/system/linux/tole` (`components.toml`), built

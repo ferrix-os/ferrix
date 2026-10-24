@@ -89,6 +89,7 @@ mod pointer;
 mod protocols;
 mod run;
 mod settings;
+mod settings_prompt;
 mod steam_store;
 pub(crate) mod steam_window;
 mod tole_demo;
@@ -410,8 +411,15 @@ struct Programs {
 impl Programs {
     /// Build them all for `arch`.
     fn build(arch: Arch) -> Result<Self> {
+        // The trusted prompt is in hyprix and sessiond exactly where the
+        // settings writer is (docs/SETTINGS-WRITER.md §12.8).
+        let writer = crate::settingsd::writer()?;
+        let hyprix = build_with(arch, "hyprix", "hyprix", writer)?;
+        let sessiond = build_with(arch, "compositor-sessiond", "sessiond", writer)?;
+        crate::settingsd::check_prompt(&hyprix, writer)?;
+        crate::settingsd::check_prompt(&sessiond, writer)?;
         Ok(Self {
-            hyprix: build(arch, "hyprix", "hyprix")?,
+            hyprix,
             client: build(arch, "compositor-pattern", "pattern")?,
             ctl: build(arch, "compositor-ctl", "hyprctl")?,
             plug: build(arch, "compositor-plug", "plug")?,
@@ -425,7 +433,7 @@ impl Programs {
             loginctl: crate::apps::program(arch, "hypridle", "loginctl")?,
             reboot: build(arch, "compositor-reboot", "reboot")?,
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
-            sessiond: build(arch, "compositor-sessiond", "sessiond")?,
+            sessiond,
             notifyd: build(arch, "compositor-notifyd", "notifyd")?,
             wallpaper: build(arch, "compositor-wallpaper", "wallpaper")?,
         })
@@ -469,19 +477,34 @@ pub(crate) fn reboot_program(arch: Arch) -> Result<PathBuf> {
 
 /// Build one of the compositor's programs for `arch`, and say where it is.
 fn build(arch: Arch, package: &str, binary: &str) -> Result<PathBuf> {
+    build_with(arch, package, binary, true)
+}
+
+/// [`build`], with its default features -- the trusted prompt's, in hyprix
+/// and sessiond -- or without them, in a target directory of their own so
+/// the two builds never replace each other.
+fn build_with(arch: Arch, package: &str, binary: &str, defaults: bool) -> Result<PathBuf> {
     let target = crate::display::target(arch).ok_or_else(|| {
         Error::new(format!(
             "{arch} has no virtio-gpu in QEMU; the compositor test runs on x86_64 and aarch64"
         ))
     })?;
-    let target_dir = paths::target_dir().join("compositor").join("hyprix");
+    let target_dir = paths::target_dir().join("compositor").join(if defaults {
+        "hyprix"
+    } else {
+        "hyprix-no-prompt"
+    });
     println!("  building src/user/system/linux/compositor/{binary} for {target}");
     let program = target_dir.join(target).join("release").join(binary);
+    let mut args = vec!["build", "--release", "-p", package, "--target", target];
+    if !defaults {
+        args.push("--no-default-features");
+    }
     crate::builds::Build::cargo(
         format!("cargo build (src/user/system/linux/compositor/{binary}) --target {target}"),
         paths::workspace_root().join("src/user/system/linux/compositor"),
     )
-    .args(["build", "--release", "-p", package, "--target", target])
+    .args(args)
     .env("CARGO_TARGET_DIR", &target_dir)
     .output(&program)
     .run()?;
@@ -562,6 +585,7 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
         "hyprlock-unset",
         "hyprlock-session",
         "session-end",
+        "settings-prompt",
     ]) {
         let _ = crate::apps::program(arch, "hyprlock", "hyprlock")?;
         let _ = crate::auth::carried(arch, None)?;
@@ -718,7 +742,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 56] = [
+const BOOTS: [(&str, Boot); 57] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -764,6 +788,7 @@ const BOOTS: [(&str, Boot); 56] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("settings-prompt", settings_prompt::test_settings_prompt),
     ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),

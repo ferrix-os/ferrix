@@ -31,6 +31,8 @@ use compositor_socket::{Connection, RecvError};
 use compositor_wire::Fd;
 
 pub mod lock;
+#[cfg(feature = "settings-prompt")]
+pub mod prompt;
 
 /// The variable naming the channel's descriptor.
 pub const FD_VARIABLE: &str = "FERRIX_SEAT_FD";

@@ -55,6 +55,7 @@ impl Compositor<'_> {
         // its frames to its plane, or back, owes a frame that draws it or
         // takes it away.
         let pointer = (self.lock.is_none()
+            && !self.prompts.up()
             && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
@@ -133,6 +134,8 @@ impl Compositor<'_> {
         let millis = self.animation_clock(now);
         self.owed = false;
         self.settling = animating;
+        // The prompt's buttons are laid out again with the screens below.
+        self.prompts.begin_frame();
         // A pass that moves the animations is one of their ticks:
         // Hyprland keeps how long it was since the last.
         if animating {
@@ -326,7 +329,10 @@ impl Compositor<'_> {
                 display = self.fixed.display,
             ));
         }
-        if let Some(directory) = self.options.dump.as_ref() {
+        // P6: a frame that shows a trusted prompt is not written down.
+        if let Some(directory) = self.options.dump.as_ref()
+            && !self.prompts.up()
+        {
             dump(&mut self.screens, directory, self.tally.drawn)?;
         }
         Ok(())
@@ -386,7 +392,7 @@ impl Compositor<'_> {
         dark: bool,
         popups: &[crate::frame::Placed],
     ) -> Vec<crate::frame::Placed> {
-        if dark {
+        if dark || self.prompts.up() {
             Vec::new()
         } else if let Some(held) = self.lock.as_ref() {
             held.surfaces
@@ -627,15 +633,22 @@ impl Compositor<'_> {
         // draws its own and the compositor's arrow over it would be
         // two pointers.
         // And not where the screen's cursor plane shows it.
+        // Over a trusted prompt, the compositor's own arrow and never a
+        // client's picture of one (P1).
+        let prompting = self.prompts.up();
         let cursor = (!dark
-            && !screen.plane.on
+            && (!screen.plane.on || prompting)
             && self.lock.is_none()
             && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: with.cursor_at,
-            surface: cursor_surface(&self.slots, &self.focus),
-            shown: cursor_shown(&self.slots, &self.focus),
+            surface: if prompting {
+                None
+            } else {
+                cursor_surface(&self.slots, &self.focus)
+            },
+            shown: prompting || cursor_shown(&self.slots, &self.focus),
         });
         // The ramps a night-light set on this screen, applied to
         // the pixels on their way out.
@@ -644,7 +657,7 @@ impl Compositor<'_> {
         // draws nothing at all: a plan says what is drawn, not what
         // the layout holds.
         let scaled = self.style.at_scale(scale);
-        let layout = if dark || self.lock.is_some() {
+        let layout = if dark || self.lock.is_some() || prompting {
             compositor_layout::MonitorLayout {
                 windows: Vec::new(),
                 ..output.clone()
@@ -665,8 +678,13 @@ impl Compositor<'_> {
         // over everything but a screen that is off. Its boxes blur
         // what is behind them as it stands, which the damage has to
         // know to redraw them whole.
-        let picture = (with.overlay_on && which == 0 && !dark)
-            .then(|| self.overlay.picture(screen_began, scale));
+        let picture = if prompting && !dark {
+            let size = (width, height);
+            self.prompts.picture(size, scale, origin)
+        } else {
+            (with.overlay_on && which == 0 && !dark)
+                .then(|| self.overlay.picture(screen_began, scale))
+        };
         if scaled.blur.is_some()
             && let Some(picture) = picture.as_ref()
         {
@@ -685,7 +703,7 @@ impl Compositor<'_> {
             scale,
             style: scaled,
             dark,
-            locked: self.lock.is_some(),
+            locked: self.lock.is_some() || prompting,
             gamma,
             layout,
             blurred,
@@ -751,7 +769,15 @@ impl Compositor<'_> {
         };
         // What a screenshot of this frame blacks out, worked out from
         // what the frame is drawn from, so that the two are of one frame.
-        screen.hidden = super::unshared(&plan, &over, origin, scale);
+        // A trusted prompt's whole screen (P6).
+        screen.hidden = if plan.locked && self.prompts.up() {
+            vec![(
+                Rect::new(0, 0, i64::from(plan.size.0), i64::from(plan.size.1)),
+                compositor_render::Rounding::none(),
+            )]
+        } else {
+            super::unshared(&plan, &over, origin, scale)
+        };
         // And the clients' own pixels: where on this screen each
         // commit since the last frame landed.
         let heard = self.commits.on(&plan, &self.sources);
@@ -791,7 +817,7 @@ impl Compositor<'_> {
         };
         let result = if dark {
             crate::frame::draw_dark(&mut target, &frame.canvas)
-        } else if self.lock.is_some() {
+        } else if self.lock.is_some() || self.prompts.up() {
             // The lock's own surface is the first of `over`, which
             // is where the damage above expects it too: the drawing
             // and the damage read one list.

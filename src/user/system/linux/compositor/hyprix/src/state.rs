@@ -309,6 +309,9 @@ struct Compositor<'r> {
     lock: Option<Lock>,
     /// Whether a lock goes on `authd`'s grant, and the channel it comes by.
     grants: crate::grants::Grants,
+    /// The trusted prompt (`docs/SETTINGS-WRITER.md` §12.4): `settingsd`'s
+    /// question to the person at the seat, through `sessiond`.
+    prompts: crate::prompt::Prompts,
     /// lode's crash screenshots: this compositor as seat0's provider, when
     /// `sessiond` gave it the session's token (`docs/LOGGING.md` §19).
     lodeshot: crate::lodeshot::Provider,
@@ -671,6 +674,7 @@ impl<'r> Compositor<'r> {
             shots: Vec::new(),
             lock: None,
             grants: crate::grants::Grants::adopted(),
+            prompts: crate::prompt::Prompts::adopted(),
             lodeshot: crate::lodeshot::Provider::new(options.lode.clone()),
             lock_grace,
             method: None,
@@ -783,6 +787,7 @@ impl<'r> Compositor<'r> {
         changed |= self.carry_asks(asks, now);
         self.after_clients();
         changed |= self.carry_grants();
+        changed |= self.carry_prompt();
         self.carry_lodeshot();
         changed |= self.run_asked(asked, &placements, now);
         changed |= self.drop_gone();
@@ -1111,6 +1116,7 @@ impl<'r> Compositor<'r> {
                     &snapshot,
                     &mut self.plugins,
                     self.options.settings.as_deref(),
+                    self.prompts.up(),
                 ) {
                     Ok(todo) => asked.extend(todo),
                     Err(_) => {
@@ -1214,7 +1220,9 @@ impl<'r> Compositor<'r> {
             self.ready.as_deref()
         };
         let inputs = self.devices.take(ready);
-        if crate::knobs::trace_input() {
+        // No trace while a trusted prompt is up: not even how many keys
+        // came (ledger 3636 (8)).
+        if crate::knobs::trace_input() && !self.prompts.up() {
             let ready = self.ready.as_deref().map_or(usize::MAX, |fds| {
                 self.devices
                     .raw_fds()
@@ -1231,7 +1239,7 @@ impl<'r> Compositor<'r> {
         }
         let mut changed = false;
         for taken in inputs {
-            changed |= self.take_one(taken, now, placements);
+            changed |= self.take_one(taken, now, placements, true);
         }
         // A virtual pointer's input has no report and no stamp; its
         // relative motion is sent with the time it is carried out.
@@ -1241,10 +1249,43 @@ impl<'r> Compositor<'r> {
                 at: 0,
                 forwarded: false,
             };
-            changed |= self.take_one(taken, now, placements);
+            changed |= self.take_one(taken, now, placements, false);
         }
         self.stamp = 0;
         changed
+    }
+
+    /// One input while a trusted prompt is up (§12.4, P3): a virtual
+    /// device's is dropped; the seat's own goes through the seat, so that
+    /// what it holds stays true, and then to the prompt alone -- no bind
+    /// fires and no client is sent anything.
+    fn take_for_prompt(&mut self, taken: crate::front::Taken, physical: bool) -> bool {
+        if !physical {
+            return false;
+        }
+        self.last_input = Instant::now();
+        let input = taken.input;
+        let _ = self.seat.input(input);
+        match input {
+            crate::seat::Input::Key { code, pressed, .. } => {
+                let modifiers = self.seat.keyboard().modifiers();
+                let keysym = self
+                    .seat
+                    .keyboard()
+                    .key_of(code)
+                    .and_then(|key| key.keysym(modifiers.depressed | modifiers.locked));
+                let _ = self.prompts.key(code, pressed, keysym);
+            }
+            crate::seat::Input::Button { button, pressed } => {
+                let _ = self.prompts.button(button, pressed, self.seat.pointer());
+            }
+            _ => {}
+        }
+        for line in self.prompts.take_said() {
+            (self.report)(&line);
+        }
+        // The pointer moved, or the prompt changed: a frame either way.
+        true
     }
 
     /// Look at `/dev/input` again when it is due, open what has been
@@ -1274,13 +1315,32 @@ impl<'r> Compositor<'r> {
     }
 
     /// One input: through the seat, to the clients, and to the dispatchers
-    /// its binds fire. Gives whether anything changed.
+    /// its binds fire. Gives whether anything changed. `physical` is whether
+    /// it came from the seat's own devices rather than a virtual one: only
+    /// those reach the trusted prompt (§12.4, P3, P8).
     fn take_one(
         &mut self,
         taken: crate::front::Taken,
         now: u32,
         placements: &[(String, Rect)],
+        physical: bool,
     ) -> bool {
+        // P8: Ctrl+Alt+Delete is the compositor's alone, before the binds
+        // and before any client.
+        if physical
+            && let crate::seat::Input::Key {
+                code,
+                pressed,
+                repeat,
+            } = taken.input
+            && self.prompts.trusted_key(code, pressed, repeat)
+        {
+            self.follow_keyboard();
+            return true;
+        }
+        if self.prompts.up() {
+            return self.take_for_prompt(taken, physical);
+        }
         // Any input at all ends the idle: that is what the protocol
         // measures, and what `forceidle` was pretending about.
         self.last_input = Instant::now();
@@ -1517,6 +1577,9 @@ impl<'r> Compositor<'r> {
         for request in self.lodeshot.read(self.report) {
             if self.lock.is_some() {
                 self.lodeshot.answer(request, Err("the session is locked"));
+            } else if self.prompts.up() {
+                // P6: no picture of a prompt, ever.
+                self.lodeshot.answer(request, Err("a system prompt is up"));
             } else if let Some(screen) = self.screens.first() {
                 self.lodeshot.answer(request, Ok(screen_pixels(screen)));
                 (self.report)(&format!(
@@ -1527,6 +1590,46 @@ impl<'r> Compositor<'r> {
                 self.lodeshot.answer(request, Err("there is no screen"));
             }
         }
+    }
+
+    /// The trusted prompt's channel: what `sessiond` relayed, a lock that
+    /// denies it, and what ended by its own clock. Gives whether the screen
+    /// changed.
+    fn carry_prompt(&mut self) -> bool {
+        let was_asking = self.prompts.asking();
+        let woke = self
+            .prompts
+            .raw_fd()
+            .is_some_and(|fd| self.ready.as_ref().is_none_or(|ready| ready.contains(&fd)));
+        let mut changed = false;
+        if woke {
+            changed |= self
+                .prompts
+                .read(self.lock.is_some(), !self.screens.is_empty());
+        }
+        if self.lock.is_some() {
+            self.prompts.lock_taken();
+        }
+        if !was_asking && self.prompts.asking() {
+            // P5: what is held as it comes up answers nothing when let go.
+            let keys = self
+                .seat
+                .keyboard()
+                .pressed()
+                .iter()
+                .map(|code| u32::from(*code));
+            self.prompts.note_held(keys);
+            // The keyboard leaves every client while it is up.
+            self.follow_keyboard();
+        }
+        changed |= self.prompts.tick(Instant::now());
+        for line in self.prompts.take_said() {
+            (self.report)(&line);
+        }
+        if changed && !self.prompts.up() {
+            self.follow_keyboard();
+        }
+        changed
     }
 
     /// The lock channel: what `sessiond` said, a waiting unlock given up on,
@@ -1734,6 +1837,16 @@ impl<'r> Compositor<'r> {
         let mut monitors = false;
         let mut arranged_by_hand = false;
         let mut screens_asked = Vec::new();
+        // A plugin's dispatchers and keywords while a trusted prompt is up
+        // are refused: nothing but the seat reaches it (§12.4, ledger 3636
+        // (6)). hyprctl's are refused at the socket.
+        if self.prompts.up() && !asked.is_empty() {
+            (self.report)(&format!(
+                "hyprix: {} request(s) refused while a system prompt is up",
+                asked.len()
+            ));
+            return false;
+        }
         for reply in asked {
             // `hyprctl output create headless` and `output remove`: a
             // screen added or taken away, once the requests are read.
@@ -2438,8 +2551,16 @@ impl<'r> Compositor<'r> {
     fn follow_keyboard(&mut self) {
         // Who the keyboard is on. A locked session takes it away from every
         // window and gives it to the lock's own surface, so that a key
-        // typed at a lock screen cannot reach what is behind it.
-        if let Some(held) = self.lock.as_ref() {
+        // typed at a lock screen cannot reach what is behind it. A trusted
+        // prompt takes it from everyone (§12.4, P3).
+        if self.prompts.up() {
+            self.focus.follow(
+                None,
+                &mut self.slots,
+                self.seat.keyboard().pressed(),
+                self.seat.keyboard().modifiers(),
+            );
+        } else if let Some(held) = self.lock.as_ref() {
             // The lock surface on the focused monitor, or the first one it
             // covered; a lock whose program has gone gets nothing, which
             // leaves the keyboard on no client at all.
@@ -2603,6 +2724,11 @@ impl<'r> Compositor<'r> {
             .as_ref()
             .and_then(|held| held.waiting)
             .map(|until| until.saturating_duration_since(Instant::now()));
+        // The prompt's arming, its last words and P8's notice end by the clock.
+        let prompt_wait = self
+            .prompts
+            .next_wake()
+            .map(|at| at.saturating_duration_since(Instant::now()));
         [
             frame_wait,
             idle_wait,
@@ -2613,6 +2739,7 @@ impl<'r> Compositor<'r> {
             injected_wait,
             request_wait,
             unlock_wait,
+            prompt_wait,
             self.wallpapers
                 .next_retirement()
                 .map(|at| at.saturating_duration_since(Instant::now())),
@@ -2670,6 +2797,7 @@ impl<'r> Compositor<'r> {
                 .and_then(crate::children::Children::raw_fd),
         );
         fds.extend(self.grants.raw_fd());
+        fds.extend(self.prompts.raw_fd());
         fds.extend(self.lodeshot.raw_fd());
         // A client whose socket was full has bytes waiting for it; the loop
         // wakes when it can take them, not only when it next asks something.

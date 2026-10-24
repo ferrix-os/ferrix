@@ -28,5 +28,12 @@ ferrix-lode-core = { path = "../../../../../lib/log/lode" }
 # The session's scope, through the init's control socket (docs/INIT.md §5.6).
 ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
 
+[features]
+default = ["settings-prompt"]
+# The trusted prompt's relay (docs/SETTINGS-WRITER.md §12.3): xtask builds
+# sessiond without it for an image whose settings writer is absent
+# (ledger 3636 (10)).
+settings-prompt = ["compositor-seat/settings-prompt"]
+
 [lints]
 workspace = true

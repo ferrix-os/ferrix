@@ -49,6 +49,11 @@ pub(crate) mod pace;
 pub mod plane;
 pub mod plugins;
 pub mod pool;
+#[cfg(feature = "settings-prompt")]
+pub mod prompt;
+#[cfg(not(feature = "settings-prompt"))]
+#[path = "prompt_absent.rs"]
+pub mod prompt;
 pub mod rules;
 pub mod scope;
 pub mod seat;

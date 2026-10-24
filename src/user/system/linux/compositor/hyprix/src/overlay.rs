@@ -479,9 +479,10 @@ impl Overlay {
     }
 }
 
-/// Something the overlay draws, in the first screen's own pixels.
+/// Something the overlay draws, in the first screen's own pixels; the
+/// trusted prompt draws with the same marks (`crate::prompt`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Mark {
+pub(crate) enum Mark {
     /// A box blurred behind and filled, corners cut.
     Panel {
         rect: Rect,
@@ -514,6 +515,12 @@ pub struct Stamp {
 }
 
 impl Picture {
+    /// A picture of `marks`, which cover `stamp.rect`.
+    #[cfg(feature = "settings-prompt")]
+    pub(crate) const fn of(marks: Vec<Mark>, stamp: Stamp) -> Picture {
+        Picture { marks, stamp }
+    }
+
     /// The boxes whose blur reads what is behind them, which the damage
     /// redraws whole when it touches them.
     pub(crate) fn blurred(&self) -> impl Iterator<Item = Rect> + '_ {

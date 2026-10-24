@@ -2,7 +2,7 @@
 //! `authd` says the person may (`docs/SETTINGS-WRITER.md`).
 //!
 //! ```text
-//! settingsd [--root DIR] [--socket PATH] [--authd PATH] [--control PATH]
+//! settingsd [--root DIR] [--socket PATH] [--authd PATH] [--control PATH] [--prompt PATH]
 //! ```
 //!
 //! Root, started by init on the first connection to `settings.socket`
@@ -15,11 +15,14 @@
 //! `--root` puts every file it reads and writes under another directory,
 //! and the other options name the sockets, for its own tests.
 
+mod apps;
 mod atomic;
 mod audit;
 mod authority;
 mod conversation;
+mod identity;
 mod requests;
+mod seat;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -58,6 +61,7 @@ struct Options {
     socket: Option<PathBuf>,
     authd: Option<PathBuf>,
     control: Option<PathBuf>,
+    prompt: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -66,6 +70,7 @@ fn options() -> Result<Options, String> {
         socket: None,
         authd: None,
         control: None,
+        prompt: None,
     };
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
@@ -80,6 +85,7 @@ fn options() -> Result<Options, String> {
             Some("--socket") => options.socket = Some(value("--socket")?),
             Some("--authd") => options.authd = Some(value("--authd")?),
             Some("--control") => options.control = Some(value("--control")?),
+            Some("--prompt") => options.prompt = Some(value("--prompt")?),
             _ => {
                 return Err(format!("unknown argument {}", argument.to_string_lossy()));
             }
@@ -120,6 +126,12 @@ fn run() -> Result<(), String> {
         )),
         passwd: under(&options.root, "/etc/passwd"),
         writing: Mutex::new(()),
+        identify: Box::new(identity::Proc),
+        prompt: options.prompt.unwrap_or_else(seat::socket),
+        trusted_uid: 0,
+        listener_uid: 0,
+        cancelled: Mutex::new(HashMap::new()),
+        prompts: std::sync::atomic::AtomicU64::new(1),
     });
     say(&format!("settingsd: listening on {}", socket.display()));
     serve(&listener, &context);

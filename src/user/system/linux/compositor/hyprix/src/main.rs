@@ -25,6 +25,15 @@ fn main() {
         ),
         None => {}
     }
+    // And the trusted prompt's channel (docs/SETTINGS-WRITER.md §12.3):
+    // settingsd's questions to the person at the seat.
+    match hyprix::prompt::adopt() {
+        Some(true) => report("hyprix: settingsd's trusted prompts come through sessiond"),
+        Some(false) => report(
+            "hyprix: sessiond named a prompt channel that could not be taken; no prompt can be shown",
+        ),
+        None => {}
+    }
     // And the session's token, which lode trusts a screenshot provider by
     // (docs/LOGGING.md §19): out of the environment before any child.
     let lode = hyprix::lodeshot::adopt();

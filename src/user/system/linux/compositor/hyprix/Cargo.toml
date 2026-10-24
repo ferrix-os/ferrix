@@ -70,5 +70,12 @@ compositor-shm = { path = "../shm" }
 # lode's screenshot protocol, for the crash-screenshot test.
 ferrix-lode-capture = { path = "../../../../../lib/proto/lode-capture" }
 
+[features]
+default = ["settings-prompt"]
+# The trusted prompt (docs/SETTINGS-WRITER.md §12.4): xtask builds hyprix
+# without it for an image whose settings writer is absent (ledger 3636
+# (10)), and then src/prompt_absent.rs stands in, with nothing to draw.
+settings-prompt = ["compositor-seat/settings-prompt"]
+
 [lints]
 workspace = true

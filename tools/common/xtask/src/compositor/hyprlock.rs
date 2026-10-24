@@ -195,7 +195,10 @@ const HYPRLOCK_UNSET_BINDS: [(&str, &[&str]); 1] = [("L, which runs hyprlock", &
 /// What the hyprlock boots carry: hyprlock and its configuration, authd,
 /// root's, `ferrix`'s and authd's accounts, the font, and one account's
 /// password where one is given.
-fn hyprlock_files(arch: Arch, seed: Option<(&str, &str)>) -> Result<Vec<crate::ports::File>> {
+pub(super) fn hyprlock_files(
+    arch: Arch,
+    seed: Option<(&str, &str)>,
+) -> Result<Vec<crate::ports::File>> {
     let data = crate::apps::folder("hyprlock")?.join("tests/data");
     let read = |path: &Path| -> Result<Vec<u8>> {
         std::fs::read(path)

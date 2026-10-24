@@ -11,7 +11,10 @@ atomically and records it.
 
 Sections 1 to 8 are the design; §9 is what B1 built and what each later
 row adds; §10 is the certification consultant's review (OK IF, ledger line
-3482); §11 is where it stands.
+3482); §11 is where it stands. §12 is the trusted prompt and the per-area
+allow-lists, the customer's review fix of 2026-10-24; §13 is the image
+manifest a Settings app reads to show a page fixed by its build (ledger
+3558).
 
 ## 1. In one page
 
@@ -442,3 +445,454 @@ default name: ...", and never stops the boot. `test-settings`' image is
 called `settings-gate`, and its first step requires the file and
 `hostname` to agree; its control (the call removed) FIRED. Code review OK
 IF (1)-(4), ledger line 3686, on design review 3636 (18).
+
+2026-10-24: **the trusted prompt and the per-area lists built** (§12):
+design OK IF (1)-(20), ledger 3636; code OK IF (A1)-(A8), ledger 3779.
+The customer answered 3636 (3) on 2026-10-24: the password relay for
+accounts with no seat stays, as built (§12.7).
+
+## 12. The trusted prompt and the per-area allow-lists
+
+The customer's review fix of 2026-10-24, about 02:40: **before `settingsd`
+acts on a request from an app, a prompt the requesting app cannot draw or
+fake asks the person to confirm, and each area has a list of the programs
+allowed to ask for it at all.** Designed against B1 as built; the
+consultant's design review is §12.10.
+
+### 12.1 What it closes
+
+B1 relays `authd`'s questions to the client (§5 step 4). So the program
+that asked draws the password field and reads the password, and the
+consultant's residual (ledger 3482 (a), `docs/AUTH.md` TA.CLIENT) is that
+any process of a wheel member's uid can drive `settingsd` with a phished
+password, or with none under `Methods=none`, and nobody need be at the
+screen. Three gaps, each closed below:
+
+| Gap | Closed by |
+|---|---|
+| the requesting program sees the password | the question is put in the prompt, which hyprix draws; the program sees only the outcome (§12.3) |
+| no one has to be there (`Methods=none`, a password the program already has) | a change asked from the desktop's account is made only once a person answers the prompt with the seat's own keyboard or pointer (§12.4 P3) |
+| any program may ask for any area | each area names the programs that may ask; any other is refused before anything is shown (§12.5) |
+
+### 12.2 How others do it, and what is taken
+
+* **polkit and its agents.** The mechanism (here `settingsd`) asks
+  `polkitd`, which asks the *session's registered agent* to authenticate;
+  the agent is a session process (gnome-shell, `polkit-kde-agent`), so the
+  calling app never sees the password. Identity is the caller's
+  `unix-process` subject, pid and start time, which CVE-2013-4288 and
+  CVE-2021-4034's family showed is racy when read by pid. *Taken:* the
+  mechanism never draws or reads; the session's own trusted component
+  asks. *Not taken:* a registrable agent (any session process could
+  register one on a bus); here there is one asker, wired by `sessiond`.
+* **GNOME Shell's system prompts** (`ShellPolkitAuthenticationAgent`,
+  gcr's `SystemPrompter`): drawn by the compositor process itself as a
+  system-modal dialog, with a pointer and keyboard grab and the screen
+  dimmed. A fullscreen client can still paint a look-alike, which GNOME
+  accepts. *Taken:* the compositor draws it and holds the input while it
+  is up.
+* **macOS TCC** (`tccd`, prompts drawn by `UserNotificationCenter`, a
+  system process): the requester is named by its **code signature taken
+  from the kernel's audit token** of the message, not by anything the app
+  says or its pid; the prompt's text is the system's, with the app's
+  stated reason quoted as such. Password fields use *secure event input*,
+  which no other process can read. *Taken:* the requester named by the
+  kernel's record of the connection, the text written by the system;
+  input no client can read.
+* **Windows UAC on the secure desktop**: consent is shown on a desktop
+  no user-mode app of the session can draw on or send input to, over a
+  dimmed still of the screen; the **secure attention sequence**
+  (Ctrl+Alt+Delete), which no app can intercept, is the trusted path to
+  the real credential prompt ("require trusted path for credential entry").
+  *Taken:* while a prompt is up nothing of any client is drawn or receives
+  input, and synthetic input is not input; and one key combination only
+  hyprix answers, which tells a real prompt from a picture of one.
+* **Firefox's `security.dialog_enable_delay`** (1 s): a dialog's buttons
+  ignore input for its first second, so a click or key aimed at what was
+  there before cannot answer it. *Taken* as P5.
+
+### 12.3 Who draws it, and how the request reaches it
+
+**hyprix draws it**, as part of its own frame, not as any client's surface.
+In a session hyprix runs as the person's uid (`docs/AUTH.md` §6), but it is
+the one process of that uid that already sees every key and owns every
+pixel; a client cannot write to it, read its memory (no `ptrace`, no
+`/proc/<pid>/mem`) or reopen its inherited sockets (§3.7).
+
+```
+settingsd (root)                    sessiond (root, the seat's owner)          hyprix (uid 1000)
+  peer is the seat's account?
+  connect /run/ferrix/prompt -----> listener 0600 root, peer uid must be 0
+                                    "seat <uid>" for the session's account
+  ASK id, area, program, what ----> uid is the session's? ----fd 5------>  draws the prompt on every screen
+  (authd's PROMPT "Password:")      relays, line for line                  physical keys and pointer only
+  QUESTION id, visible, text -----> -------------------------------------> a field in the prompt
+                                                                  <------  ANSWER id secret | ALLOW id | DENY id why
+  <------------------------------- relays, and nothing of its own
+  RESPOND to authd; on ACCEPTED: apply, audit
+  CLOSE id, outcome --------------> --------------------------------------> the prompt goes
+```
+
+* **settingsd to sessiond** on a `SOCK_SEQPACKET` socket at
+  `/run/ferrix/prompt`, mode 0600, owned by root, which `sessiond` binds
+  when the session starts and removes when it ends. Each side checks the
+  other by `SO_PEERCRED`: `sessiond` serves only uid 0, `settingsd` talks
+  only to a listener of uid 0 (U1's shape). One connection carries one
+  prompt.
+* **sessiond to hyprix** on a third socket pair, descriptor 5
+  (`compositor_seat::prompt`, `FERRIX_PROMPT_FD`), beside the devices' 3
+  and the lock's 4 and made the same way: no path, close-on-exec in hyprix
+  at once, not reopenable through `/proc`. A separate pair, so §3.7's rule
+  that any line on 4 but `locked`/`unlocked` ends the session stands.
+* **`sessiond` relays and decides nothing about the change**: it checks
+  that the uid `settingsd` names is the session's account, keeps one prompt
+  at a time (a second is answered `busy`), and passes each line to the
+  other side unchanged. What it takes from hyprix is only `ALLOW`, `ANSWER`
+  or `DENY` for the open prompt's id; anything else from hyprix ends the
+  prompt as denied.
+* `authd` is unchanged: `settingsd` still runs the conversation and acts on
+  ACCEPTED itself (§5); only the *person* it relays to changes. The
+  password now passes through `sessiond` and hyprix, both of which see the
+  keyboard anyway, and never through the requesting program.
+
+### 12.4 The prompt's rules, in hyprix
+
+* **P1. Its own frame.** While a prompt is up, every screen is drawn
+  from hyprix alone: the background colour, and the prompt centred on each
+  screen. No window, layer surface, popup, lock surface, drag icon or
+  client cursor is drawn (the screen is drawn as a lock with no lock
+  surface, §3.7, plus the prompt); the pointer is hyprix's own arrow. So no
+  client can draw on, beside or over it, and nothing a client drew is in
+  view to dress it up.
+* **P2. Its text is `settingsd`'s.** The heading names the program as the
+  kernel recorded it (P-S2 below: its executable's path and the one that
+  started it), and the body is the dry run's own `would` line ("would
+  call the computer box; it is called ferrix") with the account's name.
+  Nothing in it is the requesting program's words.
+* **P3. Physical input only.** Keys and pointer events from the seat's
+  devices go to the prompt and to nothing else: no bind fires (a
+  `bindl` on a letter would be a keylogger written into the user's own
+  `hyprland.conf`), no client is sent a key or a button, and the keyboard
+  leaves every client while it is up. What `zwp_virtual_keyboard_v1`,
+  `zwlr_virtual_pointer_v1`, `sendshortcut` and `pass` inject is dropped
+  while a prompt is up and never reaches it.
+* **P4. Answers.** With a question: the field takes the typed characters
+  (the seat's layout), Backspace, and Return or **Allow** answers with it;
+  with none (`Methods=none`, or root's own requests never come here),
+  **Allow** or Return. Escape or **Cancel** denies. The secret is held in
+  one buffer, zeroed when sent or the prompt goes, and never drawn (dots).
+* **P5. A second before it answers.** Input in the prompt's first second
+  is ignored, and a key or button counts only when it went down after the
+  prompt was shown, so Return or a click aimed at a window cannot answer a
+  prompt that came up under it.
+* **P6. Not in any picture.** While a prompt is up every screenshot
+  (`zwlr_screencopy`, `ext-image-copy-capture`, lode's crash screenshots)
+  is refused or blacked out whole, so no program can read the prompt or
+  the dots, or capture a real one to imitate it.
+* **P7. Not over a lock, not without a screen.** A prompt asked for while
+  the session is locked, or with no screen on, is denied at once (`DENY id
+  locked`); one up when a lock is taken is denied.
+* **P8. The trusted key.** **Ctrl+Alt+Delete** is hyprix's alone, at all
+  times: never a bind, never sent to a client. With a prompt up it does
+  nothing but show that the prompt is real (the prompt's footer says so);
+  with none, hyprix shows for three seconds, drawn as P1, "No system
+  prompt is waiting — a window asking for your password now is not
+  Ferrix". So a person unsure of a dialog presses the key: a real prompt
+  stays, a picture of one is replaced by hyprix's own screen. Every prompt
+  says "Ctrl+Alt+Delete shows that this prompt is real" in its footer.
+* **P9. One at a time, and ended by its owner.** One prompt is up at once.
+  `CLOSE` from `settingsd` ends it; so do a `DENY`, two minutes with no
+  answer (`settingsd`'s §5 timeout), the session's end, and hyprix's
+  channel closing.
+
+### 12.5 The rules, in `settingsd`
+
+The order of the checks for a request (`conversation::answer`), each
+before the next:
+
+1. **S1. Valid** (§4), as B1: refused `invalid`, unrecorded, nothing
+   shown.
+2. **S2. Root asks nothing**, as B1. A root peer is neither listed nor
+   prompted: root could write the file itself.
+3. **S3. On the area's list.** The requester is the executable of the
+   peer's pid as `SO_PEERCRED` recorded it at `connect`, read by root from
+   `/proc/<pid>/exe` with the pid's start time (`/proc/<pid>/stat` field
+   22) at accept, and read again once the request has arrived: a pid that
+   is gone, whose executable or start time changed, or that started after
+   the accept is refused (ledger 3636 (4)). The parent's executable is
+   read beside it for the prompt's text. The area's list names the
+   programs, by absolute path, that may ask for it; any other is refused
+   `not-permitted` ("… may not ask to change the computer's name"),
+   recorded `result=not-listed`, with nothing shown. The lists are image
+   content, one file `/lib/ferrix/settings/apps` (`area = /bin/settings
+   /bin/settingsctl`, a line an area), read on every request as authd's
+   policies are. An entry counts only if it is an absolute path to a
+   root-owned file that is not group- or world-writable, in directories
+   that are likewise; any other entry is ignored with a warning. A line
+   that does not parse makes the file allow nothing, and a missing or
+   unreadable file, or an area it does not name, allows no program (fail
+   closed). Shipped: `hostname`, `time` and `services` each allow
+   `/bin/settings` and `/bin/settingsctl`.
+4. **S4. The seat's accounts ask on the seat, from the image's word, not
+   the socket's** (ledger 3636 (1)). `settingsd` reads which accounts have
+   the seat from the configuration `sessiond` is started from: the
+   `hyprix.service` unit (`/etc/ferrix/units`, else `/lib/ferrix/units`),
+   whose `ExecStart=` runs `sessiond --user NAME`. Then:
+   * **a seat account** is served only through the prompt: `settingsd`
+     connects to `/run/ferrix/prompt`, and the conversation's person is
+     the prompt (§12.3); the client is sent only `INFO` ("confirm on the
+     screen") and the end. With no session of it up (no socket, or one
+     whose session is another account's) it is refused `unavailable`,
+     "confirm on the desktop; no desktop is running". A listener that is
+     not uid 0, one that is busy or silent, a broken line: refused
+     `unavailable`. **A seat account is never relayed to its client**, so
+     killing the compositor (§6.4, E6) leaves a program nothing to ask.
+   * **an account the image gives no seat** (a console or ssh user on an
+     image whose desktop is another account's, or that has none) is
+     relayed to its client as B1 does, the password typed at a terminal
+     as `su`'s is; but **a relayed ACCEPTED with no question** (`Methods=none`)
+     is refused `not-permitted`, "needs the desktop: this area asks no
+     password, so it must be confirmed on the seat", recorded
+     `result=needs-seat` (ledger 3636 (2)). The relay never applies a
+     change nobody typed anything for.
+   * **a configuration that cannot be read** (the unit there but
+     unreadable, or its `ExecStart=` naming sessiond without an account)
+     refuses every non-root request `unavailable`.
+5. **S5. The conversation**, as §5, with the prompt as the person.
+   `authd`'s PROMPT opens the prompt with its question; an ACCEPTED with
+   no question (`Methods=none`) opens it then with Allow and Cancel and
+   waits for the answer. A refusal before any question (not in the
+   group, a locked account) shows no prompt. Only after ACCEPTED *and* the
+   prompt's answer does `settingsd` apply.
+6. **S6. After a Cancel, a pause.** A person's Cancel refuses that program's
+   requests for the same area for 30 s (`cancelled`, "you said no a
+   moment ago"), so a program cannot put the prompt back up as fast as
+   it is dismissed.
+
+The audit record (§8) gains `program=` (the requester's path), and
+`auth=` gains `seat` beside `password`, `none` and `root`:
+`auth=seat+password` when the prompt asked a question, `auth=seat` when it
+only confirmed. A refusal by the list is recorded with `result=not-listed`;
+a Cancel with `result=cancelled`.
+
+### 12.6 The lines
+
+`compositor_seat::prompt`, one line each way per record, fields
+space-separated, each text field percent-escaped (`%20`, `%25`, nothing
+below 0x20 unescaped), every line at most 2 KiB. The same records on both
+hops; `seat` is the listener's first line on settingsd's.
+
+```
+sessiond -> settingsd  seat UID                       the session's account
+settingsd -> hyprix    ask ID AREA PROGRAM PARENT ACCOUNT WHAT
+                       question ID VISIBLE TEXT       a field, with authd's text
+                       info ID TEXT                   authd's INFO or ERROR, under the field
+                       confirm ID                     Allow and Cancel, no field
+                       close ID TEXT                  the end; TEXT is shown for a second
+hyprix -> settingsd    answer ID SECRET               the field's text, with Allow
+                       allow ID                       Allow, with no field
+                       deny ID WHY                    cancelled | locked | timeout | busy
+```
+
+### 12.7 What it leaves
+
+* **A look-alike can still be painted** while no prompt is up, as a fake
+  lock screen can (`docs/AUTH.md` §2.3). It gains nothing from
+  `settingsd` (only the real prompt's answer counts), but it can phish a
+  password that `su` would take. P8 is the trusted path §2.3 asked for:
+  it helps a person who uses it.
+* **The list is not a boundary against the user's own code.** A program
+  of the account can run `/bin/settings` or `/bin/settingsctl`, or drive
+  their windows; the list keeps every other program (a browser, a game)
+  from raising a prompt at all, and the prompt names who asked and what
+  would change. Reading the executable by pid has polkit's race (a
+  process that forks and execs after `connect`); its worst case is a
+  wrong name on a prompt the person still has to answer.
+* **The relay for an account with no seat** is a prompt the terminal
+  program draws, not one the requesting program cannot: it is `su`'s
+  shape, a password typed at a terminal, and a program of that account
+  that has phished the password can drive it as it can drive `su`. It
+  never applies a change with no password typed (S4). **The customer's
+  decision, 2026-10-24** (ledger 3636 (3)): keep it, as built -- an
+  account with no seat is asked at its terminal, as `su` asks, and an
+  acceptance with no password typed is refused.
+* **Physical input** is what arrives on the evdev descriptors `sessiond`
+  opened for hyprix (descriptor 3). Ferrix has no `uinput`; a
+  user-creatable input device would need its own review. The machine's
+  host -- QEMU's or crosvm's window, a KVM switch -- is in the trusted
+  base, as the keyboard is; a VNC or RDP server *inside* the session is a
+  client and cannot answer.
+* **One prompt at a time** on the seat: a program can keep its own
+  request up for two minutes and so hold the seat's prompt; S6 and the
+  per-uid cap of two (§6) bound it, and Cancel ends it.
+
+### 12.8 Absent where `settings_writer = absent` (ledger 3558 (13))
+
+What the writer key leaves out of an image, this included: `settingsd`,
+`settingsctl`, the `settings.*` policies, `/lib/ferrix/settings/apps`, and
+**the prompt itself** -- hyprix's, `sessiond`'s and `compositor_seat`'s
+prompt code is the cargo feature `settings-prompt` of each, which xtask
+alone sets from the image's writer (ledger 3636 (10)): the image build
+refuses an image whose `settingsd` and prompt feature disagree, either
+way, and an image check (`settingsd::check_prompt`) finds no `FERRIX_PROMPT_FD` mark
+in an absent-writer image's hyprix and sessiond, and finds it in a
+present-writer image's. Without the
+feature hyprix opens no descriptor 5 and has no prompt to draw; P8's key is
+then plain input again; `sessiond` binds no `/run/ferrix/prompt` and makes
+no fifth descriptor. xtask's `settingsd::writer()` reads the key from
+the image manifest's own source (`flags::this_image`, `docs/BUILD-FLAGS.md`
+§5.1).
+
+### 12.9 How it is tested
+
+* **Host tests.** `compositor_seat::prompt`: every record round-trips, an
+  over-long, unescaped or unknown one is refused, a secret is in no
+  `Debug`. hyprix's prompt (`prompt/tests.rs`): P4, P5 (a key held when
+  the prompt came up, and one in its first second, answer nothing), P7,
+  P8, P9, P2's escaping (U+202E, U+2028, format and tag characters; the
+  asker's paths shown as printable ASCII), the field one fixed block that
+  never moves as it fills, nothing of it in `Debug`, the control socket
+  refusing a dispatcher, a keyword and a reload while a prompt is up, and
+  every reader of a screen's pixels listed, so a new one must be guarded
+  (P6). P3 -- injected input, binds, no key to a client -- is the boot's,
+  through T1 and T8. `sessiond`'s relay: only the session's account, one
+  prompt at a time, an answer only for the open prompt, anything else
+  ending it denied. `settingsd`: S3 (a program off the list, or not the
+  one that connected, refused before anyone is asked), S4 (a seat account
+  with no desktop, a busy seat, a listener that is not root and a session
+  unit that cannot be read -- a drop-in, a mask, a wrapped `sessiond` --
+  each refused before `authd` is asked, never relayed), S5 (ACCEPTED with
+  no question waits for Allow; a Cancel or a denied field makes nothing),
+  S6, a relayed acceptance with no question refused `needs-seat`, an
+  unknown request `unsupported` with words, and the client's words when
+  there is no `settingsd`.
+* **`cargo xtask test-compositor --boot settings-prompt`**, a session
+  desktop as `ferrix` (wheel) with authd, settingsd and sessiond; the
+  person's keys are QEMU's. A bind runs `/etc/ask.sh`, a program of
+  `ferrix`'s, which runs `settingsctl` and, while its prompt is up, types
+  the password and Return with `vkbd` and takes a screenshot with `shot`.
+  Required: the prompt comes up; a bind pressed while it is up does not
+  fire; QEMU's own screendump shows the prompt's background at every
+  corner (no client); the injected keys answer nothing within ten
+  seconds; the screenshot is black; a wrong password typed in it is
+  refused and changes nothing; the right one renames the machine; in an
+  Allow-only prompt (`Methods=none` for `settings.services`) Return in its
+  first second is nothing and Return after it turns sshd on; Escape in one
+  makes nothing; `/tmp/unlisted` (settingsctl's bytes at another path) is
+  refused with no prompt; `/proc/<hyprix>/fd/5` cannot be opened ("No such
+  device or address"); Ctrl+Alt+Delete with no prompt up is hyprix's.
+* **`test-settings`** stays the console's test of B1's relay path for an
+  account with no seat, with two more lines: a program off the list
+  refused, and a `Methods=none` relay refused (`needs-seat`).
+* **Negative controls**, each through `fleet/gate.sh control` with its
+  step's own sentence (T5, T9 and TF on the host):
+
+  | | Edit | Sentence it must make |
+  |---|---|---|
+  | T1 | hyprix: injected input reaches the prompt | `an injected key answered the trusted prompt` |
+  | T2 | settingsd: the seat routing skipped | `a request from the desktop was answered without the trusted prompt` |
+  | T3 | settingsd: the list check skipped | `a program off the list was not refused` |
+  | T4 | hyprix: screenshots not blacked out | `a screenshot showed the trusted prompt` |
+  | T5 | settingsd: a seat account relayed when its desktop's socket is gone (host, `check-side`) | `a_seat_account_with_no_seat_to_ask_is_refused ... FAILED` |
+  | T6 | settingsd: the needs-seat refusal removed | `a Methods=none relay changed the computer's name` |
+  | T7 | hyprix: the frame not the prompt's while one is up | `a client was drawn while the trusted prompt was up` |
+  | T8 | hyprix: input goes the usual way while a prompt is up | `a bind fired while the trusted prompt was up` |
+  | T9 | hyprix: P5's first second removed (host, `check-side`: the boot's Return lands after the first second) | `input_before_it_is_armed_or_held_from_before_answers_nothing ... FAILED` |
+  | T10 | settingsd: applies after a Cancel of an Allow-only prompt | `a cancelled prompt changed something` |
+  | TF | xtask: hyprix built without the prompt on a present-writer image (host) | `has no trusted prompt, but this image's settings writer is present` |
+
+  The other direction of TF, the feature planted on an absent-writer
+  image, waits for the first `max` or `fast` image that builds
+  (`docs/BACKLOG.md`); until then the host test
+  `a_prompt_that_disagrees_with_the_writer_is_refused` holds both.
+
+### 12.10 The design review
+
+Design review before code, 2026-10-24: **OK IF (1)-(20)**, ledger line
+3636 (`~/.local/share/ferrix/cert-consultant/reviews.md`). S4's `ENOENT`
+fallback is replaced by routing from the image's seat configuration, with
+no passwordless relay ((1)-(2)); whether the console/ssh relay stays is
+the customer's question ((3)); controls T1-T10 ((11)). §13: OK IF
+(14)-(16). B2, B3 and B6 may land on a code review alone under (17)-(20).
+Internal review, not independent verification (F-27).
+
+Code review, 2026-10-24: **OK IF (A1)-(A8)**, ledger line 3779 (verdict
+3782): the rows and T1-T10, TF FIRED on the landing hash; condition (3)
+answered by the customer on 2026-10-24 (keep the relay, §12.7); the field one block never grown
+(A3); `shown()` escaping every invisible character and the asker's paths
+as printable ASCII (A4) -- the values inside the dry run's line are each
+bounded by its request's validator (a host name's letters, a zone's name,
+a unit off the compiled list), so they are shown as they are; the session
+unit read as init reads it or refused (A5); the host tests above (A6);
+TF's other direction in `docs/BACKLOG.md` (A7); these docs (A8).
+
+The conditions this section does not already state in its own words:
+
+* **(5) The prompt's text.** Every field the requester or its parent
+  influences (the parent's path, the values inside the dry run's line) is
+  shown quoted, control and bidirectional characters escaped, cut to a
+  length; the line is built from the same decoded request that is applied,
+  one request a connection.
+* **(6) Not configurable.** No configuration key, `hyprctl keyword`,
+  dispatcher or plugin reaches P1-P9; a reload that changes the layout,
+  the devices or the outputs waits until the prompt closes; dispatchers
+  that move focus, send keys or answer are refused while it is up; the
+  control socket and the event stream show at most that a prompt is up,
+  never the field's length; Ctrl+Alt+Delete is matched before the binds
+  and before any client.
+* **(7) Every pixel path** -- screencopy, image-copy-capture, lode's
+  screenshots, the frame dumps -- is black whole while a prompt is up and
+  on the frame it closes on, and a host test lists the paths, so a new one
+  must join it.
+* **(8) The secret** is held in a zeroing buffer in hyprix and `sessiond`,
+  line and relay buffers included; hyprix is not dumpable
+  (`PR_SET_DUMPABLE` 0) from the prompt's opening until its buffer is
+  zeroed; no trace or log line written while it is up records keys or
+  their count; descriptor 5 is close-on-exec, never passed on, and
+  reopening `/proc/<hyprix>/fd/5` is `ENXIO`, as descriptor 4's is.
+* **(11) Controls** T5 (a seat account relayed while the desktop is down
+  or the socket gone), T6 (a `Methods=none` relay applied), T7 (a client
+  drawn while the prompt is up, read from QEMU's own screendump on the
+  host), T8 (a key or bind reaching a client or firing while the prompt is
+  up), T9 (P5's delay removed) and T10 (`settingsd` applying after a
+  `deny`), beside T1-T4, each through `fleet/gate.sh control` reading
+  FIRED.
+* **(12) Rows**: `check`, `test-compositor --boot settings-prompt`,
+  `test-settings`, `--boot hyprlock-session` and `--boot session-end`.
+* **(13) Docs**: `docs/AUTH.md` TA.CLIENT rewritten for this residual,
+  §2.3 and §6.5 saying the trusted key exists, §4.5 saying phase 3's
+  privilege prompts reuse this one.
+
+## 13. The image manifest: a page fixed by its build
+
+Ledger 3558 (14): a Settings app "reads a machine-readable image manifest
+(profile, runtime_settings, settings_writer) and shows such pages
+read-only, 'fixed by this build (profile max)'". The flag and the key are
+another agent's (the `ferrix-kernel-settings` crate, `runtime_settings` in
+`build-flags.toml` and the profiles, `settings_writer` beside
+`driver_updates`); this is the small interface between them and the app,
+so that whichever lands second connects to the other.
+
+* **The file** is the settings crate's (`docs/BUILD-FLAGS.md` §5.1, on
+  its branch): `/etc/ferrix/image-manifest`, `key=value` lines --
+  `format=1`, `profile`, `level`, `claim`, `runtime_settings`, then the
+  image keys, `settings_writer` among them -- written by xtask into every
+  image, `max` included, from the values that write the build line and
+  the image key (ledger 3636 (15)). This side only reads it.
+* **The reader.** `ferrix_settings_client::manifest`: `Manifest::read()`
+  (`read_at(path)` for tests) gives the keys. **A missing file, or one
+  whose `format` is not 1, reads as unknown**, and unknown is fixed: the
+  pages a request backs are shown read-only. `Manifest::fixed()` is
+  `runtime_settings == fixed`, `settings_writer == absent`, or unknown;
+  `Manifest::fixed_text()` is "Fixed by this build (profile max)", or
+  "Fixed: this build does not say what it allows" when unknown.
+* **Information only** (ledger 3636 (14)): `settingsd` decides nothing from
+  it; a wrong manifest can only mislabel a page, and `settingsd` still
+  refuses what its build does not offer.
+* **The app.** The System pages a request backs (Name and time, Remote
+  login) show their values read-only with that line in place of their
+  buttons when `fixed()`; otherwise they send requests. A request that
+  `settingsd` does not offer answers `unsupported` with its text, which
+  the page shows, never a silent no-op; with no `settingsd` at all, the
+  client says the fixed text when the manifest says the writer is absent,
+  and "the settings service is not running" otherwise (ledger 3636 (16)).

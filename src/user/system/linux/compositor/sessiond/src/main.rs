@@ -48,6 +48,8 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 use compositor_seat::lock::{LOCK_FD, LOCK_FD_VARIABLE, MAX_LINE};
+#[cfg(feature = "settings-prompt")]
+use compositor_seat::prompt::{PROMPT_FD, PROMPT_FD_VARIABLE};
 use compositor_socket::{Connection, RecvError};
 use compositor_wire::Fd;
 use ferrix_auth_proto::Record;
@@ -59,6 +61,8 @@ mod authd;
 mod bus;
 mod gate;
 mod lode;
+#[cfg(feature = "settings-prompt")]
+mod prompt;
 mod relay;
 mod scope;
 
@@ -362,6 +366,7 @@ fn run(args: &[String]) -> Result<i32, String> {
     let (lock_ours, lock_theirs) =
         UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
     let token = lode::token();
+    let (prompt_ours, prompt_theirs) = prompt_channel(account.uid);
     let Started {
         child,
         bus: mut bus_child,
@@ -371,6 +376,7 @@ fn run(args: &[String]) -> Result<i32, String> {
         &program,
         (&runtime, &token),
         (theirs, lock_theirs),
+        prompt_theirs,
         bus.as_ref(),
     )?;
     say(&format!(
@@ -388,7 +394,7 @@ fn run(args: &[String]) -> Result<i32, String> {
     // stopped before sessiond exits: once the compositor is in the scope, the
     // init's stop of this unit no longer reaches it (the certification
     // consultant's Q1).
-    let served = serve(ours, lock_ours, authd, account.uid, &mut child);
+    let served = serve(ours, lock_ours, prompt_ours, authd, account.uid, &mut child);
     if served.is_err() {
         let _ = child.kill();
         let _ = child.wait();
@@ -404,6 +410,35 @@ fn run(args: &[String]) -> Result<i32, String> {
     }
     ended?;
     served
+}
+
+/// The trusted prompt's side of the session: `sessiond`'s listener and its
+/// end of the compositor's channel, and the compositor's end. Neither where
+/// the settings writer is absent (no feature), and neither, said, when the
+/// socket cannot be made: then no prompt can be put up and `settingsd`
+/// refuses the session's account (§12.5, S4).
+#[cfg(feature = "settings-prompt")]
+fn prompt_channel(uid: u32) -> (Option<(prompt::Prompts, OwnedFd)>, Option<OwnedFd>) {
+    let made = prompt::Prompts::bind(uid).and_then(|prompts| {
+        let (ours, theirs) = prompt::pair()?;
+        Ok(((prompts, ours), theirs))
+    });
+    match made {
+        Ok((ours, theirs)) => (Some(ours), Some(theirs)),
+        Err(error) => {
+            say(&format!(
+                "no trusted prompt for this session: {}: {error}",
+                compositor_seat::prompt::SOCKET
+            ));
+            (None, None)
+        }
+    }
+}
+
+/// Where the settings writer is absent, there is no prompt.
+#[cfg(not(feature = "settings-prompt"))]
+const fn prompt_channel(_uid: u32) -> (Option<()>, Option<OwnedFd>) {
+    (None, None)
 }
 
 /// What [`start`] started: the compositor, the session's bus when it was
@@ -429,7 +464,7 @@ struct Gated {
 /// names stays open until the fork has its copy.
 fn gated(
     mut command: Command,
-    moves: [(i32, i32); 2],
+    moves: [(i32, i32); 3],
     ids: (u32, u32, Vec<u32>),
     keep: Vec<OwnedFd>,
 ) -> Result<Gated, String> {
@@ -489,6 +524,7 @@ fn start(
     program: &[String],
     (runtime, token): (&str, &[u8; 16]),
     (theirs, lock): (UnixStream, UnixStream),
+    prompt: Option<OwnedFd>,
     bus: Option<&bus::Bus>,
 ) -> Result<Started, String> {
     let (first, rest) = program.split_first().ok_or_else(|| USAGE.to_owned())?;
@@ -510,7 +546,7 @@ fn start(
                 .env("PATH", "/usr/bin:/bin")
                 .env("XDG_RUNTIME_DIR", runtime)
                 .envs(bus.env.iter().map(|(name, value)| (name, value)));
-            let moves = [(write.as_raw_fd(), bus::ADDRESS_FD), none];
+            let moves = [(write.as_raw_fd(), bus::ADDRESS_FD), none, none];
             let gated = gated(command, moves, ids.clone(), vec![write])?;
             let pid = gate::read_pid(&gated.told);
             Some((gated, pid, read))
@@ -536,11 +572,26 @@ fn start(
         // The session's token, beside the card: how the compositor proves to
         // lode that it holds seat0 (docs/LOGGING.md §19.1).
         .env(lode::TOKEN_VARIABLE, lode::hex(token));
+    // The trusted prompt's channel, descriptor 5, where the image's
+    // settings writer is present (docs/SETTINGS-WRITER.md §12.3).
+    #[cfg(feature = "settings-prompt")]
+    let prompt_move = match &prompt {
+        Some(fd) => {
+            let _ = command.env(PROMPT_FD_VARIABLE, PROMPT_FD.to_string());
+            (fd.as_raw_fd(), PROMPT_FD)
+        }
+        None => (-1, -1),
+    };
+    #[cfg(not(feature = "settings-prompt"))]
+    let prompt_move = (-1, -1);
     let moves = [
         (channel.as_raw_fd(), compositor_seat::CHANNEL_FD),
         (lock.as_raw_fd(), LOCK_FD),
+        prompt_move,
     ];
-    let compositor = gated(command, moves, ids, vec![channel, lock])?;
+    let mut keep = vec![channel, lock];
+    keep.extend(prompt);
+    let compositor = gated(command, moves, ids, keep)?;
     let compositor_pid = gate::read_pid(&compositor.told);
     let bus_pid = bus_side.as_ref().and_then(|(_, pid, _)| *pid);
     let pids: Vec<u32> = compositor_pid
@@ -614,7 +665,7 @@ fn start(
 /// place, not close-on-exec (a place of -1 is no move), then the account's
 /// groups, gid and uid, in that order, checked.
 fn become_account(
-    moves: [(i32, i32); 2],
+    moves: [(i32, i32); 3],
     (uid, gid, groups): &(u32, u32, Vec<u32>),
 ) -> std::io::Result<()> {
     let check = |result: libc::c_int| {
@@ -624,13 +675,13 @@ fn become_account(
             Ok(result)
         }
     };
-    // Each first above 4, so that putting one at 3 or 4 cannot close the
-    // other where it was; `dup2` then gives copies without close-on-exec.
-    let mut high = [-1; 2];
+    // Each first above 5, so that putting one at 3, 4 or 5 cannot close
+    // another where it was; `dup2` then gives copies without close-on-exec.
+    let mut high = [-1; 3];
     for (slot, (from, to)) in high.iter_mut().zip(moves) {
         if to >= 0 {
             // SAFETY: fcntl on a descriptor this process holds, with constants.
-            *slot = check(unsafe { libc::fcntl(from, libc::F_DUPFD, 5) })?;
+            *slot = check(unsafe { libc::fcntl(from, libc::F_DUPFD, 6) })?;
         }
     }
     for (from, (_, to)) in high.into_iter().zip(moves) {
@@ -659,6 +710,8 @@ fn become_account(
 fn serve(
     ours: UnixStream,
     lock: UnixStream,
+    #[cfg(feature = "settings-prompt")] mut prompts: Option<(prompt::Prompts, OwnedFd)>,
+    #[cfg(not(feature = "settings-prompt"))] _prompts: Option<()>,
     mut authd: Option<Authd>,
     uid: u32,
     child: &mut std::process::Child,
@@ -694,12 +747,27 @@ fn serve(
                 ));
             }
         }
+        #[cfg(feature = "settings-prompt")]
+        let [listening, served] = prompts
+            .as_ref()
+            .map_or([None, None], |(prompts, _)| prompts.fds());
+        #[cfg(feature = "settings-prompt")]
+        let compositor_prompt = prompts.as_ref().map(|(_, fd)| fd.as_raw_fd());
+        #[cfg(not(feature = "settings-prompt"))]
+        let (listening, served, compositor_prompt) = (None, None, None);
         let fds = [
             connection.as_ref().map(Connection::as_raw_fd),
             lock.as_ref().map(AsRawFd::as_raw_fd),
             authd.as_ref().map(|seat| seat.fd().as_raw_fd()),
+            listening,
+            served,
+            compositor_prompt,
         ];
         let ready = wait_any(fds, Duration::from_millis(200));
+        #[cfg(feature = "settings-prompt")]
+        if let Some((prompts, compositor)) = prompts.as_mut() {
+            serve_prompt(prompts, compositor, [ready[3], ready[4], ready[5]]);
+        }
         if ready[0]
             && let Some(open) = connection.as_mut()
             && !answer_devices(open, &mut refusals)
@@ -741,6 +809,39 @@ fn serve(
             let _ = child.kill();
             let _ = child.wait();
             return Ok(1);
+        }
+    }
+}
+
+/// The trusted prompt's turn of the loop: a new `settingsd`, what the served
+/// one sent, and what the compositor answered (`ready` says which of the
+/// three are readable).
+#[cfg(feature = "settings-prompt")]
+fn serve_prompt(prompts: &mut prompt::Prompts, compositor: &OwnedFd, ready: [bool; 3]) {
+    let to = Some(compositor.as_raw_fd());
+    if ready[0] {
+        prompts.accept(true, &say);
+    }
+    if ready[1] {
+        let out = prompts.settingsd_said();
+        prompts.act(out, to);
+    }
+    if ready[2] {
+        let mut buffer = [0_u8; compositor_seat::prompt::MAX_RECORD + 1];
+        let record = match prompt::receive(compositor.as_raw_fd(), &mut buffer) {
+            Ok(None) => {
+                compositor_seat::prompt::zero(&mut buffer);
+                return;
+            }
+            Ok(Some(got)) if got > 0 && got <= compositor_seat::prompt::MAX_RECORD => buffer
+                .get(..got)
+                .and_then(compositor_seat::prompt::FromSeat::decode),
+            _ => None,
+        };
+        compositor_seat::prompt::zero(&mut buffer);
+        if record.is_some() || prompts.busy() {
+            let out = prompts.compositor_said(record);
+            prompts.act(out, to);
         }
     }
 }
@@ -877,7 +978,7 @@ fn answer_devices(open: &mut Connection, refusals: &mut Refusals) -> bool {
 }
 
 /// Wait until any of `fds` is readable, or `left` has gone: which are.
-fn wait_any(fds: [Option<i32>; 3], left: Duration) -> [bool; 3] {
+fn wait_any(fds: [Option<i32>; 6], left: Duration) -> [bool; 6] {
     let mut polled = fds.map(|fd| libc::pollfd {
         fd: fd.unwrap_or(-1),
         events: libc::POLLIN,
