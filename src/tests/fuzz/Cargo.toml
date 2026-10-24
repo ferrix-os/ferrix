@@ -50,6 +50,7 @@ ferrix-seccomp = { path = "../../lib/kernel/seccomp" }
 ferrix-sysfs = { path = "../../lib/fs/common/sysfs" }
 ferrix-svc = { path = "../../lib/init/svc" }
 ferrix-svc-proto = { path = "../../lib/init/svc-proto" }
+ferrix-sigverify = { path = "../../lib/crypto/sigverify" }
 compositor-config = { path = "../../user/system/linux/compositor/config" }
 compositor-wire = { path = "../../user/system/linux/compositor/wire" }
 
@@ -319,6 +320,13 @@ bench = false
 [[bin]]
 name = "seccomp_verify_run"
 path = "fuzz_targets/seccomp_verify_run.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sigverify_manifest"
+path = "fuzz_targets/sigverify_manifest.rs"
 test = false
 doc = false
 bench = false

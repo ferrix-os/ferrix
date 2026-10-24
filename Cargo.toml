@@ -47,6 +47,8 @@ members = [
     "src/lib/kernel/crng",
     "src/lib/kernel/seccomp",
     "src/lib/crypto/argon2",
+    "src/lib/crypto/sha256",
+    "src/lib/crypto/sigverify",
     "src/lib/proto/linux-abi",
     "src/lib/network/netwire",
     "src/lib/network/nettcp",
@@ -139,6 +141,7 @@ members = [
     "src/user/system/native/lode",
 
     # Host-side build and test driver (`cargo xtask ...`).
+    "tools/common/release/softsign",
     "tools/common/xtask",
 ]
 # So a bare `cargo build` builds the host tool rather than trying to compile
@@ -196,6 +199,8 @@ ferrix-partition = { path = "src/lib/fs/common/partition" }
 ferrix-crng = { path = "src/lib/kernel/crng" }
 ferrix-seccomp = { path = "src/lib/kernel/seccomp" }
 ferrix-argon2 = { path = "src/lib/crypto/argon2" }
+ferrix-sha256 = { path = "src/lib/crypto/sha256" }
+ferrix-sigverify = { path = "src/lib/crypto/sigverify" }
 ferrix-linux-abi = { path = "src/lib/proto/linux-abi" }
 ferrix-native-abi = { path = "src/lib/proto/native-abi" }
 ferrix-native = { path = "src/lib/proto/native" }

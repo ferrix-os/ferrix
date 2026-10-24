@@ -141,6 +141,7 @@ dependencies = [
  "ferrix-pci",
  "ferrix-renderctl",
  "ferrix-seccomp",
+ "ferrix-sigverify",
  "ferrix-sndctl",
  "ferrix-svc",
  "ferrix-svc-proto",
@@ -242,6 +243,17 @@ version = "0.1.0"
 [[package]]
 name = "ferrix-seccomp"
 version = "0.1.0"
+
+[[package]]
+name = "ferrix-sha256"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-sigverify"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sha256",
+]
 
 [[package]]
 name = "ferrix-sndctl"

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "068f439eb8edd0aae095b4c6798139a690a944a4645fb6717490add6d3d37b54",
+  "digest": "95f1c43583dfacf6d77b98c3a3cbaed04d08315d021c546692f119bc50cc9dff",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -105,11 +105,15 @@
     {
       "path": "docs/sysml/25-init-requirements.sysml",
       "synopsis": "Ferrix — SysML v2 model, part 25: the low-level requirements of pid 1's inputs.\n\nWhat init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written.\n\nWhat proves what. `init::check` (the `inputs` line, FX-1503) judges sets of entries made up as an archive could carry them. xtask's `test-shell`, `test-vfs` and `test-init` boot each way init can start pid 1.\n\nIds are `L.init.<n>`. They are never renumbered once a check names them."
+    },
+    {
+      "path": "docs/sysml/26-signing-requirements.sysml",
+      "synopsis": "Ferrix — SysML v2 model, part 26: the requirements of product signing's verifier.\n\ndocs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9).\n\nThe parent. H.SIGN is parented by ASR-7, \"data supplied by a partition shall be validated before use\", alone (ledger 3738 (7)). Slice S4 adds the update objective, its threat, FCS_COP.1/SigVer and FPT_TUD_EXT.1 to the Security Target, and re-parents H.SIGN then.\n\nWhat proves what. Host tests in each crate's src/tests.rs, against the published vectors (RFC 9858 Appendix A, RFC 8554 Appendix F, NIST ACVP LMS sigVer, NIST CAVP SHA-256) and against manifests the development soft signer (tools/common/release/softsign) makes; each comparison's negative control is run by fleet/gate.sh control. The time and stack bounds wait for slice S2's measurement on the DK1 and stay in the baseline until then.\n\nIds are `H.SIGN.<n>`, `L.sigverify.<n>` and `L.sha256.<n>`, reserved on develop at 81081184a. They are never renumbered once a check names them."
     }
   ],
   "summary": {
-    "packages": 142,
-    "elements": 7482,
+    "packages": 146,
+    "elements": 7595,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -117,7 +121,7 @@
       "planned": 24
     },
     "deferred": 20,
-    "relations": 217,
+    "relations": 218,
     "figures": 20,
     "unparsed": 0
   },
@@ -86008,6 +86012,1298 @@
           ]
         }
       ]
+    },
+    {
+      "name": "FerrixSigningRequirements",
+      "qualifiedName": "FerrixSigningRequirements",
+      "kind": "package",
+      "source": {
+        "file": "docs/sysml/26-signing-requirements.sysml",
+        "line": 28
+      },
+      "children": [
+        {
+          "name": "Signing",
+          "qualifiedName": "FerrixSigningRequirements::Signing",
+          "kind": "package",
+          "doc": "The verifier's own decisions: what it accepts, and why it refuses everything else.",
+          "source": {
+            "file": "docs/sysml/26-signing-requirements.sysml",
+            "line": 31
+          },
+          "children": [
+            {
+              "name": "acceptedOnlyUnderTheExpectedKindsAnchor",
+              "qualifiedName": "FerrixSigningRequirements::Signing::acceptedOnlyUnderTheExpectedKindsAnchor",
+              "kind": "requirement",
+              "shortName": "H.SIGN.1",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 35
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::acceptedOnlyUnderTheExpectedKindsAnchor",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The verifier shall accept a manifest only when its HSS signature over the manifest's first 512 bytes verifies, under the allowed parameter sets, against an anchor of the kind the caller expects with the anchor id the manifest signs.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 40
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::acceptedOnlyUnderTheExpectedKindsAnchor",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"RFC 9858 A.4 verifies; every bit flip of it is refused; another kind's anchor, an unknown id or another key is refused; ACVP's sample cases give their answers.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 43
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::acceptedOnlyUnderTheExpectedKindsAnchor",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 44
+                  }
+                }
+              ]
+            },
+            {
+              "name": "signedFieldsBind",
+              "qualifiedName": "FerrixSigningRequirements::Signing::signedFieldsBind",
+              "kind": "requirement",
+              "shortName": "H.SIGN.2",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 46
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::signedFieldsBind",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The verifier shall accept a manifest only when its signed kind, profile, arch, hardware family and subject are the ones the caller expects, shall refuse a configuration or driver manifest whose caller names no subject, and shall confirm a payload only when its length and SHA-256 are the ones the manifest signs.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 52
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::signedFieldsBind",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Each bound field one off is refused by its name; a payload one byte short, long or different is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 54
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::signedFieldsBind",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 55
+                  }
+                }
+              ]
+            },
+            {
+              "name": "notBelowTheFloor",
+              "qualifiedName": "FerrixSigningRequirements::Signing::notBelowTheFloor",
+              "kind": "requirement",
+              "shortName": "H.SIGN.3",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 57
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::notBelowTheFloor",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The verifier shall refuse a manifest whose security version is below the floor the caller holds for its kind.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 60
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::notBelowTheFloor",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A manifest one below the floor is refused, one at the floor accepted.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 62
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::notBelowTheFloor",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 63
+                  }
+                }
+              ]
+            },
+            {
+              "name": "revokedKeysRefused",
+              "qualifiedName": "FerrixSigningRequirements::Signing::revokedKeysRefused",
+              "kind": "requirement",
+              "shortName": "H.SIGN.4",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 65
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::revokedKeysRefused",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The verifier shall refuse a manifest signed through a tree the caller holds as revoked, and a revocation that lists its own signing key.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 68
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::revokedKeysRefused",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A revoked key's manifest, a revocation by a revoked key, and a revocation of its own key are each refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 70
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::revokedKeysRefused",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 71
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everythingElseRefusedByName",
+              "qualifiedName": "FerrixSigningRequirements::Signing::everythingElseRefusedByName",
+              "kind": "requirement",
+              "shortName": "H.SIGN.5",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 73
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::everythingElseRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The verifier shall answer every input with either a verified manifest or one named refusal, with no path that accepts by default and no panic.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 76
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::everythingElseRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Every byte of a good block changed is refused; every structural field is refused by its name; every truncation answers; the fuzz target finds no panic.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 79
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::everythingElseRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 80
+                  }
+                }
+              ]
+            },
+            {
+              "name": "boundedTimeAndMemory",
+              "qualifiedName": "FerrixSigningRequirements::Signing::boundedTimeAndMemory",
+              "kind": "requirement",
+              "shortName": "H.SIGN.6",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 82
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::boundedTimeAndMemory",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"One verification shall allocate nothing and finish within the bound docs/certification/MEMORY-AND-TIMING.md states for the slowest target, the DK1's Cortex-A7 at 650 MHz.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 85
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::boundedTimeAndMemory",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Slice S2's measurement of the worst-case signature on the DK1 within the bound, and the stack report.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 87
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::boundedTimeAndMemory",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 88
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "SigVerify",
+          "qualifiedName": "FerrixSigningRequirements::SigVerify",
+          "kind": "package",
+          "doc": "ferrix-sigverify: the manifest and LMS/HSS verification.",
+          "source": {
+            "file": "docs/sysml/26-signing-requirements.sysml",
+            "line": 92
+          },
+          "children": [
+            {
+              "name": "manifestStructure",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::manifestStructure",
+              "kind": "requirement",
+              "shortName": "L.sigverify.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 95
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::manifestStructure",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"structure shall refuse, naming the field, a block that is not 4,096 bytes, a wrong magic, format or body length, an unknown kind, non-zero flags, an unknown profile or arch, non-zero reserved bytes, a slot's non-zero subject, floors outside a slot manifest, revocation fields outside a revocation, a revocation count past 20 or an entry past its count, non-zero padding, a signature length past 3,532 or the block, and a non-zero byte after the signature.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 103
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::manifestStructure",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: each field refused by its name; every byte of a good block changed is refused; sig_len one short and one long is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 106
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::manifestStructure",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.SIGN.5\", \"H.SIGN.1\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 107
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::manifestStructure",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::structure\", \"ferrix_sigverify::manifest::header\", \"ferrix_sigverify::manifest::kind_fields\", \"ferrix_sigverify::manifest::signature_of\", \"ferrix_sigverify::manifest::entry_offset\", \"ferrix_sigverify::manifest::bytes\", \"ferrix_sigverify::manifest::Kind::from_code\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 113
+                  }
+                }
+              ]
+            },
+            {
+              "name": "onlyTheProductTypeCodes",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::onlyTheProductTypeCodes",
+              "kind": "requirement",
+              "shortName": "L.sigverify.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 115
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::onlyTheProductTypeCodes",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A key or signature shall be accepted by the public entry points only with LM-OTS type LMOTS_SHA256_N24_W4 and LMS types LMS_SHA256_M24_H10, _H15 or _H20; every other type code shall be refused as a type code.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 119
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::onlyTheProductTypeCodes",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: every code from 0 to 0x18 and 0xFFFFFFFF, of both types; RFC 9858 A.1 (W8, H5) verifies only in the wide test set; RFC 8554 Test Case 1 is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 122
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::onlyTheProductTypeCodes",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 123
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::onlyTheProductTypeCodes",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::lms::Allowed::ots\", \"ferrix_sigverify::lms::Allowed::lms\", \"ferrix_sigverify::lms::LmsKey::parse_in\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 125
+                  }
+                }
+              ]
+            },
+            {
+              "name": "lmsVerifiedAsRfc8554",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::lmsVerifiedAsRfc8554",
+              "kind": "requirement",
+              "shortName": "L.sigverify.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 127
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::lmsVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"lms_verify_in shall accept an LMS signature only when its length is exactly its types', its leaf index is below 2^h, its LM-OTS type is the key's, and the root computed by RFC 8554 Algorithms 4b and 6a over SHA-256/192 equals the key's.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 131
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::lmsVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: RFC 9858 A.4 verifies and every single-bit flip of its signature and message is refused; a leaf index of 2^20 is refused as a leaf; every NIST ACVP LMS sigVer sample case gives ACVP's answer.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 135
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::lmsVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 136
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::lmsVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::lms::ots_candidate\", \"ferrix_sigverify::lms::with_checksum\", \"ferrix_sigverify::lms::root_from\", \"ferrix_sigverify::lms::coef\", \"ferrix_sigverify::lms::chain_step\", \"ferrix_sigverify::lms::lms_verify_in\", \"ferrix_sigverify::lms::signature_len_for\", \"ferrix_sigverify::lms::Reader::take\", \"ferrix_sigverify::lms::Reader::array\", \"ferrix_sigverify::lms::Reader::u32\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 143
+                  }
+                }
+              ]
+            },
+            {
+              "name": "hssVerifiedAsRfc8554",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::hssVerifiedAsRfc8554",
+              "kind": "requirement",
+              "shortName": "L.sigverify.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 145
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::hssVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"hss_verify_in shall accept an HSS signature only when the key's L is 1 or 2, Nspk + 1 is L, each signed lower key verifies under the key above it, the last LMS signature verifies over the message, and no byte is short or left over; it shall return the trees it went through, top first.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 150
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::hssVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: A.4 verifies with its I; L of 0, 3 and 8 and Nspk one off are refused; A.4 cut or extended by a byte and with each key byte changed is refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 153
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::hssVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 154
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::hssVerifiedAsRfc8554",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::lms::hss_verify_in\", \"ferrix_sigverify::lms::lower_key\", \"ferrix_sigverify::lms::parse_hss_key_in\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 156
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anchorOfTheExpectedKind",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::anchorOfTheExpectedKind",
+              "kind": "requirement",
+              "shortName": "L.sigverify.5",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 158
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::anchorOfTheExpectedKind",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"verify shall take the anchor from those of the caller's expected kind (a revocation's: its target kind's) with the manifest's signed anchor id, and refuse a manifest with no such anchor.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 162
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::anchorOfTheExpectedKind",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a slot manifest checked against only a configuration anchor, against a renumbered anchor, and against the right id with another key, each refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 165
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::anchorOfTheExpectedKind",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 166
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::anchorOfTheExpectedKind",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::anchor_for\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 168
+                  }
+                }
+              ]
+            },
+            {
+              "name": "signedFieldsBound",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::signedFieldsBound",
+              "kind": "requirement",
+              "shortName": "L.sigverify.6",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 170
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::signedFieldsBound",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"verify shall refuse a manifest whose kind, profile, arch, family or subject is not what the caller expects, the kind before the signature is checked and the rest after, and a configuration or driver manifest whose caller names no subject.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 174
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::signedFieldsBound",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: each bound field one off refused by its name; a driver manifest binds its subject; a slot manifest presented as a revocation, and a revocation presented as a slot, refused by the signed kind.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 178
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::signedFieldsBound",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.2\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 179
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::signedFieldsBound",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::bindings\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 181
+                  }
+                }
+              ]
+            },
+            {
+              "name": "floorHeld",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::floorHeld",
+              "kind": "requirement",
+              "shortName": "L.sigverify.7",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 183
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::floorHeld",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"verify shall refuse a manifest whose security version is below the caller's floor.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 185
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::floorHeld",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a manifest one below the floor refused; one at the floor, and one above a zero floor, accepted.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 187
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::floorHeld",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.3\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 188
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::floorHeld",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sigverify::manifest::verify\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 189
+                  }
+                }
+              ]
+            },
+            {
+              "name": "revokedTreesRefused",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedTreesRefused",
+              "kind": "requirement",
+              "shortName": "L.sigverify.8",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 191
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedTreesRefused",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"verify shall refuse a manifest signed through a tree the caller holds as revoked, a revocation among them.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 193
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedTreesRefused",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a revoked key's manifest and a revocation by a revoked key are refused; another key's revocation leaves a manifest alone.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 196
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedTreesRefused",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.4\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 197
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedTreesRefused",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::revocations\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 199
+                  }
+                }
+              ]
+            },
+            {
+              "name": "selfRevocationRefused",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::selfRevocationRefused",
+              "kind": "requirement",
+              "shortName": "L.sigverify.13",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 201
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::selfRevocationRefused",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"verify shall refuse a revocation that lists a tree its own signature went through.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 203
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::selfRevocationRefused",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: a revocation of its own key is refused as revoking itself.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 205
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::selfRevocationRefused",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.4\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 206
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::selfRevocationRefused",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::revocations\", \"ferrix_sigverify::manifest::revocation_of\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 208
+                  }
+                }
+              ]
+            },
+            {
+              "name": "revokedListReturned",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedListReturned",
+              "kind": "requirement",
+              "shortName": "L.sigverify.14",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 210
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedListReturned",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"revoked shall return a verified revocation's target kind and exactly the trees it lists, and nothing for any other kind.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 213
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedListReturned",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a verified revocation returns its one tree and its target; a verified slot manifest returns nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 216
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedListReturned",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.4\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 217
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::revokedListReturned",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sigverify::manifest::Verified::revoked\", \"ferrix_sigverify::manifest::revocation_of\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 219
+                  }
+                }
+              ]
+            },
+            {
+              "name": "payloadConfirmed",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::payloadConfirmed",
+              "kind": "requirement",
+              "shortName": "L.sigverify.9",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 221
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::payloadConfirmed",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"check_payload shall confirm a payload only when its length and SHA-256 equal the verified manifest's.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 223
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::payloadConfirmed",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the manifest's own length and digest confirmed; one byte short, one long, and another digest refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 226
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::payloadConfirmed",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.2\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 227
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::payloadConfirmed",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sigverify::manifest::Verified::check_payload\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 228
+                  }
+                }
+              ]
+            },
+            {
+              "name": "refusalsTotal",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::refusalsTotal",
+              "kind": "requirement",
+              "shortName": "L.sigverify.10",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 230
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::refusalsTotal",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every failure of LMS/HSS verification shall reach the caller as one of the manifest's named refusals, and no input shall reach a panic.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 233
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::refusalsTotal",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: every truncation of a good block and of A.4's signature answers; the sigverify_manifest fuzz target runs bounded with no crash.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 236
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::refusalsTotal",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.5\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 237
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::refusalsTotal",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sigverify::manifest::Refusal::from\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 238
+                  }
+                }
+              ]
+            },
+            {
+              "name": "verifyTimeBound",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyTimeBound",
+              "kind": "requirement",
+              "shortName": "L.sigverify.11",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 240
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyTimeBound",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"One hss_verify of a product-set signature shall finish within 50 ms on the DK1's Cortex-A7 at 650 MHz.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 242
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyTimeBound",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Slice S2: the worst-case signature measured on the DK1 (the estimate is SIGNING.md section 2.3's).\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 244
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyTimeBound",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.6\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 245
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyTimeBound",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sigverify::lms::hss_verify_in\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 246
+                  }
+                }
+              ]
+            },
+            {
+              "name": "verifyStackBound",
+              "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyStackBound",
+              "kind": "requirement",
+              "shortName": "L.sigverify.12",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 248
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyStackBound",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"One verify shall allocate nothing and use at most the stack MEMORY-AND-TIMING.md states.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 250
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyStackBound",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"The crate has no allocator and no alloc crate; the stack report of the loader's build (S4).\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 252
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyStackBound",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.6\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 253
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::SigVerify::verifyStackBound",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sigverify::manifest::verify\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 254
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Sha256",
+          "qualifiedName": "FerrixSigningRequirements::Sha256",
+          "kind": "package",
+          "doc": "ferrix-sha256: the one hash under the verifier.",
+          "source": {
+            "file": "docs/sysml/26-signing-requirements.sysml",
+            "line": 258
+          },
+          "children": [
+            {
+              "name": "sha256AsFips180",
+              "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
+              "kind": "requirement",
+              "shortName": "L.sha256.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 261
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"digest shall return the SHA-256 of FIPS 180-4 for every message.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 263
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 265
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 266
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256AsFips180",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sha256::digest\", \"ferrix_sha256::Sha256::finish\", \"ferrix_sha256::compress\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 268
+                  }
+                }
+              ]
+            },
+            {
+              "name": "sha256InAnyPieces",
+              "qualifiedName": "FerrixSigningRequirements::Sha256::sha256InAnyPieces",
+              "kind": "requirement",
+              "shortName": "L.sha256.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 270
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256InAnyPieces",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A message given to update in any pieces shall hash as the whole message does.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 272
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256InAnyPieces",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: every length from 0 to 130 bytes byte by byte, and a million bytes in pieces of 997.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 274
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256InAnyPieces",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 275
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256InAnyPieces",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_sha256::Sha256::update\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 276
+                  }
+                }
+              ]
+            },
+            {
+              "name": "sha256Truncated192",
+              "qualifiedName": "FerrixSigningRequirements::Sha256::sha256Truncated192",
+              "kind": "requirement",
+              "shortName": "L.sha256.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 278
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256Truncated192",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"finish_192 and digest_192 shall return the first 24 bytes of the SHA-256 digest (RFC 9858 section 2.1).\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 280
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256Truncated192",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: RFC 9858's SHA-256/192 of abc, whole and in pieces.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 282
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256Truncated192",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.1\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 283
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Sha256::sha256Truncated192",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_sha256::finish_192\", \"ferrix_sha256::digest_192\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 284
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "relations": [
@@ -88282,6 +89578,16 @@
       "origin": "FerrixInitRequirements",
       "file": "docs/sysml/25-init-requirements.sysml",
       "line": 25
+    },
+    {
+      "kind": "import",
+      "source": "FerrixSigningRequirements",
+      "targets": [
+        "FerrixItemRequirements::*"
+      ],
+      "origin": "FerrixSigningRequirements",
+      "file": "docs/sysml/26-signing-requirements.sysml",
+      "line": 29
     }
   ],
   "figures": [
