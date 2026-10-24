@@ -48,6 +48,54 @@ and no drag onto a miniature. Seen on the way, not this branch's: on this
 host foot's text did not reach the headless dumps in the tiled layout
 either.
 
+**A minimized window can be found again** (the customer's bug of
+2026-10-24: once minimized, nothing brought a window back). 1c restored a
+window that was focused, but nothing a person could press focused one: the
+overview listed only the shown workspace's windows, `cyclenext` walks one
+workspace and a minimized window waits on `special:minimized`, our waybar
+had no taskbar, and -- found on the way -- `bindr = SUPER, Super_L` never
+fired at all, since a release bind was matched on the modifiers held after
+the release. Now, in the GNOME and Hyprland ways:
+
+* **The overview** has each workspace's minimized windows in its grid,
+  after the others, at half opacity (`overview::MINIMIZED_OPACITY`). A
+  click, or `Return` on the tile the arrow keys or `Tab` picked, focuses
+  the window and brings it back; `overview next|prev|pick` are the same
+  for a bind or a script. The keys it takes have their release taken too.
+* **`ALT+Tab` and `SUPER+Tab`** (and with `SHIFT`, back) in Ferrix light
+  run hyprix's new `switcher` dispatcher (`hyprix/src/switcher.rs`): every
+  window on an ordinary workspace and every minimized one, most recently
+  focused first, in a row over the focused monitor with the window before
+  the focused one picked; `Tab` again moves on, letting go of `ALT` or
+  `SUPER` (or `Return`, or a click) focuses and restores the picked one,
+  `Escape` changes nothing. A quick tap goes straight back.
+* **A taskbar**: waybar's `wlr/taskbar` in the apps repository's waybar,
+  over `zwlr_foreign_toplevel_management_v1` on the bar's own connection:
+  a button a window with `active`, `minimized`, `maximized`, `fullscreen`
+  and its application id as classes, and waybar's `minimize-raise` on a
+  click (the default here). It is not in Ferrix light's bar, which is
+  GNOME's top bar and has no window list, nor in the customer's own
+  `~/.config/waybar`, which says its window list is the dock along the
+  bottom (`hypr-dock`); `--everything` and the dotfiles desktop carry that
+  config as it is. A bar config that wants one names `wlr/taskbar`.
+* **Release binds** are matched on the modifiers the key went down with,
+  as Hyprland matches them, and one on a modifier's own key fires only when
+  that key was let go of alone, so `SUPER H` no longer opens the overview
+  as `SUPER` comes up.
+
+Tests: the overview's and the switcher's input and drawing (hyprix lib),
+`two_clients`'s `a_minimized_window_is_found_again_in_the_overview_and_the_taskbar`
+and `the_switcher_brings_a_minimized_window_back`, the seat's release
+binds, waybar's taskbar module and two `against_hyprix` clicks, and a
+`test-compositor` boot, `minimize`: a taskbar (`lswt minimize`) hides a
+window, the overview shows it dimmed, `Left` and `Return` bring it back,
+and `lswt unminimize` does again. The overview's two pictures are blessed
+from the compositor's own frame
+(`render/tests/data/overview-one-minimized.xrle` and
+`overview-one-minimized-picked.xrle`, the minimized window dimmed in the
+second slot), the renderer having no layout of the overview to bless them
+from.
+
 **Part 2 is built** (13 points estimated):
 
 | Step | Commit | What |
@@ -245,7 +293,10 @@ Hyprland's `fullscreen 1`.
   at the same relative place across its width.
 * **Minimize.** `xdg_toplevel.set_minimized` and the foreign-toplevel
   request hide the window to a per-monitor special workspace; activating it
-  from the overview, a taskbar or `focuswindow` brings it back.
+  from the overview, a taskbar or `focuswindow` brings it back. The
+  overview shows a minimized window in its workspace's grid, dimmed, and
+  the window switcher (`ALT+Tab`) lists it, so a person can always find it
+  again.
 * **An activities overview.** GNOME's overview: one key (`SUPER`, a bind to
   the new dispatcher `overview toggle`) or the top bar's Activities button
   shows every window of the active workspace of each monitor scaled into a

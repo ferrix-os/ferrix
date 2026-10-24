@@ -1,4 +1,4 @@
-//! `lswt`, `lswt activate <title>` and `lswt close <title>`.
+//! `lswt`, and `lswt activate|close|minimize|unminimize <title>`.
 
 use std::io::Write as _;
 
@@ -17,8 +17,10 @@ fn main() {
         None | Some("list") => Want::List,
         Some("activate") => Want::Activate(rest()),
         Some("close") => Want::Close(rest()),
+        Some("minimize") => Want::Minimize(rest()),
+        Some("unminimize") => Want::Unminimize(rest()),
         _ => {
-            say("lswt: usage: lswt [list] | lswt activate <title> | lswt close <title>");
+            say("lswt: usage: lswt [list] | lswt activate|close|minimize|unminimize <title>");
             std::process::exit(2);
         }
     };

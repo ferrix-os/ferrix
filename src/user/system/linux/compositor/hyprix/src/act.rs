@@ -104,6 +104,8 @@ pub struct Around<'a> {
     pub drag: &'a mut Option<Drag>,
     /// The activities overview, which `overview` opens and closes.
     pub overview: &'a mut crate::overview::Overview,
+    /// The window switcher, which `switcher` opens and moves on.
+    pub switcher: &'a mut crate::switcher::Switcher,
     /// Actions a dispatcher caused, which the caller delivers.
     pub pending: &'a mut Vec<Action>,
     /// Set when a dispatcher asked the compositor to end.
@@ -179,7 +181,20 @@ pub fn compositor(
         "event" => Some(event(argument, around)),
         "global" => Some(global(argument, around)),
         "dpms" => Some(dpms(argument, around)),
-        "overview" => Some(crate::overview::dispatch(argument, around.overview)),
+        "overview" => Some(crate::overview::dispatch_in(
+            argument,
+            around.overview,
+            state,
+        )),
+        "switcher" => Some(crate::switcher::dispatch(
+            argument,
+            (
+                around.trigger.map_or(0, |(_, held)| held),
+                around.seat.modifiers().depressed,
+            ),
+            around.switcher,
+            state,
+        )),
         "movecursor" => Some(move_cursor(argument, around)),
         "movecursortocorner" => Some(move_cursor_to_corner(argument, state, around)),
         "mouse" => Some(mouse(argument, state, around)),

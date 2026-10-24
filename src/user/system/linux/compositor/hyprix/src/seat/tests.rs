@@ -535,3 +535,31 @@ fn a_locked_pointer_stays_put_and_still_reports_the_distance() {
     );
     assert_eq!(seat.pointer(), (512.0, 384.0));
 }
+
+/// `bindr = SUPER, Super_L`: SUPER alone fires it, as Ferrix light's
+/// overview is opened; SUPER held for another bind -- SUPER H, SUPER Tab
+/// -- does not, or every SUPER chord would open the overview as SUPER is
+/// let go. GNOME and Hyprland both leave the release alone then.
+#[test]
+fn a_modifiers_release_bind_fires_only_when_nothing_was_pressed_with_it() {
+    let mut seat = seat("bindr = SUPER, Super_L, overview, toggle\nbind = SUPER, Q, exit\n");
+    let fired = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|action| matches!(action, Action::Dispatch { name, .. } if name == "overview"))
+            .count()
+    };
+    let _ = press(&mut seat, KEY_LEFTMETA);
+    assert_eq!(fired(&release(&mut seat, KEY_LEFTMETA)), 1, "SUPER alone");
+    let _ = press(&mut seat, KEY_LEFTMETA);
+    let _ = press(&mut seat, KEY_Q);
+    let _ = release(&mut seat, KEY_Q);
+    assert_eq!(fired(&release(&mut seat, KEY_LEFTMETA)), 0, "after SUPER Q");
+    // And the next SUPER alone fires again.
+    let _ = press(&mut seat, KEY_LEFTMETA);
+    assert_eq!(
+        fired(&release(&mut seat, KEY_LEFTMETA)),
+        1,
+        "SUPER alone again"
+    );
+}

@@ -1732,6 +1732,19 @@ impl State {
             && self.workspace_of(window) == Some(self.special_id(MINIMIZED))
     }
 
+    /// Every minimized window, with the workspace focusing it brings it
+    /// back to: what the overview draws in that workspace's grid and the
+    /// window switcher lists, so that a minimized window can be found
+    /// again (`docs/DESKTOP.md` §1.2).
+    #[must_use]
+    pub fn minimized_windows(&self) -> Vec<(WindowId, WorkspaceId)> {
+        self.minimized
+            .iter()
+            .filter(|(window, _)| self.is_minimized(**window))
+            .map(|(window, back)| (*window, *back))
+            .collect()
+    }
+
     /// Bring a minimized window back to the workspace it was on, inside a
     /// [`State::run`]. The workspace is made again on the focused monitor
     /// if it went while the window was away.

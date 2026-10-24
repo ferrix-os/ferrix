@@ -142,8 +142,11 @@ impl Compositor<'_> {
             .screens(self.screens.iter().map(|screen| screen.name.as_str()));
         // The overview draws every window in a tile of its own in place of
         // where the layout keeps it (`crate::overview`).
+        // The switcher the same, in a row (`crate::switcher`).
         let mut outputs = if self.overview.on {
             crate::overview::outputs(&self.state, &self.overview)
+        } else if self.switcher.on {
+            crate::switcher::outputs(&self.state, &self.switcher)
         } else {
             self.state.layout()
         };
@@ -177,7 +180,8 @@ impl Compositor<'_> {
         // not in the overview, whose tiles are the windows alone. Taken out
         // of `self` for the frame, since the screens are drawn through it.
         let mut bars = std::mem::take(&mut self.bars);
-        if !self.overview.on {
+        let tiled = self.overview.on || self.switcher.on;
+        if !tiled {
             let wanted = self.title_bars_wanted();
             let scale = self
                 .screens
@@ -186,12 +190,27 @@ impl Compositor<'_> {
                 .fold(1.0_f64, f64::max);
             bars.decorate(&mut outputs, &mut drawn_with, &wanted, &self.state, scale);
         }
-        if self.overview.on {
-            // The hovered tile is outlined whatever its frame.
-            if let Some(hovered) = self.overview.hovered {
-                let style = drawn_with.entry(hovered).or_default();
+        if tiled {
+            // The hovered or picked tile is outlined whatever its frame,
+            // and a minimized window is dimmed: it is there to be found,
+            // and is not on the screen.
+            let (lit, dimmed) = if self.overview.on {
+                (self.overview.hovered, crate::overview::dimmed(&self.state))
+            } else {
+                (
+                    self.switcher.picked(),
+                    crate::switcher::dimmed(&self.state, &self.switcher),
+                )
+            };
+            if let Some(lit) = lit {
+                let style = drawn_with.entry(lit).or_default();
                 style.border = None;
                 style.decorate = true;
+            }
+            for window in dimmed {
+                let style = drawn_with.entry(window).or_default();
+                style.opacity =
+                    Some(style.opacity.unwrap_or(1.0) * crate::overview::MINIMIZED_OPACITY);
             }
         }
         let began = Instant::now();

@@ -246,7 +246,9 @@ that lists what of the user's real files is not carried out.
   `return-type: json`, `signal` from the C library's `SIGRTMIN`, clicks,
   scrolls), `hyprland/window` (`j/monitors`, `j/workspaces`, `j/clients`,
   the bar's `empty`/`solo` classes), `cpu`, `memory`, `network`, `clock`,
-  `pulseaudio`, `tray`.
+  `pulseaudio`, `tray`, and `wlr/taskbar` (a `button` a window over
+  `zwlr_foreign_toplevel_management_v1`, bound on the bar's own connection;
+  `minimize-raise` on a click unless the config names another action).
 * **The bar on the screen** (`app.rs`, `bar.rs`, `engine.rs`): the loop on
   `src/user/system/linux/compositor/toolkit` -- a layer surface per output the config
   matches, text through `src/user/system/linux/compositor/text` and `url()` images

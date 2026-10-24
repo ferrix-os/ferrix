@@ -81,6 +81,12 @@ pub enum Want {
     Activate(String),
     /// Ask the one whose title is this to close.
     Close(String),
+    /// Minimize the one whose title is this, as a taskbar's click on the
+    /// active entry does.
+    Minimize(String),
+    /// Bring the minimized one whose title is this back, as a taskbar's
+    /// click on a minimized entry does.
+    Unminimize(String),
 }
 
 /// How long to wait for the compositor to say what it has.
@@ -104,7 +110,10 @@ pub fn run(socket: &std::path::Path, want: &Want) -> Result<Vec<String>, String>
     let mut lines: Vec<String> = session.ordered().iter().map(Toplevel::line).collect();
     let title = match want {
         Want::List => return Ok(lines),
-        Want::Activate(title) | Want::Close(title) => title.clone(),
+        Want::Activate(title)
+        | Want::Close(title)
+        | Want::Minimize(title)
+        | Want::Unminimize(title) => title.clone(),
     };
     let handle = session
         .named(&title)
@@ -113,6 +122,8 @@ pub fn run(socket: &std::path::Path, want: &Want) -> Result<Vec<String>, String>
         Want::Activate(_) => (handle::request::ACTIVATE, "activated"),
         // `activate` takes the seat that is doing it; `close` takes nothing.
         Want::Close(_) => (handle::request::CLOSE, "closed"),
+        Want::Minimize(_) => (handle::request::SET_MINIMIZED, "minimized"),
+        Want::Unminimize(_) => (handle::request::UNSET_MINIMIZED, "unminimized"),
         Want::List => return Ok(lines),
     };
     session.ask(handle, opcode)?;
@@ -127,6 +138,14 @@ pub fn run(socket: &std::path::Path, want: &Want) -> Result<Vec<String>, String>
         // a listing gets.
         Want::Close(_) => {
             session.until(|session| !session.windows.contains_key(&handle), PATIENCE)?;
+        }
+        // A minimize and its undoing are answered with the window's new
+        // state, which is what is waited for.
+        Want::Minimize(_) => {
+            session.until(|session| session.is_minimized(handle), PATIENCE)?;
+        }
+        Want::Unminimize(_) => {
+            session.until(|session| !session.is_minimized(handle), PATIENCE)?;
         }
         // An activation has no event of its own to wait for when the window
         // was already the active one.
@@ -220,6 +239,15 @@ impl Session {
     }
 
     /// Send one request to a handle.
+    /// Whether the window behind `handle` was last said to be minimized.
+    fn is_minimized(&self, handle: ObjectId) -> bool {
+        self.done.contains(&handle)
+            && self
+                .windows
+                .get(&handle)
+                .is_some_and(|window| window.minimized)
+    }
+
     fn ask(&mut self, handle: ObjectId, opcode: u16) -> Result<(), String> {
         if opcode == handle::request::ACTIVATE {
             let seat = self
