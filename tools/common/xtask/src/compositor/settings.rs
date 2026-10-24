@@ -10,8 +10,8 @@
 //!
 //! What is required, in order:
 //!
-//! 1. Settings lists the image's applications, none in game mode, and its
-//!    window is up.
+//! 1. Settings, opened on its game-mode page, lists the image's
+//!    applications, none in game mode, and its window is up.
 //! 2. `probe` typed into it and Return pressed turns Game Probe's switch
 //!    on: Settings says it wrote the file, and a second process
 //!    (`settings --list`) reads the switch back as on from the file.
@@ -48,7 +48,7 @@ use crate::{Error, Result};
 /// keys that type into it, open the launcher and ask what the file holds.
 const CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor --boot settings`.
-exec-once = /bin/settings
+exec-once = /bin/settings --page game-mode
 bind = , F1, exec, /bin/vkbd p r o b e
 bind = , F2, exec, /bin/vkbd Return
 bind = , F3, exec, /bin/fuzzel --log-level=info
@@ -422,8 +422,8 @@ mod tests {
     /// A transcript of a boot that passed, as the guest prints one.
     fn passed() -> Vec<String> {
         [
-            "settings: 5 applications listed with 5 icons, 0 in game mode (/.config/ferrix/game-mode.conf)",
-            "settings: the window is up, 1264x704 at scale 1, 6 rows in view",
+            "settings: 5 applications listed, 0 in game mode (/.config/ferrix/game-mode.conf)",
+            "settings: the window is up, 1264x704, on Game mode",
             "vkbd: typed p r o b e",
             "settings: game mode on for probe.desktop; wrote /.config/ferrix/game-mode.conf",
             "on probe.desktop Game Probe",

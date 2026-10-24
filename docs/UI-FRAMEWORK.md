@@ -1086,4 +1086,39 @@ more.
   access, filter chips, bulk rename and the freedesktop.org trash, every
   change asked first. tole gained `Ui::modifiers` (Shift and Control at a
   click, for multi-select) and `files::local_offset`/`civil_date`.
-* Next: U9, the new Settings (the customer's design), its plan first.
+* **The U8 port's gaps closed** (2026-10-24): Ctrl+Z and Ctrl+Shift+Z
+  or Ctrl+Y in text fields (letters typed in a row go back as a word; a
+  text set from outside starts the history anew); the focused caret
+  blinks from its last move and rests lit after ten seconds, so an idle
+  window stops waking; a `TextArea` follows its caret; however a popup
+  closes the keys go back to where they were. `ListView` gained
+  `followEnd`, the lode viewer's Live as `tail -f` (the customer's two
+  bugs: past the last row, and left behind). Checked live under hyprix:
+  `test-compositor --boot tole-demo` now drives the controls demo by
+  QEMU's keys -- a copy out to hyprix's clipboard and a paste back, Ctrl+Z,
+  Tab to a combo box, Space opening its list with the keys, Escape giving
+  them back -- and found the list never had them: `focus: true` on a
+  popup is turned off by the first field to take the keys, so the combo
+  box now gives its list them with `forceActiveFocus()` (tole 42ad97b).
+* **U9a and U9b built** (2026-10-24): Settings is the customer's design
+  on tole (apps' `settings`). U9a: the header, search and who is signed in
+  where; the sidebar's four groups and thirteen pages, a badge on a page
+  with changes waiting; the search narrowing it ("No setting matches");
+  one note component under a setting ("Takes effect after you sign in
+  again", "Not kept yet"); the design's look in OKLCH, dark and light,
+  seven accents, Figtree and JetBrains Mono, Fx.Controls' Theme set to
+  match; game mode ported, its filter taking the keys once its row is
+  made. A page is a list of rows the markup draws by kind, a `VecModel`
+  changed row by row so a field being typed in keeps its item and the
+  keys. U9b: Appearance (a picture of the desktop, the accent colouring
+  the borders and shadow, spacing, corners, see-through, animations;
+  Advanced shows each knob), Windows, Displays (`keyword monitor`, kept in
+  monitors.conf), Keyboard (layouts, Switch layout, repeat) and the
+  unlock grace, every one through `hyprctl setting` into hyprix's
+  settings.conf, live; the lock and screen-off timeouts written into
+  hypridle.conf for the next sign-in (a hand-written one left alone);
+  Name and time with About; Remote login, Power, Users, Logs and Boot
+  options shown until the settings writer. `settings --render PAGE FILE
+  [--light]` draws a page headless; 22 host tests. Next: U9c, Wallpaper
+  with the file chooser, then each page wired to the settings writer's
+  rows as they land.

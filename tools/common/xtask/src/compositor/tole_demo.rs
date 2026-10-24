@@ -5,12 +5,17 @@
 //!
 //! Required: the demo says it is up, and QEMU's screen shows it drawn --
 //! the controls demo's ground (`Theme.bg2`, `#fafaf8`) over a large part of
-//! the screen and its Save button's accent (`#2a62c9`).
+//! the screen and its Save button's accent (`#2a62c9`). Then, by QEMU's
+//! keyboard, what tole does with a desktop round it: the host field's
+//! text copied and pasted back through hyprix's clipboard
+//! (`ext_data_control_v1`), undone with Ctrl+Z, and the combo box's
+//! list opened, taking the keys, and closed by Escape, giving them back.
+//! The demo says where the keys are after each change.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::boot::{judge_still_running, judged_image, say_the_marker, with_the_transcript};
+use super::boot::{judge_still_running, judged_image, press, say_the_marker, with_the_transcript};
 use super::{Carried, EITHER, MARKER, Programs, SETTLE};
 use crate::args::Args;
 use crate::display::{DEVICE_ID, Qmp, free_port};
@@ -32,6 +37,36 @@ const UP: &str = "tole-examples: controls-light is up";
 const GROUND: [u8; 3] = [0xfa, 0xfa, 0xf8];
 /// The accent: the highlighted Save button, the checked boxes.
 const ACCENT: [u8; 3] = [0x2a, 0x62, 0xc9];
+
+/// What the keys do, in order: the chords pressed, what the demo then
+/// says, and what that shows.
+const STEPS: &[(&[&[&str]], &str, &str)] = &[
+    (
+        &[&["ctrl", "a"], &["ctrl", "c"], &["end"], &["ctrl", "v"]],
+        "keys on a text field holding \"nazuna.localnazuna.local\"; 0 popups open",
+        "a copy went out to hyprix's clipboard and a paste came back from it",
+    ),
+    (
+        &[&["ctrl", "z"]],
+        "keys on a text field holding \"nazuna.local\"; 0 popups open",
+        "Ctrl+Z undid the paste",
+    ),
+    (
+        &[&["tab"], &["tab"], &["tab"], &["tab"]],
+        "keys on an item; 0 popups open",
+        "Tab reached the combo box",
+    ),
+    (
+        &[&["spc"]],
+        "keys on a popup; 1 popups open",
+        "Space opened its list, which took the keys",
+    ),
+    (
+        &[&["esc"]],
+        "keys on an item; 0 popups open",
+        "Escape closed it and gave the keys back to the box",
+    ),
+];
 
 /// How long one step may take under emulation on a busy host.
 const PATIENCE: Duration = Duration::from_secs(150);
@@ -178,6 +213,24 @@ fn drive(
     // A moment for its first frame to be shown.
     std::thread::sleep(Duration::from_secs(2));
     qmp.screendump(Some(DEVICE_ID), dump)?;
+    for (keys, want, what) in STEPS {
+        // Only what the demo says after the keys count: an earlier line
+        // saying the same would pass a step that did nothing.
+        let start = watching.after().len();
+        for chord in *keys {
+            press(&mut qmp, chord)?;
+        }
+        let said = watching.read_more(Instant::now() + PATIENCE, |lines| {
+            lines.iter().skip(start).any(|line| line.contains(want))
+        })?;
+        if !said {
+            return Err(with_the_transcript(
+                &Error::new(format!("{arch}: {what}: the demo never said `{want}`")),
+                watching,
+            ));
+        }
+        println!("  {arch}: {what}");
+    }
     watching.read_what_was_said(Duration::from_secs(1))?;
     Ok(watching
         .lines()
