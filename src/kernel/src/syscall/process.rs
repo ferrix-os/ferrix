@@ -80,7 +80,7 @@ use ferrix_linux_abi::types::SIGCHLD;
 
 /// A program, as far as the system call layer is concerned.
 #[derive(Debug)]
-pub(crate) struct Process {
+pub struct Process {
     /// What the core enforces and reports: its address space, its pid, when
     /// it was made, its handles, its job and how it ended. First, so that it
     /// is dropped first -- its job's count and its pid are given back before
@@ -969,12 +969,12 @@ impl Process {
     /// Its user and group ids and supplementary groups, under their lock:
     /// `change` sees all of them at once, and what it changes changes
     /// together. Nothing that waits may be done inside it.
-    pub(crate) fn with_credentials<R>(&self, change: impl FnOnce(&mut Credentials) -> R) -> R {
+    pub fn with_credentials<R>(&self, change: impl FnOnce(&mut Credentials) -> R) -> R {
         change(&mut self.credentials.lock())
     }
 
     /// Its UTS, IPC and cgroup namespaces, as they are now.
-    pub(crate) fn nsproxy(&self) -> NsProxy {
+    pub fn nsproxy(&self) -> NsProxy {
         self.nsproxy.lock().clone()
     }
 
@@ -2095,7 +2095,7 @@ impl Process {
 
     /// Its numbers in the namespaces below the first it is in; `None` in
     /// the first.
-    pub(crate) fn numbers(&self) -> Option<&Arc<Numbers>> {
+    pub fn numbers(&self) -> Option<&Arc<Numbers>> {
         self.pids.as_ref()
     }
 

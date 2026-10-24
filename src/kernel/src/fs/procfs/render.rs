@@ -40,7 +40,7 @@ use crate::syscall::nsproxy;
 use crate::syscall::pidns::{self, PidNamespace};
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry::PID_MAX;
-use crate::syscall::system::{NAME_MAX, RELEASE, SYSNAME, VERSION};
+use crate::syscall::system::{RELEASE, SYSNAME, VERSION};
 use crate::syscall::time;
 use crate::syscall::userns::{self, Kind as IdKind, UserNamespace};
 use crate::user::space::Region;
@@ -657,25 +657,6 @@ pub(super) fn domainname(_: &Kernel) -> Result<Vec<u8>> {
     Ok(string(&nsproxy::acting().uts.domainname()))
 }
 
-/// A write to `kernel/hostname`: `proc_dostring`'s, so `echo name >` stores
-/// `name`, and a name past `__NEW_UTS_LEN` is cut there rather than refused,
-/// which is where the sysctl and `sethostname` differ on Linux too. The
-/// write is taken as from the start of the value, whatever the offset.
-pub(super) fn set_hostname(_: &Kernel, data: &[u8]) -> Result<usize> {
-    nsproxy::acting()
-        .uts
-        .set_hostname(sysctl::stored(data, NAME_MAX))?;
-    Ok(data.len())
-}
-
-/// A write to `kernel/domainname`, as [`set_hostname`].
-pub(super) fn set_domainname(_: &Kernel, data: &[u8]) -> Result<usize> {
-    nsproxy::acting()
-        .uts
-        .set_domainname(sysctl::stored(data, NAME_MAX))?;
-    Ok(data.len())
-}
-
 /// `/proc/<pid>/oom_score_adj`: see `Process::oom_score_adj`.
 pub(super) fn oom_score_adj(process: &Process) -> Result<Vec<u8>> {
     let mut out = alloc::format!("{}", process.oom_score_adj()).into_bytes();
@@ -726,10 +707,21 @@ pub(super) fn memfd_noexec(_: &Kernel) -> Result<Vec<u8>> {
 }
 
 /// A write to `vm/memfd_noexec`: the writer's pid namespace's scope, as
-/// `memfd::set_noexec` judges it. `EPERM` with no process to judge.
+/// the run-time setting entry judges it (`crate::setters`). `EPERM` with no
+/// process to judge.
 pub(super) fn set_memfd_noexec(_: &Kernel, data: &[u8]) -> Result<usize> {
     let writer = userns::acting().ok_or(Errno::EPERM)?;
-    memfd::set_noexec(&writer, data)
+    (crate::setters::bound().sysctl_memfd_noexec)(&writer, data)
+}
+
+/// A write to `kernel/hostname`, a run-time setting (`crate::setters`).
+pub(super) fn set_hostname(kernel: &Kernel, data: &[u8]) -> Result<usize> {
+    (crate::setters::bound().sysctl_hostname)(kernel, data)
+}
+
+/// A write to `kernel/domainname`, a run-time setting (`crate::setters`).
+pub(super) fn set_domainname(kernel: &Kernel, data: &[u8]) -> Result<usize> {
+    (crate::setters::bound().sysctl_domainname)(kernel, data)
 }
 
 /// `vm/overcommit_memory`: 1, Linux's `OVERCOMMIT_ALWAYS`.

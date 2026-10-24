@@ -53,7 +53,7 @@ const NGROUPS_MAX: u32 = 65_536;
 /// # Errors
 ///
 /// `EPERM`.
-pub(crate) fn require_privilege(process: &Process) -> Result<(), Errno> {
+pub fn require_privilege(process: &Process) -> Result<(), Errno> {
     if process.with_credentials(|ids| ids.privileged()) {
         Ok(())
     } else {
@@ -191,7 +191,7 @@ impl Ids {
 /// A process's ids and supplementary groups. `Clone` rather than `Copy`
 /// because of the group list.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Credentials {
+pub struct Credentials {
     /// The user ids.
     pub(crate) user: Ids,
     /// The group ids.
@@ -242,7 +242,7 @@ impl Credentials {
     /// Whether `cap` is effective in the namespace the process is in: in the
     /// first, an effective uid of 0; in a child, the bit, for the capabilities
     /// a child namespace honours at all ([`userns::HONOURED`]).
-    pub(crate) fn holds(&self, cap: u32) -> bool {
+    pub fn holds(&self, cap: u32) -> bool {
         if self.user_ns.is_first() {
             self.user.effective == 0
         } else {

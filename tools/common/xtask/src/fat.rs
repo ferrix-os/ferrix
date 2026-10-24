@@ -597,6 +597,8 @@ pub(crate) fn write_image_carrying(
     // Beside the kernel, where the loader looks for it. Every image carries
     // one, because stage 8's self-check reads its files back through the VFS.
     fs.add_file("FERRIX/INITRD.IMG", initramfs)?;
+    std::fs::create_dir_all(paths::build_dir(arch))?;
+    crate::initramfs::keep_image_manifest(arch, initramfs)?;
     // A kernel command line, when the caller has one: the loader reads it
     // from beside the kernel and hands it over in the boot info.
     if let Some(cmdline) = cmdline {

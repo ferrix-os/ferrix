@@ -27,7 +27,7 @@ struct Flag {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 16] = [
+const FLAGS: [Flag; 17] = [
     Flag {
         name: "profile",
         values: &[
@@ -157,6 +157,13 @@ const FLAGS: [Flag; 16] = [
         values: &[
             (cfg!(ferrix_linux_abi = "on"), "on"),
             (cfg!(ferrix_linux_abi = "off"), "off"),
+        ],
+    },
+    Flag {
+        name: "runtime_settings",
+        values: &[
+            (cfg!(ferrix_runtime_settings = "fixed"), "fixed"),
+            (cfg!(ferrix_runtime_settings = "live"), "live"),
         ],
     },
 ];

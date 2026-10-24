@@ -13,6 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 ferrix-kernel-load.workspace = true
+# The removable run-time setting entries: always compiled, linked only when
+# the composition root names them, under runtime_settings=live
+# (docs/KERNEL-CRATES.md §6; ledger 3558 (10), 3623 (R1)).
+ferrix-kernel-settings.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true

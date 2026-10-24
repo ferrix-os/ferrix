@@ -676,6 +676,16 @@ pub fn x87_resets() -> (u64, u64) {
     (read(&X87_RESETS), read(&X87_LEFT))
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs
+/// Every processor's fast resets so far that left the x87 alone, already
+/// initial: the x87-left branch seen taken anywhere in the boot.
+pub fn x87_left_total() -> u64 {
+    X87_LEFT
+        .iter()
+        .map(|counter| counter.load(Ordering::Relaxed))
+        .fold(0, u64::wrapping_add)
+}
+
 /// This processor's switches so far that left `DS` or `ES` unloaded, 0 over
 /// 0.
 pub fn selector_skips() -> u64 {

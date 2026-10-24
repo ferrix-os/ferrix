@@ -53,7 +53,6 @@ use crate::fs;
 use crate::syscall::pidns;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess::{self, UserError};
-use crate::syscall::userns::CAP_SYS_ADMIN;
 
 /// The longest name: `NAME_MAX` less the `memfd:` every name is shown with.
 const NAME_MAX_LEN: usize = 249;
@@ -73,7 +72,7 @@ const FLAGS: u32 = MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL | MFD_EXEC;
 const SCOPE_NOEXEC_SEAL: u32 = 1;
 /// `MEMFD_NOEXEC_SCOPE_NOEXEC_ENFORCED`: as [`SCOPE_NOEXEC_SEAL`], and
 /// `MFD_EXEC` is refused.
-const SCOPE_NOEXEC_ENFORCED: u32 = 2;
+pub const SCOPE_NOEXEC_ENFORCED: u32 = 2;
 
 /// The tmpfs every memfd lives on, made on first use.
 static MEMFD_FS: Once<Arc<Tmpfs>> = Once::new();
@@ -177,35 +176,4 @@ pub(crate) fn noexec_scope(process: Option<&Process>) -> u32 {
             .and_then(Process::numbers)
             .map(|numbers| numbers.namespace()),
     )
-}
-
-/// A write of `data` to `/proc/sys/vm/memfd_noexec` by `process`: Linux's
-/// `pid_mfd_noexec_dointvec_minmax`. One decimal integer, white space around
-/// it allowed, from the scope of the namespace's parent -- a namespace may
-/// not be set laxer than the one it was made in -- to
-/// [`SCOPE_NOEXEC_ENFORCED`]; it sets the writer's own pid namespace.
-///
-/// Two differences from Linux, both in `docs/BACKLOG.md`: the number is
-/// decimal, with an optional `+`, where `proc_dointvec` takes any base and
-/// no `+`; and `CAP_SYS_ADMIN` is asked in the writer's own user namespace,
-/// where Linux asks it over the pid namespace's owner, which a
-/// `PidNamespace` does not record yet.
-///
-/// # Errors
-///
-/// `EPERM` without `CAP_SYS_ADMIN`, asked first; `EINVAL` for anything but
-/// such a number.
-pub(crate) fn set_noexec(process: &Process, data: &[u8]) -> Result<usize, Errno> {
-    if !process.with_credentials(|held| held.holds(CAP_SYS_ADMIN)) {
-        return Err(Errno::EPERM);
-    }
-    let namespace = process.numbers().map(|numbers| numbers.namespace());
-    let floor = pidns::memfd_noexec_floor(namespace);
-    let scope = core::str::from_utf8(data)
-        .ok()
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        .filter(|scope| (floor..=SCOPE_NOEXEC_ENFORCED).contains(scope))
-        .ok_or(Errno::EINVAL)?;
-    pidns::set_memfd_noexec(namespace, scope);
-    Ok(data.len())
 }

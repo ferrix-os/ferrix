@@ -391,7 +391,10 @@
         "syscall/userns.rs",
         "syscall/vdso.rs",
         "syscall/vdso_check.rs",
-        "kernel_load.rs"
+        "kernel_load.rs",
+        "setters.rs",
+        "settings/**",
+        "kernel_settings.rs"
       ]
     }
   },
@@ -563,6 +566,7 @@
       "net::check",
       "platform::google::gs201::usb",
       "platform::st::stm32mp1",
+      "setters",
       "syscall::deliver",
       "syscall::launch",
       "syscall::linux",
@@ -593,6 +597,63 @@
         "may_lend": "firmware::may_lend",
         "refuses": "firmware::refuses",
         "kernel_mapping": "firmware::KERNEL_MAPPING"
+      }
+    },
+    "//removable": [
+      "The removable crates (docs/KERNEL-CRATES.md section 6; the certification",
+      "consultant's ledger lines 3558 (9)-(11), 3595 (C2), (C4) and 3623): a",
+      "load-ring crate a build flag links or leaves out, through one typed",
+      "interface the load defines (`interface`, in `defined_in`) with an absent",
+      "binding, which the composition root binds once per value of the flag",
+      "(`binding`). `present_when` is the value that links it; under any other",
+      "value the root names the crate nowhere and the binary carries no symbol",
+      "`symbol` names, nor any of `absent_symbols` (the load's mechanisms only",
+      "the crate calls). `calls` are the load files that call through the",
+      "interface, `fields` its entries. check-item-boundary.py's removable_problems",
+      "holds the root, the manifests and every profile to this record, and",
+      "check-removable-symbols.py the linked ELFs (cargo xtask test-removable)."
+    ],
+    "removable": {
+      "ferrix-kernel-settings": {
+        "flag": "runtime_settings",
+        "present_when": "live",
+        "interface": "setters::Setters",
+        "defined_in": "setters.rs",
+        "absent": "setters::ABSENT",
+        "binding": {
+          "live": "ferrix_kernel_settings::SETTERS",
+          "fixed": "setters::ABSENT"
+        },
+        "fields": [
+          "sethostname",
+          "setdomainname",
+          "syslog_clear",
+          "syslog_read_clear",
+          "restart_with_word",
+          "clock_settime",
+          "settimeofday",
+          "sysrq_trigger",
+          "sysctl_hostname",
+          "sysctl_domainname",
+          "sysctl_memfd_noexec",
+          "driver_bind"
+        ],
+        "calls": [
+          "fs/memfd_check.rs",
+          "fs/procfs.rs",
+          "fs/procfs/render.rs",
+          "fs/sysfs.rs",
+          "syscall/check.rs",
+          "syscall/system.rs",
+          "syscall/time.rs"
+        ],
+        "lint_expect": "unused_crate_dependencies",
+        "symbol": "ferrix_kernel_settings",
+        "absent_symbols": [
+          "<ferrix_kernel_load::syscall::system::UtsNamespace>::set_hostname",
+          "<ferrix_kernel_load::syscall::system::UtsNamespace>::set_domainname",
+          "ferrix_kernel_load::fs::timerfd::clock_was_set"
+        ]
       }
     },
     "hooks": [
@@ -701,6 +762,13 @@
     "ferrix-kernel-load": {
       "path": "src/kernel/load",
       "root": "kernel_load.rs",
+      "rings": [
+        "load"
+      ]
+    },
+    "ferrix-kernel-settings": {
+      "path": "src/kernel/settings",
+      "root": "kernel_settings.rs",
       "rings": [
         "load"
       ]

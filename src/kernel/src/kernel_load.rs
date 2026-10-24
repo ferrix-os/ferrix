@@ -47,6 +47,8 @@ pub mod interfaces;
 pub mod net;
 #[cfg(ferrix_linux_abi = "on")]
 pub mod service_check;
+#[cfg(ferrix_linux_abi = "on")]
+pub mod setters;
 /// The architecture modules (the core's), with the architecture checks raised to this crate, each declared at its position and compiled on its own architecture only.
 pub mod arch {
     pub use ferrix_kernel_item::arch::*;

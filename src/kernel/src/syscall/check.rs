@@ -9050,6 +9050,7 @@ fn check_what_an_applet_asks_of_the_system(process: &Process) -> Result<(), &'st
         .and_then(|()| check_nanosleep_takes_its_time(process, page))
         .and_then(|()| check_setting_the_clock_moves_only_realtime(process, page))
         .and_then(|()| check_a_host_name_reaches_uname(process, page))
+        .and_then(|()| check_absent_setters_refuse(process, page))
         .and_then(|()| check_unix_sockets(process, page));
     let outcome = outcome.and_then(|()| check_time_is_the_realtime_seconds(process, page));
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
@@ -9724,7 +9725,12 @@ fn set_the_clock_and_read_it_back(process: &Process, page: u64) -> Result<(), &'
     write_word(process, page, SEPTEMBER_2001)?;
     write_word(process, page + word, 0)?;
     answers(
-        time::sys_clock_settime(process, CLOCK_REALTIME as i32, page, TimeWidth::Native),
+        (crate::setters::bound().clock_settime)(
+            process,
+            CLOCK_REALTIME as i32,
+            page,
+            TimeWidth::Native,
+        ),
         0,
         "clock_settime(CLOCK_REALTIME) was refused",
     )?;
@@ -9747,7 +9753,12 @@ fn set_the_clock_and_read_it_back(process: &Process, page: u64) -> Result<(), &'
         return Err("setting CLOCK_REALTIME moved CLOCK_MONOTONIC");
     }
     refuses(
-        time::sys_clock_settime(process, CLOCK_MONOTONIC as i32, page, TimeWidth::Native),
+        (crate::setters::bound().clock_settime)(
+            process,
+            CLOCK_MONOTONIC as i32,
+            page,
+            TimeWidth::Native,
+        ),
         Errno::EINVAL,
         "CLOCK_MONOTONIC could be set",
     )
@@ -9801,6 +9812,40 @@ fn read_the_clock_through_time(process: &Process, page: u64) -> Result<(), &'sta
     )
 }
 
+/// Every run-time setting entry of the binding a `runtime_settings = "fixed"`
+/// build registers, `setters::ABSENT`, answers `EPERM` without reading an
+/// argument (`docs/KERNEL-CRATES.md` §6.2, statement settings-1; ledger 3623
+/// (R15)). Called directly, so it runs in every build, whichever binding the
+/// build has; the count is held to `setters::ENTRIES`, which
+/// check-item-boundary.py holds to the struct's fields and the manifest.
+fn check_absent_setters_refuse(process: &Process, page: u64) -> Result<(), &'static str> {
+    use crate::discovery::devmgr::Bus;
+    use crate::setters::{ABSENT, ENTRIES};
+    use crate::syscall::time::TimeWidth;
+    let none = Errno::EPERM;
+    let answers = [
+        (ABSENT.sethostname)(process, page, 10),
+        (ABSENT.setdomainname)(process, page, 10),
+        (ABSENT.syslog_clear)(process),
+        (ABSENT.syslog_read_clear)(process, page, 16),
+        (ABSENT.restart_with_word)(process, page),
+        (ABSENT.clock_settime)(process, 0, page, TimeWidth::Native),
+        (ABSENT.settimeofday)(process, page, 0, TimeWidth::Native),
+        (ABSENT.sysrq_trigger)(&(), b"c"),
+        (ABSENT.sysctl_hostname)(&(), b"check-host"),
+        (ABSENT.sysctl_domainname)(&(), b"check-host"),
+        (ABSENT.sysctl_memfd_noexec)(process, b"2"),
+        (ABSENT.driver_bind)(Bus::Pci, 0, false, b"0000:00:00.0"),
+    ];
+    if answers.len() != ENTRIES {
+        return Err("the absent setters' check does not call every entry");
+    }
+    if answers.iter().any(|answer| *answer != Err(none)) {
+        return Err("an absent run-time setting entry did not answer EPERM");
+    }
+    Ok(())
+}
+
 /// A name `sethostname` sets is the `nodename` `uname` reports, and a name
 /// longer than 64 bytes is refused. The name is forgotten afterwards, so the
 /// `uname` check and a person reading `uname -a` both still see `ferrix`.
@@ -9808,7 +9853,7 @@ fn check_a_host_name_reaches_uname(process: &Process, page: u64) -> Result<(), &
     uaccess::copy_to_user(process.space(), page, b"check-host")
         .map_err(|_| "could not stage a host name")?;
     let outcome = answers(
-        system::sys_sethostname(process, page, 10),
+        (crate::setters::bound().sethostname)(process, page, 10),
         0,
         "sethostname was refused",
     )
@@ -9828,7 +9873,7 @@ fn check_a_host_name_reaches_uname(process: &Process, page: u64) -> Result<(), &
     })
     .and_then(|()| {
         refuses(
-            system::sys_sethostname(process, page, 65),
+            (crate::setters::bound().sethostname)(process, page, 65),
             Errno::EINVAL,
             "a 65-byte host name was accepted",
         )
@@ -13052,12 +13097,21 @@ fn check_getrusage_counts(process: &Process) -> Result<(), &'static str> {
             core::hint::spin_loop();
         }
         let after = micros(&usage(1)?);
-        let wall_micros = crate::timer::now_nanos().saturating_sub(wall_start) / 1_000;
+        let wall_nanos = crate::timer::now_nanos().saturating_sub(wall_start);
         let moved = after.saturating_sub(before);
         if moved < 1_000 {
             return Err("getrusage(RUSAGE_THREAD) did not count the time the thread ran");
         }
-        if moved > wall_micros {
+        // To the reply's own precision. `ru_utime` and `ru_stime` are each
+        // cut to the microsecond, as Linux cuts them, so a reading is up to
+        // 2 us short of the time it stands for, and the difference of two can
+        // exceed the time between them by up to 2 us less a nanosecond: in
+        // nanoseconds, `moved` stands for less than its value plus 2 us, and
+        // the wall must not be shorter than that. Under KVM the two charges
+        // sit a microsecond or less inside the wall's two readings, so a
+        // bound in whole microseconds failed boots on correct counts
+        // (`moved` 2004 against 2005 of wall, 5023 against 5023, on nazuna).
+        if moved.saturating_mul(1_000) >= wall_nanos.saturating_add(2_000) {
             return Err("getrusage(RUSAGE_THREAD) counted more time than passed on the wall clock");
         }
         // The check runs in a task of the kernel's, not one of the process's

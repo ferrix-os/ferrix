@@ -91,7 +91,14 @@ kernel                                            ring 3
 **The node** (`L.device.51`). Stage 10's fifth finder,
 `discovery/powerctl.rs` (item ring), asks `arch::power_probe`. Without
 `ferrix.powerctl` or `ferrix.powerctl.fake` nothing is read, published or
-printed. With `ferrix.powerctl` the probe publishes one node,
+printed. **That is the deactivation mechanism** (the certification
+consultant's ledger 3558 C2, 3623 (R13)): no profile permits either option,
+so in every certified configuration the probe returns before it reads a
+register, no node is published, and `power_control_create` finds none to
+claim; the code is deactivated, not absent, in every build, a
+`runtime_settings=fixed` one included, until step 2 of
+`docs/KERNEL-CRATES.md` §6.2 moves its entries into the removable settings
+crate under its own boundary-move review. With `ferrix.powerctl` the probe publishes one node,
 `TREE_X86_POWER` (binding 7), only when all hold, and otherwise prints
 `power: refused: <why> (Intel .., signature .., 0x601 ..); no node` and
 publishes nothing -- never a failed finder, so the boot goes on:

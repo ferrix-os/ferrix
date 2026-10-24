@@ -120,9 +120,9 @@ impl CgroupNamespace {
 
 /// The namespaces a process is in besides its mount and user namespaces.
 #[derive(Debug, Clone)]
-pub(crate) struct NsProxy {
+pub struct NsProxy {
     /// Its host and domain name.
-    pub(crate) uts: Arc<UtsNamespace>,
+    pub uts: Arc<UtsNamespace>,
     /// Its System V semaphores.
     pub(crate) ipc: Arc<IpcNamespace>,
     /// Its view of the cgroup tree.
@@ -146,7 +146,7 @@ impl NsProxy {
 
 /// The proxy of the process making the call: the running task's, or the one a
 /// boot check is acting as, or the first's for the kernel's own reads.
-pub(crate) fn acting() -> NsProxy {
+pub fn acting() -> NsProxy {
     match userns::acting() {
         Some(process) => process.nsproxy(),
         None => NsProxy::initial(),

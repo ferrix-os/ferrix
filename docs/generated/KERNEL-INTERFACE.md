@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2378 declarations in the core's files, 174 in the item's; 66 checks-only.
+2379 declarations in the core's files, 174 in the item's; 67 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1053,6 +1053,7 @@ checks above is `pub` for raised checks (F3).
 | `set_thread_area` | fn | load |  |
 | `ss_reloads` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
+| `x87_left_total` | fn | load (checks) | checks-only |
 | `x87_resets` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FpuArea` | struct | load (checks) | checks-only |
 | `UserState` | struct | load |  |
@@ -1939,7 +1940,7 @@ checks above is `pub` for raised checks (F3).
 | `Interrupt` | struct | item, load |  |
 | `Delivery::fire` | method | load |  |
 | `Interrupt::acknowledge` | method | item, load |  |
-| `Interrupt::bind` | method | item, load |  |
+| `Interrupt::bind` | method | item, load, bin |  |
 | `Interrupt::coalesces` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Interrupt::new` | method | item, load, bin |  |
 | `Interrupt::reads_masked` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2903,7 +2904,7 @@ checks above is `pub` for raised checks (F3).
 | `WindowPages::physical` | field | load, bin |  |
 | `WindowPages::whole` | field | load, bin |  |
 | `WindowPages::whole_len` | field | load |  |
-| `WindowPages::all` | method | item, load |  |
+| `WindowPages::all` | method | item, load, bin |  |
 
 ### `user::vmo`
 

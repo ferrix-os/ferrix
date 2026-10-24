@@ -63,7 +63,7 @@ pub(crate) const CAP_SYS_PTRACE: u32 = 19;
 /// `CAP_SYS_CHROOT`.
 pub(crate) const CAP_SYS_CHROOT: u32 = 18;
 /// `CAP_SYS_ADMIN`.
-pub(crate) const CAP_SYS_ADMIN: u32 = 21;
+pub const CAP_SYS_ADMIN: u32 = 21;
 
 /// Every capability Linux defines, as a set.
 pub(crate) const FULL: u64 = (1_u64 << (CAP_LAST_CAP + 1)) - 1;
@@ -228,7 +228,7 @@ pub(crate) enum Kind {
 
 /// A user namespace.
 #[derive(Debug)]
-pub(crate) struct UserNamespace {
+pub struct UserNamespace {
     /// The namespace it was made in; `None` for the first.
     parent: Option<Arc<UserNamespace>>,
     /// 0 for the first.
@@ -398,7 +398,7 @@ pub(crate) fn from_kid_munged(ns: &UserNamespace, kind: Kind, kernel: u32) -> u3
 /// descendant of the one it is in, reached through a namespace whose owner is
 /// the process's effective kernel uid -- a namespace's creator has every
 /// capability in it from the outside.
-pub(crate) fn capable_over(credentials: &Credentials, target: &UserNamespace, cap: u32) -> bool {
+pub fn capable_over(credentials: &Credentials, target: &UserNamespace, cap: u32) -> bool {
     let own = &credentials.user_ns;
     let mut at = target;
     while at.level > own.level {

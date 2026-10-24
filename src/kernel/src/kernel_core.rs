@@ -82,6 +82,8 @@ macro_rules! build_flag_word {
             cfg!(ferrix_runtime_trades = "game_mode"),
             cfg!(ferrix_linux_abi = "on"),
             cfg!(ferrix_linux_abi = "off"),
+            cfg!(ferrix_runtime_settings = "fixed"),
+            cfg!(ferrix_runtime_settings = "live"),
         ]
     };
 }

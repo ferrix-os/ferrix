@@ -148,6 +148,16 @@ pub(crate) const TASKS: &[Task] = &[
         ],
         run: command,
     },
+    Task {
+        name: "test-removable",
+        help_at: 198,
+        help: &[
+            "test-removable",
+            "              link the release kernel for --arch (all by default) with and without each removable",
+            "              crate, and require its symbols in the one and absent from the other (docs/KERNEL-CRATES.md 6)",
+        ],
+        run: command,
+    },
 ];
 
 /// `check`, or one of its steps run alone, by the command's name
@@ -177,6 +187,7 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
         "test-flags" => test_flags(args),
+        "test-removable" => test_removable(args),
         _ => run(args),
     }
 }
@@ -1149,6 +1160,76 @@ fn test_flags(args: &Args) -> Result<()> {
     } else {
         Err(Error::new(format!("test-flags: {}", failed.join("; "))))
     }
+}
+
+/// The removable crates (`composition_root.removable` in
+/// certification-item.json, `docs/KERNEL-CRATES.md` §6): each crate, its
+/// flag, the value that links it and the values that leave it out.
+const REMOVABLE: [(&str, &str, &str, &[&str]); 1] = [(
+    "ferrix-kernel-settings",
+    "runtime_settings",
+    "live",
+    &["fixed"],
+)];
+
+/// `test-removable`: for every architecture asked (all by default) and
+/// every removable crate, link the release kernel of the default profile
+/// with each value of the crate's flag -- the present one as the profile
+/// sets it, the others by `--set`, ad hoc -- and hold each ELF to
+/// `check-removable-symbols.py`: the crate's symbols in the one, none of
+/// them nor the mechanisms only it calls in the others (ledger 3558 (11),
+/// 3623 (R1), (R14)). Each build is a child `cargo xtask build`, since one
+/// run resolves one set of flags; each ELF is kept under
+/// `target/removable/` for the record.
+fn test_removable(args: &Args) -> Result<()> {
+    let arches = if args.arch.is_none() {
+        Arch::ALL.to_vec()
+    } else {
+        args.arches()?
+    };
+    let xtask =
+        std::env::current_exe().map_err(|error| Error::new(format!("test-removable: {error}")))?;
+    let kept = paths::target_dir().join("removable");
+    std::fs::create_dir_all(&kept)
+        .map_err(|error| Error::new(format!("{}: {error}", kept.display())))?;
+    let mut checked = 0;
+    for arch in arches {
+        for (crate_name, flag, present, absent) in REMOVABLE {
+            for value in std::iter::once(present).chain(absent.iter().copied()) {
+                let mut build = Command::new(&xtask);
+                let _ = build.current_dir(paths::workspace_root()).args([
+                    "build",
+                    "--release",
+                    "--arch",
+                    arch.name(),
+                ]);
+                if value != present {
+                    let _ = build.args(["--set", &format!("{flag}={value}")]);
+                }
+                println!("test-removable: {arch}: {crate_name} with {flag}={value}");
+                let status = build
+                    .status()
+                    .map_err(|error| Error::new(format!("test-removable: {error}")))?;
+                if !status.success() {
+                    return Err(Error::new(format!(
+                        "test-removable: {arch}: the build with {flag}={value} failed"
+                    )));
+                }
+                let elf = cargo::kernel_elf(arch, true);
+                let copy = kept.join(format!("{}-{crate_name}-{value}.elf", arch.name()));
+                let _ = std::fs::copy(&elf, &copy)
+                    .map_err(|error| Error::new(format!("{}: {error}", elf.display())))?;
+                let copy_text = copy.display().to_string();
+                python_with(
+                    "tools/common/check/check-removable-symbols.py",
+                    &["--elf", &copy_text, "--crate", crate_name, "--value", value],
+                )?;
+                checked += 1;
+            }
+        }
+    }
+    println!("test-removable: run: PASSED ({checked} kernels linked and checked)");
+    Ok(())
 }
 
 /// The item crates that must make every allocation fallibly, by package.

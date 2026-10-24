@@ -68,7 +68,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0xF100_0000);
 /// A pid namespace below the first. (The first is `None` wherever a
 /// namespace is optional: it has no record and no map.)
 #[derive(Debug)]
-pub(crate) struct PidNamespace {
+pub struct PidNamespace {
     /// The namespace it was made in; `None` only when that is the first.
     parent: Option<Arc<PidNamespace>>,
     /// 1 for a child of the first.
@@ -180,13 +180,13 @@ pub(crate) fn memfd_noexec(namespace: Option<&Arc<PidNamespace>>) -> u32 {
 
 /// The lowest `vm.memfd_noexec` `namespace` may be set to: its parent's
 /// scope, and 0 for the first, which has none.
-pub(crate) fn memfd_noexec_floor(namespace: Option<&Arc<PidNamespace>>) -> u32 {
+pub fn memfd_noexec_floor(namespace: Option<&Arc<PidNamespace>>) -> u32 {
     namespace.map_or(0, |namespace| memfd_noexec(namespace.parent.as_ref()))
 }
 
 /// Set `namespace`'s own `vm.memfd_noexec`; the caller has checked it
 /// against [`memfd_noexec_floor`] and the highest scope.
-pub(crate) fn set_memfd_noexec(namespace: Option<&Arc<PidNamespace>>, scope: u32) {
+pub fn set_memfd_noexec(namespace: Option<&Arc<PidNamespace>>, scope: u32) {
     let own = namespace.map_or(&FIRST_MEMFD_NOEXEC, |namespace| &namespace.memfd_noexec);
     own.store(scope, Ordering::Release);
 }
@@ -236,7 +236,7 @@ pub(crate) fn create(parent: Option<&Arc<PidNamespace>>) -> Result<Arc<PidNamesp
 /// One task's numbers in every namespace it is in below the first: Linux's
 /// `struct pid`. A task in the first namespace has none.
 #[derive(Debug)]
-pub(crate) struct Numbers {
+pub struct Numbers {
     /// The innermost namespace the task is in.
     ns: Arc<PidNamespace>,
     /// `nr[0]` is the kernel number; `nr[i]` the number in the level-`i`
@@ -249,7 +249,7 @@ pub(crate) struct Numbers {
 
 impl Numbers {
     /// The innermost namespace.
-    pub(crate) fn namespace(&self) -> &Arc<PidNamespace> {
+    pub fn namespace(&self) -> &Arc<PidNamespace> {
         &self.ns
     }
 

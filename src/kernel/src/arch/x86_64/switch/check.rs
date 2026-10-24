@@ -84,6 +84,11 @@ pub(crate) struct Report {
     /// What the `XINUSE` probe read after a busy and after a quiet program,
     /// where `XGETBV` 1 is offered.
     pub(crate) xinuse: Option<(i32, i32)>,
+    /// Whether the x87-left branch was demanded (see [`run`]).
+    pub(crate) left_demanded: bool,
+    /// Fast resets on every processor, the whole boot so far, that left the
+    /// x87 alone, read after the quiet wakes.
+    pub(crate) left_anywhere: u64,
 }
 
 /// How long a case may take before its program is called stuck: generous
@@ -641,6 +646,20 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         // 39162329764 and 39274053774, 2026-10-18 and 19). So the probe is
         // asked again, [`PROBE_TRIES`] times, and the branch is demanded
         // only where every answer is "initial".
+        //
+        // **And the branch is seen taken where the boot saw it, not only on
+        // these wakes.** The probe reads `XINUSE` after its own reset, which
+        // leaves the x87 initial on either branch, so its "initial" says how
+        // the processor reports an x87 just reset, not what the switch will
+        // find after a quiet program has run for milliseconds, halts and
+        // host deschedules among them. A runner's KVM read "initial" on
+        // every probe and then raised the bit on all 16 wakes after them
+        // (runs 39963987141, 39998606614 and 40041330453, 2026-10-23). What
+        // the demand guards is that the switch reads `XINUSE` and acts on it
+        // at all, and a left x87 counted on any processor at any time in the
+        // boot shows that as well as one on these wakes: with the x87 reset
+        // forced, none is counted anywhere, and the check still fails by
+        // name.
         let fast = cpu::reset_components() == cpu::XSTATE_X87_SSE | cpu::XSTATE_AVX;
         report.xinuse = check_xinuse_tells_nothing()?;
         let reports_initial = matches!(
@@ -662,7 +681,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             }
         }
         let last = core_switch::x87_resets();
-        if fast && reports_initial && last.1 <= after.1 {
+        report.left_demanded = fast && reports_initial;
+        report.left_anywhere = core_switch::x87_left_total();
+        if report.left_demanded && last.1 <= after.1 && report.left_anywhere == 0 {
             return Err(
                 "a wake beside a program that left the x87 initial reset it: XINUSE was not read",
             );
@@ -2912,9 +2933,16 @@ pub fn check_switch_state() -> Result<(), &'static str> {
         match report.xinuse {
             Some((busy, quiet)) => crate::console::println!(
                 "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \
-                 after a busy and a quiet program: {busy:#x} and {quiet:#x}",
+                 after a busy and a quiet program: {busy:#x} and {quiet:#x}; the x87-left \
+                 branch {}, {} left in the boot",
                 report.x87.0,
                 report.x87.1,
+                if report.left_demanded {
+                    "demanded"
+                } else {
+                    "not demanded"
+                },
+                report.left_anywhere,
             ),
             None => crate::console::println!(
                 "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \

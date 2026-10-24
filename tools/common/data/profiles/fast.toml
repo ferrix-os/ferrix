@@ -8,7 +8,7 @@ level = "sc2"
 claim = "IEC 61508-3 SC 2 / ISO 26262 ASIL B, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
-image = { driver_updates = "absent" }
+image = { driver_updates = "absent", settings_writer = "absent" }
 exceptions = []
 
 [flags]
@@ -26,6 +26,7 @@ ssbd = "always"
 smt = "stibp"
 runtime_trades = "none"
 linux_abi = "on"
+runtime_settings = "fixed"
 
 [boot_options]
 "ferrix.checks" = ["run"]

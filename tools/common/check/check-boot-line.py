@@ -122,8 +122,45 @@ def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_clai
     return problems
 
 
+# The flags the image manifest names after profile, level and claim
+# (docs/BUILD-FLAGS.md §5.1), as xtask's `flags::MANIFEST_FLAGS`.
+MANIFEST_FLAGS = ("runtime_settings",)
+
+
+def expected_manifest(words: dict[str, str], profile_file: dict) -> str:
+    """The image manifest an image of these build-line words must carry
+    (docs/BUILD-FLAGS.md §5.1; ledger 3623 (R19)), from the files alone."""
+    lines = ["format=1", f"profile={words['profile']}", f"level={words['level']}",
+             f"claim={'no' if words['profile'] == 'none' else 'yes'}"]
+    lines += [f"{flag}={words.get(flag, 'unknown')}" for flag in MANIFEST_FLAGS]
+    lines += [f"{key}={value}" for key, value in profile_file.get("image", {}).items()]
+    return "\n".join(lines) + "\n"
+
+
+def manifest_problems(want: str, got: str | None) -> list[str]:
+    """What differs between the manifest the image carries and the profile's."""
+    if got is None:
+        return ["the image carries no manifest (etc/ferrix/image-manifest)"]
+    if got == want:
+        return []
+    wanted, carried = want.splitlines(), got.splitlines()
+    differ = [f"{have!r} (expected {line!r})" for line, have in zip(wanted, carried) if line != have]
+    if len(wanted) != len(carried):
+        differ.append(f"{len(carried)} lines (expected {len(wanted)})")
+    return [f"the image manifest differs: {'; '.join(differ)}"]
+
+
 def self_test() -> list[str]:
     failures = []
+    prof_image = {"profile": "p", "level": "l", "flags": {"runtime_settings": "live"},
+                  "image": {"driver_updates": "absent", "settings_writer": "present"}}
+    manifest = expected_manifest({"profile": "p", "level": "l", "runtime_settings": "live"}, prof_image)
+    if manifest_problems(manifest, manifest):
+        failures.append("a matching manifest was refused")
+    if not manifest_problems(manifest, manifest.replace("settings_writer=present", "settings_writer=absent")):
+        failures.append("a manifest line that disagrees with the profile passed")
+    if not manifest_problems(manifest, None):
+        failures.append("an image without a manifest passed")
     flag_file = {"flags": {"a": {}, "b": {}}}
     prof = {"profile": "p", "level": "l", "flags": {"a": "x", "b": "y"}}
     want = expected("p", [], flag_file, prof)
@@ -155,6 +192,7 @@ def main() -> int:
     parser.add_argument("--arch", default="?")
     parser.add_argument("--log", type=Path)
     parser.add_argument("--kernel", type=Path)
+    parser.add_argument("--manifest", type=Path, help="the image manifest the image carries, as xtask kept it")
     parser.add_argument("--set", action="append", default=[], dest="sets")
     parser.add_argument("--no-claim", action="store_true")
     parser.add_argument("--self-test", action="store_true")
@@ -202,6 +240,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if args.manifest is not None:
+        carried = args.manifest.read_text(encoding="utf-8") if args.manifest.is_file() else None
+        problems = manifest_problems(expected_manifest(want, profile_file), carried)
+        if problems:
+            print(f"boot-line: REFUSED: {args.arch}: " + "; ".join(problems) + f" ({args.manifest})", file=sys.stderr)
+            return 1
     digest = hashlib.sha256(args.kernel.read_bytes()).hexdigest() if args.kernel else "(no kernel given)"
     claim = (
         "an ad-hoc run, no claim"
@@ -209,7 +253,8 @@ def main() -> int:
         else f"profile {args.profile} (level {want['level']})"
     )
     print(
-        f"boot-line: {args.arch}: the kernel's build line matches {claim}, word for word; "
+        f"boot-line: {args.arch}: the kernel's build line matches {claim}, word for word"
+        f"{', and so does the image manifest' if args.manifest is not None else ''}; "
         f"kernel sha256 {digest}"
     )
     return 0

@@ -420,6 +420,7 @@ dependencies = [
  "ferrix-crng",
  "ferrix-elf",
  "ferrix-kernel-load",
+ "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
  "ferrix-sched",
@@ -527,6 +528,20 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-settings"
+version = "0.1.0"
+dependencies = [
+ "ferrix-audit",
+ "ferrix-bootinfo",
+ "ferrix-kernel-core",
+ "ferrix-kernel-load",
+ "ferrix-linux-abi",
+ "ferrix-procfs",
+ "ferrix-sysfs",
+ "ferrix-vfs",
 ]
 
 [[package]]
