@@ -2714,3 +2714,154 @@ line.
   `LASTKERNEL.TXT`, `docs/POSTMORTEM.md` §3.5, which nothing writes yet),
   backtraces (step 2's stack capture, its own review).
 
+
+### 21.9 Design: the stack capture (tombstones step 2's last part; for review, 2026-10-24)
+
+What a tombstone still lacks is §21.3's "backtrace of every thread":
+`BLOB_BACKTRACE` and a `TOMBSTONE_TOP_FRAME` that names a function's frame
+rather than the module. The customer's rule is a slim kernel, so the
+unwinding is ring 3's: `lode crashd` unwinds while the kernel holds the
+process (§21.7). The kernel gives it only two things it cannot read today.
+
+**What exists.** The hold (§21.7) parks every thread. `/proc/<pid>/maps`
+names each mapped file and offset. `/proc/<pid>/task/<tid>/syscall` gives
+`sp` and `pc` of a thread stopped in a trap, but on x86-64 only
+(`sched::inspect::calls_are_visible`, `docs/DEBUG.md` §1.1). The held line
+gives the faulting thread's `pc`, not its `sp`. Missing, and contrary to
+§21.3's assumption: the kernel has **no `/proc/<pid>/mem` and no
+`process_vm_readv`**, so nothing can read another process's stack.
+
+**The kernel's part: about 120 lines, 30 of them core.**
+
+1. **The faulting thread's registers** (core, about 30 lines). The core's
+   fault hook takes only `pc` (`trap::ReturnPath::fault_signal`, `fn(u32,
+   i32, u64, u64)`). It would take a `UserRegs { pc, sp, fp, lr }` made
+   from the trap frame: `trap.rs` about 8 lines (the type, the call); a
+   `user_frame_pointer` and `user_link` on each architecture's `TrapFrame`,
+   and `user_stack_pointer` where it is missing (x86-64 `rsp`/`rbp`, no
+   link; AArch64 `sp_el0`/`x29`/`x30`; ARMv7-A `sp_usr`/`r11`/`lr_usr`):
+   `arch/x86_64/trap.rs` 6, `arch/aarch64/trap.rs` 8, `arch/armv7a/trap.rs`
+   6. No behaviour changes; the values are the program's own registers, as
+   the signal frame already carries them.
+2. **The held line carries them** (load): `held PID TID SIGNAL CODE ADDRESS
+   PC threads N unparked M dropped D sp SP fp FP lr LR`, appended so that
+   today's parser reads what it read. `syscall/deliver.rs` 6 lines (pass
+   them on), `fs/crashes.rs` 15 (slot fields, the line).
+3. **The other threads' registers** (load, about 30 lines, no core). A
+   held process's other threads park on the return path, where the load
+   holds their whole `UserContext`. At the park, `syscall/process.rs`
+   copies `pc`, `sp`, `fp` and `lr` into the thread (about 15 lines, cleared
+   when it leaves the park), and `/proc/<pid>/task/<tid>/regs`, a Ferrix
+   file, prints them as one line `pc sp fp lr` while the process is held
+   and is empty otherwise (`fs/procfs.rs` and `fs/procfs/debug.rs`, about
+   15). All three architectures alike, unlike `syscall`.
+4. **`/proc/<pid>/mem`, read-only** (load, about 50 lines, no core). As
+   Linux's: `pread` at the virtual address, through the same
+   `uaccess::copy_from_user` loop `environ` uses (`fs/procfs/debug.rs` about
+   40, `fs/procfs.rs` 5). Narrower than Linux's on purpose: it opens only
+   for a caller privileged in the first user namespace (the crash device's
+   own rule, `fs/crashes.rs`'s `privileged`) and only **while the process is
+   held**, `EBUSY` otherwise; no write, no `lseek` past the user half.
+   Opening it to every ptrace-able process (gdb's use) is a later change
+   with its own review.
+
+| File | Ring | Lines |
+|---|---|---:|
+| `trap.rs` | core | 8 |
+| `arch/x86_64/trap.rs` | core | 6 |
+| `arch/aarch64/trap.rs` | core | 8 |
+| `arch/armv7a/trap.rs` | core | 6 |
+| `syscall/deliver.rs` | load | 6 |
+| `fs/crashes.rs` | load | 15 |
+| `syscall/process.rs` | load | 15 |
+| `fs/procfs.rs` | load | 10 |
+| `fs/procfs/debug.rs` | load | 55 |
+| **total** | | **about 130 (28 core)** |
+
+Item requirements: (1) changes a core interface, so a low-level
+requirement on `trap::user_fault_as` passing the frame's registers, with
+a stage 3 check (a fault of a known `sp`/`fp`/`lr` seen by a test hook).
+(2)-(4) are load ring: crash-5 and crash-6 statements in §21.7's form
+(the held line's registers; `mem` refused unheld or unprivileged, read
+held), each with a boot-check sub-case and a gate.sh control.
+
+**Ring 3's part: about 1,100 lines, no kernel.**
+
+* `ferrix-lode-core::unwind` (about 800 lines, `no_std`, host-tested):
+  an `.eh_frame`/`.eh_frame_hdr` parser and CFA interpreter for x86-64
+  and AArch64; ARMv7-A's `.ARM.exidx` is left out at first (its frames
+  come from the frame-pointer chain, then a bounded stack scan, each frame
+  marked how it was found). Each step is bounded: 64 frames, 1 MiB of
+  stack, `sp` strictly rising. Tests: unwind the tree's own binaries
+  (lode, init) from recorded stacks, and a fuzz target.
+* `lode crashd` (about 300 lines): reads each mapped ELF's unwind sections
+  from the file `maps` names (its build id from `.note.gnu.build-id`),
+  reads stack words through `mem`, and unwinds each thread, the faulting
+  one from the held line's registers and the others from `regs`. It sends
+  `COLLECTED_BACKTRACE`: one line a frame, `#N pc module+offset build-id
+  how`. lode makes it `BLOB_BACKTRACE` as the other parts are (§21.8: full
+  tombstones only), and the faulting thread's first frame becomes
+  `TOMBSTONE_TOP_FRAME`.
+* Bounds: unwinding counts against the hold's 2 s; whatever is not
+  finished is sent as far as it got (`BACKTRACE_CUT=deadline`).
+
+**Checks.** `test-log`'s "collected" row gains a backtrace whose first
+frame is `lode fault-stub`'s faulting function's offset and whose frames
+reach `main`, on x86-64 and AArch64; the boot check's crash-5/6
+sub-cases; the stage 3 check for (1). Symbol names stay offline (`cargo
+xtask symbolize`, or the viewer later), as Android's tombstoned leaves
+them to `ndk-stack`.
+
+**Asked of the review.** (a) Is the core change (1) acceptable at about 30
+lines, or should the faulting thread instead park on the return path like
+the others, which needs no core line but moves the hold out of
+`fault_signal` (about 60 load lines, and the "ended by signal" order the
+core prints changes)? (b) `mem` restricted to held processes: enough, or
+too narrow to name `/proc/<pid>/mem`? (c) A Ferrix-only `regs` file, or
+should (3) wait for `docs/DEBUG.md` §1.1's Arm entry frames and use
+`syscall` everywhere?
+
+**Reviewed**: OK IF (1)-(8), ledger line 3570 (verdict 3571). The core
+hook (1) is preferred to the return-path park, and a Ferrix-only `regs`
+file is accepted. `/proc/<pid>/mem` is **the customer's decision first**:
+whether the `present` configuration ships it, always or behind a named
+setting. If not, the hold copies a bounded stack image (about 16 KiB from
+`sp` a thread, user pages only, nothing faulted in) into the record
+instead. Its guard, if it ships: only the arming reader's process; held,
+re-tested at each read; non-dumpable and setuid targets refused; device,
+DMA-pinned, shared and `PROT_NONE` regions refused `EIO`; an absent page
+`EIO` and never faulted in; each read at most 64 KiB.
+
+### 21.10 Design question: the pstore import (for a decision, 2026-10-24)
+
+§5's import ("`lode -b -1` ends with what the machine said before it hung")
+was planned on the loader's `FERRIX/LASTKERNEL.TXT`. Nothing writes that
+file today: the write was owed with PM2 (branch `postmortem`, not on
+develop; `docs/POSTMORTEM.md` §3.5, the consultant's ledger 1238 and 1202
+C3). And a running Ferrix cannot read it: there is no FAT in the running
+system (`docs/INSTALLER.md`). The kernel never reads the region back
+(`console/pstore.rs`), and the loader resets it at each boot. Two paths:
+
+* **A: the file.** The loader's `LASTKERNEL.TXT` write lands with PM2
+  (loader, its own review). lode reads it through a small read-only FAT32
+  reader of the ESP partition in ring 3 (`ferrix-lode-core`, about 400
+  lines; the partition from `src/lib/fs/common/partition`, as root). No
+  kernel lines. Costs: two reviews, a FAT reader, and lode opening a raw
+  block device.
+* **B: Linux's way.** The loader copies the previous boot's text into a
+  second region handed over in the boot info, as it already reads it for
+  its two console lines. The kernel exposes it read-only as
+  `/sys/fs/pstore/console-ferrix-0`, the path `systemd-pstore` reads, and
+  lode imports from there. About 80 kernel lines (the boot-info region
+  checked as the pstore region is, in `console/pstore.rs` and
+  `ferrix-bootinfo`, core; the sysfs file, load) and about 40 loader
+  lines. No FAT, no block device.
+
+**Ruled**: the choice is the customer's (ledger line 3570). A needs PM2's
+loader write under its open conditions, and the FAT reader is bounded and
+fuzzed. B needs a design review of its boot-info region, under
+`ferrix.pstore`, and a loader review.
+
+Recommendation: **B**, as Linux and systemd do, unless the customer's
+slim-kernel rule rules out 80 lines here; A is then the path, and step 9's
+import waits for PM2.
