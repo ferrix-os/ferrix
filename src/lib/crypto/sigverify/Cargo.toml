@@ -1,0 +1,20 @@
+[package]
+name = "ferrix-sigverify"
+description = "Verify-only LMS/HSS (RFC 8554, RFC 9858, SP 800-208) and the signed manifest of Ferrix's product signing (docs/SIGNING.md)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-sha256.workspace = true
+
+[dev-dependencies]
+# An independent implementation for the host cross-check only (docs/SIGNING.md
+# §5.1): never a normal dependency, never in an image.
+hbs-lms = { version = "=0.1.1", default-features = false }
+ferrix-softsign = { path = "../../../../tools/common/release/softsign" }
+
+[lints]
+workspace = true

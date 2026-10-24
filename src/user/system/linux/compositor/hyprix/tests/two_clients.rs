@@ -3638,3 +3638,143 @@ fn the_wallpaper_follows_its_lines_and_is_kept() {
         "the kept lines: {second:?}"
     );
 }
+
+/// The expected image `name` beside the renderer's, as `(red, green, blue)`
+/// bytes; or, with `COMPOSITOR_RENDER_BLESS` set and no such image yet, the
+/// screen's frame once it has stopped changing, written as that image --
+/// which fails the test, as every blessing does, so that it is looked at
+/// before it is committed. To bless one again, delete it first.
+///
+/// For the pictures only the compositor draws -- the overview's tiles --
+/// which `src/user/system/linux/compositor/render` has no layout to bless
+/// from. `cargo xtask test-compositor --boot minimize` requires the same
+/// images of the guest.
+fn compositor_picture(ends: &Ends, name: &str) -> Vec<u8> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let path = directory.join(format!("{name}.xrle"));
+    if std::env::var_os(compositor_render::golden::BLESS).is_some() && !path.exists() {
+        let mut last = Vec::new();
+        let mut same_since = std::time::Instant::now();
+        let frame = until(&format!("{name}: the screen still"), || {
+            let frame = newest_frame(&ends.frames).ok_or("no frame yet")?;
+            if frame != last {
+                last = frame;
+                same_since = std::time::Instant::now();
+                return Err("still changing".to_owned());
+            }
+            if same_since.elapsed() < Duration::from_secs(2) {
+                return Err("not still for long enough".to_owned());
+            }
+            Ok(frame)
+        });
+        let xrgb: Vec<u8> = frame
+            .chunks_exact(3)
+            .flat_map(|rgb| [rgb[2], rgb[1], rgb[0], 0xFF])
+            .collect();
+        compositor_render::golden::check_in(&directory, name, WIDTH, HEIGHT, &xrgb);
+    }
+    image(&path)
+}
+
+/// A minimized window can be found again, by both of the ways a person
+/// looks for it (`docs/DESKTOP.md` §1.2).
+///
+/// A taskbar minimizes `one` through `zwlr_foreign_toplevel_handle_v1`,
+/// and the screen is the picture of `two` alone. The overview then shows
+/// both: `one` in the grid, dimmed. Picked there -- `overview prev`, which
+/// is the `Left` key, and `overview pick`, which is `Return` -- it comes
+/// back and is focused, beside `two` where a new window would be. Then the
+/// taskbar minimizes it again and brings it back with `unset_minimized`,
+/// which is a taskbar's click on a minimized entry.
+#[test]
+fn a_minimized_window_is_found_again_in_the_overview_and_the_taskbar() {
+    let desk = Desk::new("minimized", "");
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let alone = image(&data.join("one-client-alone.xrle"));
+    let swapped = image(&data.join("dwindle-two-clients-swapped.xrle"));
+    let (line, asked) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        let _ = frame_until(ends, "the two windows drawn", is_picture(&expected()));
+        let socket = ends.socket.clone();
+        let taskbar = |want| compositor_lswt::run(&socket, &want);
+        let mut asked = Vec::new();
+
+        asked.push(taskbar(compositor_lswt::Want::Minimize("one".to_owned())));
+        let _ = frame_until(ends, "one minimized, two alone", is_picture(&alone));
+        let _ = ends.ask("dispatch overview on");
+        let overview = compositor_picture(ends, "overview-one-minimized");
+        let _ = frame_until(ends, "the overview with one dimmed", is_picture(&overview));
+        let _ = ends.ask("dispatch overview prev");
+        let picked = compositor_picture(ends, "overview-one-minimized-picked");
+        let _ = frame_until(ends, "the minimized one picked", is_picture(&picked));
+        let _ = ends.ask("dispatch overview pick");
+        let _ = frame_until(ends, "one back from the overview", is_picture(&swapped));
+
+        asked.push(taskbar(compositor_lswt::Want::Minimize("one".to_owned())));
+        let _ = frame_until(ends, "one minimized again", is_picture(&alone));
+        asked.push(taskbar(compositor_lswt::Want::List));
+        asked.push(taskbar(compositor_lswt::Want::Unminimize("one".to_owned())));
+        let _ = frame_until(ends, "one back from the taskbar", is_picture(&swapped));
+        ends.stop();
+        for window in windows {
+            let _ = window.join();
+        }
+        asked
+    })
+    .expect("the compositor ran");
+    let said: Vec<String> = asked
+        .into_iter()
+        .flat_map(|lines| lines.unwrap_or_else(|why| panic!("the taskbar: {why}; {line}")))
+        .collect();
+    for wanted in [
+        "lswt: minimized \"one\"",
+        // Listed while minimized, and marked so.
+        "lswt: rocks.magical.pattern \"one\" [minimized]",
+        "lswt: unminimized \"one\"",
+    ] {
+        assert!(
+            said.iter().any(|said| said.contains(wanted)),
+            "the taskbar never said `{wanted}`: {said:?}"
+        );
+    }
+}
+
+/// The window switcher lists a minimized window and brings it back:
+/// `switcher next`, which `ALT+Tab` runs, picks the window focused before
+/// the focused one -- here the minimized `one` -- and `switcher pick`,
+/// which letting go of `ALT` does, restores and focuses it.
+#[test]
+fn the_switcher_brings_a_minimized_window_back() {
+    let desk = Desk::new("switcher", "");
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data");
+    let alone = image(&data.join("one-client-alone.xrle"));
+    let swapped = image(&data.join("dwindle-two-clients-swapped.xrle"));
+    let (_, ()) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        let _ = frame_until(ends, "the two windows drawn", is_picture(&expected()));
+        let _ = ends.ask("dispatch focuswindow title:^(one)$");
+        let _ = ends.ask("dispatch minimize");
+        let _ = frame_until(ends, "one minimized, two alone", is_picture(&alone));
+        let _ = ends.ask("dispatch switcher next");
+        let _ = frame_until(ends, "the switcher up", |frame| {
+            if compare(frame, &alone).0 == 0 {
+                Err("still the desktop".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+        let _ = ends.ask("dispatch switcher pick");
+        let _ = frame_until(ends, "one back from the switcher", is_picture(&swapped));
+        ends.stop();
+        for window in windows {
+            let _ = window.join();
+        }
+    })
+    .expect("the compositor ran");
+}

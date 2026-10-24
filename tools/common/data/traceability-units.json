@@ -24,6 +24,8 @@
     "console",
     "device",
     "early",
+    "ferrix_sha256",
+    "ferrix_sigverify",
     "iommu",
     "mm",
     "object",

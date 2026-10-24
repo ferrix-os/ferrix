@@ -168,6 +168,116 @@ bind = , B, exec, /bin/lswt
 bind = , K, exec, /bin/lswt close one
 ";
 
+/// The pictures the minimize boot requires, one after each of its keys.
+///
+/// A minimized window must be found again: by the overview, where it is in
+/// its workspace's grid, dimmed, and by a taskbar. The overview's two
+/// pictures are the compositor's own (`two_clients`'s
+/// `a_minimized_window_is_found_again_in_the_overview_and_the_taskbar`
+/// blesses them, the renderer having no layout of the overview to bless
+/// from); the others are the renderer's. A window brought back is tiled
+/// where a new one would be, beside the other and focused, which is the
+/// picture of the two swapped.
+const MINIMIZE_EXPECTED: [(&str, &str); 7] = [
+    (
+        "tiled",
+        "src/user/system/linux/compositor/render/tests/data/dwindle-two-clients.xrle",
+    ),
+    (
+        "one window left, the other minimized by the taskbar",
+        "src/user/system/linux/compositor/render/tests/data/one-client-alone.xrle",
+    ),
+    (
+        "the overview, the minimized window in the grid and dimmed",
+        "src/user/system/linux/compositor/render/tests/data/overview-one-minimized.xrle",
+    ),
+    (
+        "the minimized window picked in the overview by the Left key",
+        "src/user/system/linux/compositor/render/tests/data/overview-one-minimized-picked.xrle",
+    ),
+    (
+        "the minimized window back from the overview, focused",
+        "src/user/system/linux/compositor/render/tests/data/dwindle-two-clients-swapped.xrle",
+    ),
+    (
+        "minimized again by the taskbar",
+        "src/user/system/linux/compositor/render/tests/data/one-client-alone.xrle",
+    ),
+    (
+        "back from the taskbar, focused",
+        "src/user/system/linux/compositor/render/tests/data/dwindle-two-clients-swapped.xrle",
+    ),
+];
+
+/// The keys the minimize boot presses between its pictures: no modifier,
+/// for the reason `TASKBAR_BINDS` gives. `Left` and `Return` are no binds:
+/// the overview takes them, and neither reaches a client.
+const MINIMIZE_BINDS: [(&str, &[&str]); 6] = [
+    ("M, which has the taskbar minimize one window", &["m"]),
+    ("O, which opens the overview", &["o"]),
+    (
+        "Left, which picks the last window in the overview",
+        &["left"],
+    ),
+    ("Return, which brings the picked window back", &["ret"]),
+    ("M again", &["m"]),
+    ("U, which has the taskbar bring it back", &["u"]),
+];
+
+/// The configuration the minimize boot is given: two windows, a taskbar's
+/// two requests and the overview.
+const MINIMIZE_CONFIG: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor`.
+exec-once = /bin/pattern checkerboard one
+exec-once = /bin/pattern gradient two --after one
+bind = , M, exec, /bin/lswt minimize one
+bind = , U, exec, /bin/lswt unminimize one
+bind = , O, overview, on
+";
+
+/// A boot of its own: a window minimized, and found again twice, by the
+/// overview and by a taskbar (`docs/DESKTOP.md` §1.2).
+///
+/// The taskbar is `/bin/lswt` again, sending `set_minimized` and
+/// `unset_minimized` through the window's
+/// `zwlr_foreign_toplevel_handle_v1`, which is what waybar's `wlr/taskbar`
+/// sends for a click on the active entry and on a minimized one.
+pub(super) fn test_minimize(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let (screens, said) = boot_and_dump(
+        arch,
+        programs,
+        MINIMIZE_CONFIG,
+        &Wanted {
+            states: &MINIMIZE_EXPECTED,
+            others: &[],
+            moving: None,
+            pointer: None,
+            awaiting: &["lswt: unminimized"],
+        },
+        &MINIMIZE_BINDS,
+        args,
+    )?;
+    let Some(last) = screens.last() else {
+        return Err(Error::new(format!(
+            "{arch}: the minimize boot took no picture"
+        )));
+    };
+    for wanted in ["lswt: minimized \"one\"", "lswt: unminimized \"one\""] {
+        if !said.iter().any(|line| line.contains(wanted)) {
+            return Err(Error::new(format!(
+                "{arch}: the minimize boot never said `{wanted}`"
+            )));
+        }
+    }
+    println!(
+        "  {arch}: a window minimized by a taskbar came back from the overview, where it was \
+         dimmed in its workspace's grid, and from the taskbar, every one of {} pixels the \
+         picture wanted",
+        last.width * last.height
+    );
+    Ok(())
+}
+
 /// What the clipboard boot copies, and the picture it makes while it does.
 ///
 /// The two windows are the ordinary tiled pair: the clipboard has nothing to

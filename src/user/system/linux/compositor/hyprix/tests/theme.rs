@@ -24,7 +24,7 @@ fn ferrix_light_parses_and_floats() {
         }
         assert!(
             compositor_layout::Dispatcher::parse(&bind.dispatcher, &bind.arg).is_ok()
-                || ["mouse", "overview"].contains(&bind.dispatcher.as_str()),
+                || ["mouse", "overview", "switcher"].contains(&bind.dispatcher.as_str()),
             "{bind:?} names a dispatcher hyprix runs"
         );
     }

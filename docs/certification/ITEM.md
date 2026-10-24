@@ -54,6 +54,8 @@ that its module tree does not reach.
 | `ferrix-btrfs` (`src/lib/fs/btrfs/format`), the reader | `item` | 8,272 | 6,031 |
 | `ferrix-btrfs-write` (`src/lib/fs/btrfs/write`), the write path | `item` | 6,019 | 2,247 |
 | `ferrix-btrfs-vfs` (`src/lib/fs/btrfs/vfs`), the VFS glue | `load` | 2,185 | 1,822 |
+| `ferrix-sha256` (`src/lib/crypto/sha256`), product signing's hash (added 2026-10-24, measured then) | `item` | 237 | 172 |
+| `ferrix-sigverify` (`src/lib/crypto/sigverify`), product signing's verifier (added 2026-10-24, measured then; the RFC and ACVP vectors are host-test lines) | `item` | 995 | 1,340 |
 
 **The certified item is `core` + `item` and the item's crates: 79,079 lines of
 product code** -- 64,788 in the kernel and 14,291 in the two btrfs crates --
@@ -388,6 +390,25 @@ the kernel image, does not yet reach the crates, whose tests run on the host;
 the traceability matrix reaches them since the same landing (`L.btrfs.*` and
 `H.STORE.*`, traced to the crates' host tests), with the requirements no test
 verifies yet in its baseline.
+
+### ferrix-sigverify and ferrix-sha256 — product signing's verifier, two crates in the item
+
+`docs/SIGNING.md` is the design (the consultant's OK IF at ledger lines 3667
+and 3738). `ferrix-sigverify` (`src/lib/crypto/sigverify`) verifies the
+signed manifest of slot images, configuration packages and driver images
+and the LMS/HSS signature over it; `ferrix-sha256` (`src/lib/crypto/sha256`)
+is the one hash beneath it. The manifest puts both in `item`, at the item
+ring's level, and no profile links either into ring 0: their users are the
+UEFI loader, init's configuration verifier and devmgr (SIGNING.md §5.2),
+from slice S4 on. Their requirements are part 26 of the model
+(`H.SIGN`, `L.sigverify`, `L.sha256`), both are complete subsystems in the
+traceability report, and their coverage is measured under their host tests
+(`docs/certification/host-coverage.json`, TOOLS.md).
+
+| Crate | Below | Above |
+|---|---|---|
+| `ferrix-sha256` | byte slices its caller lends; no trait, no allocation, no dependency | `Sha256`, `digest`, `finish_192`, `digest_192`, called by `ferrix-sigverify` |
+| `ferrix-sigverify` | `ferrix-sha256`, and the block, anchors and revoked trees its caller lends | `manifest::verify`, `Verified::check_payload`, `Verified::revoked`, `lms::hss_verify` |
 
 ### ferrix-smbios — the firmware's SMBIOS tables, one crate in the item
 

@@ -409,6 +409,8 @@ struct Compositor<'r> {
     drag: Option<crate::act::Drag>,
     /// The activities overview (`docs/DESKTOP.md` §1.2).
     overview: crate::overview::Overview,
+    /// The window switcher (`docs/DESKTOP.md` §1.2).
+    switcher: crate::switcher::Switcher,
     /// Whether the arrangement saved for the monitors there at start has
     /// been looked for.
     restored: bool,
@@ -705,6 +707,7 @@ impl<'r> Compositor<'r> {
             urgent: Vec::new(),
             drag: None,
             overview: crate::overview::Overview::default(),
+            switcher: crate::switcher::Switcher::default(),
             last_monitor: 0,
             restored: false,
             bars: crate::titlebar::Bars::default(),
@@ -1328,6 +1331,15 @@ impl<'r> Compositor<'r> {
             &mut self.state,
             self.seat.pointer(),
         );
+        // And while the switcher is up, the same, with the modifiers'
+        // release its own as well.
+        let (actions, switched) = crate::switcher::take_input(
+            actions,
+            &mut self.switcher,
+            &mut self.state,
+            self.seat.pointer(),
+        );
+        let looked = looked || switched;
         if actions.is_empty() {
             return looked || barred;
         }
@@ -1379,6 +1391,7 @@ impl<'r> Compositor<'r> {
                 urgent: &mut self.urgent,
                 drag: &mut self.drag,
                 overview: &mut self.overview,
+                switcher: &mut self.switcher,
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
@@ -1797,6 +1810,7 @@ impl<'r> Compositor<'r> {
                 urgent: &mut self.urgent,
                 drag: &mut self.drag,
                 overview: &mut self.overview,
+                switcher: &mut self.switcher,
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
@@ -2344,7 +2358,7 @@ impl<'r> Compositor<'r> {
                 Action::Button {
                     button: LEFT,
                     pressed: true,
-                } if self.drag.is_none() && !self.overview.on => {
+                } if self.drag.is_none() && !self.overview.on && !self.switcher.on => {
                     let at = self.seat.pointer();
                     let layout = self.state.layout();
                     let Some((window, hit)) = self.bars.uncovered_hit(at, &layout) else {
@@ -6979,9 +6993,8 @@ fn renumbered(slots: &[Slot]) -> Vec<Option<usize>> {
 /// named rather than the focused one: `activate` is `focuswindow`, `close`
 /// is `killactive`, and the two state requests are `fullscreen` after the
 /// window has been focused, since that is what this layout's dispatcher
-/// acts on. `minimized` has nowhere to go -- nothing here is minimised --
-/// so it is answered by leaving the window where it is, which is what a
-/// compositor without a minimised state does.
+/// acts on. `set_minimized` is `minimize` on the window named, and
+/// `unset_minimized` focuses a minimized window, which brings it back.
 fn for_the_bar(
     window: WindowId,
     what: ForeignRequest,

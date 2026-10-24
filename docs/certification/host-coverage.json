@@ -1,0 +1,62 @@
+{
+  "//": [
+    "Statement and branch coverage of ferrix-sha256 and ferrix-sigverify under their",
+    "host tests, written by tools/common/gen/host-coverage.py (its docstring says how",
+    "and its limits). `argued` holds each unreached line or branch outcome with why;",
+    "the gate (--check) fails a stale file or an unargued gap."
+  ],
+  "argued": {},
+  "files": {
+    "src/lib/crypto/sha256/src/lib.rs": {
+      "branch_outcomes": 8,
+      "branch_outcomes_hit": 8,
+      "lines": 84,
+      "lines_hit": 84,
+      "sha256": "af805af372f03438d89b11770af716218418d92fa4354956cd3cb232b18b6241",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/crypto/sigverify/src/lib.rs": {
+      "branch_outcomes": 0,
+      "branch_outcomes_hit": 0,
+      "lines": 0,
+      "lines_hit": 0,
+      "sha256": "d9dc795a9abe5b04c68c39143d76941226722120834304ca6025c725d35412cb",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/crypto/sigverify/src/lms.rs": {
+      "branch_outcomes": 26,
+      "branch_outcomes_hit": 26,
+      "lines": 210,
+      "lines_hit": 210,
+      "sha256": "863b83abd846bf99c34f8e51fc932a733426370ff33c94769f093bdea76df769",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/crypto/sigverify/src/manifest.rs": {
+      "branch_outcomes": 68,
+      "branch_outcomes_hit": 68,
+      "lines": 200,
+      "lines_hit": 200,
+      "sha256": "f2815aae798068df7094493710565f203e3bd728c3c6644cf9f7e76ba2a2f38e",
+      "unreached_branches": [],
+      "unreached_lines": []
+    }
+  },
+  "test_inputs": {
+    "src/lib/crypto/sha256/src/cavp/SHA256LongMsg.rsp": "b1f63358201511b72aa8e21234df37cf3287e95337dc2adb3d219968bedfa6a2",
+    "src/lib/crypto/sha256/src/cavp/SHA256Monte.rsp": "bf577cba16823c78e580403b247dabb03b393ba47c0eb32db42dec5a19b175af",
+    "src/lib/crypto/sha256/src/cavp/SHA256ShortMsg.rsp": "aaf8115ef18263c52a7d2478d72b37dea30b25a1f7d0497136fbf7950715c587",
+    "src/lib/crypto/sha256/src/tests.rs": "8db0286bd1e576a1d460d6aca9ed35b935c20c943eeed3f6fa6cf27a5aecbf0c",
+    "src/lib/crypto/sigverify/src/tests.rs": "e55b4c7693c661f749a2a5437c8ee242af0c26bfa307bb5394777c444922d298",
+    "src/lib/crypto/sigverify/src/vectors.rs": "fb9b27c7d898819c8bb7780e51830ba451b306bb917b4fde6ed62a2ac7ac3147",
+    "tools/common/release/softsign/src/lib.rs": "6d2cf849d751ea45a4bd4ca1d6e3ddecfbe581175e2dbd879bcb8c93cadbfb64",
+    "tools/common/release/softsign/src/lms.rs": "bcaa4788c52a51090991fbe82bde1953b4bfa5ead451b5cbde8f169493c09d3c",
+    "tools/common/release/softsign/src/main.rs": "2861f8c1e8f8e2cce61d9ba7c0699d73b709fa80adc249957962ef0111006976",
+    "tools/common/release/softsign/src/manifest.rs": "e2e71b0657c87b71269e5d8747ebd5b9495f81b8a02879768f95c6c7603980f7",
+    "tools/common/release/softsign/src/tests.rs": "664fa79398113d0cf9ba440572df9af3615e4543dcc764aeafb618f9c2cecd8c",
+    "tools/common/release/softsign/src/token.rs": "e9749ccadeae1a7c322a475680d4dca4292f096f3b4f6617a662a5b40729340f"
+  },
+  "toolchain": "rustc 1.99.0-nightly (84b36a78a 2026-08-06)"
+}

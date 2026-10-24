@@ -29,6 +29,16 @@
       "count": 0,
       "by_file": {}
     },
+    "ferrix-sha256": {
+      "//": "Target zero. Nobody is named as converting it yet.",
+      "count": 0,
+      "by_file": {}
+    },
+    "ferrix-sigverify": {
+      "//": "Target zero. Nobody is named as converting it yet.",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-smbios": {
       "//": "Held at 0 from the start (docs/DMI.md, 2026-10-15): the crate is no_std without alloc and allocates nothing.",
       "count": 0,

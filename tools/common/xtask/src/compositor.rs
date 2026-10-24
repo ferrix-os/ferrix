@@ -121,7 +121,8 @@ use machine::{test_desktop, test_driver_restart};
 use monitors::{test_edid, test_mode, test_modes, test_monitors, test_scale, test_transform};
 use pointer::{test_cursor, test_pointer};
 use protocols::{
-    test_bar, test_clipboard, test_lock, test_menu, test_screenshot, test_taskbar, test_typing,
+    test_bar, test_clipboard, test_lock, test_menu, test_minimize, test_screenshot, test_taskbar,
+    test_typing,
 };
 use user_desktop::{test_everything_desktop, test_fuzzel, test_fuzzel_user};
 
@@ -524,7 +525,16 @@ pub(crate) fn test_compositor(args: &Args) -> Result<()> {
                 let checked = first || name == ALWAYS_CHECKED;
                 let mut these = boot_args.clone();
                 these.checks_skipped = !checked;
+                // A boot that cannot run on this machine says so and boots
+                // nothing: its serial log is the last boot's, so neither it
+                // nor the first place is judged by it.
+                let serial = paths::build_dir(arch).join("serial.log");
+                let before = std::fs::metadata(&serial).and_then(|m| m.modified()).ok();
                 boot(arch, &programs, &these)?;
+                let after = std::fs::metadata(&serial).and_then(|m| m.modified()).ok();
+                if after.is_none() || after == before {
+                    continue;
+                }
                 judge_checks(arch, name, checked)?;
                 first = false;
                 boot_args.checks_skipped = true;
@@ -578,6 +588,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     }
     if asked(&["tole-demo"]) {
         tole_demo::build_ahead(arch)?;
+    }
+    if asked(&["tole-demo-gpu"]) {
+        tole_demo::build_ahead_gpu(arch)?;
     }
     if asked(&["locked", "locked-held"]) {
         let _ = build(arch, "compositor-vptr", "vlock")?;
@@ -705,7 +718,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 54] = [
+const BOOTS: [(&str, Boot); 56] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -720,6 +733,7 @@ const BOOTS: [(&str, Boot); 54] = [
     ("clipboard", test_clipboard),
     ("submap", test_submap),
     ("taskbar", test_taskbar),
+    ("minimize", test_minimize),
     ("twin", test_twin),
     ("screenshot", test_screenshot),
     ("screenshot-unshared", test_screenshot_unshared),
@@ -754,6 +768,7 @@ const BOOTS: [(&str, Boot); 54] = [
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),
     ("tole-demo", tole_demo::test_tole_demo),
+    ("tole-demo-gpu", tole_demo::test_tole_demo_gpu),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),

@@ -266,6 +266,15 @@ pub struct Seat {
     /// have usually been let go by the time the key is, so the bind no longer
     /// matches and the release cannot be judged on its own.
     eaten: Vec<u16>,
+    /// The modifiers each held key went down with, its own among them for
+    /// a modifier's key: what a release bind is matched on, as Hyprland
+    /// matches it on the modifiers at the press. `bindr = SUPER, Super_L`
+    /// is let go of with no SUPER held, and never matched on the release's.
+    pressed_with: Vec<(u16, u32)>,
+    /// The key pressed last, which says whether a modifier's key was let
+    /// go of alone: a release bind on one fires only then, so `SUPER H`
+    /// does not open what `SUPER` alone does as SUPER comes up.
+    last_pressed: Option<u16>,
 }
 
 impl Seat {
@@ -290,6 +299,8 @@ impl Seat {
             unresolved: Vec::new(),
             layout: chosen(config).0,
             eaten: Vec::new(),
+            pressed_with: Vec::new(),
+            last_pressed: None,
         };
         seat.set_binds(config);
         // How many layout groups the keymap has, which is what
@@ -573,10 +584,30 @@ impl Seat {
     fn key(&mut self, code: u16, pressed: bool, repeat: bool) -> Vec<Action> {
         let changed = self.keyboard.key(code, pressed);
         let mut actions = Vec::new();
-        if changed && self.keyboard.is_modifier(code) {
+        let modifier = self.keyboard.is_modifier(code);
+        if changed && modifier {
             actions.push(Action::Modifiers(self.keyboard.modifiers()));
         }
-        let fired = self.fired(Trigger::Key(code), pressed, repeat);
+        let now = self.keyboard.modifiers().depressed & COMPARED;
+        let held = if pressed {
+            if !repeat {
+                self.pressed_with.retain(|(held, _)| *held != code);
+                self.pressed_with.push((code, now));
+                self.last_pressed = Some(code);
+            }
+            now
+        } else {
+            let at = self.pressed_with.iter().position(|(held, _)| *held == code);
+            at.map_or(now, |at| self.pressed_with.remove(at).1)
+        };
+        // A modifier's key let go of after another key went down is a
+        // chord's end, not the key on its own.
+        let alone = pressed || !modifier || self.last_pressed == Some(code);
+        let fired = if alone {
+            self.fired_with(Trigger::Key(code), pressed, repeat, held)
+        } else {
+            Vec::new()
+        };
         let mut consumed = !fired.is_empty() && !self.consumes_nothing(Trigger::Key(code));
         actions.extend(fired);
 
@@ -599,13 +630,19 @@ impl Seat {
 
     /// The dispatchers the binds on `trigger` ask for.
     fn fired(&self, trigger: Trigger, pressed: bool, repeat: bool) -> Vec<Action> {
+        let held = self.keyboard.modifiers().depressed & COMPARED;
+        self.fired_with(trigger, pressed, repeat, held)
+    }
+
+    /// The same, matched on `held` rather than the modifiers held now: a
+    /// key's release is matched on what it went down with.
+    fn fired_with(&self, trigger: Trigger, pressed: bool, repeat: bool, held: u32) -> Vec<Action> {
         // A client holding a shortcuts inhibitor gets every key, including
         // the ones a bind would have eaten. That is the whole of the
         // protocol: a virtual machine or a nested compositor needs `SUPER`.
         if self.shortcuts_inhibited {
             return Vec::new();
         }
-        let held = self.keyboard.modifiers().depressed & COMPARED;
         self.binds
             .iter()
             .filter(|bind| bind.trigger == trigger)
