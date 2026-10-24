@@ -418,6 +418,9 @@ OPTIONS:
                                          takes them: `nodeadkeys,` is one for the first layout only
     --wallpaper <NAME>                   run-compositor: which kept wallpaper to show, by part of its
                                          name, or `none`; one of them, another each run, otherwise
+    --theme <NAME>                       run-compositor, flash --compositor, release-image: the
+                                         desktop's look, `yoru`, `ferrix-light` or `none` [default:
+                                         yoru]; under a configuration of its own, its look alone
     --edid <DESCRIPTION>                 run-compositor: give the screen the EDID of this machine's
                                          monitor whose description starts so, as Linux's
                                          drm.edid_firmware= does, so `monitor = desc:` and waybar

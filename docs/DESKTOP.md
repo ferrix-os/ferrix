@@ -679,3 +679,152 @@ blessed image); `test-compositor` boots for the floating layout and for
 `output create headless`; `foot` against the compositor after the
 title-bar and output-management changes (`hyprix/probe/real-client.sh`);
 `test-restart --boot all` with `notifyd` for part 4.
+
+## 6. Yoru, the main UI
+
+The customer's request of 2026-10-24: their design "Yoru WM" (Claude
+Design project c2446633-7510-48b1-be87-c1906fddac9b, kept with its
+`support.js`, the Nocturne token sheet and a render at 1920x1080 in
+`~/.local/share/ferrix/design/yoru-wm/`) becomes the look of Ferrix's
+desktop on hyprix: the default for `run-compositor --everything` and the
+desktop image, with Ferrix light (§2) still selectable, and a person's own
+`~/.config/hypr` and `~/.config/waybar` still winning where they exist.
+
+Kernel lines: **0**. Everything is hyprix, its clients, tole and xtask, all
+outside the certified item, so no consultant review is owed.
+
+### 6.1 What the design is
+
+A floating window manager with tiling, keyboard first ("Alt is the Yoru
+key", every action also has a place to click), dark and compact, on the
+Nocturne design system: ground `#161826`, surface `#232532`, text
+`#e9e9ed`, accent `#9184d9`, 100-900 OKLCH ramps for neutral, accent and
+two more accents, Inter at 500, 0.7x spacing, radii 4/8/14, elevation as a
+hairline and ambient darkness, the accent as a line and a glow and never a
+flood, rules fading over 48 px at each end, Phosphor icons. The script
+derives every colour at run time from three hues (`applyTheme`): a named
+theme's triad (Nocturne 289/200/340, Sakura, Mint, Sky, Sunset) or the
+wallpaper's own hues, light or dark from the wallpaper's luminance, with a
+vibrance factor. Its parts, as the template and the script draw them:
+
+| Part | What it does | How it moves |
+|---|---|---|
+| Wallpaper | a picture, a gradient of the theme's colours or a looping video, darkened 15% to 50% top to bottom; scaled 1.08 and shifted 1.2% a workspace (parallax); dimmed and desaturated in focus mode | transform .8s `cubic-bezier(.2,.8,.2,1)` |
+| Windows | surface ground, radius 8 (0 when snapped with no gap); the focused one a 1 px accent-600 ring, an accent glow up-left and an accent-2 glow down-right and a deep drop shadow, a 1 px accent gradient line along its top fading in 48 px; others `shadow-md` | geometry .2s on the curve above, shadow .2s |
+| Title bar | 34 px, a tab per grouped window (icon and title, the active one tinted, an accent underline when focused), an auto-tile mark, minimize, maximize, close as Phosphor glyphs in neutral-400, a hover tint, close's hover in the accent | colours .15s |
+| Snapping | drag to an edge or corner (halves, quarters, top for full screen) with a preview; Alt+arrows halves then quarters; hovering maximize or Alt Z opens six snap layouts; drag edges to magnetic guides; neighbours whose edges touch resize together (Shift for one alone); a window dropped on another's title bar groups as tabs, double click pops one out | preview .14s |
+| Auto-tile | Alt T: master and stack per workspace, swap by drag or Alt+arrows | .2s |
+| Workspaces | four, named code, docs, misc, free | slide 40 px and fade, .28s |
+| Dock (layout `Dock`, the default) | a bar 52 px high floating 6 px above the bottom: a search button (the design's mascot crop of a third-party picture), the four workspaces with a dot per window and a tile mark, launchers for Terminal, Editor, Browser, Notes, Files with a running dot, Stash with a badge and a shelf, tools (auto-tile, scratchpad, clipboard, shortcuts, wallpapers), focus mode, a pomodoro with its progress, the clock and date; a gradient frame of the three accents at 26% under a 22 px blur | left/right .3s when a sidebar is pinned |
+| Bar (layout `Bar`) | the same as a 40 px bottom bar with a task list instead of launchers | |
+| Widget sidebars | 320 px columns on the left and right, shown while the pointer touches the screen's edge, on an empty workspace, or pinned (pinned reserves their room); tabs of widgets: clock and month calendar; weather (sample data); quick settings (brightness, volume, microphone, appearance Auto/Dark/Light, theme colour, Wi-Fi, Bluetooth, do not disturb, night light, focus mode, auto-tile); to-do. A blurred scrim fades in beside an unpinned one | a clip wipe .42s, content .3-.5s delayed .12s |
+| Command palette | Ctrl K or Alt Space: windows, stash, new apps, tiling, helpers, theme, workspace moves, fuzzy matched, shortcuts shown | |
+| Switcher | Alt Tab or Alt `: cards of the workspace's windows | .12s |
+| Helpers | Alt J letters on every window; Alt / the shortcut sheet; Alt V clipboard history; Alt S a scratchpad terminal dropped from the top; Alt F focus mode (others at 20%, blurred); Alt P pomodoro; toasts at the top centre; night light and brightness as overlays | scratchpad .26s |
+| Wallpaper picker | Alt I: a cover flow in 3D or a grid, folders, colour filters, sorting by hue or brightness, adding pictures and videos; picking one re-derives the accent | .45s |
+| Sounds | short sine chimes on snap, open, close, workspace | |
+
+Not in the design, though the brief names them: a lock screen and
+notifications beyond the toast. Both are made in its tokens (§6.2).
+
+### 6.2 Where each part goes
+
+| Part | Piece | New or reused |
+|---|---|---|
+| Tokens | `yoru` theme for hyprix (`hyprix/themes/yoru.conf`) and a Nocturne token set for tole, generated from the same table | new theme; tole's `Theme` reused, given Nocturne's values |
+| Wallpaper | `/bin/wallpaper` (`wallpaper = , picture ...`): a Nocturne gradient of our own as an SVG; a person's picture or video through the same line | reused; the SVG is new |
+| Video wallpaper | `pattern --video`, AV1 in IVF, decoded on the CPU by rav1d (dav1d in Rust); `cargo xtask wallpapers` converts a person's MP4 or WebM | reused. Cost: decoding and colour conversion on the CPU and a full-screen upload every frame, and the screen never idles, so the compositor composites every frame; an estimate of a third of an N150 core at 1080p30, to be measured in Y7, and real battery on a laptop. Not the default |
+| Window frames, shadows, rounding, glow | hyprix's renderer: `decoration:rounding`, `shadow`, `col.active_border` gradients | reused, configured |
+| Title bars | hyprix's `titlebar.rs` (§2.2), given `hyprix:titlebar:*` options for the colours, the height, the title's side and the top line | extended |
+| Tabs | hyprix's groups and groupbar, styled as tabs in the title bar | reused, restyled later |
+| Snapping, previews | hyprix 1b (`snapwindow`, drag to edge); quarters, layouts picker, guides and linked edges | quarters, picker and linked edges new |
+| Auto-tile | the per-workspace layout (`workspace = N, layout:master`) switched by a dispatcher | reused, one dispatcher new |
+| Workspace slide, parallax | hyprix animations; the parallax is new | |
+| Focus mode | `decoration:dim_inactive` through `hyprctl keyword` | reused |
+| Dock and bar, sidebars, palette, cheat sheet, wallpaper picker, toasts | **`yoru-shell`**, a new app on tole: layer-shell surfaces (dock at the bottom with its exclusive zone, a sidebar per edge, an overlay for the palette, sheet and picker), hyprix's IPC sockets for workspaces, clients and events as waybar's hyprland modules read them | new; tole gains layer-shell windows |
+| Launcher | fuzzel in Nocturne colours first (its `fuzzel.ini`); the full palette (windows and actions) in `yoru-shell` after | reused, then new |
+| Switcher, overview | hyprix's own (1d, ALT+Tab), drawn in Nocturne | restyled |
+| Scratchpad | a special workspace with a terminal, slid from the top | reused |
+| Clipboard history | `yoru-shell` reading the selection through `ext_data_control_v1` | new |
+| Lock | hyprlock with a Nocturne `hyprlock.conf` | reused |
+| Notifications | notifyd's banners in the tokens | restyled |
+| Quick settings | volume through pulsed, Wi-Fi and Bluetooth through what Settings reaches; brightness and night light where a backlight or gamma exists | partly later |
+| Icons, fonts | Phosphor (MIT) as its font, vendored pinned with its licence beside Inter (OFL, `assets/fonts/inter`) | Phosphor new |
+
+What is not shipped: the design's pictures and videos (`assets/walls/*`,
+`uploads/*`) are third-party art and stay out of the tree and every image;
+the dock's mascot, a crop of one of them, becomes the FX mark. The sample
+weather, files, stash and code in the design are demo content, not parts.
+
+### 6.3 Order
+
+Slices, each landed and working on its own, each with a `test-compositor`
+boot that screenshots it:
+
+| Slice | What | Points |
+|---|---|---|
+| Y1 | tokens: `yoru.conf` (floating, rounding, shadows, glow border, blur, curves, Alt binds), themable title bars, the Nocturne wallpaper, Phosphor vendored; Yoru the default of `--everything` and the desktop image; boot `yoru` | 5 |
+| Y2 | the dock: tole layer-shell windows; `yoru-shell` with workspaces, launchers, tools, pomodoro, clock; boot `yoru-dock` | 8 |
+| Y3 | the launcher: fuzzel in Nocturne; then the palette in `yoru-shell` | 3 + 5 |
+| Y4 | widget sidebars: clock and calendar, quick settings, to-do | 8 |
+| Y5 | snapping as the design has it: quarters, layouts picker, guides, linked edges; tabs in the title bar | 13 |
+| Y6 | helpers: scratchpad, focus mode, shortcut sheet, jump hints, clipboard history, toasts | 8 |
+| Y7 | wallpaper picker and the accent from the wallpaper; parallax | 8 |
+| Y8 | lock, notifications and switcher in the tokens; sounds | 5 |
+
+Measured on the GPU path where it costs: the dock's and sidebars' blur
+(`layerrule = blur`), the focused window's glow, and the workspace slide,
+as frame times from hyprix's frame statistics with and without each.
+
+### 6.4 Open questions
+
+1. **Alt as the Yoru key.** Alt+letter binds take those keys from every
+   program (a terminal's Alt+B, an editor's Alt+F). The theme binds them as
+   the design does, with SUPER doing the same; should Alt alone be dropped
+   for SUPER?
+2. **A person's own configuration.** `--everything` uses
+   `~/.config/hypr/hyprland.conf` where it exists. Yoru is sourced first and
+   that file after it, so its lines win; Yoru's dock starts only where the
+   file starts no bar of its own. `--theme yoru|ferrix-light|own` overrides.
+   Is that the precedence wanted?
+3. **The launchers.** The design's Terminal, Editor, Browser, Notes and
+   Files: Ferrix has `term`/foot and Chrome; Editor, Notes and Files have no
+   app yet. Until they do the dock shows what is installed.
+4. **Weather** needs a network source; the design shows sample data.
+5. **The mascot**: the FX mark, or a picture the person chooses.
+
+### 6.5 Where it stands
+
+**Y1, the tokens, is built** (5 points estimated):
+
+* `hyprix/themes/yoru.conf` (the look) and `yoru-keys.conf` (Alt as the
+  Yoru key, SUPER doing the same): floating, rounding 8, the focused
+  window's accent-600 ring, its deep drop shadow and accent glow, a lighter
+  shadow elsewhere, blur for the shell's layers, Nocturne's curve, the
+  ground `#161826`;
+* the renderer draws `decoration:shadow:color_inactive` and a
+  `decoration:glow` (a second shadow, centred, in its own colour, round the
+  focused window; `color_inactive` for others), options that were read and
+  not drawn;
+* title bars styled by `hyprix:titlebar:*` (height, rounding, colours, the
+  buttons' size and discs, the title's side and face, a top line of the
+  accent's gradient fading over 48 px, a hairline at the foot); the
+  defaults are Ferrix light's, so its look is unchanged;
+* `docs/brand/yoru/yoru-nocturne.svg`, the wallpaper: the design's Nocturne
+  gradient in the tokens, with a faint grain against banding (0.25 s to
+  draw at 1080p);
+* Phosphor 2.1.1 vendored in `assets/fonts/phosphor` with its licence;
+* `--theme yoru|ferrix-light|none` on `run-compositor`, `flash
+  --compositor` and `release-image`, Yoru by default: the theme is
+  sourced first, so the person's own lines win, and a configuration of
+  their own takes its look and not its keys; Yoru's wallpaper stands where
+  the shipped Ferrix one would have been chosen, and a kept picture or
+  video still wins;
+* `test-compositor --boot yoru`: two pattern windows in the theme,
+  screenshotted and judged by Nocturne's ground, the bars' surface and the
+  accent's line (`~/.local/share/ferrix/yoru/shots/Y1-yoru-1024x768.png`).
+
+Left of Y1: a window under a title bar has square bottom corners (as in
+Ferrix light: the renderer rounds all four corners or none); the
+animations' styles (`popin`, `slidefade`) are written and not yet drawn
+by hyprix, which moves windows and does not yet slide workspaces.

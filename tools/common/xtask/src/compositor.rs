@@ -92,10 +92,12 @@ mod settings;
 mod settings_prompt;
 mod steam_store;
 pub(crate) mod steam_window;
+mod theme;
 mod tole_demo;
 pub(crate) mod unity;
 mod user_desktop;
 pub(crate) mod wine;
+mod yoru;
 
 pub(crate) use apps::{test_foot, test_vkgears, test_xwindow};
 pub(crate) use bench::{bench_chrome, bench_chrome_video};
@@ -742,7 +744,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 57] = [
+const BOOTS: [(&str, Boot); 58] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -782,6 +784,7 @@ const BOOTS: [(&str, Boot); 57] = [
     ("idle-user", idle::test_idle_user),
     ("caption", test_caption),
     ("wallpaper", test_wallpaper),
+    ("yoru", yoru::test_yoru),
     ("waybar", test_waybar),
     ("waybar-volume", test_waybar_volume),
     ("fuzzel", test_fuzzel),

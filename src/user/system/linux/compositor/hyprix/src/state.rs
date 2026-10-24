@@ -2533,6 +2533,8 @@ impl<'r> Compositor<'r> {
     /// Tell the layout which windows have a title bar above them, so that
     /// it keeps the bar inside the work area.
     fn sync_title_bars(&mut self) {
+        self.bars.restyle(&self.config);
+        let bar = self.bars.height();
         let wanted = self.title_bars_wanted();
         let all: Vec<WindowId> = self
             .slots
@@ -2541,7 +2543,7 @@ impl<'r> Compositor<'r> {
             .collect();
         for window in all {
             let height = if wanted.iter().any(|want| want.window == window) {
-                crate::titlebar::HEIGHT
+                bar
             } else {
                 0
             };

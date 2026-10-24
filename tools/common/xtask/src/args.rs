@@ -464,6 +464,11 @@ pub(crate) struct Args {
     /// shows, by any part of its name, or `none` for a plain background.
     /// Given nothing it shows one of them, another each run.
     pub(crate) wallpaper: Option<String>,
+    /// `--theme <NAME>`: the look a watched desktop is drawn in -- `yoru`
+    /// (the default), `ferrix-light`, or `none` for hyprix's own defaults
+    /// (`docs/DESKTOP.md` §6). A desktop with its own configuration takes
+    /// the theme's look under its own lines, and not its keys.
+    pub(crate) theme: Option<String>,
     /// `--edid <DESCRIPTION>`: the monitor of this machine whose EDID
     /// `run-compositor` gives the guest's screen, by the start of its
     /// description, or `none` for no EDID. Given nothing it looks for
@@ -637,6 +642,15 @@ const SWITCHES: &[&str] = &[
 impl Args {
     /// `--everything`: the flags it stands for, set as if each were given,
     /// but for `--gl` beside a `--no-gl`, before or after it.
+    /// `--wallpaper` or `--theme`: what a watched desktop looks like.
+    fn look(&mut self, flag: &str, value: String) {
+        if flag == "--theme" {
+            self.theme = Some(value);
+        } else {
+            self.wallpaper = Some(value);
+        }
+    }
+
     fn everything(&mut self) {
         self.everything = true;
         self.chrome = true;
@@ -964,7 +978,7 @@ impl Args {
                 "--config" => args.config = Some(value(&mut items, "--config")?),
                 "--layout" => args.layout = Some(value(&mut items, "--layout")?),
                 "--variant" => args.variant = Some(value(&mut items, "--variant")?),
-                "--wallpaper" => args.wallpaper = Some(value(&mut items, "--wallpaper")?),
+                flag @ ("--wallpaper" | "--theme") => args.look(flag, value(&mut items, flag)?),
                 "--edid" => args.edid = Some(value(&mut items, "--edid")?),
                 "--from" => args.from = Some(value(&mut items, "--from")?),
                 flag if BARE_METAL_FLAGS.contains(&flag) => args.bare_metal(flag, &mut items)?,

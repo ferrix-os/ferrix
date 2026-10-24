@@ -275,7 +275,15 @@ pub(super) fn desktop(
         Backdrop::Any => crate::wallpaper::file(args, size)?,
         Backdrop::Board(screen) => crate::wallpaper::for_board(args, screen)?,
     };
+    // Yoru has a wallpaper of its own, Ferrix's too: it stands where the
+    // shipped one would have been chosen, and a kept one still wins.
+    let chosen = chosen.filter(|chosen| {
+        !(matches!(chosen, crate::wallpaper::Chosen::Brand(_))
+            && super::theme::has_own_wallpaper(args))
+    });
     let config = with_wallpaper(config, chosen, &mut carried);
+    // The look, sourced before every line above (docs/DESKTOP.md §6).
+    let config = super::theme::apply(config, args, &mut carried.ports)?;
     Ok((config, carried))
 }
 

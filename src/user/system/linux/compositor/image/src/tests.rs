@@ -167,3 +167,35 @@ fn the_users_icons_render() {
     }
     assert!(seen > 0);
 }
+
+/// Yoru's wallpaper (`docs/brand/yoru/yoru-nocturne.svg`, docs/DESKTOP.md
+/// §6) renders as the design's Nocturne gradient: the ground at the foot
+/// on the right, the section glow's blue up right, a whole 1920x1080
+/// screen opaque; and quickly enough to start a desktop with.
+#[test]
+fn the_yoru_wallpaper_is_nocturne() {
+    let bytes = include_bytes!("../../../../../../../docs/brand/yoru/yoru-nocturne.svg");
+    let started = std::time::Instant::now();
+    let drawn = crate::svg(bytes, Fit::Exactly(1920, 1080)).expect("renders");
+    let took = started.elapsed();
+    assert_eq!((drawn.width(), drawn.height()), (1920, 1080));
+    let at = |x: u32, y: u32| {
+        let pixel = drawn.pixel(x, y).expect("inside");
+        (pixel.red(), pixel.green(), pixel.blue(), pixel.alpha())
+    };
+    assert!(
+        drawn.pixels().iter().all(|pixel| pixel.alpha() == 255),
+        "opaque"
+    );
+    let (r, g, b, _) = at(1900, 1060);
+    assert!(
+        r < 0x24 && g < 0x24 && b < 0x34,
+        "the ground at the foot: {r} {g} {b}"
+    );
+    let (r, g, b, _) = at(1440, 216);
+    assert!(
+        b > 0x5c && b > r + 0x28 && b > g + 0x20,
+        "the glow's blue: {r} {g} {b}"
+    );
+    assert!(took.as_secs() < 5, "{took:?}");
+}

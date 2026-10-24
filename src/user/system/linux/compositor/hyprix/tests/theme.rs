@@ -29,3 +29,58 @@ fn ferrix_light_parses_and_floats() {
         );
     }
 }
+
+/// Yoru (docs/DESKTOP.md §6): every option and bind is one this
+/// compositor knows, its title bars and glow are set, and its wallpaper
+/// line names the shipped picture.
+#[test]
+fn yoru_parses_floats_and_styles_its_frames() {
+    let text = format!(
+        "{}\n{}",
+        include_str!("../themes/yoru.conf"),
+        include_str!("../themes/yoru-keys.conf")
+    );
+    let parsed = parse("yoru.conf", &text, &mut NoSources);
+    assert_eq!(parsed.diagnostics, [], "the theme parses cleanly");
+    let config = parsed.config;
+    assert_eq!(config.str("general:layout"), Some("floating"));
+    assert_eq!(config.int("hyprix:titlebars"), Some(1));
+    assert_eq!(config.int("hyprix:titlebar:height"), Some(34));
+    assert_eq!(config.str("hyprix:titlebar:title_align"), Some("left"));
+    assert_eq!(config.int("decoration:glow:enabled"), Some(1));
+    let line = config
+        .gradient("hyprix:titlebar:col.line")
+        .expect("the accent line");
+    assert_eq!(line.colors.len(), 3, "accent, accent-2, accent-3");
+    let style = compositor_render::Style::from_config(&config);
+    assert!(style.glow.is_some(), "the focused window's glow");
+    assert!(
+        style.shadow_inactive.is_some(),
+        "a lighter shadow elsewhere"
+    );
+    let bars = hyprix::titlebar::Style::from_config(&config);
+    assert_eq!(bars.height, 34);
+    assert!(bars.title_left);
+    assert_eq!(bars.disc.a, 0, "no disc behind the buttons");
+    for bind in &config.binds {
+        if let compositor_config::Key::Sym(name) = &bind.key {
+            assert!(
+                compositor_xkb::code_of(name).is_some(),
+                "{name} is a key of the default keymap"
+            );
+        }
+        assert!(
+            compositor_layout::Dispatcher::parse(&bind.dispatcher, &bind.arg).is_ok()
+                || ["exec", "mouse", "overview", "switcher"].contains(&bind.dispatcher.as_str()),
+            "{bind:?} names a dispatcher hyprix runs"
+        );
+    }
+    assert!(
+        config.wallpapers.iter().any(|line| line.source
+            == compositor_config::WallpaperSource::Picture(
+                "/usr/share/backgrounds/yoru/yoru-nocturne.svg".to_owned()
+            )),
+        "{:?}",
+        config.wallpapers
+    );
+}

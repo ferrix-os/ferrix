@@ -297,6 +297,24 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     // geometry inside its buffer -- is drawn with no border, shadow or
     // rounding of the compositor's, as a floating window manager leaves it.
     ("hyprix:own_frames", Int(0)),
+    // How those bars look (docs/DESKTOP.md §6): the defaults are Ferrix
+    // light's header; the Yoru theme sets its own.
+    ("hyprix:titlebar:button_gap", Int(9)),
+    ("hyprix:titlebar:button_margin", Int(9)),
+    ("hyprix:titlebar:button_size", Int(24)),
+    ("hyprix:titlebar:col.active", GradientOf(0xffeb_ebed)),
+    ("hyprix:titlebar:col.button", GradientOf(0x1400_0000)),
+    ("hyprix:titlebar:col.inactive", GradientOf(0xfff6_f6f7)),
+    ("hyprix:titlebar:col.line", GradientOf(0x0000_0000)),
+    ("hyprix:titlebar:col.separator", GradientOf(0x0000_0000)),
+    ("hyprix:titlebar:col.text", GradientOf(0xff2b_2b30)),
+    ("hyprix:titlebar:col.text_inactive", GradientOf(0xff8c_8c92)),
+    ("hyprix:titlebar:font_family", Str("sans-serif")),
+    ("hyprix:titlebar:font_size", Int(14)),
+    ("hyprix:titlebar:font_weight", Int(700)),
+    ("hyprix:titlebar:height", Int(38)),
+    ("hyprix:titlebar:rounding", Int(12)),
+    ("hyprix:titlebar:title_align", Str("center")),
     // hyprix's own too (docs/DESKTOP.md §2.2): 1 draws a title bar above
     // each floating window whose client asked for the compositor's frame.
     ("hyprix:titlebars", Int(0)),

@@ -41,6 +41,18 @@ pub struct Style {
     pub fullscreen_opacity: f32,
     /// `decoration:shadow:*`, or `None` when `shadow:enabled` is off.
     pub shadow: Option<Shadow>,
+    /// `decoration:shadow:color_inactive`: the shadow's colour under a
+    /// window that is not focused; `None` (the option's -1) is the
+    /// focused one's.
+    pub shadow_inactive: Option<Color>,
+    /// `decoration:glow:*`, or `None` when `glow:enabled` is off: a second
+    /// shadow round the focused window, centred on it, in its own colour
+    /// -- an accent's halo where the shadow is ambient darkness
+    /// (`docs/DESKTOP.md` §6, Yoru). Drawn as the shadow is.
+    pub glow: Option<Shadow>,
+    /// `decoration:glow:color_inactive`: the glow round a window that is
+    /// not focused; `None` (the option's -1) draws none there.
+    pub glow_inactive: Option<Color>,
     /// `decoration:dim_strength` when `decoration:dim_inactive` is on: how
     /// much black is laid over a window that is not focused. Zero when it is
     /// off.
@@ -95,6 +107,12 @@ impl Style {
                 range: grow(shadow.range),
                 offset: (grow(shadow.offset.0), grow(shadow.offset.1)),
                 ..shadow
+            }),
+            glow: self.glow.map(|glow| Shadow {
+                rounding: scaled(glow.rounding),
+                range: grow(glow.range),
+                offset: (grow(glow.offset.0), grow(glow.offset.1)),
+                ..glow
             }),
             blur: self.blur.map(|blur| Blur {
                 size: grow(blur.size),
@@ -166,6 +184,19 @@ impl Style {
                     color: first("decoration:shadow:color", 0xEE1A_1A1A),
                     offset: offset(config.str("decoration:shadow:offset").unwrap_or("")),
                 }),
+            shadow_inactive: colour_or_unset(config, "decoration:shadow:color_inactive"),
+            glow: config
+                .bool("decoration:glow:enabled")
+                .unwrap_or(false)
+                .then(|| Shadow {
+                    rounding,
+                    range: config.int("decoration:glow:range").unwrap_or(10).max(0),
+                    power: u32::try_from(config.int("decoration:glow:render_power").unwrap_or(3))
+                        .unwrap_or(3),
+                    color: first("decoration:glow:color", 0xEE33_CCFF),
+                    offset: (0, 0),
+                }),
+            glow_inactive: colour_or_unset(config, "decoration:glow:color_inactive"),
             dim: if config.bool("decoration:dim_inactive").unwrap_or(false) {
                 opacity("decoration:dim_strength")
             } else {
@@ -1170,6 +1201,16 @@ fn draw_layer<P: Painter>(
     canvas.composite_scaled(surface, rect, Rounding::none(), 1.0, false, damage);
 }
 
+/// A colour option that is an integer in Hyprland's table with -1 for
+/// "unset" (`shadow:color_inactive`, `glow:color_inactive`).
+fn colour_or_unset(config: &Config, name: &str) -> Option<Color> {
+    config
+        .int(name)
+        .filter(|&value| value != -1)
+        .and_then(|value| u32::try_from(value & 0xFFFF_FFFF).ok())
+        .map(Color)
+}
+
 /// One window: its shadow, its border, the blur behind it, its own pixels
 /// and the dim over them, with whatever a `windowrule` changed.
 fn window<P: Painter>(
@@ -1258,23 +1299,51 @@ fn window<P: Painter>(
     // is the border's width square, and its shadow a smudge of a few dozen
     // pixels that costs the blend tables of a whole one -- on the N150 box
     // (2026-10-24) a dozen such tiles were drawn every frame.
-    if let Some(shadow) = style.shadow.as_ref().filter(|_| {
-        own.shadow && own.decorate && !fullscreen(placed) && !crate::damage::is_empty(rect)
-    }) {
+    let decorated =
+        own.shadow && own.decorate && !fullscreen(placed) && !crate::damage::is_empty(rect);
+    let outer = Rect::new(
+        rect.x.saturating_sub(width),
+        rect.y.saturating_sub(width),
+        rect.width.saturating_add(width.saturating_mul(2)),
+        rect.height.saturating_add(width.saturating_mul(2)),
+    );
+    if let Some(shadow) = style.shadow.as_ref().filter(|_| decorated) {
         let _shadow = Timer::start(Phase::Shadow);
+        let color = if placed.focused {
+            shadow.color
+        } else {
+            style.shadow_inactive.unwrap_or(shadow.color)
+        };
         canvas.shadow(
-            Rect::new(
-                rect.x.saturating_sub(width),
-                rect.y.saturating_sub(width),
-                rect.width.saturating_add(width.saturating_mul(2)),
-                rect.height.saturating_add(width.saturating_mul(2)),
-            ),
+            outer,
             &Shadow {
                 rounding,
+                color,
                 ..*shadow
             },
             shadowed,
         );
+    }
+    // The glow over the shadow and under the window: the focused one's in
+    // its colour, another's only where `color_inactive` gives one.
+    if let Some(glow) = style.glow.as_ref().filter(|_| decorated) {
+        let color = if placed.focused {
+            Some(glow.color)
+        } else {
+            style.glow_inactive
+        };
+        if let Some(color) = color {
+            let _glow = Timer::start(Phase::Shadow);
+            canvas.shadow(
+                outer,
+                &Shadow {
+                    rounding,
+                    color,
+                    ..*glow
+                },
+                shadowed,
+            );
+        }
     }
     // A rounded window's border follows its corners, so it cannot be four
     // strips: Hyprland draws the outer rounding as the window's plus the

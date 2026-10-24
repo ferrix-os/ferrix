@@ -188,6 +188,7 @@ impl Compositor<'_> {
         // not in the overview, whose tiles are the windows alone. Taken out
         // of `self` for the frame, since the screens are drawn through it.
         let mut bars = std::mem::take(&mut self.bars);
+        bars.restyle(&self.config);
         let tiled = self.overview.on || self.switcher.on;
         if !tiled {
             let wanted = self.title_bars_wanted();
