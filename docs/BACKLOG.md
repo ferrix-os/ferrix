@@ -448,6 +448,8 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
+* **`trap::ReturnPath` as a static trait seam** (the consultant, ledger 3934 (b)): the personality's return-path hooks, a struct of function pointers the load registers in the core at run time, would follow `docs/KERNEL-CRATES.md` §6.3's link-time binding. It is a core interface whose `fault_signal` changes under 3570 (2), so it comes after `CrashHook` and that change, alone, with its own design review. Open.
+
 181 items: performance, hardening, certification follow-ups the
 consultant asked to ride with a later landing, and compatibility gaps that
 block nothing now. They are in [backlog/p2.md](backlog/p2.md). Read it

@@ -837,6 +837,131 @@ flag is the configuration record of it (3558 addendum (a)).
 6. **Cargo features stay at zero** (`kernel_cargo_features`, (10)), and
    there is no second binary package.
 
+### 6.3 Design: the seams as traits, chosen statically (for review, 2026-10-24)
+
+**The customer's decision, 2026-10-24**: a composition-root seam -- where
+one implementation of an interface is chosen for a build -- is a trait,
+and the binary's root chooses its implementation statically: no `dyn`, no
+table of function pointers, no run-time registration. Not every `pub`
+function becomes a trait: only the seams where an implementation is
+chosen (removable crates, policies, platform hooks). Three are in scope:
+`setters::Setters` (§6.1, landed ceb8d678c), `device::check::Policy`
+(ledger 3294), and the coming `CrashHook` of `ferrix-kernel-crash` (ledger
+3595), which is built on this from the start. No behaviour changes: the
+same answers byte for byte, the same boot lines.
+
+**Two shapes, by who names the implementation.**
+
+1. **A caller that names it: a generic.** `device::publish` is the core's;
+   its caller, the binary's `publish_devices`, names the item's policy. So
+   the core gains `pub trait Policy` (in `device/check.rs`, where the
+   struct is): `fn decoding_refusal(..) -> Option<&'static str>`, `fn
+   may_lend() -> bool`, `fn refuses(..) -> bool`, `const KERNEL_MAPPING`,
+   associated functions with no `self`. `publish<P: Policy>` and the
+   checks it calls take `P` as a type parameter, and `main.rs` has `struct
+   Discovery;` with `impl device::check::Policy for Discovery`, forwarding
+   to `pci::decoding_refusal` and `firmware`'s three, and calls
+   `device::publish::<Discovery>(..)`. The core still names nothing of the
+   item; the monomorphised `publish` is in the binary. The struct, its
+   const `DISCOVERY_POLICY` and the `&Policy` arguments go.
+
+2. **A caller that cannot name it: a link-time binding.** The load's call
+   sites reach `Setters` (and `CrashHook`), and the load is compiled before
+   the binary that chooses, so it can neither name the crate's type nor be
+   made generic up to its system-call tables (fixed `fn` items). Here the
+   load defines, in `setters.rs`:
+   * `pub trait Setters` with the twelve entries as associated functions
+     (`fn sethostname(p: &Process, name: u64, len: i32) -> Result<usize,
+     Errno>`, ...), and `pub struct Absent;` with `impl Setters for
+     Absent`, each answering `EPERM` as `ABSENT`'s fields do today;
+   * one `unsafe extern "Rust"` declaration a method,
+     `__ferrix_setters_<entry>`, with the method's signature, and one safe
+     load function a method, `setters::<entry>(..)`, which calls it: the
+     call sites call these, one call a site, as they call through `bound()`
+     now;
+   * `#[macro_export] macro_rules! bind_setters { ($chosen:ty) => { .. } }`,
+     which defines each `__ferrix_setters_<entry>` as a
+     `#[unsafe(no_mangle)]` Rust-ABI function calling `<$chosen as
+     Setters>::<entry>`.
+
+   The root invokes it once a flag value, under that value's cfg:
+   ```rust
+   #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
+   ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
+   #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
+   ferrix_kernel_load::bind_setters!(ferrix_kernel_load::setters::Absent);
+   ```
+   Every call is a direct call the linker resolves to the chosen
+   implementation's function: static dispatch, nothing chosen at run time.
+   The crate's `SETTERS` static and the load's `ABSENT` static, `bind`,
+   `bound` and `ENTRIES` go; the crate gains `pub struct Live;` and its
+   `impl Setters for Live`, forwarding to the moved entries, which stay as
+   they are. The `#[unsafe(no_mangle)]` items are the binary root's, from
+   the load's macro, never the crate's: 3623 (R2) stands (the crate exports
+   nothing a link would keep).
+
+**The registration check becomes the linker's, which closes ledger 3762
+(2).** Today `bind_setters` checks `bound()`'s identity inside itself, so a
+root that never calls it is caught only through `bound()`'s users. With the
+binding at link time there is no run-time bind to forget: a root that
+invokes no `bind_setters!` leaves `__ferrix_setters_<entry>` undefined and
+the kernel does not link; one that invokes it twice defines each twice, and
+does not link either. The SAFETY argument of each `unsafe` call is that the
+macro defines the symbol with the declaration's own signature, from the
+trait's method; a check (`removable_problems`) holds that the declaration
+list and the trait's methods are the same names and that the macro is the
+only definer of `__ferrix_setters_*` (no other `no_mangle` of that prefix
+anywhere under `src/kernel`).
+
+**`CrashHook`** (3595 (C2)): the same shape. The load's `crash_hook.rs` has
+`pub trait CrashHook` with the three calls 3595 names -- the fault's hold
+(`hold(thread, signal, code, regs) -> bool`), a held process's end
+(`held_status(process) -> Option<u32>`), the held park
+(`parked(process, thread)`) -- and `pub struct Absent;` ("never held":
+`false`, `None`, nothing), `bind_crash_hook!`, and the root's two
+invocations under `cfg(ferrix_crash_capture = "hold")` / `"absent"`. The
+three call sites stay in the load (`syscall/deliver.rs`,
+`syscall/process.rs`), each listed in `composition_root.removable`.
+
+**The checks, generic as §6.1's, adapted:**
+
+| Check | Today | With traits |
+|---|---|---|
+| the interface's shape (`removable_problems`) | the struct has exactly the recorded fields, `ENTRIES` their count, no `Default`, no value built outside the crate and `defined_in` | the trait has exactly the recorded methods; the extern declarations are the same names; `Absent` implements it in the load and the crate's type in the crate; no other type implements it |
+| one binding a flag value | each value's `const SETTERS` binds the recorded path | each value's cfg holds exactly one `bind_<name>!` invocation, of the recorded type |
+| the registration | `bind_setters` checks `bound()` by address at boot | the link: none or two invocations do not link (control (i) becomes "the invocation removed: the build fails to link", FIRED on the linker's `undefined symbol: __ferrix_setters_sethostname`) |
+| the ELF (`check-removable-symbols.py`) | no crate symbol in an absent build | unchanged; and every `__ferrix_setters_*` symbol present in every build, the absent one's calling the load's `Absent` |
+| the boot | stage 8's `memfd_noexec` write through `bound()` | unchanged: a `fixed` build's `EPERM`, a `live` build's answer, through `setters::<entry>` |
+| `kernel-interface.py` | lists the struct's fields | lists the trait, its methods and the macro; the removed `bind`/`bound`/statics drop out |
+
+The policy's checks (ledger 3294) are unchanged: `check_decoding_refusals`
+and `check_lent_framebuffer` hold the nodes to `P`'s answers instead of the
+struct's fields, and their controls run as before.
+
+**What is not changed**: the core's `trap::ReturnPath`, the personality's
+return-path hooks the load registers at run time, is a seam too, but
+outside this decision's scope until the consultant says otherwise; the
+ordinary core and item `pub` functions stay functions.
+
+**Reviewed**: OK IF (1)-(9), ledger line 3934 (verdict 3936). The link-time
+binding is sound evidence of static selection under (1)-(5): one load
+macro generates the trait's methods, the extern declarations, the safe
+wrappers and `bind_*!`'s definitions from one signature list (a mismatch
+across crates would link and be undefined behaviour); the one `unsafe` is
+each wrapper's call; the scan for definers of the `__ferrix_` prefixes
+covers every crate the kernel links, `src/lib` included, and
+`export_name` and assembly symbols too; the ELF check shows each symbol
+defined once, reaching the chosen type; and the two link controls, the
+invocation removed and made twice, read `FIRED`. `trap::ReturnPath` does not
+join now: it is a core interface whose `fault_signal` 3570 (2) changes
+under its own requirement, so it comes later and alone, after `CrashHook`,
+with its own review (`docs/BACKLOG.md`).
+
+**Order**: this design, reviewed; then Setters and Policy ported and landed
+(no behaviour change; rows: check, test-boot on the four boots, test-removable,
+test-init; the controls (a)-(j) of §6.1 re-run, (i) as the link); then
+`ferrix-kernel-crash` on `CrashHook`, with 3595's conditions.
+
 ### 6.2 `ferrix-kernel-settings`: what moved
 
 The rule: **the entry by which a program changes a system setting,
