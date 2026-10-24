@@ -405,6 +405,23 @@ Still open:
 
 ## 9. Where it stands
 
+2026-10-24: **a frame-generation pair is shown half a period apart.**
+`fetch-yserver.sh` pins the fork at c3fa8de2, past 5fc69322 (every present
+reaches hyprix) and 182c8471. With Endfield's FSR3 frame generation the
+game presents its generated and real frame 1 to 3 ms apart, then nothing
+for about 55 ms; FSR3 would space them itself through
+`VK_EXT_present_timing`, which Mesa's X11 swapchain lacks. The server now
+holds the second of a steady pair until the first plus half the average
+pair period, FSR3's own pacer's rule, and holds nothing else: a frame that
+comes alone, the first of a pair, and every frame of a game without pairs
+go at once, and a held frame a newer one would replace is queued, so none
+is dropped (`kms/render/wl_direct.rs` in the fork;
+`YSERVER_PAIR_PACING=0` turns it off). On the N150 in the world the frame
+intervals went from about 17 and 42 ms in turn (sd 12) to 29 to 30 ms (sd
+0.8 to 0.9) at the same 33 to 34 frames a second; with frame generation
+off nothing is held. Every volume built over yserver's tree is made again
+for the pin.
+
 2026-10-22: **an Intel client's frame reaches hyprix without a copy.**
 `fetch-yserver.sh` pins the fork at ab63f4b1. The card-less Wayland
 server offers DRI3 (its Vulkan device's render node, or the machine's only
