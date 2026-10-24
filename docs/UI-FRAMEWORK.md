@@ -560,7 +560,7 @@ unchanged and still host-tested.
                                        │   ├ animations (frame clock)
                                        │   └ paint: damage ──▶ Renderer
                                        │                     ├ CPU: tiny-skia + compositor-text
-                                       │                     └ (later: GPU)
+                                       │                     └ GPU: Vulkan through ash (§4.6)
                                        │   window host
                                        └── ├ Wayland: compositor-toolkit (Ferrix, any Linux desktop)
                                            └ headless: a PNG, for tests and --render
@@ -672,6 +672,90 @@ offscreen pixmap only when an item with children has `opacity < 1`. A GPU
 renderer later implements the same trait over the compositor's render path
 (`docs/GPU.md`), and the CPU one stays, always available.
 
+#### The GPU renderer: which stack (2026-10-24)
+
+The customer asked for a GPU renderer on Vulkan, presenting natively on
+Wayland, on an existing permissively licensed crate rather than one
+written from scratch where one fits. What it has to run on: Mesa's anv on
+the N150 (Ferrix's ring-3 Intel driver), lavapipe in QEMU, and any
+Linux desktop's driver; what it has to fit: the trait above, the damage
+of §4.4, `compositor-text`'s glyphs (text must look as the CPU draws it),
+and `compositor-toolkit`, which speaks Wayland in pure Rust with no
+libwayland -- so there is no `wl_display *` to hand a Vulkan surface.
+Every version below is one at least two weeks old (crates.io,
+2026-10-24).
+
+| | Licence | Version, age | What it brings | Runs on anv and lavapipe | Presenting without libwayland | Text as the CPU draws it | Fits the trait and the damage |
+|---|---|---|---|---|---|---|---|
+| **vello** (over wgpu) | Apache-2.0 or MIT | 0.11.0, 2026-10-02 | wgpu, naga, vello_shaders, peniko, skrifa: the largest build here, minutes on the N150 | compute shaders and storage buffers in every stage; lavapipe can, but slowly, and vello's fine raster is a compute pass over the whole target | only through wgpu's surface (`raw-window-handle` wants libwayland's pointers) or wgpu-hal's unsafe raw-image interop to render into a dmabuf | glyphs as outlines it draws itself: not compositor-text's masks; masks would go in as images | a scene encoder, not immediate calls; it renders the whole target each frame, so damage is a clip, not less work |
+| **vello_hybrid / vello_cpu** | Apache-2.0 or MIT | 0.2.0, 2026-08-07 / 0.3.0, 2026-10-02 | sparse strips on the CPU, the fill on the GPU (hybrid) or all on the CPU | hybrid is GL/wgpu-shaped and new (0.x months old); cpu is no GPU at all | as vello | as vello | as vello |
+| **wgpu + lyon** | MIT or Apache-2.0 | wgpu 30.0.1 (2026-08-22), lyon 1.0.19 (2026-03-08) | wgpu, naga, lyon's tessellator | yes, through wgpu's Vulkan backend | as vello | masks as an atlas texture: yes | yes, but antialiasing tessellated paths needs MSAA or a feathered mesh |
+| **femtovg** | MIT or Apache-2.0 | 0.27.0, 2026-08-31 | nanovg's model; OpenGL (glow) or wgpu | its Vulkan is wgpu's | GL needs EGL and a `wl_egl_window` (libwayland); wgpu as above | its own atlas of its own glyphs; compositor-text's would go in as images | immediate calls, close to the trait; whole-frame redraw |
+| **vulkano** | MIT or Apache-2.0 | 0.35.2, 2025-08-16 | safe Vulkan; `vulkano-shaders` builds shaderc (C++, cmake) | yes | as ash, below, through its own unsafe interop | as ash | as ash |
+| **ash** + a small renderer | MIT or Apache-2.0 | 0.38.0+1.3.281, 2024-04-01 (the newest release) | one crate of bindings, and libloading (ISC) to load `libvulkan.so.1` at run time; seconds to build | yes: only Vulkan 1.3's dynamic rendering, one pipeline, no compute | yes: any image Vulkan can make -- a dmabuf through `zwp_linux_dmabuf_v1`, or the `wl_shm` buffer itself through `VK_EXT_external_memory_host` -- handed over with the toolkit's own requests | the very masks, in an atlas, drawn texel for texel | the trait's calls become instances; the damage is scissors, and a buffer keeps what it missed (buffer age) |
+
+**Chosen: ash, with a small renderer of tole's own.** What tole draws is
+a short list -- rectangles, rounded or not, filled or outlined; glyph
+masks; pictures; rectangular cuts; opacity groups; and a few paths -- and
+each is one instance of one quad in one pipeline, the shape's coverage
+worked out in the fragment shader by its distance. A 2D vector engine
+(vello) would bring a compute rasteriser for paths tole hardly has, would
+draw text unlike the CPU, would redraw whole frames, and could reach the
+screen only through libwayland or wgpu's unsafe escape hatches, at the
+largest build of the lot. ash costs one crate and its loader, loads Vulkan
+when asked (a program with no Vulkan, or a static one that cannot load
+it, falls back to the CPU and says why), and makes the dmabuf and
+host-memory paths ordinary Vulkan. The price is the renderer itself
+(`tole/src/gpu`, about 3,000 lines with its tests) and `unsafe` around
+every Vulkan call, each block saying which rule it keeps.
+
+**What it draws, and how close to the CPU.** A square rectangle covers
+the pixels whose centres it holds, its edges rounded half up as
+tiny-skia's scan converter does; a rounded one and every outline are
+antialiased by their distance; glyphs are `compositor-text`'s own masks
+placed exactly as `draw_run_clipped` places them, so text is the CPU's
+to within a level of blending; paths and dashed outlines are filled by
+tiny-skia into a coverage mask once for each shape, size and scale, and
+laid down from the atlas; pictures are sampled bilinearly; a cut is a
+scissor (every cut tole makes is a rectangle on whole pixels); an opacity
+group is a layer. Against the CPU renderer, every demo at scale 1 and 2
+is within the customer's tolerance (§5): at most 43 levels, on at most
+0.25% of the pixels, and only where an edge or a glyph is, on lavapipe,
+RADV and NVIDIA alike (`tole-examples`' host test). Paths and dashes
+still use the CPU, once per shape; drawing them on the GPU is left for a
+consumer that draws many.
+
+**How a window's frames reach the compositor, with no copy by the
+program.** In order: a linear image the device exports as a dmabuf,
+handed over with `zwp_linux_dmabuf_v1` (hyprix offers it beside an Intel
+or NVIDIA GPU and where it draws on the GPU; GNOME does); else the
+toolkit's `wl_shm` buffer itself, imported into the device
+(`VK_EXT_external_memory_host`) and drawn into where it lies when the
+device's linear rows match the buffer's (lavapipe pads rows to 64 bytes,
+so a window whose width is a multiple of 16 pixels); else an image of
+the device's own whose drawn rectangles the device copies into that
+buffer; and only where the device cannot import the memory at all (RADV
+refuses a shared memfd mapping) are they read back and copied by the
+program. A compositor that refuses the dmabuf (`failed`) is told nothing
+more: the window says so once and goes on through `wl_shm`. Each buffer
+keeps what changed since it was last drawn into, so a frame draws its own
+damage and what that buffer missed, and reports only its own with
+`wl_surface.damage_buffer` -- the caret's blink is a 1,848-pixel frame
+on hyprix. There is no Vulkan swap chain, so `VK_KHR_incremental_present`
+does not apply; the damage goes to the compositor directly.
+
+**Choosing it.** `TOLE_RENDERER=gpu` draws on any Vulkan device,
+lavapipe included; `auto` on a hardware one only; anything else, or
+nothing, on the CPU, which stays the default and the one every
+screenshot test compares against. `TOLE_GPU_DEVICE` picks a device by
+name. A program built without the `gpu` feature has no GPU code at all;
+with it, a missing library, no device, or a device that fails
+mid-frame each draw on the CPU from then on, said once on standard
+error (`tole: drawing on the CPU: no Vulkan library: ...`). On Ferrix
+every client is a static program, which cannot load a library: Mesa is
+reached by a glibc build run from the yserver volume, as yserver itself
+runs (`test-compositor --boot tole-demo-gpu`).
+
 ### 4.7 Input
 
 Pointer events go to the topmost enabled `MouseArea`/handler under the
@@ -723,9 +807,13 @@ nothing.
 
 ### 4.12 Licences
 
-Nothing new: tiny-skia (BSD-3-Clause), rustybuzz and ttf-parser (MIT or
-Apache-2.0), all already in the tree. The framework itself is MIT, as the
-compositor's workspace. No crate is added.
+tiny-skia (BSD-3-Clause), rustybuzz and ttf-parser (MIT or Apache-2.0),
+all already in the tree. The framework itself is MIT, as the compositor's
+workspace. The GPU renderer, behind the `gpu` feature, adds ash
+0.38.0+1.3.281 (MIT or Apache-2.0) and through it, in every build but a
+static (musl) one, which cannot load a library, libloading 0.8.9 (ISC)
+and, on Windows only, windows-link 0.2.1 (MIT or Apache-2.0), pinned in
+the lock file.
 
 ### 4.13 Where it lives
 
@@ -811,7 +899,7 @@ more.
 | **U8** | The lode viewer ported: its pages in markup, its painters in Rust, `--render` identical before and after. | 8 | the screenshot comparison; the viewer's `test-compositor` row |
 | **U9** | Settings ported. | 5 | Settings' screenshots compared the same way |
 | **U10** | `tole-live`: the run-time loader for hot reload on the host. | 5 | host test: a file edited, the tree rebuilt, the state kept |
-| later | GPU renderer; fractional scale; accessibility export; input methods; the desktop clients (notifyd, caption) where they gain from it. | | |
+| later | fractional scale; accessibility export; input methods; the desktop clients (notifyd, caption) where they gain from it. | | |
 
 ## 8. Where it stands
 
@@ -1143,3 +1231,60 @@ more.
   its own. The API is unchanged, and the file chooser's two
   screenshots and shelf's four are byte for byte what they were. 104
   host tests in tole.
+* **The GPU renderer** (2026-10-24, the customer's ask; §4.6 has the
+  comparison and the design). ash and a renderer of tole's own, behind
+  tole's `gpu` feature, chosen by `TOLE_RENDERER` (`gpu`, `auto`, else
+  the CPU), the CPU the default and the screenshots' renderer. Every demo
+  drawn on the GPU is within the tolerance of §5 against the CPU's frame
+  on lavapipe, RADV and NVIDIA; a kept GPU frame drawn in parts is the
+  whole GPU frame exactly; seven host tests in tole (the atlas, the kept
+  frame, the fallback, the shaders' SPIR-V against their GLSL) and one
+  in the demos. `test-compositor --boot tole-demo-gpu` runs the controls
+  demo on Ferrix under hyprix drawn by lavapipe, from a glibc build run on
+  the yserver volume's loader and Mesa, through the same keys as
+  `tole-demo`; `tole-demo` now asks its static build for the GPU and
+  requires that it says why not and draws on the CPU. The window also
+  counts its frames (`Window::frame_stats`) for a program that measures
+  itself.
+
+  Frame times, each a kept frame drawn after the change, scene included,
+  headless on the gate host (24 cores, at a load of 25 to 56 from other
+  sessions; medians, p95 in brackets, in ms), 1920 × 1080 at scale 1
+  ("1080p") and 2 ("4K"):
+
+  | | CPU | GPU, NVIDIA RTX 3090 | GPU, lavapipe |
+  |---|---|---|---|
+  | lode viewer, Logs scrolled, 100,000 records, 1080p | 7.6 (8.5) | 2.1 (2.5) | 9.1 (11.6) |
+  | the same, 4K | 19.9 (21.8) | 3.0 (3.7) | 25.0 (46.3) |
+  | lode viewer, Logs ↔ Overview, 1080p | 13.1 (14.2) | 2.3 (4.4) | 6.6 (19.7) |
+  | the same, 4K | 40.0 (44.0) | 4.1 (7.1) | 11.6 (14.8) |
+  | Settings, five pages in turn, 1080p | 9.9 (56.0) | 0.5 (9.2) | 1.7 (11.9) |
+  | the same, 4K | 51.7 (324) | 5.6 (38.7) | 4.8 (36.4) |
+
+  No Settings page is taller than 1080 or 2160 pixels, so its scrolling
+  draws nothing at either size. The N150's anv was held by another
+  session throughout; its numbers come with the next box turn.
+
+  **The customer's acceptance test: the lode viewer scrolling on nazuna's
+  own desktop** (GNOME on the RTX 3090, three 59.95 Hz screens, the
+  window maximized at 2501 × 1408 and 1920 × 1200, 300,000 records,
+  scrolled every frame; a frame "missed" when it came more than 1.5
+  refresh periods after the last). Before: the CPU showed a scrolled
+  frame every 60 ms (17 a second), and the GPU every 34 ms, though either
+  drew in 10 to 12 ms. The rest was the viewer's own `show()`, which ran
+  on every pass of its loop and walked every record twice -- counting the
+  swim lanes and the crashes for the sidebar's badge, 20 and 18 ms at
+  300,000 records. Both are now counted only when the boot or the log
+  changes (apps' lode-viewer), and tole caches a line cut with `…` as it
+  caches a whole one, where it shaped every long line of the table again
+  on every frame. After, on the same desktop: steady wheel scrolling on
+  the GPU at a median 16.6 ms a frame (the display's rate), 13% of frames
+  missed (p95 31 ms); flings 16.8 ms, 10% missed; the CPU at 33 ms
+  (30 a second). A scrolled frame costs 2 to 3 ms on the GPU headless, so
+  the misses left are the loop's pacing on a host at a load of 30 to 56,
+  not the drawing: frames are drawn after the frame callback and waited
+  for (one in flight), and the viewer's loop still builds the whole scene
+  each frame. Next: measure again on an idle host; draw ahead of the
+  callback with two frames in flight; choose the device the compositor
+  names (`zwp_linux_dmabuf_v1` version 4's main device) -- mutter refused
+  the RTX 3090's dmabuf on one of the screens and took RADV's.
