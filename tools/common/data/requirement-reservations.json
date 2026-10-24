@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.crash.1-8"],
+      "owner": "lode",
+      "branch": "feature/lode-crashd",
+      "date": "2026-10-24",
+      "purpose": "Tombstones step 2 (docs/LOGGING.md §21; consultant OK IF, ledger lines 3501 and 3524): the crash hold behind /dev/ferrix-crashes -- the unarmed fault path unchanged, the hold and its releases with the fault's signal, the queue bound and exclusions, the arming privilege and single reader -- and the stack capture that follows it"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
