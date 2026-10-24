@@ -36,6 +36,7 @@ runtime_settings = "live"
 "ferrix.onexit" = ["*"]
 "ferrix.panic" = ["halt", "reset"]
 "ferrix.vtd" = ["on", "off"]
+"ferrix.amdvi" = ["on", "off"]
 "ferrix.fbcon" = true
 "ferrix.fbcon.small" = true
 "ferrix.pstore" = ["on", "off"]

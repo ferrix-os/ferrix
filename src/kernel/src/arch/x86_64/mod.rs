@@ -1485,23 +1485,41 @@ fn restore_console_line(old: u8, new: u8) {
 }
 
 /// Finish the console line's conversion to interrupt remapping, its handler
-/// already on `new`: its entry written in remappable format naming entry
-/// `handle`, with `new` as its vector and its trigger the entry's,
+/// already on `new`: its entry written in `form` naming entry `handle` --
+/// VT-d's remappable format with `new` as its vector, or AMD-Vi's indexed
+/// form with the index in the vector field -- and its trigger the entry's,
 /// unmasked; then the port serviced once, as its handler would, since an
 /// edge raised while the line was masked was lost.
-fn convert_console_line(new: u8, handle: u16) -> Result<(), &'static str> {
+fn convert_console_line(
+    new: u8,
+    handle: u16,
+    form: crate::iommu::remapping::Form,
+) -> Result<(), &'static str> {
     {
         let mut held = CONSOLE_INPUT.lock();
         let Some((input, _)) = *held else {
             return Err("the console's line is not routed");
         };
-        input.write(ferrix_paging::vtd::remap::redirection_entry(
-            handle,
-            new,
-            input.level(),
-            input.active_low(),
-            false,
-        ));
+        input.write(match form {
+            crate::iommu::remapping::Form::VtdRemappable => {
+                ferrix_paging::vtd::remap::redirection_entry(
+                    handle,
+                    new,
+                    input.level(),
+                    input.active_low(),
+                    false,
+                )
+            }
+            crate::iommu::remapping::Form::AmdIndexed => {
+                ferrix_paging::amdvi::table::redirection_entry(
+                    handle,
+                    input.level(),
+                    input.active_low(),
+                    false,
+                )
+                .ok_or("an entry index past 255")?
+            }
+        });
         *held = Some((input, u64::from(new)));
     }
     crate::irq::dispatch(vector_number(new));

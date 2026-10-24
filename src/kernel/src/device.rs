@@ -2041,6 +2041,14 @@ impl DeviceNode {
     ///
     /// Configuration space that could not be mapped; bus mastering stays off.
     pub fn enable_dma(&self) -> Result<(), &'static str> {
+        // An AMD-Vi unit's own function and the root complex, which no
+        // IVHD entry covers, are never made bus masters (D10, ledger 3923
+        // (2), 4108 (1)).
+        if let Location::Pci(function) = self.location
+            && iommu::dma_exempt(function)
+        {
+            return Err("the function is an IOMMU's own or the root complex: no DMA");
+        }
         if self.dma_on.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -2399,9 +2407,36 @@ impl DeviceNode {
         Ok(domain)
     }
 
+    /// Give the node `domain` as its domain, if it has none yet: for
+    /// stage 10's AMD-Vi unity check alone, which makes `edu` an IVMD
+    /// identity domain at check time (`docs/AMD-VI.md` §4.2), so the checks
+    /// after it run through that domain as through any (ledger 3867, D7).
+    ///
+    /// # Errors
+    ///
+    /// The node has a domain already, or boot checks do not run.
+    pub(crate) fn give_check_domain(&self, domain: Arc<iommu::Domain>) -> Result<(), &'static str> {
+        if !crate::boot_checks::run() {
+            return Err("a check's domain is given only while boot checks run");
+        }
+        let mut held = self.domain.lock();
+        if held.is_some() {
+            return Err("the node has a domain already");
+        }
+        *held = Some(domain);
+        Ok(())
+    }
+
     /// Set the isolated-interrupts mark. It is never cleared.
     pub fn mark_isolated(&self) {
         self.isolated_mark.store(true, Ordering::Release);
+    }
+
+    /// Whether bus mastering is on: as enumeration found it, until
+    /// `enable_dma` or `disable_dma` writes it (D10 reads it at stage 10's
+    /// report, before either has, `iommu/ivrs.rs`).
+    pub(crate) fn bus_master_on(&self) -> bool {
+        self.config.lock().bus_master
     }
 
     /// Whether the isolated-interrupts mark is set.

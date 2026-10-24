@@ -92,9 +92,9 @@ pub(crate) fn check_budget(nodes: &[Arc<DeviceNode>]) -> Result<Option<Report>, 
 /// finished: the unpin answers an error after a short patience of its own
 /// (2 ms), the pin's two pages move from `live` to `kept`, and its frames
 /// stay held -- the check's own reference on each is not the last. Only on
-/// a domain a VT-d unit translates; elsewhere nothing is checked.
+/// a domain a VT-d or AMD-Vi unit translates; elsewhere nothing is checked.
 ///
-/// Verifies: L.iommu.48
+/// Verifies: L.iommu.48, L.iommu.87
 fn check_failed_invalidation(
     domain: &Arc<Domain>,
     owners: &Owners,
@@ -106,7 +106,7 @@ fn check_failed_invalidation(
     let before = counts(domain);
     let (mut pin, frames) = watched_pin(domain, &owners.live)?;
     super::set_wait(&mut pin, Wait::Unwritten);
-    let failed = crate::iommu::invalidations().failed;
+    let failed = failed_waits();
     drop(pin);
     let now = counts(domain);
     let mut released = false;
@@ -116,7 +116,7 @@ fn check_failed_invalidation(
     if released {
         return Err("frames released after a failed invalidation");
     }
-    if crate::iommu::invalidations().failed == failed {
+    if failed_waits() == failed {
         return Err("an unpin whose wait wrote no status did not fail its invalidation");
     }
     if now.kept != before.kept + frames.len() || now.live != before.live {
@@ -124,6 +124,12 @@ fn check_failed_invalidation(
     }
     report.failed_kept = frames.len();
     Ok(())
+}
+
+/// Invalidations that failed on any unit with a queue: a VT-d unit's, or
+/// an AMD-Vi unit's completion waits.
+fn failed_waits() -> u64 {
+    crate::iommu::invalidations().failed + crate::iommu::amdvi_check::failed_waits()
 }
 
 /// P1: with a budget of two pages, a two-page pin is taken and a one-page

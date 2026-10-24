@@ -100,6 +100,9 @@ pub struct Expected {
     /// `ferrix.vtd`: 1 when the VT-d units are driven, 0 for
     /// `ferrix.vtd=off`.
     pub vtd: u32,
+    /// `ferrix.amdvi`: 1 when the AMD-Vi units are driven, 0 for
+    /// `ferrix.amdvi=off`.
+    pub amdvi: u32,
 }
 
 /// What the check established, for the boot log.
@@ -290,16 +293,16 @@ fn start_and_wrap() -> Result<(usize, u64), &'static str> {
     Ok((read_all.copied, read_all.lost))
 }
 
-/// Eleven system records and a grant in a ring of four, on [`PINNED`]: the
-/// first ten system records stay readable as the boot records, numbered
-/// as the ring numbered them, the eleventh and the grant do not join them, and
+/// Twelve system records and a grant in a ring of four, on [`PINNED`]: the
+/// first eleven system records stay readable as the boot records, numbered
+/// as the ring numbered them, the twelfth and the grant do not join them, and
 /// the ring itself has moved on.
 ///
 /// Verifies: H.AUD.2
 fn pinned() -> Result<(), &'static str> {
     let _ = PINNED.start(0, CHECK_ID);
     let system = Event::new(Class::System, 7);
-    for at in 1..=11_u64 {
+    for at in 1..=12_u64 {
         let event = if at == 4 { GRANT } else { system };
         let _ = PINNED.record_at(
             at,
@@ -311,25 +314,25 @@ fn pinned() -> Result<(), &'static str> {
             [at as u32, 0, 0],
         );
     }
-    let (boot, out) = read(&PINNED, 12, Which::Boot, 0, 16);
+    let (boot, out) = read(&PINNED, 13, Which::Boot, 0, 16);
     let kept_in_order = out
         .iter()
         .map(|record| record.sequence)
-        .eq([0, 1, 2, 3, 5, 6, 7, 8, 9, 10]);
+        .eq([0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]);
     let started = out
         .first()
         .is_some_and(|record| record.start_fields().is_some());
     if boot.copied != BOOT_RECORDS || !kept_in_order || !started {
         return Err(
-            "the first ten system records were not kept apart, numbered as the ring numbered them",
+            "the first eleven system records were not kept apart, numbered as the ring numbered them",
         );
     }
-    let (ring, _) = read(&PINNED, 12, Which::High, 0, 8);
+    let (ring, _) = read(&PINNED, 13, Which::High, 0, 8);
     if ring.lost == 0 {
         return Err("the pinned check's ring did not wrap, so it proved nothing");
     }
-    let (later, _) = read(&PINNED, 12, Which::Boot, 6, 16);
-    if later.copied != 5 || later.next != 11 {
+    let (later, _) = read(&PINNED, 13, Which::Boot, 6, 16);
+    if later.copied != 6 || later.next != 12 {
         return Err("a read of the boot records from a number did not resume there");
     }
     Ok(())
@@ -554,7 +557,7 @@ fn cost() -> (u64, u64) {
 /// The kernel's store: started, with its id, and the configuration bring-up
 /// read.
 ///
-/// Verifies: H.AUD.7
+/// Verifies: H.AUD.7, L.iommu.98
 fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
     let mut out = vec![Record::EMPTY; BOOT_RECORDS];
     let read = super::read(Which::Boot, 0, &mut out);
@@ -582,6 +585,7 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         (Config::Efifb, expected.efifb),
         (Config::Build, expected.build),
         (Config::Vtd, expected.vtd),
+        (Config::AmdVi, expected.amdvi),
     ];
     for (key, value) in wants {
         match config(key) {

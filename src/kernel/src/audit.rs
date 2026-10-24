@@ -114,11 +114,11 @@ const SECOND: u64 = 1_000_000_000;
 /// How many of the first system records are pinned ([`Which::Boot`]): the
 /// start-up record, the [`CONFIG_ITEMS`] configuration items bring-up
 /// records, and the boot brought up.
-pub(crate) const BOOT_RECORDS: usize = 10;
+pub(crate) const BOOT_RECORDS: usize = 11;
 
 /// How many configuration items bring-up records (`main.rs`'s
 /// `start_audit`, `audit::check::kernel_store`): one per [`Config`] value.
-pub const CONFIG_ITEMS: usize = 8;
+pub const CONFIG_ITEMS: usize = 9;
 
 // A configuration item added without a pinned record for it would push the
 // boot-brought-up record out of the boot's own records, as it did once on

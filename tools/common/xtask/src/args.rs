@@ -200,6 +200,9 @@ pub(crate) struct Args {
     /// address width, so the kernel walks four-level tables
     /// (`qemu::INTEL_IOMMU_AW48`).
     pub(crate) vtd_aw48: bool,
+    /// `--amd-vi`: the x86-64 machine with an AMD-Vi unit in place of the
+    /// VT-d unit (`qemu::AMD_IOMMU`, `docs/AMD-VI.md` §5).
+    pub(crate) amd_vi: bool,
     /// `--memory`, guest RAM in MiB.
     pub(crate) memory: u32,
     /// Whether `--memory` was given: `test-rustc` needs more than the
@@ -628,6 +631,7 @@ const SWITCHES: &[&str] = &[
     "--wine",
     "--vtd-aw48",
     "--nazuna-layout",
+    "--amd-vi",
 ];
 
 impl Args {
@@ -866,6 +870,7 @@ impl Args {
             "--wine" => self.wine = true,
             "--vtd-aw48" => self.vtd_aw48 = true,
             "--nazuna-layout" => self.nazuna_layout = true,
+            "--amd-vi" => self.amd_vi = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;

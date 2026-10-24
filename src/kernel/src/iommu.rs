@@ -75,8 +75,11 @@ use crate::{arch, mm, println};
 
 // CHECKS-ONLY-METHODS: home: self
 
+pub(crate) mod amdvi;
+pub mod amdvi_check;
 pub mod check;
 pub mod gate;
+mod ivrs;
 pub mod remapping;
 mod smmuv3;
 pub mod vtd;
@@ -110,6 +113,8 @@ pub(crate) enum Kind {
     VtD,
     /// An Arm `SMMUv3`.
     SmmuV3,
+    /// An AMD-Vi unit.
+    AmdVi,
 }
 
 /// One IOMMU.
@@ -167,6 +172,20 @@ pub(crate) fn units(view: &BootView<'_>) -> Vec<Unit> {
             for node in table.nodes() {
                 if let Some(smmu) = node.smmu_v3() {
                     add(&mut units, Kind::SmmuV3, smmu.base_address, SMMU_V3_WINDOW);
+                }
+            }
+        }
+        // Every IVHD's unit, of every type, kept from drivers: a type not
+        // read still names a unit's registers.
+        if let Ok(table) = tables.ivrs() {
+            for block in table.blocks() {
+                if let ferrix_acpi::ivrs::Block::Ivhd(unit) = block {
+                    add(
+                        &mut units,
+                        Kind::AmdVi,
+                        unit.base,
+                        ferrix_paging::amdvi::unit::KEPT,
+                    );
                 }
             }
         }
@@ -344,6 +363,46 @@ fn place_iort(table: &iort::Iort<'_>, units: &[Unit], function: Address) -> Behi
     }
 }
 
+/// D10's answer for `function`, from its node's class and bus mastering as
+/// enumeration found them (`iommu/ivrs.rs`).
+fn place_ivrs(
+    places: &[ivrs::Placing],
+    _units: &[Unit],
+    _bridges: &[Bridge],
+    nodes: &[Arc<DeviceNode>],
+    function: Address,
+) -> Option<ivrs::Exempt> {
+    let node = nodes
+        .iter()
+        .find(|node| node.location() == Location::Pci(function))?;
+    let class = node.pci_function()?.class;
+    ivrs::exempt(places, function, class, node.bus_master_on())
+}
+
+/// Where the AMD-Vi unit whose own function `function` is, at index `at`
+/// of `places`, puts it (D10, `docs/AMD-VI.md` §9.1).
+fn exempt_unit(places: &[ivrs::Placing], units: &[Unit], function: Address, at: usize) -> Behind {
+    places.get(at).map_or(Behind::Unresolved, |unit| {
+        behind(units, unit.base, u32::from(function.requester_id()))
+    })
+}
+
+/// Where the IVRS's units put `function` (`iommu/ivrs.rs`).
+fn ivrs_behind(
+    places: &[ivrs::Placing],
+    units: &[Unit],
+    bridges: &[Bridge],
+    function: Address,
+) -> Behind {
+    match ivrs::placed(places, function, bridges) {
+        topology::Placed::Unit(at) => places.get(at).map_or(Behind::Unresolved, |unit| {
+            behind(units, unit.base, u32::from(function.requester_id()))
+        }),
+        topology::Placed::Nothing => Behind::Nothing,
+        topology::Placed::Unresolved => Behind::Unresolved,
+    }
+}
+
 /// Where the device tree puts `function`: its host's `iommu-map`.
 ///
 /// The host is the one naming the function's segment in `linux,pci-domain`,
@@ -389,6 +448,10 @@ pub(crate) struct Report {
     pub(crate) bypassing: usize,
     /// PCI functions firmware describes in a way this cannot follow.
     pub(crate) unresolved: usize,
+    /// AMD-Vi units.
+    pub(crate) amdvi: usize,
+    /// Root complexes no IVHD entry names, which issue no DMA (D10).
+    pub(crate) root_complex: usize,
 }
 
 /// Find every unit, and place every PCI function among `nodes`.
@@ -402,6 +465,8 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
             .count(),
         ..Report::default()
     };
+    // Counted from the units read, not every IVHD kept from drivers.
+    report.amdvi = units.iter().filter(|unit| unit.kind == Kind::AmdVi).count();
     let functions: Vec<Address> = nodes
         .iter()
         .filter_map(|node| match node.location() {
@@ -427,20 +492,43 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
         Behind::Unresolved => report.unresolved += 1,
     };
 
+    let mut roots = 0;
     let machine = description::of(view);
     if let Description::Acpi(firmware) = machine {
         let tables = firmware.acpi();
         let dmar = tables.dmar().ok();
         let iort = tables.iort().ok();
+        let ivrs = tables.ivrs().ok();
         let bridges = BRIDGES.lock();
+        let placing = ivrs.as_ref().map(ivrs::placing);
+        let mut exempt = Vec::new();
+        let mut root_complex = 0;
         for &function in &functions {
-            let found = match (&dmar, &iort) {
-                (Some(table), _) => place_dmar(table, &units, &bridges, function),
-                (None, Some(table)) => place_iort(table, &units, function),
-                (None, None) => Behind::Nothing,
+            let found = match (&dmar, &iort, &placing) {
+                (Some(table), _, _) => place_dmar(table, &units, &bridges, function),
+                (None, Some(table), _) => place_iort(table, &units, function),
+                (None, None, Some(Some(places))) => {
+                    let exemption = place_ivrs(places, &units, &bridges, nodes, function);
+                    if exemption.is_some() {
+                        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                        exempt.push(function);
+                    }
+                    match exemption {
+                        Some(ivrs::Exempt::RootComplex) => {
+                            root_complex += 1;
+                            continue;
+                        }
+                        Some(ivrs::Exempt::Unit(at)) => exempt_unit(places, &units, function, at),
+                        None => ivrs_behind(places, &units, &bridges, function),
+                    }
+                }
+                (None, None, Some(None)) => Behind::Unresolved,
+                (None, None, None) => Behind::Nothing,
             };
             record(function, found);
         }
+        ivrs::note_exempt(exempt);
+        roots = root_complex;
     } else if let Description::Tree(tree) = machine {
         for &function in &functions {
             record(function, place_tree(&tree, &units, function));
@@ -452,6 +540,7 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
     }
     report.behind = tally.behind;
     report.untranslated = tally.untranslated;
+    report.root_complex = roots;
     (report, units, placements)
 }
 
@@ -464,6 +553,10 @@ fn translates(unit: &Unit) -> bool {
             .iter()
             .any(|programmed| programmed.phys() == unit.phys && programmed.translating()),
         Kind::SmmuV3 => programmed.smmu_phys.contains(&unit.phys),
+        Kind::AmdVi => programmed
+            .amdvi
+            .iter()
+            .any(|programmed| programmed.phys() == unit.phys && programmed.translating()),
     })
 }
 
@@ -477,9 +570,13 @@ fn translates(unit: &Unit) -> bool {
 pub fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     let (report, units, placements) = discover(view, nodes);
     remapping::note_bypassing(report.bypassing);
+    // The AMD-Vi count and the root complexes only where there are any, so
+    // every other machine's line is as it was (ledger 3867, 3923).
+    let amdvi = Counted(", {} AMD-Vi units", report.amdvi);
+    let roots = Counted(", {} root complex", report.root_complex);
     println!(
-        "  iommu    {} VT-d units, {} SMMUv3s; {} PCI functions behind one, {} of them \
-         untranslated, {} bypassing, {} unresolved",
+        "  iommu    {} VT-d units, {} SMMUv3s{amdvi}; {} PCI functions behind one, {} of them \
+         untranslated, {} bypassing{roots}, {} unresolved",
         report.vtd,
         report.smmu_v3,
         report.behind,
@@ -503,6 +600,20 @@ pub fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     // straight after this (`docs/KERNEL-CRATES.md` §3 (3)).
     crate::object::pin::count_ceiling();
     announce_intel_gpu(nodes);
+}
+
+/// A count said only when it is not 0: `", N label"`.
+struct Counted(&'static str, usize);
+
+impl core::fmt::Display for Counted {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Counted(said, count) = *self;
+        if count == 0 {
+            return Ok(());
+        }
+        let (before, after) = said.split_once("{}").unwrap_or((said, ""));
+        write!(f, "{before}{count}{after}")
+    }
 }
 
 /// Say how the Intel integrated GPU stands (`docs/INTEL-GPU.md` §4.4 (b)):
@@ -638,6 +749,17 @@ pub enum Cause {
         /// The interrupt entry index the request named.
         index: u16,
     },
+    /// An AMD-Vi event other than a refused access or interrupt request,
+    /// by its code: a device table entry the unit would not use, a hardware
+    /// error, a command it refused, an IOTLB timeout. No check provokes
+    /// one, so it counts as stray.
+    AmdVi(u8),
+    /// An AMD-Vi event log that overflowed: events were lost. Stray, as
+    /// [`Cause::Lost`] is.
+    AmdViLost,
+    /// An AMD-Vi unit marked failed: a completion wait never stored, or its
+    /// command buffer stopped. Stray, as [`Cause::Queue`] is.
+    AmdViFailed,
 }
 
 /// What an interrupt fault reason means, for the log.
@@ -650,6 +772,7 @@ fn interrupt_reason_name(reason: u8) -> &'static str {
         0x24 => "reserved field in the entry",
         0x25 => "compatibility format blocked",
         0x26 => "source ID check",
+        amdvi::INTERRUPT_REFUSED => "an AMD-Vi unit refused the interrupt request",
         _ => "reserved",
     }
 }
@@ -711,6 +834,12 @@ impl core::fmt::Display for Fault {
                 "stream {:#x}, interrupt index {index}, reason {reason:#x} ({})",
                 self.stream,
                 interrupt_reason_name(reason)
+            ),
+            Cause::AmdVi(code) => write!(f, "stream {:#x}, AMD-Vi event {code:#x}", self.stream),
+            Cause::AmdViLost => write!(f, "an AMD-Vi event log overflowed: events were lost"),
+            Cause::AmdViFailed => write!(
+                f,
+                "an AMD-Vi unit's completion wait was never stored, and the unit was marked failed"
             ),
         }
     }
@@ -784,6 +913,18 @@ enum Translation {
         /// unit's wait for them.
         changing: Gate,
     },
+    /// An AMD-Vi unit.
+    AmdVi {
+        /// The unit.
+        unit: &'static amdvi::Unit,
+        /// The domain on it.
+        attached: amdvi::Attached,
+        /// Held across a pin's or an unpin's changes to the tables and the
+        /// unit's wait for them.
+        changing: Gate,
+        /// The IVMD identity domain it is; `None` for any other domain.
+        identity: Option<&'static IdentityDomain>,
+    },
 }
 
 impl Translation {
@@ -792,9 +933,9 @@ impl Translation {
     fn changing(&self) -> Option<&Gate> {
         match self {
             Translation::None => None,
-            Translation::VtD { changing, .. } | Translation::SmmuV3 { changing, .. } => {
-                Some(changing)
-            }
+            Translation::VtD { changing, .. }
+            | Translation::SmmuV3 { changing, .. }
+            | Translation::AmdVi { changing, .. } => Some(changing),
         }
     }
 
@@ -804,6 +945,7 @@ impl Translation {
             Translation::None => Ok(()),
             Translation::VtD { unit, attached, .. } => unit.map(attached, iova, phys, flags),
             Translation::SmmuV3 { unit, attached, .. } => unit.map(attached, iova, phys, flags),
+            Translation::AmdVi { unit, attached, .. } => unit.map(attached, iova, phys, flags),
         }
     }
 
@@ -814,6 +956,7 @@ impl Translation {
             Translation::None => Ok(()),
             Translation::VtD { unit, attached, .. } => unit.unmap(attached, iova, tables),
             Translation::SmmuV3 { unit, attached, .. } => unit.unmap(attached, iova, tables),
+            Translation::AmdVi { unit, attached, .. } => unit.unmap(attached, iova, tables),
         }
     }
 
@@ -825,6 +968,8 @@ impl Translation {
             Translation::None => Ok(()),
             Translation::VtD { unit, attached, .. } => unit.flush(attached, after_map, wait),
             Translation::SmmuV3 { unit, attached, .. } => unit.flush(attached, after_map),
+            // After a map too: a unit may cache an entry not present.
+            Translation::AmdVi { unit, attached, .. } => unit.flush(attached, wait),
         }
     }
 
@@ -834,6 +979,7 @@ impl Translation {
             Translation::None => Some(iova),
             Translation::VtD { unit, attached, .. } => unit.resolve(attached, iova),
             Translation::SmmuV3 { unit, attached, .. } => unit.resolve(attached, iova),
+            Translation::AmdVi { unit, attached, .. } => unit.resolve(attached, iova),
         }
     }
 
@@ -843,6 +989,7 @@ impl Translation {
             Translation::None => None,
             Translation::VtD { attached, .. } => Some(attached.stream()),
             Translation::SmmuV3 { attached, .. } => Some(attached.stream()),
+            Translation::AmdVi { attached, .. } => Some(attached.stream()),
         }
     }
 
@@ -852,18 +999,21 @@ impl Translation {
             Translation::None => None,
             Translation::VtD { unit, .. } => recorded(counted(unit.take_fault())),
             Translation::SmmuV3 { unit, .. } => recorded(counted(unit.take_fault())),
+            Translation::AmdVi { unit, .. } => recorded(counted(unit.take_fault())),
         }
     }
 
     /// The RMRR pages the domain holds for good: empty but for an RMRR's
     /// identity domain.
     fn held(&self) -> &'static [Identity] {
+        self.identity().map_or(&[], IdentityDomain::regions)
+    }
+
+    /// The identity domain it is, an RMRR's or an IVMD's, if it is one.
+    fn identity(&self) -> Option<&'static IdentityDomain> {
         match self {
-            Translation::VtD {
-                identity: Some(identity),
-                ..
-            } => identity.regions(),
-            Translation::None | Translation::VtD { .. } | Translation::SmmuV3 { .. } => &[],
+            Translation::VtD { identity, .. } | Translation::AmdVi { identity, .. } => *identity,
+            Translation::None | Translation::SmmuV3 { .. } => None,
         }
     }
 
@@ -877,6 +1027,7 @@ impl Translation {
             Translation::None => Ok(()),
             Translation::VtD { unit, attached, .. } => unit.detach(*attached),
             Translation::SmmuV3 { unit, attached, .. } => unit.detach(*attached),
+            Translation::AmdVi { unit, attached, .. } => unit.detach(*attached),
         }
     }
 }
@@ -1090,7 +1241,10 @@ impl Domain {
     /// Whether a VT-d unit translates this domain: where its invalidations
     /// go through a queue, and [`Wait::Unwritten`] means something.
     pub fn queued(&self) -> bool {
-        matches!(self.translation, Translation::VtD { .. })
+        matches!(
+            self.translation,
+            Translation::VtD { .. } | Translation::AmdVi { .. }
+        )
     }
 
     /// [`Domain::unpin`], its invalidation waited for as `wait` says:
@@ -1185,11 +1339,7 @@ impl Drop for Domain {
     /// it keeps the claim, so no second domain is ever made over tables
     /// holding this one's pins (`L.iommu.78`).
     fn drop(&mut self) {
-        if let Translation::VtD {
-            identity: Some(identity),
-            ..
-        } = self.translation
-        {
+        if let Some(identity) = self.translation.identity() {
             if self.pinned.load(Ordering::Relaxed) == 0 {
                 identity.release();
             }
@@ -1232,6 +1382,13 @@ pub struct Programmed {
     streams: Vec<StreamMap>,
     /// The RMRRs' identity domains, each with its unit's index in `vtd`.
     identity: Vec<(usize, IdentityDomain)>,
+    /// AMD-Vi units brought up: translating, or remapping only.
+    pub(crate) amdvi: Vec<amdvi::Unit>,
+    /// The IVRS's units as placement reads them, each with its index in
+    /// `amdvi` (`iommu/ivrs.rs`).
+    amdvi_places: Vec<ivrs::Placing>,
+    /// The IVMDs' identity domains, each with its unit's index in `amdvi`.
+    amdvi_identity: Vec<(usize, IdentityDomain)>,
 }
 
 impl Programmed {
@@ -1262,7 +1419,7 @@ pub struct IdentityDomain {
     /// The function the RMRRs name.
     function: Address,
     /// Its domain on the unit.
-    attached: vtd::Attached,
+    attached: Attachment,
     /// The RMRR pages it maps, which no two share.
     regions: Vec<Identity>,
     /// Whether a [`Domain`] for it lives, or a dropped one left pins.
@@ -1272,10 +1429,35 @@ pub struct IdentityDomain {
     said: AtomicBool,
 }
 
+/// An identity domain's attachment: an RMRR's on a VT-d unit, an IVMD's on
+/// an AMD-Vi unit.
+#[derive(Clone, Copy, Debug)]
+enum Attachment {
+    /// On a VT-d unit.
+    VtD(vtd::Attached),
+    /// On an AMD-Vi unit.
+    AmdVi(amdvi::Attached),
+}
+
 impl IdentityDomain {
     /// The record of `function`'s identity domain `attached`, holding
     /// `regions`.
     pub fn new(function: Address, attached: vtd::Attached, regions: Vec<Identity>) -> Self {
+        Self::of(function, Attachment::VtD(attached), regions)
+    }
+
+    /// The record of an IVMD's identity domain `attached` on an AMD-Vi
+    /// unit, holding `regions` (`docs/AMD-VI.md` §4.1).
+    pub(crate) fn new_amdvi(
+        function: Address,
+        attached: amdvi::Attached,
+        regions: Vec<Identity>,
+    ) -> Self {
+        Self::of(function, Attachment::AmdVi(attached), regions)
+    }
+
+    /// The record, unclaimed.
+    fn of(function: Address, attached: Attachment, regions: Vec<Identity>) -> Self {
         IdentityDomain {
             function,
             attached,
@@ -1287,12 +1469,31 @@ impl IdentityDomain {
 
     /// The domain, on `unit`, unless one for it lives already.
     pub fn claim(&'static self, unit: &'static vtd::Unit) -> Option<Domain> {
+        let Attachment::VtD(attached) = self.attached else {
+            return None;
+        };
         if self.claimed.swap(true, Ordering::AcqRel) {
             return None;
         }
         Some(Domain::with(Translation::VtD {
             unit,
-            attached: self.attached,
+            attached,
+            changing: Gate::new(),
+            identity: Some(self),
+        }))
+    }
+
+    /// The domain, on AMD-Vi `unit`, unless one for it lives already.
+    pub(crate) fn claim_amdvi(&'static self, unit: &'static amdvi::Unit) -> Option<Domain> {
+        let Attachment::AmdVi(attached) = self.attached else {
+            return None;
+        };
+        if self.claimed.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        Some(Domain::with(Translation::AmdVi {
+            unit,
+            attached,
             changing: Gate::new(),
             identity: Some(self),
         }))
@@ -1327,7 +1528,7 @@ pub fn identity_regions() -> impl Iterator<Item = Identity> {
     PROGRAMMED
         .get()
         .into_iter()
-        .flat_map(|programmed| programmed.identity.iter())
+        .flat_map(|programmed| programmed.identity.iter().chain(&programmed.amdvi_identity))
         .flat_map(|(_, identity)| identity.regions().iter().copied())
 }
 
@@ -1616,6 +1817,8 @@ pub struct BringUp {
     pub remapping_only: usize,
     /// `SMMUv3`s now translating.
     pub smmu_v3: usize,
+    /// AMD-Vi units now translating.
+    pub(crate) amdvi: usize,
     /// Units left alone.
     pub refused: usize,
     /// Why the last of them was.
@@ -1640,9 +1843,22 @@ pub fn bring_up(view: &BootView<'_>) -> BringUp {
         if let Ok(table) = tables.iort() {
             bring_up_smmu(&table, &mut programmed, &mut report);
         }
+        // A machine has a DMAR or an IVRS; were there both, the DMAR's units
+        // would be the ones remapping's state is recorded for.
+        if let (Err(_), Ok(table)) = (tables.dmar(), tables.ivrs()) {
+            let off = amdvi_off_asked(view);
+            ivrs::bring_up(&table, view.regions(), off, &mut programmed, &mut report);
+        }
     }
     let _ = PROGRAMMED.call_once(|| programmed);
     report
+}
+
+/// Whether the command line says `ferrix.amdvi=off`
+/// (`ferrix_paging::amdvi::unit::switched_off`), for the audit record's
+/// configuration.
+pub fn amdvi_off_asked(view: &BootView<'_>) -> bool {
+    ferrix_paging::amdvi::unit::switched_off(view.option("ferrix.amdvi"))
 }
 
 /// Program every VT-d unit the DMAR describes, and record the functions its
@@ -1940,6 +2156,22 @@ pub fn domain_for(function: Address) -> Option<Domain> {
     let Some(programmed) = PROGRAMMED.get() else {
         return Some(Domain::untranslated());
     };
+    // An AMD-Vi unit's own function and the root complex (D10): never a
+    // domain, so never a pin.
+    if ivrs::is_exempt(function) {
+        return None;
+    }
+    if let Some((index, identity)) = programmed
+        .amdvi_identity
+        .iter()
+        .find(|(_, identity)| identity.function == function)
+    {
+        let unit = programmed.amdvi.get(*index)?;
+        if !topology::agrees(amdvi_placed(programmed, function), &Some(*index)) {
+            return None;
+        }
+        return identity.claim_amdvi(unit);
+    }
     if let Some((index, identity)) = programmed.identity_of(function) {
         let unit = programmed.vtd.get(index)?;
         if !topology::agrees(vtd_placed(programmed, function), &Some(index)) {
@@ -1985,6 +2217,17 @@ fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
             attached,
             changing: Gate::new(),
         })
+    } else if let Some(unit) = amdvi_unit_for(programmed, function) {
+        // A unit an IVMD holds to remapping only: untranslated, as VT-d's.
+        if !unit.translating() {
+            return Domain::untranslated();
+        }
+        unit.attach(function).map(|attached| Translation::AmdVi {
+            unit,
+            attached,
+            changing: Gate::new(),
+            identity: None,
+        })
     } else {
         return Domain::untranslated();
     };
@@ -2017,6 +2260,57 @@ pub fn register_invalidations_pending() -> (usize, usize) {
 /// it is translating.
 fn programmed_unit_for(function: Address) -> Option<&'static vtd::Unit> {
     vtd_unit_for(PROGRAMMED.get()?, function)
+}
+
+/// The unit that remaps `function`'s interrupts as its own requester: the
+/// VT-d unit the DMAR puts it behind, or the AMD-Vi unit the IVRS does.
+/// `None` for a function behind neither, under an alias, or exempted by
+/// D10.
+fn remapper_for(function: Address) -> Option<remapping::Remapper> {
+    if let Some(unit) = programmed_unit_for(function) {
+        return Some(remapping::Remapper::VtD(unit));
+    }
+    if ivrs::is_exempt(function) {
+        return None;
+    }
+    amdvi_unit_for(PROGRAMMED.get()?, function).map(remapping::Remapper::AmdVi)
+}
+
+/// Whether D10 exempted `function` -- an AMD-Vi unit's own function or the
+/// root complex -- so that it is never given a domain, a vector, or bus
+/// mastering (`DeviceNode::enable_dma`).
+pub(crate) fn dma_exempt(function: Address) -> bool {
+    ivrs::is_exempt(function)
+}
+
+/// Where the IVRS places `function` among the programmed AMD-Vi units, by
+/// index (`None` for a unit left alone), as bring-up's placings say.
+fn amdvi_placed(
+    programmed: &'static Programmed,
+    function: Address,
+) -> topology::Placed<Option<usize>> {
+    let bridges = BRIDGES.lock();
+    match ivrs::placed(&programmed.amdvi_places, function, &bridges) {
+        topology::Placed::Unit(at) => {
+            topology::Placed::Unit(programmed.amdvi_places.get(at).and_then(|unit| unit.index))
+        }
+        topology::Placed::Nothing => topology::Placed::Nothing,
+        topology::Placed::Unresolved => topology::Placed::Unresolved,
+    }
+}
+
+/// The AMD-Vi unit the IVRS puts `function` behind as its own requester,
+/// if it was brought up.
+fn amdvi_unit_for(
+    programmed: &'static Programmed,
+    function: Address,
+) -> Option<&'static amdvi::Unit> {
+    match amdvi_placed(programmed, function) {
+        topology::Placed::Unit(Some(index)) => programmed.amdvi.get(index),
+        topology::Placed::Unit(None) | topology::Placed::Nothing | topology::Placed::Unresolved => {
+            None
+        }
+    }
 }
 
 /// The VT-d unit the DMAR puts `function` behind, if it is translating.
@@ -2257,6 +2551,12 @@ pub(crate) fn audit_faults() -> FaultAudit {
         }
         for unit in &programmed.smmu {
             audit.translating += 1;
+            drain(|| recorded(counted(unit.take_fault())), &mut audit);
+        }
+        for unit in &programmed.amdvi {
+            if unit.translating() {
+                audit.translating += 1;
+            }
             drain(|| recorded(counted(unit.take_fault())), &mut audit);
         }
     }

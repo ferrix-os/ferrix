@@ -1171,4 +1171,262 @@ package FerrixIommuRequirements {
                 "iommu::report", "iommu::programmed_unit_for");
         }
     }
+    package AmdVi {
+        doc /* docs/AMD-VI.md: the AMD IOMMU behind the interface VT-d serves
+             * (ledger 3867, 3923). */
+
+        requirement <'L.iommu.79'> ivrsReadAsWritten : ItemLowLevel {
+            attribute :>> statement = "The IVRS shall be read as the AMD IOMMU specification lays it out:
+                IVHD 10h, 11h and 40h with their headers, EFR images and attributes;
+                their select, range, extended, alias, special and ACPI-HID device
+                entries, a range's start and end joined; and IVMD 20h, 21h and 22h.";
+            attribute :>> criterion = "Host tests on nazuna's IVRS as its firmware wrote it (200 bytes),
+                QEMU 10.2's as build_amd_iommu writes it, a 40h with an ACPI-HID
+                entry, and alias, extended and ALL entries: every unit, devid,
+                special entry and IVMD read as written.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::units", "iommu::ivrs::ioapic_source");
+        }
+        requirement <'L.iommu.80'> unreadableIvrsIsUnresolved : ItemLowLevel {
+            attribute :>> statement = "An IVRS a block of which runs past the table or is too short for its
+                header, a unit's device entries of which cannot be read to their
+                end, or a unit of which an IVHD of another type names that the
+                chosen type does not, shall not be whole, and bring-up shall then
+                bring no AMD-Vi unit up and place no function behind one, saying so
+                on a line.";
+            attribute :>> criterion = "Host tests: a lone end of range, a range ending below its start, one
+                never ended, a start after a start, a variable type of no known
+                length, a reserved fixed-size type, an entry cut off by its block, a
+                block past the table, an IVMD cut short, and a unit missing at the
+                chosen type each make the table not whole.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::ivrs::placing", "iommu::ivrs::bring_up");
+        }
+        requirement <'L.iommu.81'> oneIvhdTypePerUnit : ItemLowLevel {
+            attribute :>> statement = "Only the IVHDs of one type shall be read: the highest of 10h, 11h
+                and 40h among those naming the first IVHD's devid.";
+            attribute :>> criterion = "Host tests: nazuna's and QEMU's 10h and 11h read as the 11h's one
+                unit; a lone 10h read; a 40h chosen over an 11h.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::ivrs::placing");
+        }
+        requirement <'L.iommu.82'> anAmdUnitIsAccepted : ItemLowLevel {
+            attribute :>> statement = "accept shall drive a unit whose IVHD says HATDis as remapping only,
+                without reading its HATS, and refuse a unit that translates whose
+                EFR reports HATS 11b; the EFR shall be the IVHD's image for 11h and
+                40h, the unit's register for 10h.";
+            attribute :>> criterion = "Host tests: QEMU's EFR accepted translating; its dma-translation=off
+                EFR (HATS 11b) with HATDis accepted remapping only and refused
+                without; nazuna's EFR accepted translating. Boot (QEMU amd-iommu):
+                the unit's line says translating.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::open");
+        }
+        requirement <'L.iommu.83'> firmwareLeftOnIsStopped : ItemLowLevel {
+            attribute :>> statement = "A unit firmware left on -- the unit, its command buffer or its event
+                log enabled -- shall be turned off and its buffer and log seen
+                stopped before any table of it is written, or refused.";
+            attribute :>> criterion = "Host test: left_on answers true for the unit, its log or its buffer
+                on, false for only a coherence bit. QEMU never leaves a unit on: the
+                path is argued.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::stop_firmware");
+        }
+        requirement <'L.iommu.84'> everyDeviceEntryBlocked : ItemLowLevel {
+            attribute :>> statement = "Every one of a unit's 65,536 device table entries shall be written
+                blocked before the unit is enabled: valid and translation valid, on
+                a translating unit Mode 3 over an empty table with IR and IW clear
+                and domain 0, on a unit that only remaps untranslated; and its
+                interrupt half IV set with IntCtl abort and every pass bit clear.";
+            attribute :>> criterion = "Host test of the entries' encodings. Boot (QEMU amd-iommu with dma-
+                remap): edu's write with no domain is refused and recorded as its
+                provoked fault, and lands nowhere; every 4,096th devid no function
+                holds, and every function with no domain, reads blocked. With V
+                cleared in blocked entries edu's write lands and the check panics.";
+            attribute :>> parent = ("H.DMA.1", "H.DMA.9");
+            attribute :>> unit = ("iommu::amdvi::Unit::open", "iommu::amdvi::Unit::blocked_dma", "iommu::amdvi::Unit::device_entry", "iommu::amdvi::Unit::write_entry", "iommu::amdvi::frames", "iommu::amdvi::read_word", "iommu::amdvi::write_word", "iommu::amdvi::write64", "iommu::amdvi::wait_for");
+        }
+        requirement <'L.iommu.85'> aDomainIsAModeThreeTable : ItemLowLevel {
+            attribute :>> statement = "An AMD-Vi domain shall be a Mode 3 entry over its own three-level v1
+                table, IR and IW set, under a domain ID no other domain has; every
+                table entry shall name the level of the table it points to, and
+                every leaf be a 4 KiB page.";
+            attribute :>> criterion = "Host tests: AmdV1 maps, resolves and walks three levels at 0,
+                2^39-4K and between, each table entry's NextLevel the next table's
+                level, IR and IW on every table entry; table_descriptor_at writes
+                what table_descriptor did for every other encoding. Boot: virtio-
+                rng's entropy and edu's writes land through their domains.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::attach", "iommu::amdvi::Unit::attach_blocked", "iommu::amdvi::Unit::write_dma_half", "iommu::amdvi::Unit::map", "iommu::amdvi::Unit::unmap", "iommu::amdvi::Unit::translating");
+        }
+        requirement <'L.iommu.86'> commandsWaitBySequence : ItemLowLevel {
+            attribute :>> statement = "Every batch of commands shall end in a completion wait that stores a
+                sequence number of the unit's own, which shall be waited for within
+                the unit's patience before the batch is called done.";
+            attribute :>> criterion = "Host test of every command's encoding against the specification and
+                QEMU's reserved-field checks. Boot: stage 10's check counts the
+                boot's commands, each batch's wait stored by its sequence.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::submit", "iommu::amdvi::Unit::submit_and_wait");
+        }
+        requirement <'L.iommu.87'> aFailedWaitFailsTheUnit : ItemLowLevel {
+            attribute :>> statement = "A completion wait not stored in time, or a command buffer the unit
+                stopped, shall fail the batch; a stopped buffer or a lost stored
+                wait shall mark the unit failed, after which no command is issued on
+                it and nothing it may reach is released; check R7's wait that stores
+                nothing shall fail without failing the unit.";
+            attribute :>> criterion = "Boot: check R7's unpin with a wait that stores nothing fails and
+                keeps its pages, and exactly one wait failed in the boot. That a
+                stopped buffer or a lost stored wait marks the unit failed is argued
+                from the code (Unit::submit_and_wait, Unit::fail): no QEMU unit
+                stops its buffer.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::fail", "iommu::amdvi::Unit::submit");
+        }
+        requirement <'L.iommu.88'> unpinForgetsBeforeRelease : ItemLowLevel {
+            attribute :>> statement = "An unpin from an AMD-Vi domain shall unmap its pages and wait for
+                INVALIDATE_IOMMU_PAGES of the whole domain before it answers, so the
+                unit reaches the pages no more; a detach shall block the entry and
+                invalidate it and the domain before its root is given back.";
+            attribute :>> criterion = "Boot (QEMU amd-iommu): edu's write to a pinned page lands; once
+                unpinned the same write is refused and recorded, though the unit had
+                cached the translation. With the invalidation dropped from the flush
+                the second write lands and the check panics.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::flush", "iommu::amdvi::Unit::detach");
+        }
+        requirement <'L.iommu.89'> mapIsFlushed : ItemLowLevel {
+            attribute :>> statement = "A map into an AMD-Vi domain shall be followed by the same
+                invalidation as an unmap, so no unit reads a cached not-present
+                entry for it.";
+            attribute :>> criterion = "Host test of the invalidation's encoding; QEMU caches no not-present
+                entry, so the boot cannot show it, and the rule is argued from the
+                code: the AMD-Vi arm of Translation::flush invalidates whatever
+                after_map says.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::flush");
+        }
+        requirement <'L.iommu.90'> everyEventIsRead : ItemLowLevel {
+            attribute :>> statement = "The event log shall be read from head to tail, each slot zeroed once
+                read, each event decoded: an IO_PAGE_FAULT without I, or with I at
+                an address outside the interrupt window (QEMU's encoding, its write
+                in flags bit 1), as a refused access by its devid, page and RW; one
+                with I in the window as a refused interrupt request; any other code
+                as an AMD-Vi event; an overflow as lost.";
+            attribute :>> criterion = "Host tests of the decoder on hardware's and QEMU's encodings; xtask
+                holds QEMU's traced faults to the pages provoked. Boot: the out-of-
+                domain probe's write is read back as its fault, and the end-of-boot
+                audit finds no stray fault.";
+            attribute :>> parent = ("H.DMA.1", "H.AUD.7");
+            attribute :>> unit = ("iommu::amdvi::Unit::take_fault", "iommu::amdvi::fault_of");
+        }
+        requirement <'L.iommu.91'> aFunctionsInterruptsUseItsOwnTable : ItemLowLevel {
+            attribute :>> statement = "A function's vectors shall be remapped through an interrupt table of
+                its own, made at its first vector: the entry, index the vector's
+                slot among the sixty-four, written and its table invalidated before
+                the function's device table entry is pointed at the table, and the
+                entry never rewritten; the message the plain interrupt address with
+                the index as data.";
+            attribute :>> criterion = "Host tests of the entries and the two halves written apart. Boot:
+                edu's own remapped message is delivered through its table's entry.";
+            attribute :>> parent = ("H.DMA.9");
+            attribute :>> unit = ("iommu::amdvi::Unit::remap", "iommu::remapping::remap_message", "iommu::amdvi::Unit::write_interrupt_half", "iommu::amdvi::read_half", "iommu::amdvi::write_half", "iommu::amdvi::Unit::remapping", "iommu::remapping::Remapper::remapping");
+        }
+        requirement <'L.iommu.92'> noOtherInterruptIsDelivered : ItemLowLevel {
+            attribute :>> statement = "A message naming an entry its function's table never wrote, one
+                naming another function's entry, and one in delivery mode NMI shall
+                each be refused and arrive nowhere.";
+            attribute :>> criterion = "Boot (QEMU amd-iommu, check R1 to R3): edu's message naming entry
+                0xfc, its NMI, and its message naming another function's index each
+                fault with reason 0x80 from edu and arrive nowhere.";
+            attribute :>> parent = ("H.DMA.9");
+            attribute :>> unit = ("iommu::remapping::route", "iommu::remapper_for");
+        }
+        requirement <'L.iommu.93'> theConsoleLineByItsSpecialEntry : ItemLowLevel {
+            attribute :>> statement = "The console's I/O APIC line shall be converted only when an IVHD
+                special entry names its I/O APIC, and only when it is edge-
+                triggered: masked, its new vector's entry written in the I/O APIC's
+                own table, its redirection entry holding the index; otherwise no
+                entry shall remap and the line shall say why.";
+            attribute :>> criterion = "Boot (QEMU amd-iommu): the line is converted through entry 1 of
+                devid 0x00a0's table, and a byte looped back is delivered on its new
+                vector and none on the retired one.";
+            attribute :>> parent = ("H.DMA.9");
+            attribute :>> unit = ("iommu::remapping::bring_up_amdvi", "iommu::remapping::prepare_amdvi_console", "iommu::amdvi::Unit::leave_interrupts_alone");
+        }
+        requirement <'L.iommu.94'> ivmdAsIdentityDomains : ItemLowLevel {
+            attribute :>> statement = "An IVMD for one devid or a range, or an exclusion range, naming
+                functions the unit names as their own and honoured by the RMRR
+                rules, shall give each such function an identity domain of exactly
+                its pages, attached before the unit is enabled and never detached; a
+                pin over its pages shall be refused.";
+            attribute :>> criterion = "Host test of the IVMDs' reading. Boot (QEMU amd-iommu): an identity
+                domain made for edu at check time takes edu's write at its page's
+                own address, refuses the page beside, and refuses a pin over the
+                page.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::ivrs::plan", "iommu::amdvi::Unit::attach_identity", "iommu::IdentityDomain::claim_amdvi", "iommu::ivrs::attach", "iommu::Translation::identity", "device::DeviceNode::give_check_domain");
+        }
+        requirement <'L.iommu.95'> unhonourableIvmdHoldsRemappingOnly : ItemLowLevel {
+            attribute :>> statement = "An IVMD for every peripheral, one naming a devid the unit does not
+                name as its own, or one the RMRR rules refuse, shall hold the unit
+                to remapping only: untranslated entries, its line naming why.";
+            attribute :>> criterion = "Argued from the code; QEMU's IVRS has no IVMD, so no boot shows it,
+                and a QEMU patch giving the AMD-Vi row an IVMD (as O2 is for VT-d)
+                would (docs/BACKLOG.md).";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::ivrs::plan", "iommu::amdvi::Unit::open");
+        }
+        requirement <'L.iommu.96'> exclusionRegistersOff : ItemLowLevel {
+            attribute :>> statement = "The exclusion base and limit registers shall be written 0 at enable,
+                and read back 0, whatever an IVMD asks.";
+            attribute :>> criterion = "Boot: the unit's line says the exclusion range is off, read back,
+                and stage 10's check reads both registers 0. With ExEn written 1 the
+                line and the check fail.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::amdvi::Unit::enable", "iommu::amdvi::Unit::exclusion", "iommu::ivrs::say");
+        }
+        requirement <'L.iommu.97'> aliasedIsUnresolved : ItemLowLevel {
+            attribute :>> statement = "A function an alias entry names, the last entry naming it deciding,
+                or one enumeration finds under an aliasing bridge, shall be
+                unresolved: never given a domain or a vector.";
+            attribute :>> criterion = "Host tests: nazuna's bus 0xFF, named by a range and then an alias
+                range, arrives as 00:14.5; an alias select is read as one.";
+            attribute :>> parent = ("H.DMA.1");
+            attribute :>> unit = ("iommu::ivrs::placed", "iommu::ivrs_behind", "iommu::amdvi_placed", "iommu::amdvi_unit_for");
+        }
+        requirement <'L.iommu.98'> amdviOff : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::amdvi::unit::switched_off shall answer true for the
+                command-line value 'off' alone; with it, bring-up shall leave every
+                AMD-Vi unit alone with one line calling it a recovery configuration,
+                not an evaluated one, and the audit record's configuration shall
+                hold AmdVi 0, else 1.";
+            attribute :>> criterion = "Host test: 'off' switches off; no value, '', 'on', 'OFF' and 'off '
+                do not. Every checked boot reads AmdVi 1 back from the audit record.";
+            attribute :>> parent = ("H.DMA.1", "H.AUD.7");
+            attribute :>> unit = ("iommu::amdvi_off_asked");
+        }
+        requirement <'L.iommu.99'> theUnitsOwnFunctionIsTheUnit : ItemLowLevel {
+            attribute :>> statement = "A PCI function at an AMD-Vi unit's IVHD devid whose class is 08h/06h
+                shall be counted behind its unit, and never given a domain, a
+                message vector or bus mastering.";
+            attribute :>> criterion = "Host test on nazuna's IVRS: 00:00.2, an IOMMU, is its unit's; the
+                same address with a host bridge's class is not. Boot (QEMU amd-
+                iommu): its function is refused a pin and its bus mastering stays
+                off; with the domain taken after bus mastering the check panics.";
+            attribute :>> parent = ("H.DMA.1", "H.DMA.9");
+            attribute :>> unit = ("iommu::ivrs::exempt", "iommu::ivrs::is_exempt", "iommu::domain_for", "iommu::ivrs::note_exempt", "device::DeviceNode::enable_dma", "iommu::dma_exempt");
+        }
+        requirement <'L.iommu.100'> anUnnamedHostBridgeIsTheRootComplex : ItemLowLevel {
+            attribute :>> statement = "A host bridge (class 06h/00h) on bus 0 that no IVHD entry names,
+                with bus mastering off as enumeration found it, shall be counted as
+                the root complex, not bypassing, and never given a domain, a message
+                vector or bus mastering; with bus mastering on it shall be
+                bypassing.";
+            attribute :>> criterion = "Host test on nazuna's IVRS: 00:00.0 is the root complex; with bus
+                mastering on, of another class, or named by an entry it is not.";
+            attribute :>> parent = ("H.DMA.1", "H.DMA.9");
+            attribute :>> unit = ("iommu::ivrs::exempt", "iommu::discover", "iommu::Counted::fmt", "iommu::place_ivrs");
+        }
+    }
 }

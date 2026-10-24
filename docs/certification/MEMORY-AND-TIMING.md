@@ -1779,6 +1779,31 @@ program waits on. At run time an identity domain adds to `Domain::pin`
 and `unpin` one comparison of each page against its RMRRs (one range on
 the N150), outside every lock.
 
+### 2.2s An AMD-Vi unit (`iommu::amdvi`, 2026-10-24)
+
+Memory, per unit, taken once at stage 10's bring-up and never given back:
+the device table, one 2 MiB block (order 9, 65,536 entries of 32 bytes);
+one empty table frame every blocked entry of a translating unit points at;
+the command buffer's frame (256 commands of 16 bytes), the event log's (256
+records) and the completion word's. Per function, at its first vector, one
+4 KiB frame for its interrupt table (512 four-byte entries, 2 KiB used),
+never given back, as its vectors are not; per domain, its root frame and
+the tables below it, as VT-d's. Nothing is allocated per interrupt.
+
+Time: every command batch is held inside the unit's `gate`, entered with
+interrupts on wherever the caller may block; the hold is the commands'
+writes, one tail register write and the wait for the completion word,
+bounded by the unit's patience, 100 ms (2 ms for check R7's wait that
+stores nothing). A batch carries at most 252 commands. Bring-up
+invalidates every devid the IVHD names, two commands each: on nazuna
+(devids 0x0003-0xFFFF) about 131,000 commands in about 520 batches, each
+waited for; on QEMU a few dozen. Both halves of a device table entry are
+written under the unit's `tables` lock, an `IrqSpinLock` held for the
+writes only, never across a wait. A fault take reads one event record
+under the `taken` lock. A function's first vector takes the unit's
+`remaps` gate across its table's allocation, the entry's write and two
+batches.
+
 ### 2.2y The crash hold (`fs::crashes`, load ring, 2026-10-24)
 
 Tombstones step 2 (`docs/LOGGING.md` §21.7; the consultant's OK IF, ledger

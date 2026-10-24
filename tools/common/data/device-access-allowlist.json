@@ -113,6 +113,18 @@
       "reason": "Root and context table entries in RAM the VT-d unit walks itself. Volatile because the unit observes the write, not because the address is a register."
     },
     {
+      "file": "src/kernel/src/iommu/amdvi.rs",
+      "kind": "shared",
+      "max_sites": 4,
+      "reason": "The AMD-Vi unit's device table, interrupt tables, command buffer, event log and completion word: RAM the unit reads and writes itself (docs/AMD-VI.md). Volatile because the unit observes the access, not because the address is a register."
+    },
+    {
+      "file": "src/kernel/src/iommu/amdvi_check.rs",
+      "kind": "shared",
+      "max_sites": 2,
+      "reason": "Stage 10's AMD-Vi checks: the first 64 bytes of a frame the check took, which QEMU's edu device writes by DMA, filled and read back to see whether the write landed (docs/AMD-VI.md section 5.1)."
+    },
+    {
       "file": "src/kernel/src/object/pin.rs",
       "kind": "shared",
       "max_sites": 1,

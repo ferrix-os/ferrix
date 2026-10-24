@@ -38,14 +38,7 @@ pub fn check_iommu() {
         return;
     }
     // First, while no function's domain is made but by bring-up's own.
-    match check_isolation_before_pin() {
-        Ok(Some(line)) => println!("  iommu    {line}"),
-        Ok(None) => {}
-        Err(problem) => fatal!(
-            catalog::STAGE10_IOMMU,
-            "stage 10 self-check failed: {problem}"
-        ),
-    }
+    say_line(check_isolation_before_pin());
     let domains = match check_domains(device::devices()) {
         Ok(report) => report,
         // A change refused for a write not cleaned fails the domains'
@@ -73,14 +66,7 @@ pub fn check_iommu() {
         domains.refusals,
         domains.waits,
     );
-    match check_cleaning(super::vtd::cleaning()) {
-        Ok(Some(line)) => println!("  iommu    {line}"),
-        Ok(None) => {}
-        Err(problem) => fatal!(
-            catalog::STAGE10_IOMMU,
-            "stage 10 self-check failed: {problem}"
-        ),
-    }
+    say_line(check_cleaning(super::vtd::cleaning()));
     let failed_kept = match object::pin::check::check_budget(device::devices()) {
         Ok(Some(report)) => {
             println!(
@@ -109,14 +95,9 @@ pub fn check_iommu() {
         ),
     };
     check_remapping();
-    match check_queue(super::invalidations(), failed_kept, planted) {
-        Ok(Some(line)) => println!("  iommu    {line}"),
-        Ok(None) => {}
-        Err(problem) => fatal!(
-            catalog::STAGE10_IOMMU,
-            "stage 10 self-check failed: {problem}"
-        ),
-    }
+    say_line(check_exempt_pin());
+    say_line(super::amdvi_check::check_tables(failed_kept));
+    say_line(check_queue(super::invalidations(), failed_kept, planted));
     match object::pin::check::check_untranslated(device::devices()) {
         Ok(Some(done)) => println!(
             "  iommu    untranslated pins: {} a live driver closed given back at once, past twice \
@@ -131,6 +112,18 @@ pub fn check_iommu() {
         ),
     }
     report_intel_gpu_budget();
+}
+
+/// Say a stage 10 check's line, if it has one, or halt on its problem.
+fn say_line(result: Result<Option<alloc::string::String>, impl core::fmt::Display>) {
+    match result {
+        Ok(Some(line)) => println!("  iommu    {line}"),
+        Ok(None) => {}
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
 }
 
 /// The Intel integrated GPU's pin budget, checked and said
@@ -321,6 +314,66 @@ fn check_queue(
     )))
 }
 
+/// D10's exempt functions -- an AMD-Vi unit's own, the root complex --
+/// are refused a pin and bus mastering, and the refused pin leaves bus
+/// mastering as enumeration found it: the domain is taken before bus
+/// mastering goes on (ledger 4108 (1)). `None`
+/// with no exempt function, as on every machine but an AMD-Vi one.
+///
+/// # Errors
+///
+/// What did not hold, as a sentence.
+///
+/// Verifies: L.iommu.99, L.iommu.100
+fn check_exempt_pin() -> Result<Option<alloc::string::String>, &'static str> {
+    use ferrix_native_abi::nr;
+    use ferrix_native_abi::rights::Rights;
+
+    let Some(node) = device::devices().iter().find(|node| {
+        matches!(node.location(), Location::Pci(function) if super::amdvi_check::exempt(function))
+    }) else {
+        return Ok(None);
+    };
+    let side = object::check::Side::new()?;
+    let outcome = (|| {
+        let reg = object::check::reg;
+        let manager = side
+            .process
+            .with_handles(|table| {
+                table.insert(
+                    object::Object::Device(Arc::clone(node)),
+                    Rights(Rights::DEVICE.0 | Rights::MANAGE.0),
+                )
+            })
+            .map_err(|_| "no room for a device handle")?;
+        // The unit's own function may be a bus master as firmware found it
+        // -- it fetches its tables -- and the kernel leaves it so: what it
+        // must not do is turn it on.
+        let before = super::amdvi_check::bus_master(node);
+        let vmo = side.handle(
+            nr::VMO_CREATE,
+            &[PAGE_SIZE],
+            "vmo_create for the exempt pin failed",
+        )?;
+        if side
+            .call(nr::VMO_PIN, &[reg(manager), reg(vmo), 0, PAGE_SIZE, 0])
+            .is_ok()
+        {
+            return Err("an exempt function was given a pin");
+        }
+        if super::amdvi_check::bus_master(node) != before || node.enable_dma().is_ok() {
+            return Err("an exempt function was made a bus master");
+        }
+        Ok(alloc::format!(
+            "{}, exempt under D10, was refused a pin and bus mastering, which stayed as \
+             enumeration found it",
+            node.location()
+        ))
+    })();
+    side.close_everything();
+    outcome.map(Some)
+}
+
 /// The consultant's condition 1 on N0g's slice 1: on every translating
 /// VT-d unit, an invalidation completion error (`ICE`) the check plants
 /// fails that invalidation, is cleared and counted, and the next
@@ -472,7 +525,7 @@ const CONVERTED_BYTE: u8 = 0xF6;
 ///
 /// A delivery came on the retired vector.
 ///
-/// Verifies: `L.x86_64.130`, H.DMA.9
+/// Verifies: `L.x86_64.130`, H.DMA.9, L.iommu.93
 fn check_console_line() -> Result<Option<alloc::string::String>, &'static str> {
     let (Some((old, new)), Some(line)) = (super::console_vectors(), super::remapping::live_line())
     else {

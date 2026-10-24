@@ -54,6 +54,7 @@
 pub mod dmar;
 pub mod hpet;
 pub mod iort;
+pub mod ivrs;
 
 use core::fmt;
 
@@ -787,6 +788,11 @@ impl<'t, T: Tables> Acpi<'t, T> {
     /// The IORT, decoded: which SMMU an Arm machine's devices sit behind.
     pub fn iort(&self) -> Result<iort::Iort<'t>, AcpiError> {
         iort::Iort::parse(self.find(iort::IORT_SIGNATURE)?)
+    }
+
+    /// The IVRS, decoded: where x86-64's AMD-Vi units are.
+    pub fn ivrs(&self) -> Result<ivrs::Ivrs<'t>, AcpiError> {
+        ivrs::Ivrs::parse(self.find(ivrs::IVRS_SIGNATURE)?)
     }
 }
 

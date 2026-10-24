@@ -10,8 +10,11 @@
 //! vector's slot among the sixty-four is its index -- which holds the vector,
 //! the destination, and the requester ID the message must arrive with; the
 //! unit refuses a message in compatibility format, and one naming the entry
-//! from any other function. Where no unit remaps, the message carries the
-//! vector itself, in compatibility format, as before.
+//! from any other function. **Where an AMD-Vi unit remaps**
+//! (`docs/AMD-VI.md` §3), the message is the plain address with the entry's
+//! index as its data, and the entry is in the function's own table, so no
+//! other function can name it. Where no unit remaps, the message carries
+//! the vector itself, in compatibility format, as before.
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -60,10 +63,7 @@ pub fn msi_allocate(device: u32) -> Result<Msi, &'static str> {
             let message = local_apic_message(destination, vector as u8);
             (message.address, message.data)
         }
-        Route::Remapped(unit) => (
-            remapping::remap_message(unit, requester, vector as u8, apic_id)?,
-            0,
-        ),
+        Route::Remapped(unit) => remapping::remap_message(unit, requester, vector as u8, apic_id)?,
     };
     Ok(Msi {
         number: (vector - trap::IRQ_BASE) as u32,

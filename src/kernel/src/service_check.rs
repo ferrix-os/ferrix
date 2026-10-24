@@ -462,6 +462,7 @@ fn faults_and_domains_read_as_recorded(report: &mut Report) -> Result<(), &'stat
             "translation: None",
             "translation: VtD",
             "translation: SmmuV3",
+            "translation: AmdVi",
         ];
         if !names.iter().any(|name| printed.contains(name)) {
             return Err("a device's domain does not print what translates it");

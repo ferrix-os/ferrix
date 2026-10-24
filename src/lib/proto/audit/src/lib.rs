@@ -294,6 +294,10 @@ pub enum Config {
     /// when `ferrix.vtd=off` left every one alone (a recovery
     /// configuration, not an evaluated one).
     Vtd = 8,
+    /// `ferrix.amdvi`: 1 when the kernel drives the AMD-Vi units the IVRS
+    /// describes, 0 when `ferrix.amdvi=off` left every one alone (a
+    /// recovery configuration, not an evaluated one, `L.iommu.98`).
+    AmdVi = 9,
 }
 
 /// Whether the decision recorded went for the subject or against it.

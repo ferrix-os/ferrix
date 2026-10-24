@@ -2599,8 +2599,8 @@ fn vmo_pin(
         return Err(status::WRONG_TYPE);
     }
     // The first pin is what gives the device DMA, so it is where bus
-    // mastering goes on; a device whose switch cannot be reached gets no pin.
-    node.enable_dma().map_err(|_| status::BAD_STATE)?;
+    // mastering goes on, once the device has its domain.
+    domain_then_dma(&node)?;
     let vmo = process.with_handles(|table| {
         if !read_only {
             let _ = vmo_in(table, vmo, Rights::WRITE)?;
@@ -2841,6 +2841,14 @@ fn set_isolated_mark(node: &DeviceNode, value: u64) -> Result<usize, Errno> {
     }
     node.mark_isolated();
     Ok(usize::from(was))
+}
+
+/// The device's domain, then its bus mastering: a pin the domain is
+/// refused for leaves bus mastering off (ledger 4108 (1)), and a device
+/// whose switch cannot be reached gets no pin.
+fn domain_then_dma(node: &DeviceNode) -> Result<(), Errno> {
+    let _ = node.domain().map_err(|_| status::NO_MEMORY)?;
+    node.enable_dma().map_err(|_| status::BAD_STATE)
 }
 
 /// `device_isolation`: how the device is isolated, as

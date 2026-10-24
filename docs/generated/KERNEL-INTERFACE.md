@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2379 declarations in the core's files, 174 in the item's; 67 checks-only.
+2388 declarations in the core's files, 174 in the item's; 71 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1191,6 +1191,7 @@ checks above is `pub` for raised checks (F3).
 | `Expected` | struct | bin |  |
 | `Report` | struct | item, load, bin |  |
 | `Booted::dma_faults_read` | field | bin |  |
+| `Expected::amdvi` | field | bin |  |
 | `Expected::build` | field | load, bin |  |
 | `Expected::checks` | field | item, load, bin |  |
 | `Expected::devmgr` | field | item, load, bin |  |
@@ -1647,6 +1648,7 @@ checks above is `pub` for raised checks (F3).
 | `Cause` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DomainError` | enum | item, load |  |
 | `Wait` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `amdvi_off_asked` | fn | bin |  |
 | `bring_up` | fn | bin |  |
 | `domain_for` | fn | item, load |  |
 | `frames_outside_allocator` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1656,6 +1658,7 @@ checks above is `pub` for raised checks (F3).
 | `report` | fn | bin |  |
 | `report_unchecked_faults` | fn | bin |  |
 | `vtd_off_asked` | fn | bin |  |
+| `amdvi_check` | mod | load (checks) | pub for raised checks |
 | `check` | mod | load, bin |  |
 | `gate` | mod | load (checks) | pub for raised checks |
 | `remapping` | mod | load (checks) | pub for raised checks |
@@ -1707,6 +1710,21 @@ checks above is `pub` for raised checks (F3).
 | `Pinned::leak` | method | item, load |  |
 | `Programmed::vtd` | field | load, bin | pub for raised checks; type unobtainable from product API |
 
+### `iommu::amdvi`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Unit` | struct | item, load |  |
+
+### `iommu::amdvi_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `bus_master` | fn | load (checks) | checks-only |
+| `check_tables` | fn | load (checks) | checks-only |
+| `exempt` | fn | load (checks) | checks-only |
+| `failed_waits` | fn | load (checks) | checks-only |
+
 ### `iommu::check`
 
 | Item | Kind | Named by | Note |
@@ -1727,6 +1745,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `CHECK_VECTOR` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Remapper` | enum | - |  |
 | `Route` | enum | load |  |
 | `any_remapping` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `console_vectors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

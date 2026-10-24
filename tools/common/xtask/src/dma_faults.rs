@@ -57,11 +57,20 @@ use crate::{Error, Result};
 /// The trace event QEMU's VT-d unit emits for every fault it reports.
 const EVENT: &str = "vtd_dmar_fault";
 
-/// The arguments that make QEMU trace every VT-d fault, for an `arch` whose
-/// machine this tool gives a VT-d unit.
+/// The trace event QEMU's AMD-Vi unit emits for every DMA page fault: it
+/// carries the address alone, no requester and no access, so an AMD-Vi
+/// row's faults are counted and held to the pages the kernel provoked, not
+/// attributed to a stream (ledger 3867, condition 6).
+const AMDVI_EVENT: &str = "amdvi_page_fault";
+
+/// The source a traced AMD-Vi fault is given: none it names.
+const UNATTRIBUTED: u32 = u32::MAX;
+
+/// The arguments that make QEMU trace every VT-d and AMD-Vi fault, for an
+/// `arch` whose machine this tool gives either unit.
 pub(crate) fn trace_args(arch: Arch) -> &'static [&'static str] {
     if arch == Arch::X86_64 {
-        &["-trace", EVENT]
+        &["-trace", EVENT, "-trace", AMDVI_EVENT]
     } else {
         &[]
     }
@@ -82,13 +91,16 @@ const PROVOKED: &str = " outside its domain, on purpose";
 /// kernel judges those faults itself, by their reasons, and test-boot holds
 /// them to the three the checks provoke (`qemu::remap_problem`); here they
 /// are remarks like the rest.
-const REMARKS: [&str; 6] = [
+const REMARKS: [&str; 7] = [
     "vtd_iova_to_slpte: detected",
     "vtd_iommu_translate: detected translation failure",
     "Interrupt Mask set, irq is not generated",
     "New fault is not recorded due to compression of faults",
     "vtd_interrupt_remap_msi: compatibility format interrupt blocked",
     "vtd_irte_get: invalid IRTE SID",
+    // QEMU's AMD-Vi unit on an interrupt request it refused (checks R1 to
+    // R3 on the AMD-Vi row), which the kernel reads as an event.
+    "failed to remap interrupt from devid",
 ];
 
 /// One fault QEMU traced.
@@ -105,6 +117,16 @@ pub(crate) struct Fault {
 /// The fault a trace line reports, if it is one:
 /// `1610532@1790384790.551512:vtd_dmar_fault sid 0x10 fault 5 addr 0x1000 write 1`.
 pub(crate) fn traced(line: &str) -> Option<Fault> {
+    if let Some((_, rest)) = line.split_once(AMDVI_EVENT) {
+        // `amdvi_page_fault error: page fault accessing guest physical
+        // address 0x1000`: the address alone.
+        let address = rest.split_whitespace().last()?;
+        return Some(Fault {
+            source: UNATTRIBUTED,
+            address: hex(address)?,
+            write: true,
+        });
+    }
     let (_, rest) = line.split_once(EVENT)?;
     let mut words = rest.split_whitespace();
     let mut source = None;
@@ -168,7 +190,8 @@ pub(crate) fn problem(seen: &Seen, lines: &[String]) -> Option<String> {
         .filter(|fault| {
             !(fault.write
                 && provoked.iter().any(|&(stream, page)| {
-                    fault.source == stream && fault.address & !0xFFF == page
+                    (fault.source == stream || fault.source == UNATTRIBUTED)
+                        && fault.address & !0xFFF == page
                 }))
         })
         .collect();
@@ -324,6 +347,33 @@ mod tests {
         assert!(problem(&other_page, &boot).is_some());
         let a_read = seen(&["1@1.0:vtd_dmar_fault sid 0x10 fault 6 addr 0x1000 write 0"]);
         assert!(problem(&a_read, &boot).is_some());
+    }
+
+    /// QEMU's AMD-Vi trace carries the address alone: its faults are held to
+    /// the pages provoked, whatever stream provoked them.
+    ///
+    /// Verifies: L.iommu.90
+    #[test]
+    fn amdvi_faults_are_counted_by_page() {
+        let line =
+            "1@1.0:amdvi_page_fault error: page fault accessing guest physical address 0x1004";
+        assert_eq!(
+            traced(line),
+            Some(Fault {
+                source: UNATTRIBUTED,
+                address: 0x1004,
+                write: true
+            })
+        );
+        let boot = lines(&[PROBE]);
+        assert_eq!(problem(&seen(&[line]), &boot), None);
+        let other_page = seen(&[
+            "1@1.0:amdvi_page_fault error: page fault accessing guest physical address 0x9000",
+        ]);
+        assert!(problem(&other_page, &boot).is_some());
+        assert!(remark(
+            "qemu-system-x86_64: failed to remap interrupt from devid 0x200"
+        ));
     }
 
     #[test]

@@ -244,9 +244,14 @@ pub(crate) fn judge(
         devmgr_problem(lines),
         msi_problem(arch, lines),
         held_off_problem(arch, lines),
-        cleaning_problem(arch, lines),
-        remap_problem(arch, own_model, lines),
-        queue_problem(arch, lines),
+        (!args.amd_vi)
+            .then(|| cleaning_problem(arch, lines))
+            .flatten(),
+        (!args.amd_vi)
+            .then(|| remap_problem(arch, own_model, lines))
+            .flatten(),
+        (!args.amd_vi).then(|| queue_problem(arch, lines)).flatten(),
+        args.amd_vi.then(|| amdvi_problem(lines)).flatten(),
         config_problem(arch, lines),
         qemu.then(|| iommu_problem(lines)).flatten(),
         walk_problem(arch, args, lines),
@@ -768,6 +773,66 @@ fn iommu_problem(lines: &[String]) -> Option<String> {
         ));
     }
     None
+}
+
+/// What every `--amd-vi` boot must print of its AMD-Vi unit and the checks
+/// run on it (`docs/AMD-VI.md` §5.1), each by the words that say it held.
+const AMDVI_LINES: [(&str, &str); 11] = [
+    (
+        "translating (three-level), commands and event log on, remapping on (512 entries per \
+         function, 32-bit format), exclusion range off; 65536 device table entries blocked by \
+         default",
+        "the AMD-Vi unit never said it translates and remaps with every entry blocked",
+    ),
+    (
+        " 1 AMD-Vi units; ",
+        "the kernel never placed functions behind the AMD-Vi unit",
+    ),
+    (
+        "device_isolation asked of pci ",
+        "L.device.55's check never asked device_isolation of a node before any pin",
+    ),
+    (
+        "edu on AMD-Vi: its write with no domain refused and recorded; an IVMD identity domain",
+        "the AMD-Vi DMA checks on edu (A1, A8, the unpin) never said they held",
+    ),
+    (
+        "edu's forged messages refused on AMD-Vi",
+        "checks R1 to R3 never refused edu's forged messages on AMD-Vi",
+    ),
+    (
+        "sampled device table entries no function holds read blocked",
+        "the AMD-Vi tables and commands check never said it held",
+    ),
+    (
+        "the console's I/O APIC line converted: vector",
+        "the console's I/O APIC line was never converted on AMD-Vi",
+    ),
+    (
+        " 1 out-of-domain writes faulted",
+        "the out-of-domain probe's write was not faulted on AMD-Vi",
+    ),
+    (
+        " 0 DMA faults recorded that no check provoked",
+        "the end-of-boot audit read a fault no check provoked on AMD-Vi",
+    ),
+    (
+        "the isolated-interrupts mark set on",
+        "check R10 never showed the isolated-interrupts mark on AMD-Vi",
+    ),
+    (
+        ", exempt under D10, was refused a pin and bus mastering",
+        "D10's exempt function was never shown refused a pin and bus mastering",
+    ),
+];
+
+/// Why an `--amd-vi` boot did not show its AMD-Vi unit whole, if it did not.
+///
+/// Verifies: L.iommu.84
+fn amdvi_problem(lines: &[String]) -> Option<String> {
+    AMDVI_LINES.iter().find_map(|(text, problem)| {
+        (!lines.iter().any(|line| line.contains(text))).then(|| (*problem).to_owned())
+    })
 }
 
 /// What the kernel prints of a VT-d unit that translates with three-level
@@ -2499,6 +2564,11 @@ pub(crate) const INTEL_IOMMU_UNISOLATED: &str = "intel-iommu,intremap=off,aw-bit
 /// [`INTEL_IOMMU`] with a 48-bit guest address width, so the unit offers
 /// four-level tables beside three and the kernel takes four, as the N150's
 /// units, which offer four alone, make it (`--vtd-aw48`).
+/// The AMD-Vi row's unit (`--amd-vi`, `docs/AMD-VI.md` §5.1): interrupt
+/// remapping on, and `dma-remap=on`, without which QEMU 10.2 translates no
+/// device's DMA at all (ledger 3867, condition 1).
+pub(crate) const AMD_IOMMU: &str = "amd-iommu,intremap=on,dma-remap=on";
+
 pub(crate) const INTEL_IOMMU_AW48: &str = "intel-iommu,intremap=on,eim=off,aw-bits=48";
 
 /// Which CPU model the `virt` machine emulates for an Arm architecture.
@@ -2823,7 +2893,9 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
 /// (`INTEL_IOMMU_AW48`), or without remapping for `test-nvrm`'s unisolated
 /// boot (`INTEL_IOMMU_UNISOLATED`).
 fn intel_iommu(args: &Args) -> &'static str {
-    if args.unisolated_interrupts {
+    if args.amd_vi {
+        AMD_IOMMU
+    } else if args.unisolated_interrupts {
         INTEL_IOMMU_UNISOLATED
     } else if args.vtd_aw48 {
         INTEL_IOMMU_AW48
@@ -2882,8 +2954,11 @@ fn attach_rng(command: &mut Command, arch: Arch) {
             "pcie-root-port,id=ferrix.port0,chassis=1,slot=1",
             "-device",
             "pcie-root-port,id=ferrix.port1,chassis=2,slot=2",
+            // Its DMA mask widened to 32 bits from its own 28, so the
+            // AMD-Vi row's checks can aim its DMA at any frame of the
+            // guest's memory (`iommu/amdvi_check.rs`).
             "-device",
-            "edu,bus=ferrix.port1",
+            "edu,bus=ferrix.port1,dma_mask=0xffffffff",
             // QEMU's e1000e, both MSI and MSI-X, with QEMU's subsystem
             // (the properties `hw/net/e1000e.c` declares), which no real
             // 82574L carries: stage 10's held-off check runs on it
@@ -4086,12 +4161,12 @@ mod tests {
     }
 
     use super::{
-        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES, SUCCESS_MARKER,
-        UNCHECKED_MARKER, X2APIC_ALL, blocks_compatibility_format, cleaning_problem,
-        config_problem, devmgr_problem, entropy_problem, fallback_problem, fault_problem,
-        held_off_problem, iommu_problem, msi_problem, namespace_problem, parse_qemu_version,
-        power_off_problem, queue_problem, remap_problem, send_lines, version_translates,
-        walk_problem, xstate_problem,
+        AMDVI_LINES, Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES,
+        SUCCESS_MARKER, UNCHECKED_MARKER, X2APIC_ALL, amdvi_problem, blocks_compatibility_format,
+        cleaning_problem, config_problem, devmgr_problem, entropy_problem, fallback_problem,
+        fault_problem, held_off_problem, iommu_problem, msi_problem, namespace_problem,
+        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
+        version_translates, walk_problem, xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -4450,6 +4525,21 @@ mod tests {
             None,
             "an SMMU snoops"
         );
+    }
+
+    /// Verifies: L.iommu.84
+    #[test]
+    fn an_amdvi_boot_without_its_lines_fails() {
+        let whole: Vec<String> = AMDVI_LINES
+            .iter()
+            .map(|(text, _)| format!("    6.0 |   iommu    {text}"))
+            .collect();
+        assert_eq!(amdvi_problem(&whole), None);
+        for missing in 0..whole.len() {
+            let mut cut = whole.clone();
+            let _ = cut.remove(missing);
+            assert!(amdvi_problem(&cut).is_some(), "line {missing} missing");
+        }
     }
 
     #[test]

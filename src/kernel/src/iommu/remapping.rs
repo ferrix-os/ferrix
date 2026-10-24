@@ -51,7 +51,7 @@ use ferrix_paging::vtd::remap::{self, Remap, UnitState};
 use ferrix_pci::Address;
 use ferrix_sync::Once;
 
-use super::vtd;
+use super::{amdvi, vtd};
 use crate::panic::{catalog, fatal};
 use crate::println;
 
@@ -87,12 +87,22 @@ pub struct LiveLine {
     pub(crate) retire: fn(old: u8, new: u8) -> Result<(), &'static str>,
     /// Undo `retire`, for a conversion given up.
     pub(crate) restore: fn(old: u8, new: u8),
-    /// Write its entry in remappable format naming entry `handle` with
-    /// vector `new`, unmask it, and service the port once.
-    pub(crate) convert: fn(new: u8, handle: u16) -> Result<(), &'static str>,
+    /// Write its entry naming entry `handle` with vector `new`, in `form`,
+    /// unmask it, and service the port once.
+    pub(crate) convert: fn(new: u8, handle: u16, form: Form) -> Result<(), &'static str>,
     /// Loop `byte` back through the port to its own receiver, the port's
     /// transmit side quiet: for checks R5 and G3's service once.
     pub loop_back: fn(byte: u8),
+}
+
+/// The form an I/O APIC entry names its interrupt remapping entry in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Form {
+    /// VT-d's remappable format: format bit 48 and the handle in 63:49.
+    VtdRemappable,
+    /// AMD-Vi's: compatibility form, the entry's index in the vector field,
+    /// fixed delivery (`ferrix_paging::amdvi::table::redirection_entry`).
+    AmdIndexed,
 }
 
 /// What x86-64 registers for bring-up.
@@ -283,7 +293,7 @@ fn finish_console(unit: &vtd::Unit, old: u8, new: u8, handle: u16) {
     let Some(line) = HOOKS.get().and_then(|hooks| hooks.line) else {
         return;
     };
-    let converted = (line.convert)(new, handle);
+    let converted = (line.convert)(new, handle, Form::VtdRemappable);
     super::check::require_masked_byte_served();
     match converted {
         Ok(()) => println!(
@@ -330,6 +340,124 @@ fn require_no_compatibility_vector() {
          all the console's; {converted} I/O APIC inputs converted",
         taken.count_ones()
     );
+}
+
+/// Bring AMD-Vi `unit` up -- enabled, with the console's line converted to
+/// an entry of its I/O APIC's own table -- and say what it ended in
+/// (`docs/AMD-VI.md` §3.2). `ivhd` is the unit's IVHD, `table` the IVRS.
+///
+/// The unit blocks every interrupt the moment it is enabled, the console's
+/// live line too, so the line is masked and its new vector taken first,
+/// check R9 run, then the unit enabled and the line's entry written and the
+/// line converted. When no special entry names the line's I/O APIC, or the
+/// line is level-triggered (its end of interrupt would be matched against
+/// the index the entry holds), every entry is left unremapped before the
+/// unit is enabled: the machine's interrupts are not isolated, and the line
+/// says why.
+///
+/// # Errors
+///
+/// The unit would not come up.
+pub(super) fn bring_up_amdvi(
+    unit: &amdvi::Unit,
+    table: &ferrix_acpi::ivrs::Ivrs<'_>,
+    ivhd: &ferrix_acpi::ivrs::Ivhd<'_>,
+) -> Result<UnitState, &'static str> {
+    let off = UnitState {
+        remapping: false,
+        compatibility_blocked: false,
+    };
+    let line = HOOKS.get().and_then(|hooks| hooks.line);
+    let source = line.map(|line| {
+        (
+            line.io_apic,
+            super::ivrs::ioapic_source(table, line.io_apic),
+        )
+    });
+    let converting = match source {
+        Some((io_apic, None)) => {
+            println!(
+                "  iommu    amd-vi unit {:#x}: no IVHD special entry names I/O APIC {io_apic}, \
+                 which carries the console",
+                unit.phys()
+            );
+            Err("the console's I/O APIC is named by no special entry")
+        }
+        Some((_, Some(devid))) => prepare_amdvi_console(devid).map(Some),
+        None => Ok(None),
+    };
+    let converting = match converting {
+        Ok(converting) => converting,
+        Err(why) => {
+            unit.leave_interrupts_alone();
+            unit.enable(ivhd.entries())?;
+            println!(
+                "  iommu    amd-vi unit {:#x}: remapping not enabled: {why}",
+                unit.phys()
+            );
+            return Ok(off);
+        }
+    };
+    require_no_compatibility_vector();
+    if let Err(why) = unit.enable(ivhd.entries()) {
+        unmask_console(converting.map(|(old, new, handle, _)| (old, new, handle)));
+        return Err(why);
+    }
+    ANY_REMAPPING.store(true, Ordering::Release);
+    if let Some((old, new, handle, (devid, destination))) = converting {
+        let written = unit.remap(devid, handle, new, destination);
+        let Some(line) = HOOKS.get().and_then(|hooks| hooks.line) else {
+            return Ok(off);
+        };
+        let converted = written.and_then(|()| (line.convert)(new, handle, Form::AmdIndexed));
+        super::check::require_masked_byte_served();
+        match converted {
+            Ok(()) => println!(
+                "  iommu    amd-vi unit {:#x}: the console's I/O APIC line converted: vector                  {old:#x} retired, {new:#x} through entry {handle} of devid {devid:#06x}'s table",
+                unit.phys()
+            ),
+            Err(why) => fatal!(
+                catalog::STAGE10_REMAP,
+                "the console's I/O APIC line could not be converted to AMD-Vi's indexed form:                  {why}"
+            ),
+        }
+    }
+    Ok(UnitState {
+        remapping: true,
+        compatibility_blocked: true,
+    })
+}
+
+/// The console line made ready for an AMD-Vi unit: `(V0, V1, V1's index,
+/// (the I/O APIC's devid, the destination))`.
+type AmdViConsole = (u8, u8, u16, (u16, u8));
+
+/// Mask the console's line, take its new vector `V1` and move its handler
+/// there, before an AMD-Vi unit is enabled; see [`AmdViConsole`].
+fn prepare_amdvi_console(devid: u16) -> Result<AmdViConsole, &'static str> {
+    let hooks = HOOKS.get().ok_or("no interrupt hooks")?;
+    let line = hooks.line.ok_or("no console line")?;
+    let masked = (line.mask)().ok_or("the console's line is not routed")?;
+    let result = (|| {
+        if masked.level {
+            return Err("the console's line is level-triggered");
+        }
+        let destination = ferrix_paging::amdvi::table::destination(masked.apic_id)
+            .ok_or("a destination above APIC ID 255")?;
+        super::check::plant_masked_byte(&line);
+        let new = (hooks.vector)().ok_or("no vector left for the console")?;
+        let handle = u16::from(new.wrapping_sub(FIRST_VECTOR));
+        CONSOLE_VECTORS.store(
+            u64::from(masked.vector) | u64::from(new) << 8,
+            Ordering::Release,
+        );
+        (line.retire)(masked.vector, new)?;
+        Ok((masked.vector, new, handle, (devid, destination)))
+    })();
+    if result.is_err() {
+        (line.unmask)();
+    }
+    result
 }
 
 /// Record what every unit the DMAR lists ended in.
@@ -385,7 +513,27 @@ pub enum Route {
     /// No unit remaps: a compatibility-format message.
     Compatibility,
     /// Through this unit's interrupt remapping table.
-    Remapped(&'static vtd::Unit),
+    Remapped(Remapper),
+}
+
+/// A unit that remaps interrupts.
+#[derive(Clone, Copy, Debug)]
+pub enum Remapper {
+    /// A VT-d unit, through its one table.
+    VtD(&'static vtd::Unit),
+    /// An AMD-Vi unit, through the function's own table.
+    AmdVi(&'static amdvi::Unit),
+}
+
+impl Remapper {
+    /// Whether the unit remaps every interrupt request: VT-d's with
+    /// compatibility format blocked, AMD-Vi's with every entry's `IV` set.
+    pub(crate) fn remapping(self) -> bool {
+        match self {
+            Remapper::VtD(unit) => unit.remapping(),
+            Remapper::AmdVi(unit) => unit.remapping(),
+        }
+    }
 }
 
 /// How the function whose requester ID is `requester`, on segment 0 -- the
@@ -403,7 +551,7 @@ pub fn route(requester: u16) -> Result<Route, &'static str> {
     let [bus, devfn] = requester.to_be_bytes();
     let function = Address::new(0, bus, devfn >> 3, devfn & 7)
         .ok_or("a requester ID that names no function")?;
-    match super::programmed_unit_for(function) {
+    match super::remapper_for(function) {
         Some(unit) if unit.remapping() => Ok(Route::Remapped(unit)),
         Some(_) => Ok(Route::Compatibility),
         None => Err(
@@ -414,40 +562,55 @@ pub fn route(requester: u16) -> Result<Route, &'static str> {
 }
 
 /// Write `vector`'s entry on `unit` for the function `requester`, aimed at
-/// `apic_id`, and answer the remappable-format message's address that
-/// names it; its data is 0.
+/// `apic_id`, and answer the message that names it, address and data: on
+/// VT-d the remappable-format address with data 0, on AMD-Vi the plain
+/// address with the entry's index as data.
 ///
 /// # Errors
 ///
-/// A destination past APIC ID 255, or what [`vtd::Unit::remap`] refused.
+/// A destination past APIC ID 255, or what the unit's `remap` refused.
 #[cfg_attr(
     not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64 routes messages through VT-d")
+    expect(dead_code, reason = "only x86-64 routes messages through an IOMMU")
 )]
 pub(crate) fn remap_message(
-    unit: &vtd::Unit,
+    unit: Remapper,
     requester: u16,
     vector: u8,
     apic_id: u32,
-) -> Result<u64, &'static str> {
-    let destination = remap::destination(apic_id).ok_or("a destination above APIC ID 255")?;
+) -> Result<(u64, u32), &'static str> {
     let handle = u16::from(vector.wrapping_sub(FIRST_VECTOR));
-    unit.remap(
-        handle,
-        Remap {
-            vector,
-            destination,
-            level: false,
-            source: requester,
-        },
-    )?;
-    Ok(remap::message_address(handle))
+    match unit {
+        Remapper::VtD(unit) => {
+            let destination =
+                remap::destination(apic_id).ok_or("a destination above APIC ID 255")?;
+            unit.remap(
+                handle,
+                Remap {
+                    vector,
+                    destination,
+                    level: false,
+                    source: requester,
+                },
+            )?;
+            Ok((remap::message_address(handle), 0))
+        }
+        Remapper::AmdVi(unit) => {
+            let destination = ferrix_paging::amdvi::table::destination(apic_id)
+                .ok_or("a destination above APIC ID 255")?;
+            unit.remap(requester, handle, vector, destination)?;
+            Ok((
+                ferrix_paging::amdvi::table::MESSAGE_ADDRESS,
+                ferrix_paging::amdvi::table::message_data(handle),
+            ))
+        }
+    }
 }
 
 /// Whether the function at `function` has its interrupts isolated: the
 /// machine's are, and the unit it is placed behind remaps.
 pub(crate) fn function_isolated(function: Address) -> bool {
-    interrupts_isolated() && super::programmed_unit_for(function).is_some_and(vtd::Unit::remapping)
+    interrupts_isolated() && super::remapper_for(function).is_some_and(Remapper::remapping)
 }
 
 /// The vector check R1 aims its forged compatibility-format message at

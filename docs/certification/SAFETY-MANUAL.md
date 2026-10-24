@@ -244,8 +244,10 @@ element. (Finding F-21b.)
 The claims hold for the reference configuration and no other. Changing the
 toolchain, enabling a Cargo feature, building with `--mitigations off`,
 booting with `ferrix.devmgr=init` (AoU-13), `ferrix.efifb` (AoU-31) or
-`ferrix.vtd=off`, or moving a file between rings
-changes what is claimed. `ferrix.vtd=off` leaves every VT-d unit alone, so
+`ferrix.vtd=off` or `ferrix.amdvi=off`, or moving a file between rings
+changes what is claimed. `ferrix.amdvi=off` does to every AMD-Vi unit what
+`ferrix.vtd=off` does to VT-d's, and its boot line says it was taken
+(`L.iommu.98`). `ferrix.vtd=off` leaves every VT-d unit alone, so
 no DMA is translated and no interrupt remapped and the isolated-interrupts
 mark is refused: it is for recovering a machine whose units break its boot,
 never an evaluated configuration; the boot line and the audit record's
@@ -316,7 +318,8 @@ stops a device that asks the IOMMU on every access. A device with address
 translation services (PCIe ATS) keeps translations of its own, which that
 invalidation does not reach. The element never enables ATS: VT-d context
 entries are written with `TT=00`, SMMUv3 stream table entries with `EATS=0`,
-and PCI enumeration switches off any ATS capability firmware left on, and
+AMD-Vi device table entries with `I`=0 (no IOTLB, so a translated request
+is refused) and every pass bit clear, and PCI enumeration switches off any ATS capability firmware left on, and
 refuses to boot a function that keeps it on (`pci.rs`, `keep_ats_off`). The
 integrator shall not enable ATS on any device, nor configure its IOMMU to
 accept translated requests, nor add a device-TLB invalidation path without

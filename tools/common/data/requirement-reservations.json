@@ -12,25 +12,11 @@
   ],
   "reservations": [
     {
-      "ids": ["L.iommu.99-100"],
-      "owner": "amd-vi",
-      "branch": "feature/amd-vi",
-      "date": "2026-10-24",
-      "purpose": "docs/AMD-VI.md section 9.1, decision D10 (consultant OK IF (1)-(5), ledger 3923, condition 4): an AMD-Vi unit's own PCI function is the unit (theUnitsOwnFunctionIsTheUnit), and an unnamed bus-0 host bridge with bus mastering off is the root complex (anUnnamedHostBridgeIsTheRootComplex); neither is given a domain or a vector, nor counted bypassing"
-    },
-    {
       "ids": ["L.device.57-59"],
       "owner": "amd-vi",
       "branch": "feature/devmgr-isolation-gate",
       "date": "2026-10-24",
       "purpose": "docs/DMA-GATE.md, every bus master gated on isolation (the customer's decision, ledger 3905; consultant OK IF (1)-(9), ledger 3906): device_isolation's NO_DMA bit, ferrix.unisolated forwarded to devmgr said and audited, and devmgr's one admission rule"
-    },
-    {
-      "ids": ["L.iommu.79-98"],
-      "owner": "amd-vi",
-      "branch": "feature/amd-vi",
-      "date": "2026-10-24",
-      "purpose": "docs/AMD-VI.md, the AMD-Vi driver behind the iommu interface (consultant OK IF (1)-(13), ledger 3867, condition 7): the IVRS read and its fail-closed cases, one IVHD type per unit, unit acceptance and firmware hand-over, the blocked device table, Mode-3 domains, sequenced completion waits and failed units, unpin and map flushes, the event log, per-function interrupt tables, other interrupts refused, the console line, IVMD identity domains and holds, exclusion registers off, aliases unresolved, ferrix.amdvi=off"
     },
     {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],

@@ -42,6 +42,7 @@
 #![no_std]
 
 pub mod aarch64;
+pub mod amdvi;
 pub mod armv7a;
 pub mod coherence;
 pub mod mtrr;
@@ -441,6 +442,16 @@ pub trait Encoding {
     /// user access to everything beneath.
     fn table_descriptor(table: PhysAddr, flags: MapFlags) -> u64;
 
+    /// Descriptor for an intermediate table at `table`, written into a
+    /// table at `level`: what the mapper writes. The default is
+    /// [`Encoding::table_descriptor`], so every encoding whose table
+    /// entries do not name a level is unchanged; AMD-Vi's names the level
+    /// of the table it points to (`amdvi`).
+    fn table_descriptor_at(table: PhysAddr, level: Level, flags: MapFlags) -> u64 {
+        let _ = level;
+        Self::table_descriptor(table, flags)
+    }
+
     /// Descriptor for a leaf mapping `frame` at `level`.
     fn leaf_descriptor(frame: PhysAddr, level: Level, flags: MapFlags) -> u64;
 
@@ -692,7 +703,7 @@ impl<E: Encoding> Mapper<E> {
                 E::address(entry)
             } else {
                 let fresh = memory.allocate_table().ok_or(MapError::OutOfMemory)?;
-                memory.write(slot, E::table_descriptor(fresh, flags));
+                memory.write(slot, E::table_descriptor_at(fresh, level, flags));
                 fresh
             };
 

@@ -122,7 +122,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 146 packages, 7614 elements, 218 relations. Model digest `872f59ebedfdc45a`.
+27 files, 147 packages, 7725 elements, 218 relations. Model digest `baa20ba4c0fe19f1`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4201,6 +4201,28 @@ flowchart LR
 | `L.iommu.53` | `anEntryCarriesItsFixedFields` | — | — | — |
 | `L.iommu.54` | `interruptFaultsAreToldApart` | — | — | — |
 | `L.iommu.55` | `isolationIsTheWholeMachines` | — | — | — |
+| `L.iommu.79` | `ivrsReadAsWritten` | — | — | — |
+| `L.iommu.80` | `unreadableIvrsIsUnresolved` | — | — | — |
+| `L.iommu.81` | `oneIvhdTypePerUnit` | — | — | — |
+| `L.iommu.82` | `anAmdUnitIsAccepted` | — | — | — |
+| `L.iommu.83` | `firmwareLeftOnIsStopped` | — | — | — |
+| `L.iommu.84` | `everyDeviceEntryBlocked` | — | — | — |
+| `L.iommu.85` | `aDomainIsAModeThreeTable` | — | — | — |
+| `L.iommu.86` | `commandsWaitBySequence` | — | — | — |
+| `L.iommu.87` | `aFailedWaitFailsTheUnit` | — | — | — |
+| `L.iommu.88` | `unpinForgetsBeforeRelease` | — | — | — |
+| `L.iommu.89` | `mapIsFlushed` | — | — | — |
+| `L.iommu.90` | `everyEventIsRead` | — | — | — |
+| `L.iommu.91` | `aFunctionsInterruptsUseItsOwnTable` | — | — | — |
+| `L.iommu.92` | `noOtherInterruptIsDelivered` | — | — | — |
+| `L.iommu.93` | `theConsoleLineByItsSpecialEntry` | — | — | — |
+| `L.iommu.94` | `ivmdAsIdentityDomains` | — | — | — |
+| `L.iommu.95` | `unhonourableIvmdHoldsRemappingOnly` | — | — | — |
+| `L.iommu.96` | `exclusionRegistersOff` | — | — | — |
+| `L.iommu.97` | `aliasedIsUnresolved` | — | — | — |
+| `L.iommu.98` | `amdviOff` | — | — | — |
+| `L.iommu.99` | `theUnitsOwnFunctionIsTheUnit` | — | — | — |
+| `L.iommu.100` | `anUnnamedHostBridgeIsTheRootComplex` | — | — | — |
 | `L.mm.1` | `initGivesTheAllocatorTheUsableRam` | — | — | — |
 | `L.mm.2` | `frameZeroIsNeverHandedOut` | — | — | — |
 | `L.mm.3` | `aFrameHasOneHolder` | — | — | — |

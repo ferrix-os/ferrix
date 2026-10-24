@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "872f59ebedfdc45abc8e837b84d0993bec81d6ca7a63fd463366b082934ef7cf",
+  "digest": "baa20ba4c0fe19f191a4659bf008111d967e4887c3cfc0602fda927b113d2ea6",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -112,8 +112,8 @@
     }
   ],
   "summary": {
-    "packages": 146,
-    "elements": 7614,
+    "packages": 147,
+    "elements": 7725,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -25604,7 +25604,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"The first ten system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
+                              "value": "\"The first eleven system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1397
@@ -25615,7 +25615,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"Eleven system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, the ring reports records lost, and a read of the boot records from 6 copies 5 and resumes at 11.\"",
+                              "value": "\"Twelve system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, the ring reports records lost, and a read of the boot records from 6 copies 6 and resumes at 12.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1401
@@ -43438,6 +43438,1272 @@
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
                     "line": 1171
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "AmdVi",
+          "qualifiedName": "FerrixIommuRequirements::AmdVi",
+          "kind": "package",
+          "doc": "docs/AMD-VI.md: the AMD IOMMU behind the interface VT-d serves (ledger 3867, 3923).",
+          "source": {
+            "file": "docs/sysml/16-iommu-requirements.sysml",
+            "line": 1174
+          },
+          "children": [
+            {
+              "name": "ivrsReadAsWritten",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::ivrsReadAsWritten",
+              "kind": "requirement",
+              "shortName": "L.iommu.79",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1178
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivrsReadAsWritten",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The IVRS shall be read as the AMD IOMMU specification lays it out: IVHD 10h, 11h and 40h with their headers, EFR images and attributes; their select, range, extended, alias, special and ACPI-HID device entries, a range's start and end joined; and IVMD 20h, 21h and 22h.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1182
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivrsReadAsWritten",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests on nazuna's IVRS as its firmware wrote it (200 bytes), QEMU 10.2's as build_amd_iommu writes it, a 40h with an ACPI-HID entry, and alias, extended and ALL entries: every unit, devid, special entry and IVMD read as written.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1186
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivrsReadAsWritten",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1187
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivrsReadAsWritten",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::units\", \"iommu::ivrs::ioapic_source\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1188
+                  }
+                }
+              ]
+            },
+            {
+              "name": "unreadableIvrsIsUnresolved",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::unreadableIvrsIsUnresolved",
+              "kind": "requirement",
+              "shortName": "L.iommu.80",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1190
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unreadableIvrsIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An IVRS a block of which runs past the table or is too short for its header, a unit's device entries of which cannot be read to their end, or a unit of which an IVHD of another type names that the chosen type does not, shall not be whole, and bring-up shall then bring no AMD-Vi unit up and place no function behind one, saying so on a line.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1196
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unreadableIvrsIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a lone end of range, a range ending below its start, one never ended, a start after a start, a variable type of no known length, a reserved fixed-size type, an entry cut off by its block, a block past the table, an IVMD cut short, and a unit missing at the chosen type each make the table not whole.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1201
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unreadableIvrsIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1202
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unreadableIvrsIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::placing\", \"iommu::ivrs::bring_up\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1203
+                  }
+                }
+              ]
+            },
+            {
+              "name": "oneIvhdTypePerUnit",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::oneIvhdTypePerUnit",
+              "kind": "requirement",
+              "shortName": "L.iommu.81",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1205
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::oneIvhdTypePerUnit",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Only the IVHDs of one type shall be read: the highest of 10h, 11h and 40h among those naming the first IVHD's devid.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1207
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::oneIvhdTypePerUnit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: nazuna's and QEMU's 10h and 11h read as the 11h's one unit; a lone 10h read; a 40h chosen over an 11h.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1209
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::oneIvhdTypePerUnit",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1210
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::oneIvhdTypePerUnit",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::placing\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1211
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anAmdUnitIsAccepted",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::anAmdUnitIsAccepted",
+              "kind": "requirement",
+              "shortName": "L.iommu.82",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1213
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anAmdUnitIsAccepted",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"accept shall drive a unit whose IVHD says HATDis as remapping only, without reading its HATS, and refuse a unit that translates whose EFR reports HATS 11b; the EFR shall be the IVHD's image for 11h and 40h, the unit's register for 10h.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1217
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anAmdUnitIsAccepted",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: QEMU's EFR accepted translating; its dma-translation=off EFR (HATS 11b) with HATDis accepted remapping only and refused without; nazuna's EFR accepted translating. Boot (QEMU amd-iommu): the unit's line says translating.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1221
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anAmdUnitIsAccepted",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1222
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anAmdUnitIsAccepted",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::open\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1223
+                  }
+                }
+              ]
+            },
+            {
+              "name": "firmwareLeftOnIsStopped",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::firmwareLeftOnIsStopped",
+              "kind": "requirement",
+              "shortName": "L.iommu.83",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1225
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::firmwareLeftOnIsStopped",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A unit firmware left on -- the unit, its command buffer or its event log enabled -- shall be turned off and its buffer and log seen stopped before any table of it is written, or refused.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1228
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::firmwareLeftOnIsStopped",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: left_on answers true for the unit, its log or its buffer on, false for only a coherence bit. QEMU never leaves a unit on: the path is argued.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1231
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::firmwareLeftOnIsStopped",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1232
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::firmwareLeftOnIsStopped",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::stop_firmware\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1233
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyDeviceEntryBlocked",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::everyDeviceEntryBlocked",
+              "kind": "requirement",
+              "shortName": "L.iommu.84",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1235
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyDeviceEntryBlocked",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every one of a unit's 65,536 device table entries shall be written blocked before the unit is enabled: valid and translation valid, on a translating unit Mode 3 over an empty table with IR and IW clear and domain 0, on a unit that only remaps untranslated; and its interrupt half IV set with IntCtl abort and every pass bit clear.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1240
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyDeviceEntryBlocked",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test of the entries' encodings. Boot (QEMU amd-iommu with dma- remap): edu's write with no domain is refused and recorded as its provoked fault, and lands nowhere; every 4,096th devid no function holds, and every function with no domain, reads blocked. With V cleared in blocked entries edu's write lands and the check panics.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1245
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyDeviceEntryBlocked",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1246
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyDeviceEntryBlocked",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::open\", \"iommu::amdvi::Unit::blocked_dma\", \"iommu::amdvi::Unit::device_entry\", \"iommu::amdvi::Unit::write_entry\", \"iommu::amdvi::frames\", \"iommu::amdvi::read_word\", \"iommu::amdvi::write_word\", \"iommu::amdvi::write64\", \"iommu::amdvi::wait_for\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1247
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aDomainIsAModeThreeTable",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::aDomainIsAModeThreeTable",
+              "kind": "requirement",
+              "shortName": "L.iommu.85",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1249
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aDomainIsAModeThreeTable",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An AMD-Vi domain shall be a Mode 3 entry over its own three-level v1 table, IR and IW set, under a domain ID no other domain has; every table entry shall name the level of the table it points to, and every leaf be a 4 KiB page.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1253
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aDomainIsAModeThreeTable",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: AmdV1 maps, resolves and walks three levels at 0, 2^39-4K and between, each table entry's NextLevel the next table's level, IR and IW on every table entry; table_descriptor_at writes what table_descriptor did for every other encoding. Boot: virtio- rng's entropy and edu's writes land through their domains.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1258
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aDomainIsAModeThreeTable",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1259
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aDomainIsAModeThreeTable",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::attach\", \"iommu::amdvi::Unit::attach_blocked\", \"iommu::amdvi::Unit::write_dma_half\", \"iommu::amdvi::Unit::map\", \"iommu::amdvi::Unit::unmap\", \"iommu::amdvi::Unit::translating\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1260
+                  }
+                }
+              ]
+            },
+            {
+              "name": "commandsWaitBySequence",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::commandsWaitBySequence",
+              "kind": "requirement",
+              "shortName": "L.iommu.86",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1262
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::commandsWaitBySequence",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every batch of commands shall end in a completion wait that stores a sequence number of the unit's own, which shall be waited for within the unit's patience before the batch is called done.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1265
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::commandsWaitBySequence",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test of every command's encoding against the specification and QEMU's reserved-field checks. Boot: stage 10's check counts the boot's commands, each batch's wait stored by its sequence.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1268
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::commandsWaitBySequence",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1269
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::commandsWaitBySequence",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::submit\", \"iommu::amdvi::Unit::submit_and_wait\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1270
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFailedWaitFailsTheUnit",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::aFailedWaitFailsTheUnit",
+              "kind": "requirement",
+              "shortName": "L.iommu.87",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1272
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFailedWaitFailsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A completion wait not stored in time, or a command buffer the unit stopped, shall fail the batch; a stopped buffer or a lost stored wait shall mark the unit failed, after which no command is issued on it and nothing it may reach is released; check R7's wait that stores nothing shall fail without failing the unit.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1277
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFailedWaitFailsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Boot: check R7's unpin with a wait that stores nothing fails and keeps its pages, and exactly one wait failed in the boot. That a stopped buffer or a lost stored wait marks the unit failed is argued from the code (Unit::submit_and_wait, Unit::fail): no QEMU unit stops its buffer.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1282
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFailedWaitFailsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1283
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFailedWaitFailsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::fail\", \"iommu::amdvi::Unit::submit\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1284
+                  }
+                }
+              ]
+            },
+            {
+              "name": "unpinForgetsBeforeRelease",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::unpinForgetsBeforeRelease",
+              "kind": "requirement",
+              "shortName": "L.iommu.88",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1286
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unpinForgetsBeforeRelease",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An unpin from an AMD-Vi domain shall unmap its pages and wait for INVALIDATE_IOMMU_PAGES of the whole domain before it answers, so the unit reaches the pages no more; a detach shall block the entry and invalidate it and the domain before its root is given back.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1290
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unpinForgetsBeforeRelease",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Boot (QEMU amd-iommu): edu's write to a pinned page lands; once unpinned the same write is refused and recorded, though the unit had cached the translation. With the invalidation dropped from the flush the second write lands and the check panics.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1294
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unpinForgetsBeforeRelease",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1295
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unpinForgetsBeforeRelease",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::flush\", \"iommu::amdvi::Unit::detach\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1296
+                  }
+                }
+              ]
+            },
+            {
+              "name": "mapIsFlushed",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::mapIsFlushed",
+              "kind": "requirement",
+              "shortName": "L.iommu.89",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1298
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::mapIsFlushed",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A map into an AMD-Vi domain shall be followed by the same invalidation as an unmap, so no unit reads a cached not-present entry for it.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1301
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::mapIsFlushed",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test of the invalidation's encoding; QEMU caches no not-present entry, so the boot cannot show it, and the rule is argued from the code: the AMD-Vi arm of Translation::flush invalidates whatever after_map says.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1305
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::mapIsFlushed",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1306
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::mapIsFlushed",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::flush\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1307
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyEventIsRead",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::everyEventIsRead",
+              "kind": "requirement",
+              "shortName": "L.iommu.90",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1309
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyEventIsRead",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The event log shall be read from head to tail, each slot zeroed once read, each event decoded: an IO_PAGE_FAULT without I, or with I at an address outside the interrupt window (QEMU's encoding, its write in flags bit 1), as a refused access by its devid, page and RW; one with I in the window as a refused interrupt request; any other code as an AMD-Vi event; an overflow as lost.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1315
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyEventIsRead",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests of the decoder on hardware's and QEMU's encodings; xtask holds QEMU's traced faults to the pages provoked. Boot: the out-of- domain probe's write is read back as its fault, and the end-of-boot audit finds no stray fault.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1319
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyEventIsRead",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.AUD.7\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1320
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::everyEventIsRead",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::take_fault\", \"iommu::amdvi::fault_of\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1321
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFunctionsInterruptsUseItsOwnTable",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::aFunctionsInterruptsUseItsOwnTable",
+              "kind": "requirement",
+              "shortName": "L.iommu.91",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1323
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFunctionsInterruptsUseItsOwnTable",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A function's vectors shall be remapped through an interrupt table of its own, made at its first vector: the entry, index the vector's slot among the sixty-four, written and its table invalidated before the function's device table entry is pointed at the table, and the entry never rewritten; the message the plain interrupt address with the index as data.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1329
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFunctionsInterruptsUseItsOwnTable",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests of the entries and the two halves written apart. Boot: edu's own remapped message is delivered through its table's entry.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1331
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFunctionsInterruptsUseItsOwnTable",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1332
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aFunctionsInterruptsUseItsOwnTable",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::remap\", \"iommu::remapping::remap_message\", \"iommu::amdvi::Unit::write_interrupt_half\", \"iommu::amdvi::read_half\", \"iommu::amdvi::write_half\", \"iommu::amdvi::Unit::remapping\", \"iommu::remapping::Remapper::remapping\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1333
+                  }
+                }
+              ]
+            },
+            {
+              "name": "noOtherInterruptIsDelivered",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::noOtherInterruptIsDelivered",
+              "kind": "requirement",
+              "shortName": "L.iommu.92",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1335
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::noOtherInterruptIsDelivered",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A message naming an entry its function's table never wrote, one naming another function's entry, and one in delivery mode NMI shall each be refused and arrive nowhere.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1338
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::noOtherInterruptIsDelivered",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Boot (QEMU amd-iommu, check R1 to R3): edu's message naming entry 0xfc, its NMI, and its message naming another function's index each fault with reason 0x80 from edu and arrive nowhere.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1341
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::noOtherInterruptIsDelivered",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1342
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::noOtherInterruptIsDelivered",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::remapping::route\", \"iommu::remapper_for\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1343
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theConsoleLineByItsSpecialEntry",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::theConsoleLineByItsSpecialEntry",
+              "kind": "requirement",
+              "shortName": "L.iommu.93",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1345
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theConsoleLineByItsSpecialEntry",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The console's I/O APIC line shall be converted only when an IVHD special entry names its I/O APIC, and only when it is edge- triggered: masked, its new vector's entry written in the I/O APIC's own table, its redirection entry holding the index; otherwise no entry shall remap and the line shall say why.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1350
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theConsoleLineByItsSpecialEntry",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Boot (QEMU amd-iommu): the line is converted through entry 1 of devid 0x00a0's table, and a byte looped back is delivered on its new vector and none on the retired one.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1353
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theConsoleLineByItsSpecialEntry",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1354
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theConsoleLineByItsSpecialEntry",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::remapping::bring_up_amdvi\", \"iommu::remapping::prepare_amdvi_console\", \"iommu::amdvi::Unit::leave_interrupts_alone\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1355
+                  }
+                }
+              ]
+            },
+            {
+              "name": "ivmdAsIdentityDomains",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::ivmdAsIdentityDomains",
+              "kind": "requirement",
+              "shortName": "L.iommu.94",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1357
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivmdAsIdentityDomains",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An IVMD for one devid or a range, or an exclusion range, naming functions the unit names as their own and honoured by the RMRR rules, shall give each such function an identity domain of exactly its pages, attached before the unit is enabled and never detached; a pin over its pages shall be refused.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1362
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivmdAsIdentityDomains",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test of the IVMDs' reading. Boot (QEMU amd-iommu): an identity domain made for edu at check time takes edu's write at its page's own address, refuses the page beside, and refuses a pin over the page.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1366
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivmdAsIdentityDomains",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1367
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::ivmdAsIdentityDomains",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::plan\", \"iommu::amdvi::Unit::attach_identity\", \"iommu::IdentityDomain::claim_amdvi\", \"iommu::ivrs::attach\", \"iommu::Translation::identity\", \"device::DeviceNode::give_check_domain\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1368
+                  }
+                }
+              ]
+            },
+            {
+              "name": "unhonourableIvmdHoldsRemappingOnly",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::unhonourableIvmdHoldsRemappingOnly",
+              "kind": "requirement",
+              "shortName": "L.iommu.95",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1370
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unhonourableIvmdHoldsRemappingOnly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An IVMD for every peripheral, one naming a devid the unit does not name as its own, or one the RMRR rules refuse, shall hold the unit to remapping only: untranslated entries, its line naming why.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1373
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unhonourableIvmdHoldsRemappingOnly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Argued from the code; QEMU's IVRS has no IVMD, so no boot shows it, and a QEMU patch giving the AMD-Vi row an IVMD (as O2 is for VT-d) would (docs/BACKLOG.md).\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1376
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unhonourableIvmdHoldsRemappingOnly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1377
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::unhonourableIvmdHoldsRemappingOnly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::plan\", \"iommu::amdvi::Unit::open\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1378
+                  }
+                }
+              ]
+            },
+            {
+              "name": "exclusionRegistersOff",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::exclusionRegistersOff",
+              "kind": "requirement",
+              "shortName": "L.iommu.96",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1380
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::exclusionRegistersOff",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The exclusion base and limit registers shall be written 0 at enable, and read back 0, whatever an IVMD asks.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1382
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::exclusionRegistersOff",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Boot: the unit's line says the exclusion range is off, read back, and stage 10's check reads both registers 0. With ExEn written 1 the line and the check fail.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1385
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::exclusionRegistersOff",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1386
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::exclusionRegistersOff",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi::Unit::enable\", \"iommu::amdvi::Unit::exclusion\", \"iommu::ivrs::say\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1387
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aliasedIsUnresolved",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::aliasedIsUnresolved",
+              "kind": "requirement",
+              "shortName": "L.iommu.97",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1389
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aliasedIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A function an alias entry names, the last entry naming it deciding, or one enumeration finds under an aliasing bridge, shall be unresolved: never given a domain or a vector.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1392
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aliasedIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: nazuna's bus 0xFF, named by a range and then an alias range, arrives as 00:14.5; an alias select is read as one.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1394
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aliasedIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1395
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aliasedIsUnresolved",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::placed\", \"iommu::ivrs_behind\", \"iommu::amdvi_placed\", \"iommu::amdvi_unit_for\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1396
+                  }
+                }
+              ]
+            },
+            {
+              "name": "amdviOff",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::amdviOff",
+              "kind": "requirement",
+              "shortName": "L.iommu.98",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1398
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::amdviOff",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"ferrix_paging::amdvi::unit::switched_off shall answer true for the command-line value 'off' alone; with it, bring-up shall leave every AMD-Vi unit alone with one line calling it a recovery configuration, not an evaluated one, and the audit record's configuration shall hold AmdVi 0, else 1.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1403
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::amdviOff",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: 'off' switches off; no value, '', 'on', 'OFF' and 'off ' do not. Every checked boot reads AmdVi 1 back from the audit record.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1405
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::amdviOff",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.AUD.7\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1406
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::amdviOff",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::amdvi_off_asked\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1407
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theUnitsOwnFunctionIsTheUnit",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::theUnitsOwnFunctionIsTheUnit",
+              "kind": "requirement",
+              "shortName": "L.iommu.99",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1409
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theUnitsOwnFunctionIsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A PCI function at an AMD-Vi unit's IVHD devid whose class is 08h/06h shall be counted behind its unit, and never given a domain, a message vector or bus mastering.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1412
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theUnitsOwnFunctionIsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test on nazuna's IVRS: 00:00.2, an IOMMU, is its unit's; the same address with a host bridge's class is not. Boot (QEMU amd- iommu): its function is refused a pin and its bus mastering stays off; with the domain taken after bus mastering the check panics.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1416
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theUnitsOwnFunctionIsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1417
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::theUnitsOwnFunctionIsTheUnit",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::exempt\", \"iommu::ivrs::is_exempt\", \"iommu::domain_for\", \"iommu::ivrs::note_exempt\", \"device::DeviceNode::enable_dma\", \"iommu::dma_exempt\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1418
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anUnnamedHostBridgeIsTheRootComplex",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::anUnnamedHostBridgeIsTheRootComplex",
+              "kind": "requirement",
+              "shortName": "L.iommu.100",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1420
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anUnnamedHostBridgeIsTheRootComplex",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A host bridge (class 06h/00h) on bus 0 that no IVHD entry names, with bus mastering off as enumeration found it, shall be counted as the root complex, not bypassing, and never given a domain, a message vector or bus mastering; with bus mastering on it shall be bypassing.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1425
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anUnnamedHostBridgeIsTheRootComplex",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test on nazuna's IVRS: 00:00.0 is the root complex; with bus mastering on, of another class, or named by an entry it is not.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1427
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anUnnamedHostBridgeIsTheRootComplex",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.DMA.9\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1428
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::anUnnamedHostBridgeIsTheRootComplex",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::ivrs::exempt\", \"iommu::discover\", \"iommu::Counted::fmt\", \"iommu::place_ivrs\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1429
                   }
                 }
               ]

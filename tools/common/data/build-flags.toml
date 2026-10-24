@@ -264,6 +264,10 @@ why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the 
 values = ["on", "off"]
 why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only (SAFETY-MANUAL AoU-8, certification-item.json `vtd`)"
 
+[boot_options."ferrix.amdvi"]
+values = ["on", "off"]
+why = "whether the kernel drives the AMD-Vi units the IVRS describes (iommu/ivrs.rs, L.iommu.98): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only, as ferrix.vtd=off is for VT-d (SAFETY-MANUAL AoU-8, docs/AMD-VI.md O1)"
+
 [boot_options."ferrix.btrfs"]
 values = ["*"]
 test_only = true

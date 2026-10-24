@@ -174,6 +174,16 @@ fn check_msi(nodes: &[Arc<DeviceNode>], report: &mut Report) -> Result<(), Failu
         .first()
         .and_then(|aperture| vmap::map_device(aperture.phys(), 0x1000).ok())
         .ok_or_else(|| fail("edu's registers could not be mapped"))?;
+    // On the AMD-Vi row, the checks that need edu's DMA, before its domain
+    // is made (`iommu/amdvi_check.rs`).
+    match crate::iommu::amdvi_check::check_edu(node, Mmio::at(registers)) {
+        Ok(Some(line)) => crate::println!("  iommu    {line}"),
+        Ok(None) => {}
+        Err(what) => {
+            let _ = vmap::unmap_device(registers);
+            return Err(fail(what));
+        }
+    }
     let delivered = deliver(node, Mmio::at(registers), first);
     let forged = delivered
         .is_ok()
@@ -217,7 +227,7 @@ const GRACE_NANOS: u64 = 2_000_000;
 ///
 /// `edu`'s minted message is programmed back, masked, after each.
 ///
-/// Verifies: `L.x86_64.129`, L.iommu.54, H.DMA.9
+/// Verifies: `L.x86_64.129`, L.iommu.54, H.DMA.9, L.iommu.92
 #[allow(
     clippy::disallowed_methods,
     reason = "the method's home: checks-only for the crates above, not here (ledger 1795, S3.2a)"
@@ -231,9 +241,17 @@ fn check_forged(
     let Some((minted, minted_data)) = node.config_writes()?.state.msi else {
         return Err("edu's minted message was not recorded");
     };
-    if minted >> 20 != 0xFEE || minted & 1 << 4 == 0 {
+    // On AMD-Vi a remapped message is the plain address with the entry's
+    // index as its data, in edu's own table: R1 names an entry never
+    // written (0xfc), R2 is an NMI, R3 names another function's index,
+    // and each is refused as an IO_PAGE_FAULT with I set, which the kernel
+    // records with reason `amdvi::INTERRUPT_REFUSED` (`docs/AMD-VI.md`
+    // §5.1, A7).
+    let amdvi = remapped_by_amdvi(node);
+    if minted >> 20 != 0xFEE || (minted & 1 << 4 == 0 && !amdvi) {
         return Ok(None);
     }
+    let (compatibility_reason, source_reason) = forged_reasons(amdvi);
     let domain = node.domain().map_err(|_| "no memory for edu's domain")?;
     node.enable_dma()?;
     let result = (|| {
@@ -250,7 +268,7 @@ fn check_forged(
             &domain,
             compatibility.address,
             compatibility.data as u16,
-            0x25,
+            compatibility_reason,
             8,
             || crate::iommu::open_check_window() != before,
         );
@@ -272,7 +290,7 @@ fn check_forged(
             &domain,
             compatibility.address,
             DATA_NMI,
-            0x25,
+            compatibility_reason,
             16,
             || crate::iommu::nmis() != nmis,
         );
@@ -284,12 +302,23 @@ fn check_forged(
             return Err("a compatibility-format NMI was not refused with fault 0x25");
         }
         // R3.
-        let (other, vector, address) = minted_elsewhere(node, nodes)?;
+        let (other, vector, address, data) = minted_elsewhere(node, nodes)?;
         let interrupt = Interrupt::new(vector)
             .map_err(|_| "the other function's vector could not be claimed")?;
-        let r3 = forge(node, edu, msi, &domain, address, 0, 0x26, 32, || {
-            interrupt.is_pending()
-        });
+        // VT-d names the entry by the address, with data 0; AMD-Vi by the
+        // data, an index edu's own table never wrote.
+        let data = if amdvi { data as u16 } else { 0 };
+        let r3 = forge(
+            node,
+            edu,
+            msi,
+            &domain,
+            address,
+            data,
+            source_reason,
+            32,
+            || interrupt.is_pending(),
+        );
         restore(node, msi, minted, minted_data)?;
         // Held for the unit's whole patience before it is looked at, so a
         // late delivery on the other function's vector is still caught
@@ -307,15 +336,67 @@ fn check_forged(
             );
         }
         drop(interrupt);
-        Ok(Some(alloc::format!(
-            "edu's forged messages refused: a compatibility-format one to 0xfc and an NMI each \
-             faulted 0x25 and arrived nowhere, one naming {}'s entry faulted 0x26 and arrived \
-             nowhere; its own remapped message delivered",
-            other.location()
+        Ok(Some(forged_line(
+            amdvi,
+            compatibility_reason,
+            other,
+            source_reason,
         )))
     })();
     node.disable_dma()?;
     result
+}
+
+/// Whether `node`'s messages are remapped by an AMD-Vi unit.
+fn remapped_by_amdvi(node: &DeviceNode) -> bool {
+    matches!(
+        node.location(),
+        Location::Pci(function)
+            if matches!(
+                crate::iommu::remapping::route(function.requester_id()),
+                Ok(crate::iommu::remapping::Route::Remapped(
+                    crate::iommu::remapping::Remapper::AmdVi(_)
+                ))
+            )
+    )
+}
+
+/// The faults R1 and R2, and R3, are refused with: VT-d's 0x25 and 0x26,
+/// or AMD-Vi's one refusal.
+const fn forged_reasons(amdvi: bool) -> (u8, u8) {
+    if amdvi {
+        (
+            crate::iommu::amdvi::INTERRUPT_REFUSED,
+            crate::iommu::amdvi::INTERRUPT_REFUSED,
+        )
+    } else {
+        (0x25, 0x26)
+    }
+}
+
+/// [`check_forged`]'s line, once R1 to R3 were refused.
+fn forged_line(
+    amdvi: bool,
+    compatibility_reason: u8,
+    other: &DeviceNode,
+    source_reason: u8,
+) -> alloc::string::String {
+    if amdvi {
+        return alloc::format!(
+            "edu's forged messages refused on AMD-Vi: one naming entry 0xfc of its own table, \
+             never written, and an NMI each faulted {:#x} and arrived nowhere, one naming \
+             {}'s entry faulted {:#x} and arrived nowhere; its own remapped message delivered",
+            compatibility_reason,
+            other.location(),
+            source_reason
+        );
+    }
+    alloc::format!(
+        "edu's forged messages refused: a compatibility-format one to 0xfc and an NMI each \
+         faulted 0x25 and arrived nowhere, one naming {}'s entry faulted 0x26 and arrived \
+         nowhere; its own remapped message delivered",
+        other.location()
+    )
 }
 
 /// Program `edu`'s MSI capability with `address` and `data`, raise its
@@ -391,18 +472,18 @@ fn restore(
 }
 
 /// Another function's minted MSI-X entry 0: the node, its vector and the
-/// message address that names its entry.
+/// message that names its entry, address and data.
 fn minted_elsewhere<'a>(
     edu: &DeviceNode,
     nodes: &'a [Arc<DeviceNode>],
-) -> Result<(&'a Arc<DeviceNode>, Vector, u64), &'static str> {
+) -> Result<(&'a Arc<DeviceNode>, Vector, u64, u32), &'static str> {
     nodes
         .iter()
         .filter(|other| !core::ptr::eq(other.as_ref(), edu))
         .find_map(|other| {
             let table = other.msix.as_ref()?;
-            let &(_, address, _) = table.minted.lock().get(&0)?;
-            Some((other, other.vector(0)?, address))
+            let &(_, address, data) = table.minted.lock().get(&0)?;
+            Some((other, other.vector(0)?, address, data))
         })
         .ok_or("no other function has a minted MSI-X entry")
 }

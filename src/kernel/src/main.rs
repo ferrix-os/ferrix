@@ -1500,6 +1500,7 @@ fn start_audit(view: &BootView<'_>) {
         efifb: u32::from(firmware::asked(view)),
         build,
         vtd: u32::from(!iommu::vtd_off_asked(view)),
+        amdvi: u32::from(!iommu::amdvi_off_asked(view)),
     };
     audit::config(audit::Config::Checks, expected.checks, 0);
     audit::config(audit::Config::Devmgr, expected.devmgr, 0);
@@ -1513,6 +1514,7 @@ fn start_audit(view: &BootView<'_>) {
     audit::config(audit::Config::Efifb, expected.efifb, 0);
     audit::config(audit::Config::Build, build, profile_and_level);
     audit::config(audit::Config::Vtd, expected.vtd, 0);
+    audit::config(audit::Config::AmdVi, expected.amdvi, 0);
     println!(
         "  audit    started: {} high-value and {} refusal records, {} configuration items \
          recorded",
