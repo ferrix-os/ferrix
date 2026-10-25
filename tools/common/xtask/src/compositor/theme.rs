@@ -150,9 +150,12 @@ pub(super) fn apply(config: String, args: &Args, files: &mut Vec<File>) -> Resul
         carry(themes.join(name), format!("{THEMES}/{name}"))?;
         head.push_str(&format!("source = /{THEMES}/{name}\n"));
     }
-    // Yoru's dock, unless the configuration starts a bar of its own.
+    // Yoru's dock and its two widget sidebars, unless the configuration
+    // starts a bar of its own.
     if theme == Theme::Yoru && !starts_a_bar(&config) {
         head.push_str(&format!("exec-once = /{DOCK}\n"));
+        head.push_str(&format!("exec-once = /{DOCK} --sidebar left\n"));
+        head.push_str(&format!("exec-once = /{DOCK} --sidebar right\n"));
     }
     if theme == Theme::Yoru {
         // The launcher's look, which Yoru's keys and its dock start fuzzel

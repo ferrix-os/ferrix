@@ -92,6 +92,7 @@ mod run;
 mod settings;
 mod settings_live;
 mod settings_prompt;
+mod sidebars;
 mod stash;
 mod steam_store;
 pub(crate) mod steam_window;
@@ -754,7 +755,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 63] = [
+const BOOTS: [(&str, Boot); 64] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -807,6 +808,7 @@ const BOOTS: [(&str, Boot); 63] = [
     ("edge-drag", edge_drag::test_edge_drag),
     ("walls", walls::test_walls),
     ("stash", stash::test_stash),
+    ("sidebars", sidebars::test_sidebars),
     ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),

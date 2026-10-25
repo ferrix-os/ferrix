@@ -766,7 +766,7 @@ boot that screenshots it:
 | Y1 | tokens: `yoru.conf` (floating, rounding, shadows, glow border, blur, curves) and its keys, themable title bars, the Nocturne wallpaper, Phosphor vendored; Yoru the default of `--everything` and the desktop image; boot `yoru` | 5 |
 | Y2 | the dock: tole layer-shell windows; `yoru-shell` with workspaces, launchers, tools, pomodoro, clock; boot `yoru-dock` | 8 |
 | Y3 | the launcher: fuzzel in Nocturne; then the palette in `yoru-shell` | 3 + 5 |
-| Y4 | widget sidebars: clock and calendar, quick settings, to-do | 8 |
+| Y4 | widget sidebars: clock and calendar, quick settings, to-do (built: `yoru-shell --sidebar left` and `right`, edge reveal, pin, tabs, move and remove, clock and month, to-do kept in the person's file; weather and quick settings say "not kept yet"; boot `sidebars`) | 8 |
 | Y5 | snapping as the design has it: quarters, layouts picker, guides, linked edges; tabs in the title bar | 13 |
 | Y6 | helpers: scratchpad, focus mode, shortcut sheet, jump hints, clipboard history, toasts | 8 |
 | Y7 | wallpaper picker (built: `yoru-shell --walls` on SUPER I, cover and grid, folders, colour filter and sorts, boot `walls`) and the accent from the wallpaper; parallax | 8 |

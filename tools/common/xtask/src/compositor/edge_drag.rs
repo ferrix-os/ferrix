@@ -182,6 +182,10 @@ pub(super) fn test_edge_drag(arch: Arch, programs: &Programs, args: &Args) -> Re
         let dump = crate::paths::build_dir(arch).join("edge-drag-1.ppm");
         qmp.screendump(Some(crate::display::DEVICE_ID), &dump)?;
         let snapped = sx <= 8 && sw >= SCREEN.0 / 2 - 40 && sw <= SCREEN.0 / 2 + 40;
+        // Let go at the left edge, the pointer opened Yoru's left sidebar
+        // over the snapped window's bar: away from the edge, it closes.
+        at(&mut qmp, (SCREEN.0 / 2 + 100, SCREEN.1 / 2))?;
+        std::thread::sleep(Duration::from_secs(2));
         drag(
             &mut qmp,
             (sx + sw / 2, sy - BAR_MIDDLE),
