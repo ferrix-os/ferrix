@@ -142,6 +142,8 @@ pub(in crate::tests) struct Xhci {
     ports: [Port; PORTS],
     slots: Vec<Option<Slot>>,
     pub(in crate::tests) disks: Vec<Disk>,
+    /// FTDI chips' far sides.
+    pub(in crate::tests) serials: Vec<super::ftdi::Serial>,
     pub(in crate::tests) violations: Vec<String>,
     /// Every command's type, in order.
     pub(in crate::tests) commands: Vec<u32>,
@@ -209,6 +211,7 @@ impl Xhci {
             }; PORTS],
             slots: vec![None; SLOTS + 1],
             disks: Vec::new(),
+            serials: Vec::new(),
             violations: Vec::new(),
             commands: Vec::new(),
             cleared_halts: Vec::new(),
@@ -1229,6 +1232,24 @@ impl Xhci {
         let asked = (status & 0x1_FFFF) as usize;
         if (control >> 10) & 0x3F != 1 || control & (1 << 5) == 0 {
             self.violation(format!("a bulk request of {control:#x}"));
+        }
+        if let Some(serial) = self.serials.iter().position(|serial| serial.device == device) {
+            if dci % 2 == 1 {
+                let Some(data) = self.serials[serial].bulk_in(asked) else {
+                    return false;
+                };
+                let moved = data.len().min(asked);
+                for (i, &byte) in data.iter().take(moved).enumerate() {
+                    self.write8(buffer + i as u64, byte);
+                }
+                let code = if moved < asked { SHORT } else { SUCCESS };
+                self.transfer_event(slot, dci, at, code, (asked - moved) as u32);
+            } else {
+                let bytes: Vec<u8> = (0..asked as u64).map(|i| self.read8(buffer + i)).collect();
+                self.serials[serial].bulk_out(&bytes);
+                self.transfer_event(slot, dci, at, SUCCESS, 0);
+            }
+            return true;
         }
         let Some(disk) = self.disks.iter().position(|disk| disk.device == device) else {
             self.halt(slot, dci, at, STALL, asked as u32);

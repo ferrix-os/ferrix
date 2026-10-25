@@ -27,6 +27,9 @@ use crate::usb::{Setup, Speed};
 pub const CONTROL_BYTES: usize = 1024;
 /// The largest packet an interrupt pipe reads.
 pub const PIPE_BYTES: usize = 64;
+/// The most one request of a bulk IN stream reads: a high-speed bulk
+/// endpoint's packet, or several full-speed ones.
+pub const STREAM_BYTES: usize = 512;
 
 /// Why the controller would not come up, or a transfer failed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -182,6 +185,24 @@ pub struct Packet {
     pub bytes: [u8; PIPE_BYTES],
     /// How many.
     pub len: usize,
+}
+
+/// What one request of a bulk IN stream read: whole packets of the
+/// endpoint's size, the last perhaps short.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Chunk {
+    /// The bytes, of which `len` were received.
+    pub bytes: [u8; STREAM_BYTES],
+    /// How many.
+    pub len: usize,
+}
+
+impl Chunk {
+    /// The bytes received.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        self.bytes.get(..self.len).unwrap_or(&[])
+    }
 }
 
 /// A transfer event on an interrupt pipe that was not a plain success.
@@ -357,5 +378,51 @@ pub trait Host {
     /// Close bulk pair `pair`.
     fn close_bulk(&mut self, pair: usize) {
         let _ = pair;
+    }
+
+    /// Open bulk OUT endpoint `outward` of `target` alone, for
+    /// [`Host::bulk`] with [`Data::Out`]: the pair's index. Its inward
+    /// half is not there, and [`Data::In`] on it is [`Error::NoPipe`]:
+    /// for a device whose IN endpoint is read as a stream.
+    ///
+    /// # Errors
+    ///
+    /// As [`Host::open_bulk`].
+    fn open_bulk_out(&mut self, target: &Target, outward: &Endpoint) -> Result<usize, Error> {
+        let _ = (target, outward);
+        Err(Error::Unsupported)
+    }
+
+    /// Open a bulk IN stream to `endpoint` of `target`: a few requests of
+    /// [`STREAM_BYTES`] kept queued, as an interrupt pipe's are, so a
+    /// device that answers only when it has something -- a serial port --
+    /// is read without anything waiting for it. Its index.
+    ///
+    /// What a request read waits, in order, for [`Host::take_chunk`]; a
+    /// request is queued again only as its chunk is taken, so a reader
+    /// that falls behind holds the device back rather than losing bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unsupported`] from a controller that moves no bulk data,
+    /// [`Error::NoPipe`] when every stream is open, [`Error::TooLong`] for
+    /// a packet past [`STREAM_BYTES`].
+    fn open_stream(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
+        let _ = (target, endpoint);
+        Err(Error::Unsupported)
+    }
+
+    /// The oldest chunk stream `stream` read and nobody took, its request
+    /// queued again. Only what [`Host::service`] or a wait has taken off
+    /// the controller is here.
+    fn take_chunk(&mut self, stream: usize) -> Option<Chunk> {
+        let _ = stream;
+        None
+    }
+
+    /// Close stream `stream`, and wait until the controller can no longer
+    /// be writing it.
+    fn close_stream(&mut self, stream: usize) {
+        let _ = stream;
     }
 }

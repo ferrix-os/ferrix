@@ -22,6 +22,7 @@ use crate::ehci::AREA_BYTES;
 use crate::usb::Speed;
 use crate::{Clock, Dma, MILLISECOND, Registers};
 
+pub(super) mod ftdi;
 pub(super) mod xhci;
 
 /// Where each page of the area is, as the controller sees it: scattered
@@ -664,6 +665,8 @@ impl Model {
                 self.hub_clear(device, index, value)?;
                 Vec::new()
             }
+            // An FTDI chip's vendor requests, which `setups` keeps.
+            (0x40, _) => Vec::new(),
             _ => return Err(()),
         };
         let mut reply = reply;

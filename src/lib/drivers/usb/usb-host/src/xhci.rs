@@ -34,15 +34,27 @@
 //! failed is marked and recovered there, never from inside the wait -- so
 //! no command is ever issued while another is waited for.
 //!
+//! # Bulk IN streams
+//!
+//! A device that answers a bulk IN request only when it has something to
+//! say -- a serial adapter, whose bytes come when they come -- cannot be
+//! waited for in place. [`Host::open_stream`] keeps a few requests queued
+//! on such an endpoint, as an interrupt pipe's are; each completion is kept
+//! in the stream until [`Host::take_chunk`] takes it, and only then is a
+//! request queued in its place. A stream's page is eight buffers of
+//! [`STREAM_BYTES`], of which at most four (`STREAM_QUEUED`) are ever queued or
+//! waiting to be taken, so no buffer is written while its bytes are held.
+//!
 //! # What is not here
 //!
-//! Streams, isochronous endpoints, power management of links and ports,
+//! Bulk streams in the specification's sense (stream IDs), isochronous
+//! endpoints, power management of links and ports,
 //! more than one interrupter, more than one event ring segment, and
 //! `SuperSpeed` hubs. A bulk transfer moves at most a page.
 
 use crate::host::{
-    CONTROL_BYTES, Data, Endpoint, Error, Host, PIPE_BYTES, Packet, Place, RootPort, RootReset,
-    Target, Trouble,
+    CONTROL_BYTES, Chunk, Data, Endpoint, Error, Host, PIPE_BYTES, Packet, Place, RootPort,
+    RootReset, STREAM_BYTES, Target, Trouble,
 };
 use crate::usb::{Setup, Speed};
 use crate::{Clock, Dma, MILLISECOND, Parts, Registers};
@@ -276,6 +288,13 @@ pub const MAX_PIPES: usize = 16;
 pub const MAX_BULK: usize = 4;
 /// The most a bulk transfer moves.
 pub const BULK_BYTES: usize = PAGE;
+/// How many bulk IN streams there may be at once.
+pub const MAX_STREAMS: usize = 4;
+/// Requests a stream keeps queued or holds, read, for its reader.
+const STREAM_QUEUED: usize = 4;
+/// Buffers a stream's page is cut into; more than [`STREAM_QUEUED`], so no
+/// buffer is queued again while its bytes are held.
+const STREAM_BUFFERS: usize = PAGE / STREAM_BYTES;
 /// Requests an interrupt pipe keeps queued.
 const QUEUED: usize = 8;
 /// Buffers an interrupt pipe's page is cut into; more than [`QUEUED`], so
@@ -289,6 +308,10 @@ const TROUBLES: usize = 8;
 const _: () = assert!(
     PIPE_BUFFERS * PIPE_BYTES <= PAGE && QUEUED < PIPE_BUFFERS,
     "a pipe's buffers fit its page, one a queued request"
+);
+const _: () = assert!(
+    STREAM_QUEUED < STREAM_BUFFERS,
+    "a stream's buffers outnumber what it ever holds"
 );
 const _: () = assert!(CONTROL_BYTES <= PAGE, "the control buffer fits its page");
 const _: () = assert!((MAX_SLOTS + 1) * 8 <= PAGE, "the array fits its page");
@@ -402,6 +425,29 @@ struct Bulk {
     buffer: usize,
 }
 
+/// A bulk IN stream: an endpoint with requests kept queued, and what they
+/// read kept until it is taken.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Stream {
+    target: Target,
+    /// The endpoint's number.
+    number: u8,
+    dci: u8,
+    ring: Ring,
+    /// Its buffers' page.
+    buffers: usize,
+    /// Requests the controller holds.
+    queued: usize,
+    /// Each read request not yet taken, oldest first: its buffer and how
+    /// many bytes it read.
+    done: [Option<(usize, usize)>; STREAM_QUEUED],
+    done_len: usize,
+    /// Halts in a row, reset by a good completion.
+    halts: u32,
+    /// Halted, and to be recovered by the next service.
+    halted: bool,
+}
+
 /// The transfer being waited for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Waiting {
@@ -452,6 +498,7 @@ pub struct Controller<R, D, C> {
     slots: [Option<Slot>; MAX_SLOTS + 1],
     pipes: [Option<Pipe>; MAX_PIPES],
     bulk: [Option<Bulk>; MAX_BULK],
+    streams: [Option<Stream>; MAX_STREAMS],
     /// Packets taken off the event ring and not yet handed on.
     arrived: [Option<Packet>; ARRIVED],
     arrived_head: usize,
@@ -511,6 +558,7 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
             slots: [None; MAX_SLOTS + 1],
             pipes: [None; MAX_PIPES],
             bulk: [None; MAX_BULK],
+            streams: [None; MAX_STREAMS],
             arrived: [None; ARRIVED],
             arrived_head: 0,
             arrived_len: 0,
@@ -862,6 +910,12 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
             }
             return;
         }
+        if let Some(index) = self.streams.iter().position(|stream| {
+            stream.is_some_and(|stream| stream.target.slot == slot && stream.dci == dci)
+        }) {
+            self.take_stream_transfer(index, pointer, code, left);
+            return;
+        }
         let Some(index) = self
             .pipes
             .iter()
@@ -915,6 +969,103 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         }
         if let Some(entry) = self.pipes.get_mut(index) {
             *entry = Some(pipe);
+        }
+    }
+
+    /// A stream's request ended: what it read is kept for the reader, or
+    /// the stream is marked for recovery.
+    fn take_stream_transfer(&mut self, index: usize, pointer: u64, code: u8, left: u32) {
+        let Some(Some(mut stream)) = self.streams.get(index).copied() else {
+            return;
+        };
+        let buffer = self.stream_buffer_of(&stream, pointer);
+        if (code != CODE_SUCCESS && code != CODE_SHORT_PACKET) || buffer.is_none() {
+            self.note_trouble(Trouble {
+                slot: stream.target.slot,
+                endpoint: stream.dci,
+                code,
+                known: buffer.is_some(),
+            });
+        }
+        match code {
+            CODE_SUCCESS | CODE_SHORT_PACKET => {
+                stream.queued = stream.queued.saturating_sub(1);
+                stream.halts = 0;
+                let len = STREAM_BYTES.saturating_sub(left as usize);
+                match buffer {
+                    Some(buffer) if stream.done_len < STREAM_QUEUED => {
+                        if let Some(slot) = stream.done.get_mut(stream.done_len) {
+                            *slot = Some((buffer, len));
+                            stream.done_len += 1;
+                        }
+                    }
+                    // Not a request this queued: its bytes are not
+                    // trusted, and the request it ended is replaced.
+                    _ => {
+                        self.queue_stream_request(&mut stream);
+                        self.ring_doorbell(stream.target.slot, stream.dci);
+                    }
+                }
+            }
+            CODE_STOPPED..=CODE_STOPPED_SHORT => {}
+            _ => stream.halted = true,
+        }
+        if let Some(entry) = self.streams.get_mut(index) {
+            *entry = Some(stream);
+        }
+    }
+
+    /// The buffer of the request of `stream` whose TRB is at `pointer`.
+    fn stream_buffer_of(&self, stream: &Stream, pointer: u64) -> Option<usize> {
+        let base = self.address(stream.ring.page).ok()?;
+        let offset = usize::try_from(pointer.checked_sub(base)?).ok()?;
+        if offset >= LINK_INDEX * TRB_BYTES || !offset.is_multiple_of(TRB_BYTES) {
+            return None;
+        }
+        Some(stream.buffers + (offset / TRB_BYTES % STREAM_BUFFERS) * STREAM_BYTES)
+    }
+
+    /// Queue one more request on a stream.
+    fn queue_stream_request(&mut self, stream: &mut Stream) {
+        let buffer = stream.buffers + (stream.ring.enqueue % STREAM_BUFFERS) * STREAM_BYTES;
+        let Ok(address) = self.address(buffer) else {
+            return;
+        };
+        let _ = self.enqueue(
+            &mut stream.ring,
+            address,
+            STREAM_BYTES as u32,
+            (TRB_NORMAL << TRB_TYPE_SHIFT) | TRB_IOC | TRB_SHORT,
+        );
+        stream.queued += 1;
+    }
+
+    /// Recover every stream an event marked halted, as
+    /// [`Self::recover_pipes`] does a pipe: what it read and was not taken
+    /// is kept, and as many requests queued again as leave room for it.
+    fn recover_streams(&mut self) {
+        for index in 0..MAX_STREAMS {
+            let Some(Some(mut stream)) = self.streams.get(index).copied() else {
+                continue;
+            };
+            if !stream.halted {
+                continue;
+            }
+            stream.halted = false;
+            stream.halts += 1;
+            stream.queued = 0;
+            if stream.halts <= MAX_HALTS {
+                let slot = stream.target.slot;
+                self.restart_endpoint(slot, stream.dci, &stream.ring, true);
+                self.clear_halt(&stream.target, stream.number | 0x80);
+                while stream.queued + stream.done_len < STREAM_QUEUED {
+                    self.queue_stream_request(&mut stream);
+                }
+                self.ring_doorbell(slot, stream.dci);
+            }
+            if let Some(entry) = self.streams.get_mut(index) {
+                *entry = Some(stream);
+            }
         }
     }
 
@@ -1546,7 +1697,7 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         self.memory.barrier();
         // What the controller may still be reading is kept, for good: a
         // page it was not told to forget is not one to hand out again.
-        let mut pages = [None; 2 + 2 * MAX_PIPES + 3 * MAX_BULK];
+        let mut pages = [None; 2 + 2 * MAX_PIPES + 3 * MAX_BULK + 2 * MAX_STREAMS];
         let mut count = 0;
         let mut note = |page: usize| {
             if let Some(entry) = pages.get_mut(count) {
@@ -1572,6 +1723,15 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
                 note(pair.ring_in.page);
                 note(pair.ring_out.page);
                 note(pair.buffer);
+                *entry = None;
+            }
+        }
+        for entry in &mut self.streams {
+            if let Some(stream) = entry
+                && stream.target.slot == id
+            {
+                note(stream.ring.page);
+                note(stream.buffers);
                 *entry = None;
             }
         }
@@ -1721,6 +1881,7 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         }
         self.pump();
         self.recover_pipes();
+        self.recover_streams();
         // Once more: an event that came while the busy flag was being
         // cleared raises no interrupt of its own.
         self.pump();
@@ -1748,83 +1909,125 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         inward: &Endpoint,
         outward: &Endpoint,
     ) -> Result<usize, Error> {
-        let valid = |endpoint: &Endpoint| (1..=15).contains(&endpoint.number);
-        if !valid(inward) || !valid(outward) {
+        self.open_pair(target, Some(inward), outward)
+    }
+
+    fn open_bulk_out(&mut self, target: &Target, outward: &Endpoint) -> Result<usize, Error> {
+        self.open_pair(target, None, outward)
+    }
+
+    fn open_stream(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
+        if usize::from(endpoint.max_packet) > STREAM_BYTES
+            || endpoint.max_packet == 0
+            || !(1..=15).contains(&endpoint.number)
+        {
             return Err(Error::TooLong);
         }
         let index = self
-            .bulk
+            .streams
             .iter()
             .position(Option::is_none)
             .ok_or(Error::NoPipe)?;
         let mut slot = self.slot(target.slot)?;
-        let (dci_in, dci_out) = (inward.number * 2 + 1, outward.number * 2);
-        let mut pages = [0_usize; 3];
-        for at in 0..3 {
-            match self.take_page() {
-                Ok(page) => {
-                    if let Some(entry) = pages.get_mut(at) {
-                        *entry = page;
-                    }
-                }
-                Err(error) => {
-                    for &page in pages.iter().take(at) {
-                        self.give_page(page);
-                    }
-                    return Err(error);
-                }
+        let dci = endpoint.number * 2 + 1;
+        let ring = self.take_ring()?;
+        let buffers = match self.take_page() {
+            Ok(page) => page,
+            Err(error) => {
+                self.give_page(ring.page);
+                return Err(error);
             }
-        }
-        let [in_page, out_page, buffer] = pages;
-        let ring = |page| Ring {
-            page,
-            enqueue: 0,
-            cycle: true,
         };
-        let (ring_in, ring_out) = (ring(in_page), ring(out_page));
-        let entries = slot.entries.max(dci_in).max(dci_out);
-        self.begin_input(
-            ADD_SLOT | (1 << dci_in) | (1 << dci_out),
-            0,
-            Some((&slot, entries)),
-        );
-        // Three kilobytes: the average the specification suggests for a
-        // bulk endpoint (section 4.14.1.1).
+        let entries = slot.entries.max(dci);
+        self.begin_input(ADD_SLOT | (1 << dci), 0, Some((&slot, entries)));
         let configured = self
-            .link(in_page)
-            .and_then(|()| self.link(out_page))
-            .and_then(|()| {
-                self.input_endpoint(dci_in, EP_BULK_IN, inward.max_packet, 0, &ring_in, 3072)
-            })
-            .and_then(|()| {
-                self.input_endpoint(dci_out, EP_BULK_OUT, outward.max_packet, 0, &ring_out, 3072)
-            })
+            .input_endpoint(dci, EP_BULK_IN, endpoint.max_packet, 0, &ring, 3072)
             .and_then(|()| {
                 self.memory.barrier();
                 let input = self.input_address()?;
                 self.slot_command(TRB_CONFIGURE_ENDPOINT, target.slot, input)
             });
         if let Err(error) = configured {
-            for page in pages {
-                self.give_page(page);
-            }
+            self.give_page(ring.page);
+            self.give_page(buffers);
             return Err(error);
         }
         slot.entries = entries;
         if let Some(entry) = self.slots.get_mut(usize::from(target.slot)) {
             *entry = Some(slot);
         }
-        if let Some(entry) = self.bulk.get_mut(index) {
-            *entry = Some(Bulk {
-                target: *target,
-                number_in: inward.number,
-                number_out: outward.number,
-                ring_in,
-                ring_out,
-                buffer,
-            });
+        let mut stream = Stream {
+            target: *target,
+            number: endpoint.number,
+            dci,
+            ring,
+            buffers,
+            queued: 0,
+            done: [None; STREAM_QUEUED],
+            done_len: 0,
+            halts: 0,
+            halted: false,
+        };
+        for _ in 0..STREAM_QUEUED {
+            self.queue_stream_request(&mut stream);
         }
+        if let Some(entry) = self.streams.get_mut(index) {
+            *entry = Some(stream);
+        }
+        self.ring_doorbell(target.slot, dci);
         Ok(index)
+    }
+
+    fn take_chunk(&mut self, stream: usize) -> Option<Chunk> {
+        let mut state = self.streams.get(stream).copied().flatten()?;
+        if state.done_len == 0 {
+            return None;
+        }
+        let (buffer, len) = state.done.first().copied().flatten()?;
+        state.done.rotate_left(1);
+        if let Some(last) = state.done.last_mut() {
+            *last = None;
+        }
+        state.done_len -= 1;
+        let len = len.min(STREAM_BYTES);
+        let mut chunk = Chunk {
+            bytes: [0; STREAM_BYTES],
+            len,
+        };
+        for (at, byte) in chunk.bytes.iter_mut().enumerate().take(len) {
+            *byte = self.memory.read8(buffer + at);
+        }
+        // The request it was is queued again, unless the stream is halted
+        // or given up: its recovery queues its own.
+        if !state.halted && state.halts <= MAX_HALTS && !self.dead {
+            self.queue_stream_request(&mut state);
+            self.ring_doorbell(state.target.slot, state.dci);
+        }
+        if let Some(entry) = self.streams.get_mut(stream) {
+            *entry = Some(state);
+        }
+        Some(chunk)
+    }
+
+    fn close_stream(&mut self, stream: usize) {
+        let Some(Some(state)) = self.streams.get(stream).copied() else {
+            return;
+        };
+        let Ok(slot) = self.slot(state.target.slot) else {
+            return;
+        };
+        self.begin_input(ADD_SLOT, 1 << state.dci, Some((&slot, slot.entries)));
+        self.memory.barrier();
+        let dropped = self
+            .input_address()
+            .and_then(|input| self.slot_command(TRB_CONFIGURE_ENDPOINT, state.target.slot, input));
+        if dropped.is_ok() {
+            self.give_page(state.ring.page);
+            self.give_page(state.buffers);
+            if let Some(entry) = self.streams.get_mut(stream) {
+                *entry = None;
+            }
+        }
     }
 
     fn bulk(&mut self, pair: usize, data: Data<'_>) -> Result<usize, Error> {
@@ -1840,6 +2043,8 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         };
         let inward = match &data {
             Data::None => return Ok(0),
+            // A pair opened with no IN endpoint: its IN is a stream's.
+            Data::In(_) if state.number_in == 0 => return Err(Error::NoPipe),
             Data::In(_) => true,
             Data::Out(bytes) => {
                 for (at, &byte) in bytes.iter().enumerate() {
@@ -1908,7 +2113,12 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         let Ok(slot) = self.slot(state.target.slot) else {
             return;
         };
-        let drop = (1 << (state.number_in * 2 + 1)) | (1 << (state.number_out * 2));
+        let drop_in = if state.number_in == 0 {
+            0
+        } else {
+            1 << (state.number_in * 2 + 1)
+        };
+        let drop = drop_in | (1 << (state.number_out * 2));
         self.begin_input(ADD_SLOT, drop, Some((&slot, slot.entries)));
         self.memory.barrier();
         let dropped = self
@@ -1926,6 +2136,99 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
 }
 
 impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
+    /// [`Host::open_bulk`] and [`Host::open_bulk_out`]: the OUT endpoint,
+    /// and the IN one if there is one. The pair takes its three pages
+    /// either way, so closing or releasing it gives back the same three.
+    fn open_pair(
+        &mut self,
+        target: &Target,
+        inward: Option<&Endpoint>,
+        outward: &Endpoint,
+    ) -> Result<usize, Error> {
+        let valid = |endpoint: &Endpoint| (1..=15).contains(&endpoint.number);
+        if !inward.is_none_or(valid) || !valid(outward) {
+            return Err(Error::TooLong);
+        }
+        let index = self
+            .bulk
+            .iter()
+            .position(Option::is_none)
+            .ok_or(Error::NoPipe)?;
+        let mut slot = self.slot(target.slot)?;
+        let dci_in = inward.map(|inward| inward.number * 2 + 1);
+        let dci_out = outward.number * 2;
+        let mut pages = [0_usize; 3];
+        for at in 0..3 {
+            match self.take_page() {
+                Ok(page) => {
+                    if let Some(entry) = pages.get_mut(at) {
+                        *entry = page;
+                    }
+                }
+                Err(error) => {
+                    for &page in pages.iter().take(at) {
+                        self.give_page(page);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        let [in_page, out_page, buffer] = pages;
+        let ring = |page| Ring {
+            page,
+            enqueue: 0,
+            cycle: true,
+        };
+        let (ring_in, ring_out) = (ring(in_page), ring(out_page));
+        let entries = slot.entries.max(dci_in.unwrap_or(0)).max(dci_out);
+        let add_in = dci_in.map_or(0, |dci| 1 << dci);
+        self.begin_input(
+            ADD_SLOT | add_in | (1 << dci_out),
+            0,
+            Some((&slot, entries)),
+        );
+        // Three kilobytes: the average the specification suggests for a
+        // bulk endpoint (section 4.14.1.1).
+        let configured = self
+            .link(in_page)
+            .and_then(|()| self.link(out_page))
+            .and_then(|()| match (dci_in, inward) {
+                (Some(dci), Some(inward)) => {
+                    self.input_endpoint(dci, EP_BULK_IN, inward.max_packet, 0, &ring_in, 3072)
+                }
+                _ => Ok(()),
+            })
+            .and_then(|()| {
+                self.input_endpoint(dci_out, EP_BULK_OUT, outward.max_packet, 0, &ring_out, 3072)
+            })
+            .and_then(|()| {
+                self.memory.barrier();
+                let input = self.input_address()?;
+                self.slot_command(TRB_CONFIGURE_ENDPOINT, target.slot, input)
+            });
+        if let Err(error) = configured {
+            for page in pages {
+                self.give_page(page);
+            }
+            return Err(error);
+        }
+        slot.entries = entries;
+        if let Some(entry) = self.slots.get_mut(usize::from(target.slot)) {
+            *entry = Some(slot);
+        }
+        if let Some(entry) = self.bulk.get_mut(index) {
+            *entry = Some(Bulk {
+                target: *target,
+                number_in: inward.map_or(0, |inward| inward.number),
+                number_out: outward.number,
+                ring_in,
+                ring_out,
+                buffer,
+            });
+        }
+        Ok(index)
+    }
+
     /// [`Host::open`], once the slot is enabled: its contexts, its ring, and
     /// the Address Device command.
     fn address_slot(&mut self, target: &mut Target) -> Result<(), Error> {

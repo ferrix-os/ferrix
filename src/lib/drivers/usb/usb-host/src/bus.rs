@@ -22,13 +22,24 @@
 //! each report as the events it makes, and each function as it goes. A
 //! function's index is the driver's to key its input channel by; it is not
 //! reused until its [`Output::Detached`] has been read.
+//!
+//! # Serial adapters
+//!
+//! An FTDI UART or a USB-Blaster ([`crate::ftdi::identify`]) behind a
+//! controller that moves bulk data becomes a serial port: its OUT endpoint
+//! a bulk pair of its own, its IN endpoint a stream ([`Host::open_stream`])
+//! whose chunks [`Bus::serial_read`] hands on with the chip's status bytes
+//! taken off. [`Bus::next_serial_change`] says when one comes and goes,
+//! the way [`Bus::next_disk_change`] does for disks.
 
 use ferrix_inputctl::message::{Hello, RawEvent, Text};
 
+use crate::blaster;
 use crate::ehci;
+use crate::ftdi::{self, Chip, Line, Role};
 use crate::hid::{BOOT_KEYBOARD, BOOT_MOUSE, EventBuf, Identity, Interpreter, Kind};
 use crate::host::{
-    self, CONTROL_BYTES, Data, Endpoint, Host, PIPE_BYTES, Place, RootReset, Target,
+    self, CONTROL_BYTES, Data, Endpoint, Host, PIPE_BYTES, Place, RootReset, STREAM_BYTES, Target,
 };
 use crate::hub::{
     self, CHANGE_CONNECTION, CHANGE_RESET, HubDescriptor, PORT_POWER, PORT_RESET, PortStatus,
@@ -87,6 +98,18 @@ pub const MAX_FUNCTIONS: usize = 8;
 
 /// The most disks at once.
 pub const MAX_DISKS: usize = 2;
+
+/// The most serial adapters at once.
+pub const MAX_SERIALS: usize = 2;
+
+/// How long a UART's chip holds a part-filled packet before it sends it:
+/// FTDI's default, and Linux's.
+const UART_LATENCY_MS: u8 = 16;
+/// The same for a USB-Blaster: `OpenOCD`'s two, since every scan waits for
+/// its answer.
+const BLASTER_LATENCY_MS: u8 = 2;
+/// How long [`Bus::serial_read_exact`] looks again while it waits.
+const SERIAL_STEP: u64 = MILLISECOND / 2;
 
 /// How long a connection must stay before it is reset: USB 2.0's
 /// `TATTDB`.
@@ -225,6 +248,13 @@ pub enum Note {
         /// The root port.
         port: u32,
     },
+    /// An FTDI chip would not be set up as a serial port.
+    SerialFailed {
+        /// What it was taken for.
+        role: Role,
+        /// Why.
+        error: Error,
+    },
 }
 
 /// What the driver hands on.
@@ -293,6 +323,54 @@ impl Watched {
     pub fn as_bytes(&self) -> &[u8] {
         self.bytes.get(..self.len).unwrap_or(&[])
     }
+}
+
+/// A serial adapter coming or going, which [`Bus::next_serial_change`]
+/// hands on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SerialChange {
+    /// One appeared: [`Bus::serial`] says what it is.
+    Attached(usize),
+    /// One went: its index is free again.
+    Detached(usize),
+}
+
+/// What a serial adapter is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Serial {
+    /// `idVendor`.
+    pub vendor: u16,
+    /// `idProduct`.
+    pub product: u16,
+    /// The chip family.
+    pub chip: Chip,
+    /// What it is used as.
+    pub role: Role,
+    /// The interface, counting from zero.
+    pub interface: u8,
+    /// Its bulk IN endpoint's packet size: where the status bytes recur.
+    pub max_packet: u16,
+    /// The line it was last set to.
+    pub line: Line,
+    /// The modem lines, as the last packet's status gave them.
+    pub modem: u8,
+    /// Every line-status error bit seen since the last
+    /// [`Bus::take_serial_errors`].
+    pub errors: u8,
+}
+
+/// A serial adapter and the device it is on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Port {
+    device: usize,
+    serial: Serial,
+    /// The `wIndex` port byte its requests carry.
+    port: u16,
+    /// Its OUT pair and IN stream.
+    out: usize,
+    stream: usize,
+    /// Unplugged, with its [`SerialChange::Detached`] still to be read.
+    gone: bool,
 }
 
 /// A disk and the device it is on.
@@ -390,6 +468,8 @@ pub struct Bus<H> {
     functions: [Option<Function>; MAX_FUNCTIONS],
     disks: [Option<Held>; MAX_DISKS],
     disk_changes: Ring<DiskChange, { 2 * MAX_DISKS }>,
+    serials: [Option<Port>; MAX_SERIALS],
+    serial_changes: Ring<SerialChange, { 2 * MAX_SERIALS }>,
     pending: Ring<Pending, PENDING>,
     /// The events of the last [`Output::Events`].
     events: EventBuf,
@@ -428,6 +508,8 @@ impl<H: Host> Bus<H> {
             functions: [None; MAX_FUNCTIONS],
             disks: [None; MAX_DISKS],
             disk_changes: Ring::new(),
+            serials: [None; MAX_SERIALS],
+            serial_changes: Ring::new(),
             pending: Ring::new(),
             events: EventBuf::default(),
             notes: Ring::new(),
@@ -551,6 +633,214 @@ impl<H: Host> Bus<H> {
             self.next_poll = self.hc.clock().now_nanos();
         }
         serviced
+    }
+
+    // -----------------------------------------------------------------------
+    // Serial adapters
+    // -----------------------------------------------------------------------
+
+    /// The next serial adapter to have come or gone, if any.
+    pub fn next_serial_change(&mut self) -> Option<SerialChange> {
+        let change = self.serial_changes.pop()?;
+        if let SerialChange::Detached(serial) = change
+            && let Some(slot) = self.serials.get_mut(serial)
+        {
+            *slot = None;
+        }
+        Some(change)
+    }
+
+    /// Serial adapter `serial`, if it is there.
+    #[must_use]
+    pub fn serial(&self, serial: usize) -> Option<&Serial> {
+        self.serials
+            .get(serial)?
+            .as_ref()
+            .filter(|port| !port.gone)
+            .map(|port| &port.serial)
+    }
+
+    fn port(&self, serial: usize) -> Result<Port, Error> {
+        self.serials
+            .get(serial)
+            .copied()
+            .flatten()
+            .filter(|port| !port.gone)
+            .ok_or(Error::Transfer(host::Error::NoPipe))
+    }
+
+    fn port_target(&self, port: &Port) -> Result<Target, Error> {
+        self.devices
+            .get(port.device)
+            .copied()
+            .flatten()
+            .map(|device| device.target)
+            .ok_or(Error::Transfer(host::Error::NoPipe))
+    }
+
+    /// Set serial adapter `serial`'s line to `line`: its rate, framing and
+    /// flow control.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unsupported`] for a rate the chip cannot have, which leaves
+    /// the line as it was; a request's failure.
+    pub fn serial_configure(&mut self, serial: usize, line: &Line) -> Result<(), Error> {
+        let port = self.port(serial)?;
+        let target = self.port_target(&port)?;
+        let setups =
+            ftdi::configure(port.serial.chip, port.port, line).ok_or(Error::Unsupported)?;
+        for setup in &setups {
+            let _ = self.hc.control(&target, setup, Data::None)?;
+        }
+        if let Some(Some(entry)) = self.serials.get_mut(serial) {
+            entry.serial.line = *line;
+        }
+        Ok(())
+    }
+
+    /// Set serial adapter `serial`'s DTR and RTS.
+    ///
+    /// # Errors
+    ///
+    /// The request's failure.
+    pub fn serial_modem(&mut self, serial: usize, dtr: bool, rts: bool) -> Result<(), Error> {
+        let port = self.port(serial)?;
+        let target = self.port_target(&port)?;
+        let _ = self
+            .hc
+            .control(&target, &ftdi::modem(port.port, dtr, rts), Data::None)?;
+        Ok(())
+    }
+
+    /// Send `bytes` out of serial adapter `serial`, waiting until the chip
+    /// took them: how many it took.
+    ///
+    /// # Errors
+    ///
+    /// The transfer's failure.
+    pub fn serial_write(&mut self, serial: usize, bytes: &[u8]) -> Result<usize, Error> {
+        let port = self.port(serial)?;
+        let mut sent = 0;
+        for piece in bytes.chunks(crate::xhci::BULK_BYTES) {
+            sent += self.hc.bulk(port.out, Data::Out(piece))?;
+        }
+        Ok(sent)
+    }
+
+    /// What serial adapter `serial` received and nobody read, into `into`,
+    /// without waiting: how many bytes. A chunk is taken only while `into`
+    /// has room for a whole one, so nothing is dropped: what is left waits
+    /// in the controller, which holds the chip back once its queue is full.
+    pub fn serial_read(&mut self, serial: usize, into: &mut [u8]) -> usize {
+        let Ok(port) = self.port(serial) else {
+            return 0;
+        };
+        let max_packet = usize::from(port.serial.max_packet);
+        let mut got = 0;
+        let mut modem = port.serial.modem;
+        let mut errors = 0;
+        while into.len() - got >= STREAM_BYTES {
+            let Some(chunk) = self.hc.take_chunk(port.stream) else {
+                break;
+            };
+            ftdi::payload(chunk.as_slice(), max_packet, |status, data| {
+                modem = status.modem;
+                if !data.is_empty() {
+                    errors |= status.line
+                        & (ftdi::LINE_OVERRUN
+                            | ftdi::LINE_PARITY
+                            | ftdi::LINE_FRAMING
+                            | ftdi::LINE_BREAK);
+                }
+                if let Some(slot) = into.get_mut(got..got + data.len()) {
+                    slot.copy_from_slice(data);
+                    got += data.len();
+                }
+            });
+        }
+        if let Some(Some(entry)) = self.serials.get_mut(serial) {
+            entry.serial.modem = modem;
+            entry.serial.errors |= errors;
+        }
+        got
+    }
+
+    /// The line errors serial adapter `serial` reported since this was last
+    /// asked, cleared.
+    pub fn take_serial_errors(&mut self, serial: usize) -> u8 {
+        self.serials
+            .get_mut(serial)
+            .and_then(Option::as_mut)
+            .map_or(0, |port| core::mem::take(&mut port.serial.errors))
+    }
+
+    /// Fill `into` from serial adapter `serial`, waiting at most `patience`
+    /// for it: whether it filled. The controller's events are taken while
+    /// it waits, as [`Bus::on_interrupt`] takes them, so a report that comes
+    /// meanwhile waits for the next output as any other does.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Transfer`] with [`host::Error::Timeout`] when too little
+    /// came in time; the controller's own failure.
+    pub fn serial_read_exact(
+        &mut self,
+        serial: usize,
+        into: &mut [u8],
+        patience: u64,
+    ) -> Result<(), Error> {
+        let until = self.hc.clock().now_nanos().saturating_add(patience);
+        let mut got = 0;
+        let mut chunk = [0_u8; STREAM_BYTES];
+        let mut held = 0;
+        let mut at = 0;
+        loop {
+            // What a chunk read beyond `into` would be lost, so the chunks
+            // go through a buffer of their own size.
+            while got < into.len() && at < held {
+                let take = (held - at).min(into.len() - got);
+                if let (Some(to), Some(from)) =
+                    (into.get_mut(got..got + take), chunk.get(at..at + take))
+                {
+                    to.copy_from_slice(from);
+                }
+                got += take;
+                at += take;
+            }
+            if got == into.len() {
+                if at < held {
+                    // A cable answers what it is asked for and no more; more
+                    // is a protocol error the caller will see in its data.
+                    self.notes.push_over(Note::SerialFailed {
+                        role: self.port(serial)?.serial.role,
+                        error: Error::Descriptor,
+                    });
+                }
+                return Ok(());
+            }
+            held = self.serial_read(serial, &mut chunk);
+            at = 0;
+            if held > 0 {
+                continue;
+            }
+            self.on_interrupt()?;
+            held = self.serial_read(serial, &mut chunk);
+            if held > 0 {
+                continue;
+            }
+            if self.hc.clock().now_nanos() >= until {
+                return Err(Error::Transfer(host::Error::Timeout));
+            }
+            self.hc.clock().sleep_nanos(SERIAL_STEP);
+        }
+    }
+
+    /// Serial adapter `serial` as a JTAG cable, if it is a USB-Blaster.
+    #[must_use]
+    pub fn blaster(&mut self, serial: usize) -> Option<Cable<'_, H>> {
+        let port = self.port(serial).ok()?;
+        (port.serial.role == Role::Blaster).then_some(Cable { bus: self, serial })
     }
 
     /// The next thing to hand on, if any.
@@ -1027,6 +1317,7 @@ impl<H: Host> Bus<H> {
             (Some(self.set_up_hub(slot, &target)?), 0)
         } else {
             self.set_up_disks(slot, &target, &configuration);
+            self.set_up_serials(slot, &target, &descriptor, &configuration);
             (
                 None,
                 self.set_up_functions(slot, &target, &descriptor, &configuration),
@@ -1122,6 +1413,119 @@ impl<H: Host> Bus<H> {
                 Err(error) => self.notes.push_over(Note::DiskFailed { error }),
             }
         }
+    }
+
+    /// Open the device in `slot` as a serial adapter, if it is an FTDI
+    /// chip this drives, behind a controller that moves bulk data: its
+    /// first vendor interface with a bulk endpoint each way, reset, purged,
+    /// DTR and RTS raised, and a UART set to [`Line::DEFAULT`].
+    fn set_up_serials(
+        &mut self,
+        slot: usize,
+        target: &Target,
+        descriptor: &DeviceDescriptor,
+        configuration: &Configuration,
+    ) {
+        let Some((chip, role)) =
+            ftdi::identify(descriptor.vendor, descriptor.product, descriptor.release)
+        else {
+            return;
+        };
+        let Some(interface) = configuration
+            .interfaces()
+            .iter()
+            .find(|interface| interface.bulk_in.is_some() && interface.bulk_out.is_some())
+        else {
+            return;
+        };
+        let Some(index) = self.serials.iter().position(Option::is_none) else {
+            return;
+        };
+        match self.open_serial(slot, target, chip, role, interface, descriptor) {
+            Ok(port) => {
+                if let Some(entry) = self.serials.get_mut(index) {
+                    *entry = Some(port);
+                }
+                let _ = self.serial_changes.push(SerialChange::Attached(index));
+            }
+            // A controller with no bulk pipes has no serial ports, silently.
+            Err(Error::Transfer(host::Error::Unsupported)) => {}
+            Err(error) => self.notes.push_over(Note::SerialFailed { role, error }),
+        }
+    }
+
+    fn open_serial(
+        &mut self,
+        slot: usize,
+        target: &Target,
+        chip: Chip,
+        role: Role,
+        interface: &Interface,
+        descriptor: &DeviceDescriptor,
+    ) -> Result<Port, Error> {
+        let ((number_in, packet_in), (number_out, packet_out)) = interface
+            .bulk_in
+            .zip(interface.bulk_out)
+            .ok_or(Error::Descriptor)?;
+        let port = chip.port(interface.number);
+        let hc = &mut self.hc;
+        let _ = hc.control(target, &ftdi::reset(port), Data::None)?;
+        for setup in &ftdi::purge(port) {
+            let _ = hc.control(target, setup, Data::None)?;
+        }
+        let latency = match role {
+            Role::Uart => UART_LATENCY_MS,
+            Role::Blaster => BLASTER_LATENCY_MS,
+        };
+        let _ = hc.control(target, &ftdi::latency(port, latency), Data::None)?;
+        let _ = hc.control(target, &ftdi::modem(port, true, true), Data::None)?;
+        let line = Line::DEFAULT;
+        if role == Role::Uart {
+            let setups = ftdi::configure(chip, port, &line).ok_or(Error::Unsupported)?;
+            for setup in &setups {
+                let _ = hc.control(target, setup, Data::None)?;
+            }
+        }
+        let out = hc.open_bulk_out(
+            target,
+            &Endpoint {
+                number: number_out,
+                max_packet: packet_out,
+                interval: 0,
+            },
+        )?;
+        let stream = match hc.open_stream(
+            target,
+            &Endpoint {
+                number: number_in,
+                max_packet: packet_in,
+                interval: 0,
+            },
+        ) {
+            Ok(stream) => stream,
+            Err(error) => {
+                hc.close_bulk(out);
+                return Err(error.into());
+            }
+        };
+        Ok(Port {
+            device: slot,
+            serial: Serial {
+                vendor: descriptor.vendor,
+                product: descriptor.product,
+                chip,
+                role,
+                interface: interface.number,
+                max_packet: packet_in,
+                line,
+                modem: 0,
+                errors: 0,
+            },
+            port,
+            out,
+            stream,
+            gone: false,
+        })
     }
 
     /// Turn every HID interface of the device in `slot` whose reports map
@@ -1314,6 +1718,20 @@ impl<H: Host> Bus<H> {
             }
             let _ = self.disk_changes.push(DiskChange::Detached(index));
         }
+        for index in 0..MAX_SERIALS {
+            let Some(Some(port)) = self.serials.get(index).copied() else {
+                continue;
+            };
+            if port.device != slot || port.gone {
+                continue;
+            }
+            self.hc.close_stream(port.stream);
+            self.hc.close_bulk(port.out);
+            if let Some(Some(entry)) = self.serials.get_mut(index) {
+                entry.gone = true;
+            }
+            let _ = self.serial_changes.push(SerialChange::Detached(index));
+        }
         if let Some(entry) = self.devices.get_mut(slot) {
             *entry = None;
         }
@@ -1331,5 +1749,33 @@ impl<H: Host> Bus<H> {
                 .flatten()
                 .any(|device| device.target.address == address)
         })
+    }
+}
+
+/// How long a USB-Blaster has to answer a read: a scan of a few hundred
+/// bits answers within a few of its latency timer's two milliseconds.
+const CABLE_PATIENCE: u64 = 500 * MILLISECOND;
+
+/// A USB-Blaster on the bus, as [`blaster::Link`] reaches it.
+#[derive(Debug)]
+pub struct Cable<'a, H> {
+    bus: &'a mut Bus<H>,
+    serial: usize,
+}
+
+impl<H: Host> blaster::Link for Cable<'_, H> {
+    type Error = Error;
+
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        let sent = self.bus.serial_write(self.serial, bytes)?;
+        if sent == bytes.len() {
+            Ok(())
+        } else {
+            Err(Error::Transfer(host::Error::Timeout))
+        }
+    }
+
+    fn read(&mut self, into: &mut [u8]) -> Result<(), Error> {
+        self.bus.serial_read_exact(self.serial, into, CABLE_PATIENCE)
     }
 }

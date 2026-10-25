@@ -22,6 +22,10 @@
 //! * [`usb`]: the standard requests and descriptors;
 //! * [`hub`]: the hub class's requests and port status;
 //! * [`hid`]: the boot protocol's reports, and the events and HELLO they make;
+//! * [`ftdi`]: FTDI's USB UARTs -- the FT232H and its kin -- their vendor
+//!   requests, baud divisors and status bytes;
+//! * [`blaster`]: JTAG through an Altera USB-Blaster, an FTDI FIFO in front
+//!   of a CPLD;
 //! * [`bus`]: enumeration, hot plugging, and what the driver hands the core;
 //! * [`watch`]: which functions' raw reports the driver says, when asked.
 //!
@@ -44,8 +48,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod blaster;
 pub mod bus;
 pub mod ehci;
+pub mod ftdi;
 pub mod hid;
 pub mod host;
 pub mod hub;

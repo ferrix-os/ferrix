@@ -5,4 +5,5 @@ mod absolute;
 mod bus;
 mod model;
 mod parsing;
+mod serial;
 mod xhci;
