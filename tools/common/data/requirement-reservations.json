@@ -12,7 +12,7 @@
   ],
   "reservations": [
     {
-      "ids": ["L.x86_64.211", "L.sched.96-101"],
+      "ids": ["L.sched.96-101"],
       "owner": "chardev-sigrace",
       "branch": "bugfix/tsc-aux, feature/sched-setaffinity",
       "date": "2026-10-25",

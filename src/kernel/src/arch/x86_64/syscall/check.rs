@@ -245,3 +245,37 @@ pub fn run_decode() -> Result<(), &'static str> {
     );
     Ok(())
 }
+
+/// `L.x86_64.211`: every processor that has `RDTSCP` read its own logical
+/// number back through it at bring-up. Answers how many processors
+/// recorded, or `None` if none has the instruction.
+///
+/// # Errors
+///
+/// A processor whose `RDTSCP` named another number, or one that recorded
+/// nothing while others did.
+/// Verifies: `L.x86_64.211`
+pub(crate) fn tsc_aux() -> Result<Option<usize>, &'static str> {
+    let processors = crate::smp::count();
+    let mut recorded = 0;
+    for logical in 0..processors {
+        let word = super::TSC_AUX_READ
+            .get(logical)
+            .map_or(0, |slot| slot.load(core::sync::atomic::Ordering::Acquire));
+        if word & super::RECORDED == 0 {
+            continue;
+        }
+        recorded += 1;
+        let want = super::tsc_aux_of(logical);
+        if word & 0xffff_ffff != want {
+            return Err("a processor's RDTSCP did not name its own logical number (TSC_AUX)");
+        }
+    }
+    if recorded == 0 {
+        return Ok(None);
+    }
+    if recorded != processors {
+        return Err("a processor recorded no TSC_AUX read-back while others did");
+    }
+    Ok(Some(recorded))
+}

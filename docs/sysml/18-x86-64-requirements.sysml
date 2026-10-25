@@ -2288,6 +2288,23 @@ package FerrixX8664Requirements {
                 "arch::x86_64::trap::fault_signal",
                 "arch::x86_64::signal::compat::sigcontext_of");
         }
+        requirement <'L.x86_64.211'> tscAuxNamesItsOwnProcessor : ItemLowLevel {
+            doc /* Linux's setup_getcpu writes (node << 12) | cpu there and
+                Windows the processor number; a program compares RDTSCP's ECX
+                or RDPID with getcpu or GetCurrentProcessorNumber. */
+            attribute :>> statement = "Every processor that has RDTSCP or RDPID
+                shall hold its logical processor number, node 0, in IA32_TSC_AUX
+                before it first returns to user mode.";
+            attribute :>> criterion = "On every processor with RDTSCP, its ECX read
+                back at bring-up equals the processor's logical number (the
+                `tsc_aux` cpu line counts N of N); with the write removed the boot
+                ends in FX-0310 by name. RDPID reads the same register.";
+            attribute :>> parent = "H.SCHED.6";
+            attribute :>> unit = ("arch::x86_64::syscall::init",
+                "arch::x86_64::syscall::tsc_aux_of",
+                "arch::x86_64::syscall::has_tsc_aux",
+                "arch::x86_64::syscall::record_tsc_aux");
+        }
         requirement <'L.x86_64.78'> aTouchPastAFileIsSigbus : ItemLowLevel {
             attribute :>> statement = "handle_page_fault shall answer with SIGBUS a
                 user fault the address space reports as past the end of a mapped

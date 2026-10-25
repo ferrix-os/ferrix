@@ -32,13 +32,16 @@
 //!   ends `EINTR` at once, under `SA_RESTART` too, as on Linux
 //!   ([`futex_signal`]);
 //! * **futex-stop**: one stopped and continued, with no handler, resumes to
-//!   its own deadline and ends `ETIMEDOUT`.
+//!   its own deadline and ends `ETIMEDOUT`;
+//! * **cpu-number**: on x86-64, `RDTSCP` names the processor `getcpu` names
+//!   ([`cpu_number`]).
 
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
 
+mod cpu_number;
 mod futex_signal;
 mod setuid;
 
@@ -239,6 +242,10 @@ fn main() {
     println!("threads: futex-stop");
     futex_signal::check_futex_stop(fail);
     println!("threads: futex-stop ok");
+
+    println!("threads: cpu-number");
+    cpu_number::check_cpu_number(fail);
+    println!("threads: cpu-number ok");
 
     println!("threads: all ok");
     std::process::exit(0)

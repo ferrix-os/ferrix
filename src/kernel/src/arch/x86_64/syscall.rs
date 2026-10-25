@@ -35,6 +35,9 @@
 //! saved `CS`, and never on a path that cannot have come from user mode.
 
 use core::mem::offset_of;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use ferrix_sched::MAX_CPUS;
 
 use crate::smp::PerCpu;
 use crate::trap::{Abi, Outcome};
@@ -59,6 +62,8 @@ const IA32_SYSENTER_CS: u32 = 0x174;
 const IA32_FMASK: u32 = 0xC000_0084;
 /// `IA32_KERNEL_GS_BASE`. What `swapgs` exchanges `GS_BASE` with.
 const IA32_KERNEL_GS_BASE: u32 = 0xC000_0102;
+/// `IA32_TSC_AUX`, what `RDTSCP` leaves in `ECX` and `RDPID` reads.
+const IA32_TSC_AUX: u32 = 0xC000_0103;
 /// `IA32_FS_BASE`, which `arch_prctl(ARCH_SET_FS)` writes: a program's thread
 /// pointer, and the first thing a libc sets up.
 const IA32_FS_BASE: u32 = 0xC000_0100;
@@ -1016,7 +1021,7 @@ pub fn user_base(code: u64) -> Option<u64> {
     Some(base)
 }
 
-/// Turn `SYSCALL` on for this processor.
+/// Turn `SYSCALL` on for this processor, logical processor `logical`.
 ///
 /// Per processor, because every MSR here is per processor. A secondary that
 /// skipped this would take `#UD` on the first system call a program made on
@@ -1027,7 +1032,7 @@ pub fn user_base(code: u64) -> Option<u64> {
 /// (ENTRY) Must run on each processor after its per-CPU record is installed in `GS`,
 /// and before any program makes a system call there. The GDT the selectors
 /// name need not be loaded yet, only by the time that call is made.
-pub(crate) unsafe fn init() {
+pub(crate) unsafe fn init(logical: usize) {
     // SAFETY: (ENTRY) `IA32_EFER` exists on every 64-bit x86; setting SCE only enables
     // an instruction that faults until `LSTAR` is set, two lines below.
     let efer = unsafe { cpu::read_msr(IA32_EFER) };
@@ -1074,7 +1079,79 @@ pub(crate) unsafe fn init() {
     // SAFETY: (ENTRY) the shadow MSR exists on every 64-bit x86, and zero is a
     // canonical address that no kernel code reaches through.
     unsafe { cpu::write_msr(IA32_KERNEL_GS_BASE, 0) };
+
+    // This processor's logical number in `TSC_AUX`, as Linux puts
+    // `(node << 12) | cpu` there (`setup_getcpu`) and Windows the processor
+    // number: so `RDTSCP` and `RDPID` in a program name the processor
+    // `getcpu` -- and Wine's `GetCurrentProcessorNumber` -- names. Left as
+    // firmware left it, both said 0 on every processor of the N150 while
+    // `getcpu` said 1 to 3 (2026-10-25), a disagreement no Linux or Windows
+    // machine shows, and that a check of the two finds on any thread off
+    // processor 0. One node, so the node bits are zero.
+    // The number comes from the record `set_cpu_local` just installed, not
+    // from `smp::this_cpu`, which answers `None` on the boot processor until
+    // bring-up marks the records ready.
+    if has_tsc_aux() {
+        // SAFETY: (ENTRY) the MSR exists where `RDTSCP` or `RDPID` does, which
+        // `has_tsc_aux` asked CPUID; it holds a number for programs to read
+        // and steers nothing in the processor.
+        unsafe { cpu::write_msr(IA32_TSC_AUX, tsc_aux_of(logical)) };
+    }
+    record_tsc_aux(logical);
 }
+
+/// Whether this processor has `IA32_TSC_AUX`: it has `RDTSCP`
+/// (CPUID `0x8000_0001` `EDX` bit 27) or `RDPID` (CPUID 7.0 `ECX` bit 22).
+fn has_tsc_aux() -> bool {
+    use core::arch::x86_64::{__cpuid, __cpuid_count};
+    let rdtscp =
+        __cpuid(0x8000_0000).eax >= 0x8000_0001 && __cpuid(0x8000_0001).edx & (1 << 27) != 0;
+    let rdpid = __cpuid(0).eax >= 7 && __cpuid_count(7, 0).ecx & (1 << 22) != 0;
+    rdtscp || rdpid
+}
+
+/// What each processor's `RDTSCP` read back at bring-up, by logical number:
+/// bit 63 set once recorded, its `ECX` in bits 0-31. Zero for a processor
+/// without `RDTSCP`, or not yet up. `RDPID` reads the same register, and
+/// would need an `asm!` of its own to be read here (the assembly budget).
+pub(super) static TSC_AUX_READ: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+
+/// Bit 63 of a [`TSC_AUX_READ`] word: the processor recorded.
+pub(super) const RECORDED: u64 = 1 << 63;
+
+/// Read `TSC_AUX` back through `RDTSCP` on this processor and keep what it
+/// said for [`check_tsc_aux`].
+fn record_tsc_aux(logical: usize) {
+    use core::arch::x86_64::__cpuid;
+    let rdtscp =
+        __cpuid(0x8000_0000).eax >= 0x8000_0001 && __cpuid(0x8000_0001).edx & (1 << 27) != 0;
+    if !rdtscp {
+        // `RDPID` alone reads the same register, which nothing here can
+        // reach without assembly: the read-back needs `RDTSCP`.
+        return;
+    }
+    let mut aux = 0_u32;
+    // SAFETY: (ENTRY) CPUID says the instruction exists; it reads the counter
+    // and TSC_AUX and writes `aux`.
+    let _ = unsafe { core::arch::x86_64::__rdtscp(&raw mut aux) };
+    let word = RECORDED | u64::from(aux);
+    if let Some(slot) = TSC_AUX_READ.get(logical) {
+        slot.store(word, Ordering::Release);
+    }
+}
+
+/// What `IA32_TSC_AUX` holds on logical processor `logical`: Linux's
+/// `(node << 12) | (cpu & 0xfff)`, with node 0.
+pub(crate) const fn tsc_aux_of(logical: usize) -> u64 {
+    (logical & 0xfff) as u64
+}
+
+// The encoding, checked where it is built: the number in the low twelve
+// bits, node 0 above them.
+const _: () = assert!(
+    tsc_aux_of(0) == 0 && tsc_aux_of(3) == 3 && tsc_aux_of(0x1005) == 5,
+    "TSC_AUX holds the logical number in its low twelve bits, node 0 above"
+);
 
 /// The `GS` base of the program this processor last ran, read from the kernel
 /// side of `swapgs`, where it is parked.
@@ -1143,8 +1220,7 @@ pub(crate) unsafe fn thread_pointer() -> u64 {
 pub(crate) unsafe fn set_entry_stack(top: u64) {
     let cpu = crate::smp::this_cpu();
     if let Some(cpu) = cpu {
-        cpu.kernel_stack
-            .store(top, core::sync::atomic::Ordering::Relaxed);
+        cpu.kernel_stack.store(top, Ordering::Relaxed);
     }
     // SAFETY: (ENTRY) the caller guarantees the stack and the TSS; `cpu` is
     // this processor's own record.

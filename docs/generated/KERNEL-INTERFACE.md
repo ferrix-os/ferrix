@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2384 declarations in the core's files, 175 in the item's; 71 checks-only.
+2386 declarations in the core's files, 175 in the item's; 73 checks-only.
 
 ## ferrix-kernel-core
 
@@ -65,6 +65,7 @@ checks above is `pub` for raised checks (F3).
 | `check_boot_options` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check_distributor` | fn | bin |  |
 | `check_hwp_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `check_tsc_aux` | fn | bin (checks) | checks-only |
 | `cpuid` | fn | load |  |
 | `flush_window` | fn | bin |  |
 | `midr_of` | fn | load |  |
@@ -2333,6 +2334,7 @@ checks above is `pub` for raised checks (F3).
 | `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SYSRQ_CRASH` | static | load |  |
 | `TIMER_REGISTRATION` | static | bin |  |
+| `TSC_AUX` | static | bin (checks) | checks-only |
 | `VMAP_ARENA_BRING_UP` | static | bin |  |
 | `Explanation` | struct | - |  |
 

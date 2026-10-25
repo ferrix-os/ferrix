@@ -139,7 +139,7 @@ pub(crate) unsafe fn set_cpu_local(address: u64) {
     // a secondary this runs before `init_secondary` loads its own GDT, which is
     // fine: the MSRs only record the selectors, and nothing uses them until a
     // program's first `SYSCALL`, long after that GDT is in place.
-    unsafe { syscall::init() };
+    unsafe { syscall::init(record.logical) };
 }
 
 /// The address [`set_cpu_local`] installed on this CPU.

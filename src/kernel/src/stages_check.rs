@@ -920,6 +920,14 @@ pub(super) fn check_entry_paths() {
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_speculation() {
+    match arch::check_tsc_aux() {
+        Ok(Some(processors)) => println!(
+            "  cpu      tsc_aux: {processors} of {processors} processors name their own number \
+             through RDTSCP"
+        ),
+        Ok(None) => println!("  cpu      tsc_aux: absent (no RDTSCP)"),
+        Err(problem) => fatal!(catalog::TSC_AUX, "TSC_AUX self-check failed: {problem}"),
+    }
     let report = match arch::check_speculation() {
         Ok(report) => report,
         Err(problem) => fatal!(

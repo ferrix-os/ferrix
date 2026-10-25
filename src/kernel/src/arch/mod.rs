@@ -35,6 +35,24 @@ pub use speculation::{
     forget_hook_armed_by, leave_hook_armed_by, report_exposure as report_speculation,
 };
 pub use speculation_check::check as check_speculation;
+
+/// `L.x86_64.211`'s check: every processor's `RDTSCP` named its own logical
+/// number; `Ok(None)` where the architecture or the processor has none.
+///
+/// # Errors
+///
+/// As `x86_64::syscall::check::tsc_aux`.
+// CHECKS-ONLY: for `check_speculation` in `stages_check.rs`.
+pub fn check_tsc_aux() -> Result<Option<usize>, &'static str> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        x86_64::syscall::check::tsc_aux()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        Ok(None)
+    }
+}
 #[cfg(target_arch = "x86_64")]
 use x86_64::speculation as machine_speculation;
 

@@ -55,6 +55,7 @@ const STEPS: &[&str] = &[
     "threads: setuid ok",
     "threads: futex-signal ok",
     "threads: futex-stop ok",
+    "threads: cpu-number ok",
     "threads: all ok",
 ];
 

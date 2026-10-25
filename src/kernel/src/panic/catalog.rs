@@ -823,6 +823,26 @@ pub static SPECULATION_DEFENCES: Explanation = Explanation {
           docs/certification/SPECULATION.md",
 };
 
+/// For `check_speculation` in `stages_check.rs`, when `arch::check_tsc_aux`
+/// fails.
+// CHECKS-ONLY: for `check_speculation` in `stages_check.rs`.
+pub static TSC_AUX: Explanation = Explanation {
+    code: "FX-0310",
+    title: "a processor's RDTSCP read-back of TSC_AUX named another processor",
+    meaning: "`arch::check_tsc_aux` requires every processor that has `RDTSCP` to have read \
+              its own logical number -- the one `getcpu` answers -- back through it when it was \
+              brought up (`L.x86_64.211`; `RDPID` reads the same register). Linux and \
+              Windows put the processor's number in `IA32_TSC_AUX`; a program comparing it \
+              with `getcpu` or `GetCurrentProcessorNumber` saw 0 on every processor before \
+              Ferrix wrote it.",
+    causes: &[
+        "A bring-up path that stopped calling `syscall::init` with the processor's logical \
+         number, or the write of `IA32_TSC_AUX` taken out of it.",
+        "A hypervisor that advertises `RDTSCP` and drops writes to `IA32_TSC_AUX`.",
+    ],
+    see: "src/kernel/src/arch/x86_64/syscall.rs",
+};
+
 /// For `check_timer_and_start_clocks` in `main.rs`, when `arch::check_machine`
 /// fails.
 pub static STAGE3_MACHINE: Explanation = Explanation {
@@ -3454,6 +3474,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPECULATION_DEFENCES,
     &STAGE3_MACHINE,
     &AUDIT_STORE,
+    &TSC_AUX,
     &PROCESSOR_DISCOVERY,
     &SECONDARY_START,
     &SECONDARY_GDT,

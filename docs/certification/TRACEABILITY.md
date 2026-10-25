@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 147 | 94 | 53 |
-| Low (`L.*`) | 1089 | 824 | 265 |
+| Low (`L.*`) | 1090 | 825 | 265 |
 
-2398 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2401 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2400 |
-| Accessors, covered by the requirement they serve | 1072 |
+| Named by a low-level requirement | 2403 |
+| Accessors, covered by the requirement they serve | 1073 |
 | Check code in a product file | 83 |
 | Named by none | 937 |
 
@@ -1268,6 +1268,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.trap.1` | dispatch shall answer a breakpoint, illegal instruction or other fault taken from user mode by forcing the architecture's signal on the program through the registered return path, and shall not stop the kernel. | The faulting programs of the `fault` line are ended by their signals and the check returns to the boot. | H.TRAP.4 | `trap::dispatch`, `trap::user_fault_as`, `trap::return_path` | `src/kernel/src/arch/x86_64/trap/check.rs::run` | reached | not built | not built |
 | `L.x86_64.209` | A 64-bit program's int3 shall raise #BP, for which classify and fault_signal name SIGTRAP with si_code SI_KERNEL, and put_cause shall write trap 3 and the address after the int3 into its sigcontext, where a handler's return resumes. | A 64-bit program's SIGTRAP handler for its int3 reads si_signo 5, si_code 0x80, trapno 3 and rip past the 0xcc, and is resumed after it (the `int3` line). With the #BP and #OF gates at DPL 0 the program is ended by SIGSEGV and the check fails by name. | H.TRAP.4, H.TRAP.9 | `arch::x86_64::trap::classify`, `arch::x86_64::trap::fault_signal`, `arch::x86_64::signal::put_cause` | `src/kernel/src/arch/x86_64/trap/check.rs::check_breakpoint` | not reached | not built | not built |
 | `L.x86_64.210` | An i386 program's into with OF set shall raise #OF, for which fault_signal names SIGSEGV with si_code SI_KERNEL, and its int3 #BP, SIGTRAP with SI_KERNEL; sigcontext_of shall write trap 4 and trap 3 and the address after each instruction into the i386 sigcontext, where a handler's return resumes. | An i386 program's handler reads SIGSEGV, 0x80, trap 4 and eip past its into, then SIGTRAP, 0x80, trap 3 and eip past its int3, and is resumed after each (the `into` line). With the #OF gate alone at DPL 0 the handler reads trap 13 and the check fails by name. | H.TRAP.4, H.TRAP.9 | `arch::x86_64::trap::classify`, `arch::x86_64::trap::fault_signal`, `arch::x86_64::signal::compat::sigcontext_of` | `src/kernel/src/arch/x86_64/trap/check.rs::check_overflow` | reached | not built | not built |
+| `L.x86_64.211` | Every processor that has RDTSCP or RDPID shall hold its logical processor number, node 0, in IA32_TSC_AUX before it first returns to user mode. | On every processor with RDTSCP, its ECX read back at bring-up equals the processor's logical number (the `tsc_aux` cpu line counts N of N); with the write removed the boot ends in FX-0310 by name. RDPID reads the same register. | H.SCHED.6 | `arch::x86_64::syscall::init`, `arch::x86_64::syscall::tsc_aux_of`, `arch::x86_64::syscall::has_tsc_aux`, `arch::x86_64::syscall::record_tsc_aux` | `src/kernel/src/arch/x86_64/syscall/check.rs::tsc_aux` | not reached | not built | not built |
 | `L.x86_64.78` | handle_page_fault shall answer with SIGBUS a user fault the address space reports as past the end of a mapped file. | A program that reads the second page of a two-page shared mapping of a one-page memfd ends with SIGBUS (the `fault` line). | H.TRAP.4 | `trap::handle_page_fault`, `trap::resolve_user_fault`, `trap::user_fault_as`, `arch::x86_64::cpu::read_cr2` | `src/kernel/src/arch/x86_64/trap/check.rs::run` | reached | not built | not built |
 | `L.trap.2` | handle_page_fault shall resolve a user-mode fault in a region the running program's space maps by making the mapping true, so that the instruction is retried. | The user test program runs with at least 1 page fault resolved and exits 42. | H.MEM.1 | `trap::handle_page_fault`, `trap::resolve_user_fault` | `src/kernel/src/syscall/check.rs::check_a_program_runs_in_user_mode` | reached | reached | reached |
 | `L.x86_64.79` | dispatch shall count an interrupt taken from user mode, have the architecture service it and signal its end, and then preempt the program. | Two spinning programs pinned to one processor are each preempted at least twice and switched to at least twice, and the count of interrupts taken in user mode rises while they run. | H.SCHED.1 | `trap::dispatch`, `arch::x86_64::service_interrupts` | `src/kernel/src/syscall/check.rs::check_two_programs_take_turns_on_one_processor` | reached | reached | reached |
@@ -2046,6 +2047,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/arch/x86_64/switch/check.rs::run_vector_case` | kernel | H.SCHED.12, L.sched.54, L.x86_64.153, L.x86_64.154, L.x86_64.155 |
 | `src/kernel/src/arch/x86_64/syscall/check.rs::run` | kernel | L.x86_64.62 |
 | `src/kernel/src/arch/x86_64/syscall/check.rs::run_decode` | kernel | L.x86_64.140 |
+| `src/kernel/src/arch/x86_64/syscall/check.rs::tsc_aux` | kernel | L.x86_64.211 |
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_arch_prctl_reads` | kernel | L.x86_64.173 |
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_arch_prctl_refusals` | kernel | L.x86_64.60 |
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_breakpoint` | kernel | L.x86_64.209 |

@@ -40,6 +40,7 @@ Causes are listed most likely first.
 | [FX-0307](#fx-0307) | the side-channel defences did not hold |
 | [FX-0308](#fx-0308) | the architecture decoded or masked something wrongly |
 | [FX-0309](#fx-0309) | the audit record lost or misplaced what it keeps |
+| [FX-0310](#fx-0310) | a processor's RDTSCP read-back of TSC_AUX named another processor |
 | [FX-0401](#fx-0401) | the processor list could not be read |
 | [FX-0402](#fx-0402) | a secondary processor could not be started |
 | [FX-0403](#fx-0403) | a secondary processor could not build its GDT |
@@ -695,6 +696,23 @@ boot that skipped its checks among it -- goes unrecorded.
 
 See: src/kernel/src/audit/check.rs; src/kernel/src/audit.rs;
 docs/certification/AUDIT.md.
+
+<a id="fx-0310"></a>
+
+## FX-0310 — a processor's RDTSCP read-back of TSC_AUX named another processor
+
+`arch::check_tsc_aux` requires every processor that has `RDTSCP` to have read
+its own logical number -- the one `getcpu` answers -- back through it when it
+was brought up (`L.x86_64.211`; `RDPID` reads the same register). Linux and
+Windows put the processor's number in `IA32_TSC_AUX`; a program comparing it
+with `getcpu` or `GetCurrentProcessorNumber` saw 0 on every processor before
+Ferrix wrote it.
+
+1. A bring-up path that stopped calling `syscall::init` with the processor's
+   logical number, or the write of `IA32_TSC_AUX` taken out of it.
+2. A hypervisor that advertises `RDTSCP` and drops writes to `IA32_TSC_AUX`.
+
+See: src/kernel/src/arch/x86_64/syscall.rs.
 
 <a id="fx-0401"></a>
 
