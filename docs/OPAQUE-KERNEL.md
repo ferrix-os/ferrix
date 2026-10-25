@@ -5587,6 +5587,421 @@ tree (`land-j-ctl-sign`, `land-j-ctl-unshared`, `land-j-ctl-extra`,
 `land-j-ctl-sign-host`, `land-j-ctl-unshared-host`; their verdicts are in
 the landing message).
 
+### 9.12 Fast path v2: the direct resume (design for the consultant, draft, 2026-10-07, os-76)
+
+The customer's target is `domain-call` under 400 ns p50 on nazuna, matched
+(§9.10), and at most seL4's 440 (2026-10-07). On 2026-10-07 the customer
+also ruled that the target stays nazuna, with software only: no PCID host as
+the platform, and no protection-key address spaces. This section is a design
+for the consultant's first look. Nothing in it is built. It names its
+requirement rows but reserves no ids; they are reserved before rows are
+written. Every figure is **measured** (where it was), **guessed**, or
+**inferred** from reading the code.
+
+#### Where one direction goes (`main` 08984c2db)
+
+`domain-call` reads 873 ns (858 and 888 in the fast boot mode, F48 in the
+evidence index; 3c, measured on its branch in a quiet window). That is
+about 436 a direction. After the four items in flight it reads about 760 to
+800 (**guessed**, po10's estimate). Those items are user-side inlining, J
+(the job-load fold), the object side's cut 3, and the Q items Q1 to Q7 of
+the round's plan: the clock without a divide, inverse weights, `this_cpu`
+once, cached GDT and TSS pointers, a lazy CPU mask, a base `WRMSR` skipped
+by an `RDMSR` compare, and `opt-level` 3.
+
+The direction, read from the code (**inferred**):
+- **Locked read-modify-writes: 16.** Four ticket locks: the handle table,
+  two inbox locks and the run queue. Four `Arc` operations: the lookup's
+  clone, the queue's `current().cloned()`, `finish_switch`'s drop of the
+  previous task, and the drop of B's endpoint. Two run-slot operations, four
+  job-load operations, and `install`'s CPU mask join and leave.
+- **About 10 to 14 64-bit `DIV`s:** two in `now_nanos`, the rest in
+  `slice_for`, `RunQueue::hand_over` and `effective_weight`.
+- **The way back.** B resumes through `ferrix_switch` and returns up its
+  whole kernel call chain: `Direct::switch`, `send_direct`, the closure,
+  `fast_write_read`, the hook, `trap::fast_write_read_now` and
+  `ferrix_syscall_entry`, then the frame tail, `take_reply` and
+  `write_outcome`. Every return address on that chain was pushed before the
+  `CR3` write, which with ERAPS empties the return-address predictor. So
+  each of those eight or nine returns probably mispredicts (**inferred**;
+  not measured).
+
+The budget a direction, with the in-flight items and the Q items landed
+(**guessed** except `CR3`):
+
+| Piece | Then | Target |
+|---|---|---|
+| `CR3` write, no PCID (**measured** 79 to 113) | 88 | 88 |
+| `SYSCALL`, `SYSRET`, the stub's pushes, clears and pops | 35 | 28 |
+| user TLB refill | 30 | 20 |
+| user state: base writes, the vector reset | 45 | 20 |
+| kernel software | 120 to 150 | 40 |
+| **a direction** | **320 to 350** | **196** |
+
+Kernel software is the piece this section is for. seL4 does its fast path
+in about 50 ns a direction (§9.10). It does so because nothing is live on a
+kernel stack while a thread waits in `Call` or `ReplyRecv`: the fast path
+writes the message into the receiver's saved registers, switches the space
+and returns to user mode from them. Ferrix keeps a kernel stack per task and
+resumes a waiting task by switching to it and returning up its call chain.
+That costs a context switch, a `finish_switch` and an unwind that the
+predictor has just forgotten. This design removes all three for the trip
+that matters, and keeps the general path's results.
+
+#### Two layers
+
+The design is in two layers, so that the Linux pipe ping-pong (po10-pipe)
+can build on the lower one:
+- **The generic layer (G1 to G3)** serves any "wake one task, then block"
+  pair on one processor.
+- **The call layer (C1 and C2)** is `channel_write_read`'s own.
+
+A pipe fast path would need its own call layer. The waker would complete the
+reader's `read`, copying into the reader's buffer in the reader's space
+after the `CR3` write, and that is its design, not this one.
+
+#### G1: the continuation park and the resume trampoline (revised after ledger 511)
+
+**Two kinds of park (V2-1).** With the fast path on, a task can be parked on
+a channel half in two ways:
+- **General:** `park_for_reply` (`syscall/native.rs`), reached from the
+  general path's receive half. Every server's first, receive-only call takes
+  it (T3 declines it), and so does any call after a decline. The task blocks
+  through the general block with its call chain live: it holds the lookup's
+  `Arc<Endpoint>` in that chain and takes its reply from the reply cell.
+- **Direct:** the direct switch's own park of its caller, `hand_over`'s
+  `between`. Only this kind becomes a continuation.
+
+A per-task mark, `continuation`, says which kind a record names. It is set
+by the direct switch, under the run-queue lock, when it parks its caller.
+It is cleared in the trampoline after `finish_switch` and before either
+branch. A commit to an unmarked peer switches to it with `ferrix_switch` as
+today, and the peer takes its reply from the cell. Its caller, though, is
+still parked as a continuation: `ferrix_switch` is given a scratch save word
+instead of the caller's own slot, so the caller's slot keeps the resume
+frame's address (V2-15). A commit to a marked peer is made by the direct
+resume.
+
+In a steady trade the first trip goes to an unmarked server; every trip
+after it goes to a marked peer. L.sched.59 is restated for the mark, and the
+cases include a re-park after a signal.
+
+**The reserve (V2-2).** The `SYSCALL` stub reserves 64 bytes after its 16
+pushes, before the call: `subq $64, %rsp`, and `addq $64, %rsp` before the
+pops. Stack tops are 16-byte aligned (L.mm.55) and the pushes are 128 bytes,
+so the call is entered aligned as the ABI wants. The upper 56 bytes are the
+resume frame, in `ferrix_switch`'s shape: six registers and a return
+address. No code on the call chain touches the reserve. The I3 check
+requires its size, position and alignment at `ferrix_syscall_entry`, and
+its control, a 56-byte reserve, must fire. The reserve is made on every
+`SYSCALL`, so it is in the certified configuration with
+`ferrix.fastpath=off` too, and G6 applies to it (V2-11).
+
+**The park, made a continuation.** When the direct switch parks its caller
+A, under the run-queue lock as today, it also:
+1. writes A's resume frame: zeros, and `ferrix_fast_resume` as the return
+   word;
+2. sets A's saved stack pointer to that frame;
+3. sets A's `continuation` mark.
+
+From then on nothing below A's reserve is live. What was live on A's chain
+at the commit is listed (V2-6). Every object in that list is either moved
+into a named place or released before the park, and a check with a
+forgotten-`Arc` control shows that every one is freed.
+
+**One way in for a resumed continuation: the trampoline.**
+`ferrix_fast_resume` is a stub in `ferrix_task_entry`'s shape:
+1. it zeroes RBP;
+2. it reserves 64 bytes again, so that its own calls never reach the frame;
+3. it calls `fast_resume(frame)` through a third link-time hook. The
+   trampoline is core and the continuation is item code, so L.x86_64.161 is
+   restated (V2-8);
+4. when `fast_resume` returns, it jumps to the stub's one way out: `addq`,
+   the pops, `FERRIX_CLEAR_BUFFERS`, `swapgs` and `ferrix_syscall_sysret`
+   (V2-9).
+
+`fast_resume` makes, in this order:
+1. `finish_switch`, as every context that is switched to does first;
+2. the `continuation` mark cleared, and the resume frame's return word
+   cleared (V2-3);
+3. the vector mark lowered (V2-8). It was raised at the entry and is
+   lowered here as the entry's Tail and Done arms lower it today;
+4. then one of two branches:
+   - **Replied** (a commit wrote the reply into the frame, C1): `frame_tail`
+     exactly as today, with its quiet look and its general branch.
+   - **Woken otherwise:** §9.7's general continuation exactly as today,
+     `continue_general` with the six arguments read from the frame (case 15
+     and the continuation cases now run through here), then `leave`.
+
+**Two ways to reach the trampoline.** The first is the general resume. Any
+wake but a commit (a general writer, the peer's close, `END`, a kill) wakes
+A as today. A processor that picks A switches to it with `ferrix_switch`,
+which pops the resume frame and returns into `ferrix_fast_resume`. Before
+any switch to a marked task, an always-on assert requires its saved stack
+pointer to be its resume frame and the frame's return word to be
+`ferrix_fast_resume`, under an FX code of its own (I1, V2-3). Its control
+leaves the frame unwritten, and fires on the first switch to a marked task.
+
+The second is the direct resume, which carries the saving. A commit to a
+marked peer B, on A's stack with interrupts masked and the lock held:
+1. **The scheduler part, unchanged.** `hand_over`, then `switch_chosen`,
+   which stays the one tail of every switch (V2-5): `queue.previous` is A,
+   `current` is B, the space and the user state are installed, and
+   `set_entry_stack` is made in `switch_user_state` as now.
+2. **The reply (C1).** The commit, which can no longer fail, writes B's
+   `rax`, `rsi`, `rdx` and `r10` in B's frame, as `write_outcome`'s
+   `ReturnWords` writes them, and nothing else. It also marks B "replied".
+3. **The jump.** RSP moves to the bottom of B's frame, which is where
+   `ferrix_switch`'s `ret` from B's resume frame would leave it. Execution
+   jumps to `ferrix_fast_resume`. No registers are pushed, and nothing
+   returns.
+
+From the jump, B's own trampoline runs on B's stack. Its `finish_switch`
+releases the lock (a plain store, ferrix_sync's own function) and takes
+`queue.previous`, which is A. Its `frame_tail` makes B's quiet look and
+leaves through the stub's exit.
+
+**I2 by construction (V2-4).** Nothing runs on A's stack after the jump,
+because the jump is the last instruction there. An assert at the release
+inside the trampoline requires RSP to lie outside A's stack (`previous`'s
+stack range), on every resume. Its control moves the release before the
+jump, and fires on the first trip. The `loom` model of the park gains A's
+stack owner and the release-after-jump ordering. The model is not
+"unchanged": that ordering is new.
+
+**What the direct resume drops (V2-5).** Part 2a's list, written out:
+- A's `ferrix_switch` (six pushes, a store, and the `ret` it never makes);
+- B's return up its chain: `Direct::switch`, `send_direct`, the closure,
+  `fast_write_read`, the hook, `fast_write_read_now`, and the Tail and Done
+  arms of `ferrix_syscall_entry`;
+- `take_reply` and the reply cell, for a marked peer;
+- the entry's own return into the stub.
+
+Every effect each of those had is made by the trampoline or by
+`switch_chosen`, and the list says which.
+
+**Exits, registers and interrupts (V2-9).**
+- There is one exit, the stub's.
+- Interrupts stay masked from the entry to `sysretq` on the quiet branch.
+  The general branches open them where today's do.
+- Every general-purpose register B sees is its own frame's, the four reply
+  registers excepted. The D7 register canary runs across both resumes
+  (V2-10).
+- The new assembly goes on the allowlist, and every new `unsafe` is
+  traced.
+
+**Diagnostics.** Ferrix has no dump that walks a blocked task's stack
+(`panic.rs`), so nothing else changes. The panic report of a marked task
+says "continuation, resume frame at ...".
+
+#### C1 and C2 (revised after ledger 511)
+
+**C1 (V2-10).** The reply is written into a *marked* peer's frame, the four
+registers only, after the commit can no longer fail. An unmarked peer still
+takes its reply from the cell. This reopens Q3 and O7 (ledger 410), and the
+review accepts it narrowly.
+
+**C2 (V2-7).** The lookup's counted `Arc<Endpoint>` is moved into a named
+task field, `parked_on`, at the park. It is never dropped under a run-queue
+lock or with interrupts masked. It is let go at the call's end, as the
+general path lets go of its own:
+- on the general branches, after interrupts open;
+- on the quiet branch, by the rule that po10-obj's fix of ledger 511's
+  masked-drop finding on `main` settles (native.rs:1058-1091). Both use the
+  same form.
+
+A last-handle-closed case, in which a second thread closes the last handle
+while the caller is parked, runs on both resumes, with its control.
+
+#### G2 and G3: later, each its own design (ledger 511)
+
+- **G2** comes back under D1, D3 and D11 (ledger 411) and J-C1 to J-C12
+  (ledger 461). Its slot moves by plain stores reopen ledger 415's S1 to S7
+  and L.sched.63.
+- **G3** restates part 3's orderings, step 2's per-bit rows, T12 under the
+  lock, and D8 and H4: T2's predicate is read live at every call, never
+  cached. It needs a `loom` extension.
+
+#### Rows, documents and evidence for G1 (V2-12 to V2-14)
+
+**Rows.** No new H row. Restated: L.sched.57, L.sched.59, L.object.166,
+L.object.168, L.x86_64.160 and L.x86_64.161. New L rows, reserved before
+they are written:
+- the reserve;
+- the park kind;
+- I1;
+- I2;
+- the trampoline;
+- the endpoint field.
+
+**Documents, landing with G1:**
+- SPECULATION.md §3;
+- the Security Target (ADV_ARC, ADV_TDS, FDP_RIP.2);
+- a VULNERABILITY-ANALYSIS entry;
+- MEMORY-AND-TIMING §2.2f and the stack bytes;
+- the SAFETY-MANUAL.
+
+Ledger 404's F3 stays owed.
+
+**Evidence:**
+- G1 to G11;
+- every step 4 control re-fired;
+- `loom`;
+- `ipc-equiv` on all three architectures, KVM and TCG, and at `--smp 2`;
+- each new check's control shown to fire;
+- the G8 figures.
+
+#### Order and points (revised)
+
+1. **The unwind ablation**, timing only, built as `os76/unwind-abl`
+   9b8d04556 on `main` 08984c2db. Every function on the chain above
+   `ferrix_switch` is `#[inline(always)]`, and the entry calls the item past
+   the hook. Its disassembly shows B's way back as three returns
+   (`ferrix_switch`, the fast path's closure, `ferrix_syscall_entry`)
+   against about nine on `main`. Alternated against `main`, 5 boots a side
+   in one mode, in os-76's first bench window. If it reads under about 10
+   ns a direction, G1 is argued by `ferrix_switch` and `finish_switch`
+   alone, and is re-weighed against its cost in rows.
+2. **This text re-read by the consultant**, docs only: G1 with C1 and C2
+   under V2-1 to V2-14.
+3. **G1, built:** 25 to 35 points with the evidence.
+
+#### The consultant's design review (2026-10-07, ledger 511) and what changed
+
+**The verdict.** NOT YET for G1 with C1 and C2 as first drafted
+(d4ab98e7e). The mechanism is acceptable inside the item in principle. The
+timing-only ablation may run now, under G8. G2 and G3 come back as designs
+of their own.
+
+The first draft rested on five claims the review found false. Each is
+answered above:
+- **R1, two kinds of park.** The general path does park: `park_for_reply`,
+  with a live chain and the reply cell. Answered by the `continuation` mark
+  (V2-1).
+- **R2, the reserve's size.** A 56-byte reserve entered the call with RSP
+  ≡ 0 mod 16, breaking the ABI. It is now 64 bytes, with the resume frame
+  in its upper 56 (V2-2).
+- **R3, a self-deadlock.** C2's endpoint drop under the run-queue lock could
+  end in `Endpoint::drop`'s `wake_at_home` on the lock already held. The
+  `Arc` now lives in a named field, never dropped masked or under a lock
+  (V2-7).
+- **R4, the general resume's list.** It omitted the vector mark and the
+  link-time hook the trampoline needs. Both are now in `fast_resume`
+  (V2-8).
+- **R5, controls that could not fire.** I1's and I2's controls could not be
+  shown to fire. Each is now an always-on assert with a deterministic
+  control (V2-3, V2-4).
+
+Also corrected:
+- `queue.previous` is used. `switch_chosen` stays the one tail, and the
+  trampoline's `finish_switch` takes it.
+- `set_entry_stack` is already made in `switch_user_state`.
+- I3 holds for the stub's call chain. The trampoline reserves again for
+  its own.
+- The `loom` model gains the release-after-jump ordering.
+- No dump walks a blocked task's stack.
+
+**The conditions**, V2-1 to V2-14, are in the ledger at line 511. Each is
+cited where the text above meets it.
+
+**Outside §9.12**, the review found a possible masked drop of the last
+`Arc<Endpoint>` on `main` (native.rs:1058-1091). The product owner routed
+it to po10-obj, which is first to show whether it can be reached. C2 takes
+the form of its fix.
+
+#### The second reading (2026-10-07, ledger 524): OK IF V2-15 to V2-22
+
+The review accepted the single trampoline for both resumes. It removes R3
+by construction: the woken task's `finish_switch` lets the lock go before
+anything in the trampoline can drop an endpoint.
+
+The four points it was asked to check:
+- **(a)** The alignment chain holds. Taking the stack top T as 16-byte
+  aligned:
+  - the stub's call enters `ferrix_syscall_entry` at T−200, as the ABI
+    wants;
+  - `ferrix_switch`'s return leaves RSP at T−128;
+  - the trampoline's re-reserve and call reach T−200 again.
+
+  The exit label sits on the `addq $64` itself, and every caller computes
+  `frame` before its `subq`.
+- **(b)** The direct jump is equivalent in all the trampoline relies on.
+  Only RBP and the callee-saved registers differ: zeros on a general
+  resume, A's kernel values on a direct one. So the trampoline zeroes RBP,
+  and its contract says it reads nothing but RSP. The 16 pops overwrite
+  every register before `sysretq`.
+- **(c)** Running `finish_switch` first is correct for both entries. On the
+  direct entry it releases the lock the direct switch took by
+  `try_lock_manually`, and takes `previous` (A), as `Direct::switch` hands
+  it over today.
+- **(d)** The mark's set and clear points are sound. One claim of the first
+  revision was false: "a commit to an unmarked peer is made exactly as
+  today", which would have left every trip unmarked. V2-15 fixes it above.
+
+The added conditions, each to be met by the code and its review:
+- **V2-15, the first trip.** A commit to an unmarked peer still parks its
+  caller as a continuation, `ferrix_switch` given a scratch save word. It
+  has a trip-count case. The control passes A's own slot, and I1 must fire.
+- **V2-16, "replied" cannot outlive its trip.** The branch is chosen from
+  the entry, for example by a register the resume frame pops as zero, or
+  the flag is cleared on read. A case has a general resume follow a direct
+  trip, with its control.
+- **V2-17, the switch invariant stays in the core.** `finish_switch`, both
+  clears and the I2 assert run in core code before the third hook. The hook
+  forwards only the call layer (ledger 415, H1).
+- **V2-18, A3 and I1 on the direct resume.** The direct resume keeps A3
+  (`require_preemption_on`), and `Direct`'s drop still never releases the
+  lock. The I1 assert sits in `switch_chosen`, so that it covers the direct
+  resume too.
+- **V2-19, I2's assert travels with the release.** It is part of the
+  release in `finish_switch`. Its control moves that release, not a second
+  copy of it, so it fires with the assert's own text.
+- **V2-20, the vector mark at today's points.** It is lowered after
+  `continue_general` returns and at `frame_tail`'s exits, not before the
+  branches.
+- **V2-21, the two lists before the code review.** V2-5's walk and V2-6's
+  dead-frame list are written out. By the review's reading, the dead-frame
+  list is the lookup's `Arc<Endpoint>` alone (into `parked_on`). The half
+  guards are dropped before the switch, and everything else is `Copy` or
+  borrowed.
+- **V2-22, C2's quiet release takes po10-obj's form, and G1 lands after
+  that fix.** `object::dispose` on `main` is not yet a deferral, so the
+  form G1 reuses must:
+  - allocate nothing while interrupts are masked;
+  - wait on no lock there;
+  - bound the delay of the peer's `PEER_CLOSED`;
+  - carry a check that fires on both resumes.
+
+  Where it cannot meet these, the quiet branch takes the general branch
+  instead (`Arc::into_inner`) and lets go of the endpoint there, with
+  interrupts on.
+
+**Where it stands.** G1 with C1 and C2 may be built now under V2-1 to V2-22,
+G1 to G11. It lands only after po10-obj's fix of the masked endpoint drop is
+on `main`. The timing ablation (`os76/unwind-abl`) runs first. If the unwind
+is worth little, G1 is weighed again before it is built.
+
+#### Measured since the second reading (2026-10-07, os-76 window 1)
+
+The timing ablation's figures:
+- **The tree.** `os76/unwind-abl` 9b8d04556, on `08984c2db`. The woken
+  task's way back is cut from about nine returns to three.
+- **Per round trip** (host perf, guest mode, fast clock mode, quiet host):
+  4,868 cycles and 4,996 instructions, against 4,841 and 4,981 on
+  `main`'s code. Return mispredicts were 9.99 per trip on both sides.
+- **ABAB in the slow clock mode:** +10 to +20 ns, 3 boots against 5.
+
+So G1's premise is false: the ten return mispredicts a trip are not the
+kernel's unwind. A per-function profile places them after the user's
+`syscall` in `trap_words`, at `finish_switch`'s `Arc<Task>` drop and in
+`load_selectors`. G1's remaining saving is `ferrix_switch`,
+`finish_switch` and the reply cell, a few dozen instructions out of about
+5,000 a trip.
+
+**G1 is not built.** It is weighed again against the profile: the
+scheduler's hand-over is about 2,500 instructions a trip, and that comes
+first. The profile is on the gate host, at
+`~/.local/share/ferrix/logs/os76/profile-main60.txt`.
 
 ### 9.14 ARMv7-A user state: the stub's clobbers, 3a's reset and 3b (design for the consultant, os07-ustate, 2026-10-08)
 
