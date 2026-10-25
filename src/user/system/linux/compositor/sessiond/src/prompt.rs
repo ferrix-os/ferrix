@@ -278,7 +278,8 @@ impl Prompts {
         let mut address: libc::sockaddr_un = unsafe { core::mem::zeroed() };
         address.sun_family = libc::sa_family_t::try_from(libc::AF_UNIX).unwrap_or(1);
         for (slot, byte) in address.sun_path.iter_mut().zip(SOCKET.bytes()) {
-            *slot = byte.cast_signed();
+            // `c_char` is `i8` on x86-64 and `u8` on AArch64: the bits, either way.
+            *slot = libc::c_char::from_ne_bytes([byte]);
         }
         // The socket is made 0600 before anyone can connect: the umask.
         // SAFETY: `umask` takes and returns a mode.
