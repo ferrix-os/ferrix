@@ -747,6 +747,32 @@ fn home() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+/// Copy every file of `from` into `tree` that `tree` does not have, as
+/// hard links. A file both have stays `tree`'s: the NVIDIA volume's GL
+/// stack is NVIDIA's, and Chrome's tree carries Debian's libglvnd (since
+/// `chrome-4`, for GTK 4), whose `libGLdispatch.so.0`, laid over NVIDIA's,
+/// left NVIDIA's `libEGL` on another dispatch library: `virgl_test_server`
+/// died in its EGL's start, and hyprix's GPU path with it ("failed to fill
+/// whole buffer", 2026-10-25).
+fn merge_keeping(tree: &Path, from: &Path) -> Result<()> {
+    let merged = Command::new("cp")
+        .arg("-a")
+        .arg("--link")
+        .arg("--update=none")
+        .arg(format!("{}/.", from.display()))
+        .arg(tree)
+        .status()
+        .map_err(|error| Error::new(format!("running cp: {error}")))?;
+    if !merged.success() {
+        return Err(Error::new(format!(
+            "merging {} into {}: {merged}",
+            from.display(),
+            tree.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Merge Chrome's tree, or `--everything`'s whole one `beside`, into the
 /// NVIDIA volume's `tree`.
 fn merge_beside(tree: &Path, beside: Option<&Path>) -> Result<()> {
@@ -763,21 +789,7 @@ fn merge_beside(tree: &Path, beside: Option<&Path>) -> Result<()> {
         let chrome_tree = chrome.with_file_name("tree");
         if chrome_tree.is_dir() {
             usr_merge(tree, &chrome_tree)?;
-            let merged = Command::new("cp")
-                .arg("-a")
-                .arg("--link")
-                .arg("--remove-destination")
-                .arg(format!("{}/.", chrome_tree.display()))
-                .arg(tree)
-                .status()
-                .map_err(|error| Error::new(format!("running cp: {error}")))?;
-            if !merged.success() {
-                return Err(Error::new(format!(
-                    "merging {} into {}: {merged}",
-                    chrome_tree.display(),
-                    tree.display()
-                )));
-            }
+            merge_keeping(tree, &chrome_tree)?;
             println!(
                 "  volume: Chrome's tree merged from {}",
                 chrome_tree.display()
@@ -1648,5 +1660,36 @@ nvrm: quiesce: done in 1840 ms
         let stuck = "nvrm: quiesce: asked by /run/nvrm-quiesce\n\
                      nvrm: quiesce: not done after 20 s, in NVKMS (freeing its device); the GPU is left as it is\n";
         assert_eq!(quiesced(&lines(stuck)), Quiesced::Stuck);
+    }
+    /// Chrome's tree merged into the NVIDIA volume's adds what the volume
+    /// has not and leaves what it has as it was, a symbolic link of
+    /// Chrome's over a file of NVIDIA's included.
+    #[test]
+    fn a_merge_keeps_the_nvidia_volumes_own_files() {
+        let base =
+            std::env::temp_dir().join(format!("ferrix-merge-keeping-{}", std::process::id()));
+        let (tree, from) = (base.join("tree"), base.join("from"));
+        let lib = |root: &Path| root.join("usr/lib/x86_64-linux-gnu");
+        for root in [&tree, &from] {
+            std::fs::create_dir_all(lib(root)).unwrap();
+        }
+        std::fs::write(lib(&tree).join("libGLdispatch.so.0"), "nvidia").unwrap();
+        std::fs::write(lib(&from).join("libGLdispatch.so.0.0.0"), "debian").unwrap();
+        std::os::unix::fs::symlink(
+            "libGLdispatch.so.0.0.0",
+            lib(&from).join("libGLdispatch.so.0"),
+        )
+        .unwrap();
+        std::fs::write(lib(&from).join("libgtk-4.so.1"), "gtk").unwrap();
+        merge_keeping(&tree, &from).unwrap();
+        let kept = lib(&tree).join("libGLdispatch.so.0");
+        assert!(!kept.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "nvidia");
+        assert_eq!(
+            std::fs::read_to_string(lib(&tree).join("libgtk-4.so.1")).unwrap(),
+            "gtk"
+        );
+        assert!(lib(&tree).join("libGLdispatch.so.0.0.0").exists());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
