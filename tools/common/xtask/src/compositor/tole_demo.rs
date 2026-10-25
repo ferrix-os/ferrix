@@ -264,7 +264,7 @@ fn carried_program(program: &std::path::Path) -> Result<Carried> {
 /// CPU.
 pub(super) fn test_tole_demo(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (image, kernel) = judged_image(arch, programs, CONFIG, carried(arch)?, None, args)?;
-    let said = run_demo(arch, &image, &kernel, args)?;
+    let said = run_demo(arch, &image, &kernel, args, None)?;
     if !said.iter().any(|line| line.contains(FELL_BACK)) {
         return Err(Error::new(format!(
             "{arch}: the static demo, asked for the GPU, never said `{FELL_BACK}`"
@@ -287,7 +287,7 @@ pub(super) fn test_tole_demo_gpu(arch: Arch, programs: &Programs, args: &Args) -
     args.data_image = Some(volume);
     let carried = carried_program(&build_examples_gnu()?)?;
     let (image, kernel) = judged_image(arch, programs, CONFIG_GPU, carried, None, &args)?;
-    let said = run_demo(arch, &image, &kernel, &args)?;
+    let said = run_demo(arch, &image, &kernel, &args, Some(DRAWN_ON_LAVAPIPE))?;
     judge_drawn_by(arch, &said, DRAWN_ON_LAVAPIPE)?;
     println!("  {arch}: tole's GPU renderer drew the demo on lavapipe");
     Ok(())
@@ -320,12 +320,15 @@ fn judge_drawn_by(arch: Arch, said: &[String], wanted: &str) -> Result<()> {
 }
 
 /// Boot `image`, drive the demo and judge its screen; answers what the
-/// guest said.
+/// guest said. With `settled`, the boot waits after the keys for the demo
+/// to say it: the GPU is made on a thread while the CPU draws, and under a
+/// loaded host lavapipe's start outlasts the keys.
 fn run_demo(
     arch: Arch,
     image: &std::path::Path,
     kernel: &std::path::Path,
     args: &Args,
+    settled: Option<&str>,
 ) -> Result<Vec<String>> {
     let port = free_port()?;
     let mut qemu_args = args.clone();
@@ -335,7 +338,7 @@ fn run_demo(
     let mut said = Vec::new();
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         watching.stop_when_done();
-        said = drive(arch, port, &dump, watching)?;
+        said = drive(arch, port, &dump, watching, settled)?;
         Ok(())
     };
     let _ = crate::qemu::watch_then(arch, image, kernel, &qemu_args, EITHER, hook)?;
@@ -373,6 +376,7 @@ fn drive(
     port: u16,
     dump: &std::path::Path,
     watching: &mut Watching<'_>,
+    settled: Option<&str>,
 ) -> Result<Vec<String>> {
     let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
     let up = watching.read_more(Instant::now() + SETTLE, |lines| {
@@ -414,6 +418,13 @@ fn drive(
             ));
         }
         println!("  {arch}: {what}");
+    }
+    if let Some(wanted) = settled {
+        let _ = watching.read_more(Instant::now() + PATIENCE, |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("tole-examples:") && line.contains(wanted))
+        })?;
     }
     watching.read_what_was_said(Duration::from_secs(1))?;
     Ok(watching
