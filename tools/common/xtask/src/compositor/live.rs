@@ -293,12 +293,14 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
 /// machine has, and the licence inventory reads their tarballs. Unless the
 /// caller named them (`FERRIX_SHELL_TREES`, as the release workflow does),
 /// `tools/common/fetch/fetch-shell-trees.sh` fetches them into
-/// `~/.local/share/ferrix/live-iso-shell`, checked against the pins.
+/// the target directory's `live-iso-shell`, checked against the pins.
 fn pinned_shell_trees() -> Result<()> {
     if std::env::var_os("FERRIX_SHELL_TREES").is_some() {
         return Ok(());
     }
-    let dir = paths::volume_directory("live-iso-shell")?;
+    // In this tree's target directory: two trees building at once must not
+    // unpack into one directory.
+    let dir = paths::target_dir().join("live-iso-shell");
     let script = paths::workspace_root().join("tools/common/fetch/fetch-shell-trees.sh");
     let status = std::process::Command::new("bash")
         .arg(&script)

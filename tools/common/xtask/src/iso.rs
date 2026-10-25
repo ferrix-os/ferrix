@@ -101,7 +101,7 @@ pub(crate) fn write(volume: &Path, extras: &[Extra], label: &str, out: &Path) ->
     Ok(layout)
 }
 
-/// [`write`] onto any seekable target: the tests write into memory.
+/// [`write()`] onto any seekable target: the tests write into memory.
 pub(crate) fn lay_out<R: Read, W: Write + Seek>(
     volume: &mut R,
     esp_bytes: u64,
