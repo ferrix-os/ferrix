@@ -128,7 +128,21 @@ pub(super) fn test_idle(arch: Arch, programs: &Programs, args: &Args) -> Result<
             run.wait_for(&["hypridle-test: idle for 5 s"])?;
             run.black("the screen turned off by the dpms listener, with no input for 20 s")?;
             press(&mut run.qmp, &["l"])?;
-            run.wait_for(&TEST_SAID)?;
+            if let Err(error) = run.wait_for(&TEST_SAID) {
+                // Which half failed: the key, or the compositor? A second
+                // key, bound to a command hyprix says it started, tells.
+                press(&mut run.qmp, &["n"])?;
+                let reached = run.wait_for(&["started /bin/busybox"]).is_ok();
+                println!(
+                    "  {arch}: after the lock key went unanswered, a second key {}",
+                    if reached {
+                        "reached the compositor: the first was lost"
+                    } else {
+                        "did not reach the compositor either"
+                    }
+                );
+                return Err(error);
+            }
             run.wait_for(&["lock: locked 1 screen(s) and unlocked again"])?;
             run.tiled("the windows again, the key having ended the idle and the lock let go")
         },
