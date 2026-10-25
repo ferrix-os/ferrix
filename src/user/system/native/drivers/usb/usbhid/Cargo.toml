@@ -20,6 +20,7 @@ ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-rt.workspace = true
 ferrix-usb-host.workspace = true
+ferrix-usbif.workspace = true
 
 [lints]
 workspace = true

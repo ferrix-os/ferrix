@@ -20,6 +20,7 @@ members = [
     "src/lib/proto/inputctl",
     "src/lib/proto/sndctl",
     "src/lib/proto/chardevctl",
+    "src/lib/proto/usbif",
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
     "src/lib/log/lode",
@@ -65,6 +66,7 @@ members = [
     "src/lib/drivers/display/modes",
     "src/lib/drivers/display/stm32-display",
     "src/lib/drivers/usb/usb-host",
+    "src/lib/drivers/usb/usb-serial",
     "src/lib/drivers/usb/usb-device",
     "src/lib/drivers/usb/dwc3",
     "src/lib/drivers/gpu/gc400",
@@ -134,6 +136,7 @@ members = [
     "src/user/system/native/drivers/input/virtio-input",
     "src/user/system/native/drivers/sound/virtio-snd",
     "src/user/system/native/drivers/usb/usbhid",
+    "src/user/system/native/drivers/usb/usbserial",
     "src/user/system/native/drivers/usb/usbdev",
     "src/user/system/native/drivers/power/x86",
     "src/user/system/native/drivers/gpu/gc400",
@@ -177,6 +180,7 @@ ferrix-renderctl = { path = "src/lib/proto/renderctl" }
 ferrix-inputctl = { path = "src/lib/proto/inputctl" }
 ferrix-sndctl = { path = "src/lib/proto/sndctl" }
 ferrix-chardevctl = { path = "src/lib/proto/chardevctl" }
+ferrix-usbif = { path = "src/lib/proto/usbif" }
 ferrix-adb = { path = "src/lib/proto/adb" }
 ferrix-vdagent = { path = "src/lib/drivers/console/vdagent" }
 ferrix-logctl = { path = "src/lib/proto/logctl" }
@@ -217,6 +221,7 @@ ferrix-stm32-sdmmc = { path = "src/lib/drivers/block/stm32-sdmmc" }
 ferrix-nvme = { path = "src/lib/drivers/block/nvme" }
 ferrix-ahci = { path = "src/lib/drivers/block/ahci" }
 ferrix-usb-host = { path = "src/lib/drivers/usb/usb-host" }
+ferrix-usb-serial = { path = "src/lib/drivers/usb/usb-serial" }
 ferrix-usb-device = { path = "src/lib/drivers/usb/usb-device" }
 ferrix-dwc3 = { path = "src/lib/drivers/usb/dwc3" }
 ferrix-gc400 = { path = "src/lib/drivers/gpu/gc400" }

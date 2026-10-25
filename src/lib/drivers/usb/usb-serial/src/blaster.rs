@@ -22,7 +22,7 @@
 //! [`Jtag`] keeps the state machine in Run-Test/Idle between scans, and
 //! knows no more about the chain than [`Jtag::idcodes`] reads from it.
 //! It is written against [`Link`], which the bus gives for a cable it
-//! found (`crate::bus::Bus::blaster`) and the tests give for a model.
+//! found ([`crate::port::Cable`]) and the tests give for a model.
 
 /// Bit-bang: TCK.
 pub const TCK: u8 = 1 << 0;

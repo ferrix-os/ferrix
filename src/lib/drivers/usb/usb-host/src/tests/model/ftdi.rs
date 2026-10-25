@@ -34,6 +34,8 @@ pub(in crate::tests) struct Serial {
     pub(in crate::tests) line_error: u8,
     /// Every byte the host sent.
     pub(in crate::tests) from_host: Vec<u8>,
+    /// The modem-status byte its packets carry.
+    pub(in crate::tests) modem: u8,
     /// NAK every OUT request: what a chip does while CTS holds it off.
     pub(in crate::tests) hold_out: bool,
     /// Stall every OUT request.
@@ -52,6 +54,7 @@ impl Serial {
             line_error: 0,
             from_host: Vec::new(),
             hold_out: false,
+            modem: MODEM,
             stall_out: false,
             cable: None,
         }
@@ -61,7 +64,7 @@ impl Serial {
     pub(in crate::tests) fn bulk_in(&mut self, asked: usize) -> Option<Vec<u8>> {
         if self.status_only > 0 {
             self.status_only -= 1;
-            return Some(vec![MODEM, LINE]);
+            return Some(vec![self.modem, LINE]);
         }
         if self.to_host.is_empty() {
             return None;
@@ -69,7 +72,7 @@ impl Serial {
         let mut out = Vec::new();
         while !self.to_host.is_empty() && asked - out.len() >= self.max_packet {
             let line = LINE | core::mem::take(&mut self.line_error);
-            out.extend_from_slice(&[MODEM, line]);
+            out.extend_from_slice(&[self.modem, line]);
             let take = self.to_host.len().min(self.max_packet - 2);
             out.extend(self.to_host.drain(..take));
             if take < self.max_packet - 2 {

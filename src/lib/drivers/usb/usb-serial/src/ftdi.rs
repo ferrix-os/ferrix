@@ -40,7 +40,7 @@
 //! stripped a packet at a time ([`payload`]), the endpoint's packet size
 //! apart: 64 bytes at full speed, 512 at high speed.
 
-use crate::usb::Setup;
+use crate::Setup;
 
 /// FTDI's vendor id.
 pub const VENDOR_FTDI: u16 = 0x0403;
@@ -255,6 +255,8 @@ pub enum Flow {
     None,
     /// RTS and CTS.
     RtsCts,
+    /// DTR and DSR.
+    DtrDsr,
     /// XON and XOFF, with these two characters.
     XonXoff {
         /// The character that restarts output.
@@ -323,6 +325,8 @@ const CMSPAR: u32 = 0o10_000_000_000;
 const CRTSCTS: u32 = 0o20_000_000_000;
 /// `c_iflag`: XON/XOFF on input, as `IXON` is on output.
 const IXOFF: u32 = 0o10_000;
+/// `c_iflag`: XON/XOFF on output.
+const IXON: u32 = 0o2000;
 
 impl Termios {
     /// The line these settings ask for. A speed of 0 is the hang-up
@@ -344,7 +348,7 @@ impl Termios {
         };
         let flow = if self.cflag & CRTSCTS != 0 {
             Flow::RtsCts
-        } else if self.iflag & (ferrix_linux_abi::types::IXON | IXOFF) != 0 {
+        } else if self.iflag & (IXON | IXOFF) != 0 {
             Flow::XonXoff {
                 start: self.start,
                 stop: self.stop,
@@ -426,6 +430,23 @@ pub fn configure(chip: Chip, port: u16, line: &Line) -> Option<[Setup; 3]> {
         Chip::X | Chip::H => (high << 8) | port,
     };
     let baud = vendor(REQUEST_BAUD, divisor as u16, index);
+    let data = framing(port, line, false);
+    let (value, handshake) = match line.flow {
+        Flow::None => (0, 0),
+        Flow::RtsCts => (0, 0x0100),
+        Flow::DtrDsr => (0, 0x0200),
+        Flow::XonXoff { start, stop } => ((u16::from(stop) << 8) | u16::from(start), 0x0400),
+    };
+    let flow = vendor(REQUEST_FLOW, value, handshake | port);
+    Some([baud, data, flow])
+}
+
+/// `SET_DATA` for `line`'s framing on port `port`, with the line held in
+/// break (TX low) or not: a break is the framing request again with bit
+/// 14 set, and its end the same request without it, as `ftdi_sio`'s
+/// `break_ctl` sends.
+#[must_use]
+pub fn framing(port: u16, line: &Line, held_break: bool) -> Setup {
     let parity: u16 = match line.parity {
         Parity::None => 0,
         Parity::Odd => 1,
@@ -434,18 +455,11 @@ pub fn configure(chip: Chip, port: u16, line: &Line) -> Option<[Setup; 3]> {
         Parity::Space => 4,
     };
     let stop: u16 = if line.two_stop_bits { 2 } else { 0 };
-    let data = vendor(
+    vendor(
         REQUEST_DATA,
-        u16::from(line.data_bits) | (parity << 8) | (stop << 11),
+        u16::from(line.data_bits) | (parity << 8) | (stop << 11) | (u16::from(held_break) << 14),
         port,
-    );
-    let (value, handshake) = match line.flow {
-        Flow::None => (0, 0),
-        Flow::RtsCts => (0, 0x0100),
-        Flow::XonXoff { start, stop } => ((u16::from(stop) << 8) | u16::from(start), 0x0400),
-    };
-    let flow = vendor(REQUEST_FLOW, value, handshake | port);
-    Some([baud, data, flow])
+    )
 }
 
 /// The two status bytes at the start of a packet.

@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-usb-serial"
+description = "USB serial class drivers as logic over a claimed interface: FTDI's UARTs (FT232H and kin) and the USB-Blaster's JTAG"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

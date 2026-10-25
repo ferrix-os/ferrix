@@ -1,208 +1,36 @@
-//! FTDI serial adapters and the USB-Blaster: the chip's arithmetic on its
-//! own, then the bus behind the xHCI model, with the model's chip on the
-//! far side of the bulk pipes.
+//! Exported interfaces, and FTDI serial adapters and the USB-Blaster as
+//! their class drivers drive them: `ferrix-usb-serial`'s logic reaching a
+//! model chip through the bus's export calls, as `usbserial` reaches a
+//! real one through `usbhid`'s.
 
 use std::vec;
 use std::vec::Vec;
 
-use super::model::ftdi::{Cable, Serial, Tap, chip};
-use super::model::xhci::{Memory, Regs, Shared, Time, Xhci};
-use crate::blaster::{self, Jtag, MAX_TAPS};
-use crate::bus::{Bus, SerialChange};
-use crate::ftdi::{
-    self, Chip, Flow, LINE_PARITY, Line, PRODUCT_FT232, PRODUCT_FT232H, PRODUCT_USB_BLASTER,
-    Parity, Role, Status, Termios, VENDOR_ALTERA, VENDOR_FTDI,
+use ferrix_usb_serial::blaster::{self, Jtag, MAX_TAPS};
+use ferrix_usb_serial::ftdi::{
+    self, Chip, Flow, LINE_BREAK, LINE_OVERRUN, LINE_PARITY, Line, PRODUCT_FT232, PRODUCT_FT232H,
+    PRODUCT_USB_BLASTER, Parity, Role, VENDOR_ALTERA, VENDOR_FTDI,
 };
+use ferrix_usb_serial::port::{
+    self, Cable as Link, FLAG_BREAK, FLAG_NORMAL, FLAG_OVERRUN, FLAG_PARITY, Identity, Serial,
+};
+use ferrix_usb_serial::{CHUNK_BYTES, Setup, Usb};
+
+use super::model::ftdi::{Cable, Serial as Far, Tap, chip};
+use super::model::xhci::{Memory, Regs, Shared, Time, Xhci};
+use crate::bus::{Bus, ExportChange, ExportError, Output};
 use crate::usb::Speed;
 use crate::xhci::Controller;
 use crate::{Clock, MILLISECOND, Parts};
 
 type TestBus = Bus<Controller<Regs, Memory, Time>>;
 
-/// A MAX 10 10M08: a ten-bit IR, IDCODE at 0x006, and the IDCODE `OpenOCD`
-/// read from the customer's board.
 const MAX10_IDCODE: u32 = 0x0318_20DD;
 const MAX10_IR: usize = 10;
 const MAX10_IDCODE_INSTRUCTION: u64 = 0x006;
 
-// ---------------------------------------------------------------------------
-// The arithmetic
-// ---------------------------------------------------------------------------
-
-#[test]
-fn the_b_family_divides_three_megahertz_by_eighths() {
-    // 3 MHz / 9600 = 312.5: 312, and the half's code 1 in bits 16..14.
-    assert_eq!(ftdi::divisor(Chip::B, 9600), Some(0x4138));
-    // 3 MHz / 115200 = 26.04: 26, no fraction.
-    assert_eq!(ftdi::divisor(Chip::B, 115_200), Some(0x001A));
-    // The two the chips read specially: 3 Mbaud is divisor 1, sent as 0,
-    // and 2 Mbaud is 1.5, sent as 1.
-    assert_eq!(ftdi::divisor(Chip::B, 3_000_000), Some(0));
-    assert_eq!(ftdi::divisor(Chip::B, 2_000_000), Some(1));
-    assert_eq!(ftdi::divisor(Chip::B, 4_000_000), None);
-    assert_eq!(ftdi::divisor(Chip::B, 100), None);
-}
-
-#[test]
-fn the_h_family_divides_twelve_megahertz_with_its_clock_bit() {
-    // 12 MHz / 115200 = 104.17: 104 and an eighth, whose code is 3, and
-    // bit 17 set.
-    assert_eq!(ftdi::divisor(Chip::H, 115_200), Some(0x2_C068));
-    assert_eq!(ftdi::divisor(Chip::H, 12_000_000), Some(0x2_0000));
-    assert_eq!(ftdi::divisor(Chip::H, 3_000_000), Some(0x2_0004));
-    // Below 1200 the 3 MHz clock, without the bit.
-    assert_eq!(ftdi::divisor(Chip::H, 300), Some(10_000));
-    assert_eq!(ftdi::divisor(Chip::H, 12_000_001), None);
-}
-
-#[test]
-fn every_rate_a_divisor_is_made_for_comes_back_within_three_percent() {
-    for chip in [Chip::B, Chip::R, Chip::X, Chip::H] {
-        for baud in [
-            184, 300, 1200, 2400, 9600, 19200, 38400, 57600, 115_200, 230_400, 460_800, 921_600,
-            1_000_000, 2_000_000, 3_000_000,
-        ] {
-            let value = ftdi::divisor(chip, baud).expect("a divisor");
-            let got = ftdi::rate(chip, value).expect("a rate");
-            assert!(
-                u64::from(got.abs_diff(baud)) * 100 <= u64::from(baud) * 3,
-                "{chip:?} {baud}: {got}"
-            );
-        }
-    }
-    for baud in [6_000_000, 8_000_000, 12_000_000] {
-        let value = ftdi::divisor(Chip::H, baud).expect("a divisor");
-        assert_eq!(ftdi::rate(Chip::H, value), Some(baud));
-    }
-}
-
-#[test]
-fn qemu_s_decoding_reads_the_b_family_s_divisor_as_its_rate() {
-    // hw/usb/dev-serial.c: the eighths' code from wValue's top two bits and
-    // wIndex's bit 0, then 24 MHz over eight times the divisor plus it.
-    let subdivisors = [0, 4, 2, 1, 3, 5, 6, 7];
-    for baud in [300, 9600, 115_200, 1_000_000] {
-        let [setup, ..] = ftdi::configure(
-            Chip::B,
-            0,
-            &Line {
-                baud,
-                ..Line::DEFAULT
-            },
-        )
-        .expect("setups");
-        let value = u32::from(setup.value);
-        let index = u32::from(setup.index);
-        let sub = subdivisors[(((value & 0xC000) >> 14) | ((index & 1) << 2)) as usize];
-        let divisor = value & 0x3FFF;
-        let (divisor, sub) = match (divisor, sub) {
-            (1, 0) => (1, 4),
-            (0, 0) => (1, 0),
-            other => other,
-        };
-        let speed = 24_000_000 / (8 * divisor + sub);
-        assert!(speed.abs_diff(baud) * 100 <= baud * 3, "{baud}: {speed}");
-    }
-}
-
-#[test]
-fn the_chips_are_told_apart_by_ids_and_release() {
-    assert_eq!(
-        ftdi::identify(VENDOR_FTDI, PRODUCT_FT232H, 0x900),
-        Some((Chip::H, Role::Uart))
-    );
-    assert_eq!(
-        ftdi::identify(VENDOR_FTDI, PRODUCT_FT232, 0x400),
-        Some((Chip::B, Role::Uart))
-    );
-    assert_eq!(
-        ftdi::identify(VENDOR_ALTERA, PRODUCT_USB_BLASTER, 0x400),
-        Some((Chip::B, Role::Blaster))
-    );
-    // An FT232AM's divisor is another, and nothing here computes it.
-    assert_eq!(ftdi::identify(VENDOR_FTDI, PRODUCT_FT232, 0x200), None);
-    assert_eq!(ftdi::identify(0x1234, PRODUCT_FT232H, 0x900), None);
-    assert_eq!(Chip::H.port(0), 1);
-    assert_eq!(Chip::B.port(0), 0);
-}
-
-#[test]
-fn the_status_bytes_go_from_every_packet() {
-    let mut transfer = vec![0x31, 0x60];
-    transfer.extend(0..62_u8);
-    transfer.extend_from_slice(&[0xF1, 0x64, 100, 101]);
-    let mut data = Vec::new();
-    let mut statuses = Vec::new();
-    ftdi::payload(&transfer, 64, |status, bytes| {
-        statuses.push(status);
-        data.extend_from_slice(bytes);
-    });
-    let mut wanted: Vec<u8> = (0..62).collect();
-    wanted.extend_from_slice(&[100, 101]);
-    assert_eq!(data, wanted);
-    assert_eq!(
-        statuses,
-        vec![
-            Status {
-                modem: 0x30,
-                line: 0x60
-            },
-            Status {
-                modem: 0xF0,
-                line: 0x64
-            }
-        ]
-    );
-    // A status-only packet has no data; a stray byte is no packet.
-    let mut none = Vec::new();
-    ftdi::payload(&[0x01, 0x60], 512, |_, bytes| none.extend_from_slice(bytes));
-    ftdi::payload(&[0x01], 512, |_, bytes| none.extend_from_slice(bytes));
-    assert!(none.is_empty());
-}
-
-#[test]
-fn a_termios_reads_as_the_line_it_asks_for() {
-    // cs7, parenb, parodd, cstopb, crtscts, at 57600.
-    let termios = Termios {
-        iflag: 0,
-        cflag: 0o40 | 0o400 | 0o1000 | 0o100 | 0o20_000_000_000,
-        ospeed: 57600,
-        start: 0x11,
-        stop: 0x13,
-    };
-    assert_eq!(
-        termios.line(9600),
-        Line {
-            baud: 57600,
-            data_bits: 7,
-            parity: Parity::Odd,
-            two_stop_bits: true,
-            flow: Flow::RtsCts,
-        }
-    );
-    // cs8, ixon, B0: the speed kept.
-    let termios = Termios {
-        iflag: 0x400,
-        cflag: 0o60,
-        ospeed: 0,
-        start: 0x11,
-        stop: 0x13,
-    };
-    assert_eq!(
-        termios.line(9600),
-        Line {
-            flow: Flow::XonXoff {
-                start: 0x11,
-                stop: 0x13
-            },
-            ..Line::DEFAULT
-        }
-    );
-}
-
-// ---------------------------------------------------------------------------
-// On the bus
-// ---------------------------------------------------------------------------
+const IN: u8 = 0x81;
+const OUT: u8 = 0x02;
 
 fn started(model: &Shared) -> TestBus {
     Bus::with(
@@ -217,7 +45,7 @@ fn started(model: &Shared) -> TestBus {
 }
 
 /// The model with one chip on root port `port` (0 and 1 are USB 2), its
-/// far side `serial`, and the bus once it found it.
+/// far side behind it, and the bus once it found and exported it.
 fn board(
     device: super::model::Device,
     port: usize,
@@ -228,14 +56,15 @@ fn board(
         let mut m = model.borrow_mut();
         let packet = if device.speed == Speed::High { 512 } else { 64 };
         let index = m.add(device);
-        let mut serial = Serial::new(index, packet);
-        serial.cable = cable;
-        m.serials.push(serial);
+        let mut far = Far::new(index, packet);
+        far.cable = cable;
+        m.serials.push(far);
         m.plug_root(port, index);
         index
     };
     let mut bus = started(&model);
     bus.poll();
+    assert_eq!(bus.next_export_change(), Some(ExportChange::Attached(0)));
     (model, bus, index)
 }
 
@@ -268,24 +97,221 @@ fn vendor_requests(model: &Shared, device: usize) -> Vec<(u8, u16, u16)> {
         .collect()
 }
 
-/// Everything serial `serial` has, read until the controller has nothing
-/// more for `ms` milliseconds.
-fn drain(model: &Shared, bus: &mut TestBus, serial: usize, into: usize) -> Vec<u8> {
-    let mut got = Vec::new();
-    let mut buffer = vec![0_u8; into];
+/// A class driver's view of exported interface 0, through the bus's
+/// export calls: what `usbserial` has through `usbhid`'s channel.
+struct Driver<'a> {
+    bus: &'a mut TestBus,
+    model: Shared,
+}
+
+impl Usb for Driver<'_> {
+    type Error = ExportError;
+
+    fn control(&mut self, setup: &Setup, data: &mut [u8]) -> Result<usize, ExportError> {
+        self.bus.export_control(0, setup.bytes(), data)
+    }
+
+    fn send(&mut self, bytes: &[u8]) -> Result<usize, ExportError> {
+        self.bus.export_send(0, OUT, bytes)
+    }
+
+    fn in_flight(&self) -> usize {
+        self.bus.export_in_flight(0, OUT)
+    }
+
+    fn take_chunk(&mut self, into: &mut [u8; CHUNK_BYTES]) -> Option<usize> {
+        let chunk = self.bus.export_take_chunk(0, IN)?;
+        into[..chunk.len].copy_from_slice(chunk.as_slice());
+        Some(chunk.len)
+    }
+
+    fn pause(&mut self) -> Result<(), ExportError> {
+        Time(self.model.clone()).sleep_nanos(MILLISECOND / 2);
+        self.bus.on_interrupt()?;
+        Ok(())
+    }
+
+    fn now(&self) -> u64 {
+        Time(self.model.clone()).now_nanos()
+    }
+}
+
+fn driver<'a>(model: &Shared, bus: &'a mut TestBus) -> Driver<'a> {
+    Driver {
+        bus,
+        model: model.clone(),
+    }
+}
+
+/// Bind `ferrix-usb-serial` to exported interface 0, as `usbserial` does
+/// at its start: both streams opened, the chip set up.
+fn bind(model: &Shared, bus: &mut TestBus) -> Serial {
+    bus.export_open(0, IN).expect("IN opens");
+    bus.export_open(0, OUT).expect("OUT opens");
+    let export = *bus.export(0).expect("exported");
+    let identity = Identity {
+        vendor: export.identity.vendor,
+        product: export.identity.product,
+        release: export.identity.release,
+        interface: export.identity.interface,
+        max_packet: export.endpoints()[0].max_packet,
+    };
+    Serial::open(&mut driver(model, bus), &identity).expect("the chip is set up")
+}
+
+/// Everything the chip received, read `room` bytes at a time until the
+/// controller has had nothing more for 5 ms.
+fn drain(
+    model: &Shared,
+    bus: &mut TestBus,
+    serial: &mut Serial,
+    room: usize,
+) -> (Vec<u8>, Vec<u8>) {
+    let (mut got, mut marks) = (Vec::new(), Vec::new());
+    let (mut data, mut flags) = (vec![0_u8; room], vec![0_u8; room]);
     let mut quiet = 0;
     while quiet < 5 {
         pass(model, bus, 1);
-        let n = bus.serial_read(serial, &mut buffer);
+        let n = serial.read(&mut driver(model, bus), &mut data, &mut flags);
         if n == 0 {
             quiet += 1;
         } else {
             quiet = 0;
-            got.extend_from_slice(&buffer[..n]);
+            got.extend_from_slice(&data[..n]);
+            marks.extend_from_slice(&flags[..n]);
         }
     }
-    got
+    (got, marks)
 }
+
+// ---------------------------------------------------------------------------
+// The export
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_vendor_interface_is_exported_with_its_identity_and_endpoints() {
+    let (model, bus, _) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let export = *bus.export(0).expect("exported");
+    let identity = export.identity;
+    assert_eq!(
+        (identity.vendor, identity.product, identity.release),
+        (VENDOR_FTDI, PRODUCT_FT232H, 0x900)
+    );
+    assert_eq!(
+        (identity.class, identity.interface, identity.speed),
+        (0xFF, 0, 2)
+    );
+    assert_eq!(identity.path, 1 << 24, "root port 1, from one, no hub");
+    assert_eq!(identity.manufacturer.as_bytes(), b"FTDI");
+    assert_eq!(identity.product_name.as_bytes(), b"Model Serial");
+    let addresses: Vec<(u8, u16)> = export
+        .endpoints()
+        .iter()
+        .map(|endpoint| (endpoint.address, endpoint.max_packet))
+        .collect();
+    assert_eq!(addresses, vec![(IN, 512), (OUT, 512)]);
+    // Nothing was sent the chip: setting it up is its class driver's.
+    assert!(vendor_requests(&model, 0).is_empty());
+    no_violations(&model);
+}
+
+#[test]
+fn a_class_driver_asks_only_what_its_interface_may() {
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let mut none = [0_u8; 0];
+    let set_address = [0x00, 5, 9, 0, 0, 0, 0, 0];
+    let set_configuration = [0x00, 9, 0, 0, 0, 0, 0, 0];
+    let another_interface = [0x41, 1, 0, 0, 1, 0, 0, 0];
+    for refused in [set_address, set_configuration, another_interface] {
+        assert_eq!(
+            bus.export_control(0, refused, &mut none),
+            Err(ExportError::Refused),
+            "{refused:?}"
+        );
+    }
+    // A data stage longer than the buffer the driver gave is refused too.
+    assert_eq!(
+        bus.export_control(0, [0xC0, 5, 0, 0, 1, 0, 2, 0], &mut none),
+        Err(ExportError::Refused)
+    );
+    assert_eq!(model.borrow().world.devices[device].setups.len(), {
+        // Enumeration's own requests, and none of the refused.
+        let all = &model.borrow().world.devices[device].setups;
+        all.iter()
+            .filter(|setup| setup[0] != 0x40 && setup[0] != 0x41)
+            .count()
+    });
+    // A vendor request to the device goes.
+    assert_eq!(
+        bus.export_control(0, [0x40, 0, 0, 0, 1, 0, 0, 0], &mut none),
+        Ok(0)
+    );
+    // Streams only on the interface's own bulk endpoints, once each.
+    assert_eq!(bus.export_open(0, 0x83), Err(ExportError::Refused));
+    assert_eq!(bus.export_send(0, OUT, b"x"), Err(ExportError::Busy));
+    bus.export_open(0, OUT).expect("opens");
+    assert_eq!(bus.export_open(0, OUT), Err(ExportError::Busy));
+    no_violations(&model);
+}
+
+#[test]
+fn a_driver_that_goes_leaves_nothing_open_and_the_next_binds_as_the_first() {
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    model.borrow_mut().serials[0].to_host.extend(b"before");
+    assert_eq!(drain(&model, &mut bus, &mut serial, 4096).0, b"before");
+    // The driver dies: the host closes what it opened.
+    bus.export_release(0);
+    assert_eq!(bus.export_send(0, OUT, b"x"), Err(ExportError::Busy));
+    let requests = vendor_requests(&model, device).len();
+    // The next driver starts afresh, and the chip is set up again.
+    let mut again = bind(&model, &mut bus);
+    assert!(vendor_requests(&model, device).len() > requests);
+    model.borrow_mut().serials[0].to_host.extend(b"after");
+    assert_eq!(drain(&model, &mut bus, &mut again, 4096).0, b"after");
+    assert_eq!(again.write(&mut driver(&model, &mut bus), b"out"), Ok(3));
+    pass(&model, &mut bus, 1);
+    assert_eq!(model.borrow().serials[0].from_host, b"out");
+    no_violations(&model);
+}
+
+#[test]
+fn an_unplugged_interface_goes_and_comes_back_under_a_new_key() {
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let _ = bind(&model, &mut bus);
+    let key = bus.export(0).expect("exported").key;
+    model.borrow_mut().unplug_root(0);
+    bus.poll();
+    assert_eq!(bus.next_export_change(), Some(ExportChange::Detached(0)));
+    assert!(bus.export(0).is_none());
+    assert_eq!(bus.export_send(0, OUT, b"gone"), Err(ExportError::Gone));
+    assert_eq!(model.borrow().slots_used(), 0);
+    model.borrow_mut().plug_root(0, device);
+    bus.poll();
+    assert_eq!(bus.next_export_change(), Some(ExportChange::Attached(0)));
+    assert_ne!(bus.export(0).expect("exported").key, key);
+    no_violations(&model);
+}
+
+// ---------------------------------------------------------------------------
+// FTDI's UARTs
+// ---------------------------------------------------------------------------
 
 #[test]
 fn an_ft232h_is_set_up_as_a_uart_at_9600_8n1() {
@@ -294,8 +320,7 @@ fn an_ft232h_is_set_up_as_a_uart_at_9600_8n1() {
         0,
         None,
     );
-    assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
-    let serial = *bus.serial(0).expect("the port");
+    let serial = bind(&model, &mut bus);
     assert_eq!(
         (serial.chip, serial.role, serial.max_packet),
         (Chip::H, Role::Uart, 512)
@@ -328,21 +353,27 @@ fn bytes_go_out_and_come_in_without_the_status_bytes() {
         (Speed::Full, PRODUCT_FT232, 0x400, 1),
     ] {
         let (model, mut bus, _) = board(chip(speed, VENDOR_FTDI, product, release), port, None);
-        let _ = bus.next_serial_change();
+        let mut serial = bind(&model, &mut bus);
         let out: Vec<u8> = (0..3000).map(|at| (at * 7 % 251) as u8).collect();
-        assert_eq!(bus.serial_write(0, &out), Ok(out.len()));
+        assert_eq!(
+            serial.write(&mut driver(&model, &mut bus), &out),
+            Ok(out.len())
+        );
+        pass(&model, &mut bus, 1);
         assert_eq!(model.borrow().serials[0].from_host, out);
 
-        // More than a request holds, and more than the stream's queue, and
-        // three status-only packets before any of it.
         let incoming: Vec<u8> = (0..5000).map(|at| (at * 13 % 253) as u8).collect();
         {
             let mut m = model.borrow_mut();
             m.serials[0].status_only = 3;
             m.serials[0].to_host.extend(incoming.iter().copied());
         }
-        assert_eq!(drain(&model, &mut bus, 0, 4096), incoming, "{speed:?}");
-        assert_eq!(bus.serial(0).expect("the port").modem, 0xB0);
+        let (got, flags) = drain(&model, &mut bus, &mut serial, 4096);
+        assert_eq!(got, incoming, "{speed:?}");
+        assert!(flags.iter().all(|&flag| flag == FLAG_NORMAL));
+        assert_eq!(serial.modem, 0xB0);
+        assert_eq!(serial.counters.rx, 5000);
+        assert_eq!(serial.counters.tx, 3000);
         no_violations(&model);
     }
 }
@@ -354,244 +385,203 @@ fn a_reader_with_little_room_loses_nothing() {
         0,
         None,
     );
-    let _ = bus.next_serial_change();
+    let mut serial = bind(&model, &mut bus);
     let incoming: Vec<u8> = (0..4000).map(|at| (at % 241) as u8).collect();
     model.borrow_mut().serials[0]
         .to_host
         .extend(incoming.iter().copied());
-    // A buffer of one request's size takes a chunk at a time.
-    assert_eq!(drain(&model, &mut bus, 0, 512), incoming);
-    // One too small takes nothing, rather than part of a chunk.
+    assert_eq!(
+        drain(&model, &mut bus, &mut serial, CHUNK_BYTES).0,
+        incoming
+    );
+    // A buffer too small for a chunk takes nothing, rather than part of one.
     model.borrow_mut().serials[0].to_host.extend([1, 2, 3]);
     pass(&model, &mut bus, 2);
-    assert_eq!(bus.serial_read(0, &mut [0; 100]), 0);
-    assert_eq!(drain(&model, &mut bus, 0, 512), vec![1, 2, 3]);
+    assert_eq!(
+        serial.read(&mut driver(&model, &mut bus), &mut [0; 100], &mut [0; 100]),
+        0
+    );
+    assert_eq!(
+        drain(&model, &mut bus, &mut serial, CHUNK_BYTES).0,
+        vec![1, 2, 3]
+    );
 }
 
 #[test]
-fn a_line_error_is_kept_until_it_is_asked_for() {
+fn line_errors_mark_their_bytes_as_linux_s_ftdi_sio_does() {
     let (model, mut bus, _) = board(
         chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400),
         0,
         None,
     );
-    let _ = bus.next_serial_change();
+    let mut serial = bind(&model, &mut bus);
+    // A parity error marks every byte of its packet.
     {
         let mut m = model.borrow_mut();
         m.serials[0].line_error = LINE_PARITY;
-        m.serials[0].to_host.extend(b"x");
+        m.serials[0].to_host.extend(b"xyz");
     }
-    assert_eq!(drain(&model, &mut bus, 0, 512), b"x");
-    assert_eq!(bus.take_serial_errors(0), LINE_PARITY);
-    assert_eq!(bus.take_serial_errors(0), 0);
+    let (got, flags) = drain(&model, &mut bus, &mut serial, 4096);
+    assert_eq!(
+        (got.as_slice(), flags.as_slice()),
+        (&b"xyz"[..], &[FLAG_PARITY; 3][..])
+    );
+    // A break marks only the NUL it arrived as.
+    {
+        let mut m = model.borrow_mut();
+        m.serials[0].line_error = LINE_BREAK;
+        m.serials[0].to_host.extend(b"a\0");
+    }
+    let (got, flags) = drain(&model, &mut bus, &mut serial, 4096);
+    assert_eq!(
+        (got.as_slice(), flags.as_slice()),
+        (&b"a\0"[..], &[FLAG_NORMAL, FLAG_BREAK][..])
+    );
+    // An overrun is a NUL of its own before the packet's bytes.
+    {
+        let mut m = model.borrow_mut();
+        m.serials[0].line_error = LINE_OVERRUN;
+        m.serials[0].to_host.extend(b"q");
+    }
+    let (got, flags) = drain(&model, &mut bus, &mut serial, 4096);
+    assert_eq!(
+        (got.as_slice(), flags.as_slice()),
+        (&b"\0q"[..], &[FLAG_OVERRUN, FLAG_NORMAL][..])
+    );
+    assert_eq!(
+        (
+            serial.counters.parity,
+            serial.counters.brk,
+            serial.counters.overrun
+        ),
+        (1, 1, 1)
+    );
 }
 
 #[test]
-fn a_new_line_is_sent_as_the_chip_s_three_requests() {
+fn modem_line_changes_are_counted_as_tiocgicount_counts_them() {
+    let (model, mut bus, _) = board(
+        chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    model.borrow_mut().serials[0].status_only = 1;
+    let _ = drain(&model, &mut bus, &mut serial, 4096);
+    assert_eq!(serial.modem, 0xB0, "CTS, DSR and carrier up");
+    // CTS and carrier drop, the ring indicator rises.
+    {
+        let mut m = model.borrow_mut();
+        m.serials[0].modem = 0x61;
+        m.serials[0].status_only = 1;
+    }
+    let _ = drain(&model, &mut bus, &mut serial, 4096);
+    assert_eq!(serial.modem, 0x60);
+    let counters = serial.counters;
+    assert_eq!(
+        (counters.cts, counters.dsr, counters.rng, counters.dcd),
+        (1, 0, 1, 1)
+    );
+}
+
+#[test]
+fn a_new_line_and_a_break_are_the_chip_s_own_requests() {
     let (model, mut bus, device) = board(
         chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
         0,
         None,
     );
-    let _ = bus.next_serial_change();
+    let mut serial = bind(&model, &mut bus);
     let before = vendor_requests(&model, device).len();
     let line = Line {
-        baud: 3_000_000,
+        baud: 12_000_000,
         data_bits: 7,
         parity: Parity::Even,
         two_stop_bits: true,
         flow: Flow::RtsCts,
     };
-    bus.serial_configure(0, &line).expect("configured");
+    serial
+        .configure(&mut driver(&model, &mut bus), &line)
+        .expect("configured");
     assert_eq!(
         vendor_requests(&model, device)[before..],
         [
-            (3, 0x0004, 0x0201),
+            (3, 0x0000, 0x0201),
             (4, 7 | (2 << 8) | (2 << 11), 1),
             (2, 0, 0x0101)
         ]
     );
-    assert_eq!(bus.serial(0).expect("the port").line, line);
+    assert_eq!(serial.line, line);
+    assert_eq!(serial.actual_baud(), 12_000_000);
     // A rate the chip cannot have leaves the line as it was.
-    assert!(bus.serial_configure(0, &Line { baud: 50, ..line }).is_err());
-    assert_eq!(bus.serial(0).expect("the port").line, line);
-    bus.serial_modem(0, false, true).expect("the modem lines");
+    assert_eq!(
+        serial.configure(&mut driver(&model, &mut bus), &Line { baud: 50, ..line }),
+        Err(port::Error::Rate)
+    );
+    assert_eq!(serial.line, line);
+    // An odd rate it can: 250000, DMX's, exactly.
+    let dmx = Line {
+        baud: 250_000,
+        ..Line::DEFAULT
+    };
+    serial
+        .configure(&mut driver(&model, &mut bus), &dmx)
+        .expect("250000");
+    assert_eq!(serial.actual_baud(), 250_000);
+    serial
+        .modem(&mut driver(&model, &mut bus), false, true)
+        .expect("the modem lines");
     assert_eq!(
         vendor_requests(&model, device).last(),
         Some(&(1, 0x0302, 1))
     );
+    // A break is the framing request with bit 14, its end without.
+    serial
+        .set_break(&mut driver(&model, &mut bus), true)
+        .expect("break on");
+    assert_eq!(
+        vendor_requests(&model, device).last(),
+        Some(&(4, 8 | (1 << 14), 1))
+    );
+    serial
+        .set_break(&mut driver(&model, &mut bus), false)
+        .expect("break off");
+    assert_eq!(vendor_requests(&model, device).last(), Some(&(4, 8, 1)));
+    serial
+        .set_latency(&mut driver(&model, &mut bus), 1)
+        .expect("latency");
+    assert_eq!(vendor_requests(&model, device).last(), Some(&(9, 1, 1)));
 }
 
 #[test]
-fn an_unplugged_adapter_goes_and_gives_its_slot_back() {
-    let (model, mut bus, device) = board(
-        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
-        0,
-        None,
-    );
-    let _ = bus.next_serial_change();
-    model.borrow_mut().unplug_root(0);
-    bus.poll();
-    assert_eq!(bus.next_serial_change(), Some(SerialChange::Detached(0)));
-    assert!(bus.serial(0).is_none());
-    assert!(bus.serial_write(0, b"gone").is_err());
-    assert_eq!(model.borrow().slots_used(), 0);
-    // Plugged in again, it is found again, at the same index.
-    model.borrow_mut().plug_root(0, device);
-    bus.poll();
-    assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
-    no_violations(&model);
-}
-
-// ---------------------------------------------------------------------------
-// The USB-Blaster
-// ---------------------------------------------------------------------------
-
-fn max10() -> Tap {
-    Tap::new(MAX10_IR, MAX10_IDCODE_INSTRUCTION, Some(MAX10_IDCODE))
-}
-
-fn blaster_board(taps: Vec<Tap>) -> (Shared, TestBus) {
+fn a_megabyte_through_a_slow_reader_loses_nothing() {
     let (model, mut bus, _) = board(
-        chip(Speed::Full, VENDOR_ALTERA, PRODUCT_USB_BLASTER, 0x400),
-        0,
-        Some(Cable::new(taps)),
-    );
-    assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
-    assert_eq!(bus.serial(0).expect("the cable").role, Role::Blaster);
-    (model, bus)
-}
-
-#[test]
-fn a_blaster_reads_the_max10_s_idcode() {
-    let (model, mut bus) = blaster_board(vec![max10()]);
-    let mut cable = bus.blaster(0).expect("a cable");
-    let mut jtag = Jtag::new(&mut cable);
-    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
-    assert_eq!(jtag.idcodes(&mut taps), Ok(1));
-    assert_eq!(taps[0], blaster::Tap::Idcode(MAX10_IDCODE));
-    // Version 0, part 0x3182, Altera's JEDEC code 0x6E.
-    assert_eq!(blaster::fields(MAX10_IDCODE), (0, 0x3182, 0x6E));
-    let m = model.borrow();
-    let cable = m.serials[0].cable.as_ref().expect("the cable");
-    assert!(cable.faults.is_empty(), "{:?}", cable.faults);
-    no_violations(&model);
-}
-
-#[test]
-fn ir_and_dr_scans_read_what_the_tap_captured() {
-    let (model, mut bus) = blaster_board(vec![max10()]);
-    let mut cable = bus.blaster(0).expect("a cable");
-    let mut jtag = Jtag::new(&mut cable);
-    jtag.reset().expect("reset");
-    // IR captures 0b01 in its lowest bits.
-    let mut tdo = [0_u8; 2];
-    jtag.scan(true, MAX10_IR, &[0x06, 0x00], &mut tdo)
-        .expect("the IR scan");
-    assert_eq!(u16::from_le_bytes(tdo) & 0x3FF, 0b01);
-    // IDCODE selected, DR is it.
-    let mut idcode = [0_u8; 4];
-    jtag.scan(false, 32, &[0; 4], &mut idcode)
-        .expect("the DR scan");
-    assert_eq!(u32::from_le_bytes(idcode), MAX10_IDCODE);
-    // BYPASS selected, DR is one zero, then what goes in comes out a bit
-    // later.
-    jtag.scan(true, MAX10_IR, &[0xFF, 0x03], &mut tdo)
-        .expect("BYPASS");
-    let mut out = [0_u8; 2];
-    jtag.scan(false, 16, &[0xA5, 0x5A], &mut out)
-        .expect("through BYPASS");
-    assert_eq!(u16::from_le_bytes(out), 0x5AA5 << 1);
-    let m = model.borrow();
-    let cable = m.serials[0].cable.as_ref().expect("the cable");
-    assert_eq!(cable.taps[0].updates, vec![0x006, 0x3FF]);
-    assert!(cable.faults.is_empty(), "{:?}", cable.faults);
-}
-
-#[test]
-fn a_chain_is_read_tap_by_tap_bypassed_ones_too() {
-    let other = 0x020F_30DD;
-    let (_, mut bus) = blaster_board(vec![
-        Tap::new(8, 0x01, Some(other)),
-        Tap::new(4, 0x01, None),
-        max10(),
-    ]);
-    let mut cable = bus.blaster(0).expect("a cable");
-    let mut jtag = Jtag::new(&mut cable);
-    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
-    assert_eq!(jtag.idcodes(&mut taps), Ok(3));
-    // The tap nearest TDO first.
-    assert_eq!(
-        taps[..3],
-        [
-            blaster::Tap::Idcode(MAX10_IDCODE),
-            blaster::Tap::Bypass,
-            blaster::Tap::Idcode(other)
-        ]
-    );
-}
-
-#[test]
-fn no_chain_reads_as_no_taps_and_a_tdo_held_low_as_a_fault() {
-    // Nothing behind the cable: TDO is TDI, all ones.
-    let (_, mut bus) = blaster_board(Vec::new());
-    let mut cable = bus.blaster(0).expect("a cable");
-    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
-    assert_eq!(Jtag::new(&mut cable).idcodes(&mut taps), Ok(0));
-
-    // Every tap bypassed, and more of them than are read: zeros all the
-    // way, which no chain of real taps ends in.
-    let bypassed = (0..40).map(|_| Tap::new(2, 0x01, None)).collect();
-    let (_, mut bus) = blaster_board(bypassed);
-    let mut cable = bus.blaster(0).expect("a cable");
-    assert_eq!(
-        Jtag::new(&mut cable).idcodes(&mut taps),
-        Err(blaster::Error::Chain)
-    );
-}
-
-#[test]
-fn a_uart_is_no_jtag_cable() {
-    let (_, mut bus, _) = board(
         chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
         0,
         None,
     );
-    let _ = bus.next_serial_change();
-    assert!(bus.blaster(0).is_none());
-}
-
-#[test]
-fn a_terminal_s_lines_read_as_commands() {
-    use blaster::{Command, Refused};
-    assert_eq!(Command::parse(b"  reset \n"), Ok(Command::Reset));
-    assert_eq!(Command::parse(b"idcode"), Ok(Command::Idcode));
-    let Ok(Command::Scan { ir, bits, tdi }) = Command::parse(b"ir 10 0x3ff") else {
-        panic!("a scan");
-    };
-    assert_eq!((ir, bits, &tdi[..3]), (true, 10, &[0xFF, 0x03, 0][..]));
-    let Ok(Command::Scan { ir, bits, tdi }) = Command::parse(b"dr 32 31820DD") else {
-        panic!("a scan");
-    };
-    assert_eq!((ir, bits), (false, 32));
-    assert_eq!(
-        u32::from_le_bytes(tdi[..4].try_into().expect("four")),
-        MAX10_IDCODE
-    );
-    assert_eq!(Command::parse(b"ir 10 0x7ff"), Err(Refused::Value));
-    assert_eq!(Command::parse(b"ir 10 0xg"), Err(Refused::Value));
-    assert_eq!(Command::parse(b"dr 0 1"), Err(Refused::Bits));
-    assert_eq!(Command::parse(b"dr 513 1"), Err(Refused::Bits));
-    assert_eq!(Command::parse(b"dr 8"), Err(Refused::Value));
-    assert_eq!(Command::parse(b"shift"), Err(Refused::Unknown));
-    assert_eq!(Command::parse(b"reset now"), Err(Refused::Unknown));
-
-    let mut text = std::string::String::new();
-    blaster::write_hex(&mut text, &[0xFF, 0x03], 10).expect("written");
-    assert_eq!(text, "0x3ff");
-    text.clear();
-    blaster::write_hex(&mut text, &MAX10_IDCODE.to_le_bytes(), 32).expect("written");
-    assert_eq!(text, "0x031820dd");
+    let mut serial = bind(&model, &mut bus);
+    let incoming: Vec<u8> = (0..1_048_576_u32)
+        .map(|at| (at.wrapping_mul(2_654_435_761) >> 24) as u8)
+        .collect();
+    model.borrow_mut().serials[0]
+        .to_host
+        .extend(incoming.iter().copied());
+    let mut got = Vec::new();
+    let (mut data, mut flags) = (vec![0_u8; CHUNK_BYTES], vec![0_u8; CHUNK_BYTES]);
+    // The reader takes one chunk every 3 ms: far slower than the chip
+    // could send, which the streams' queue holds back.
+    for _ in 0..20_000 {
+        pass(&model, &mut bus, 3);
+        let n = serial.read(&mut driver(&model, &mut bus), &mut data, &mut flags);
+        got.extend_from_slice(&data[..n]);
+        if got.len() == incoming.len() {
+            break;
+        }
+    }
+    assert_eq!(got.len(), incoming.len());
+    assert!(got == incoming, "the bytes came in order and whole");
+    no_violations(&model);
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +592,7 @@ fn a_terminal_s_lines_read_as_commands() {
 fn events_seen(bus: &mut TestBus) -> usize {
     let mut seen = 0;
     while let Some(output) = bus.next_output() {
-        if matches!(output, crate::bus::Output::Events(_)) {
+        if matches!(output, Output::Events(_)) {
             seen += 1;
         }
     }
@@ -616,14 +606,15 @@ fn a_chip_holding_its_out_endpoint_off_holds_back_only_its_own_bytes() {
         let mut m = model.borrow_mut();
         let keyboard = m.add(super::model::sem_keyboard());
         let ftdi = m.add(chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900));
-        m.serials.push(Serial::new(ftdi, 512));
+        m.serials.push(Far::new(ftdi, 512));
         m.plug_root(0, keyboard);
         m.plug_root(1, ftdi);
         keyboard
     };
     let mut bus = started(&model);
     bus.poll();
-    assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
+    assert_eq!(bus.next_export_change(), Some(ExportChange::Attached(0)));
+    let mut serial = bind(&model, &mut bus);
     let _ = events_seen(&mut bus);
 
     // CTS low: the chip NAKs every OUT packet.
@@ -631,16 +622,18 @@ fn a_chip_holding_its_out_endpoint_off_holds_back_only_its_own_bytes() {
     let out: Vec<u8> = (0..10_000).map(|at| (at * 11 % 251) as u8).collect();
     let clock = Time(model.clone());
     let before = clock.now_nanos();
-    let queued = bus.serial_write(0, &out).expect("queued");
+    let queued = serial
+        .write(&mut driver(&model, &mut bus), &out)
+        .expect("queued");
     // Queued at once, not waited for: no model time passed.
     assert_eq!(clock.now_nanos(), before, "the write waited for the chip");
     assert_eq!(queued, 6 * 512);
     assert_eq!(
-        bus.serial_write(0, &out[queued..]),
+        serial.write(&mut driver(&model, &mut bus), &out[queued..]),
         Ok(0),
         "a full stream takes nothing"
     );
-    assert_eq!(bus.serial_in_flight(0), queued);
+    assert_eq!(bus.export_in_flight(0, OUT), queued);
 
     // The keyboard on the same controller types all the while.
     for _ in 0..20 {
@@ -653,20 +646,22 @@ fn a_chip_holding_its_out_endpoint_off_holds_back_only_its_own_bytes() {
     }
     assert_eq!(events_seen(&mut bus), 40, "every key went through");
     assert!(model.borrow().serials[0].from_host.is_empty());
-    assert_eq!(bus.serial_in_flight(0), queued);
+    assert_eq!(bus.export_in_flight(0, OUT), queued);
 
     // CTS up again: what was held goes, then the rest, in order.
     model.borrow_mut().serials[0].hold_out = false;
     let mut sent = queued;
     for _ in 0..1000 {
         pass(&model, &mut bus, 1);
-        sent += bus.serial_write(0, &out[sent..]).expect("queued");
-        if sent == out.len() && bus.serial_in_flight(0) == 0 {
+        sent += serial
+            .write(&mut driver(&model, &mut bus), &out[sent..])
+            .expect("queued");
+        if sent == out.len() && bus.export_in_flight(0, OUT) == 0 {
             break;
         }
     }
     assert_eq!(model.borrow().serials[0].from_host, out);
-    assert_eq!(bus.take_serial_lost(0), 0);
+    assert_eq!(bus.export_take_lost(0, OUT), 0);
     no_violations(&model);
 }
 
@@ -677,15 +672,134 @@ fn a_stalled_out_endpoint_says_what_it_lost_and_sends_again() {
         0,
         None,
     );
-    let _ = bus.next_serial_change();
+    let mut serial = bind(&model, &mut bus);
     model.borrow_mut().serials[0].stall_out = true;
-    assert_eq!(bus.serial_write(0, &[7; 1000]), Ok(1000));
+    assert_eq!(
+        serial.write(&mut driver(&model, &mut bus), &[7; 1000]),
+        Ok(1000)
+    );
     pass(&model, &mut bus, 3);
-    assert_eq!(bus.take_serial_lost(0), 1000);
-    assert!(model.borrow().cleared_halts.contains(&(device, 0x02)));
+    assert_eq!(bus.export_take_lost(0, OUT), 1000);
+    assert!(model.borrow().cleared_halts.contains(&(device, OUT)));
     model.borrow_mut().serials[0].stall_out = false;
-    assert_eq!(bus.serial_write(0, b"again"), Ok(5));
+    assert_eq!(serial.write(&mut driver(&model, &mut bus), b"again"), Ok(5));
     pass(&model, &mut bus, 2);
     assert_eq!(model.borrow().serials[0].from_host, b"again");
     no_violations(&model);
+}
+
+// ---------------------------------------------------------------------------
+// The USB-Blaster
+// ---------------------------------------------------------------------------
+
+fn max10() -> Tap {
+    Tap::new(MAX10_IR, MAX10_IDCODE_INSTRUCTION, Some(MAX10_IDCODE))
+}
+
+fn blaster_board(taps: Vec<Tap>) -> (Shared, TestBus, Serial) {
+    let (model, mut bus, _) = board(
+        chip(Speed::Full, VENDOR_ALTERA, PRODUCT_USB_BLASTER, 0x400),
+        0,
+        Some(Cable::new(taps)),
+    );
+    let serial = bind(&model, &mut bus);
+    assert_eq!(serial.role, Role::Blaster);
+    (model, bus, serial)
+}
+
+#[test]
+fn a_blaster_reads_the_max10_s_idcode() {
+    let (model, mut bus, serial) = blaster_board(vec![max10()]);
+    let mut usb = driver(&model, &mut bus);
+    let mut cable = Link::new(&mut usb, &serial).expect("a cable");
+    let mut jtag = Jtag::new(&mut cable);
+    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
+    assert_eq!(jtag.idcodes(&mut taps), Ok(1));
+    assert_eq!(taps[0], blaster::Tap::Idcode(MAX10_IDCODE));
+    assert_eq!(blaster::fields(MAX10_IDCODE), (0, 0x3182, 0x6E));
+    let m = model.borrow();
+    let far = m.serials[0].cable.as_ref().expect("the cable");
+    assert!(far.faults.is_empty(), "{:?}", far.faults);
+    no_violations(&model);
+}
+
+#[test]
+fn ir_and_dr_scans_read_what_the_tap_captured() {
+    let (model, mut bus, serial) = blaster_board(vec![max10()]);
+    {
+        let mut usb = driver(&model, &mut bus);
+        let mut cable = Link::new(&mut usb, &serial).expect("a cable");
+        let mut jtag = Jtag::new(&mut cable);
+        jtag.reset().expect("reset");
+        let mut tdo = [0_u8; 2];
+        jtag.scan(true, MAX10_IR, &[0x06, 0x00], &mut tdo)
+            .expect("the IR scan");
+        assert_eq!(u16::from_le_bytes(tdo) & 0x3FF, 0b01);
+        let mut idcode = [0_u8; 4];
+        jtag.scan(false, 32, &[0; 4], &mut idcode)
+            .expect("the DR scan");
+        assert_eq!(u32::from_le_bytes(idcode), MAX10_IDCODE);
+        jtag.scan(true, MAX10_IR, &[0xFF, 0x03], &mut tdo)
+            .expect("BYPASS");
+        let mut out = [0_u8; 2];
+        jtag.scan(false, 16, &[0xA5, 0x5A], &mut out)
+            .expect("through BYPASS");
+        assert_eq!(u16::from_le_bytes(out), 0x5AA5 << 1);
+    }
+    let m = model.borrow();
+    let far = m.serials[0].cable.as_ref().expect("the cable");
+    assert_eq!(far.taps[0].updates, vec![0x006, 0x3FF]);
+    assert!(far.faults.is_empty(), "{:?}", far.faults);
+}
+
+#[test]
+fn a_chain_is_read_tap_by_tap_bypassed_ones_too() {
+    let other = 0x020F_30DD;
+    let (model, mut bus, serial) = blaster_board(vec![
+        Tap::new(8, 0x01, Some(other)),
+        Tap::new(4, 0x01, None),
+        max10(),
+    ]);
+    let mut usb = driver(&model, &mut bus);
+    let mut cable = Link::new(&mut usb, &serial).expect("a cable");
+    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
+    assert_eq!(Jtag::new(&mut cable).idcodes(&mut taps), Ok(3));
+    assert_eq!(
+        taps[..3],
+        [
+            blaster::Tap::Idcode(MAX10_IDCODE),
+            blaster::Tap::Bypass,
+            blaster::Tap::Idcode(other)
+        ]
+    );
+}
+
+#[test]
+fn no_chain_reads_as_no_taps_and_a_tdo_held_low_as_a_fault() {
+    let (model, mut bus, serial) = blaster_board(Vec::new());
+    let mut taps = [blaster::Tap::Bypass; MAX_TAPS];
+    {
+        let mut usb = driver(&model, &mut bus);
+        let mut cable = Link::new(&mut usb, &serial).expect("a cable");
+        assert_eq!(Jtag::new(&mut cable).idcodes(&mut taps), Ok(0));
+    }
+    let bypassed = (0..40).map(|_| Tap::new(2, 0x01, None)).collect();
+    let (model, mut bus, serial) = blaster_board(bypassed);
+    let mut usb = driver(&model, &mut bus);
+    let mut cable = Link::new(&mut usb, &serial).expect("a cable");
+    assert_eq!(
+        Jtag::new(&mut cable).idcodes(&mut taps),
+        Err(blaster::Error::Chain)
+    );
+}
+
+#[test]
+fn a_uart_is_no_jtag_cable() {
+    let (model, mut bus, _) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let serial = bind(&model, &mut bus);
+    assert!(Link::new(&mut driver(&model, &mut bus), &serial).is_none());
 }

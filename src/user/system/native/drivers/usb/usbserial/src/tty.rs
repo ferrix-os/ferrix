@@ -18,7 +18,8 @@
 //!   writes `EIO`, as a Linux `ttyUSB` hung up does.
 //!
 //! The link is `/tmp/ttyUSB<N>` for a UART and `/tmp/jtag<N>` for a
-//! USB-Blaster, `N` the bus's index.
+//! USB-Blaster, `N` the number devmgr gave the device, which stays the same
+//! across the driver's restarts; a link a killed driver left is replaced.
 
 use core::fmt::Write as _;
 
@@ -28,7 +29,7 @@ use ferrix_linux_abi::types::{
     OPOST, TCGETS2, TCSETS2, TERMIOS2_BYTES, TIOCGPTN, TIOCSPTLCK,
 };
 use ferrix_rt::linux;
-use ferrix_usb_host::ftdi::Termios;
+use ferrix_usb_serial::ftdi::Termios;
 
 /// How often a terminal's settings are looked at when nothing else wakes
 /// the driver: a program's `stty` reaches the chip within this.
@@ -129,7 +130,7 @@ fn ioctl(fd: usize, request: u32, argument: usize) -> Result<usize, Errno> {
 }
 
 impl Tty {
-    /// A new pseudoterminal for adapter `index`, set up for `kind`, its
+    /// A new pseudoterminal for device number `index`, set up for `kind`, its
     /// slave linked from `/tmp`.
     pub(crate) fn open(index: usize, kind: Kind) -> Option<Tty> {
         let flags = O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC;
@@ -199,7 +200,9 @@ impl Tty {
             )
         };
         if linked.is_err() {
-            ferrix_rt::warn!("usbhid: /tmp/{name}{index} could not be linked to /dev/pts/{number}");
+            ferrix_rt::warn!(
+                "usbserial: /tmp/{name}{index} could not be linked to /dev/pts/{number}"
+            );
         }
         tty.link = link.bytes;
         Some(tty)

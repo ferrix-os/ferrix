@@ -56,6 +56,8 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 
+mod usb;
+
 ferrix_rt::entry!(main);
 
 /// The most devices devmgr keeps, over every DEVICES message: ARMv7-A's
@@ -484,6 +486,9 @@ struct Started {
     /// The image an update put on it (`docs/DEVMGR.md` §4.1): `devmgr`'s
     /// own copy, which every later start uses. `None` is the initramfs's.
     image: Option<Image>,
+    /// A bus host's bootstrap channel, which its driver attaches the
+    /// interfaces it exports on ([`usb`]).
+    host: Option<Channel<Kernel>>,
 }
 
 /// The port key a driver of the device in `slot` is watched under, started
@@ -608,7 +613,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 if kind == Kind::Host {
                     await_settled(&bootstrap);
                 }
-                drop(bootstrap);
+                let host = keep_host(kind, bootstrap, &port, count as usize);
                 let published = settle(channel, &port, kind, info.location, key, &mut inbox);
                 let idle = !published && stopped_idle(&process);
                 say_started(name, &info, published, idle, &process);
@@ -638,6 +643,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     dead: false,
                     generation: 0,
                     image: None,
+                    host,
                 });
                 count += 1;
             }
@@ -1264,6 +1270,7 @@ fn serve(
     // never meets a boot still starting drivers.
     let mut updates = spawn_updater(drivers, port);
     let events = spawn_events(drivers);
+    let mut children = usb::Children::new();
     let _ = channel.wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_KERNEL);
     loop {
         // What arrived while a driver was being waited for comes first.
@@ -1281,6 +1288,9 @@ fn serve(
             take_updates(channel, port, started, drivers, inbox, &mut updates);
             continue;
         }
+        if take_usb(key, started, &mut children, drivers, port) {
+            continue;
+        }
         let (slot, generation) = slot_of(key);
         let Some(entry) = started.get_mut(slot).and_then(Option::as_mut) else {
             continue;
@@ -1291,6 +1301,11 @@ fn serve(
             continue;
         }
         entry.dead = true;
+        if entry.kind == Kind::Host {
+            // Every interface it exported went with it.
+            children.host_gone(slot);
+            entry.host = None;
+        }
         // A keeper's worker lives in its job: the device is quiesced, and
         // another driver started, only once that whole tree has ended (the
         // consultant's condition 1, ledger 3156).
@@ -1364,6 +1379,53 @@ fn serve(
             );
         }
     }
+}
+
+/// A bus host's bootstrap channel, kept and watched for the interfaces its
+/// driver exports to class drivers ([`usb`]); any other driver's goes.
+fn keep_host(
+    kind: Kind,
+    bootstrap: Channel<Kernel>,
+    port: &Port<Kernel>,
+    slot: usize,
+) -> Option<Channel<Kernel>> {
+    if kind != Kind::Host {
+        return None;
+    }
+    let _ = bootstrap.wait_async(
+        port,
+        Signals::READABLE | Signals::PEER_CLOSED,
+        usb::KEY_HOST + slot as u64,
+    );
+    Some(bootstrap)
+}
+
+/// Take a packet of [`usb`]'s, if `key` is one: a bus host's ATTACH, or a
+/// class driver's end. Whether it was.
+fn take_usb(
+    key: u64,
+    started: &mut [Option<Started>; MAX_DEVICES],
+    children: &mut usb::Children,
+    drivers: &Drivers<'_>,
+    port: &Port<Kernel>,
+) -> bool {
+    if key & usb::KEY_HOST != 0 {
+        let slot = (key & 0xFFFF) as usize;
+        if let Some(entry) = started.get_mut(slot).and_then(Option::as_mut)
+            && let Some(host) = &entry.host
+            && !children.take(slot, entry.generation, host, drivers, port)
+        {
+            // The host's end closed: it died, which its own death's packet
+            // handles; nothing more comes on this channel.
+            entry.host = None;
+        }
+        return true;
+    }
+    if key & usb::KEY_CHILD != 0 {
+        children.ended(key & !usb::KEY_CHILD, drivers);
+        return true;
+    }
+    false
 }
 
 /// Everything the kernel has written, kept in `inbox` if it is a request. A
@@ -1849,7 +1911,7 @@ fn launch_again(
     ) else {
         return false;
     };
-    let Ok((job, process, _bootstrap)) = start(
+    let Ok((job, process, bootstrap)) = start(
         drivers,
         admitted,
         device,
@@ -1861,6 +1923,7 @@ fn launch_again(
     ) else {
         return false;
     };
+    entry.host = keep_host(entry.kind, bootstrap, port, slot);
     entry.generation = generation;
     entry.job = job;
     entry.process = process;

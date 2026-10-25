@@ -22,6 +22,7 @@ ferrix-native-abi.workspace = true
 ferrix-netring.workspace = true
 ferrix-restart.workspace = true
 ferrix-rt.workspace = true
+ferrix-usbif.workspace = true
 
 [lints]
 workspace = true

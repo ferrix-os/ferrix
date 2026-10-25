@@ -250,6 +250,7 @@ dependencies = [
  "ferrix-netring",
  "ferrix-restart",
  "ferrix-rt",
+ "ferrix-usbif",
 ]
 
 [[package]]
@@ -959,7 +960,13 @@ dependencies = [
  "ferrix-inputctl",
  "ferrix-linux-abi",
  "ferrix-native-abi",
+ "ferrix-usb-serial",
+ "ferrix-usbif",
 ]
+
+[[package]]
+name = "ferrix-usb-serial"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-usbdev"
@@ -983,6 +990,22 @@ dependencies = [
  "ferrix-native-abi",
  "ferrix-rt",
  "ferrix-usb-host",
+ "ferrix-usbif",
+]
+
+[[package]]
+name = "ferrix-usbif"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-usbserial"
+version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-rt",
+ "ferrix-usb-serial",
+ "ferrix-usbif",
 ]
 
 [[package]]

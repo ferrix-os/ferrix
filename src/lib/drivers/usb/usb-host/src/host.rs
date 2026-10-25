@@ -347,6 +347,12 @@ pub trait Host {
     /// own and stopped.
     fn service(&mut self, receive: impl FnMut(Packet)) -> Result<(), Error>;
 
+    /// Whether the controller moves bulk data at all: a disk or an
+    /// exported interface needs it.
+    fn moves_bulk(&self) -> bool {
+        false
+    }
+
     /// Open the bulk endpoints `inward` and `outward` of `target`, for
     /// [`Host::bulk`]: the pair's index.
     ///

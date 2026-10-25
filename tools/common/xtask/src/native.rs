@@ -128,6 +128,13 @@ pub(crate) const PROGRAMS: &[Program] = &[
         binary: "usbhid",
         directory: DRIVERS,
     },
+    // The class driver of the USB serial interfaces usbhid exports, which
+    // devmgr starts per interface (docs/USB-SERIAL.md §6.1).
+    Program {
+        package: "ferrix-usbserial",
+        binary: "usbserial",
+        directory: DRIVERS,
+    },
     Program {
         package: "ferrix-usbdev",
         binary: "usbdev",

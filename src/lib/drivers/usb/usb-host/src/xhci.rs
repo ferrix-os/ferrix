@@ -1959,6 +1959,10 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
         self.open_pair(target, Some(inward), outward)
     }
 
+    fn moves_bulk(&self) -> bool {
+        true
+    }
+
     fn open_bulk_out(&mut self, target: &Target, outward: &Endpoint) -> Result<usize, Error> {
         self.open_pair(target, None, outward)
     }

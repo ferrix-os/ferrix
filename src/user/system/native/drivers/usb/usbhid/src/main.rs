@@ -24,11 +24,13 @@
 //!    times), a HELLO, and its reports as EVENTS; one unplugged has its
 //!    channel closed, which the core hears as the device going.
 //!
-//! 5. Each FTDI serial adapter found gets a pseudoterminal of its own, the
-//!    slave linked as `/tmp/ttyUSB<N>`, and a USB-Blaster one as
-//!    `/tmp/jtag<N>` that takes JTAG commands a line at a time ([`tty`],
-//!    [`serial`], `docs/USB-SERIAL.md`). While one is open the wait is a
-//!    `ppoll` on the port's descriptor and every master.
+//! 5. Every other interface -- no hub, keyboard, mouse or disk -- is
+//!    exported ([`export`]): its channel goes to devmgr in ATTACH, on the
+//!    bootstrap channel, and devmgr starts the class driver its table
+//!    names in a process of its own -- `usbserial` for an FTDI chip -- whose
+//!    transfers this process carries (`docs/USB-SERIAL.md` §6.1). A class
+//!    driver's fault ends only its own interface: this process closes what
+//!    it opened and attaches the interface again.
 //!
 //! What it finds is said on standard error, which is the console.
 //!
@@ -64,16 +66,15 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 use ferrix_usb_host::bus::{
-    Bus, DiskChange, MAX_FUNCTIONS, MAX_SERIALS, Note, Output, SERVICE_POLL, SERVICE_POLL_IDLE_MAX,
-    Watched, next_service_poll,
+    Bus, DiskChange, ExportChange, MAX_FUNCTIONS, Note, Output, SERVICE_POLL,
+    SERVICE_POLL_IDLE_MAX, Watched, next_service_poll,
 };
 use ferrix_usb_host::hid::Kind;
 use ferrix_usb_host::host::{self, Host as Controller};
 use ferrix_usb_host::watch::{self, Watch};
 use ferrix_usb_host::{Clock, Dma, MILLISECOND, Parts, Registers, ehci, xhci};
 
-mod serial;
-mod tty;
+mod export;
 
 ferrix_rt::entry!(main);
 
@@ -527,10 +528,9 @@ where
         interrupt,
         location: start.location,
         channels: [const { None }; MAX_FUNCTIONS],
-        ttys: [const { None }; MAX_SERIALS],
-        port_fd: None,
+        exports: export::Exports::new(),
+        boot: boot.duplicate(Requested::Same).ok(),
     };
-    driver.port_fd = driver.port.descriptor(true).ok();
     let ended = driver.serve(boot, settle);
     let Driver { bus, .. } = driver;
     match bus.shutdown() {
@@ -559,10 +559,10 @@ struct Driver<H> {
     booted: Watch,
     /// When each function's last watched report was taken.
     last_report: [u64; MAX_FUNCTIONS],
-    /// Each serial adapter's terminal.
-    ttys: [Option<tty::Tty>; MAX_SERIALS],
-    /// The port as a descriptor, for the `ppoll` a terminal needs.
-    port_fd: Option<i32>,
+    /// The interfaces served to class drivers of their own.
+    exports: export::Exports,
+    /// The bootstrap channel, which every ATTACH goes down to devmgr.
+    boot: Option<Channel<Kernel>>,
 }
 
 impl<H: Controller<Clock = Time>> Driver<H> {
@@ -602,18 +602,6 @@ impl<H: Controller<Clock = Time>> Driver<H> {
             } else {
                 next_poll.min(now.saturating_add(service_every))
             };
-            // A terminal's master is a descriptor, which a port wait does
-            // not hear: with one open, the wait is a ppoll on both, and its
-            // settings are looked at every POLL_SETTINGS.
-            let deadline = if self.ttys.iter().any(Option::is_some) {
-                let deadline = deadline.min(now.saturating_add(tty::POLL_SETTINGS));
-                if self.wait_for_terminals(deadline) {
-                    continue;
-                }
-                deadline
-            } else {
-                deadline
-            };
             match self.port.wait(Deadline::At(deadline)) {
                 Ok(packet) if packet.kind == PACKET_INTERRUPT && packet.key == KEY_INTERRUPT => {
                     interrupted = true;
@@ -640,6 +628,15 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     service_every = next_service_poll(service_every, false);
                     if ferrix_rt::linux::monotonic_nanos().unwrap_or(0) >= next_poll {
                         self.poll();
+                    }
+                }
+                Ok(packet)
+                    if packet.kind == PACKET_SIGNAL && packet.key >= export::KEY_FIRST_EXPORT =>
+                {
+                    let index = usize::try_from(packet.key - export::KEY_FIRST_EXPORT)
+                        .unwrap_or(usize::MAX);
+                    if let Some(boot) = &self.boot {
+                        self.exports.take(&mut self.bus, index, boot, &self.port);
                     }
                 }
                 Ok(packet) if packet.kind == PACKET_SIGNAL && packet.key >= KEY_FIRST_CONTROL => {
@@ -723,7 +720,21 @@ impl<H: Controller<Clock = Time>> Driver<H> {
             moved = true;
             self.tell_disk(change);
         }
-        moved |= self.serve_serials();
+        while let Some(change) = self.bus.next_export_change() {
+            moved = true;
+            match change {
+                ExportChange::Attached(index) => {
+                    if let Some(boot) = &self.boot {
+                        self.exports.attach(&self.bus, index, boot, &self.port);
+                    }
+                }
+                ExportChange::Detached(index) => {
+                    self.exports.detach(index);
+                    ferrix_rt::info!("usbhid: export {index} unplugged");
+                }
+            }
+        }
+        moved |= self.exports.pump(&mut self.bus);
         while let Some(output) = self.bus.next_output() {
             moved = true;
             let mut said_report = None;
@@ -1155,8 +1166,5 @@ fn tell(note: Note) {
         Note::Handed { port } => ferrix_rt::info!(
             "usbhid: root port {port} has a full- or low-speed device, which EHCI hands to its companion"
         ),
-        Note::SerialFailed { role, error } => {
-            ferrix_rt::err!("usbhid: a {} would not be set up: {error:?}", role.word());
-        }
     }
 }

@@ -259,6 +259,8 @@ pub struct DeviceDescriptor {
     pub manufacturer: u8,
     /// `iProduct`.
     pub product_name: u8,
+    /// `iSerialNumber`.
+    pub serial_number: u8,
 }
 
 impl DeviceDescriptor {
@@ -277,6 +279,7 @@ impl DeviceDescriptor {
             release: word(12)?,
             manufacturer: *bytes.get(14)?,
             product_name: *bytes.get(15)?,
+            serial_number: *bytes.get(16)?,
         })
     }
 }
