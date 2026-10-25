@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.x86_64.211", "L.sched.96-101"],
+      "owner": "chardev-sigrace",
+      "branch": "bugfix/tsc-aux, feature/sched-setaffinity",
+      "date": "2026-10-25",
+      "purpose": "L.x86_64.211: every processor with RDTSCP or RDPID holds its logical number, node 0, in IA32_TSC_AUX before it first returns to user mode (the consultant's OK IF, ledger 4436). L.sched.96-101: sched_setaffinity that pins (design OK IF D1-D12, ledger 4446): the kernel-thread refusal, every placement path re-homing an excluded task, the pick push, the move before user code, the setter's wait, inheritance"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
