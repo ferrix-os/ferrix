@@ -358,6 +358,25 @@ package FerrixAssurance {
              * x86-64 and AArch64, with a negative control that must fail. */
         subject os : Ferrix;
     }
+    #implemented verification def UsbTest {
+        @stage { number = 17; }
+        doc /* cargo xtask test-usb, x86-64: a qemu-xhci with a hub, a
+             * keyboard, a tablet, a mouse and a stick; keys and pointers
+             * required out of /dev/input/eventN (the tablet's as ABS_X and
+             * ABS_Y), a device unplugged and plugged in again over QMP, the
+             * stick read, the driver killed twice, and a negative control. */
+        subject os : Ferrix;
+    }
+    #implemented verification def StallTest {
+        doc /* cargo xtask test-stall (finding F-95, docs/PREEMPTIBLE-WAITS.md):
+             * 10 ms sleepers, one pinned to each processor and one free,
+             * beside a ring-3 load that saturates every processor, phase
+             * by phase. A phase is asserted from the landing that brings it
+             * under its bound; until then the row reports and verifies
+             * nothing, and a run whose quiet phases break their bounds is
+             * void. */
+        subject os : Ferrix;
+    }
     #implemented verification def SeatTest {
         @stage { number = 17; }
         doc /* cargo xtask test-seat: keys typed at QEMU's far end reach a

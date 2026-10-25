@@ -122,11 +122,11 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 7887 elements, 218 relations. Model digest `e9fa3ec01d3ae392`.
+27 files, 149 packages, 7891 elements, 218 relations. Model digest `4438cbeb595d15ab`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 282 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#implemented` | 284 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
 | `#inProgress` | 29 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
@@ -2483,7 +2483,7 @@ src/user/system/native/drivers/input/virtio-input over src/lib/drivers/input/vir
 
 `#implemented`  ·  stage 17  ·  specialises `DriverProcess`
 
-src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7). Since 2026-10-10 it also drives a PC's xHCI controller, picked by what START names (docs/XHCI.md; a bulk-only disk is read and not yet served to the block core), gated under QEMU by cargo xtask test-usb; a USB keyboard worked on the N150 box on 2026-10-15.
+src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7). Since 2026-10-10 it also drives a PC's xHCI controller, picked by what START names (docs/XHCI.md; a bulk-only disk is read and not yet served to the block core), gated under QEMU by cargo xtask test-usb; a USB keyboard worked on the N150 box on 2026-10-15. Since 2026-10-25 a tablet's absolute axes reach the input core as ABS_X, ABS_Y and ABS_WHEEL with the HID field's range (test-usb attaches a usb-tablet and requires two places); and the boot word ferrix.usbhid.reports, or the file /run/usbhid-reports, makes it log each interrupt report of the functions named at debug (docs/XHCI.md section 13).
 
 #### Gc400Driver
 
@@ -3348,7 +3348,7 @@ Placed after stage 12 without a number of its own, built on 2026-09-24 in the sh
 
 **InProgress**  ·  size headless and a window spent; the DK1 about 45 to 55 points  ·  `#inProgress`
 
-Placed after sysfs without a number of its own, asked for by the customer on 2026-09-23 (docs/CHROME.md). Google's prebuilt Chrome for Testing on Debian's glibc from a btrfs volume, by the customer's choice of 2026-09-24. Exit met on x86-64: cargo xtask test-chrome runs it headless, and cargo xtask test-chrome-window in a window on the compositor. On ferrousli in glibc's place, headless and in a window, since 2026-09-26: cargo xtask test-chrome and test-chrome-window with --interpreter ferrousli --library ferrousli. On the persistent btrfs root since 2026-09-26. With its zygote since 2026-09-26, once SCM_CREDENTIALS carried its children's pids; idle at 13% of a processor where it took 443%, after the futex, clock, munmap, shootdown and doorbell fixes and a vDSO (cargo xtask bench-chrome); and playing sound through /dev/snd (cargo xtask test-chrome-audio). Owed: the GPU (inotify landed on 2026-09-27); and the STM32MP157D-DK1, where nothing has run yet. Debian's armhf Chromium runs headless on ARMv7-A under QEMU in 512 MiB (2026-10-08, after ARM's send and recv, cacheflush and mmap of a read-only btrfs were fixed); the SD card has a ring-3 SDMMC1 driver (2026-10-08); the cgroup controllers (2026-10-07) let the page cache give back a read-only btrfs's clean pages.
+Placed after sysfs without a number of its own, asked for by the customer on 2026-09-23 (docs/CHROME.md). Google's prebuilt Chrome for Testing on Debian's glibc from a btrfs volume, by the customer's choice of 2026-09-24. Exit met on x86-64: cargo xtask test-chrome runs it headless, and cargo xtask test-chrome-window in a window on the compositor. On ferrousli in glibc's place, headless and in a window, since 2026-09-26: cargo xtask test-chrome and test-chrome-window with --interpreter ferrousli --library ferrousli. On the persistent btrfs root since 2026-09-26. With its zygote since 2026-09-26, once SCM_CREDENTIALS carried its children's pids; idle at 13% of a processor where it took 443%, after the futex, clock, munmap, shootdown and doorbell fixes and a vDSO (cargo xtask bench-chrome); and playing sound through /dev/snd (cargo xtask test-chrome-audio). Since 2026-10-25 a second volume (GTK 3) lets Chrome draw in Nocturne under the Yoru desktop (test-compositor --boot chrome-yoru), and a third (GSettings schemas, the MIME database, gdk-pixbuf's loaders) gives GTK's file chooser (--boot chrome-save opens Save-as with Ctrl+S); the first volume is left as it was (docs/CHROME.md). Owed: the GPU (inotify landed on 2026-09-27); and the STM32MP157D-DK1, where nothing has run yet. Debian's armhf Chromium runs headless on ARMv7-A under QEMU in 512 MiB (2026-10-08, after ARM's send and recv, cacheflush and mmap of a read-only btrfs were fixed); the SD card has a ring-3 SDMMC1 driver (2026-10-08); the cgroup controllers (2026-10-07) let the page cache give back a read-only btrfs's clean pages.
 
 **Allocated to: **`ferrix.userland`
 
@@ -3440,11 +3440,13 @@ Gears, the customer's order of 2026-09-24 (docs/GPU.md 6): vkgears through Venus
 
 The desktop's own clients, begun on 2026-09-26 at the customer's request: waybar, fuzzel, hyprlock and hypridle in Rust, reading their own configuration files unchanged, over a shared foundation of 21 points. waybar and fuzzel are on main (2026-09-27) and run the customer's own configuration on run-compositor --everything, and hypridle is on main (2026-09-26); hyprlock is on main too (2026-10-03), its lock over authd.
 
+The Yoru desktop (docs/DESKTOP.md section 6) carries Nocturne for GTK 3 and GTK 4 and starts portald, which answers org.freedesktop.portal.Settings on the session bus (dark, the accent, the theme's name) and no other portal.
+
 ### S21 — Stage 21 bare metal gpu
 
 **InProgress**  ·  size unsized, over 100 points  ·  `#inProgress`
 
-Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
+Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. N3c, hyprix compositing on the card, is on main; run-compositor --nvidia keeps the software compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's WebGL page is faster under it (2026-10-25). nvrm follows a monitor plugged, unplugged or swapped, answers IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13). The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
 
 ### S22 — Stage 22 steam
 
@@ -5241,6 +5243,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 17 | `FerrixDrivers::UsbHidDriver` | part | `#implemented` |
 | 17 | `FerrixAssurance::DisplayTest` | verification | `#implemented` |
 | 17 | `FerrixAssurance::InputTest` | verification | `#implemented` |
+| 17 | `FerrixAssurance::UsbTest` | verification | `#implemented` |
 | 17 | `FerrixAssurance::SeatTest` | verification | `#implemented` |
 | 18 | `FerrixAssurance::CompositorTest` | verification | `#implemented` |
 | 18 | `FerrixAssurance::PtyTest` | verification | `#implemented` |
@@ -5251,7 +5254,7 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 21 | `FerrixDrivers::EfifbDriver` | part | `#inProgress` |
 | 21 | `FerrixDrivers::IntelGpuDriver` | part | `#inProgress` |
 
-193 elements across 19 stages.
+194 elements across 19 stages.
 
 ## Figures
 

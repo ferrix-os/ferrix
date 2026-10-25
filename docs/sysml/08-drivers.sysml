@@ -276,7 +276,13 @@ package FerrixDrivers {
              * by what START names (docs/XHCI.md; a bulk-only disk is read and
              * not yet served to the block core), gated under QEMU by cargo
              * xtask test-usb; a USB keyboard worked on the N150 box on
-             * 2026-10-15. */
+             * 2026-10-15.
+             * Since 2026-10-25 a tablet's absolute axes reach the input
+             * core as ABS_X, ABS_Y and ABS_WHEEL with the HID field's
+             * range (test-usb attaches a usb-tablet and requires two
+             * places); and the boot word ferrix.usbhid.reports, or the
+             * file /run/usbhid-reports, makes it log each interrupt report
+             * of the functions named at debug (docs/XHCI.md section 13). */
     }
 
     #inProgress part def Gc400Driver :> DriverProcess {

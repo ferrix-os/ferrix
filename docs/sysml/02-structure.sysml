@@ -396,7 +396,12 @@ package FerrixStructure {
                  * ProtectSystem= in a mount namespace per service; L13b
                  * (2026-10-05) PrivateNetwork=, a network namespace with lo
                  * up; L13c SystemCallFilter= is built over seccomp's S3,
-                 * which landed 2026-10-04, and waits to land. */
+                 * which landed 2026-10-04, and waits to land.
+                 * Since 2026-10-24 each unit's console copy goes through a
+                 * per-source shed that drops the least severe lines first
+                 * under load and says each drop (src/lib/log/shed;
+                 * docs/LOGGING.md section 7.5); the unit's ring still gets
+                 * every line. */
         }
         #implemented part shell : UserProcess {
             doc /* busybox sh was the first foreign binary to run on Ferrix:

@@ -456,6 +456,12 @@ package FerrixRoadmap {
              * 443%, after the futex, clock, munmap, shootdown and doorbell
              * fixes and a vDSO (cargo xtask bench-chrome); and playing
              * sound through /dev/snd (cargo xtask test-chrome-audio).
+             * Since 2026-10-25 a second volume (GTK 3) lets Chrome draw in
+             * Nocturne under the Yoru desktop (test-compositor --boot
+             * chrome-yoru), and a third (GSettings schemas, the MIME
+             * database, gdk-pixbuf's loaders) gives GTK's file chooser
+             * (--boot chrome-save opens Save-as with Ctrl+S); the first
+             * volume is left as it was (docs/CHROME.md).
              * Owed: the GPU (inotify landed on 2026-09-27); and the
              * STM32MP157D-DK1, where nothing has run yet. Debian's armhf
              * Chromium runs headless on ARMv7-A under QEMU in 512 MiB
@@ -710,7 +716,12 @@ package FerrixRoadmap {
              * shared foundation of 21 points. waybar and fuzzel are on
              * main (2026-09-27) and run the customer's own configuration
              * on run-compositor --everything, and hypridle is on main
-             * (2026-09-26); hyprlock is on main too (2026-10-03), its lock over authd. */
+             * (2026-09-26); hyprlock is on main too (2026-10-03), its lock over authd.
+             *
+             * The Yoru desktop (docs/DESKTOP.md section 6) carries Nocturne
+             * for GTK 3 and GTK 4 and starts portald, which answers
+             * org.freedesktop.portal.Settings on the session bus (dark,
+             * the accent, the theme's name) and no other portal. */
     }
 
     #inProgress requirement <'S21'> stage21BareMetalGpu : Stage {
@@ -731,7 +742,13 @@ package FerrixRoadmap {
              * stage 10's chardev self-check since 2026-10-05. N2 to N4 and
              * the screen on the customer's TV landed on 2026-10-05, and N3b's
              * kernel half (a chardev render node, dmabufs and sync-file
-             * fences) on 2026-10-11. The customer's Intel N150 box is the
+             * fences) on 2026-10-11. N3c, hyprix compositing on the card,
+             * is on main; run-compositor --nvidia keeps the software
+             * compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's
+             * WebGL page is faster under it (2026-10-25). nvrm follows a
+             * monitor plugged, unplugged or swapped, answers
+             * IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter
+             * when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13). The customer's Intel N150 box is the
              * stage's first bare-metal machine (docs/N150.md): Ferrix booted
              * on it on 2026-10-15, its drivers (AHCI, the YT6801, a
              * firmware framebuffer, VT-d, SMBIOS, an event log) and a render
