@@ -1391,8 +1391,38 @@ impl<'r> Compositor<'r> {
         // A press on a title bar the compositor drew is the compositor's
         // (`crate::titlebar`): before the border's ring, which reaches up
         // into the bar.
-        let (actions, barred) = self.press_title_bars(actions);
-        let actions = crate::act::grab_border(actions, &mut self.state, &self.seat, &mut self.drag);
+        //
+        // Neither is the compositor's where a layer surface above the
+        // windows covers the pointer -- a launcher, a panel, Yoru's stash
+        // or wallpaper switcher: the press is that surface's, and a title
+        // bar or a border under it took the press from it, and the release
+        // after (the customer's stash, 2026-10-25: a pick over a window's
+        // bar opened nothing). With a drag or a swallowed press under way
+        // the release still goes to what began it.
+        let covered = self.drag.is_none()
+            && !self.bars.swallow_release
+            && crate::frame::above_at(&self.placed_layers, self.seat.pointer(), |layer, (x, y)| {
+                self.slots
+                    .get(layer.client)
+                    .and_then(|slot| slot.client().surface(layer.surface))
+                    .is_none_or(|surface| {
+                        surface
+                            .current
+                            .input
+                            .as_ref()
+                            .is_none_or(|region| region.contains(x, y))
+                    })
+            });
+        let (actions, barred) = if covered {
+            (actions, false)
+        } else {
+            self.press_title_bars(actions)
+        };
+        let actions = if covered {
+            actions
+        } else {
+            crate::act::grab_border(actions, &mut self.state, &self.seat, &mut self.drag)
+        };
         // While the overview is up the pointer and the keys are its own:
         // nothing reaches a client, and binds still run.
         let (actions, looked) = crate::overview::take_input(

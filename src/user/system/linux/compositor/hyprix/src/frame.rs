@@ -1266,9 +1266,46 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     })
 }
 
+/// Whether a layer surface drawn above the windows covers `at`, a point in
+/// the global space, where `takes` says its input region takes a point in
+/// its own coordinates: a press there is that surface's, not a title bar's
+/// or a border's under it. A surface that takes no input there -- a
+/// notification's clear margin -- covers nothing.
+#[must_use]
+pub fn above_at(
+    layers: &[Placed],
+    at: (f64, f64),
+    takes: impl Fn(&Placed, (i32, i32)) -> bool,
+) -> bool {
+    layers.iter().any(|layer| {
+        let r = layer.rect;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a surface's edge is at most a screen's width; the loss is beyond any pixel"
+        )]
+        let (left, top, right, bottom) = (
+            r.x as f64,
+            r.y as f64,
+            (r.x + r.width) as f64,
+            (r.y + r.height) as f64,
+        );
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "inside the surface, which is far inside i32"
+        )]
+        let local = ((at.0 - left).floor() as i32, (at.1 - top).floor() as i32);
+        layer.above
+            && at.0 >= left
+            && at.0 < right
+            && at.1 >= top
+            && at.1 < bottom
+            && takes(layer, local)
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LayerRules, Placed, unseen};
+    use super::{LayerRules, Placed, above_at, unseen};
     use compositor_layout::Rect;
     use compositor_wire::ObjectId;
 
@@ -1286,6 +1323,26 @@ mod tests {
     /// windows, the wallpaper in what the bar leaves, and a game the size of
     /// the monitor at 2560,0. The wallpaper is not on the screen; the bar
     /// is, over the game.
+    /// A press over a panel above the windows is the panel's; one over the
+    /// wallpaper under them, or beside the panel, is not covered.
+    #[test]
+    fn a_layer_above_the_windows_covers_what_is_under_it() {
+        let panel = layer(7, Rect::new(342, 496, 340, 188), true);
+        let wallpaper = layer(8, Rect::new(0, 0, 1024, 768), false);
+        let all = |_: &Placed, _: (i32, i32)| true;
+        assert!(above_at(&[panel, wallpaper], (392.0, 606.0), all));
+        assert!(!above_at(&[panel, wallpaper], (100.0, 606.0), all));
+        assert!(!above_at(&[wallpaper], (392.0, 606.0), all));
+        assert!(
+            !above_at(&[panel], (682.0, 606.0), all),
+            "the right edge is outside"
+        );
+        // Its input region only its top 20 rows: below them it covers nothing.
+        let top_rows = |_: &Placed, (_, y): (i32, i32)| y < 20;
+        assert!(above_at(&[panel], (392.0, 500.0), top_rows));
+        assert!(!above_at(&[panel], (392.0, 606.0), top_rows));
+    }
+
     #[test]
     fn a_wallpaper_under_a_window_that_covers_it_is_unseen() {
         let wallpaper = layer(10, Rect::new(2560, 40, 1920, 1040), false);
