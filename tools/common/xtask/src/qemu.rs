@@ -3462,7 +3462,10 @@ fn attach_usb_serial(command: &mut Command, arch: Arch, args: &Args) {
         display(socket)
     );
     if args.usb.is_none() {
+        // A keyboard beside it, which must keep typing whatever becomes of
+        // the serial adapter's driver.
         let _ = command.args(["-device", &format!("qemu-xhci,id={USB_BUS}")]);
+        let _ = command.args(["-device", &format!("usb-kbd,bus={USB_BUS}.0,id=serialkbd")]);
     }
     let _ = command.args([
         "-chardev",

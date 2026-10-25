@@ -50,8 +50,18 @@ pub(crate) const TASKS: &[Task] = &[Task {
 /// What the script prints once its terminal is set and it waits for the
 /// gate: the boot's marker.
 const READY: &str = "serial-gate: ready";
-/// What it prints before what it read.
+/// What it prints before what it read, each round.
 const GOT: &str = "serial-gate-in=";
+const GOT_AGAIN: &str = "serial-gate-in-again=";
+/// What it prints once the killed driver's successor linked the terminal
+/// again.
+const REBOUND: &str = "serial-gate: rebound";
+/// What it prints once the host controller's driver, killed, is back and
+/// the terminal with it.
+const HOST_REBOUND: &str = "serial-gate: host rebound";
+const GOT_THIRD: &str = "serial-gate-in-third=";
+/// What it prints before how many bytes the keyboard's event node gave.
+const KEY: &str = "serial-gate-key=";
 /// What it prints when something it needs is missing.
 const FAILED: &str = "serial-gate: failed";
 /// What the gate sends first, so the guest's line goes out only once the
@@ -63,20 +73,64 @@ const BAUD: u32 = 115_200;
 const PATIENCE: Duration = Duration::from_secs(30);
 
 /// The guest's half: wait for the terminal, set it, say so, wait for the
-/// gate's go, write `out`, read `len` bytes, print them.
-fn script(out: &str, len: usize) -> String {
+/// gate's go, write `lines[0]`, read `len` bytes, print them. Then kill
+/// `usbserial` with SIGKILL, wait for its successor and set the terminal
+/// again, read the keyboard's event node meanwhile, and do the round again
+/// with `lines[1]`. Then kill `usbhid` itself, the controller's driver,
+/// and do the round a third time with `lines[2]` once devmgr has started it
+/// again and it has exported the interface again.
+fn script(lines: [&str; 3], len: usize) -> String {
+    let round = |line: &str, got: &str| {
+        format!(
+            "head -c {go} /tmp/ttyUSB0 > /tmp/go\n\
+             echo {line} > /tmp/ttyUSB0\n\
+             head -c {len} /tmp/ttyUSB0 > /tmp/in\n\
+             echo \"{got}$(cat /tmp/in)\"\n",
+            go = GO.len(),
+        )
+    };
+    // Kill `victim`, then wait for a `usbserial` that is not the one that
+    // was running, and set its terminal.
+    let kill = |victim: &str| {
+        format!(
+            "old=\n\
+             for p in /proc/[0-9]*; do read c < $p/comm; \
+             if [ \"$c\" = usbserial ]; then old=${{p##*/}}; fi; done\n\
+             for p in /proc/[0-9]*; do read c < $p/comm; \
+             if [ \"$c\" = {victim} ]; then kill -9 ${{p##*/}} && echo \"serial-gate: killed {victim} ${{p##*/}}\"; fi; done\n\
+             new=\n\
+             i=0\n\
+             while [ -z \"$new\" ]; do i=$((i+1)); \
+             if [ $i -gt 300 ]; then echo '{FAILED}: no usbserial after {victim}'; exit 1; fi; sleep 0.1; \
+             for p in /proc/[0-9]*; do read c < $p/comm; \
+             if [ \"$c\" = usbserial ] && [ \"${{p##*/}}\" != \"$old\" ]; then new=${{p##*/}}; fi; done; done\n\
+             i=0\n\
+             until stty -F /tmp/ttyUSB0 {BAUD} raw -echo 2>/dev/null; do i=$((i+1)); \
+             if [ $i -gt 100 ]; then echo '{FAILED}: stty after {victim}'; exit 1; fi; sleep 0.1; done\n"
+        )
+    };
     format!(
         "i=0\n\
          while [ ! -e /tmp/ttyUSB0 ]; do i=$((i+1)); \
          if [ $i -gt 300 ]; then echo '{FAILED}: no /tmp/ttyUSB0'; exit 1; fi; sleep 0.1; done\n\
          stty -F /tmp/ttyUSB0 {BAUD} raw -echo || echo '{FAILED}: stty'\n\
          echo '{READY}'\n\
-         head -c {go} /tmp/ttyUSB0 > /tmp/go\n\
-         echo {out} > /tmp/ttyUSB0\n\
-         head -c {len} /tmp/ttyUSB0 > /tmp/in\n\
-         echo \"{GOT}$(cat /tmp/in)\"\n\
+         {first}\
+         {kill_driver}\
+         dd if=/dev/input/event0 of=/tmp/key bs=24 count=1 2>/dev/null &\n\
+         echo '{REBOUND}'\n\
+         {second}\
+         wait\n\
+         echo \"{KEY}$(wc -c < /tmp/key)\"\n\
+         {kill_host}\
+         echo '{HOST_REBOUND}'\n\
+         {third}\
          sleep 3\n",
-        go = GO.len(),
+        first = round(lines[0], GOT),
+        kill_driver = kill("usbserial"),
+        second = round(lines[1], GOT_AGAIN),
+        kill_host = kill("usbhid"),
+        third = round(lines[2], GOT_THIRD),
     )
 }
 
@@ -114,14 +168,9 @@ fn busybox(arch: Arch, args: &Args) -> Result<PathBuf> {
 
 /// The gate's half, once the guest is ready: connect, send go, read the
 /// guest's line, send ours, and wait for the guest to print it.
-fn exchange(
-    watching: &mut Watching<'_>,
-    socket: &Path,
-    from_guest: &str,
-    to_guest: &str,
-) -> std::result::Result<(), String> {
+fn connect(socket: &Path) -> std::result::Result<UnixStream, String> {
     let deadline = Instant::now() + PATIENCE;
-    let mut stream = loop {
+    let stream = loop {
         match UnixStream::connect(socket) {
             Ok(stream) => break stream,
             Err(error) if Instant::now() >= deadline => {
@@ -134,6 +183,94 @@ fn exchange(
         }
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    Ok(stream)
+}
+
+/// The whole run, from the gate's side: both rounds, the kill between
+/// them and the key pressed after it.
+fn exchange(
+    watching: &mut Watching<'_>,
+    socket: &Path,
+    qmp_port: u16,
+    lines: [&str; 6],
+) -> std::result::Result<(), String> {
+    let [
+        from_guest,
+        to_guest,
+        from_again,
+        to_again,
+        from_third,
+        to_third,
+    ] = lines;
+    let mut stream = connect(socket)?;
+    round(watching, &mut stream, from_guest, to_guest, GOT)?;
+    // The driver is killed; its successor links the terminal again.
+    let rebound = watching
+        .read_more(Instant::now() + PATIENCE, |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains(REBOUND) || line.contains(FAILED))
+        })
+        .map_err(|error| error.to_string())?;
+    if !rebound || !watching.after().iter().any(|line| line.contains(REBOUND)) {
+        return Err("no usbserial linked /tmp/ttyUSB0 again after the kill".to_owned());
+    }
+    // A key on the keyboard behind the same controller: it must arrive
+    // whatever became of the serial driver.
+    let mut qmp = crate::display::Qmp::connect(qmp_port, Instant::now() + PATIENCE)
+        .map_err(|error| error.to_string())?;
+    for down in [true, false] {
+        qmp.input_send_event(&[crate::input::key("a", down)])
+            .map_err(|error| error.to_string())?;
+    }
+    round(watching, &mut stream, from_again, to_again, GOT_AGAIN)?;
+    let keyed = watching
+        .read_more(Instant::now() + PATIENCE, |lines| {
+            lines.iter().any(|line| line.contains(KEY))
+        })
+        .map_err(|error| error.to_string())?;
+    let key_line = watching
+        .lines()
+        .iter()
+        .chain(watching.after())
+        .find(|line| line.contains(KEY))
+        .cloned()
+        .unwrap_or_default();
+    if !keyed || !key_line.trim_end().ends_with(&format!("{KEY}24")) {
+        return Err(format!(
+            "the keyboard's key never reached /dev/input/event0 after usbserial was killed: `{}`",
+            key_line.trim()
+        ));
+    }
+    // The controller's driver is killed; devmgr starts it again, it
+    // exports the interface again, and a new usbserial takes it.
+    let back = watching
+        .read_more(Instant::now() + PATIENCE, |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains(HOST_REBOUND) || line.contains(FAILED))
+        })
+        .map_err(|error| error.to_string())?;
+    if !back
+        || !watching
+            .after()
+            .iter()
+            .any(|line| line.contains(HOST_REBOUND))
+    {
+        return Err("no usbserial linked /tmp/ttyUSB0 again after usbhid was killed".to_owned());
+    }
+    round(watching, &mut stream, from_third, to_third, GOT_THIRD)
+}
+
+/// One round: go, the guest's line in, the gate's line out and read back.
+fn round(
+    watching: &mut Watching<'_>,
+    stream: &mut UnixStream,
+    from_guest: &str,
+    to_guest: &str,
+    got: &str,
+) -> std::result::Result<(), String> {
+    let deadline = Instant::now() + PATIENCE;
     stream
         .write_all(GO)
         .map_err(|error| format!("sending go: {error}"))?;
@@ -159,12 +296,12 @@ fn exchange(
     stream
         .write_all(to_guest.as_bytes())
         .map_err(|error| format!("sending the gate's line: {error}"))?;
-    let want = format!("{GOT}{to_guest}");
+    let want = format!("{got}{to_guest}");
     let found = watching
         .read_more(deadline, |lines| {
             lines
                 .iter()
-                .any(|line| line.contains(GOT) || line.contains(FAILED))
+                .any(|line| line.contains(got) || line.contains(FAILED))
         })
         .map_err(|error| error.to_string())?;
     let said = watching.lines().iter().chain(watching.after());
@@ -189,6 +326,83 @@ fn baud_rates(trace: &str) -> Vec<u32> {
         .collect()
 }
 
+/// What the boot's lines and QEMU's trace at `trace` must show, each
+/// failure said.
+fn judge(lines: &[String], trace: &Path) -> Vec<String> {
+    let mut failures = Vec::new();
+    let count = |want: &str| lines.iter().filter(|line| line.contains(want)).count();
+    // usbhid exported the interface, devmgr started usbserial for it, and
+    // it made the terminal: twice, the second time after the kill, under
+    // the same number.
+    // usbhid exported the interface, devmgr started usbserial for it, and
+    // it made the terminal: three times -- at boot, after usbserial's kill
+    // and after usbhid's -- always under the same number.
+    for (want, times) in [
+        (
+            "usbhid: interface 0 of 0403:6001 exported for its class driver",
+            3,
+        ),
+        (
+            "devmgr   usbserial for usb 0403:6001 interface 0: started (serial 0)",
+            3,
+        ),
+        (
+            "usbserial: serial 0 0403:6001 (FT232B UART, 64-byte packets, serial 1-",
+            3,
+        ),
+        ("serial-gate: killed usbserial ", 1),
+        (
+            "devmgr   usbserial for usb 0403:6001 interface 0 (serial 0) died with status 137; started again (1 of 8)",
+            1,
+        ),
+        ("serial-gate: killed usbhid ", 1),
+        (&format!("usbserial: serial 0 set to {BAUD} baud"), 3),
+    ] {
+        let seen = count(want);
+        if seen != times {
+            failures.push(format!("`{want}` came {seen} times, not {times}"));
+        }
+    }
+    // The controller's driver lived through usbserial's death, and was
+    // started again, once, only after its own.
+    let host_killed = lines
+        .iter()
+        .position(|line| line.contains("serial-gate: killed usbhid "))
+        .unwrap_or(lines.len());
+    let (before, after) = lines.split_at(host_killed);
+    let in_part =
+        |part: &[String], want: &str| part.iter().filter(|line| line.contains(want)).count();
+    if in_part(before, "usbhid: xHCI running") != 1 || in_part(before, "was started again") != 0 {
+        failures.push("usbhid died or was started again before it was killed".to_owned());
+    }
+    if in_part(after, "usbhid: xHCI running") != 1 || in_part(after, "was started again") != 1 {
+        failures.push("usbhid was not started again, once, after it was killed".to_owned());
+    }
+    // QEMU decodes the divisor itself: hw/usb/dev-serial.c's
+    // `usb_serial_set_baud`, "dev %d:%u baud rate %d". The rate is the
+    // chip's, which a divisor of 26 makes 115384: within the 3% a UART
+    // allows, as the driver's own arithmetic is held to.
+    let traced = std::fs::read_to_string(trace).unwrap_or_default();
+    let rates = baud_rates(&traced);
+    let near =
+        |rate: u32, wanted: u32| u64::from(rate.abs_diff(wanted)) * 100 <= u64::from(wanted) * 3;
+    // Each driver opens the chip at 9600, and stty sets it to BAUD.
+    let wanted = [9600, BAUD, 9600, BAUD, 9600, BAUD];
+    let shaped = rates.len() == wanted.len()
+        && rates
+            .iter()
+            .zip(wanted)
+            .all(|(&rate, wanted)| near(rate, wanted));
+    if !shaped {
+        failures.push(format!(
+            "QEMU's trace {} does not show the chip set to 9600 baud and then {BAUD}, by \
+             each of the two drivers, within 3%: it traced the rates {rates:?}",
+            trace.display(),
+        ));
+    }
+    failures
+}
+
 /// `test-usb-serial`.
 ///
 /// # Errors
@@ -205,6 +419,10 @@ pub(crate) fn test(args: &Args) -> Result<()> {
     let seed = nonce();
     let from_guest = format!("ferrix-to-host-{seed:016x}");
     let to_guest = format!("host-to-ferrix-{:016x}", seed.rotate_left(17) ^ 0x5A5A);
+    let from_again = format!("ferrix-to-host-{:016x}", seed.rotate_left(29) ^ 0xA5A5);
+    let to_again = format!("host-to-ferrix-{:016x}", seed.rotate_left(41) ^ 0x3C3C);
+    let from_third = format!("ferrix-to-host-{:016x}", seed.rotate_left(7) ^ 0x1E1E);
+    let to_third = format!("host-to-ferrix-{:016x}", seed.rotate_left(53) ^ 0xE1E1);
     let shell = busybox(arch, args)?;
     println!(
         "  {arch}: busybox {} as init, with the gate's script",
@@ -215,7 +433,7 @@ pub(crate) fn test(args: &Args) -> Result<()> {
         arch,
         args.release,
         &shell,
-        &script(&from_guest, to_guest.len()),
+        &script([&from_guest, &from_again, &from_third], to_guest.len()),
     )?;
     let natives = crate::native::build(arch, args.release)?;
     // Busybox as /bin/busybox too, with its applets linked in /bin: the
@@ -237,45 +455,34 @@ pub(crate) fn test(args: &Args) -> Result<()> {
     }
     let mut booted = args.clone();
     booted.usb_serial = Some(socket.clone());
+    let qmp_port = crate::display::free_port()?;
+    booted.qmp_port = Some(qmp_port);
 
     let mut outcome = Err("the boot never reached the script's ready line".to_owned());
     let lines = crate::qemu::watch_then(arch, &image, &kernel, &booted, READY, |watching| {
         watching.stop_when_done();
-        outcome = exchange(watching, &socket, &from_guest, &to_guest);
+        outcome = exchange(
+            watching,
+            &socket,
+            qmp_port,
+            [
+                &from_guest,
+                &to_guest,
+                &from_again,
+                &to_again,
+                &from_third,
+                &to_third,
+            ],
+        );
         Ok(())
     })?;
     let mut failures = Vec::new();
     if let Err(why) = outcome {
         failures.push(why);
     }
-    let has = |want: &str| lines.iter().any(|line| line.contains(want));
-    let found = "usbhid: serial 0 0403:6001 (FT232B UART, 64-byte packets) is /tmp/ttyUSB0";
-    if !has(found) {
-        failures.push(format!("the driver never said `{found}`"));
-    }
-    let set = format!("usbhid: serial 0 set to {BAUD} baud, 8 data bits, parity None, 1 stop bits");
-    if !has(&set) {
-        failures.push(format!("the driver never said `{set}`"));
-    }
-    // QEMU decodes the divisor itself: hw/usb/dev-serial.c's
-    // `usb_serial_set_baud`, "dev %d:%u baud rate %d". The rate is the
-    // chip's, which a divisor of 26 makes 115384: within the 3% a UART
-    // allows, as the driver's own arithmetic is held to.
-    let traced = std::fs::read_to_string(&trace).unwrap_or_default();
+    failures.extend(judge(&lines, &trace));
     let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_file(&trace);
-    let rates = baud_rates(&traced);
-    let near =
-        |rate: u32, wanted: u32| u64::from(rate.abs_diff(wanted)) * 100 <= u64::from(wanted) * 3;
-    let opened = rates.iter().position(|&rate| near(rate, 9600));
-    let set = rates.iter().rposition(|&rate| near(rate, BAUD));
-    if !matches!((opened, set), (Some(first), Some(last)) if first < last) {
-        failures.push(format!(
-            "QEMU's trace {} does not show the chip set to 9600 baud and then to {BAUD}, \
-             within 3%: it traced the rates {rates:?}",
-            trace.display(),
-        ));
-    }
     if !failures.is_empty() {
         let mut message = format!("{arch}: the FTDI adapter did not carry the run:\n");
         for failure in &failures {
@@ -289,7 +496,10 @@ pub(crate) fn test(args: &Args) -> Result<()> {
     println!(
         "  {arch}: stty set the FT232BM to {BAUD} baud (QEMU decoded the divisor to it), \
          {from_guest:?} came out of /tmp/ttyUSB0 onto the socket, and {to_guest:?} went the \
-         other way"
+         other way; usbserial killed with SIGKILL was started again by devmgr under the same \
+         number, carried {from_again:?} and {to_again:?}, and a key typed meanwhile reached \
+         the keyboard's node with usbhid never restarted; usbhid killed was started again, \
+         exported the interface again, and a new usbserial carried {from_third:?} and {to_third:?}"
     );
     Ok(())
 }
