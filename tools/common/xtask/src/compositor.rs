@@ -68,6 +68,7 @@ mod direct_scanout;
 mod drawing;
 mod drawn_here;
 pub(crate) mod dxvk;
+mod edge_drag;
 mod effects;
 pub(crate) mod endfield;
 mod firmware_screen;
@@ -751,7 +752,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 60] = [
+const BOOTS: [(&str, Boot); 61] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -801,6 +802,7 @@ const BOOTS: [(&str, Boot); 60] = [
     ("settings", settings::test_settings),
     ("settings-prompt", settings_prompt::test_settings_prompt),
     ("settings-live", settings_live::test_settings_live),
+    ("edge-drag", edge_drag::test_edge_drag),
     ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),

@@ -348,8 +348,13 @@ impl Bars {
     /// checks with the layout.
     #[must_use]
     pub fn hit(&self, point: (f64, f64)) -> Option<(WindowId, Hit)> {
+        self.hit_among(&self.placed, point)
+    }
+
+    /// [`Bars::hit`] over `bars`, bottom to top.
+    fn hit_among(&self, bars: &[(WindowId, Rect)], point: (f64, f64)) -> Option<(WindowId, Hit)> {
         let (x, y) = point;
-        self.placed.iter().rev().find_map(|(window, rect)| {
+        bars.iter().rev().find_map(|(window, rect)| {
             #[expect(
                 clippy::cast_precision_loss,
                 reason = "a screen's pixels are far inside f64's exact range"
@@ -387,7 +392,34 @@ impl Bars {
         point: (f64, f64),
         layout: &[MonitorLayout],
     ) -> Option<(WindowId, Hit)> {
-        let (window, hit) = self.hit(point)?;
+        // Where each titled window's bar is now, from the layout the press
+        // is judged against, not from the last frame drawn: a window that
+        // moved since -- snapped to an edge, dropped, raised -- has its bar
+        // where it is, so the bar it shows is the one a press reaches (the
+        // customer on the TV, 2026-10-25: after a drag to the edge the bar
+        // took no clicks).
+        let height = self.style.height;
+        let now: Vec<(WindowId, Rect)> = layout
+            .iter()
+            .flat_map(|output| output.windows.iter())
+            .filter(|placed| {
+                self.placed
+                    .iter()
+                    .any(|(window, _)| *window == placed.window)
+            })
+            .map(|placed| {
+                (
+                    placed.window,
+                    Rect::new(
+                        placed.rect.x,
+                        placed.rect.y.saturating_sub(height),
+                        placed.rect.width,
+                        height,
+                    ),
+                )
+            })
+            .collect();
+        let (window, hit) = self.hit_among(&now, point)?;
         #[expect(
             clippy::cast_possible_truncation,
             reason = "the pointer is held inside the screen, which is far inside i64"
@@ -776,6 +808,53 @@ mod tests {
         assert_eq!(
             drawn.bytes.get(..4),
             Some([0xed, 0xeb, 0xeb, 0xff].as_slice())
+        );
+    }
+}
+
+#[cfg(test)]
+mod moved_tests {
+    use compositor_layout::{MonitorId, MonitorLayout, Placed, Rect, WindowId, WorkspaceId};
+
+    use super::{Bars, Hit};
+
+    fn placed(window: u64, rect: Rect) -> Placed {
+        Placed {
+            window: WindowId(window),
+            rect,
+            border: 1,
+            focused: false,
+            floating: true,
+            fullscreen: false,
+        }
+    }
+
+    /// A window that moved since the last frame -- snapped to the left half
+    /// -- has its bar where the layout has it now: a press there takes the
+    /// bar, and one where the bar was before takes nothing (the customer's
+    /// edge drag, 2026-10-25).
+    #[test]
+    fn a_press_finds_the_bar_where_the_window_is_now() {
+        let mut bars = Bars::default();
+        let height = bars.style.height;
+        bars.placed
+            .push((WindowId(2), Rect::new(192, 125 - height, 640, height)));
+        let layout = [MonitorLayout {
+            monitor: MonitorId(0),
+            workspace: WorkspaceId(1),
+            windows: vec![placed(2, Rect::new(0, height, 512, 662))],
+        }];
+        let middle = f64::from(u32::try_from(height).unwrap()) / 2.0;
+        assert_eq!(
+            bars.uncovered_hit((100.0, middle), &layout),
+            Some((WindowId(2), Hit::Bar))
+        );
+        assert_eq!(
+            bars.uncovered_hit(
+                (700.0, f64::from(u32::try_from(125 - height / 2).unwrap())),
+                &layout
+            ),
+            None
         );
     }
 }
