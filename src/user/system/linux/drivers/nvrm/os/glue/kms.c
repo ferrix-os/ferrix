@@ -62,7 +62,14 @@ static void kms_event(const struct NvKmsKapiEvent *event)
 {
     if (event->type == NVKMS_EVENT_TYPE_DPY_CHANGED ||
         event->type == NVKMS_EVENT_TYPE_DYNAMIC_DPY_CONNECTED)
+    {
+        /* Said, so a dark screen can be told from a quiet one. */
+        kms_say("display event %d for display %x\n", (int)event->type,
+                event->type == NVKMS_EVENT_TYPE_DPY_CHANGED
+                    ? event->u.displayChanged.display
+                    : event->u.dynamicDisplayConnected.display);
         __atomic_fetch_add(&kms_display_events, 1, __ATOMIC_SEQ_CST);
+    }
     else
         kms_say("event %d\n", (int)event->type);
 }
@@ -934,7 +941,7 @@ static int kms_card_start(struct kms_head *lit)
  * it could not.
  */
 static int kms_recheck(struct kms_head *lit, struct NvKmsKapiDynamicDisplayParams *dyn,
-                       NvBool *connected)
+                       NvBool *connected, NvBool told)
 {
     struct NvKmsKapiDisplayMode mode;
     struct nvos_display_hello hello;
@@ -958,7 +965,15 @@ static int kms_recheck(struct kms_head *lit, struct NvKmsKapiDynamicDisplayParam
     bytes = dyn->edid.bufferSize <= sizeof(lit->edid) ? dyn->edid.bufferSize : 0;
     same = *connected && bytes == lit->edid_bytes && memcmp(lit->edid, dyn->edid.buffer, bytes) == 0;
     *connected = NV_TRUE;
-    if (same)
+    /*
+     * The same monitor, connected, and NVKMS told of no change: nothing to
+     * do. Told of one, the head is lit again even so: a monitor that drops
+     * its hot-plug line for less than a look (power saving, a re-sync) is
+     * found connected with the same EDID, while NVKMS may have shut the head
+     * down meanwhile, and nvidia-drm's clients answer such an event with a
+     * mode set too.
+     */
+    if (same && !told)
         return 0;
     if (!kms_preferred_mode(lit->device, lit->display, &mode))
     {
@@ -1027,11 +1042,13 @@ static void kms_watch(void *argument)
     for (NvU32 looks = 1;; looks++)
     {
         NvU32 events;
+        NvBool told;
 
         nvkms_usleep(KMS_WATCH_TICK_US);
         events = __atomic_load_n(&kms_display_events, __ATOMIC_SEQ_CST);
         if (events == seen && looks % KMS_WATCH_LOOK_TICKS != 0)
             continue;
+        told = events != seen;
         seen = events;
         nvos_mutex_lock(&kms_lock);
         if (kms_stopped)
@@ -1046,7 +1063,7 @@ static void kms_watch(void *argument)
                 (void)kms_card_start(lit);
         }
         else
-            (void)kms_recheck(lit, dyn, &connected);
+            (void)kms_recheck(lit, dyn, &connected, told);
         nvos_mutex_unlock(&kms_lock);
         /* A line a minute, so a wait is told from a hang. */
         if (status == -ENODEV && looks % (KMS_WATCH_LOOK_TICKS * 30) == 0)
