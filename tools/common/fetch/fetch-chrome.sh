@@ -25,7 +25,7 @@
 # than on Ferrix.
 #
 # Writes $FERRIX_CHROME_VOLUME/chrome.img (default
-# ~/.local/share/ferrix/chrome/chrome.img). Needs curl, sha256sum, dpkg-deb,
+# ~/.local/share/ferrix/chrome-2/chrome.img). Needs curl, sha256sum, dpkg-deb,
 # unzip, readelf and mkfs.btrfs; no root.
 #
 # Usage: tools/common/fetch/fetch-chrome.sh
@@ -35,7 +35,9 @@ set -euo pipefail
 debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
 chrome_dist=${CHROME_FOR_TESTING:-https://storage.googleapis.com/chrome-for-testing-public}
-out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome}
+# The volume's directory is versioned (xtask's chrome::VOLUME names the same):
+# chrome-2 added GTK 3, and the first, chrome, is left as it was.
+out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome-2}
 # Where a pinned Debian file comes from once the mirror has dropped it, as
 # trixie-security drops a package's update when the next one comes:
 # snapshot.debian.org's archive as it was on the days the pins were taken,
@@ -134,6 +136,34 @@ debs=(
     "main/libt/libtasn1-6/libtasn1-6_4.20.0-2+deb13u1_amd64.deb 23fec6e06583ce2bad9b2c04c9b485e90440e259b1abf8677cd80d3ce60831ad"
     "main/libu/libunistring/libunistring5_1.3-2_amd64.deb 6dd3490bef06ea1096f32d10766b7e016cf579bfae8451d1b7df15ce05b8aa46"
     "main/k/keyutils/libkeyutils1_1.6.3-6_amd64.deb 0b11ad17be0300b63ad4eeb4c6450fed24d34b7b740f23e5363dcb29ee6d5eba"
+    # GTK 3, which Chrome loads for its system look, its dark mode and its
+    # file chooser (Yoru's Nocturne, docs/DESKTOP.md §6), and what it loads.
+    # The keyboard's layouts, which GTK's xkbcommon reads and aborts without.
+    "main/x/xkeyboard-config/xkb-data_2.42-1_all.deb 196ff18533382f64e057ea49df2bb486bd4275a4cc0917361edb560b8756dada"
+    "main/a/adwaita-icon-theme/adwaita-icon-theme_48.1-1_all.deb f60b0577aee314d43d6908ca7f0b8f07dc48e2bb766e7e25035330817e0e827c"
+    "main/h/hicolor-icon-theme/hicolor-icon-theme_0.18-2_all.deb d91fef83a186d3fc9fff293bfd7da4f684f736d15459d258a5a0d251168c1a35"
+    "main/c/cairo/libcairo-gobject2_1.18.4-1+b1_amd64.deb 4fcd432ebe8f93599bd05426f304e2f70409aad271fc6b4b3a2c6243c99c377c"
+    "main/libc/libcloudproviders/libcloudproviders0_0.3.6-2_amd64.deb a626bb23ed9ebc4bc3ce446b552048de63d76768bf0fb492754965c5ee28a7e4"
+    "main/c/colord/libcolord2_1.4.7-3_amd64.deb f11fd3b492781122edf0790f1e1fe24c51a41c67d4bb76cff84a9426c5654fa7"
+    "main/libd/libdeflate/libdeflate0_1.23-2_amd64.deb 5fe37fb79d53f5c91da6ba3ac4c1a8453e1f2b1ff0e0ea45189c5338bbfdbf82"
+    "main/libe/libepoxy/libepoxy0_1.5.10-2_amd64.deb 4c4c8024f2175086de65bca9fdc3fbb967f2863ebf249d489c66d0c8103dd3a3"
+    "main/g/gtk+3.0/libgtk-3-0t64_3.24.49-3_amd64.deb 4aa8828f01365f937f3bf69f812c8107ee4c8a2b208ffdd7656e8de5de81d98f"
+    "main/g/gtk+3.0/libgtk-3-common_3.24.49-3_all.deb 9161bd6b9933384073ac5bacd6a3bb1e2998877a605411d73041fb0b7fadd605"
+    "main/j/jbigkit/libjbig0_2.1-6.1+b2_amd64.deb 95cbc44561651e1b3385454df08e8f2efe84498f6963a85259be2cc2fe798709"
+    "main/libj/libjpeg-turbo/libjpeg62-turbo_2.1.5-4_amd64.deb 5504299ad0e3c0a9ca9f962a68a650a040db52f9f416a109e74df48d55601d3f"
+    "main/l/lerc/liblerc4_4.0.0+ds-5_amd64.deb 2e0c13c0ddbde12968c2c713c2e0474a5b78e90d5216031256a725e8c76aa31c"
+    "main/x/xz-utils/liblzma5_5.8.1-1+deb13u1_amd64.deb 1cfcc6e0dc36f438a79b6e2189facdb9d150b08f57d190a60e01c98075c7f896"
+    "main/p/pango1.0/libpangocairo-1.0-0_1.56.3-1_amd64.deb 6994729c5b7a9649661ec078cf039991f22eff44600543aa917894f83c89cd05"
+    "main/p/pango1.0/libpangoft2-1.0-0_1.56.3-1_amd64.deb b506cf66f78ddf542ddb4bb4a68b3d748d41caa6e190e4480430a6630c1e5105"
+    "main/libw/libwebp/libsharpyuv0_1.5.0-0.1_amd64.deb 51934833d909588f7761fd84362114e90d8d2d38af57edf5df5c4a705e037547"
+    "main/g/gcc-14/libstdc++6_14.2.0-19_amd64.deb ab1fa05837aa7a92aae748fd07a18a35f7d18bb4a71c4724fe2bbf0e32089de0"
+    "main/w/wayland/libwayland-client0_1.23.1-3_amd64.deb d1607e1db1a7c5378a2e5c6ae7b20f64dc6acf134f953d84a7f5204b74339f33"
+    "main/w/wayland/libwayland-cursor0_1.23.1-3_amd64.deb 26fccae2b1228744de0cad6c688550b8d13cd4e8d4ccf0cfdae015634ece673f"
+    "main/w/wayland/libwayland-egl1_1.23.1-3_amd64.deb 7c5c3429028b39b9432792db08cb218c43891df439ebc648b83ebee676a80ec5"
+    "main/libw/libwebp/libwebp7_1.5.0-0.1_amd64.deb c749744b04abdd1426b0c7718e516362c03a557c5151662092d6d4f2cef6e7c1"
+    "main/libx/libxcursor/libxcursor1_1.2.3-1_amd64.deb bb0dbf58b804faaa74ed9efdae61c4b14bb0b4855680798f63e5ca6a4954976b"
+    "main/libx/libxinerama/libxinerama1_1.1.4-3+b4_amd64.deb 49d4e1628960407b8be2880a42428e7629801715a8a5697d42c0b0ca0a479911"
+    "main/libz/libzstd/libzstd1_1.5.7+dfsg-1_amd64.deb 2f6a2aeacfc925eba8b00ac9139bc4bfccf8cacb09eb93de067074b26948eef9"
 )
 
 # The same, from the security archive.
@@ -150,6 +180,11 @@ security_debs=(
     "updates/main/k/krb5/libk5crypto3_1.21.3-5+deb13u1_amd64.deb 7da07ee674b47f1f0be7cc89317c25310086a1f1761217d0f72e6ae2c5a69b84"
     "updates/main/k/krb5/libkrb5-3_1.21.3-5+deb13u1_amd64.deb 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97"
     "updates/main/k/krb5/libkrb5support0_1.21.3-5+deb13u1_amd64.deb 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117"
+    # GTK 3's, from the security archive.
+    "updates/main/g/gdk-pixbuf/libgdk-pixbuf-2.0-0_2.42.12+dfsg-4+deb13u1_amd64.deb 94150fb955b2d3a9a5e054e31c5a4b048bad4a479207e86cde46fbc975c838b4"
+    "updates/main/g/gdk-pixbuf/libgdk-pixbuf2.0-common_2.42.12+dfsg-4+deb13u1_all.deb 9f0c64e33cf5bb3226a5a6ddf630dd76530596e476e6b47a8b27da444ff43a03"
+    "updates/main/l/lcms2/liblcms2-2_2.16-2+deb13u2_amd64.deb 32e53c2002ccea8c60c02779bea0ba49ac132fef702988a30d64af79b6617806"
+    "updates/main/t/tiff/libtiff6_4.7.0-3+deb13u3_amd64.deb 6bb2038f36817ae1ee6d33df03917b21835dcc2e0f3e3e80a71390e83c171173"
 )
 
 for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs; do

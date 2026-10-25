@@ -535,8 +535,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-sha256"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-slots"
 version = "0.1.0"
+dependencies = [
+ "ferrix-sha256",
+]
 
 [[package]]
 name = "ferrix-svc-proto"

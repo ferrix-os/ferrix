@@ -62,6 +62,7 @@ mod apps;
 mod bench;
 mod boot;
 mod browser;
+mod chrome_yoru;
 pub(crate) mod claude_desktop;
 mod desktop;
 mod direct_scanout;
@@ -761,7 +762,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 64] = [
+const BOOTS: [(&str, Boot); 65] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -815,6 +816,7 @@ const BOOTS: [(&str, Boot); 64] = [
     ("walls", walls::test_walls),
     ("stash", stash::test_stash),
     ("sidebars", sidebars::test_sidebars),
+    ("chrome-yoru", chrome_yoru::test_chrome_yoru),
     ("kept-settings", kept_settings::test_kept_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),

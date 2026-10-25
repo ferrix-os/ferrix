@@ -135,6 +135,10 @@ pub(crate) const LINKS: &[(&str, &str)] = &[
     // alsa-lib's configuration, which it reads from this path: Chrome's
     // sound goes through alsa-lib to `/dev/snd` (docs/AUDIO.md §3.5).
     ("usr/share/alsa", "/data/usr/share/alsa"),
+    // GTK 3's, which Chrome loads for its system look: the keyboard's
+    // layouts, which its xkbcommon aborts without, and its icons.
+    ("usr/share/X11/xkb", "/data/usr/share/X11/xkb"),
+    ("usr/share/icons/Adwaita", "/data/usr/share/icons/Adwaita"),
 ];
 
 /// [`LINKS`] for AArch64's Chromium volume: its loader where the program's
@@ -630,12 +634,18 @@ pub(crate) fn pulse_volume() -> Result<std::path::PathBuf> {
     }
 }
 
+/// The volume's directory under `~/.local/share/ferrix`, by version: a
+/// volume with new contents gets a directory of its own, so every machine
+/// keeps the one it had until the commit that names the new one lands. 2
+/// added GTK 3 (2026-10-25); `chrome`, the first, is left where it is.
+pub(crate) const VOLUME: &str = "chrome-2";
+
 /// Where `tools/common/fetch/fetch-chrome.sh` writes, unless `FERRIX_CHROME_VOLUME`
 /// names another directory.
 pub(crate) fn volume() -> Result<std::path::PathBuf> {
     let directory = match std::env::var_os("FERRIX_CHROME_VOLUME") {
         Some(directory) => std::path::PathBuf::from(directory),
-        None => crate::paths::volume_directory("chrome")?,
+        None => crate::paths::volume_directory(VOLUME)?,
     };
     let image = directory.join("chrome.img");
     if !image.is_file() {

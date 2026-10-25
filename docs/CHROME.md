@@ -1245,3 +1245,31 @@ scan at the root switch publishes its partitions, and `mount -t btrfs
   the product owner's OK.
 * **Left:** high speed (50 MHz) and the internal DMA, each a step of its
   own; a Chrome volume on the card is po10-chrome-a's.
+
+---
+
+## 10. GTK, and the volume's second version, 2026-10-25
+
+Chrome on Linux loads GTK 3 for its system look -- the colours of its tab
+strip and toolbar, its dark mode -- and draws its own light default where
+there is none. The volume now carries GTK 3 and what it loads, 29 more
+Debian 13 packages pinned by SHA-256 as the rest are: GTK and its common
+data, gdk-pixbuf and its image libraries, pango's cairo and FreeType
+halves, epoxy, libwayland's client, cursor and EGL libraries, colord and
+lcms2, the Adwaita and hicolor icons, and the keyboard layouts
+(`xkb-data`), without which GTK's xkbcommon finds no `evdev` rules and
+Chrome ends at its first window. The image links the layouts and the
+Adwaita icons to the volume's, as it does the fonts.
+
+A volume with new contents is made under a directory of its own, so that a
+machine keeps running the one it had until the commit naming the new one
+lands: `~/.local/share/ferrix/chrome-2` (`chrome::VOLUME`), the first,
+`chrome`, left as it was. Under Yoru, whose image carries Nocturne for GTK
+and GTK's settings naming it, Chrome draws its frame in Nocturne's dark
+colours; `test-compositor --boot chrome-yoru` requires the toolbar above
+the page dark (about 0x5e on average, against 0xc7 for Chrome's light
+default on the first volume).
+
+Not yet: GTK's file chooser needs GSettings' compiled schemas, which
+unpacking without Debian's maintainer scripts does not make, and
+gdk-pixbuf's loaders' cache likewise; neither is used by drawing the frame.

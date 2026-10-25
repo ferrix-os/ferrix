@@ -368,7 +368,7 @@ fn pulsed(arch: Arch, args: &Args) -> Result<Option<Vec<u8>>> {
 /// the volume's, Debian's. Without it fontconfig knew no generic family and
 /// no metric alias, and Chrome drew every face, its own tabs and toolbar
 /// too, in foot's one font, a monospace.
-fn chrome_links(arch: Arch, carried: &[crate::ports::File]) -> Vec<crate::ports::File> {
+pub(super) fn chrome_links(arch: Arch, carried: &[crate::ports::File]) -> Vec<crate::ports::File> {
     let taken = |path: &str| {
         carried.iter().any(|file| {
             file.path == path
