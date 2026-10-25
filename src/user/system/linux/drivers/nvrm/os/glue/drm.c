@@ -978,8 +978,10 @@ static int drm_fd_to_handle(struct drm_file *file, NvU64 request, NvU64 arg)
 
 static int drm_ioctl_one(void *opened, NvU64 request, NvU32 cmd, NvU64 arg);
 
-/* Bring-up aid (N3b): say every ioctl and its answer. */
-int nvrm_trace_drm = 1;
+/* Bring-up aid (N3b): say every ioctl and its answer, and every fence.
+ * Off: on the RTX 3060 it was 4.28 of a desktop's 4.35 million serial
+ * lines, a byte a trap to QEMU each. */
+int nvrm_trace_drm = 0;
 
 int nvrm_drm_ioctl(void *opened, NvU64 request, NvU32 cmd, NvU64 arg)
 {
