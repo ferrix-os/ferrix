@@ -81,7 +81,10 @@ fn a_name_that_is_not_level_2_is_refused() {
 /// catalog's EFI image and the file in the root.
 #[test]
 fn xorriso_reads_it() {
-    let Ok(found) = std::process::Command::new("xorriso").arg("-version").output() else {
+    let Ok(found) = std::process::Command::new("xorriso")
+        .arg("-version")
+        .output()
+    else {
         eprintln!("no xorriso here; skipped");
         return;
     };
@@ -105,8 +108,8 @@ fn xorriso_reads_it() {
     assert!(text.contains("README.TXT"), "{text}");
     assert!(text.contains("EFIBOOT.IMG"), "{text}");
     assert!(
-        text.lines().any(|line| line.contains("UEFI")
-            && line.contains(&layout.esp_block.to_string())),
+        text.lines()
+            .any(|line| line.contains("UEFI") && line.contains(&layout.esp_block.to_string())),
         "{text}"
     );
 }

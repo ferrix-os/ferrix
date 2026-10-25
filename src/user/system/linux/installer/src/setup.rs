@@ -50,8 +50,20 @@ pub struct Answers {
 
 /// Names the system has for itself, which a person's account may not take.
 const RESERVED: &[&str] = &[
-    "root", "auth", "nobody", "daemon", "bin", "sys", "wheel", "audio", "video", "input",
-    "render", "users", "admin", "ferrix-setup",
+    "root",
+    "auth",
+    "nobody",
+    "daemon",
+    "bin",
+    "sys",
+    "wheel",
+    "audio",
+    "video",
+    "input",
+    "render",
+    "users",
+    "admin",
+    "ferrix-setup",
 ];
 
 impl Answers {
@@ -96,8 +108,14 @@ impl Answers {
         }
         let zone_ok = !self.timezone.is_empty()
             && !self.timezone.starts_with('/')
-            && !self.timezone.split('/').any(|part| part.is_empty() || part == "..")
-            && self.timezone.bytes().all(|b| b.is_ascii_alphanumeric() || b"/_-+".contains(&b));
+            && !self
+                .timezone
+                .split('/')
+                .any(|part| part.is_empty() || part == "..")
+            && self
+                .timezone
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/_-+".contains(&b));
         if !zone_ok {
             return Err(format!("{:?} is not a time zone", self.timezone));
         }
@@ -293,7 +311,9 @@ pub fn apply_to(root: &Path, filled: &Filled) -> Result<(), String> {
         }
     }
     if !found {
-        lines.push(format!("{user}:x:{UID}:{UID}:{fullname}:/home/{user}:/bin/zsh"));
+        lines.push(format!(
+            "{user}:x:{UID}:{UID}:{fullname}:/home/{user}:/bin/zsh"
+        ));
     }
     write(&at("etc/passwd"), &(lines.join("\n") + "\n"), 0o644)?;
     let group = read(&at("etc/group"));
@@ -339,7 +359,11 @@ pub fn apply_to(root: &Path, filled: &Filled) -> Result<(), String> {
     )?;
 
     // The computer's name.
-    write(&at("etc/hostname"), &format!("{}\n", answers.hostname), 0o644)?;
+    write(
+        &at("etc/hostname"),
+        &format!("{}\n", answers.hostname),
+        0o644,
+    )?;
 
     // The time zone, as settingsd's set-timezone writes it.
     let zone = Path::new("/usr/share/zoneinfo").join(&answers.timezone);
@@ -426,7 +450,9 @@ mod tests {
 
     #[test]
     fn the_file_holds_the_answers_and_never_the_password() {
-        let file = answers().file("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA").expect("a file");
+        let file = answers()
+            .file("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA")
+            .expect("a file");
         assert_eq!(file.len(), super::SETUP_BYTES);
         let text = String::from_utf8(file.clone()).expect("text");
         assert!(!text.contains("a password"));
@@ -440,7 +466,12 @@ mod tests {
 
     #[test]
     fn bad_answers_are_refused() {
-        for (user, host) in [("Kira", "pc"), ("root", "pc"), ("kira", "My PC"), ("", "pc")] {
+        for (user, host) in [
+            ("Kira", "pc"),
+            ("root", "pc"),
+            ("kira", "My PC"),
+            ("", "pc"),
+        ] {
             let mut a = answers();
             a.user = user.into();
             a.hostname = host.into();
@@ -461,9 +492,16 @@ mod tests {
             "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/home/ferrix:/bin/zsh\nauth:x:90:90:authd:/var/lib/ferrix/auth:/sbin/nologin\n",
         )
         .expect("passwd");
-        std::fs::write(root.join("etc/group"), "root:x:0:\nferrix:x:1000:\nauth:x:90:\nwheel:x:10:ferrix\n")
-            .expect("group");
-        std::fs::write(root.join("etc/hyprland.conf"), "exec-once = /bin/yoru-shell\n").expect("conf");
+        std::fs::write(
+            root.join("etc/group"),
+            "root:x:0:\nferrix:x:1000:\nauth:x:90:\nwheel:x:10:ferrix\n",
+        )
+        .expect("group");
+        std::fs::write(
+            root.join("etc/hyprland.conf"),
+            "exec-once = /bin/yoru-shell\n",
+        )
+        .expect("conf");
         let filled = Filled {
             answers: answers(),
             hash: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA".into(),
@@ -477,7 +515,11 @@ mod tests {
         assert!(group.contains("kira:x:1000:"));
         assert!(group.contains("wheel:x:10:kira"));
         let conf = std::fs::read_to_string(root.join("etc/hyprland.conf")).expect("conf");
-        assert_eq!(conf.matches("source = /etc/ferrix/installed-hyprland.conf").count(), 1);
+        assert_eq!(
+            conf.matches("source = /etc/ferrix/installed-hyprland.conf")
+                .count(),
+            1
+        );
         let installed =
             std::fs::read_to_string(root.join("etc/ferrix/installed-hyprland.conf")).expect("ours");
         assert!(installed.contains("input:kb_layout = de"));

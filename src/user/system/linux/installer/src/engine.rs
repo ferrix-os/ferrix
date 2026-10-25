@@ -37,9 +37,14 @@ pub const ROOT_MIN: u64 = 4 << 30;
 pub enum Space {
     Erase,
     /// Sectors `first..=last` that no partition holds.
-    Free { first: u64, last: u64 },
+    Free {
+        first: u64,
+        last: u64,
+    },
     /// The partition numbered `number` (1-based), whose contents are lost.
-    Partition { number: u32 },
+    Partition {
+        number: u32,
+    },
 }
 
 /// One install.
@@ -103,7 +108,14 @@ pub fn install(plan: &Plan, live: &str, report: &mut dyn FnMut(Event)) -> Result
     let esp_last = esp_first + esp_sectors - 1;
     let root_first = esp_last + 1;
     let root_last = (last + 1) / ALIGN * ALIGN - 1;
-    if root_last <= root_first || (root_last - root_first + 1) * SECTOR < ROOT_MIN {
+    // The command line's bare install, a test image's, keeps its 1 GiB
+    // floor; a person's desktop needs room.
+    let root_min = if plan.answers.is_some() {
+        ROOT_MIN
+    } else {
+        crate::ROOT_BYTES
+    };
+    if root_last <= root_first || (root_last - root_first + 1) * SECTOR < root_min {
         return Err(format!(
             "the space chosen on {} is {} MiB; Ferrix needs {} MiB",
             plan.target,
@@ -111,7 +123,13 @@ pub fn install(plan: &Plan, live: &str, report: &mut dyn FnMut(Event)) -> Result
             needed(esp_bytes) >> 20
         ));
     }
-    let esp = Partition::new(ESP, random_guid()?, esp_first, esp_last, "EFI system partition");
+    let esp = Partition::new(
+        ESP,
+        random_guid()?,
+        esp_first,
+        esp_last,
+        "EFI system partition",
+    );
     let root = Partition::new(
         LINUX_FILESYSTEM,
         random_guid()?,
@@ -208,9 +226,7 @@ pub fn install(plan: &Plan, live: &str, report: &mut dyn FnMut(Event)) -> Result
 fn existing(disk: &mut File, target: &str) -> Result<disk::Table, String> {
     disk::table(disk)
         .map_err(|e| format!("{target}: {e}"))?
-        .ok_or_else(|| {
-            format!("{target} has no GUID partition table; only erasing it is offered")
-        })
+        .ok_or_else(|| format!("{target} has no GUID partition table; only erasing it is offered"))
 }
 
 /// Refuse a range that is not free space of `table`'s.
@@ -223,10 +239,7 @@ fn check_free(table: &disk::Table, first: u64, last: u64) -> Result<(), String> 
         .iter()
         .find(|(_, partition)| partition.first <= last && first <= partition.last)
     {
-        return Err(format!(
-            "the space chosen overlaps partition {}",
-            index + 1
-        ));
+        return Err(format!("the space chosen overlaps partition {}", index + 1));
     }
     Ok(())
 }
@@ -264,11 +277,10 @@ fn patched(table: &disk::Table, added: &[Partition]) -> Result<Vec<(u64, Vec<u8>
     // The entry given up, if any, is the one the table read had and
     // `entries` no longer lists: cleared.
     for (index, chunk) in array.chunks_exact_mut(size).enumerate() {
-        let used = chunk.get(..16).is_some_and(|guid| guid.iter().any(|&b| b != 0));
-        let kept = table
-            .entries
-            .iter()
-            .any(|(at, _)| *at as usize == index);
+        let used = chunk
+            .get(..16)
+            .is_some_and(|guid| guid.iter().any(|&b| b != 0));
+        let kept = table.entries.iter().any(|(at, _)| *at as usize == index);
         if used && !kept {
             chunk.fill(0);
         }
@@ -313,7 +325,10 @@ fn patched(table: &disk::Table, added: &[Partition]) -> Result<Vec<(u64, Vec<u8>
     finish(&mut primary, 1, last, header.entries_at);
     finish(&mut backup, last, 1, last - array_sectors);
     let mut padded = array;
-    padded.resize(usize::try_from(array_sectors * SECTOR).map_err(|e| e.to_string())?, 0);
+    padded.resize(
+        usize::try_from(array_sectors * SECTOR).map_err(|e| e.to_string())?,
+        0,
+    );
     Ok(vec![
         (1, primary),
         (header.entries_at, padded.clone()),
@@ -375,7 +390,13 @@ mod tests {
         let parts = [
             Partition::new(ESP, Guid([1; 16]), 2048, 206_847, "EFI"),
             Partition::new(LINUX_FILESYSTEM, Guid([2; 16]), 206_848, 20_000_000, "gone"),
-            Partition::new(LINUX_FILESYSTEM, Guid([3; 16]), 40_000_000, 60_000_000, "other"),
+            Partition::new(
+                LINUX_FILESYSTEM,
+                Guid([3; 16]),
+                40_000_000,
+                60_000_000,
+                "other",
+            ),
         ];
         let written = write_table(sectors, 512, Guid([9; 16]), &parts).expect("a table");
         let mut array = written[2].1.clone();
@@ -411,8 +432,20 @@ mod tests {
     fn new_partitions_take_empty_entries_and_others_keep_their_numbers() {
         let table = table();
         let added = [
-            Partition::new(ESP, Guid([4; 16]), 206_848, 1_255_423, "EFI system partition"),
-            Partition::new(LINUX_FILESYSTEM, Guid([5; 16]), 1_255_424, 39_999_487, "ferrix-root"),
+            Partition::new(
+                ESP,
+                Guid([4; 16]),
+                206_848,
+                1_255_423,
+                "EFI system partition",
+            ),
+            Partition::new(
+                LINUX_FILESYSTEM,
+                Guid([5; 16]),
+                1_255_424,
+                39_999_487,
+                "ferrix-root",
+            ),
         ];
         let sectors = patched(&table, &added).expect("patched");
         let header = &sectors[0].1;
@@ -437,8 +470,14 @@ mod tests {
         covered[16..20].fill(0);
         let crc = u32::from_le_bytes(backup[16..20].try_into().expect("four"));
         assert_eq!(ferrix_partition::crc32(&covered), crc);
-        assert_eq!(u64::from_le_bytes(backup[24..32].try_into().expect("8")), sectors[3].0);
-        assert_eq!(u64::from_le_bytes(backup[72..80].try_into().expect("8")), sectors[2].0);
+        assert_eq!(
+            u64::from_le_bytes(backup[24..32].try_into().expect("8")),
+            sectors[3].0
+        );
+        assert_eq!(
+            u64::from_le_bytes(backup[72..80].try_into().expect("8")),
+            sectors[2].0
+        );
         assert_eq!(backup[88..92], header[88..92]);
     }
 

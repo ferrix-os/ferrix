@@ -363,9 +363,9 @@ fn catalog(esp_block: u64) -> Vec<u8> {
     out[1] = 0xEF;
     out[30] = 0x55;
     out[31] = 0xAA;
-    let sum = out[..32]
-        .chunks(2)
-        .fold(0_u16, |sum, word| sum.wrapping_add(u16::from_le_bytes([word[0], word[1]])));
+    let sum = out[..32].chunks(2).fold(0_u16, |sum, word| {
+        sum.wrapping_add(u16::from_le_bytes([word[0], word[1]]))
+    });
     out[28..30].copy_from_slice(&0_u16.wrapping_sub(sum).to_le_bytes());
     out[32] = 0x88;
     out[40..44].copy_from_slice(&u32::try_from(esp_block).unwrap_or(u32::MAX).to_le_bytes());

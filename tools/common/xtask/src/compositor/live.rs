@@ -96,7 +96,8 @@ const UNITS: [(&str, &str); 2] = [
 /// The lock screen an installed system's session starts behind, which is
 /// its login: hyprlock in Yoru's Nocturne colours, where hyprlock looks for
 /// a system-wide file (`/etc/xdg/hypr`).
-const HYPRLOCK_CONF: &str = "# The installed system's login (cargo xtask iso): hyprlock in Nocturne.
+const HYPRLOCK_CONF: &str =
+    "# The installed system's login (cargo xtask iso): hyprlock in Nocturne.
 $font = Inter
 
 general {
@@ -418,7 +419,9 @@ fn installer_files(arch: Arch) -> Result<Vec<File>> {
     {
         files.extend(crate::apps::taken(arch, &["installer"])?);
     } else {
-        println!("  the graphical installer is not in the apps checkout; the ISO has the daemon only");
+        println!(
+            "  the graphical installer is not in the apps checkout; the ISO has the daemon only"
+        );
     }
     Ok(files)
 }
@@ -429,11 +432,23 @@ fn installer_files(arch: Arch) -> Result<Vec<File>> {
 fn zones() -> Result<Vec<File>> {
     const ROOT: &str = "/usr/share/zoneinfo";
     const REGIONS: [&str; 11] = [
-        "Africa", "America", "Antarctica", "Asia", "Atlantic", "Australia", "Europe", "Indian",
-        "Pacific", "Etc", "UTC",
+        "Africa",
+        "America",
+        "Antarctica",
+        "Asia",
+        "Atlantic",
+        "Australia",
+        "Europe",
+        "Indian",
+        "Pacific",
+        "Etc",
+        "UTC",
     ];
     let mut files = Vec::new();
-    let mut pending: Vec<PathBuf> = REGIONS.iter().map(|region| Path::new(ROOT).join(region)).collect();
+    let mut pending: Vec<PathBuf> = REGIONS
+        .iter()
+        .map(|region| Path::new(ROOT).join(region))
+        .collect();
     while let Some(path) = pending.pop() {
         if path.is_dir() {
             let entries = std::fs::read_dir(&path)
@@ -441,11 +456,17 @@ fn zones() -> Result<Vec<File>> {
             pending.extend(entries.flatten().map(|entry| entry.path()));
             continue;
         }
-        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
         if !bytes.starts_with(b"TZif") {
             continue;
         }
-        let relative = path.strip_prefix("/").unwrap_or(&path).to_string_lossy().into_owned();
+        let relative = path
+            .strip_prefix("/")
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
         files.push(File {
             path: relative,
             mode: 0o644,
@@ -502,7 +523,10 @@ pub(crate) fn test_iso(args: &Args) -> Result<()> {
         let said = boot_live(arch, &built, &boot, how)?;
         for (wanted, problem) in [
             ("sessiond: ", "sessiond never started the session"),
-            ("ferrix-installd: listening", "the installer's daemon never listened"),
+            (
+                "ferrix-installd: listening",
+                "the installer's daemon never listened",
+            ),
             (
                 "ferrix-installer: the window is up",
                 "the graphical installer never opened its window",
@@ -707,9 +731,18 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
     };
     let _ = crate::qemu::watch_then(arch, &built.iso, &built.kernel, &install, "", hook)?;
     for (wanted, problem) in [
-        ("unattended answers on /dev/vdf", "the daemon never found the answers"),
-        ("ferrix-install: the answers are in FERRIX/SETUP.TXT", "the answers never reached the ESP"),
-        ("ferrix-installd: powering off", "the install did not finish"),
+        (
+            "unattended answers on /dev/vdf",
+            "the daemon never found the answers",
+        ),
+        (
+            "ferrix-install: the answers are in FERRIX/SETUP.TXT",
+            "the answers never reached the ESP",
+        ),
+        (
+            "ferrix-installd: powering off",
+            "the install did not finish",
+        ),
     ] {
         if !said.iter().any(|line| line.contains(wanted)) {
             return Err(Error::new(format!(
@@ -717,7 +750,10 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
             )));
         }
     }
-    println!("  {arch}: installed from the live ISO onto {}", target.display());
+    println!(
+        "  {arch}: installed from the live ISO onto {}",
+        target.display()
+    );
 
     // The installed disk alone: answers applied, the session the person's,
     // locked until their password.
@@ -760,7 +796,14 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
             .collect();
         Ok(())
     };
-    let _ = crate::qemu::watch_then(arch, &target, &built.kernel, &installed, super::EITHER, hook)?;
+    let _ = crate::qemu::watch_then(
+        arch,
+        &target,
+        &built.kernel,
+        &installed,
+        super::EITHER,
+        hook,
+    )?;
     for (wanted, problem) in [
         (
             "/ is btrfs on vdd2; the system was installed on it",
@@ -775,7 +818,10 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
             "the session did not start as the person's account",
         ),
         ("hyprlock: locked", "the session did not start locked"),
-        ("hyprlock: authenticated", "the person's password did not open it"),
+        (
+            "hyprlock: authenticated",
+            "the person's password did not open it",
+        ),
     ] {
         if !said.iter().any(|line| line.contains(wanted)) {
             return Err(Error::new(format!(

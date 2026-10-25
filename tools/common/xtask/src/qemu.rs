@@ -2841,7 +2841,10 @@ fn qemu_command(
             // which is harmless and the kind of noise that trains people to
             // skim the boot log.
             if args.boot_cdrom {
-                println!("  {arch}: {} as a CD on the AHCI port, booted from", display(image));
+                println!(
+                    "  {arch}: {} as a CD on the AHCI port, booted from",
+                    display(image)
+                );
                 let _ = command.args([
                     "-drive",
                     &format!(

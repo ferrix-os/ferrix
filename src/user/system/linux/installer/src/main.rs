@@ -37,9 +37,7 @@ mod fat_in_place;
 mod serve;
 mod setup;
 mod slots;
-use ferrix_partition::{
-    ESP, Guid, Partition, parse_entries, parse_header,
-};
+use ferrix_partition::{ESP, Guid, Partition, parse_entries, parse_header};
 
 /// The live medium's EFI system partition's name (`tools/common/xtask/src/installer.rs`).
 pub(crate) const LIVE_NAME: &str = "FERRIX-LIVE";
@@ -54,7 +52,7 @@ const LIVE_WORD: &[u8] = b"ferrix.live";
 /// The root volume's label, which is how the kernel finds it.
 const ROOT_LABEL: &[u8] = b"ferrix-root";
 /// The smallest root partition: the system unpacked, with room to work.
-const ROOT_BYTES: u64 = 1 << 30;
+pub(crate) const ROOT_BYTES: u64 = 1 << 30;
 /// Bytes in a sector: virtio's unit.
 pub(crate) const SECTOR: u64 = 512;
 /// Partitions start on MiB boundaries, as every tool puts them.
@@ -217,7 +215,11 @@ fn answers_file(path: &str) -> Result<setup::Answers, String> {
 pub(crate) fn live_disk() -> Option<String> {
     let live = find_live().ok()?;
     let disk = live.trim_end_matches(|c: char| c.is_ascii_digit());
-    Some(if Path::new(disk).exists() { disk.to_owned() } else { live })
+    Some(if Path::new(disk).exists() {
+        disk.to_owned()
+    } else {
+        live
+    })
 }
 
 /// Run a step, saying what it is and what went wrong.
