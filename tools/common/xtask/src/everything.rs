@@ -645,11 +645,19 @@ fn is_alternative(target: &Path) -> bool {
 /// pin; and two of Debian's libraries, the same upstream version in another
 /// security revision (`fetch-wine.sh` pins libpng `+deb13u6` and liblzma
 /// `+deb13u2`, the volumes before it `+deb13u5` and `+deb13u1`). Wine and
-/// Proton run on either. Any other difference stays a clash.
+/// Proton run on either. Chrome's volume 4 is the same the other way round:
+/// its libssh2 1.11.1 and libxml2 2.9.14 are `+deb13u1`, the rustc
+/// volume's, merged first, `+deb13u2` and `+deb13u3`, which are kept. And
+/// `GLib`'s compiled schemas: volume 4's are GTK 3's and GTK 4's, the Claude
+/// desktop's, merged after it, GTK 3's alone, from the same schema files.
+/// Any other difference stays a clash.
 const EARLIER_KEPT: &[&str] = &[
     "yserver/yserver",
     "usr/lib/x86_64-linux-gnu/libpng16.so.16.48.0",
     "usr/lib/x86_64-linux-gnu/liblzma.so.5.8.1",
+    "usr/lib/x86_64-linux-gnu/libssh2.so.1.0.1",
+    "usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14",
+    "usr/share/glib-2.0/schemas/gschemas.compiled",
 ];
 
 /// Whether `target`, a path in the merged tree, is one of [`EARLIER_KEPT`].
