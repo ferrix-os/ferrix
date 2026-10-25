@@ -789,9 +789,11 @@ rather than to GTK's own (`test-compositor --boot chrome-save` and
 `--boot gtk-chooser`). It needs a session bus. Not yet: several files at
 once (`multiple` answers one), and choosing a folder as such.
 
-Follow-up, not built: the Files app in the same design language -- tabs,
-places and pinned folders, list and grid -- the window beside the dialog
-in the customer's design.
+The Files app of the same design language is shelf, after the customer's
+File Explorer v2 design (tabs, list and grid with thumbnails, Back, Up and
+Forward, the breadcrumbs, Places, and Quick access, which the first
+version called Pinned); on Yoru the dock's Files, the stash's folder button
+and the default handler of a folder open it.
 
 Measured on the GPU path where it costs: the dock's and sidebars' blur
 (`layerrule = blur`), the focused window's glow, and the workspace slide,
@@ -980,7 +982,7 @@ built and the size of what is not (points as the backlog counts them).
 | Workspaces 1-4 named, slide 40 px and fade | switch (dock, keys) | the slide animation -- 3; names in the dock's tooltip -- 1 |
 | Parallax wallpaper per workspace | no | 3 |
 | Dock: search, workspaces, launchers, tools, focus, pomodoro, clock | yes (Y2) | the FX mark in the round button -- 1; tooltips -- 2 |
-| Stash: drag files onto the dock, shelf popover, badge, open in Files | yes: the button and its count, a drop on it, the panel (boot `stash`) | the folder opens in shelf, and a drag from shelf -- 2 |
+| Stash: drag files onto the dock, shelf popover, badge, open in Files | yes: the button and its count, a drop on it, the panel, its folder in Files (boots `stash`, `files`) | a drag from shelf -- 1 |
 | Bar layout (40 px bottom bar with a task list) | no | 3 |
 | Widget sidebars, edge reveal, pin to reserve room | yes (boot `sidebars`) | |
 | Widgets: clock and month calendar | yes | |
@@ -1003,6 +1005,6 @@ built and the size of what is not (points as the backlog counts them).
 | Chrome and GTK apps in the tokens | yes: Nocturne for GTK 3 and 4, portald's settings, GTK in Chrome's volume (boot `chrome-yoru`), and Ferrix's file chooser for GTK and Chrome through the portal (boots `chrome-save`, `gtk-chooser`) | |
 
 The stash, the wallpaper picker and the widgets (but weather and quick
-settings) are built, as the customer asked them in that order; next is the
-Files app, shelf, wired into Yoru (the dock's Files, the stash's folder,
-the handler of a folder).
+settings) are built, as the customer asked them in that order; and Files is
+shelf, wired into Yoru: the dock's Files, the stash's folder and a folder's
+default handler (`inode/directory`, `xdg-open`) open it (boot `files`).

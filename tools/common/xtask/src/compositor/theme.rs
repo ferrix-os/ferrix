@@ -46,6 +46,10 @@ const FACES: [(&str, &str); 4] = [
     ),
 ];
 
+/// The default applications a Yoru desktop names: Files, shelf, for a
+/// folder.
+const MIMEAPPS: &str = "[Default Applications]\ninode/directory=shelf.desktop\n";
+
 /// Nocturne for GTK, from hyprix's `themes/gtk`, and where each goes.
 const GTK: [(&str, &str); 4] = [
     (
@@ -190,6 +194,13 @@ pub(super) fn apply(config: String, args: &Args, files: &mut Vec<File>) -> Resul
         for (from, to) in GTK {
             carry(themes.join(from), to.to_owned())?;
         }
+        // A folder opens in Files, shelf (the customer's choice): GIO's and
+        // xdg-open's default for inode/directory.
+        files.push(File {
+            path: "etc/xdg/mimeapps.list".to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(MIMEAPPS.as_bytes().to_vec()),
+        });
     }
     println!(
         "  theme: {} ({})",

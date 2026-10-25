@@ -73,6 +73,7 @@ pub(crate) mod dxvk;
 mod edge_drag;
 mod effects;
 pub(crate) mod endfield;
+mod files;
 mod firmware_screen;
 pub(crate) mod frames;
 mod gnome_apps;
@@ -765,7 +766,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 67] = [
+const BOOTS: [(&str, Boot); 68] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -819,6 +820,7 @@ const BOOTS: [(&str, Boot); 67] = [
     ("walls", walls::test_walls),
     ("stash", stash::test_stash),
     ("sidebars", sidebars::test_sidebars),
+    ("files", files::test_files),
     ("chrome-yoru", chrome_yoru::test_chrome_yoru),
     ("chrome-save", chrome_save::test_chrome_save),
     ("gtk-chooser", gtk_chooser::test_gtk_chooser),

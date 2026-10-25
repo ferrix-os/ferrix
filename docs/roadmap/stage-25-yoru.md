@@ -34,6 +34,8 @@ estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
   and month, the to-do; boot `sidebars`. The weather and quick settings
   tabs say "not kept yet".
 * **Y7's wallpaper picker**: `yoru-shell --walls` on SUPER I; boot `walls`.
+* **Files is shelf** on Yoru: the dock's Files, the stash's folder button
+  and a folder's default handler open it; boot `files`.
 * **Settings** shows what hyprix has in force, reading each option it shows
   with `hyprctl --batch getoption`.
 * **GTK and Chrome in the tokens**: Nocturne for GTK 3 and GTK 4, and
@@ -62,9 +64,6 @@ of §6.7:
   clipboard history, toasts.
 * Y7: the accent from the wallpaper, and parallax.
 * Y8 (5): lock, notifications and the switcher in the tokens; sounds.
-* The Files app: shelf against the customer's File Explorer v2 design, and
-  wired into Yoru -- the dock's Files, the stash's folder, the handler of a
-  folder (next).
 * The file chooser: several files at once, and choosing a folder.
 
 Nothing of the design is on a device other than QEMU and the customer's

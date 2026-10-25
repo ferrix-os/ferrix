@@ -553,10 +553,18 @@ pub(crate) fn opener(arch: Arch, profile: &str, nvidia: bool) -> crate::ports::F
         path: "bin/xdg-open".to_owned(),
         mode: 0o755,
         content: crate::ports::Content::Bytes(
-            format!("#!/bin/sh\n{OPENER_CLAUDE}exec env {WINDOW_HOME} {command}\n").into_bytes(),
+            format!("#!/bin/sh\n{OPENER_FOLDER}{OPENER_CLAUDE}exec env {WINDOW_HOME} {command}\n")
+                .into_bytes(),
         ),
     }
 }
+
+/// What [`opener`] hands Files (shelf) rather than Chrome: a folder, as a
+/// path or a `file://` URI -- the default for `inode/directory` on Yoru,
+/// the customer's choice that Files is shelf.
+const OPENER_FOLDER: &str = r#"folder=${1#file://}
+[ -d "$folder" ] && [ -x /bin/shelf ] && exec /bin/shelf "$folder"
+"#;
 
 /// What [`opener`] hands the Claude desktop app rather than Chrome, when
 /// `/bin/claude-desktop` is there.
