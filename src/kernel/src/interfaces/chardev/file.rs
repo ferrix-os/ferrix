@@ -204,8 +204,9 @@ pub(crate) fn of(io: &Arc<dyn Inode>) -> Option<Arc<ChardevFile>> {
 ///
 /// # Errors
 ///
-/// `ENODEV` once the driver is gone, `EBUSY`, `EINTR`, or the errno the
-/// driver answered.
+/// `ENODEV` once the driver is gone, `EBUSY`, `ERESTARTSYS` when a signal
+/// abandons a request no driver read, `EINTR` when it abandons one a driver
+/// may have run, or the errno the driver answered.
 pub(crate) fn ioctl(file: &ChardevFile, request: u32, arg: u64) -> Result<usize, Errno> {
     if file.control.is_gone() {
         return Err(Errno::ENODEV);

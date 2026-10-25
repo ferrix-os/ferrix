@@ -1301,8 +1301,12 @@ fn interrupt_queued(
     ))?;
     let outcome = finish()?;
     taken(&program.process);
-    if outcome != Err(Errno::EINTR) {
-        return Err("a signal to a program whose request was still queued did not answer EINTR");
+    // Nothing of it reached the driver, so the call is made again after
+    // the handler, as Linux restarts it: never EINTR under SA_RESTART.
+    if outcome != Err(Errno::ERESTARTSYS) {
+        return Err(
+            "a signal to a program whose request was still queued did not answer ERESTARTSYS",
+        );
     }
     while let Some(bytes) = read(side, control) {
         if Message::decode(&bytes).is_ok_and(|message| {
@@ -1364,7 +1368,7 @@ fn interrupt_killed(
 /// driver has read sends one `INTERRUPT` naming it and the program waits on,
 /// the driver's copies still reach it, and its reply is what the call
 /// returns, copies refused after; (b) a signal to one whose request is still
-/// queued abandons it, `EINTR`, and nothing is sent for it; (c) a kill after
+/// queued abandons it, `ERESTARTSYS`, and nothing is sent for it; (c) a kill after
 /// the `INTERRUPT` ends the call with `EINTR`, the request abandoned.
 fn interrupted(
     side: &Side,

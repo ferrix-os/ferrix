@@ -47,6 +47,15 @@
 //!    and no `uapi refused EXECBUFFER2 EFAULT` line anywhere, which a
 //!    signal abandoning an execbuffer the driver was running gave.
 //!
+//! 7. `wine-suspend` (`nvrm/test/wine-suspend.c`), first, on raw render
+//!    node calls: Wine's `SuspendThread` against threads in fast calls,
+//!    held syncobj waits, futex and `pselect6` waits and user code, 20 s
+//!    of SIGUSR1 sent and each handler's report waited for, the call
+//!    restarted after it. Every suspend reported, no restart code in a
+//!    handler's context, and every call's answer Linux's: never `EINTR`
+//!    from a render node call under `SA_RESTART`, which a signal to a
+//!    request still queued for the driver answered.
+//!
 //! Every `intel: unserved …` line is printed: what Mesa asked that the front
 //! end does not serve, to be added as M3 to M5 find them (§8, risk 4).
 
@@ -127,6 +136,8 @@ while [ -z "$node" ]; do
     fi
 done
 echo "intel-uapi-gate: $node is there after ${waited}s"
+/bin/wine-suspend 20 $node 2>&1
+echo "intel-uapi-gate: wine-suspend exited $?"
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1 \
     /data/usr/bin/vulkaninfo --summary 2>&1
 echo "intel-uapi-gate: vulkaninfo exited $?"
@@ -175,6 +186,8 @@ const READ_BACK: &[&str] = &["pixels wrong on", "pixels cleared to"];
 const OFFSCREEN_PATH: &str = "bin/vk-offscreen";
 /// Where `vk-submit-signals` is in the image.
 const SUBMIT_SIGNALS_PATH: &str = "bin/vk-submit-signals";
+/// Where `wine-suspend` is in the image.
+const WINE_SUSPEND_PATH: &str = "bin/wine-suspend";
 /// Where `vk-shader-cache` is in the image.
 const SHADER_CACHE_PATH: &str = "bin/vk-shader-cache";
 /// The pipelines `vk-shader-cache` creates (its `PIPELINES`).
@@ -303,6 +316,30 @@ pub(crate) fn refuse_fake(binary: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Build `nvrm/test/<name>.c` statically, with no library beyond libc and
+/// pthreads: a test of the render node's raw calls, which runs the same on
+/// Linux.
+fn static_test(dir: &std::path::Path, name: &str) -> Result<Vec<u8>> {
+    let source =
+        paths::workspace_root().join(format!("src/user/system/linux/drivers/nvrm/test/{name}.c"));
+    let out = dir.join(name);
+    let built = Command::new("cc")
+        .args([
+            "-O2", "-Wall", "-Wextra", "-Werror", "-static", "-pthread", "-o",
+        ])
+        .arg(&out)
+        .arg(&source)
+        .status()
+        .map_err(|error| Error::new(format!("running cc: {error}")))?;
+    if !built.success() {
+        return Err(Error::new(format!(
+            "building {} failed ({built}); it needs the host's static libc",
+            source.display()
+        )));
+    }
+    std::fs::read(&out).map_err(|error| Error::new(format!("reading {}: {error}", out.display())))
+}
+
 /// The test.
 ///
 /// # Errors
@@ -353,6 +390,11 @@ pub(crate) fn test_intel_uapi(args: &Args) -> Result<()> {
         content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-submit-signals")?),
     });
     files.push(crate::ports::File {
+        path: WINE_SUSPEND_PATH.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(static_test(&dir, "wine-suspend")?),
+    });
+    files.push(crate::ports::File {
         path: SHADER_CACHE_PATH.to_owned(),
         mode: 0o755,
         content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-shader-cache")?),
@@ -363,7 +405,11 @@ pub(crate) fn test_intel_uapi(args: &Args) -> Result<()> {
         content: crate::ports::Content::Bytes(RUN.as_bytes().to_vec()),
     });
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
-    let options = format!("{OPTION}\n");
+    // `--kernel-option` words after the driver's: a control boots this
+    // image with `ferrix.checks=skip` to reach the judge past a check.
+    let mut words = vec![OPTION.to_owned()];
+    words.extend(args.kernel_options.iter().cloned());
+    let options = format!("{}\n", words.join(" "));
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
     println!(
         "  {arch}: anv and iris on the fake back end, {} MiB (timeout {}s)",
@@ -405,7 +451,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
             line.trim()
         ));
     }
-    let wants: [Want<'_>; 9] = [
+    let wants: [Want<'_>; 10] = [
         ("the fake back end's facts", &|line| {
             line.contains(FACTS) && line.contains("24 EUs")
         }),
@@ -415,6 +461,14 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         ("the render node in /dev/dri", &|line| {
             line.contains(SAID) && line.contains(" is there after ")
         }),
+        (
+            "every Wine-style suspend reported and every call answered as on Linux",
+            &|line| {
+                line.contains("wine-suspend: ")
+                    && line.contains(" 0 lost, 0 late, 0 bad contexts, 0 errors")
+                    && line.trim_end().ends_with(": PASS")
+            },
+        ),
         ("anv's device", &|line| {
             line.contains("deviceName") && line.contains(DEVICE)
         }),
@@ -522,6 +576,8 @@ mod tests {
   1.0 | intel-fake: 0x00000010 8086:46d4 rev 0: facts 24 EUs, DSS 0x3, CS 19200000 Hz; every batch completes at once, nothing runs
   1.1 | intel: render node published (1 node)
   2.0 | intel-uapi-gate: /dev/dri/renderD128 is there after 0s
+  2.9 | wine-suspend: 58053 rounds, 188670 suspends (mean 396 us, max 3257 us), 0 lost, 0 late, 0 bad contexts, 0 errors (0 EINTR), 0 early: PASS
+  2.9 | intel-uapi-gate: wine-suspend exited 0
   3.0 |     deviceName         = Intel(R) Graphics (ADL-N)
   3.1 |     driverID           = DRIVER_ID_INTEL_OPEN_SOURCE_MESA
   3.2 | intel-uapi-gate: vulkaninfo exited 0
@@ -554,6 +610,7 @@ mod tests {
             ("vulkaninfo exited 0", "vulkaninfo exiting 0"),
             ("pixels wrong", "vk-offscreen"),
             ("submits under SIGUSR1", "SIGUSR1 storm"),
+            ("suspends (mean", "Wine-style suspend"),
             ("OpenGL core profile renderer", "iris's renderer"),
         ] {
             let text: Vec<String> = lines(GOOD)
@@ -597,6 +654,26 @@ mod tests {
             .map(|line| line.replace("0 fences never signalled", "1 fences never signalled"))
             .collect();
         assert!(judge(&text).is_err_and(|error| error.contains("SIGUSR1 storm")));
+    }
+
+    #[test]
+    fn a_suspend_lost_or_a_call_interrupted_fails() {
+        for (good, bad) in [
+            (
+                "0 errors (0 EINTR), 0 early: PASS",
+                "40 errors (40 EINTR), 0 early: FAIL",
+            ),
+            ("0 lost, 0 late", "1 lost, 0 late"),
+        ] {
+            let text: Vec<String> = lines(GOOD)
+                .into_iter()
+                .map(|line| line.replace(good, bad))
+                .collect();
+            assert!(
+                judge(&text).is_err_and(|error| error.contains("Wine-style suspend")),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

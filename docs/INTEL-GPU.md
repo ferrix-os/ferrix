@@ -593,8 +593,11 @@ verdicts, with their conditions, are binding on the code that follows:
   to the driver by an `INTERRUPT` (HELLO version 2, 2026-10-24, ledger
   3471): the driver answers a held wait `-ERESTARTSYS`, so the client's
   handler runs and the call is made again, and lets running work finish,
-  whose answer the client waits for. A request still queued is abandoned,
-  `EINTR`, as before. At most 256
+  whose answer the client waits for. A request still queued, for a
+  driver of either version, is taken back and the call made again after
+  the handler (`ERESTARTSYS`, 2026-10-25, ledger 4304), as Linux restarts
+  a call that changed nothing; `EINTR` stays for a request a version-1
+  driver has read and for a process that is ending. At most 256
   requests are outstanding per control, deferred `GEM_WAIT` and
   `SYNCOBJ_WAIT` replies included, and the 257th is `EBUSY` to the client.
   So the driver's waits are deferred replies within that bound (§4.1), and

@@ -39,8 +39,10 @@
 //!   lost and reaches the driver after every request of its file (N8).
 //! * When the driver goes, its nodes go: every open file answers `ENODEV`
 //!   for good, and every waiter wakes with `ENODEV` (N9).
-//! * A signal abandons a request the driver has not been sent, and one to a
-//!   driver whose HELLO did not ask for interrupts. A driver that did
+//! * A signal abandons a request the driver has not been sent, which the
+//!   program makes again (`ERESTARTSYS`, restarted under `SA_RESTART` as
+//!   Linux restarts a call that has changed nothing), and one to a driver
+//!   whose HELLO did not ask for interrupts (`EINTR`). A driver that did
 //!   (`VERSION_INTERRUPTS`) is sent an `INTERRUPT` naming a request it has,
 //!   once, and the program waits on for the answer: a wait that changed
 //!   nothing answers `ERESTARTSYS`, work in progress finishes. Abandoned
@@ -833,7 +835,8 @@ pub(crate) struct Ask {
 /// # Errors
 ///
 /// `ENODEV` once the driver is gone, `EBUSY` with [`MAX_OUTSTANDING`]
-/// requests outstanding, `EINTR` when a signal abandons the request, or the
+/// requests outstanding, `ERESTARTSYS` when a signal abandons a request no
+/// driver read, `EINTR` when it abandons one a driver may have run, or the
 /// errno the driver answered.
 pub(crate) fn call(
     control: &Arc<Control>,
@@ -910,7 +913,11 @@ fn admit(control: &Arc<Control>, client: &Arc<Process>, ask: Ask) -> Result<Arc<
 /// drivers take a signal only in a wait that has changed nothing yet; one
 /// abandoned mid-way had its copies refused after its work was queued
 /// (an Intel `EXECBUFFER2` ran, and the program, told `EINTR`, submitted
-/// it again). A process that is ending abandons it still.
+/// it again). A request no driver has read changed nothing either, so it
+/// is taken back and the call made again once the handler has run
+/// (`ERESTARTSYS`), as Linux restarts a call under `SA_RESTART`: told
+/// `EINTR`, a program that does not call again lost a call Linux never
+/// fails. A process that is ending abandons it still, `EINTR`.
 fn await_answer(
     control: &Control,
     request: &Arc<Request>,
@@ -920,14 +927,20 @@ fn await_answer(
         || request.inner.lock().answer.is_some() || client.signal_pending(),
         u64::MAX,
     );
-    if request.inner.lock().answer.is_none()
-        && !client.caller_must_leave()
-        && interrupt(control, request)
-    {
-        let _ = request.waiters.wait_until_deadline(
-            || request.inner.lock().answer.is_some() || client.caller_must_leave(),
-            u64::MAX,
-        );
+    if request.inner.lock().answer.is_none() && !client.caller_must_leave() {
+        match interrupt(control, request) {
+            Interrupted::Told => {
+                let _ = request.waiters.wait_until_deadline(
+                    || request.inner.lock().answer.is_some() || client.caller_must_leave(),
+                    u64::MAX,
+                );
+            }
+            Interrupted::Unsent => {
+                abandon(control, request);
+                return Err(Errno::ERESTARTSYS);
+            }
+            Interrupted::Not => {}
+        }
     }
     let answered = request.inner.lock().answer.clone();
     if let Some(answer) = answered {
@@ -941,23 +954,38 @@ fn await_answer(
     Err(Errno::EINTR)
 }
 
-/// Tell `control`'s driver that `request`'s program has a signal to take,
-/// if the driver takes interrupts and the request has left the queue for
-/// it: true when told. A request still queued is the caller's to abandon,
-/// since no driver has seen it; and with the queue at its bound the old way
-/// is kept, so the queue never outgrows its reserved room (F-63).
-fn interrupt(control: &Control, request: &Arc<Request>) -> bool {
-    if !control.interrupts.load(Ordering::Acquire) {
-        return false;
-    }
+/// What [`interrupt`] did with a request whose program has a signal.
+enum Interrupted {
+    /// Its driver was sent an `INTERRUPT` naming it.
+    Told,
+    /// It was still queued, and is taken out: no driver ever reads it.
+    Unsent,
+    /// Neither: a driver that takes no interrupts has it, or the queue is
+    /// at its bound.
+    Not,
+}
+
+/// Act on a signal for `request`'s program, in one look at the queue under
+/// its lock, so the control's task cannot write the request between the
+/// look and the act: a request still queued is taken out ([`Interrupted::Unsent`]),
+/// since no driver has seen it; one that has left the queue, to a driver
+/// that takes interrupts, gets an `INTERRUPT` ([`Interrupted::Told`]); and
+/// with the queue at its bound the old way is kept, so the queue never
+/// outgrows its reserved room (F-63).
+fn interrupt(control: &Control, request: &Arc<Request>) -> Interrupted {
     {
         let mut state = control.state.lock();
         let queued = state
             .outgoing
             .iter()
-            .any(|held| matches!(held, Outgoing::Request(held) if Arc::ptr_eq(held, request)));
-        if queued || state.queued >= MAX_OUTSTANDING {
-            return false;
+            .position(|held| matches!(held, Outgoing::Request(held) if Arc::ptr_eq(held, request)));
+        if let Some(at) = queued {
+            let _ = state.outgoing.remove(at);
+            state.queued = state.queued.saturating_sub(1);
+            return Interrupted::Unsent;
+        }
+        if !control.interrupts.load(Ordering::Acquire) || state.queued >= MAX_OUTSTANDING {
+            return Interrupted::Not;
         }
         // NOALLOC: `queued` is below MAX_OUTSTANDING, the room reserved.
         state
@@ -966,7 +994,7 @@ fn interrupt(control: &Control, request: &Arc<Request>) -> bool {
         state.queued += 1;
     }
     control.work.wake_all();
-    true
+    Interrupted::Told
 }
 
 /// Wait until no copy for `request` is in flight. Each copy re-checks the
