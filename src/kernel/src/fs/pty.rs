@@ -78,6 +78,23 @@ const MAX_PAIRS: u32 = 256;
 /// has to stop somewhere.
 const OUTPUT_LIMIT: usize = 8192;
 
+/// Linux's `TTY_THRESHOLD_THROTTLE`: with less room than this left for
+/// input, the pair throttles -- `IXOFF`'s stop character goes to the master,
+/// and a driver in packet mode hears it (K1, K2).
+const THROTTLE_ROOM: usize = 128;
+/// Linux's `TTY_THRESHOLD_UNTHROTTLE`: once the slave's reader has left
+/// fewer bytes than this held, it unthrottles.
+const UNTHROTTLE_HELD: usize = 128;
+
+/// `c_iflag`: `IXON`'s stop and start act on output; any character
+/// restarts it; and the input is flow-controlled with the two characters.
+const IXON: u32 = 0o2000;
+const IXANY: u32 = 0o4000;
+const IXOFF: u32 = 0o10_000;
+/// `c_cc` indices of the start and stop characters.
+const VSTART: usize = 8;
+const VSTOP: usize = 9;
+
 /// A slave's inode number is this plus its number.
 ///
 /// A range of its own, above the event nodes' `1 << 41`: two nodes of one
@@ -125,6 +142,14 @@ struct State {
     /// them: what `TCGETS2` reports for a speed `c_cflag` names `BOTHER`
     /// (K3). The console has no such numbers and keeps its own speed.
     speeds: (u32, u32),
+    /// `IXON`: the slave's output is stopped, by the stop character the
+    /// master sent, until the start character (or any, with `IXANY`).
+    stopped: bool,
+    /// The input is throttled: it had less than [`THROTTLE_ROOM`] left.
+    throttled: bool,
+    /// Whether a slave was ever opened: a master write that waits ends with
+    /// `EIO` once every one has closed again.
+    slave_seen: bool,
 }
 
 impl core::fmt::Debug for Pty {
@@ -229,6 +254,9 @@ pub(crate) fn open_master() -> VfsResult<Arc<MasterFile>> {
             slaves: 0,
             locked: true,
             speeds: (0, 0),
+            stopped: false,
+            throttled: false,
+            slave_seen: false,
         }),
         changed: Arc::new(WaitQueue::new()),
     });
@@ -255,6 +283,7 @@ pub(crate) fn open_slave(number: u32) -> VfsResult<Arc<SlaveFile>> {
             return Err(Errno::EIO);
         }
         state.slaves = state.slaves.saturating_add(1);
+        state.slave_seen = true;
     }
     Ok(Arc::new(SlaveFile { pty }))
 }
@@ -379,9 +408,24 @@ impl Pty {
         self.state.lock().output.len()
     }
 
-    /// Whether the slave's output has room for another byte.
+    /// Whether the slave's output has room for another byte, and is not
+    /// stopped by `IXON`.
     fn output_room(&self) -> bool {
-        self.state.lock().output.len() < OUTPUT_LIMIT
+        let state = self.state.lock();
+        state.output.len() < OUTPUT_LIMIT && !state.stopped
+    }
+
+    /// How many bytes a master write may hand the line discipline now
+    /// without any being dropped (K1).
+    pub(crate) fn input_room(&self) -> usize {
+        self.state.lock().discipline.room()
+    }
+
+    /// Whether a master write that waits for room has nothing left to wait
+    /// for: a slave was opened and every one has closed.
+    fn slaves_gone(&self) -> bool {
+        let state = self.state.lock();
+        state.slave_seen && state.slaves == 0
     }
 
     /// Throw away what has been typed and not read.
@@ -410,15 +454,32 @@ impl Pty {
         }
     }
 
-    /// Put what the master wrote through the line discipline, and give back
-    /// the signal it asks for, if any.
-    fn typed(&self, bytes: &[u8]) -> Option<u32> {
+    /// Put what the master wrote through the line discipline, as much as it
+    /// has room for (K1): how many bytes it took, and the signal they ask
+    /// for, if any.
+    ///
+    /// Under `IXON` the stop and start characters stop and start the
+    /// slave's output and go no further; with `IXANY` any character starts
+    /// it. The echo goes to the master, and what of it the output has no
+    /// room for is dropped, as `n_tty` drops it: an echo never makes a
+    /// master write wait, so a driver that writes before it reads cannot
+    /// stop itself.
+    fn typed(&self, bytes: &[u8]) -> (usize, Option<u32>) {
         let mut signal = None;
+        let mut taken = 0;
         {
             let mut state = self.state.lock();
             let mut echo = Vec::new();
-            for byte in bytes {
-                if let Some(raised) = state.discipline.receive(*byte, &mut echo) {
+            let termios = state.discipline.termios();
+            for &byte in bytes {
+                if state.discipline.room() == 0 {
+                    break;
+                }
+                taken += 1;
+                if flow_control(&mut state, &termios, byte) {
+                    continue;
+                }
+                if let Some(raised) = state.discipline.receive(byte, &mut echo) {
                     signal = Some(raised);
                 }
             }
@@ -430,9 +491,32 @@ impl Pty {
                     state.output.push_back(byte);
                 }
             }
+            if !state.throttled && state.discipline.room() < THROTTLE_ROOM {
+                state.throttled = true;
+                if termios.iflag & IXOFF != 0
+                    && let Some(&stop) = termios.cc.get(VSTOP)
+                {
+                    state.output.push_back(stop);
+                }
+            }
         }
         self.changed.wake_all();
-        signal
+        (taken, signal)
+    }
+
+    /// After the slave read: unthrottle once what is held is below
+    /// [`UNTHROTTLE_HELD`], sending `IXOFF`'s start character.
+    fn unthrottle(&self) {
+        let mut state = self.state.lock();
+        if state.throttled && state.discipline.held() < UNTHROTTLE_HELD {
+            state.throttled = false;
+            let termios = state.discipline.termios();
+            if termios.iflag & IXOFF != 0
+                && let Some(&start) = termios.cc.get(VSTART)
+            {
+                state.output.push_back(start);
+            }
+        }
     }
 
     /// One look by the slave's read, as [`Discipline::read_step`] decides:
@@ -445,6 +529,7 @@ impl Pty {
             .discipline
             .read_step(buf, timer, now, nonblock);
         if matches!(step, ReadStep::Took(_)) {
+            self.unthrottle();
             self.changed.wake_all();
         }
         step
@@ -456,6 +541,10 @@ impl Pty {
         let mut written = 0;
         {
             let mut state = self.state.lock();
+            // Stopped by `IXON`: nothing goes until the start character.
+            if state.stopped {
+                return 0;
+            }
             let post = state.discipline.termios().oflag;
             let newlines = post & OPOST != 0 && post & ONLCR != 0;
             for byte in bytes {
@@ -524,6 +613,43 @@ impl Pty {
             Err(Errno::ERESTARTSYS)
         }
     }
+
+    /// A blocking master write's wait for room in the input (K1): until a
+    /// read makes room, or every slave that was opened has closed, which
+    /// ends it with `EIO` when there is still no room; a signal ends it as
+    /// [`Self::wait_for`] does.
+    fn wait_for_room(&self) -> Result<(), Errno> {
+        self.wait_for(|| self.input_room() > 0 || self.slaves_gone(), u64::MAX)?;
+        if self.input_room() == 0 && self.slaves_gone() {
+            Err(Errno::EIO)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// `IXON`'s stop and start characters, as `n_tty` takes them (K1): the
+/// stop character stops the slave's output, the start character starts it,
+/// and with `IXANY` any character does. Whether `byte` was one of the two,
+/// which go no further.
+fn flow_control(state: &mut State, termios: &Termios, byte: u8) -> bool {
+    if termios.iflag & IXON == 0 {
+        return false;
+    }
+    let start = termios.cc.get(VSTART).copied().unwrap_or(0);
+    let stop = termios.cc.get(VSTOP).copied().unwrap_or(0);
+    if stop != 0 && byte == stop {
+        state.stopped = true;
+        return true;
+    }
+    if start != 0 && byte == start {
+        state.stopped = false;
+        return true;
+    }
+    if termios.iflag & IXANY != 0 {
+        state.stopped = false;
+    }
+    false
 }
 
 /// The master end: what a terminal emulator holds.
@@ -610,18 +736,43 @@ impl Inode for MasterFile {
             .map(|written| (written, offset))
     }
 
-    /// What the person typed, through the line discipline.
-    fn write_stream(&self, buf: &[u8], _nonblock: bool) -> VfsResult<usize> {
-        if let Some(signal) = self.pty.typed(buf) {
-            self.pty.signal_foreground(signal);
+    /// What the person typed, or the serial line received, through the line
+    /// discipline: only as much as it has room for (K1). Non-blocking, that
+    /// is the short count, or `EAGAIN` with no room at all; blocking, the
+    /// write waits for the slave's reader to make room, killably, and ends
+    /// with `EIO` once every slave that was opened has closed -- with what
+    /// was written so far, and the error only when that is nothing. Nothing
+    /// is ever taken and then dropped.
+    fn write_stream(&self, buf: &[u8], nonblock: bool) -> VfsResult<usize> {
+        let mut written = 0;
+        loop {
+            let (taken, signal) = self.pty.typed(buf.get(written..).unwrap_or_default());
+            written += taken;
+            if let Some(signal) = signal {
+                self.pty.signal_foreground(signal);
+            }
+            if written >= buf.len() {
+                return Ok(written);
+            }
+            let ended = if nonblock {
+                Err(Errno::EAGAIN)
+            } else if self.pty.slaves_gone() {
+                Err(Errno::EIO)
+            } else {
+                self.pty.wait_for_room()
+            };
+            if let Err(error) = ended {
+                return if written > 0 { Ok(written) } else { Err(error) };
+            }
         }
-        Ok(buf.len())
     }
 
     fn poll(&self) -> Readiness {
         Readiness {
             readable: self.pty.master_available() > 0,
-            writable: true,
+            // Writable only with room for input (K1); a pair whose slaves
+            // have all gone does not wait, it fails.
+            writable: self.pty.input_room() > 0 || self.pty.slaves_gone(),
             hangup: false,
             error: false,
             priority: false,

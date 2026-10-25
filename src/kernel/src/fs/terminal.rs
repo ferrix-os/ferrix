@@ -27,8 +27,13 @@
 //! * Output: `OPOST` with `ONLCR`, the newline translation the console has
 //!   always done.
 //!
-//! Flow control (`IXON`) and the baud rate are stored and reported but change
-//! nothing: QEMU's serial port and the boards' USB bridges have neither.
+//! On the console, flow control (`IXON`) and the baud rate are stored and
+//! reported but change nothing: QEMU's serial port and the boards' USB
+//! bridges have neither. On a pseudoterminal both act, since a serial
+//! driver may hold its master (`crate::fs::pty`, `docs/USB-SERIAL.md` §5):
+//! `IXON` stops and starts the slave's output, `IXOFF` sends the stop and
+//! start characters as the input fills and empties, and a `BOTHER` speed
+//! is kept as its number.
 //!
 //! # Input arrives when somebody looks, or every twenty milliseconds
 //!
@@ -516,6 +521,34 @@ impl Discipline {
         let fits = bytes.get(..room.min(bytes.len())).unwrap_or_default();
         self.ready.extend(fits);
         self.pushed = self.pushed.saturating_add(fits.len() as u64);
+    }
+
+    /// How many more bytes [`Discipline::receive`] takes now without
+    /// dropping any (K1): what a pseudoterminal's master write may hand it.
+    ///
+    /// Raw input has the room the reader's queue has. A canonical line has
+    /// what is left of `MAX_CANON` and of the queue together, so a line
+    /// finished within it always fits. A canonical line that is full with
+    /// no finished line before it would wait for ever, since no reader can
+    /// take half a line: then one byte at a time goes in, and only a line
+    /// terminator or a signal character does anything, the rest dropped,
+    /// as Linux's `n_tty` does.
+    pub(crate) fn room(&self) -> usize {
+        let held = self.ready.len().saturating_add(self.editing.len());
+        let queue = INPUT_LIMIT.saturating_sub(held);
+        if !self.termios.canonical() {
+            return queue;
+        }
+        let line = MAX_CANON.saturating_sub(self.editing.len());
+        match line.min(queue) {
+            0 if self.ends.is_empty() => 1,
+            room => room,
+        }
+    }
+
+    /// How many bytes it holds: finished, and the line being typed.
+    pub(crate) fn held(&self) -> usize {
+        self.ready.len().saturating_add(self.editing.len())
     }
 
     /// Whether a read would return without waiting for a keystroke.

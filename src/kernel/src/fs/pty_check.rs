@@ -159,3 +159,199 @@ pub(crate) fn check_a_pty_keeps_its_speeds_as_numbers(
     }
     Ok(())
 }
+
+/// Raw settings: no canonical lines, no echo, no signal characters, no
+/// input mapping, no flow control, `VMIN` 0.
+fn raw() -> Termios {
+    use ferrix_linux_abi::types::{ECHO, ICANON, ICRNL, IEXTEN, ISIG, VMIN};
+    let mut termios = Termios {
+        iflag: Termios::DEFAULT.iflag & !(ICRNL | IXON),
+        lflag: Termios::DEFAULT.lflag & !(ICANON | ECHO | ISIG | IEXTEN),
+        ..Termios::DEFAULT
+    };
+    if let Some(slot) = termios.cc.get_mut(VMIN) {
+        *slot = 0;
+    }
+    termios
+}
+
+/// `c_iflag` bits the flow-control cases set.
+const IXON: u32 = 0o2000;
+const IXANY: u32 = 0o4000;
+const IXOFF: u32 = 0o10_000;
+/// The stop and start characters, as `Termios::DEFAULT` has them.
+const STOP: u8 = 0x13;
+const START: u8 = 0x11;
+/// The discipline's queue and longest line (`fs::terminal`).
+const QUEUE: usize = 4096;
+const LINE: usize = 4095;
+
+/// **serial-2** (K1): a master write takes only what the line discipline
+/// has room for. 64 KiB written non-blocking through a master to a slave
+/// read a few hundred bytes at a time arrive whole and in order, 0 bytes
+/// lost; the first write's count is exactly the queue's room, the next is
+/// `EAGAIN`, the master polls not writable until a read makes room and
+/// writable after it; a blocking write with no room and its slave gone ends
+/// with `EIO`.
+pub(crate) fn check_a_master_write_takes_only_what_fits() -> Result<(), &'static str> {
+    use ferrix_vfs::Inode as _;
+
+    let pair = pair()?;
+    pair.master.pty.set_termios(raw(), true);
+    let sent: alloc::vec::Vec<u8> = (0..64 * 1024_u32)
+        .map(|at| (at.wrapping_mul(2_654_435_761) >> 24) as u8)
+        .collect();
+    let mut got = alloc::vec::Vec::with_capacity(sent.len());
+    let mut written = 0;
+    let mut first = true;
+    let mut buf = [0_u8; 300];
+    while got.len() < sent.len() {
+        match pair
+            .master
+            .write_stream(sent.get(written..).unwrap_or_default(), true)
+        {
+            Ok(taken) => {
+                if first && taken != QUEUE {
+                    return Err(
+                        "a master write took more than the line discipline had room for: bytes lost",
+                    );
+                }
+                first = false;
+                written += taken;
+            }
+            Err(Errno::EAGAIN) => {
+                if pair.master.poll().writable {
+                    return Err("a master with no room for input polled writable");
+                }
+            }
+            Err(_) => return Err("a non-blocking master write failed"),
+        }
+        if written < sent.len()
+            && pair
+                .master
+                .write_stream(sent.get(written..).unwrap_or_default(), true)
+                != Err(Errno::EAGAIN)
+        {
+            return Err("a full master write was not EAGAIN: bytes lost");
+        }
+        match pair.slave.read_stream(&mut buf, true) {
+            Ok(n) => got.extend_from_slice(buf.get(..n).unwrap_or_default()),
+            Err(_) => return Err("a slave read of a full queue failed"),
+        }
+        if written < sent.len() && !pair.master.poll().writable {
+            return Err("a master did not poll writable once a read made room");
+        }
+    }
+    if got != sent {
+        return Err(
+            "64 KiB through a pseudoterminal did not arrive whole and in order: bytes lost",
+        );
+    }
+
+    // Full again, and the slave gone: a blocking write does not wait.
+    let filler = [b'x'; QUEUE];
+    let _ = pair.master.write_stream(&filler, true);
+    let Pair { master, slave } = pair;
+    drop(slave);
+    if master.write_stream(b"y", false) != Err(Errno::EIO) {
+        return Err("a blocking master write with no room and no slave did not end EIO");
+    }
+    Ok(())
+}
+
+/// **serial-3** (K1): `IXON`, `IXANY` and `IXOFF` act on a pseudoterminal.
+/// The stop character from the master stops the slave's output -- a
+/// non-blocking slave write is `EAGAIN` -- and goes no further; the start
+/// character starts it; with `IXANY` any character does. With `IXOFF` the
+/// stop character goes to the master once the input has less than 128
+/// bytes of room left, and the start character once a read has left fewer
+/// than 128 held.
+pub(crate) fn check_flow_control_acts_on_a_pty() -> Result<(), &'static str> {
+    use ferrix_vfs::Inode as _;
+
+    let pair = pair()?;
+    let mut buf = [0_u8; 64];
+    let mut flow = raw();
+    flow.iflag |= IXON;
+    pair.master.pty.set_termios(flow, true);
+    let _ = pair.master.write_stream(&[STOP], false);
+    if pair.slave.write_stream(b"held", true) != Err(Errno::EAGAIN) {
+        return Err("IXON's stop character from the master did not stop the slave's output");
+    }
+    if pair.slave.read_stream(&mut buf, true) != Ok(0) {
+        return Err("IXON's stop character reached the slave's input");
+    }
+    let _ = pair.master.write_stream(&[START], false);
+    if pair.slave.write_stream(b"go", true) != Ok(2) {
+        return Err("IXON's start character did not start the slave's output");
+    }
+    let _ = pair.master.read_stream(&mut buf, true);
+    flow.iflag |= IXANY;
+    pair.master.pty.set_termios(flow, true);
+    let _ = pair.master.write_stream(&[STOP, b'k'], false);
+    if pair.slave.write_stream(b"any", true) != Ok(3) {
+        return Err("IXANY: a character after the stop did not start the output");
+    }
+    let _ = pair.master.read_stream(&mut buf, true);
+
+    // IXOFF: the stop character to the master as the input fills.
+    let mut throttled = raw();
+    throttled.iflag |= IXOFF;
+    pair.master.pty.set_termios(throttled, true);
+    let _ = pair.slave.read_stream(&mut buf, true);
+    let full = [b'f'; QUEUE - 100];
+    let _ = pair.master.write_stream(&full, true);
+    let mut said = [0_u8; 8];
+    if pair.master.read_stream(&mut said, true) != Ok(1) || said.first() != Some(&STOP) {
+        return Err("IXOFF did not send the stop character as the input filled");
+    }
+    // Drain to under 128 held: the start character.
+    let mut drain = [0_u8; 512];
+    while pair.slave.read_stream(&mut drain, true).unwrap_or(0) > 0 {}
+    if pair.master.read_stream(&mut said, true) != Ok(1) || said.first() != Some(&START) {
+        return Err("IXOFF did not send the start character as the input emptied");
+    }
+    Ok(())
+}
+
+/// **serial-4** (K1): a full canonical line with no terminator does not
+/// stop the master. More bytes are taken -- the write is not `EAGAIN` --
+/// and dropped, and a newline still ends the line, which reads whole.
+pub(crate) fn check_a_full_canonical_line_does_not_block_the_master() -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::{ECHO, ICRNL};
+    use ferrix_vfs::Inode as _;
+
+    let pair = pair()?;
+    let canonical = Termios {
+        iflag: Termios::DEFAULT.iflag & !(ICRNL | IXON),
+        lflag: Termios::DEFAULT.lflag & !ECHO,
+        ..Termios::DEFAULT
+    };
+    pair.master.pty.set_termios(canonical, true);
+    let line = [b'a'; LINE];
+    if pair.master.write_stream(&line, true) != Ok(LINE) {
+        return Err("a canonical line of MAX_CANON bytes was not taken whole");
+    }
+    for _ in 0..10 {
+        if pair.master.write_stream(b"b", true) != Ok(1) {
+            return Err("a full canonical line made the master wait");
+        }
+    }
+    if pair.master.write_stream(b"\n", true) != Ok(1) {
+        return Err("a full canonical line refused its terminator");
+    }
+    let mut read = alloc::vec![0_u8; QUEUE];
+    let got = pair
+        .slave
+        .read_stream(&mut read, true)
+        .map_err(|_| "the full canonical line did not read")?;
+    if got != LINE + 1
+        || read
+            .get(..LINE)
+            .is_none_or(|bytes| bytes.iter().any(|&byte| byte != b'a'))
+        || read.get(LINE) != Some(&b'\n')
+    {
+        return Err("a full canonical line did not read as its MAX_CANON bytes and its newline");
+    }
+    Ok(())
+}

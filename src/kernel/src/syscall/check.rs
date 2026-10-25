@@ -2756,7 +2756,12 @@ fn check_the_console_answers_as_a_terminal(process: &Process) -> Result<(), &'st
 /// `fs::pty_check`.
 fn check_a_pty_as_a_serial_port(process: &Process) -> Result<(), &'static str> {
     let page = map_rw(process, PAGE_SIZE)?;
-    let outcome = crate::fs::pty_check::check_a_pty_keeps_its_speeds_as_numbers(process, page);
+    let outcome = crate::fs::pty_check::check_a_pty_keeps_its_speeds_as_numbers(process, page)
+        .and_then(|()| crate::fs::pty_check::check_a_master_write_takes_only_what_fits())
+        .and_then(|()| crate::fs::pty_check::check_flow_control_acts_on_a_pty())
+        .and_then(|()| {
+            crate::fs::pty_check::check_a_full_canonical_line_does_not_block_the_master()
+        });
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
     outcome
 }
