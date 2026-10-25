@@ -145,10 +145,13 @@ fn token(args: &Args) -> Result<SoftToken, String> {
 /// The CI key's commands (`docs/SIGNING.md` §6.5); `None` when `command`
 /// is none of them.
 fn ci(command: &str, args: &Args) -> Option<Result<(), String>> {
-    let number = |name: &str| args.need(name).and_then(number);
+    // The flags' numbers, through the module's `number` (a closure named
+    // the same inside another would call itself: the first CI run's
+    // "--1 is required").
+    let flag = |name: &str| args.need(name).and_then(number);
     let run = |args: &Args| -> Result<std::ops::Range<u32>, String> {
-        let number = |name: &str| args.need(name).and_then(number);
-        ci::leaf_range(number("run-number")?, number("run-attempt")?, 1 << 20)
+        let flag = |name: &str| args.need(name).and_then(number);
+        ci::leaf_range(flag("run-number")?, flag("run-attempt")?, 1 << 20)
             .map_err(|e| e.to_string())
     };
     Some(match command {
@@ -184,8 +187,8 @@ fn ci(command: &str, args: &Args) -> Option<Result<(), String>> {
                 ci::anchors_from(args.get("anchors"), body.anchor_id).map_err(|e| e.to_string())?;
             ci::refuse_expired(&anchor, &ci::today()).map_err(|e| e.to_string())?;
             let context = ci::RunContext {
-                run_number: number("run-number")?,
-                run_attempt: number("run-attempt")?,
+                run_number: flag("run-number")?,
+                run_attempt: flag("run-attempt")?,
                 workflow: args.need("workflow")?.to_owned(),
             };
             let mut signer = ci::Signer::open(key, range, &prior, &log, &release, &context)
