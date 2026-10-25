@@ -111,6 +111,14 @@ struct Open {
     device: Device,
     node: String,
     axes: Axes,
+    /// Whether a read said the device has gone. Its node can come back
+    /// under the same name with a new device behind it -- a USB keyboard
+    /// that re-enumerates, as the N150's `JetKVM` did on 2026-10-25 -- so a
+    /// gone open is let go of by this, not by its name leaving
+    /// `/dev/input`, and is no longer waited on: a hung-up descriptor is
+    /// ready on every poll, and the input thread spun on it at a whole core
+    /// for four hours while the new device was never opened.
+    gone: bool,
 }
 
 /// Every device the compositor reads.
@@ -193,7 +201,7 @@ impl Devices {
             return (Vec::new(), Vec::new());
         };
         let names: Vec<String> = nodes.iter().map(|path| node_name(path)).collect();
-        self.open.retain(|open| names.contains(&open.node));
+        self.open.retain(|open| kept(&open.node, open.gone, &names));
         self.refused.retain(|node| names.contains(node));
         let mut added = Vec::new();
         let mut refused = Vec::new();
@@ -244,6 +252,7 @@ impl Devices {
                 touch_clicks: direct && range.is_some(),
                 ..Axes::default()
             },
+            gone: false,
         })
     }
 
@@ -315,7 +324,10 @@ impl Devices {
 
     /// The device descriptors that wake the compositor when input arrives.
     pub fn raw_fds(&self) -> impl Iterator<Item = libc::c_int> + '_ {
-        self.open.iter().map(|open| open.device.raw_fd())
+        self.open
+            .iter()
+            .filter(|open| !open.gone)
+            .map(|open| open.device.raw_fd())
     }
 
     /// Whether any device reports keys, and whether any reports a pointer:
@@ -389,11 +401,16 @@ impl Devices {
             // Drained, every frame draws the pointer where the mouse is now.
             // Bounded, so a device that never stops talking cannot keep the
             // compositor from drawing: 64 reads are a queue's worth.
-            // Nothing waiting is `Ok(0)`; an error is a device that has gone,
-            // and the next pass will find it gone too.
+            // Nothing waiting is `Ok(0)`; an error is a device that has gone:
+            // it is waited on no more, and the next rescan opens its node
+            // again (`Open::gone`).
             for _ in 0..DRAIN_READS {
                 match open.device.read_events(&mut self.events) {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) => break,
+                    Err(_) => {
+                        open.gone = true;
+                        break;
+                    }
                     Ok(_) => {}
                 }
             }
@@ -404,6 +421,13 @@ impl Devices {
         }
         inputs
     }
+}
+
+/// Whether a rescan keeps an open device: its node is still in
+/// `/dev/input` and no read has said the device behind it has gone. One it
+/// lets go of whose node is still there is opened again by the same rescan.
+fn kept(node: &str, gone: bool, names: &[String]) -> bool {
+    !gone && names.iter().any(|name| name == node)
 }
 
 /// What a device node is called in the log and in `hyprctl devices`: its

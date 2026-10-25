@@ -5,7 +5,7 @@ use ferrix_linux_abi::input::{
     MSC_SCAN, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT,
 };
 
-use super::{Axes, WHEEL_STEP, fraction, translate};
+use super::{Axes, WHEEL_STEP, fraction, kept, translate};
 use crate::seat::Input;
 
 fn event(kind: u16, code: u16, value: i32) -> Event {
@@ -385,4 +385,15 @@ fn a_key_carries_its_own_stamp() {
         sent.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
         [1_000, 2_000]
     );
+}
+
+#[test]
+fn a_gone_device_is_let_go_of_even_when_its_node_came_back() {
+    let names = vec!["event0".to_owned(), "event2".to_owned()];
+    assert!(kept("event0", false, &names));
+    // The node left /dev/input.
+    assert!(!kept("event1", false, &names));
+    // The node is there again, a new device behind the old name: the old
+    // open goes, so the rescan opens the new one.
+    assert!(!kept("event2", true, &names));
 }
