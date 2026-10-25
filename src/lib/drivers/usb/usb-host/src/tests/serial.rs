@@ -593,3 +593,99 @@ fn a_terminal_s_lines_read_as_commands() {
     blaster::write_hex(&mut text, &MAX10_IDCODE.to_le_bytes(), 32).expect("written");
     assert_eq!(text, "0x031820dd");
 }
+
+// ---------------------------------------------------------------------------
+// A chip that holds its OUT endpoint off
+// ---------------------------------------------------------------------------
+
+/// Every report the bus made events of, counted.
+fn events_seen(bus: &mut TestBus) -> usize {
+    let mut seen = 0;
+    while let Some(output) = bus.next_output() {
+        if matches!(output, crate::bus::Output::Events(_)) {
+            seen += 1;
+        }
+    }
+    seen
+}
+
+#[test]
+fn a_chip_holding_its_out_endpoint_off_holds_back_only_its_own_bytes() {
+    let model = Xhci::new();
+    let keyboard = {
+        let mut m = model.borrow_mut();
+        let keyboard = m.add(super::model::sem_keyboard());
+        let ftdi = m.add(chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900));
+        m.serials.push(Serial::new(ftdi, 512));
+        m.plug_root(0, keyboard);
+        m.plug_root(1, ftdi);
+        keyboard
+    };
+    let mut bus = started(&model);
+    bus.poll();
+    assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
+    let _ = events_seen(&mut bus);
+
+    // CTS low: the chip NAKs every OUT packet.
+    model.borrow_mut().serials[0].hold_out = true;
+    let out: Vec<u8> = (0..10_000).map(|at| (at * 11 % 251) as u8).collect();
+    let clock = Time(model.clone());
+    let before = clock.now_nanos();
+    let queued = bus.serial_write(0, &out).expect("queued");
+    // Queued at once, not waited for: no model time passed.
+    assert_eq!(clock.now_nanos(), before, "the write waited for the chip");
+    assert_eq!(queued, 6 * 512);
+    assert_eq!(
+        bus.serial_write(0, &out[queued..]),
+        Ok(0),
+        "a full stream takes nothing"
+    );
+    assert_eq!(bus.serial_in_flight(0), queued);
+
+    // The keyboard on the same controller types all the while.
+    for _ in 0..20 {
+        model
+            .borrow_mut()
+            .report(keyboard, 1, &[0, 0, 4, 0, 0, 0, 0, 0]);
+        pass(&model, &mut bus, 2);
+        model.borrow_mut().report(keyboard, 1, &[0; 8]);
+        pass(&model, &mut bus, 2);
+    }
+    assert_eq!(events_seen(&mut bus), 40, "every key went through");
+    assert!(model.borrow().serials[0].from_host.is_empty());
+    assert_eq!(bus.serial_in_flight(0), queued);
+
+    // CTS up again: what was held goes, then the rest, in order.
+    model.borrow_mut().serials[0].hold_out = false;
+    let mut sent = queued;
+    for _ in 0..1000 {
+        pass(&model, &mut bus, 1);
+        sent += bus.serial_write(0, &out[sent..]).expect("queued");
+        if sent == out.len() && bus.serial_in_flight(0) == 0 {
+            break;
+        }
+    }
+    assert_eq!(model.borrow().serials[0].from_host, out);
+    assert_eq!(bus.take_serial_lost(0), 0);
+    no_violations(&model);
+}
+
+#[test]
+fn a_stalled_out_endpoint_says_what_it_lost_and_sends_again() {
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let _ = bus.next_serial_change();
+    model.borrow_mut().serials[0].stall_out = true;
+    assert_eq!(bus.serial_write(0, &[7; 1000]), Ok(1000));
+    pass(&model, &mut bus, 3);
+    assert_eq!(bus.take_serial_lost(0), 1000);
+    assert!(model.borrow().cleared_halts.contains(&(device, 0x02)));
+    model.borrow_mut().serials[0].stall_out = false;
+    assert_eq!(bus.serial_write(0, b"again"), Ok(5));
+    pass(&model, &mut bus, 2);
+    assert_eq!(model.borrow().serials[0].from_host, b"again");
+    no_violations(&model);
+}

@@ -34,6 +34,10 @@ pub(in crate::tests) struct Serial {
     pub(in crate::tests) line_error: u8,
     /// Every byte the host sent.
     pub(in crate::tests) from_host: Vec<u8>,
+    /// NAK every OUT request: what a chip does while CTS holds it off.
+    pub(in crate::tests) hold_out: bool,
+    /// Stall every OUT request.
+    pub(in crate::tests) stall_out: bool,
     /// A USB-Blaster's CPLD and chain.
     pub(in crate::tests) cable: Option<Cable>,
 }
@@ -47,6 +51,8 @@ impl Serial {
             status_only: 0,
             line_error: 0,
             from_host: Vec::new(),
+            hold_out: false,
+            stall_out: false,
             cable: None,
         }
     }

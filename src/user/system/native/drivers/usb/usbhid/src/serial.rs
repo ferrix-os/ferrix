@@ -165,7 +165,14 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         };
         let mut moved = false;
         let mut buffer = [0_u8; PUMP_BYTES];
-        let out = tty.read(&mut buffer);
+        // Only what the OUT stream has room for is read from the terminal:
+        // the rest waits in the pty, whose writer the kernel holds back.
+        let room = self.bus.serial_room(index).min(PUMP_BYTES);
+        let out = if room == 0 {
+            0
+        } else {
+            tty.read(buffer.get_mut(..room).unwrap_or_default())
+        };
         if out > 0 {
             moved = true;
             if let Err(error) = self
@@ -218,7 +225,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                 }
             }
             Err(error) => {
-                ferrix_rt::warn!("usbhid: jtag {index}: the chain did not read: {error:?}")
+                ferrix_rt::warn!("usbhid: jtag {index}: the chain did not read: {error:?}");
             }
         }
     }

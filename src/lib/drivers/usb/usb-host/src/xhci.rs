@@ -292,6 +292,11 @@ pub const BULK_BYTES: usize = PAGE;
 pub const MAX_STREAMS: usize = 4;
 /// Requests a stream keeps queued or holds, read, for its reader.
 const STREAM_QUEUED: usize = 4;
+/// Requests an OUT stream keeps in flight at most. A request's buffer is
+/// the one its ring position names, eight to a page; any seven positions
+/// in a row name seven different buffers, the link TRB's gap included, so
+/// six in flight and the one being filled never share one.
+const OUT_QUEUED: usize = 6;
 /// Buffers a stream's page is cut into; more than [`STREAM_QUEUED`], so no
 /// buffer is queued again while its bytes are held.
 const STREAM_BUFFERS: usize = PAGE / STREAM_BYTES;
@@ -310,7 +315,7 @@ const _: () = assert!(
     "a pipe's buffers fit its page, one a queued request"
 );
 const _: () = assert!(
-    STREAM_QUEUED < STREAM_BUFFERS,
+    STREAM_QUEUED < STREAM_BUFFERS && OUT_QUEUED < STREAM_BUFFERS - 1,
     "a stream's buffers outnumber what it ever holds"
 );
 const _: () = assert!(CONTROL_BYTES <= PAGE, "the control buffer fits its page");
@@ -425,11 +430,19 @@ struct Bulk {
     buffer: usize,
 }
 
-/// A bulk IN stream: an endpoint with requests kept queued, and what they
-/// read kept until it is taken.
+/// A bulk stream: an IN endpoint with requests kept queued, and what they
+/// read kept until it is taken; or an OUT endpoint with what was sent in
+/// flight until the device takes it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Stream {
     target: Target,
+    /// IN rather than OUT.
+    inward: bool,
+    /// An OUT stream's requests in flight, oldest first: their lengths.
+    flight: [usize; OUT_QUEUED],
+    flight_len: usize,
+    /// Bytes an OUT stream lost to a halt, since last asked.
+    lost: usize,
     /// The endpoint's number.
     number: u8,
     dci: u8,
@@ -987,6 +1000,25 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
                 known: buffer.is_some(),
             });
         }
+        if !stream.inward {
+            match code {
+                CODE_SUCCESS | CODE_SHORT_PACKET if buffer.is_some() => {
+                    stream.queued = stream.queued.saturating_sub(1);
+                    stream.halts = 0;
+                    stream.flight.rotate_left(1);
+                    if let Some(last) = stream.flight.last_mut() {
+                        *last = 0;
+                    }
+                    stream.flight_len = stream.flight_len.saturating_sub(1);
+                }
+                CODE_SUCCESS | CODE_SHORT_PACKET | CODE_STOPPED..=CODE_STOPPED_SHORT => {}
+                _ => stream.halted = true,
+            }
+            if let Some(entry) = self.streams.get_mut(index) {
+                *entry = Some(stream);
+            }
+            return;
+        }
         match code {
             CODE_SUCCESS | CODE_SHORT_PACKET => {
                 stream.queued = stream.queued.saturating_sub(1);
@@ -1054,6 +1086,21 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
             stream.halted = false;
             stream.halts += 1;
             stream.queued = 0;
+            if !stream.inward {
+                // What was in flight is gone with the requests the reset
+                // drops: counted, for the writer to hear of.
+                let dropped: usize = stream.flight.iter().take(stream.flight_len).sum();
+                stream.lost = stream.lost.saturating_add(dropped);
+                stream.flight = [0; OUT_QUEUED];
+                stream.flight_len = 0;
+                let slot = stream.target.slot;
+                self.restart_endpoint(slot, stream.dci, &stream.ring, true);
+                self.clear_halt(&stream.target, stream.number);
+                if let Some(entry) = self.streams.get_mut(index) {
+                    *entry = Some(stream);
+                }
+                continue;
+            }
             if stream.halts <= MAX_HALTS {
                 let slot = stream.target.slot;
                 self.restart_endpoint(slot, stream.dci, &stream.ring, true);
@@ -1917,70 +1964,81 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
     }
 
     fn open_stream(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
-        if usize::from(endpoint.max_packet) > STREAM_BYTES
-            || endpoint.max_packet == 0
-            || !(1..=15).contains(&endpoint.number)
-        {
-            return Err(Error::TooLong);
+        self.open_any_stream(target, endpoint, true)
+    }
+
+    fn open_out_stream(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
+        self.open_any_stream(target, endpoint, false)
+    }
+
+    fn send(&mut self, stream: usize, bytes: &[u8]) -> usize {
+        let Some(Some(mut state)) = self.streams.get(stream).copied() else {
+            return 0;
+        };
+        if state.inward || state.halted || self.dead {
+            return 0;
         }
-        let index = self
-            .streams
-            .iter()
-            .position(Option::is_none)
-            .ok_or(Error::NoPipe)?;
-        let mut slot = self.slot(target.slot)?;
-        let dci = endpoint.number * 2 + 1;
-        let ring = self.take_ring()?;
-        let buffers = match self.take_page() {
-            Ok(page) => page,
-            Err(error) => {
-                self.give_page(ring.page);
-                return Err(error);
+        let mut sent = 0;
+        while state.flight_len < OUT_QUEUED && sent < bytes.len() {
+            let piece = bytes
+                .get(sent..bytes.len().min(sent + STREAM_BYTES))
+                .unwrap_or_default();
+            let buffer = state.buffers + (state.ring.enqueue % STREAM_BUFFERS) * STREAM_BYTES;
+            let Ok(address) = self.address(buffer) else {
+                break;
+            };
+            for (at, &byte) in piece.iter().enumerate() {
+                self.memory.write8(buffer + at, byte);
             }
-        };
-        let entries = slot.entries.max(dci);
-        self.begin_input(ADD_SLOT | (1 << dci), 0, Some((&slot, entries)));
-        let configured = self
-            .input_endpoint(dci, EP_BULK_IN, endpoint.max_packet, 0, &ring, 3072)
-            .and_then(|()| {
-                self.memory.barrier();
-                let input = self.input_address()?;
-                self.slot_command(TRB_CONFIGURE_ENDPOINT, target.slot, input)
-            });
-        if let Err(error) = configured {
-            self.give_page(ring.page);
-            self.give_page(buffers);
-            return Err(error);
+            let _ = self.enqueue(
+                &mut state.ring,
+                address,
+                piece.len() as u32,
+                (TRB_NORMAL << TRB_TYPE_SHIFT) | TRB_IOC,
+            );
+            if let Some(slot) = state.flight.get_mut(state.flight_len) {
+                *slot = piece.len();
+            }
+            state.flight_len += 1;
+            state.queued += 1;
+            sent += piece.len();
         }
-        slot.entries = entries;
-        if let Some(entry) = self.slots.get_mut(usize::from(target.slot)) {
-            *entry = Some(slot);
+        if sent > 0 {
+            self.ring_doorbell(state.target.slot, state.dci);
         }
-        let mut stream = Stream {
-            target: *target,
-            number: endpoint.number,
-            dci,
-            ring,
-            buffers,
-            queued: 0,
-            done: [None; STREAM_QUEUED],
-            done_len: 0,
-            halts: 0,
-            halted: false,
-        };
-        for _ in 0..STREAM_QUEUED {
-            self.queue_stream_request(&mut stream);
+        if let Some(entry) = self.streams.get_mut(stream) {
+            *entry = Some(state);
         }
-        if let Some(entry) = self.streams.get_mut(index) {
-            *entry = Some(stream);
-        }
-        self.ring_doorbell(target.slot, dci);
-        Ok(index)
+        sent
+    }
+
+    fn out_room(&self, stream: usize) -> usize {
+        self.streams
+            .get(stream)
+            .copied()
+            .flatten()
+            .filter(|state| !state.inward && !state.halted && !self.dead)
+            .map_or(0, |state| (OUT_QUEUED - state.flight_len) * STREAM_BYTES)
+    }
+
+    fn in_flight(&self, stream: usize) -> usize {
+        self.streams
+            .get(stream)
+            .copied()
+            .flatten()
+            .map_or(0, |state| state.flight.iter().take(state.flight_len).sum())
+    }
+
+    fn take_lost(&mut self, stream: usize) -> usize {
+        self.streams
+            .get_mut(stream)
+            .and_then(Option::as_mut)
+            .map_or(0, |state| core::mem::take(&mut state.lost))
     }
 
     fn take_chunk(&mut self, stream: usize) -> Option<Chunk> {
         let mut state = self.streams.get(stream).copied().flatten()?;
-        if state.done_len == 0 {
+        if !state.inward || state.done_len == 0 {
             return None;
         }
         let (buffer, len) = state.done.first().copied().flatten()?;
@@ -2136,6 +2194,88 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
 }
 
 impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
+    /// [`Host::open_stream`] and [`Host::open_out_stream`]: the endpoint
+    /// configured, its ring and its page of buffers, and for IN its
+    /// requests queued.
+    fn open_any_stream(
+        &mut self,
+        target: &Target,
+        endpoint: &Endpoint,
+        inward: bool,
+    ) -> Result<usize, Error> {
+        if usize::from(endpoint.max_packet) > STREAM_BYTES
+            || endpoint.max_packet == 0
+            || !(1..=15).contains(&endpoint.number)
+        {
+            return Err(Error::TooLong);
+        }
+        let index = self
+            .streams
+            .iter()
+            .position(Option::is_none)
+            .ok_or(Error::NoPipe)?;
+        let mut slot = self.slot(target.slot)?;
+        let dci = endpoint.number * 2 + u8::from(inward);
+        let ring = self.take_ring()?;
+        let buffers = match self.take_page() {
+            Ok(page) => page,
+            Err(error) => {
+                self.give_page(ring.page);
+                return Err(error);
+            }
+        };
+        let entries = slot.entries.max(dci);
+        self.begin_input(ADD_SLOT | (1 << dci), 0, Some((&slot, entries)));
+        let configured = self
+            .input_endpoint(
+                dci,
+                if inward { EP_BULK_IN } else { EP_BULK_OUT },
+                endpoint.max_packet,
+                0,
+                &ring,
+                3072,
+            )
+            .and_then(|()| {
+                self.memory.barrier();
+                let input = self.input_address()?;
+                self.slot_command(TRB_CONFIGURE_ENDPOINT, target.slot, input)
+            });
+        if let Err(error) = configured {
+            self.give_page(ring.page);
+            self.give_page(buffers);
+            return Err(error);
+        }
+        slot.entries = entries;
+        if let Some(entry) = self.slots.get_mut(usize::from(target.slot)) {
+            *entry = Some(slot);
+        }
+        let mut stream = Stream {
+            target: *target,
+            inward,
+            flight: [0; OUT_QUEUED],
+            flight_len: 0,
+            lost: 0,
+            number: endpoint.number,
+            dci,
+            ring,
+            buffers,
+            queued: 0,
+            done: [None; STREAM_QUEUED],
+            done_len: 0,
+            halts: 0,
+            halted: false,
+        };
+        // An OUT stream queues nothing until it is given bytes.
+        for _ in 0..if inward { STREAM_QUEUED } else { 0 } {
+            self.queue_stream_request(&mut stream);
+        }
+        if let Some(entry) = self.streams.get_mut(index) {
+            *entry = Some(stream);
+        }
+        self.ring_doorbell(target.slot, dci);
+        Ok(index)
+    }
+
     /// [`Host::open_bulk`] and [`Host::open_bulk_out`]: the OUT endpoint,
     /// and the IN one if there is one. The pair takes its three pages
     /// either way, so closing or releasing it gives back the same three.

@@ -420,6 +420,47 @@ pub trait Host {
         None
     }
 
+    /// Open a bulk OUT stream to `endpoint` of `target`: what [`Host::send`]
+    /// is given goes out without anything waiting for the device to take
+    /// it, so a device that holds its OUT endpoint off -- a UART whose CTS
+    /// is low -- holds back only its own bytes. Its index, among the
+    /// streams [`Host::close_stream`] closes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Host::open_stream`].
+    fn open_out_stream(&mut self, target: &Target, endpoint: &Endpoint) -> Result<usize, Error> {
+        let _ = (target, endpoint);
+        Err(Error::Unsupported)
+    }
+
+    /// Queue as much of `bytes` on OUT stream `stream` as it has room for,
+    /// without waiting: how many bytes it took. Zero when it is full, which
+    /// [`Host::in_flight`] says empties as the device takes them.
+    fn send(&mut self, stream: usize, bytes: &[u8]) -> usize {
+        let _ = (stream, bytes);
+        0
+    }
+
+    /// How many bytes [`Host::send`] would take on OUT stream `stream` now.
+    fn out_room(&self, stream: usize) -> usize {
+        let _ = stream;
+        0
+    }
+
+    /// Bytes OUT stream `stream` holds that the device has not taken yet.
+    fn in_flight(&self, stream: usize) -> usize {
+        let _ = stream;
+        0
+    }
+
+    /// Bytes OUT stream `stream` lost to a halt since this was last asked:
+    /// what was in flight when the device stalled the endpoint.
+    fn take_lost(&mut self, stream: usize) -> usize {
+        let _ = stream;
+        0
+    }
+
     /// Close stream `stream`, and wait until the controller can no longer
     /// be writing it.
     fn close_stream(&mut self, stream: usize) {

@@ -1249,6 +1249,13 @@ impl Xhci {
                 let code = if moved < asked { SHORT } else { SUCCESS };
                 self.transfer_event(slot, dci, at, code, (asked - moved) as u32);
             } else {
+                if self.serials[serial].stall_out {
+                    self.halt(slot, dci, at, STALL, asked as u32);
+                    return false;
+                }
+                if self.serials[serial].hold_out {
+                    return false;
+                }
                 let bytes: Vec<u8> = (0..asked as u64).map(|i| self.read8(buffer + i)).collect();
                 self.serials[serial].bulk_out(&bytes);
                 self.transfer_event(slot, dci, at, SUCCESS, 0);

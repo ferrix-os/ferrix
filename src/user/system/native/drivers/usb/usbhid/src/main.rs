@@ -1156,7 +1156,7 @@ fn tell(note: Note) {
             "usbhid: root port {port} has a full- or low-speed device, which EHCI hands to its companion"
         ),
         Note::SerialFailed { role, error } => {
-            ferrix_rt::err!("usbhid: a {} would not be set up: {error:?}", role.word())
+            ferrix_rt::err!("usbhid: a {} would not be set up: {error:?}", role.word());
         }
     }
 }

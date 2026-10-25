@@ -713,19 +713,40 @@ impl<H: Host> Bus<H> {
         Ok(())
     }
 
-    /// Send `bytes` out of serial adapter `serial`, waiting until the chip
-    /// took them: how many it took.
+    /// Queue `bytes` to go out of serial adapter `serial`, without waiting
+    /// for the chip to take them: how many were queued, which is fewer
+    /// than all once the OUT stream is full. A chip that holds its OUT
+    /// endpoint off -- CTS low under RTS/CTS -- holds back only these.
     ///
     /// # Errors
     ///
-    /// The transfer's failure.
+    /// An adapter that is not there.
     pub fn serial_write(&mut self, serial: usize, bytes: &[u8]) -> Result<usize, Error> {
         let port = self.port(serial)?;
-        let mut sent = 0;
-        for piece in bytes.chunks(crate::xhci::BULK_BYTES) {
-            sent += self.hc.bulk(port.out, Data::Out(piece))?;
+        Ok(self.hc.send(port.out, bytes))
+    }
+
+    /// How many bytes [`Bus::serial_write`] would queue now.
+    #[must_use]
+    pub fn serial_room(&self, serial: usize) -> usize {
+        self.port(serial)
+            .map_or(0, |port| self.hc.out_room(port.out))
+    }
+
+    /// Bytes queued to serial adapter `serial` that the chip has not taken.
+    #[must_use]
+    pub fn serial_in_flight(&self, serial: usize) -> usize {
+        self.port(serial)
+            .map_or(0, |port| self.hc.in_flight(port.out))
+    }
+
+    /// Bytes serial adapter `serial` lost when its OUT endpoint stalled,
+    /// since this was last asked.
+    pub fn take_serial_lost(&mut self, serial: usize) -> usize {
+        match self.port(serial) {
+            Ok(port) => self.hc.take_lost(port.out),
+            Err(_) => 0,
         }
-        Ok(sent)
     }
 
     /// What serial adapter `serial` received and nobody read, into `into`,
@@ -1486,7 +1507,7 @@ impl<H: Host> Bus<H> {
                 let _ = hc.control(target, setup, Data::None)?;
             }
         }
-        let out = hc.open_bulk_out(
+        let out = hc.open_out_stream(
             target,
             &Endpoint {
                 number: number_out,
@@ -1504,7 +1525,7 @@ impl<H: Host> Bus<H> {
         ) {
             Ok(stream) => stream,
             Err(error) => {
-                hc.close_bulk(out);
+                hc.close_stream(out);
                 return Err(error.into());
             }
         };
@@ -1726,7 +1747,7 @@ impl<H: Host> Bus<H> {
                 continue;
             }
             self.hc.close_stream(port.stream);
-            self.hc.close_bulk(port.out);
+            self.hc.close_stream(port.out);
             if let Some(Some(entry)) = self.serials.get_mut(index) {
                 entry.gone = true;
             }
@@ -1766,13 +1787,30 @@ pub struct Cable<'a, H> {
 impl<H: Host> blaster::Link for Cable<'_, H> {
     type Error = Error;
 
+    /// All of `bytes` queued, the controller served while the stream is
+    /// full: a scan waits for its cable anyway.
     fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let sent = self.bus.serial_write(self.serial, bytes)?;
-        if sent == bytes.len() {
-            Ok(())
-        } else {
-            Err(Error::Transfer(host::Error::Timeout))
+        let until = self
+            .bus
+            .hc
+            .clock()
+            .now_nanos()
+            .saturating_add(CABLE_PATIENCE);
+        let mut sent = 0;
+        while sent < bytes.len() {
+            sent += self
+                .bus
+                .serial_write(self.serial, bytes.get(sent..).unwrap_or_default())?;
+            if sent == bytes.len() {
+                break;
+            }
+            self.bus.on_interrupt()?;
+            if self.bus.hc.clock().now_nanos() >= until {
+                return Err(Error::Transfer(host::Error::Timeout));
+            }
+            self.bus.hc.clock().sleep_nanos(SERIAL_STEP);
         }
+        Ok(())
     }
 
     fn read(&mut self, into: &mut [u8]) -> Result<(), Error> {
