@@ -327,9 +327,11 @@ OPTIONS:
     --everything                         run-compositor: all of it at once -- --gl, --release,
                                          --clipboard, --chrome, and rustc and cargo in the shell,
                                          from one volume made of the rustc and Chrome ones, with
-                                         claude too once fetch-claude-code.sh has run; and
-                                         this machine's ~/.config/hypr/hyprland.conf with its
-                                         dotfiles unless --config or --no-dotfiles says otherwise
+                                         claude too once fetch-claude-code.sh has run; on Yoru,
+                                         its keys, dock and sidebars; under --theme none or
+                                         ferrix-light, this machine's ~/.config/hypr/hyprland.conf
+                                         with its dotfiles unless --config or --no-dotfiles says
+                                         otherwise
     --steam-preinstall                   run-compositor --everything, test-steam-game: merge the Steam
                                          library fetch-steam-preinstall.sh installed on the host
                                          (Teeworlds, the Steam Linux Runtime) into /data/steam, so

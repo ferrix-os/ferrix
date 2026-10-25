@@ -123,6 +123,21 @@ pub(super) fn everything_config(args: &mut Args) -> Result<Option<String>> {
     )))
 }
 
+/// [`everything_config`], except under Yoru: there `--everything` is Yoru's
+/// desktop, its keys, its dock and its sidebars, which a host's own config
+/// would keep out (it starts a bar of its own, and an own config takes a
+/// theme's look and not its keys). The host's config is `--theme none`'s,
+/// `--theme ferrix-light`'s, or `--config`'s.
+fn host_config(args: &mut Args) -> Result<Option<String>> {
+    if matches!(
+        super::theme::Theme::of(args)?,
+        Some(super::theme::Theme::Yoru)
+    ) {
+        return Ok(None);
+    }
+    everything_config(args)
+}
+
 /// `config` with the interface brought up, when the boot has a network.
 ///
 /// `--net` puts a virtio-net device on the bus and xtask's own gateway behind
@@ -280,7 +295,7 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     }
     everything_venus(arch, &mut args);
     data_disk(arch, &mut args)?;
-    let config = match everything_config(&mut args)? {
+    let config = match host_config(&mut args)? {
         // A terminal as the desktop starts, beside Chrome and Steam, as
         // `RUN_CONFIG`'s desktop has one; the host's own config names a
         // terminal Ferrix may not have. Not in `everything_config`, which the
