@@ -938,15 +938,26 @@ applications, in `yoru-shell` -- is still to come (5 points).
   edge reveal, pin, tabs, move and remove, the clock and month, the to-do,
   and the weather, opt-in (§6.6; boot `weather`); quick settings (boot `quick`): focus
   mode (`decoration:dim_inactive`, as the dock's button), auto-tile
-  (`general:layout`) and the theme colour (Settings' accents) kept by
-  `hyprctl setting` as Settings keeps them, do not disturb as notifyd's
-  `do-not-disturb` file (banners off but critical ones, the list kept),
-  brightness where `/sys/class/backlight` has one, the volume and its mute
-  on the sound server's default sink over the PulseAudio protocol
-  (`pulsed`), the microphone on its source where there is one (`pulsed`
-  has none: no capture yet); Wi-Fi, Bluetooth, night light and Auto and
-  Light are drawn faint with why (no wireless or Bluetooth stack, no
-  gamma, Nocturne dark only). Boot `sidebars`.
+  (`general:layout`, kept by `hyprctl setting` as Settings keeps it), do
+  not disturb as notifyd's `do-not-disturb` file (banners off but critical
+  ones, the list kept), brightness where `/sys/class/backlight` has one,
+  the volume and its mute on the sound server's default sink over the
+  PulseAudio protocol (`pulsed`), the microphone on its source where it has
+  one (`pulsed` has none: no capture yet), and the theme colour and the
+  appearance, which are the theme engine's; Wi-Fi, Bluetooth and night
+  light are drawn faint with why (no wireless or Bluetooth stack, no
+  gamma). Boot `sidebars`.
+* **The theme engine** (`yoru-shell`'s `theme.rs`, the design's
+  `applyTheme`): a theme is one of the design's triads (Nocturne, Sakura,
+  Mint, Sky, Sunset) or the wallpaper's own three hues, dark, light, or
+  Auto by the wallpaper's luminance, at a vibrance; every Nocturne token
+  follows. It is `~/.config/yoru-shell/theme`, chosen in the quick
+  settings; the dock, the sidebars, the switcher and the stash draw in it,
+  the dock and the sidebars again within a second of it or the wallpaper
+  changing, and the dock hands hyprix the frames' and title bars' colours.
+  Until a person chooses, the tokens are the markup's own Nocturne, which
+  the engine's Nocturne triad comes near but not to. GTK, Chrome and
+  portald's settings stay Nocturne dark (boot `quick`).
 * **GTK and Chrome in the tokens**: Nocturne for GTK 3 and 4 and GTK's
   settings naming it; `portald`, answering `org.freedesktop.portal.Settings`
   (dark, the accent, the theme) and `FileChooser` with Ferrix's own dialog
@@ -987,7 +998,7 @@ built and the size of what is not (points as the backlog counts them).
 
 | Feature (the design's) | Built | Left, and its size |
 |---|---|---|
-| Nocturne tokens, wallpaper gradient | yes (Y1) | the theme engine: accent from a named triad or the wallpaper's hues, light/dark from its luminance, vibrance -- 5 (written and passing its boot on the branches `theme-engine` of Ferrix and of the apps, set aside 2026-10-25) |
+| Nocturne tokens, wallpaper gradient | yes (Y1); the theme engine: a named triad or the wallpaper's hues, Auto, dark or light, vibrance, live in the shell and the frames (boot `quick`) | GTK, Chrome and portald following the theme -- 1; a vibrance slider -- 1 |
 | Window frames: radius, ring, glow, shadows, accent top line | yes (Y1) | the two-tone glow (accent up left, accent-2 down right) -- 2; rounded bottom corners under a bar -- 2 |
 | Title bar: icon, tabs of a group, auto-tile mark, buttons with hover | title, buttons (Y1) | tabs in the bar from hyprix's groups, icons, hover states, drag a bar onto another to group, double click to pop out -- 8 |
 | Snapping: halves, quarters, layouts picker on hover, preview | halves and max by drag and keys (1b) | quarters and thirds, the six-layout picker (hover and Super Z), magnetic guides -- 8 |
@@ -1001,7 +1012,7 @@ built and the size of what is not (points as the backlog counts them).
 | Widget sidebars, edge reveal, pin to reserve room | yes (boot `sidebars`) | |
 | Widgets: clock and month calendar | yes | |
 | Widgets: weather (Open-Meteo, opt-in, §6.6) | yes: off until a place is typed, a name looked up once and kept as rounded coordinates, now and feels like, seven days, eight hours (boot `weather`) | |
-| Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | partly: focus, auto-tile (for every workspace), theme colour, DND, brightness on a backlight, volume and mute through pulsed, the microphone where a source is (boot `quick`); not Wi-Fi, Bluetooth, night light, Auto and Light | 2 |
+| Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | yes but what Ferrix has no backend for: focus, auto-tile (for every workspace), theme colour and appearance, DND, brightness on a backlight, volume and mute through pulsed, the microphone where a source is (boot `quick`); Wi-Fi, Bluetooth and night light faint | a microphone (capture in pulsed) -- 1; night light (gamma) -- 1; auto-tile per workspace -- 1 |
 | Widgets: to-do | yes, kept in the person's file | |
 | Command palette: windows, actions, workspaces, fuzzy | applications only, fuzzel (Y3) | 5 |
 | Switcher cards | hyprix's own | restyle -- 2 |

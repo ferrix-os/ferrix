@@ -1,4 +1,4 @@
-# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 28 built*
+# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 30 built*
 
 The customer's design "Yoru WM" becomes the look and the shell of Ferrix's
 desktop on hyprix: the default of `run-compositor --everything` and of the
@@ -17,10 +17,10 @@ tokens. Not met.
 
 ## Built
 
-The count is by slice: Y1 5, Y2 8, Y3 3 of 8, Y4 7 of 8 (the sidebars, the
-clock, the to-do, the weather and most quick settings; volume, the
-microphone, Wi-Fi, Bluetooth, night light and a light look not), Y7 5 of 8 (the
-picker; the accent from the wallpaper and parallax not). The stash, Settings
+The count is by slice: Y1 5, Y2 8, Y3 3 of 8, Y4 8 of 8 (the sidebars, the
+clock, the to-do, the weather and the quick settings, whose microphone,
+Wi-Fi, Bluetooth and night light wait on backends Ferrix lacks), Y7 6 of 8
+(the picker and the theme engine; parallax not). The stash, Settings
 live, and GTK and Chrome in the tokens are of the exit, outside the slices'
 estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
 
@@ -33,10 +33,12 @@ estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
   `yoru-launcher`.
 * **Y4, the widget sidebars (8)**: both edges, reveal, pin, tabs, the clock
   and month, the to-do; boot `sidebars`. The weather, strictly opt-in
-  (§6.6); boot `weather`. Quick settings: focus mode, auto-tile, the theme
-  colour (kept as Settings keeps them), do not disturb (notifyd's file),
-  brightness where there is a backlight, the volume and its mute through
-  `pulsed`; boot `quick`.
+  (§6.6); boot `weather`. Quick settings: focus mode, auto-tile, do not
+  disturb (notifyd's file), brightness where there is a backlight, the
+  volume and its mute through `pulsed`, the theme; boot `quick`.
+* **Y7's theme engine**: the design's triads or the wallpaper's hues, dark,
+  light or Auto, every Nocturne token from them, live in the shell and the
+  window frames; boot `quick`.
 * **Y7's wallpaper picker**: `yoru-shell --walls` on SUPER I; boot `walls`.
 * **Files is shelf** on Yoru: the dock's Files, the stash's folder button
   and a folder's default handler open it; boot `files`.
@@ -62,17 +64,14 @@ of §6.7:
 * Y3's second half (5): the palette in `yoru-shell`, with windows, actions
   and workspaces.
 * Y4: the microphone (capture in `pulsed` first), Wi-Fi and Bluetooth
-  (stacks first), night light (gamma), a light Nocturne for Auto and
-  Light; auto-tile per workspace rather than for all.
-* The theme engine (named triads and the wallpaper's hues, Auto, dark and
-  light, live in the shell and the window frames) is written and passed
-  its boot locally; it waits on the `theme-engine` branches of Ferrix and
-  the apps, set aside on 2026-10-25 to cut the agent count.
+  (stacks first), night light (gamma in hyprix first); auto-tile per
+  workspace rather than for all. GTK, Chrome and portald following the
+  theme engine.
 * Y5 (13): snapping as the design has it: quarters, the layouts picker,
   guides, linked edges, tabs in the title bar.
 * Y6 (8): scratchpad, focus mode, the shortcut sheet, jump hints,
   clipboard history, toasts.
-* Y7: the accent from the wallpaper, and parallax.
+* Y7: parallax.
 * Y8 (5): lock, notifications and the switcher in the tokens; sounds.
 * The file chooser: several files at once, and choosing a folder.
 

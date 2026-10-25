@@ -1,13 +1,15 @@
-//! `test-compositor --boot quick`: the sidebar's quick settings
-//! (`docs/DESKTOP.md` §6.1). The right sidebar opens on them (the
-//! arrangement's file says so); focus mode, auto-tile, do not disturb, the
-//! volume (to half, then muted: `pulsed` runs beside the desktop as it does
-//! with a sound card, the card's sound going to a WAV file) and a theme
-//! colour are pressed in turn. Required, for each, the shell's line that
-//! it was taken and what it read back after (focus on, tiled, quiet, the
-//! volume, the accent Settings calls Teal), the microphone read as none
-//! (`pulsed` has no source), and notifyd's line that do not disturb is
-//! on. Kept as `quick.ppm`.
+//! `test-compositor --boot quick`: the sidebar's quick settings and the
+//! theme engine (`docs/DESKTOP.md` §6.1). The right sidebar opens on them
+//! (the arrangement's file says so); focus mode, auto-tile, do not
+//! disturb, the volume (to half, then muted: `pulsed` runs beside the
+//! desktop as it does with a sound card, the card's sound going to a WAV
+//! file), the Sakura theme and the Light appearance are pressed in turn;
+//! the microphone must read as none, `pulsed` having no source.
+//! Required, for each, the shell's line that it was taken and what it
+//! read back after; notifyd's line that do not disturb is on; and for
+//! the theme, the dock's and the sidebar's lines that they redrew in
+//! Sakura, dark then light, with no frame colour refused by the
+//! compositor. Kept as `quick.ppm`, in Sakura light.
 
 use std::time::{Duration, Instant};
 
@@ -112,7 +114,7 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
         std::thread::sleep(Duration::from_secs(3));
         let mut failures = Vec::new();
         // Each press, and what the shell must say after it.
-        let presses: [(&str, (i64, i64), &[&str]); 6] = [
+        let presses: [(&str, (i64, i64), &[&str]); 7] = [
             (
                 "focus mode",
                 (LEFT + 70, TILES + 112 + 25),
@@ -143,9 +145,19 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
             ),
             (
                 "the theme colour",
-                (LEFT + 40 + 14, 8 + 90 + 402 + 14),
+                (LEFT + 2 * 49 + 20, 8 + 90 + 402 + 14),
                 &[
-                    "quick: Accent(1): ok; now focus true, tiled true, accent Some(1), quiet true, volume 50% muted",
+                    "quick: theme Sakura; now focus true, tiled true, theme Sakura Dark, quiet true",
+                    "dock: theme Sakura dark",
+                ],
+            ),
+            (
+                "the appearance",
+                (LEFT + 2 * 98 + 46, 8 + 90 + 342 + 14),
+                &[
+                    "quick: appearance Light; now focus true, tiled true, theme Sakura Light",
+                    "dock: theme Sakura light",
+                    "right sidebar: theme Sakura light",
                 ],
             ),
         ];
@@ -167,6 +179,14 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
                     .collect();
                 failures.push(format!("{what}: not all of {wanted:?} but {lines:?}"));
             }
+        }
+        if watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .any(|l| l.contains("theme: setting "))
+        {
+            failures.push("the compositor refused a frame colour".to_owned());
         }
         // notifyd looks at its file every five seconds.
         let quiet = watching.read_more(Instant::now() + Duration::from_secs(15), |lines| {
@@ -190,7 +210,7 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
         );
         if failures.is_empty() {
             println!(
-                "  {arch}: quick: focus mode, auto-tile, do not disturb, the volume and its mute and the theme colour each taken and read back; no microphone; notifyd quiet"
+                "  {arch}: quick: focus mode, auto-tile, do not disturb, the volume and its mute, the theme and the appearance each taken and read back; no microphone; notifyd quiet"
             );
             Ok(())
         } else {
