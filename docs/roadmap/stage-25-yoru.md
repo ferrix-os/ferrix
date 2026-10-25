@@ -35,7 +35,8 @@ estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
   and month, the to-do; boot `sidebars`. The weather, strictly opt-in
   (§6.6); boot `weather`. Quick settings: focus mode, auto-tile, the theme
   colour (kept as Settings keeps them), do not disturb (notifyd's file),
-  brightness where there is a backlight; boot `quick`.
+  brightness where there is a backlight, the volume and its mute through
+  `pulsed`; boot `quick`.
 * **Y7's wallpaper picker**: `yoru-shell --walls` on SUPER I; boot `walls`.
 * **Files is shelf** on Yoru: the dock's Files, the stash's folder button
   and a folder's default handler open it; boot `files`.
@@ -60,9 +61,13 @@ of §6.7:
   clock's time zone beyond UTC offsets.
 * Y3's second half (5): the palette in `yoru-shell`, with windows, actions
   and workspaces.
-* Y4: the quick settings' volume and microphone (pulsed; capture first),
-  Wi-Fi, Bluetooth, night light (gamma), a light Nocturne for Auto and
+* Y4: the microphone (capture in `pulsed` first), Wi-Fi and Bluetooth
+  (stacks first), night light (gamma), a light Nocturne for Auto and
   Light; auto-tile per workspace rather than for all.
+* The theme engine (named triads and the wallpaper's hues, Auto, dark and
+  light, live in the shell and the window frames) is written and passed
+  its boot locally; it waits on the `theme-engine` branches of Ferrix and
+  the apps, set aside on 2026-10-25 to cut the agent count.
 * Y5 (13): snapping as the design has it: quarters, the layouts picker,
   guides, linked edges, tabs in the title bar.
 * Y6 (8): scratchpad, focus mode, the shortcut sheet, jump hints,

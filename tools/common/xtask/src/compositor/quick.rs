@@ -1,10 +1,13 @@
 //! `test-compositor --boot quick`: the sidebar's quick settings
 //! (`docs/DESKTOP.md` §6.1). The right sidebar opens on them (the
-//! arrangement's file says so); focus mode, auto-tile, do not disturb and
-//! a theme colour are pressed in turn. Required, for each, the shell's
-//! line that the compositor took it and what it read back after (focus
-//! on, tiled, the accent Settings calls Teal, quiet), and notifyd's line
-//! that do not disturb is on. Kept as `quick.ppm`.
+//! arrangement's file says so); focus mode, auto-tile, do not disturb, the
+//! volume (to half, then muted: `pulsed` runs beside the desktop as it does
+//! with a sound card, the card's sound going to a WAV file) and a theme
+//! colour are pressed in turn. Required, for each, the shell's line that
+//! it was taken and what it read back after (focus on, tiled, quiet, the
+//! volume, the accent Settings calls Teal), the microphone read as none
+//! (`pulsed` has no source), and notifyd's line that do not disturb is
+//! on. Kept as `quick.ppm`.
 
 use std::time::{Duration, Instant};
 
@@ -64,11 +67,20 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
                 .to_vec(),
         ),
     });
+    let pulsed = crate::audio::build_media(arch, "media-pulsed", "pulsed")?;
+    carried.pulsed = Some(
+        std::fs::read(&pulsed)
+            .map_err(|error| Error::new(format!("{}: {error}", pulsed.display())))?,
+    );
     let (image, kernel) = build_image(arch, programs, &config, carried, args)?;
     let port = free_port()?;
     let mut qemu_args = args.clone();
     qemu_args.display = true;
     qemu_args.qmp_port = Some(port);
+    if qemu_args.audio.is_none() {
+        let wav = paths::build_dir(arch).join("quick.wav");
+        qemu_args.audio = Some(format!("wav:{}", wav.display()));
+    }
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         watching.stop_when_done();
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
@@ -100,41 +112,60 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
         std::thread::sleep(Duration::from_secs(3));
         let mut failures = Vec::new();
         // Each press, and what the shell must say after it.
-        for (what, point, wanted) in [
+        let presses: [(&str, (i64, i64), &[&str]); 6] = [
             (
                 "focus mode",
                 (LEFT + 70, TILES + 112 + 25),
-                "quick: Focus: ok; now focus true",
+                &[
+                    "quick: Focus: ok; now focus true",
+                    "volume 100%, microphone none",
+                ],
             ),
             (
                 "auto-tile",
                 (LEFT + 147 + 70, TILES + 112 + 25),
-                "quick: Tile: ok; now focus true, tiled true",
+                &["quick: Tile: ok; now focus true, tiled true"],
             ),
             (
                 "do not disturb",
                 (LEFT + 70, TILES + 56 + 25),
-                "quick: do not disturb on;",
+                &["quick: do not disturb on;"],
+            ),
+            (
+                "the volume",
+                (LEFT + 144, 8 + 90 + 46 + 26),
+                &["quick: volume 50%; ", "volume 50%, microphone none"],
+            ),
+            (
+                "the mute",
+                (LEFT + 40, 8 + 90 + 46 + 6),
+                &["quick: volume muted; ", "volume 50% muted, microphone none"],
             ),
             (
                 "the theme colour",
                 (LEFT + 40 + 14, 8 + 90 + 402 + 14),
-                "quick: Accent(1): ok; now focus true, tiled true, accent Some(1), quiet true",
+                &[
+                    "quick: Accent(1): ok; now focus true, tiled true, accent Some(1), quiet true, volume 50% muted",
+                ],
             ),
-        ] {
+        ];
+        for (what, point, wanted) in presses {
             let from = watching.after().len();
             click(&mut qmp, point)?;
-            let said = watching.read_more(Instant::now() + Duration::from_secs(20), |lines| {
-                lines.iter().skip(from).any(|l| l.contains(wanted))
-            })?;
+            let all = |lines: &[String]| {
+                wanted
+                    .iter()
+                    .all(|w| lines.iter().skip(from).any(|l| l.contains(w)))
+            };
+            let said = watching.read_more(Instant::now() + Duration::from_secs(20), all)?;
             if !said {
                 let lines: Vec<&String> = watching
                     .after()
                     .iter()
                     .skip(from)
-                    .filter(|l| l.contains("quick:"))
+                    .filter(|l| l.contains("quick:") || l.contains("theme"))
                     .collect();
-                failures.push(format!("{what}: not \"{wanted}\" but {lines:?}"));
+                failures.push(format!("{what}: not all of {wanted:?} but {lines:?}"));
             }
         }
         // notifyd looks at its file every five seconds.
@@ -159,7 +190,7 @@ pub(super) fn test_quick(arch: Arch, programs: &Programs, args: &Args) -> Result
         );
         if failures.is_empty() {
             println!(
-                "  {arch}: quick: focus mode, auto-tile, do not disturb and the theme colour each taken and read back; notifyd quiet"
+                "  {arch}: quick: focus mode, auto-tile, do not disturb, the volume and its mute and the theme colour each taken and read back; no microphone; notifyd quiet"
             );
             Ok(())
         } else {
