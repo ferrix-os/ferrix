@@ -916,6 +916,35 @@ the Yoru desktop and judges its card
 palette's second half -- windows, actions and workspaces beside the
 applications, in `yoru-shell` -- is still to come (5 points).
 
+**Built since, 2026-10-24 and 25:**
+
+* **Settings live**: under Yoru Appearance and Windows take effect at once
+  and are kept in `~/.config/hypr/settings.conf`, read after the theme;
+  Settings shows what hyprix has in force (`hyprctl --batch getoption`)
+  and says when a change cannot show (spacing under the floating layout, a
+  window with its own frame, blur in software). Boot `settings-live`.
+* **The edge drag**: a title bar takes presses where its window is now, so
+  a window snapped to the edge is dragged again by its bar; a press under
+  a layer surface (a panel, the stash, the switcher) is that surface's,
+  not a bar's or a border's under it. Boot `edge-drag`.
+* **The wallpaper switcher** (Y7's picker): `yoru-shell --walls`, SUPER I
+  or the dock's button; boot `walls`.
+* **The stash** on the dock: the button and its count, files dropped on it
+  (a drag's `text/uri-list`) or given to `yoru-shell --stash`, the panel of
+  tiles that opens them; boot `stash`.
+* **The widget sidebars** (Y4): `yoru-shell --sidebar left` and `right`,
+  edge reveal, pin, tabs, move and remove, the clock and month, the to-do;
+  weather and quick settings say "not kept yet". Boot `sidebars`.
+* **GTK and Chrome in the tokens**: Nocturne for GTK 3 and 4 and GTK's
+  settings naming it; `portald`, answering `org.freedesktop.portal.Settings`
+  (dark, the accent, the theme) and `FileChooser` with Ferrix's own dialog
+  (the `chooser` app, tole's FileDialog), which GTK 3 (`GTK_USE_PORTAL`),
+  GTK 4 (`GDK_DEBUG=portals`) and Chrome use on Yoru; Chrome's volume in
+  four versions side by side under `~/.local/share/ferrix` -- 2 GTK 3, 3
+  GTK's file chooser's schemas, MIME data and loaders, 4 a session bus, GTK
+  4 and zenity -- each named by `chrome::VOLUME` only in the commit that
+  landed it. Boots `chrome-yoru`, `chrome-save`, `gtk-chooser`.
+
 ### 6.6 Privacy: the weather
 
 The design's weather widget (Y4) asks Open-Meteo, on these terms (the
@@ -934,3 +963,46 @@ widget exists:
 * **Checked.** A host test holds that an unconfigured shell, one turned
   off with a location kept, and one on with no location make no request,
   and that coordinates leave rounded.
+
+### 6.7 The design against what is built (2026-10-24, brought up to 2026-10-25)
+
+Every feature of `Yoru WM.dc.html`, in the design's order, with what is
+built and the size of what is not (points as the backlog counts them).
+
+| Feature (the design's) | Built | Left, and its size |
+|---|---|---|
+| Nocturne tokens, wallpaper gradient | yes (Y1) | the theme engine: accent from a named triad or the wallpaper's hues, light/dark from its luminance, vibrance -- 5 |
+| Window frames: radius, ring, glow, shadows, accent top line | yes (Y1) | the two-tone glow (accent up left, accent-2 down right) -- 2; rounded bottom corners under a bar -- 2 |
+| Title bar: icon, tabs of a group, auto-tile mark, buttons with hover | title, buttons (Y1) | tabs in the bar from hyprix's groups, icons, hover states, drag a bar onto another to group, double click to pop out -- 8 |
+| Snapping: halves, quarters, layouts picker on hover, preview | halves and max by drag and keys (1b) | quarters and thirds, the six-layout picker (hover and Super Z), magnetic guides -- 8 |
+| Linked edges: neighbours resize together, Shift for one | no | 5 |
+| Auto-tile per workspace (master and stack), swap by drag | no | 3 |
+| Workspaces 1-4 named, slide 40 px and fade | switch (dock, keys) | the slide animation -- 3; names in the dock's tooltip -- 1 |
+| Parallax wallpaper per workspace | no | 3 |
+| Dock: search, workspaces, launchers, tools, focus, pomodoro, clock | yes (Y2) | the FX mark in the round button -- 1; tooltips -- 2 |
+| Stash: drag files onto the dock, shelf popover, badge, open in Files | yes: the button and its count, a drop on it, the panel (boot `stash`) | the folder opens in shelf, and a drag from shelf -- 2 |
+| Bar layout (40 px bottom bar with a task list) | no | 3 |
+| Widget sidebars, edge reveal, pin to reserve room | yes (boot `sidebars`) | |
+| Widgets: clock and month calendar | yes | |
+| Widgets: weather (Open-Meteo, opt-in, §6.6) | the opt-in rule | 3 |
+| Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | no | 8 |
+| Widgets: to-do | yes, kept in the person's file | |
+| Command palette: windows, actions, workspaces, fuzzy | applications only, fuzzel (Y3) | 5 |
+| Switcher cards | hyprix's own | restyle -- 2 |
+| Jump hints (letters on windows) | no | 3 |
+| Shortcut sheet | no | 2 |
+| Clipboard history | no | 3 |
+| Scratchpad drop-down terminal | special workspace (keys, dock) | the slide from the top -- 2 |
+| Focus mode (others dimmed and blurred) | dimmed (dock) | blur of the others -- 2 |
+| Pomodoro | yes (dock) | |
+| Toasts | no | 2 (on notifyd) |
+| Night light and brightness overlays | no | 3 |
+| Wallpaper picker: cover flow and grid, folders, colour filters, sorts, add pictures and videos | yes, SUPER I (boot `walls`): cover and grid, folders and a new one, the colour dots, the sorts, live (IVF) wallpapers listed | adding pictures from the picker -- 2 |
+| Video wallpapers | `pattern --video`, and the picker sets an IVF | |
+| Sounds on snap, open, close | no | 2 |
+| Chrome and GTK apps in the tokens | yes: Nocturne for GTK 3 and 4, portald's settings, GTK in Chrome's volume (boot `chrome-yoru`), and Ferrix's file chooser for GTK and Chrome through the portal (boots `chrome-save`, `gtk-chooser`) | |
+
+The stash, the wallpaper picker and the widgets (but weather and quick
+settings) are built, as the customer asked them in that order; next is the
+Files app, shelf, wired into Yoru (the dock's Files, the stash's folder,
+the handler of a folder).

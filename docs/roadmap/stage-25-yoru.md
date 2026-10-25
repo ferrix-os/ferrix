@@ -1,4 +1,4 @@
-# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 27 built*
+# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 25 built*
 
 The customer's design "Yoru WM" becomes the look and the shell of Ferrix's
 desktop on hyprix: the default of `run-compositor --everything` and of the
@@ -17,6 +17,12 @@ tokens. Not met.
 
 ## Built
 
+The count is by slice: Y1 5, Y2 8, Y3 3 of 8, Y4 4 of 8 (the sidebars, the
+clock and the to-do; weather and quick settings not), Y7 5 of 8 (the
+picker; the accent from the wallpaper and parallax not). The stash, Settings
+live, and GTK and Chrome in the tokens are of the exit, outside the slices'
+estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
+
 * **Y1, the tokens (5)**: `yoru.conf`, the title bars, the glow, the
   Nocturne wallpaper, Phosphor, `--theme`; boot `yoru`.
 * **Y2, the dock (8)**: `yoru-shell` on tole layer-shell surfaces;
@@ -31,14 +37,16 @@ tokens. Not met.
 * **Settings** shows what hyprix has in force, reading each option it shows
   with `hyprctl --batch getoption`.
 * **GTK and Chrome in the tokens**: Nocturne for GTK 3 and GTK 4, and
-  `portald`, which answers `org.freedesktop.portal.Settings` and no other
-  portal (dark, the accent, the theme's name); Chrome's volumes 2 (GTK 3;
-  boot `chrome-yoru`) and 3 (GTK's file chooser; boot `chrome-save`).
+  `portald`, which answers `org.freedesktop.portal.Settings` (dark, the
+  accent, the theme's name) and `FileChooser` with Ferrix's own dialog,
+  which GTK 3, GTK 4 and Chrome use on Yoru; Chrome's volumes 2 (GTK 3;
+  boot `chrome-yoru`), 3 (GTK's file chooser) and 4 (a session bus, GTK 4;
+  boots `chrome-save`, `gtk-chooser`).
 
 ## Still to do
 
-From `docs/DESKTOP.md` §6.3 and the "Left of" lines of §6.5 (there is no
-separate gap list):
+From `docs/DESKTOP.md` §6.3, the "Left of" lines of §6.5 and the gap list
+of §6.7:
 
 * Y1: a window under a title bar has square bottom corners; `popin` and
   `slidefade` are written and not drawn, and hyprix does not slide
@@ -54,9 +62,10 @@ separate gap list):
   clipboard history, toasts.
 * Y7: the accent from the wallpaper, and parallax.
 * Y8 (5): lock, notifications and the switcher in the tokens; sounds.
-* The Files app of the customer's design, as a follow-up: the dock treats
-  Files as a shelf entry that shows where an image has it, and the app
-  itself is not designed or sized here.
+* The Files app: shelf against the customer's File Explorer v2 design, and
+  wired into Yoru -- the dock's Files, the stash's folder, the handler of a
+  folder (next).
+* The file chooser: several files at once, and choosing a folder.
 
 Nothing of the design is on a device other than QEMU and the customer's
 desktops; the weather's rule (§6.6) holds before any widget exists.
