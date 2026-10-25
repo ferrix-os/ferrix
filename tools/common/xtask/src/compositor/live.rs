@@ -241,23 +241,7 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
     let cmdline = format!("{} {LIVE_WORDS}\n", crate::init::command_line().trim_end());
     let (loader_bytes, kernel_bytes, carried) =
         crate::fat::live_parts(arch, &loader, &kernel, &initramfs)?;
-    let initrd = build.join("ferrix-live.initrd");
-    std::fs::write(&initrd, &carried)
-        .map_err(|error| Error::new(format!("writing {}: {error}", initrd.display())))?;
-    let mut licences = licences(&initrd, &build.join("live-licences"))?;
-    licences.extend_from_slice(
-        format!(
-            "\n## Time zones\n\n`/usr/share/zoneinfo` is the IANA time zone database, release \
-             {}, compiled, as the build machine's tzdata package had it. The database is in the \
-             public domain (https://www.iana.org/time-zones).\n",
-            tzdata_version()?
-        )
-        .as_bytes(),
-    );
-    // The notice as the ISO carries it, for the release's asset too.
-    let notice = build.join(NOTICE);
-    std::fs::write(&notice, &licences)
-        .map_err(|error| Error::new(format!("writing {}: {error}", notice.display())))?;
+    let licences = notice(&build, &carried)?;
     let readme = README.replace('\n', "\r\n").into_bytes();
     let volume = build.join("ferrix-live.esp");
     crate::fat::write_live_volume(
@@ -328,15 +312,40 @@ fn pinned_shell_trees() -> Result<()> {
             script.display()
         )));
     }
-    // SAFETY: set before any thread of this process reads the environment
-    // in parallel; xtask's builds run as child processes.
-    unsafe {
-        std::env::set_var("FERRIX_OMZ", dir.join("oh-my-zsh"));
-        std::env::set_var("FERRIX_ZSH_FUNCTIONS", dir.join("zsh-functions"));
-        std::env::set_var("FERRIX_SHELL_TREES", &dir);
+    for (name, value) in [
+        ("FERRIX_OMZ", dir.join("oh-my-zsh")),
+        ("FERRIX_ZSH_FUNCTIONS", dir.join("zsh-functions")),
+        ("FERRIX_SHELL_TREES", dir.clone()),
+    ] {
+        // SAFETY: set before any thread of this process reads the
+        // environment in parallel; xtask's builds run as child processes.
+        unsafe { std::env::set_var(name, value) };
     }
     println!("  shell trees: the pinned ones, in {}", dir.display());
     Ok(())
+}
+
+/// The licence notice of the initramfs `carried`, as the ISO carries it:
+/// licences.py's inventory and the time zones' release, written beside
+/// the ISO for the release's asset too.
+fn notice(build: &Path, carried: &[u8]) -> Result<Vec<u8>> {
+    let initrd = build.join("ferrix-live.initrd");
+    std::fs::write(&initrd, carried)
+        .map_err(|error| Error::new(format!("writing {}: {error}", initrd.display())))?;
+    let mut licences = licences(&initrd, &build.join("live-licences"))?;
+    licences.extend_from_slice(
+        format!(
+            "\n## Time zones\n\n`/usr/share/zoneinfo` is the IANA time zone database, release \
+             {}, compiled, as the build machine's tzdata package had it. The database is in the \
+             public domain (https://www.iana.org/time-zones).\n",
+            tzdata_version()?
+        )
+        .as_bytes(),
+    );
+    let path = build.join(NOTICE);
+    std::fs::write(&path, &licences)
+        .map_err(|error| Error::new(format!("writing {}: {error}", path.display())))?;
+    Ok(licences)
 }
 
 /// What the volume's and the ISO's `README.TXT` says.
@@ -412,15 +421,11 @@ fn installer_files(arch: Arch) -> Result<Vec<File>> {
     // `FERRIX_ISO_WITHOUT_GUI=1` leaves the window out, for working on the
     // rest while it is not built; a release never sets it.
     let without = std::env::var_os("FERRIX_ISO_WITHOUT_GUI").is_some();
-    if !without
-        && paths::workspace_root()
-            .join("src/user/apps/installer/app.toml")
-            .is_file()
-    {
+    if !without {
         files.extend(crate::apps::taken(arch, &["installer"])?);
     } else {
         println!(
-            "  the graphical installer is not in the apps checkout; the ISO has the daemon only"
+            "  FERRIX_ISO_WITHOUT_GUI: the graphical installer left out; the ISO has the daemon only"
         );
     }
     Ok(files)
@@ -612,11 +617,12 @@ fn distinct_colours(path: &Path) -> Result<usize> {
     // P6, width, height, maxval, each followed by one whitespace byte.
     let mut fields = 0;
     let mut at = 0;
+    let space = |at: usize| bytes.get(at).is_some_and(u8::is_ascii_whitespace);
     while fields < 4 && at < bytes.len() {
-        while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+        while at < bytes.len() && space(at) {
             at += 1;
         }
-        while at < bytes.len() && !bytes[at].is_ascii_whitespace() {
+        while at < bytes.len() && !space(at) {
             at += 1;
         }
         fields += 1;
@@ -624,7 +630,7 @@ fn distinct_colours(path: &Path) -> Result<usize> {
     let pixels = bytes.get(at + 1..).unwrap_or_default();
     let mut seen = std::collections::HashSet::new();
     for pixel in pixels.chunks_exact(3).step_by(7) {
-        let _ = seen.insert([pixel[0], pixel[1], pixel[2]]);
+        let _ = seen.insert(pixel.to_vec());
         if seen.len() >= 4096 {
             break;
         }
@@ -675,10 +681,9 @@ fn answers_disk(path: &Path, text: &str) -> Result<()> {
         .map_err(|error| Error::new(format!("the answers disk's table: {error}")))?;
     let mut bytes = vec![0_u8; (sectors * 512) as usize];
     for (lba, sector) in table {
-        let at = (lba * 512) as usize;
-        bytes[at..at + sector.len()].copy_from_slice(&sector);
+        crate::iso::set(&mut bytes, (lba * 512) as usize, &sector);
     }
-    bytes[2048 * 512..2048 * 512 + text.len()].copy_from_slice(text.as_bytes());
+    crate::iso::set(&mut bytes, 2048 * 512, text.as_bytes());
     std::fs::write(path, bytes)
         .map_err(|error| Error::new(format!("writing {}: {error}", path.display())))
 }
@@ -706,50 +711,7 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
 
     // A machine a person installs on has memory to spare: authd rehashes a
     // seeded password at 256 MiB at its first use, beside the desktop.
-    let install = Args {
-        memory: args.memory.max(GATE_MEMORY),
-        boot_virtio: true,
-        display: true,
-        extra_disks: vec![target.clone(), answers],
-        ..args.clone()
-    };
-    let mut said = Vec::new();
-    let hook = |watching: &mut Watching<'_>| -> Result<()> {
-        let _ = watching.read_more(Instant::now() + Duration::from_secs(900), |lines| {
-            lines.iter().any(|line| {
-                line.contains("ferrix-installd: powering off")
-                    || line.contains("the install failed")
-            })
-        })?;
-        said = watching
-            .lines()
-            .iter()
-            .chain(watching.after())
-            .cloned()
-            .collect();
-        Ok(())
-    };
-    let _ = crate::qemu::watch_then(arch, &built.iso, &built.kernel, &install, "", hook)?;
-    for (wanted, problem) in [
-        (
-            "unattended answers on /dev/vdf",
-            "the daemon never found the answers",
-        ),
-        (
-            "ferrix-install: the answers are in FERRIX/SETUP.TXT",
-            "the answers never reached the ESP",
-        ),
-        (
-            "ferrix-installd: powering off",
-            "the install did not finish",
-        ),
-    ] {
-        if !said.iter().any(|line| line.contains(wanted)) {
-            return Err(Error::new(format!(
-                "{arch}: {problem} (no `{wanted}`); the serial log has the rest"
-            )));
-        }
-    }
+    install_unattended(arch, &built, &target, answers, args)?;
     println!(
         "  {arch}: installed from the live ISO onto {}",
         target.display()
@@ -834,5 +796,67 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
          {GATE_USER}'s password opened it ({})",
         dump.display()
     );
+    Ok(())
+}
+
+/// The ISO booted as a virtio disk beside `target` and the answers disk:
+/// the unattended install must find the answers, fill in the setup file and
+/// power off.
+fn install_unattended(
+    arch: Arch,
+    built: &Built,
+    target: &Path,
+    answers: PathBuf,
+    args: &Args,
+) -> Result<()> {
+    let install = Args {
+        memory: args.memory.max(GATE_MEMORY),
+        boot_virtio: true,
+        display: true,
+        extra_disks: vec![target.to_path_buf(), answers],
+        ..args.clone()
+    };
+    let mut said = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let _ = watching.read_more(Instant::now() + Duration::from_secs(900), |lines| {
+            lines.iter().any(|line| {
+                line.contains("ferrix-installd: powering off")
+                    || line.contains("the install failed")
+            })
+        })?;
+        said = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        Ok(())
+    };
+    let _ = crate::qemu::watch_then(arch, &built.iso, &built.kernel, &install, "", hook)?;
+    for (wanted, problem) in [
+        (
+            "unattended answers on /dev/vdf",
+            "the daemon never found the answers",
+        ),
+        (
+            "ferrix-install: the answers are in FERRIX/SETUP.TXT",
+            "the answers never reached the ESP",
+        ),
+        (
+            "ferrix-installd: powering off",
+            "the install did not finish",
+        ),
+    ] {
+        if !said.iter().any(|line| line.contains(wanted)) {
+            return Err(Error::new(format!(
+                "{arch}: {problem} (no `{wanted}`); the serial log has the rest"
+            )));
+        }
+    }
+    println!(
+        "  {arch}: installed from the live ISO onto {}",
+        target.display()
+    );
+
     Ok(())
 }

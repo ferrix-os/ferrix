@@ -211,6 +211,14 @@ pub(crate) fn lay_out<R: Read, W: Write + Seek>(
     })
 }
 
+/// `bytes` into `out` from `at`: a field of a fixed-size structure, which
+/// always fits; one that would not is left out rather than panicking.
+pub(crate) fn set(out: &mut [u8], at: usize, bytes: &[u8]) {
+    if let Some(field) = out.get_mut(at..at + bytes.len()) {
+        field.copy_from_slice(bytes);
+    }
+}
+
 /// Blocks `bytes` takes.
 fn blocks(bytes: u64) -> u64 {
     bytes.div_ceil(BLOCK)
@@ -253,17 +261,26 @@ fn both16(value: u16) -> [u8; 4] {
 /// A directory record for `name` (`\0` is `.`, `\x01` is `..`).
 fn record(name: &[u8], extent: u64, len: u64, directory: bool) -> Vec<u8> {
     let mut out = vec![0_u8; 33];
-    out[2..10].copy_from_slice(&both32(u32::try_from(extent).unwrap_or(u32::MAX)));
-    out[10..18].copy_from_slice(&both32(u32::try_from(len).unwrap_or(u32::MAX)));
-    out[18..25].copy_from_slice(&[YEAR, 1, 1, 0, 0, 0, 0]);
-    out[25] = if directory { 2 } else { 0 };
-    out[28..32].copy_from_slice(&both16(1));
-    out[32] = u8::try_from(name.len()).unwrap_or(u8::MAX);
+    set(
+        &mut out,
+        2,
+        &both32(u32::try_from(extent).unwrap_or(u32::MAX)),
+    );
+    set(
+        &mut out,
+        10,
+        &both32(u32::try_from(len).unwrap_or(u32::MAX)),
+    );
+    set(&mut out, 18, &[YEAR, 1, 1, 0, 0, 0, 0]);
+    set(&mut out, 25, &[if directory { 2 } else { 0 }]);
+    set(&mut out, 28, &both16(1));
+    set(&mut out, 32, &[u8::try_from(name.len()).unwrap_or(u8::MAX)]);
     out.extend_from_slice(name);
     if out.len() % 2 == 1 {
         out.push(0);
     }
-    out[0] = u8::try_from(out.len()).unwrap_or(u8::MAX);
+    let len = u8::try_from(out.len()).unwrap_or(u8::MAX);
+    set(&mut out, 0, &[len]);
     out
 }
 
@@ -284,55 +301,59 @@ fn long_date() -> [u8; 17] {
 /// The primary volume descriptor.
 fn primary(label: &str, volume_blocks: u64) -> Vec<u8> {
     let mut out = vec![0_u8; BLOCK as usize];
-    out[0] = 1;
-    out[1..6].copy_from_slice(b"CD001");
-    out[6] = 1;
-    out[8..40].copy_from_slice(&field("", 32));
-    out[40..72].copy_from_slice(&field(label, 32));
-    out[80..88].copy_from_slice(&both32(u32::try_from(volume_blocks).unwrap_or(u32::MAX)));
-    out[120..124].copy_from_slice(&both16(1));
-    out[124..128].copy_from_slice(&both16(1));
-    out[128..132].copy_from_slice(&both16(BLOCK as u16));
-    out[132..140].copy_from_slice(&both32(10));
-    out[140..144].copy_from_slice(&(L_PATH as u32).to_le_bytes());
-    out[148..152].copy_from_slice(&(M_PATH as u32).to_be_bytes());
+    set(&mut out, 0, &[1]);
+    set(&mut out, 1, b"CD001");
+    set(&mut out, 6, &[1]);
+    set(&mut out, 8, &field("", 32));
+    set(&mut out, 40, &field(label, 32));
+    set(
+        &mut out,
+        80,
+        &both32(u32::try_from(volume_blocks).unwrap_or(u32::MAX)),
+    );
+    set(&mut out, 120, &both16(1));
+    set(&mut out, 124, &both16(1));
+    set(&mut out, 128, &both16(BLOCK as u16));
+    set(&mut out, 132, &both32(10));
+    set(&mut out, 140, &(L_PATH as u32).to_le_bytes());
+    set(&mut out, 148, &(M_PATH as u32).to_be_bytes());
     let root = record(&[0], ROOT, BLOCK, true);
-    out[156..156 + root.len()].copy_from_slice(&root);
-    out[190..318].copy_from_slice(&field("", 128));
-    out[318..446].copy_from_slice(&field("FERRIX", 128));
-    out[446..574].copy_from_slice(&field("", 128));
-    out[574..702].copy_from_slice(&field("CARGO XTASK ISO", 128));
-    out[702..739].copy_from_slice(&field("LICENSE.TXT", 37));
-    out[739..776].copy_from_slice(&field("", 37));
-    out[776..813].copy_from_slice(&field("", 37));
-    out[813..830].copy_from_slice(&long_date());
-    out[830..847].copy_from_slice(&long_date());
+    set(&mut out, 156, &root);
+    set(&mut out, 190, &field("", 128));
+    set(&mut out, 318, &field("FERRIX", 128));
+    set(&mut out, 446, &field("", 128));
+    set(&mut out, 574, &field("CARGO XTASK ISO", 128));
+    set(&mut out, 702, &field("LICENSE.TXT", 37));
+    set(&mut out, 739, &field("", 37));
+    set(&mut out, 776, &field("", 37));
+    set(&mut out, 813, &long_date());
+    set(&mut out, 830, &long_date());
     // Neither expires nor takes effect later: all zeros, as ISO 9660 says.
-    out[847..864].copy_from_slice(&[b'0'; 17]);
-    out[863] = 0;
-    out[864..881].copy_from_slice(&[b'0'; 17]);
-    out[880] = 0;
-    out[881] = 1;
+    set(&mut out, 847, &[b'0'; 17]);
+    set(&mut out, 863, &[0]);
+    set(&mut out, 864, &[b'0'; 17]);
+    set(&mut out, 880, &[0]);
+    set(&mut out, 881, &[1]);
     out
 }
 
 /// El Torito's boot record volume descriptor, pointing at the catalog.
 fn boot_record() -> Vec<u8> {
     let mut out = vec![0_u8; BLOCK as usize];
-    out[1..6].copy_from_slice(b"CD001");
-    out[6] = 1;
+    set(&mut out, 1, b"CD001");
+    set(&mut out, 6, &[1]);
     let id = b"EL TORITO SPECIFICATION";
-    out[7..7 + id.len()].copy_from_slice(id);
-    out[0x47..0x4b].copy_from_slice(&(CATALOG as u32).to_le_bytes());
+    set(&mut out, 7, id);
+    set(&mut out, 0x47, &(CATALOG as u32).to_le_bytes());
     out
 }
 
 /// The volume descriptor set terminator.
 fn terminator() -> Vec<u8> {
     let mut out = vec![0_u8; BLOCK as usize];
-    out[0] = 255;
-    out[1..6].copy_from_slice(b"CD001");
-    out[6] = 1;
+    set(&mut out, 0, &[255]);
+    set(&mut out, 1, b"CD001");
+    set(&mut out, 6, &[1]);
     out
 }
 
@@ -359,16 +380,28 @@ fn path_table(big_endian: bool) -> Vec<u8> {
 /// (`xorriso`'s for an image past 32 MiB: the image reaches the end).
 fn catalog(esp_block: u64) -> Vec<u8> {
     let mut out = vec![0_u8; BLOCK as usize];
-    out[0] = 1;
-    out[1] = 0xEF;
-    out[30] = 0x55;
-    out[31] = 0xAA;
-    let sum = out[..32].chunks(2).fold(0_u16, |sum, word| {
-        sum.wrapping_add(u16::from_le_bytes([word[0], word[1]]))
-    });
-    out[28..30].copy_from_slice(&0_u16.wrapping_sub(sum).to_le_bytes());
-    out[32] = 0x88;
-    out[40..44].copy_from_slice(&u32::try_from(esp_block).unwrap_or(u32::MAX).to_le_bytes());
+    set(&mut out, 0, &[1]);
+    set(&mut out, 1, &[0xEF]);
+    set(&mut out, 30, &[0x55]);
+    set(&mut out, 31, &[0xAA]);
+    let sum = out
+        .get(..32)
+        .unwrap_or_default()
+        .chunks_exact(2)
+        .fold(0_u16, |sum, word| {
+            let pair = [
+                word.first().copied().unwrap_or(0),
+                word.get(1).copied().unwrap_or(0),
+            ];
+            sum.wrapping_add(u16::from_le_bytes(pair))
+        });
+    set(&mut out, 28, &0_u16.wrapping_sub(sum).to_le_bytes());
+    set(&mut out, 32, &[0x88]);
+    set(
+        &mut out,
+        40,
+        &u32::try_from(esp_block).unwrap_or(u32::MAX).to_le_bytes(),
+    );
     out
 }
 

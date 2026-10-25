@@ -2840,31 +2840,7 @@ fn qemu_command(
             //
             // which is harmless and the kind of noise that trains people to
             // skim the boot log.
-            if args.boot_cdrom {
-                println!(
-                    "  {arch}: {} as a CD on the AHCI port, booted from",
-                    display(image)
-                );
-                let _ = command.args([
-                    "-drive",
-                    &format!(
-                        "format=raw,file={},if=none,id=disk,media=cdrom,readonly=on",
-                        display(image)
-                    ),
-                    "-device",
-                    "ide-cd,drive=disk,bus=ide.0,bootindex=0",
-                ]);
-            } else if args.boot_usb {
-                println!("  {arch}: {} as a USB stick, booted from", display(image));
-                let _ = command.args([
-                    "-device",
-                    "qemu-xhci,id=livexhci",
-                    "-drive",
-                    &format!("format=raw,file={},if=none,id=disk", display(image)),
-                    "-device",
-                    "usb-storage,bus=livexhci.0,drive=disk,bootindex=0,removable=on",
-                ]);
-            } else if !args.boot_virtio && !args.boot_nvme && !args.boot_sata {
+            if !attach_live_medium(&mut command, arch, image, args) {
                 let _ = command.args([
                     "-drive",
                     &format!("format=raw,file={},if=none,id=disk", display(image)),
@@ -3645,6 +3621,43 @@ fn attach_data_image(command: &mut Command, arch: Arch, args: &Args) -> Result<(
     };
     let _ = command.args(["-device", device]);
     Ok(())
+}
+
+/// The live ISO as `test-iso` boots it, first in the firmware's boot order:
+/// a CD on q35's first AHCI port (`boot_cdrom`), or a USB stick on an xHCI
+/// controller of its own (`boot_usb`). Whether it attached one, or the
+/// image boots some other way (`boot_virtio`, `boot_nvme`, `boot_sata`):
+/// false leaves the image to the default AHCI disk.
+fn attach_live_medium(command: &mut Command, arch: Arch, image: &Path, args: &Args) -> bool {
+    if args.boot_cdrom {
+        println!(
+            "  {arch}: {} as a CD on the AHCI port, booted from",
+            display(image)
+        );
+        let _ = command.args([
+            "-drive",
+            &format!(
+                "format=raw,file={},if=none,id=disk,media=cdrom,readonly=on",
+                display(image)
+            ),
+            "-device",
+            "ide-cd,drive=disk,bus=ide.0,bootindex=0",
+        ]);
+        true
+    } else if args.boot_usb {
+        println!("  {arch}: {} as a USB stick, booted from", display(image));
+        let _ = command.args([
+            "-device",
+            "qemu-xhci,id=livexhci",
+            "-drive",
+            &format!("format=raw,file={},if=none,id=disk", display(image)),
+            "-device",
+            "usb-storage,bus=livexhci.0,drive=disk,bootindex=0,removable=on",
+        ]);
+        true
+    } else {
+        args.boot_virtio || args.boot_nvme || args.boot_sata
+    }
 }
 
 /// `test-install`'s disks, after the three every boot has: the live disk and
