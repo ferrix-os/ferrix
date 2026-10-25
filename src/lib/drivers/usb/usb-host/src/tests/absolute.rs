@@ -239,3 +239,50 @@ fn the_switch_reads_the_first_word_and_every_form_of_its_value() {
     }
     assert!(!Watch::OFF.covers(0x1D6B, 0x0104, Kind::Keyboard));
 }
+
+/// The watch file is looked for at the system's `/run` as a driver started
+/// from the initramfs sees it (`/sysroot/run`) first, then at its own
+/// `/run`; the first found wins, and none found is `None`, which leaves the
+/// boot word's choice. Before 2026-10-25 only `/run` was read, which for
+/// usbhid on the N150 was the initramfs's tmpfs, so the file an
+/// administrator wrote was never seen.
+#[test]
+fn the_watch_file_is_found_under_sysroot_or_run() {
+    use crate::watch::{FILES, from_files};
+    let file = |found: &'static [u8], value: &'static [u8]| {
+        move |path: &[u8], buf: &mut [u8]| {
+            (path == found).then(|| {
+                buf[..value.len()].copy_from_slice(value);
+                value.len()
+            })
+        }
+    };
+    let keys = Watch::parse(b"1d6b:0104/keyboard");
+    assert_eq!(FILES[0], b"/sysroot/run/usbhid-reports\0");
+    assert_eq!(FILES[1], b"/run/usbhid-reports\0");
+    assert_eq!(
+        from_files(&mut file(
+            b"/sysroot/run/usbhid-reports\0",
+            b"1d6b:0104/keyboard\n"
+        )),
+        keys
+    );
+    assert_eq!(
+        from_files(&mut file(b"/run/usbhid-reports\0", b"1d6b:0104/keyboard")),
+        keys
+    );
+    assert_eq!(from_files(&mut |_: &[u8], _: &mut [u8]| None), None);
+    // Both there: the system's wins.
+    let mut both = |path: &[u8], buf: &mut [u8]| {
+        let value: &[u8] = if path == FILES[0] {
+            b"mouse"
+        } else {
+            b"keyboard"
+        };
+        buf[..value.len()].copy_from_slice(value);
+        Some(value.len())
+    };
+    assert_eq!(from_files(&mut both), Watch::parse(b"mouse"));
+    // A value that does not parse watches nothing.
+    assert_eq!(from_files(&mut file(FILES[1], b"zz:zz")), Some(Watch::OFF));
+}

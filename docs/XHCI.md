@@ -412,6 +412,10 @@ last, the reports dropped before it for want of room, and the events the
 report made as `type:code=value`. Off by default; it costs a file read per
 port poll. `echo 1d6b:0104/keyboard > /run/usbhid-reports`, then
 `lode -t usbhid -p debug -f`, shows what a KVM sends while a key is held.
+The driver looks for the file at `/sysroot/run` first: started from the
+initramfs, its own `/run` is the initramfs's tmpfs, and the system's `/run`
+is `/sysroot/run` there (until 2026-10-25 it read only `/run` and never saw
+the file on the N150).
 
 **Held keys letting go through the JetKVM** are, as far as the source
 shows, the JetKVM's own release. Its firmware (jetkvm/kvm 8f6c3001b,

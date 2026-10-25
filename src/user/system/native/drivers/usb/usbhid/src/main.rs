@@ -882,9 +882,7 @@ fn boot_watch() -> Watch {
 /// What `/run/usbhid-reports` asks to be watched, while it is there; a
 /// value it cannot read watches nothing.
 fn file_watch() -> Option<Watch> {
-    let mut bytes = [0_u8; 64];
-    let len = read_file(watch::FILE, &mut bytes).ok()?;
-    Some(Watch::parse(bytes.get(..len).unwrap_or_default()).unwrap_or(Watch::OFF))
+    watch::from_files(&mut |path, bytes| read_file(path, bytes).ok())
 }
 
 /// A small file from its start into `buf` (`path` NUL-terminated): its

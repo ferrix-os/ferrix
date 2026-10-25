@@ -22,8 +22,37 @@
 
 use crate::hid::Kind;
 
-/// The file that overrides the boot word while it exists.
+/// The file that overrides the boot word while it exists, as the running
+/// system names it.
 pub const FILE: &[u8] = b"/run/usbhid-reports\0";
+
+/// Where a driver looks for [`FILE`], first found winning. A driver that
+/// devmgr started from the initramfs keeps the initramfs as its root: its
+/// `/run` is the initramfs's own tmpfs, and the system's `/run`, where an
+/// administrator writes the file, is `/sysroot/run` there (2026-10-25 on
+/// the N150: `/proc/5/mounts` lists both, and the file written to `/run`
+/// was never seen). A driver started from the system's root finds it at
+/// `/run`, and has no `/sysroot`.
+pub const FILES: [&[u8]; 2] = [b"/sysroot/run/usbhid-reports\0", FILE];
+
+/// Fills a buffer from a NUL-terminated path, giving its length, or `None`
+/// when the path cannot be read.
+pub type ReadFile<'a> = dyn FnMut(&[u8], &mut [u8]) -> Option<usize> + 'a;
+
+/// What the first of [`FILES`] that `read` can read asks to be watched;
+/// `None` while none is there. `read` fills a buffer from a path and gives
+/// its length, or `None` when the path cannot be read. A file whose value
+/// does not parse watches nothing.
+pub fn from_files(read: &mut ReadFile<'_>) -> Option<Watch> {
+    let mut bytes = [0_u8; 64];
+    for path in FILES {
+        if let Some(len) = read(path, &mut bytes) {
+            let value = bytes.get(..len).unwrap_or_default();
+            return Some(Watch::parse(value).unwrap_or(Watch::OFF));
+        }
+    }
+    None
+}
 
 /// What is watched.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
