@@ -320,7 +320,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/iso"
           cp build/x86_64/ferrix-live.iso "$RUNNER_TEMP/iso/ferrix-$TAG-x86_64.iso"
-          cp build/x86_64/live-licences/THIRD-PARTY-LICENSES.md \
+          cp build/x86_64/ferrix-live-THIRD-PARTY-LICENSES.md \
             "$RUNNER_TEMP/iso/ferrix-$TAG-x86_64-iso-THIRD-PARTY-LICENSES.md"
           (cd "$RUNNER_TEMP/iso" && sha256sum ferrix-*.iso ferrix-*-iso-THIRD-PARTY-LICENSES.md > SHA256SUMS)
           cat "$RUNNER_TEMP/iso/SHA256SUMS"

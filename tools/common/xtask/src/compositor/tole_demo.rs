@@ -243,7 +243,8 @@ fn carried_program(program: &std::path::Path) -> Result<Carried> {
         .map_err(|error| Error::new(format!("{}: {error}", fonts.display())))?;
     for item in listing.flatten() {
         let name = item.file_name().to_string_lossy().into_owned();
-        if !name.ends_with(".ttf") {
+        // The fonts and their OFL-1.1 text, which goes with them.
+        if !name.ends_with(".ttf") && name != "LICENSE" {
             continue;
         }
         let bytes = std::fs::read(item.path())

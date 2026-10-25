@@ -47,6 +47,9 @@ use crate::{Error, Result};
 /// The ISO, in the architecture's build directory.
 pub(crate) const ISO: &str = "ferrix-live.iso";
 
+/// The licence notice the ISO carries, beside it in the build directory.
+pub(crate) const NOTICE: &str = "ferrix-live-THIRD-PARTY-LICENSES.md";
+
 /// The volume identifier, which a file manager shows for the CD.
 const LABEL: &str = "FERRIX_LIVE";
 
@@ -240,7 +243,20 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
     let initrd = build.join("ferrix-live.initrd");
     std::fs::write(&initrd, &carried)
         .map_err(|error| Error::new(format!("writing {}: {error}", initrd.display())))?;
-    let licences = licences(&initrd, &build.join("live-licences"))?;
+    let mut licences = licences(&initrd, &build.join("live-licences"))?;
+    licences.extend_from_slice(
+        format!(
+            "\n## Time zones\n\n`/usr/share/zoneinfo` is the IANA time zone database, release \
+             {}, compiled, as the build machine's tzdata package had it. The database is in the \
+             public domain (https://www.iana.org/time-zones).\n",
+            tzdata_version()?
+        )
+        .as_bytes(),
+    );
+    // The notice as the ISO carries it, for the release's asset too.
+    let notice = build.join(NOTICE);
+    std::fs::write(&notice, &licences)
+        .map_err(|error| Error::new(format!("writing {}: {error}", notice.display())))?;
     let readme = README.replace('\n', "\r\n").into_bytes();
     let volume = build.join("ferrix-live.esp");
     crate::fat::write_live_volume(
@@ -436,6 +452,14 @@ fn zones() -> Result<Vec<File>> {
             content: Content::Bytes(bytes),
         });
     }
+    // Which release of the database: the notice says it, so two ISOs built
+    // on machines with different tzdata tell it (consultant, ledger 4417).
+    let version = tzdata_version()?;
+    files.push(File {
+        path: "usr/share/zoneinfo/VERSION".to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(format!("{version}\n").into_bytes()),
+    });
     if files.len() < 300 {
         return Err(Error::new(format!(
             "{ROOT} has {} zones; the live image wants the IANA database (install tzdata)",
@@ -445,6 +469,23 @@ fn zones() -> Result<Vec<File>> {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     println!("  {} time zones from {ROOT}", files.len());
     Ok(files)
+}
+
+/// The IANA release this machine's zones are, from `tzdata.zi`'s
+/// `# version` line; a machine without one cannot build the ISO.
+fn tzdata_version() -> Result<String> {
+    let path = "/usr/share/zoneinfo/tzdata.zi";
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        Error::new(format!(
+            "{path}: {error}; the ISO's notice names the tzdata release, so it needs this file"
+        ))
+    })?;
+    text.lines()
+        .next()
+        .and_then(|line| line.strip_prefix("# version "))
+        .map(|version| version.trim().to_owned())
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| Error::new(format!("{path} has no `# version` line")))
 }
 
 /// `cargo xtask test-iso`: see the module documentation.
