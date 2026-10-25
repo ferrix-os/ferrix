@@ -769,7 +769,7 @@ boot that screenshots it:
 | Y4 | widget sidebars: clock and calendar, quick settings, to-do | 8 |
 | Y5 | snapping as the design has it: quarters, layouts picker, guides, linked edges; tabs in the title bar | 13 |
 | Y6 | helpers: scratchpad, focus mode, shortcut sheet, jump hints, clipboard history, toasts | 8 |
-| Y7 | wallpaper picker and the accent from the wallpaper; parallax | 8 |
+| Y7 | wallpaper picker (built: `yoru-shell --walls` on SUPER I, cover and grid, folders, colour filter and sorts, boot `walls`) and the accent from the wallpaper; parallax | 8 |
 | Y8 | lock, notifications and switcher in the tokens; sounds | 5 |
 
 Measured on the GPU path where it costs: the dock's and sidebars' blur
