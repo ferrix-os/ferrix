@@ -62,15 +62,26 @@ controller's ABAR is BAR slot 5, sized and mappable whole.
    window first; a write drops a window it lands on.
 7. **Recover.** A command that fails or times out (10 s) stops the port's
    command list, clears the errors, overrides a busy task file and starts
-   it again (AHCI 1.3.1 §6.2.2.1); the request is answered with the error.
-   Registers that read all ones mean the HBA left the bus.
+   it again (AHCI 1.3.1 §6.2.2.1). It is then issued again, up to three
+   times in all, unless the drive said the medium could not take or give
+   the sector (`UNC`): libata retries every failure of a read or write but
+   a medium error the same way (`ata_eh_worth_retry`). A command that
+   timed out has the link COMRESET before its second try and gets no third,
+   so a hung drive is answered in about 20 s, inside the 30 s the kernel
+   waits for a request before it answers EIO itself; once it has timed out
+   after the reset, the drive is taken to have stopped answering and each
+   command is issued once until one completes. Only the last attempt's
+   failure is answered, and a request that needed another try is said on
+   the console, done or not (2026-10-25: on the N150, one failed write
+   aborted btrfs's transaction and left `/` read-only). Registers that read
+   all ones mean the HBA left the bus.
 8. **Shut down.** Wait for a window being read, flush the drive's cache,
    stop the port.
 
 On the console: one line when the function is found, before a register is
 written, with the HBA's registers as firmware left them; one when the drive
-is up, naming its model, serial and size; one per failed request, up to
-16; one at shutdown.
+is up, naming its model, serial and size; one per failed request and one
+per request that was issued again, up to 16 together; one at shutdown.
 
 ## 3. What the box taught it
 

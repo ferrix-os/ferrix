@@ -34,7 +34,9 @@
 //!
 //! One line when the function is found, before a register is written; one
 //! when the drive is up, naming its model, serial and size; one line for
-//! each failed request, up to a limit; one line when it is shut down.
+//! each failed request, and for each request whose command had to be issued
+//! again (`ferrix_ahci::driver::ATTEMPTS`), up to a limit; one line when it
+//! is shut down.
 //!
 //! The exit status is a `ferrix_driver::Step`, 0 a clean STOP, or a clean
 //! stop before HELLO when the controller has no ATA disk (`Step::Idle`).
@@ -406,6 +408,29 @@ impl Sata {
             }
             self.logic.transfer(op, lba, count, data)
         };
+        // A command issued again is said, done or not, under the same limit
+        // as a failure: a drive or link that needs second tries is worth
+        // knowing about before it needs more.
+        if let Some((error, attempt)) = self.logic.take_retried() {
+            self.errors = self.errors.saturating_add(1);
+            if self.errors <= SAID_ERRORS {
+                if attempt > 0 {
+                    ferrix_rt::err!(
+                        "ahci     request {} ({:?} of {count} sectors at {lba}) failed with \
+                         {error:?} and was done on attempt {attempt}",
+                        request.id,
+                        request.op
+                    );
+                } else {
+                    ferrix_rt::err!(
+                        "ahci     request {} ({:?} of {count} sectors at {lba}) failed with \
+                         {error:?} first, and on every attempt after",
+                        request.id,
+                        request.op
+                    );
+                }
+            }
+        }
         if op == AhciOp::Read && result.is_ok() {
             self.read_ahead(lba, count);
         }

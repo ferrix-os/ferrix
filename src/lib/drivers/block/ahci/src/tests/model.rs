@@ -65,6 +65,12 @@ pub(crate) struct Model {
     pub(crate) fail_next: Option<(u8, u8)>,
     /// Commands never complete.
     pub(crate) hang: bool,
+    /// This many more commands end with `ERR` as [`Model::fail_next`] says,
+    /// after the one it fails.
+    pub(crate) fail_again: u32,
+    /// This many commands never complete, then they do again.
+    pub(crate) hang_next: u32,
+
     /// Commands complete this many nanoseconds of the clock after they are
     /// issued, as a drive's do, rather than at once.
     pub(crate) slow: Option<(Rc<Cell<u64>>, u64)>,
@@ -123,6 +129,8 @@ impl Model {
             identify,
             fail_next: None,
             hang: false,
+            fail_again: 0,
+            hang_next: 0,
             slow: None,
             running: None,
             seen: Vec::new(),
@@ -304,11 +312,19 @@ impl Model {
         if self.hang {
             return;
         }
+        if self.hang_next > 0 {
+            self.hang_next -= 1;
+            return;
+        }
         if let Some((clock, takes)) = &self.slow {
             self.running = Some((index, clock.get() + takes));
             return;
         }
         if let Some((status, error)) = self.fail_next.take() {
+            if self.fail_again > 0 {
+                self.fail_again -= 1;
+                self.fail_next = Some((status, error));
+            }
             return self.fail(index, status, error);
         }
         let moved = match fis[2] {

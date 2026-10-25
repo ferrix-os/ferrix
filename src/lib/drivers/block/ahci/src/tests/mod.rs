@@ -316,7 +316,98 @@ fn device_error_then_recovery() {
             error: 0x40
         })
     );
+    // A medium error is the drive's answer, not a hiccup: issued once,
+    // answered, and nothing said of a retry.
+    assert_eq!(model.borrow().seen.len(), 2);
+    assert_eq!(ahci.take_retried(), None);
     ahci.transfer(Op::Read, 1, 1, &seg).unwrap();
+}
+
+/// A write the link garbled once (`ICRC` and `ABRT`, an interface CRC
+/// error) is issued again and lands; the request succeeds, and the retry
+/// is there to be said.
+#[test]
+fn a_write_failed_on_the_link_is_issued_again_and_lands() {
+    let (model, _, ahci) = start(Model::new(100, 512));
+    let mut ahci = ahci.unwrap();
+    let data = pattern(4 * 512, 9);
+    model.borrow_mut().write_bytes(0x10_0000, &data);
+    let before = model.borrow().seen.len();
+    model.borrow_mut().fail_next = Some((0x51, 0x84));
+    let out = [Segment {
+        addr: 0x10_0000,
+        len: 2048,
+    }];
+    ahci.transfer(Op::Write, 20, 4, &out).unwrap();
+    assert_eq!(&model.borrow().disk[20 * 512..24 * 512], &data[..]);
+    assert_eq!(model.borrow().seen.len() - before, 2, "issued twice");
+    assert_eq!(
+        ahci.take_retried(),
+        Some((
+            Error::Device {
+                status: 0x51,
+                error: 0x84
+            },
+            2
+        ))
+    );
+    assert_eq!(ahci.take_retried(), None, "said once");
+}
+
+/// A command that fails on every attempt is answered after [`ATTEMPTS`]
+/// of them, with the last failure.
+#[test]
+fn a_command_failing_every_attempt_is_answered_after_the_last() {
+    let (model, _, ahci) = start(Model::new(100, 512));
+    let mut ahci = ahci.unwrap();
+    let before = model.borrow().seen.len();
+    model.borrow_mut().fail_next = Some((0x51, 0x04));
+    model.borrow_mut().fail_again = 10;
+    let seg = [Segment {
+        addr: 0x10_0000,
+        len: 512,
+    }];
+    let failed = Error::Device {
+        status: 0x51,
+        error: 0x04,
+    };
+    assert_eq!(ahci.transfer(Op::Write, 1, 1, &seg), Err(failed));
+    assert_eq!(
+        model.borrow().seen.len() - before,
+        crate::driver::ATTEMPTS as usize
+    );
+    assert_eq!(ahci.take_retried(), Some((failed, 0)));
+    model.borrow_mut().fail_next = None;
+    ahci.transfer(Op::Write, 1, 1, &seg).unwrap();
+}
+
+/// A drive that did not answer once has its link reset and the command
+/// issued again, which it then does: the request succeeds, well inside
+/// the 30 s the kernel waits for it.
+#[test]
+fn a_timed_out_command_is_issued_again_after_a_comreset() {
+    let mut drive = Model::new(100, 512);
+    drive.ports[0].after_reset = Some((0x113, 0x50, regs::SIG_ATA));
+    let (model, clock, ahci) = start(drive);
+    let mut ahci = ahci.unwrap();
+    let resets = model.borrow().ports[0].comresets;
+    model.borrow_mut().hang_next = 1;
+    let data = pattern(512, 5);
+    model.borrow_mut().write_bytes(0x10_0000, &data);
+    let seg = [Segment {
+        addr: 0x10_0000,
+        len: 512,
+    }];
+    let started = clock.get();
+    ahci.transfer(Op::Write, 7, 1, &seg).unwrap();
+    assert_eq!(&model.borrow().disk[7 * 512..8 * 512], &data[..]);
+    assert_eq!(model.borrow().ports[0].comresets, resets + 1);
+    let took = clock.get() - started;
+    assert!(
+        (10_000_000_000..30_000_000_000).contains(&took),
+        "{took} ns"
+    );
+    assert_eq!(ahci.take_retried(), Some((Error::Timeout("command"), 2)));
 }
 
 #[test]
@@ -332,8 +423,22 @@ fn timeout_then_recovery() {
         ahci.transfer(Op::Read, 1, 1, &seg),
         Err(Error::Timeout("command"))
     );
-    assert!(clock.get() >= 10_000_000_000);
+    // Tried twice, the link reset between: answered inside the kernel's
+    // 30 s, not after it gave up.
+    assert!(clock.get() >= 20_000_000_000);
+    assert!(clock.get() < 30_000_000_000, "{} ns", clock.get());
+    // Taken to have stopped answering: the next command is issued once,
+    // one timeout and no reset, and one that completes ends that.
+    let (issued, at) = (model.borrow().seen.len(), clock.get());
+    assert_eq!(
+        ahci.transfer(Op::Read, 1, 1, &seg),
+        Err(Error::Timeout("command"))
+    );
+    assert_eq!(model.borrow().seen.len() - issued, 1);
+    assert!(clock.get() - at < 12_000_000_000);
     model.borrow_mut().hang = false;
+    ahci.transfer(Op::Read, 1, 1, &seg).unwrap();
+    model.borrow_mut().hang_next = 1;
     ahci.transfer(Op::Read, 1, 1, &seg).unwrap();
 }
 

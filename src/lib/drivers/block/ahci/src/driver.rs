@@ -38,6 +38,13 @@ pub const LINK_TIMEOUT: u64 = 100_000_000;
 pub const COMRESET_HOLD: u64 = 2_000_000;
 /// How long a link is given to come up after a COMRESET.
 pub const COMRESET_LINK_TIMEOUT: u64 = 1_000_000_000;
+/// How many times a read, write or flush is issued before its failure is
+/// answered: once, and twice more after a failure worth trying again
+/// (`worth_retrying`), as Linux's libata retries a command its error
+/// handler recovered the link for. A second [`COMMAND_TIMEOUT`] ends it
+/// sooner, so a hung drive is answered in about 20 s, inside the 30 s the
+/// kernel waits for a request (`src/kernel/src/interfaces/block_ring`).
+pub const ATTEMPTS: u32 = 3;
 
 /// One piece of a transfer's buffer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -122,6 +129,15 @@ pub struct Ahci<R: Registers, C: Clock, M: Memory> {
     /// Whether a command [`Ahci::start_read`] launched has not been waited
     /// for.
     outstanding: bool,
+    /// The first failure a command was issued again after since
+    /// [`Ahci::take_retried`] last looked, and the attempt it was done on
+    /// (0 when it never was).
+    retried: Option<(Error, u32)>,
+    /// Set when a command timed out again after its link was reset, and
+    /// cleared by the next command that completes: while set, a command is
+    /// issued once, so a drive that has stopped answering costs every
+    /// request one [`COMMAND_TIMEOUT`], as before retries, not two.
+    unresponsive: bool,
 }
 
 /// Why a port was passed over.
@@ -149,6 +165,8 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
                 port: 0,
             },
             outstanding: false,
+            retried: None,
+            unresponsive: false,
         };
         hba.cap = hba.regs.read(regs::CAP);
         if hba.cap == regs::GONE {
@@ -200,6 +218,14 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
     /// The drive found.
     pub const fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The first failure a command was issued again after since the last
+    /// call, and the attempt that then did it, 0 when none did: for the
+    /// console, so a drive or link that needed a second try is said even
+    /// when the request succeeded.
+    pub fn take_retried(&mut self) -> Option<(Error, u32)> {
+        self.retried.take()
     }
 
     /// Read, write or flush, one command at a time, polled to completion.
@@ -513,7 +539,19 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         self.start();
     }
 
-    /// Build slot 0's command, issue it and poll it to completion.
+    /// Build slot 0's command, issue it and poll it to completion; issue it
+    /// again after a failure [`worth_retrying`], up to [`ATTEMPTS`] times
+    /// in all, and after a timeout once more at most, with the link reset
+    /// first. A failure is answered only when the last attempt failed too.
+    ///
+    /// A drive that timed out again after the reset is taken to have stopped
+    /// answering, and its next commands are issued once each until one
+    /// completes (`unresponsive`).
+    ///
+    /// The port is recovered after every failure ([`Ahci::complete`]), so
+    /// each attempt starts on a running command list, as the first did. A
+    /// request is idempotent at the block layer, so a write done twice is
+    /// only done twice.
     fn issue(
         &mut self,
         opcode: u8,
@@ -522,8 +560,73 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         write: bool,
         pieces: &[(u64, u32)],
     ) -> Result<(), Error> {
-        self.launch(opcode, lba, count, write, pieces)?;
-        self.complete()
+        let mut timeouts = 0u32;
+        let mut first: Option<Error> = None;
+        let attempts = if self.unresponsive { 1 } else { ATTEMPTS };
+        for attempt in 1..=attempts {
+            self.launch(opcode, lba, count, write, pieces)?;
+            let error = match self.complete() {
+                Ok(()) => {
+                    self.unresponsive = false;
+                    if let Some(error) = first {
+                        self.note_retried(error, attempt);
+                    }
+                    return Ok(());
+                }
+                Err(error) => error,
+            };
+            if first.is_none() {
+                first = Some(error);
+            }
+            if matches!(error, Error::Timeout(_)) {
+                timeouts += 1;
+            }
+            if timeouts > 1 {
+                self.unresponsive = true;
+            }
+            if attempt == attempts || !worth_retrying(error) || timeouts > 1 {
+                if attempt > 1
+                    && let Some(first) = first
+                {
+                    self.note_retried(first, 0);
+                }
+                return Err(error);
+            }
+            // A drive that did not answer in time gets its link reset
+            // before the next try, as libata's error handler resets it.
+            if timeouts == 1 && matches!(error, Error::Timeout(_)) {
+                self.reset_link();
+            }
+        }
+        Err(Error::Timeout("command"))
+    }
+
+    /// Remember the first failure retried since [`Ahci::take_retried`].
+    fn note_retried(&mut self, error: Error, attempt: u32) {
+        if self.retried.is_none() {
+            self.retried = Some((error, attempt));
+        }
+    }
+
+    /// COMRESET the drive's link between two attempts at a command that
+    /// timed out: the command list stopped, the link reset, the device
+    /// waited for, the errors cleared and the list started again.
+    fn reset_link(&mut self) {
+        let at = port(self.port, regs::PX_CMD);
+        let cmd = self.regs.read(at);
+        self.regs.write(at, cmd & !regs::CMD_ST);
+        let _stopped = self.wait(STOP_TIMEOUT, "PxCMD.CR", |hba| {
+            hba.regs.read(at) & regs::CMD_CR == 0
+        });
+        let index = self.port;
+        if self.comreset(index) {
+            let _idle = self.wait(BUSY_TIMEOUT, "device busy after COMRESET", |hba| {
+                hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ) == 0
+            });
+        }
+        self.regs.write(port(index, regs::PX_SERR), u32::MAX);
+        self.regs.write(port(index, regs::PX_IS), u32::MAX);
+        self.start();
     }
 
     /// Build slot 0's command and issue it.
@@ -647,6 +750,24 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
             self.clock
                 .pause(if waited < fine { poll } else { 1_000_000 });
         }
+    }
+}
+
+/// The error register's uncorrectable-data bit (ATA8-ACS): the medium could
+/// not give or take the sector.
+const ERROR_UNC: u8 = 1 << 6;
+
+/// Whether a command that failed so is worth issuing again: a timeout, an
+/// HBA's host bus or interface error, or a device error other than an
+/// uncorrectable medium error. Linux's libata retries a read or write after
+/// every failure but a medium error (`ata_eh_worth_retry`), and so does
+/// this; a drive that has gone, and a request this driver refused before
+/// issuing it, are not.
+const fn worth_retrying(error: Error) -> bool {
+    match error {
+        Error::Timeout(_) | Error::Hba(_) => true,
+        Error::Device { error, .. } => error & ERROR_UNC == 0,
+        _ => false,
     }
 }
 
