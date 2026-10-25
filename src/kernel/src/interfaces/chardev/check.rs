@@ -834,10 +834,21 @@ fn fenced_after_death(
                 .is_some_and(|(code, _)| code == enodev)
         })
     };
+    // The death is the chardev task's to finish (`finish`, then
+    // `sync::control_gone`, one fence after another): the poll that woke
+    // says its own fence was reached, not that the slot's fences are yet --
+    // the one exported before the death, nor the slot's fence now, which a
+    // later case may have put there. Wait for both, as long as a poll may
+    // take to wake, and fail loudly past that.
     let now = export(program, &fenced.dmabuf, SYNC_RW)?
         .map_err(|_| "an export after its driver's death was refused")?;
-    if !dead(fenced.exported) || !dead(now) {
-        return Err("a dead driver's slot fences did not read ENODEV");
+    let settled = || dead(fenced.exported) && dead(now);
+    let deadline = timer::now_nanos().saturating_add(DEATH_WAKE_MS * 1_000_000);
+    while !settled() && timer::now_nanos() <= deadline {
+        sched::sleep_for(1_000_000);
+    }
+    if !settled() {
+        return Err("a dead driver's slot fences did not read ENODEV within a second");
     }
     let mut argument = [0u8; 8];
     argument[..4].copy_from_slice(&SYNC_WRITE.to_ne_bytes());
