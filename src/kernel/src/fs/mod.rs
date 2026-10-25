@@ -64,6 +64,7 @@ pub(crate) mod portfd;
 pub mod procaccess_check;
 pub mod procfs;
 pub(crate) mod pty;
+pub(crate) mod pty_check;
 pub mod root_disk;
 pub(crate) mod seam;
 pub(crate) mod signalfd;

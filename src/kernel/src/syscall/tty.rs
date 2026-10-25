@@ -21,9 +21,13 @@
 //! instead, whose structure adds the input and output speeds as numbers, and
 //! Ubuntu's static busybox is linked against one. Refusing them made `isatty`
 //! false, so its `stty`, `tty`, `login` and `less` all decided there was no
-//! terminal. They take the same settings as their older twins; the speeds are
-//! the ones `c_cflag` names, and a speed given as a number (`BOTHER`) becomes
-//! the code for it -- see `Termios::with_speeds`.
+//! terminal. They take the same settings as their older twins. On the
+//! console the speeds are the ones `c_cflag` names, and a speed given as a
+//! number (`BOTHER`) becomes the code for it -- see `Termios::with_speeds`.
+//! A pseudoterminal keeps a `BOTHER` speed as the number it was given, as
+//! Linux does, since a serial driver on its master runs a chip at any rate
+//! the chip can do (`fs::pty::Pty::termios2`, `docs/USB-SERIAL.md` §5,
+//! serial-1).
 //!
 //! # The controlling terminal
 //!
@@ -435,21 +439,21 @@ fn pty_ioctl(
 ) -> Result<usize, Errno> {
     match request {
         TCGETS => put(process, arg, &pty.termios().to_bytes()),
-        TCGETS2 => put(process, arg, &pty.termios().to_bytes2()),
+        // A pseudoterminal keeps its speeds as numbers (K3): `TCGETS2`
+        // reports a `BOTHER` speed as the number it was set to, and a
+        // `TCSETS` that names `BOTHER` keeps the numbers it had, as Linux's
+        // does. The console keeps its own speed (`Termios::with_speeds`).
+        TCGETS2 => put(process, arg, &pty.termios2()),
         TCSETS | TCSETSW | TCSETSF => {
             let mut bytes = [0_u8; TERMIOS_BYTES];
             get(process, arg, &mut bytes)?;
-            let current = pty.termios();
-            let speeds = (current.input_speed(), current.output_speed());
-            let termios = Termios::from_bytes(&bytes).with_speeds(speeds.0, speeds.1, current);
-            pty.set_termios(termios, request == TCSETSF);
+            pty.set_termios(Termios::from_bytes(&bytes), request == TCSETSF);
             Ok(0)
         }
         TCSETS2 | TCSETSW2 | TCSETSF2 => {
             let mut bytes = [0_u8; TERMIOS2_BYTES];
             get(process, arg, &mut bytes)?;
-            let termios = Termios::from_bytes2(&bytes, pty.termios());
-            pty.set_termios(termios, request == TCSETSF2);
+            pty.set_termios2(&bytes, request == TCSETSF2);
             Ok(0)
         }
         TIOCGWINSZ => put(process, arg, &pty.winsize().to_bytes()),

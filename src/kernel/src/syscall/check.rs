@@ -811,6 +811,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_a_raw_read_waits_for_vmin()?;
     check_a_pseudoterminal_slave_reads_as_vmin_and_vtime_say()?;
     check_the_console_answers_as_a_terminal(&process)?;
+    check_a_pty_as_a_serial_port(&process)?;
     check_a_dead_leaders_terminals_are_let_go()?;
     check_a_hangup_revokes_the_consoles_reading()?;
     check_a_signal_disposition_reads_back_as_it_was_set(&process)?;
@@ -2746,6 +2747,16 @@ fn check_the_console_answers_as_a_terminal(process: &Process) -> Result<(), &'st
         terminal.session = session;
         terminal.foreground = foreground;
     });
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
+}
+
+/// A pseudoterminal as a serial driver's terminal: the `serial-N` load
+/// statements of `docs/USB-SERIAL.md` §5, each a check in
+/// `fs::pty_check`.
+fn check_a_pty_as_a_serial_port(process: &Process) -> Result<(), &'static str> {
+    let page = map_rw(process, PAGE_SIZE)?;
+    let outcome = crate::fs::pty_check::check_a_pty_keeps_its_speeds_as_numbers(process, page);
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
     outcome
 }

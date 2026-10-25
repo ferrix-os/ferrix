@@ -47,7 +47,9 @@ use core::any::Any;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use ferrix_linux_abi::errno::Errno;
-use ferrix_linux_abi::types::{ONLCR, OPOST, SIGWINCH};
+use ferrix_linux_abi::types::{
+    BOTHER, CBAUD, IBSHIFT, ONLCR, OPOST, SIGWINCH, TERMIOS_BYTES, TERMIOS2_BYTES,
+};
 use ferrix_vfs::initramfs::makedev;
 use ferrix_vfs::{FileType, Inode, Metadata, Readiness, Result as VfsResult, Timespec};
 
@@ -119,6 +121,10 @@ struct State {
     /// `TIOCSPTLCK`: a slave may not be opened while this is set, which is
     /// how it starts.
     locked: bool,
+    /// The input and output speeds as numbers, as the last `TCSETS2` gave
+    /// them: what `TCGETS2` reports for a speed `c_cflag` names `BOTHER`
+    /// (K3). The console has no such numbers and keeps its own speed.
+    speeds: (u32, u32),
 }
 
 impl core::fmt::Debug for Pty {
@@ -222,6 +228,7 @@ pub(crate) fn open_master() -> VfsResult<Arc<MasterFile>> {
             master: true,
             slaves: 0,
             locked: true,
+            speeds: (0, 0),
         }),
         changed: Arc::new(WaitQueue::new()),
     });
@@ -265,6 +272,57 @@ impl Pty {
             state.discipline.flush_input();
         }
         state.discipline.set_termios(termios);
+    }
+
+    /// The settings as `TCGETS2` reports them: `struct termios`, then the
+    /// input and output speeds as numbers. A speed `c_cflag` names by a
+    /// `B` code is that code's; one it names `BOTHER` is the number the
+    /// last `TCSETS2` gave, kept as given, as Linux keeps `c_ospeed` (K3);
+    /// an input speed of zero bits is the output speed.
+    pub(crate) fn termios2(&self) -> [u8; TERMIOS2_BYTES] {
+        let (termios, (input, output)) = {
+            let state = self.state.lock();
+            (state.discipline.termios(), state.speeds)
+        };
+        let output = if termios.cflag & CBAUD == BOTHER {
+            output
+        } else {
+            termios.output_speed()
+        };
+        let input = match (termios.cflag >> IBSHIFT) & CBAUD {
+            0 => output,
+            BOTHER => input,
+            _ => termios.input_speed(),
+        };
+        let mut bytes = [0_u8; TERMIOS2_BYTES];
+        let all = termios
+            .to_bytes()
+            .into_iter()
+            .chain(input.to_le_bytes())
+            .chain(output.to_le_bytes());
+        for (slot, byte) in bytes.iter_mut().zip(all) {
+            *slot = byte;
+        }
+        bytes
+    }
+
+    /// Change the settings from a `struct termios2`, keeping its speeds as
+    /// numbers: `BOTHER` stays `BOTHER`, with the number beside it, rather
+    /// than becoming the nearest code or the old speed (K3).
+    pub(crate) fn set_termios2(&self, bytes: &[u8; TERMIOS2_BYTES], flush: bool) {
+        let Some((head, speeds)) = bytes.split_first_chunk::<TERMIOS_BYTES>() else {
+            return;
+        };
+        let word = |four: Option<&[u8; 4]>| four.copied().map_or(0, u32::from_le_bytes);
+        let input = word(speeds.first_chunk::<4>());
+        let output = word(speeds.last_chunk::<4>());
+        let termios = Termios::from_bytes(head);
+        let mut state = self.state.lock();
+        if flush {
+            state.discipline.flush_input();
+        }
+        state.discipline.set_termios(termios);
+        state.speeds = (input, output);
     }
 
     /// The size the terminal says it is.
