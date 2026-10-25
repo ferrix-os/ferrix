@@ -347,3 +347,144 @@ pub const fn fields(idcode: u32) -> (u8, u16, u16) {
         ((idcode >> 1) & 0x7FF) as u16,
     )
 }
+
+// ---------------------------------------------------------------------------
+// The commands a program sends a cable's terminal
+// ---------------------------------------------------------------------------
+
+/// The most bytes one scan command shifts: 512 bits.
+pub const SCAN_BYTES: usize = 64;
+
+/// A line a program wrote to the cable's terminal, read.
+///
+/// * `reset`: [`Jtag::reset`];
+/// * `idcode`: [`Jtag::idcodes`];
+/// * `ir <bits> <hex>` and `dr <bits> <hex>`: [`Jtag::scan`] of `bits` bits
+///   of the number `hex`, its least significant bit shifted first, and what
+///   TDO gave answered the same way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Command {
+    /// To Test-Logic-Reset and Run-Test/Idle.
+    Reset,
+    /// Read the chain.
+    Idcode,
+    /// A scan.
+    Scan {
+        /// IR rather than DR.
+        ir: bool,
+        /// How many bits.
+        bits: usize,
+        /// The bits, least significant first.
+        tdi: [u8; SCAN_BYTES],
+    },
+}
+
+/// Why a line is no command.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Refused {
+    /// No word this knows.
+    Unknown,
+    /// A count of bits that is no number, zero, or more than
+    /// [`SCAN_BYTES`] hold.
+    Bits,
+    /// A value that is not hexadecimal, or has more bits than the count.
+    Value,
+}
+
+impl Refused {
+    /// The words a terminal is answered with.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            Refused::Unknown => {
+                "unknown command: reset, idcode, ir <bits> <hex> or dr <bits> <hex>"
+            }
+            Refused::Bits => "the count of bits must be 1 to 512",
+            Refused::Value => "the value must be hexadecimal and fit the count of bits",
+        }
+    }
+}
+
+impl Command {
+    /// The command `line` is, spaces around and between words aside.
+    ///
+    /// # Errors
+    ///
+    /// Why it is none.
+    pub fn parse(line: &[u8]) -> Result<Command, Refused> {
+        let mut words = line
+            .split(u8::is_ascii_whitespace)
+            .filter(|word| !word.is_empty());
+        let command = match words.next() {
+            Some(b"reset") => Command::Reset,
+            Some(b"idcode") => Command::Idcode,
+            Some(word @ (b"ir" | b"dr")) => {
+                let bits = words
+                    .next()
+                    .and_then(|bits| core::str::from_utf8(bits).ok())
+                    .and_then(|bits| bits.parse::<usize>().ok())
+                    .filter(|&bits| (1..=SCAN_BYTES * 8).contains(&bits))
+                    .ok_or(Refused::Bits)?;
+                let value = words.next().ok_or(Refused::Value)?;
+                Command::Scan {
+                    ir: word == b"ir",
+                    bits,
+                    tdi: hex_value(value, bits).ok_or(Refused::Value)?,
+                }
+            }
+            _ => return Err(Refused::Unknown),
+        };
+        if words.next().is_some() {
+            return Err(Refused::Unknown);
+        }
+        Ok(command)
+    }
+}
+
+/// `text`, a hexadecimal number with or without `0x`, as bytes least
+/// significant first, if it fits `bits` bits.
+fn hex_value(text: &[u8], bits: usize) -> Option<[u8; SCAN_BYTES]> {
+    let digits = text
+        .strip_prefix(b"0x")
+        .or_else(|| text.strip_prefix(b"0X"))
+        .unwrap_or(text);
+    if digits.is_empty() {
+        return None;
+    }
+    let mut value = [0_u8; SCAN_BYTES];
+    for (position, &digit) in digits.iter().rev().enumerate() {
+        let nibble = u8::try_from(char::from(digit).to_digit(16)?).ok()?;
+        if nibble == 0 {
+            continue;
+        }
+        // The digit's highest bit must lie within the count.
+        let top = position * 4 + (8 - nibble.leading_zeros() as usize);
+        if top > bits {
+            return None;
+        }
+        let byte = value.get_mut(position / 2)?;
+        *byte |= nibble << (4 * (position % 2));
+    }
+    Some(value)
+}
+
+/// Write `bits` bits of `value`, least significant first, as hexadecimal
+/// with `0x`, the most significant digit first.
+///
+/// # Errors
+///
+/// The writer's.
+pub fn write_hex(out: &mut impl core::fmt::Write, value: &[u8], bits: usize) -> core::fmt::Result {
+    out.write_str("0x")?;
+    for position in (0..bits.div_ceil(4)).rev() {
+        let byte = value.get(position / 2).copied().unwrap_or(0);
+        let mut nibble = (byte >> (4 * (position % 2))) & 0xF;
+        // The top digit holds only what is left of the count.
+        let left = bits - position * 4;
+        if left < 4 {
+            nibble &= (1 << left) - 1;
+        }
+        write!(out, "{nibble:x}")?;
+    }
+    Ok(())
+}

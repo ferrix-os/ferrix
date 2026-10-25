@@ -518,3 +518,33 @@ fn a_uart_is_no_jtag_cable() {
     let _ = bus.next_serial_change();
     assert!(bus.blaster(0).is_none());
 }
+
+#[test]
+fn a_terminal_s_lines_read_as_commands() {
+    use blaster::{Command, Refused};
+    assert_eq!(Command::parse(b"  reset \n"), Ok(Command::Reset));
+    assert_eq!(Command::parse(b"idcode"), Ok(Command::Idcode));
+    let Ok(Command::Scan { ir, bits, tdi }) = Command::parse(b"ir 10 0x3ff") else {
+        panic!("a scan");
+    };
+    assert_eq!((ir, bits, &tdi[..3]), (true, 10, &[0xFF, 0x03, 0][..]));
+    let Ok(Command::Scan { ir, bits, tdi }) = Command::parse(b"dr 32 31820DD") else {
+        panic!("a scan");
+    };
+    assert_eq!((ir, bits), (false, 32));
+    assert_eq!(u32::from_le_bytes(tdi[..4].try_into().expect("four")), MAX10_IDCODE);
+    assert_eq!(Command::parse(b"ir 10 0x7ff"), Err(Refused::Value));
+    assert_eq!(Command::parse(b"ir 10 0xg"), Err(Refused::Value));
+    assert_eq!(Command::parse(b"dr 0 1"), Err(Refused::Bits));
+    assert_eq!(Command::parse(b"dr 513 1"), Err(Refused::Bits));
+    assert_eq!(Command::parse(b"dr 8"), Err(Refused::Value));
+    assert_eq!(Command::parse(b"shift"), Err(Refused::Unknown));
+    assert_eq!(Command::parse(b"reset now"), Err(Refused::Unknown));
+
+    let mut text = std::string::String::new();
+    blaster::write_hex(&mut text, &[0xFF, 0x03], 10).expect("written");
+    assert_eq!(text, "0x3ff");
+    text.clear();
+    blaster::write_hex(&mut text, &MAX10_IDCODE.to_le_bytes(), 32).expect("written");
+    assert_eq!(text, "0x031820dd");
+}
