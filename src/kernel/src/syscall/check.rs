@@ -2761,7 +2761,8 @@ fn check_a_pty_as_a_serial_port(process: &Process) -> Result<(), &'static str> {
         .and_then(|()| crate::fs::pty_check::check_flow_control_acts_on_a_pty())
         .and_then(|()| {
             crate::fs::pty_check::check_a_full_canonical_line_does_not_block_the_master()
-        });
+        })
+        .and_then(|()| crate::fs::pty_check::check_a_masters_close_hangs_its_slave_up());
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
     outcome
 }

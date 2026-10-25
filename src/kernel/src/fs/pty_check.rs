@@ -355,3 +355,47 @@ pub(crate) fn check_a_full_canonical_line_does_not_block_the_master() -> Result<
     }
     Ok(())
 }
+
+/// **serial-5** (K6): the master's last close hangs the slave up. The
+/// leader of the session whose controlling terminal it was gets `SIGHUP`
+/// (and `SIGCONT`) -- the check's leader, with no handler, ends by it --
+/// the session loses the terminal, the slave reads end of
+/// file, writes `EIO`, and polls hung up.
+pub(crate) fn check_a_masters_close_hangs_its_slave_up() -> Result<(), &'static str> {
+    use crate::syscall::process;
+    use crate::syscall::signal::bit;
+    use ferrix_linux_abi::types::SIGHUP;
+    use ferrix_vfs::Inode as _;
+
+    let leader = process::new_for_check().map_err(|_| "could not make a session leader")?;
+    let _ = crate::syscall::family::sys_setsid(&leader);
+    let sid = leader.sid();
+    if sid == 0 || sid != leader.pid() {
+        process::kill(&leader, 0);
+        return Err("a check's process could not lead a session");
+    }
+    let Pair { master, slave } = pair()?;
+    master.pty.set_session(sid, sid);
+    drop(master);
+    // A leader that takes SIGHUP's default action ends by it at once, as a
+    // shell with no handler does; one that catches or blocks it has it
+    // pending.
+    let hung_up = leader.is_terminated()
+        || leader.with_signals(|signals| signals.pending()) & bit(SIGHUP) != 0;
+    let mut buf = [0_u8; 8];
+    let outcome = if !hung_up {
+        Err("the hang-up sent the session's leader no SIGHUP")
+    } else if slave.pty.session() != 0 {
+        Err("a hung-up pseudoterminal was still the session's terminal")
+    } else if slave.write_stream(b"x", false) != Err(Errno::EIO) {
+        Err("a hung-up slave's write was not EIO")
+    } else if slave.read_stream(&mut buf, false) != Ok(0) {
+        Err("a hung-up slave's read was not end of file")
+    } else if !slave.poll().hangup {
+        Err("a hung-up slave did not poll hung up")
+    } else {
+        Ok(())
+    };
+    process::kill(&leader, 0);
+    outcome
+}

@@ -665,17 +665,44 @@ pub(crate) struct SlaveFile {
 }
 
 impl Drop for MasterFile {
-    /// Closing the master takes the pair away, as Linux's `pty_close` does:
-    /// the slave's reads end and its writes fail, and the number is free for
-    /// the next `/dev/ptmx`.
+    /// Closing the master -- the last descriptor of it, as a serial driver
+    /// unplugged or dying lets go -- hangs the slave up, as Linux's
+    /// `pty_close` and `tty_vhangup` do (K6): the session the slave is the
+    /// controlling terminal of loses it, and its leader gets `SIGHUP` and
+    /// then `SIGCONT`; the slave's reads end at end of file, its writes
+    /// fail with `EIO`, it polls hung up, and every wait on it ends. The
+    /// number is free for the next `/dev/ptmx`.
     fn drop(&mut self) {
-        {
+        let session = {
             let mut state = self.pty.state.lock();
             state.master = false;
             state.output.clear();
-        }
+            state.stopped = false;
+            let session = state.session;
+            state.session = 0;
+            state.foreground = 0;
+            session
+        };
         let _ = PAIRS.lock().remove(&self.pty.number);
         self.pty.changed.wake_all();
+        if session != 0 {
+            signal_leader(session);
+        }
+    }
+}
+
+/// `SIGHUP`, then `SIGCONT`, to the leader of `session`, as Linux's
+/// `tty_signal_session_leader` sends them when its terminal hangs up. A
+/// leader that has gone gets nothing; with no memory to list the live
+/// processes, nothing is sent, as `signal_foreground` loses its signal.
+fn signal_leader(session: u32) {
+    use crate::syscall::signal::Origin;
+    use ferrix_linux_abi::types::{SIGCONT, SIGHUP};
+    for target in crate::syscall::registry::live().unwrap_or_default() {
+        if target.pid() == session {
+            crate::syscall::kill::send(&target, SIGHUP, Origin::Kernel);
+            crate::syscall::kill::send(&target, SIGCONT, Origin::Kernel);
+        }
     }
 }
 
