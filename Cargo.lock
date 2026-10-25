@@ -612,6 +612,7 @@ dependencies = [
  "ferrix-linux-abi",
  "ferrix-lode-capture",
  "ferrix-lode-core",
+ "ferrix-log-shed",
  "ferrix-native-abi",
  "ferrix-partition",
  "ferrix-rt",
@@ -629,6 +630,10 @@ dependencies = [
  "ferrix-slots",
  "ruzstd",
 ]
+
+[[package]]
+name = "ferrix-log-shed"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-logctl"

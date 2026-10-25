@@ -36,6 +36,10 @@ name = "ferrix-linux-abi"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-log-shed"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-native"
 version = "0.1.0"
 dependencies = [
@@ -84,6 +88,7 @@ name = "init"
 version = "0.1.0"
 dependencies = [
  "ferrix-audit",
+ "ferrix-log-shed",
  "ferrix-native",
  "ferrix-native-abi",
  "ferrix-settings-proto",

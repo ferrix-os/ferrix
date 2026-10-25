@@ -561,6 +561,70 @@ environment). Each alert has a rate limit and a 10-minute dedupe window.
 Alerts run in `lode` as rules; the action is a message to init or to the
 session bus relay, never something `lode` does itself (§11.2).
 
+### 7.5 Under load, the least severe goes first (the customer, 2026-10-24)
+
+The box froze on 2026-10-24 from 14:19 to 14:22: yserver at
+`RUST_LOG=info,present_pace=debug` wrote thousands of lines a second, and
+they reached the console, a framebuffer console printed synchronously
+(`ferrix.fbcon`), and the kernel log ("232205 printk messages dropped"),
+until userland starved -- hyprix's flips 5.7 s apart. Two ways got them
+there: hyprix wraps each program in `lode cat --echo`, which copied every
+line on to hyprix's output, and init prints every unit line on the
+console; and `lode cat` wrote every line to its standard output whenever
+lode was not there, for good once lode had gone away. The customer's rule
+since:
+
+**Under load, lode sheds the least severe first, and says so.** When lines
+come faster than a sink takes them, debug goes first, then info, notice and
+warning; err, crit, alert and emerg are kept as long as anything is. A
+source's lines count against its own budget only, so a flooding program
+loses its own debug lines before a quiet one loses anything. Every shed is
+said, once a window: `N lines dropped (debug: a, info: b) from SOURCE in T
+s`, at the level of the most severe line dropped.
+
+**The mechanism** is `ferrix-log-shed` (`src/lib/log/shed`), one per
+source and sink: over each second, a line of severity `s` passes while
+fewer lines than the cap of `s` passed, and the caps rise with severity, so
+a rising rate sheds debug first and errors last. It is journald's
+`RateLimitIntervalSec=`/`RateLimitBurst=` (`journal-ratelimit.c`, per
+source) with Android logd's order (`LogBuffer::prune` removes the least
+important, chattiest entries first, and `liblog`'s
+`__android_log_is_loggable` drops below a priority before anything is
+stored), applied as lines come rather than after. A line's level is its
+`<N>` prefix, or the first `ERROR`/`WARN`/`INFO`/`DEBUG`/`TRACE` word in its
+first 80 bytes, else info.
+
+| Where | Caps a second, by severity (debug / info, notice / warning / err and worse) | Built |
+|---|---|---|
+| the console, a unit's lines (init) | 100 / 1,000 / 2,000 / 10,000 | yes: lode still gets every line, and the unit's ring |
+| `lode cat`'s standard output: `--echo`, and every line while lode is away | 100 / 1,000 / 2,000 / 10,000 | yes |
+| `lode cat`'s queue to lode, when lode is behind | queued, 4 MiB; full, the oldest line of the least severe level queued goes | yes: the command is never held up, and the first line lode takes says what went (`while lode was behind`) |
+| the store (lode's limiter, §7.1) | per source and class over 30 s: chatter 1,000, warnings 2,000, errors 10,000 | yes, since step 2 |
+| forwarding (§10.2) | nothing shed: the store is the buffer; what vacuum removed first is said (`N_UNSENT`) | yes |
+| the kernel log | the kernel's own lines are the kernel's (§7.1); a program's `/dev/kmsg` writes are the kernel's ratelimit's | no change: kernel, slim |
+
+`lode cat` also looks for a lode that went away once a second, and `--tee`
+makes its file 0644 under the umask, as `>` does (a file of mode 0, made
+before, could not be opened again by a restarted writer). The kernel's
+console path is unchanged: a framebuffer console that prints
+synchronously is held up by whatever reaches it, and the producers above
+are what keep it fed at a person's rate; a deferred console is a kernel
+change for its own review, not needed for this.
+
+**Checks.** Host tests (`ferrix-log-shed`): a 10,000-a-second debug flood
+with a warning and an error every 100 lines keeps every warning and error
+and about 100 debug lines a second, a quiet source keeps everything, the
+drop is said; info and notice stop before warnings. `test-log`: `lode cat
+--echo` of a 20,000-line debug flood echoes every warning and error, about
+100 debug lines, and the drop line, and lode keeps the warnings and errors
+(`flood-echo`, `flood-kept`); the same flood as a unit's output reaches the
+serial console as every warning, at most a few hundred debug lines and
+init's `lines dropped ... to the console` line; a writer through `lode cat`
+to a stopped lode is done within a second, and the first line after lode
+comes back says what was shed, the error after the flood kept (`behind`);
+`--tee` as user ferrix makes its file 0644 and a second writer opens it
+(`tee mode`).
+
 ## 8. Storage
 
 ### 8.1 Where, and the tiers

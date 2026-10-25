@@ -23,6 +23,7 @@ members = [
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
     "src/lib/log/lode",
+    "src/lib/log/shed",
     "src/lib/proto/lode-capture",
     "src/lib/drivers/power/x86-power",
     "src/lib/proto/audit",
@@ -198,6 +199,7 @@ ferrix-btrfs-write = { path = "src/lib/fs/btrfs/write" }
 ferrix-cpio = { path = "src/lib/fs/common/cpio" }
 ferrix-partition = { path = "src/lib/fs/common/partition" }
 ferrix-fat = { path = "src/lib/fs/common/fat" }
+ferrix-log-shed = { path = "src/lib/log/shed" }
 ferrix-crng = { path = "src/lib/kernel/crng" }
 ferrix-seccomp = { path = "src/lib/kernel/seccomp" }
 ferrix-argon2 = { path = "src/lib/crypto/argon2" }

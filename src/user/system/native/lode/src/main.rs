@@ -21,6 +21,7 @@ mod alerting;
 mod arch;
 mod blobs;
 mod capture;
+mod cat;
 mod cli;
 mod control;
 mod crashd;

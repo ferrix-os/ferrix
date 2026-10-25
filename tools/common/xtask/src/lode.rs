@@ -412,6 +412,33 @@ say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
 echo "echoed line" | /bin/lode cat -t echoey --echo
 $bb sleep 2
 say "streams: $($bb cat /tmp/teey.log) $(/bin/lode -b -t teey -o cat | $bb wc -l) $(/bin/lode -b -g '^echoed line$' -o cat | $bb wc -l) $(/bin/lode -b -t echoey -o json | $bb grep -c '"_KERNEL_SEQNUM"') $(/bin/lode events | $bb grep -c '^app-error  *on ') $(/bin/lode reload > /dev/null && echo reloaded)"
+# Under load the least severe goes first (§7.5): a debug flood through
+# `lode cat --echo`, a warning and an error every 1000 lines among it. The
+# echo -- what a console would get -- keeps every warning and error and a
+# few debug lines, and says the rest; lode keeps the warnings and errors.
+flood() { i=0; while [ $i -lt 20000 ]; do echo "<7>floody: frame $i"; [ $((i % 1000)) -eq 0 ] && { echo "<4>floody: late $i"; echo "<3>floody: lost $i"; }; i=$((i+1)); done; }
+flood | /bin/lode cat -t floody --echo > /tmp/floody.echo
+$bb sleep 2
+say "flood-echo: $($bb grep -c '^<7>floody' /tmp/floody.echo) $($bb grep -c '^<4>floody' /tmp/floody.echo) $($bb grep -c '^<3>floody' /tmp/floody.echo) $($bb grep -c 'lines dropped (debug: [0-9]*) from floody' /tmp/floody.echo)"
+say "flood-kept: $(/bin/lode -b -t floody -o cat | $bb grep -c 'floody: late') $(/bin/lode -b -t floody -o cat | $bb grep -c 'floody: lost')"
+# --tee's file is 0644 under the umask, so a restarted writer -- yserver's
+# after its restart, as user ferrix -- opens it again.
+/bin/svc start tee-user.service > /dev/null 2>&1
+say "tee mode: $($bb stat -c %a /tmp/teeu.log) $($bb cat /tmp/teeu.log)"
+# The same flood as a unit's own output: init sheds what goes to the
+# console, and says it; lode has every line (the gate counts the serial).
+/bin/svc start floodc.service > /dev/null 2>&1
+$bb sleep 3
+# A stopped lode does not hold a program up: lode cat queues, sheds the
+# least severe when its queue is full, and says so once lode takes lines.
+pid=$(lode_pid)
+kill -STOP $pid
+( $bb sleep 4; kill -CONT $pid ) &
+pad=$($bb printf '%0200d' 0)
+began=$($bb date +%s)
+( i=0; while [ $i -lt 30000 ]; do echo "<7>behindy: $i $pad"; i=$((i+1)); done; echo "<3>behindy: the error after"; $bb date +%s > /tmp/behind.end ) | /bin/lode cat -t behindy
+$bb sleep 3
+say "behind: $(( $($bb cat /tmp/behind.end) - began )) $(/bin/lode -b -t behindy -o cat | $bb grep -c 'while lode was behind') $(/bin/lode -b -t behindy -o cat | $bb grep -c 'the error after')"
 # lode reload says what changed: an event kind switched, retention given
 # a class (its segments sealed first), capture as it was.
 echo 'window-opened on' > /etc/ferrix/lode.d/events.conf
@@ -504,11 +531,55 @@ say "no lode: $([ $said -eq 124 ] && echo hung || echo returned)"
 say done
 "#;
 
+/// A unit whose own output is a debug flood with a warning every 1000 lines
+/// (§7.5): init sheds its console copy.
+const FLOODC_UNIT: &str = "\
+# test-log's console flood (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Flood the console at debug
+
+[Service]
+Type=oneshot
+ExecStart=/bin/busybox sh /lib/lode-floodc.sh
+";
+
+/// `lode cat --tee` as user ferrix, twice, as a restarted writer does.
+const TEE_UNIT: &str = "\
+# test-log's --tee as a user (tools/common/xtask/src/lode.rs).
+[Unit]
+Description=Tee a file twice as a user
+
+[Service]
+Type=oneshot
+User=ferrix
+ExecStart=/bin/busybox sh /lib/lode-teeu.sh
+";
+
+/// What [`TEE_UNIT`] runs.
+const TEE_SCRIPT: &str = r#"cd /tmp
+umask 022
+echo one | /bin/lode cat -t teeu --tee /tmp/teeu.log
+echo two | /bin/lode cat -t teeu --tee /tmp/teeu.log
+"#;
+
+/// What [`FLOODC_UNIT`] runs.
+const FLOODC_SCRIPT: &str = r#"i=0
+while [ $i -lt 20000 ]; do
+  echo "<7>floodc: frame $i"
+  [ $((i % 1000)) -eq 0 ] && echo "<4>floodc: late $i"
+  i=$((i+1))
+done
+"#;
+
 /// The units, scripts and accounts the flood's unit uses beside itself.
 fn test_units() -> Vec<File> {
     let mut files = Vec::new();
     for (path, text) in [
         ("etc/ferrix/units/lode-user.service", USER_UNIT),
+        ("etc/ferrix/units/floodc.service", FLOODC_UNIT),
+        ("lib/lode-floodc.sh", FLOODC_SCRIPT),
+        ("etc/ferrix/units/tee-user.service", TEE_UNIT),
+        ("lib/lode-teeu.sh", TEE_SCRIPT),
         ("etc/ferrix/units/twice.service", TWICE_UNIT),
         ("etc/ferrix/units/alert-handler.service", HANDLER_UNIT),
         ("lib/lode-user.sh", USER_SCRIPT),
@@ -671,6 +742,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     }
     held(lines)?;
     attributed(lines)?;
+    shed_under_load(lines)?;
     collected(lines)?;
     blobs_sent(lines)?;
     vacuumed(lines)?;
@@ -734,6 +806,71 @@ fn fast(lines: &[String]) -> std::result::Result<(), String> {
         return Err("`-u lode-test -n 3` did not give 3 lines".into());
     }
     Ok(())
+}
+
+/// Under load the least severe goes first (`docs/LOGGING.md` §7.5): the
+/// echo of a debug flood keeps every warning and error, a few debug lines,
+/// and says the rest; lode keeps them; init's console copy of a unit's flood
+/// carries every warning, few debug lines and the line that says so; a
+/// stopped lode holds no program up, and its queue says what it shed.
+fn shed_under_load(lines: &[String]) -> std::result::Result<(), String> {
+    let echo = said(lines, "lode-test: flood-echo:").unwrap_or_default();
+    let words: Vec<u32> = echo
+        .split_whitespace()
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    let [debug, warnings, errors, saids] = words[..] else {
+        return Err(format!("the flood's echo row did not read: `{echo}`"));
+    };
+    if warnings != 20 || errors != 20 || saids == 0 || debug == 0 || debug > 500 {
+        return Err(format!(
+            "lode cat --echo did not shed a debug flood's least severe lines first: `{echo}` \
+             (debug echoed, of 20,000, at most 500; warnings and errors 20 each; drops said)"
+        ));
+    }
+    let kept = said(lines, "lode-test: flood-kept:").unwrap_or_default();
+    if kept != "20 20" {
+        return Err(format!(
+            "lode did not keep the flood's warnings and errors: `{kept}`"
+        ));
+    }
+    let console_debug = lines
+        .iter()
+        .filter(|line| line.contains("floodc: frame"))
+        .count();
+    let console_warnings = lines
+        .iter()
+        .filter(|line| line.contains("floodc: late"))
+        .count();
+    let console_said = lines.iter().any(|line| {
+        line.contains("lines dropped (debug: ") && line.contains("from floodc.service")
+    });
+    if console_warnings != 20 || !console_said || console_debug > 500 {
+        return Err(format!(
+            "init's console did not shed floodc's debug flood first: {console_debug} debug lines \
+             (at most 500), {console_warnings} warnings (20), said: {console_said}"
+        ));
+    }
+    let tee = said(lines, "lode-test: tee mode:").unwrap_or_default();
+    if tee != "644 two" {
+        return Err(format!(
+            "lode cat --tee's file was not 0644, or a second writer could not open it again: \
+             `{tee}`, wanted `644 two`"
+        ));
+    }
+    let behind = said(lines, "lode-test: behind:").unwrap_or_default();
+    let words: Vec<i64> = behind
+        .split_whitespace()
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    match words[..] {
+        [seconds, said, 1] if seconds < 4 && said > 0 => Ok(()),
+        _ => Err(format!(
+            "a stopped lode held lode cat's writer up, or its queue did not say what it shed, \
+             or lost the error after: `{behind}` (wanted the writer done before lode came \
+             back, one or more 'while lode was behind', the error kept)"
+        )),
+    }
 }
 
 /// Step 1 of the customer's order of 2026-10-23: units' streams with
@@ -1032,6 +1169,31 @@ lode-test: jctl admin: synced flushed rotated 1
 lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
 lode-test: streams: teed line 1 1 1 1 reloaded
+lode-test: flood-echo: 97 20 20 1
+lode-test: flood-kept: 20 20
+lode-test: tee mode: 644 two
+  init     floodc.service[90]: <4>floodc: late 0
+  init     floodc.service[90]: <4>floodc: late 1000
+  init     floodc.service[90]: <4>floodc: late 2000
+  init     floodc.service[90]: <4>floodc: late 3000
+  init     floodc.service[90]: <4>floodc: late 4000
+  init     floodc.service[90]: <4>floodc: late 5000
+  init     floodc.service[90]: <4>floodc: late 6000
+  init     floodc.service[90]: <4>floodc: late 7000
+  init     floodc.service[90]: <4>floodc: late 8000
+  init     floodc.service[90]: <4>floodc: late 9000
+  init     floodc.service[90]: <4>floodc: late 10000
+  init     floodc.service[90]: <4>floodc: late 11000
+  init     floodc.service[90]: <4>floodc: late 12000
+  init     floodc.service[90]: <4>floodc: late 13000
+  init     floodc.service[90]: <4>floodc: late 14000
+  init     floodc.service[90]: <4>floodc: late 15000
+  init     floodc.service[90]: <4>floodc: late 16000
+  init     floodc.service[90]: <4>floodc: late 17000
+  init     floodc.service[90]: <4>floodc: late 18000
+  init     floodc.service[90]: <4>floodc: late 19000
+  init     floodc.service: 19900 lines dropped (debug: 19900) from floodc.service in 1.0 s to the console; lode kept them
+lode-test: behind: 1 1 1
 lode-test: reload: 1
 lode-test: names: 1 1
 lode-test: box: 1 1 3 1

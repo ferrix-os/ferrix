@@ -166,6 +166,9 @@ struct Init {
     pending: BTreeMap<u64, Pending>,
     /// The log pipes and each unit's last lines.
     logs: Logs,
+    /// Each unit's lines to the console, shed by severity under load
+    /// (`docs/LOGGING.md` §7.5): lode and the ring take them all.
+    console: BTreeMap<UnitId, ferrix_log_shed::Shed>,
     /// The connection to lode, which units' lines go to with who wrote
     /// them.
     lode: lode::Lode,
@@ -350,6 +353,7 @@ impl Init {
             control,
             pending: BTreeMap::new(),
             logs: Logs::default(),
+            console: BTreeMap::new(),
             lode: lode::Lode::default(),
             invocations: BTreeMap::new(),
             readiness: Readiness::default(),
@@ -401,6 +405,7 @@ impl Init {
                 .chain(audit)
                 .chain(devices)
                 .chain(self.lode.next_flush())
+                .chain(self.next_said())
                 .min()
             {
                 None => -1,
@@ -419,6 +424,7 @@ impl Init {
                 }
             };
             self.gather(&ready);
+            self.say_shed(sys::monotonic() / 1000);
         }
     }
 
@@ -1162,11 +1168,48 @@ impl Init {
             // lode first, the console after: lode pairs the console's copy
             // with the line it was handed (`ferrix_lode_core::units`).
             self.lode.send(&lode::encode(&line, &name, monotonic_us));
-            say(&format!("{name}[{}]: {}", line.whose.pid, line.line));
+            // The console only as fast as a person reads it: a flood's
+            // least severe lines are shed first, and said (§7.5). lode has
+            // every line already.
+            let level =
+                ferrix_log_shed::level_of(line.line.as_bytes()).unwrap_or(ferrix_log_shed::UNKNOWN);
+            let shed = self.console.entry(line.whose.unit).or_insert_with(|| {
+                ferrix_log_shed::Shed::new(ferrix_log_shed::Caps::CONSOLE, monotonic_us)
+            });
+            if shed.admit(level, monotonic_us) {
+                say(&format!("{name}[{}]: {}", line.whose.pid, line.line));
+            }
         }
+        self.say_shed(monotonic_us);
         if let Some(fd) = closed {
             sys::unwatch(self.epoll.as_fd(), fd);
         }
+    }
+
+    /// Say what each unit's console shed in windows now over: one line a
+    /// unit, `NAME: N lines dropped (debug: a, ...) from NAME in T s to the
+    /// console; lode kept them`, which lode reads as a warning.
+    fn say_shed(&mut self, monotonic_us: u64) {
+        let owed: Vec<(UnitId, ferrix_log_shed::Said)> = self
+            .console
+            .iter_mut()
+            .filter_map(|(unit, shed)| shed.said(monotonic_us).map(|said| (*unit, said)))
+            .collect();
+        for (unit, said) in owed {
+            let name = self.display(unit);
+            let mut text = String::new();
+            let _ = ferrix_log_shed::describe(&said, &name, &mut text);
+            say(&format!("{name}: {text} to the console; lode kept them"));
+        }
+    }
+
+    /// When a console shed may have something to say: a second on while any
+    /// unit's window has lines shed and not said.
+    fn next_said(&self) -> Option<Duration> {
+        self.console
+            .values()
+            .any(ferrix_log_shed::Shed::pending)
+            .then_some(Duration::from_secs(1))
     }
 
     /// Accept control connections.

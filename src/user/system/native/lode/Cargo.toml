@@ -18,6 +18,7 @@ ferrix-linux-abi.workspace = true
 ferrix-lode-capture.workspace = true
 ferrix-fat.workspace = true
 ferrix-lode-core.workspace = true
+ferrix-log-shed.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-partition.workspace = true
 ferrix-rt.workspace = true

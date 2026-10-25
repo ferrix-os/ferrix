@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use ferrix_lode_core::filter::{self, Expr, Op, Test};
 use ferrix_lode_core::format::{self, Output};
 use ferrix_lode_core::ingest;
-use ferrix_lode_core::record::{Record, UNSPECIFIED, level};
+use ferrix_lode_core::record::{Record, UNSPECIFIED};
 use ferrix_lode_core::regex::{self, Regex};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::summary::Summary;
@@ -195,7 +195,7 @@ pub(crate) fn run() -> i32 {
         Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
         Some("rotate") => return rotate(),
         Some("session") => return announce(rest.get(1..).unwrap_or_default()),
-        Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
+        Some("cat") => return crate::cat::cat(rest.get(1..).unwrap_or_default()),
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
         Some("alerts") => return crate::top::alerts(),
@@ -1738,109 +1738,14 @@ fn provide_stub(words: &[String]) -> i32 {
     0
 }
 
-/// `COMMAND | lode cat [-t ID] [-p PRIO] [--journal] [--tee FILE] [--echo]`:
-/// standard input into the log, a line a record -- through a stdout stream,
-/// as `systemd-cat` sends it, or with `--journal` a native-protocol
-/// datagram a line. `--tee FILE` also writes everything to FILE (made
-/// afresh, as `>` makes it), so a script that kept a log file keeps it;
-/// `--echo` also to standard output. Nothing waits for lode and nothing is
-/// lost without it: a lode that is not there, or goes away, sends what
-/// follows to standard output instead, and the command's output keeps
-/// being read.
-fn cat(words: &[String]) -> i32 {
-    let mut identifier = String::from("lode-cat");
-    // No `-p`: no level, which the log shows as unspecified.
-    let mut priority: Option<u8> = None;
-    let mut journal = false;
-    let mut tee: Option<usize> = None;
-    let mut echo = false;
-    let mut at = 0;
-    while let Some(word) = words.get(at) {
-        at += 1;
-        match word.as_str() {
-            "-t" | "--identifier" => match words.get(at) {
-                Some(value) => {
-                    identifier.clone_from(value);
-                    at += 1;
-                }
-                None => return usage("cat -t needs an identifier"),
-            },
-            "-p" | "--priority" => match words.get(at).and_then(|value| level(value)) {
-                Some(value) if value != UNSPECIFIED => {
-                    priority = Some(value);
-                    at += 1;
-                }
-                _ => return usage("cat -p needs a priority"),
-            },
-            "--journal" => journal = true,
-            "--echo" => echo = true,
-            "--tee" => match words.get(at) {
-                Some(path) => {
-                    at += 1;
-                    match sys::open(
-                        path.as_bytes(),
-                        sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
-                    ) {
-                        Ok(fd) => tee = Some(fd),
-                        Err(error) => {
-                            complain(&alloc::format!("lode: cat: {path}: errno {}", error.0));
-                        }
-                    }
-                }
-                None => return usage("cat --tee needs a file"),
-            },
-            other => {
-                return usage(&alloc::format!(
-                    "cat: {other}: pipe a command's output into `lode cat`"
-                ));
-            }
-        }
-    }
-    let mut lode = open_cat(journal, &identifier, priority, echo);
-    let mut held: Vec<u8> = Vec::new();
-    let mut chunk = [0_u8; 8192];
-    loop {
-        let got = match sys::read(0, &mut chunk) {
-            Ok(0) | Err(_) => 0,
-            Ok(got) => got,
-        };
-        let piece = chunk.get(..got).unwrap_or_default();
-        if let Some(fd) = tee {
-            let _ = sys::write_all(fd, piece);
-        }
-        if echo || lode.is_none() {
-            let _ = sys::write_all(1, piece);
-        }
-        held.extend_from_slice(piece);
-        let finished = got == 0;
-        let take = if finished {
-            held.len()
-        } else {
-            held.iter()
-                .rposition(|&byte| byte == b'\n')
-                .map_or(0, |end| end + 1)
-        };
-        let lines: Vec<u8> = held.drain(..take).collect();
-        if let Some(fd) = lode
-            && !send_lines(fd, journal, &identifier, priority, lines)
-        {
-            // lode went away: what follows goes to standard output.
-            sys::close(fd);
-            lode = None;
-        }
-        if finished {
-            break;
-        }
-    }
-    if let Some(fd) = lode {
-        sys::close(fd);
-    }
-    0
-}
-
 /// The connection `lode cat` sends on: a stream with its header, or a
 /// datagram socket; `None` when lode is not there to take it.
-fn open_cat(journal: bool, identifier: &str, priority: Option<u8>, echo: bool) -> Option<usize> {
+pub(crate) fn open_cat(
+    journal: bool,
+    identifier: &str,
+    priority: Option<u8>,
+    echo: bool,
+) -> Option<usize> {
     if journal {
         return connect_datagram(b"/run/systemd/journal/socket").ok();
     }
@@ -1868,7 +1773,7 @@ pub(crate) fn open_stream(identifier: &str) -> Option<usize> {
 }
 
 /// Whole `lines` to lode on `fd`; whether it took them.
-fn send_lines(
+pub(crate) fn send_lines(
     fd: usize,
     journal: bool,
     identifier: &str,
@@ -1892,7 +1797,7 @@ fn send_lines(
 
 /// A stream's `chunk` of whole lines, each begun `<6>` when `-p info` was
 /// asked for: a stream's own info is its default, and reads as no level.
-fn info_said(priority: Option<u8>, chunk: Vec<u8>) -> Vec<u8> {
+pub(crate) fn info_said(priority: Option<u8>, chunk: Vec<u8>) -> Vec<u8> {
     if priority != Some(6) {
         return chunk;
     }

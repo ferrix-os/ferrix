@@ -43,6 +43,9 @@ pub(crate) const EEXIST: u16 = 17;
 pub(crate) const EACCES: u16 = 13;
 /// `EINTR`.
 pub(crate) const EINTR: u16 = 4;
+
+/// `EAGAIN`: nothing now, try again.
+pub(crate) const EAGAIN: u16 = 11;
 /// `POLLIN`.
 const POLLIN: i16 = 1;
 
@@ -733,6 +736,36 @@ pub(crate) fn send_all(fd: usize, mut data: &[u8]) -> Result<(), Errno> {
         }
     }
     Ok(())
+}
+
+/// Send what of `data` the connected `fd` takes now, without waiting and
+/// without `SIGPIPE`: how many bytes, 0 when it takes none.
+pub(crate) fn send_some(fd: usize, data: &[u8]) -> Result<usize, Errno> {
+    const MSG_NOSIGNAL: usize = 0x4000;
+    const MSG_DONTWAIT: usize = 0x40;
+    loop {
+        // SAFETY: `data` is read for the call; no address.
+        let sent = unsafe {
+            call(
+                numbers::SENDTO,
+                [
+                    fd,
+                    data.as_ptr() as usize,
+                    data.len(),
+                    MSG_NOSIGNAL | MSG_DONTWAIT,
+                    0,
+                    0,
+                ],
+            )
+        };
+        match sent {
+            Ok(0) if !data.is_empty() => return Err(Errno(EPIPE)),
+            Ok(count) => return Ok(count),
+            Err(error) if error.0 == EINTR => {}
+            Err(error) if error.0 == EAGAIN => return Ok(0),
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Receive one message into `buf`, waiting for it, with at most one passed

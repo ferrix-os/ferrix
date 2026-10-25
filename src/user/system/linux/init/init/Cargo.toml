@@ -15,6 +15,9 @@ libc = "0.2.189"
 ferrix-svc = { path = "../../../../../lib/init/svc" }
 # The control socket's records and the readiness lines.
 ferrix-svc-proto = { path = "../../../../../lib/init/svc-proto" }
+# A unit's lines to the console shed by severity under load
+# (docs/LOGGING.md §7.5).
+ferrix-log-shed = { path = "../../../../../lib/log/shed" }
 # The native calls, for bootstrap channels, native services and the
 # directory (docs/INIT.md §6): the numbers and layouts, and the typed
 # wrappers over them.
