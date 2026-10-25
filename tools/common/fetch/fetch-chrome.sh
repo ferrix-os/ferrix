@@ -25,8 +25,9 @@
 # than on Ferrix.
 #
 # Writes $FERRIX_CHROME_VOLUME/chrome.img (default
-# ~/.local/share/ferrix/chrome-2/chrome.img). Needs curl, sha256sum, dpkg-deb,
-# unzip, readelf and mkfs.btrfs; no root.
+# ~/.local/share/ferrix/chrome-3/chrome.img). Needs curl, sha256sum, dpkg-deb,
+# unzip, readelf, mkfs.btrfs, glib-compile-schemas and update-mime-database;
+# no root.
 #
 # Usage: tools/common/fetch/fetch-chrome.sh
 
@@ -36,8 +37,9 @@ debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
 chrome_dist=${CHROME_FOR_TESTING:-https://storage.googleapis.com/chrome-for-testing-public}
 # The volume's directory is versioned (xtask's chrome::VOLUME names the same):
-# chrome-2 added GTK 3, and the first, chrome, is left as it was.
-out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome-2}
+# chrome-2 added GTK 3, chrome-3 GTK's file chooser (its schemas, SVG and
+# gdk-pixbuf's loaders' cache); the earlier ones are left as they were.
+out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome-3}
 # Where a pinned Debian file comes from once the mirror has dropped it, as
 # trixie-security drops a package's update when the next one comes:
 # snapshot.debian.org's archive as it was on the days the pins were taken,
@@ -138,6 +140,12 @@ debs=(
     "main/k/keyutils/libkeyutils1_1.6.3-6_amd64.deb 0b11ad17be0300b63ad4eeb4c6450fed24d34b7b740f23e5363dcb29ee6d5eba"
     # GTK 3, which Chrome loads for its system look, its dark mode and its
     # file chooser (Yoru's Nocturne, docs/DESKTOP.md §6), and what it loads.
+    # SVG for gdk-pixbuf: the Adwaita icons GTK's file chooser draws are SVG.
+    # And the MIME database, without which gdk-pixbuf cannot tell an SVG.
+    "main/s/shared-mime-info/shared-mime-info_2.4-5+b2_amd64.deb d7d061df29326b0ca6b273ac9332168659ff1562659f0a33609657a143dd7881"
+    "main/d/dav1d/libdav1d7_1.5.1-1_amd64.deb 8c64de4465a8ae1ca23e1dada1dfc73d7b431540fd5ae18f21430928576d5b05"
+    "main/libr/librsvg/librsvg2-2_2.60.0+dfsg-1_amd64.deb 81fd7a825f06e344dc42fb7af92577ec242b6d24237b8a0bf79ea203a7f377c9"
+    "main/libr/librsvg/librsvg2-common_2.60.0+dfsg-1_amd64.deb aba248f2913dbcbb2bde40621b7478575983bfc18fdf61562413c82a4bef9995"
     # The keyboard's layouts, which GTK's xkbcommon reads and aborts without.
     "main/x/xkeyboard-config/xkb-data_2.42-1_all.deb 196ff18533382f64e057ea49df2bb486bd4275a4cc0917361edb560b8756dada"
     "main/a/adwaita-icon-theme/adwaita-icon-theme_48.1-1_all.deb f60b0577aee314d43d6908ca7f0b8f07dc48e2bb766e7e25035330817e0e827c"
@@ -181,13 +189,14 @@ security_debs=(
     "updates/main/k/krb5/libkrb5-3_1.21.3-5+deb13u1_amd64.deb 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97"
     "updates/main/k/krb5/libkrb5support0_1.21.3-5+deb13u1_amd64.deb 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117"
     # GTK 3's, from the security archive.
+    "updates/main/libx/libxml2/libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u1_amd64.deb b4743a0fd8e86379ec2bdfb6b97b99fb1c92a925e538920052316814470e99f8"
     "updates/main/g/gdk-pixbuf/libgdk-pixbuf-2.0-0_2.42.12+dfsg-4+deb13u1_amd64.deb 94150fb955b2d3a9a5e054e31c5a4b048bad4a479207e86cde46fbc975c838b4"
     "updates/main/g/gdk-pixbuf/libgdk-pixbuf2.0-common_2.42.12+dfsg-4+deb13u1_all.deb 9f0c64e33cf5bb3226a5a6ddf630dd76530596e476e6b47a8b27da444ff43a03"
     "updates/main/l/lcms2/liblcms2-2_2.16-2+deb13u2_amd64.deb 32e53c2002ccea8c60c02779bea0ba49ac132fef702988a30d64af79b6617806"
     "updates/main/t/tiff/libtiff6_4.7.0-3+deb13u3_amd64.deb 6bb2038f36817ae1ee6d33df03917b21835dcc2e0f3e3e80a71390e83c171173"
 )
 
-for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs; do
+for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs glib-compile-schemas update-mime-database; do
     command -v "$tool" > /dev/null || { echo "fetch-chrome: $tool is not installed" >&2; exit 1; }
 done
 
@@ -250,6 +259,25 @@ mv "$unpacked/chrome-linux64" "$tree/chrome-window"
 
 # Documentation and manuals, which nothing runs.
 rm -rf "$tree/usr/share/doc" "$tree/usr/share/man" "$tree/usr/share/lintian"
+
+# What Debian's maintainer scripts make and unpacking does not run: the MIME
+# database, by which gdk-pixbuf tells an SVG from other files; GSettings'
+# compiled schemas, which GTK's file chooser asks for and GLib aborts without,
+# and gdk-pixbuf's loaders' cache, which names the loaders by the paths they
+# have on Ferrix (the volume's, linked at /usr/lib/x86_64-linux-gnu). The
+# cache is the volume's own gdk-pixbuf-query-loaders, run on its own glibc.
+glib-compile-schemas "$tree/usr/share/glib-2.0/schemas"
+update-mime-database "$tree/usr/share/mime"
+test -f "$tree/usr/share/mime/mime.cache" \
+    || { echo "fetch-chrome: no MIME database" >&2; exit 1; }
+test -f "$tree/usr/share/glib-2.0/schemas/gschemas.compiled" \
+    || { echo "fetch-chrome: no compiled GSettings schemas" >&2; exit 1; }
+pixbuf="$tree/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0"
+"$tree/usr/lib64/ld-linux-x86-64.so.2" --library-path "$tree/usr/lib/x86_64-linux-gnu" \
+    "$pixbuf/gdk-pixbuf-query-loaders" "$pixbuf"/2.10.0/loaders/*.so \
+    | sed "s#$tree##g" > "$pixbuf/2.10.0/loaders.cache"
+grep -q 'loaders/libpixbufloader_svg.so' "$pixbuf/2.10.0/loaders.cache" \
+    || { echo "fetch-chrome: gdk-pixbuf's loaders' cache has no SVG loader" >&2; exit 1; }
 
 test -x "$tree/chrome/chrome-headless-shell" \
     || { echo "fetch-chrome: no chrome-headless-shell in the tree" >&2; exit 1; }

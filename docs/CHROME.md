@@ -1270,6 +1270,15 @@ colours; `test-compositor --boot chrome-yoru` requires the toolbar above
 the page dark (about 0x5e on average, against 0xc7 for Chrome's light
 default on the first volume).
 
-Not yet: GTK's file chooser needs GSettings' compiled schemas, which
-unpacking without Debian's maintainer scripts does not make, and
-gdk-pixbuf's loaders' cache likewise; neither is used by drawing the frame.
+The third version, `chrome-3`, gives GTK's file chooser what Debian's
+maintainer scripts make and unpacking does not run, made when the volume
+is built: GSettings' compiled schemas (`glib-compile-schemas`), without
+which GLib ends the browser when the chooser asks for its settings; the
+MIME database (`update-mime-database` over shared-mime-info), without
+which gdk-pixbuf cannot tell an SVG and GTK's icon helper aborts on
+Adwaita's `image-missing.svg`; and gdk-pixbuf's loaders' cache, by the
+volume's own `gdk-pixbuf-query-loaders` run on its glibc, with librsvg's
+loader for the SVG icons. The image links `usr/share/glib-2.0` and
+`usr/share/mime` to the volume's. `test-compositor --boot chrome-save`
+presses Ctrl+S in Chrome under Yoru and requires GTK's "Save File" window,
+gone again at Escape with Chrome still running.

@@ -139,6 +139,10 @@ pub(crate) const LINKS: &[(&str, &str)] = &[
     // layouts, which its xkbcommon aborts without, and its icons.
     ("usr/share/X11/xkb", "/data/usr/share/X11/xkb"),
     ("usr/share/icons/Adwaita", "/data/usr/share/icons/Adwaita"),
+    // GSettings' compiled schemas, which GTK's file chooser asks for.
+    ("usr/share/glib-2.0", "/data/usr/share/glib-2.0"),
+    // The MIME database, by which gdk-pixbuf tells an SVG icon.
+    ("usr/share/mime", "/data/usr/share/mime"),
 ];
 
 /// [`LINKS`] for AArch64's Chromium volume: its loader where the program's
@@ -637,8 +641,9 @@ pub(crate) fn pulse_volume() -> Result<std::path::PathBuf> {
 /// The volume's directory under `~/.local/share/ferrix`, by version: a
 /// volume with new contents gets a directory of its own, so every machine
 /// keeps the one it had until the commit that names the new one lands. 2
-/// added GTK 3 (2026-10-25); `chrome`, the first, is left where it is.
-pub(crate) const VOLUME: &str = "chrome-2";
+/// added GTK 3 (2026-10-25), 3 its file chooser's schemas, SVG and
+/// gdk-pixbuf's loaders' cache; the earlier ones are left where they are.
+pub(crate) const VOLUME: &str = "chrome-3";
 
 /// Where `tools/common/fetch/fetch-chrome.sh` writes, unless `FERRIX_CHROME_VOLUME`
 /// names another directory.
