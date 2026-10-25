@@ -1,6 +1,6 @@
 # Logging: one place for every log
 
-Version 1, 2026-10-23, design only. Nothing here is built.
+Version 1, 2026-10-23, a design; §18 says what is built.
 
 The customer asked (2026-10-23): "do we need overall better logs? Should
 we have an agent design something like dmesg+ which is the central location

@@ -815,7 +815,7 @@ on 2026-10-21 it is 28 open and 62 closed, of 90. CI on `main` is green again (r
 37331100176, after a rerun of a flaky job), after the Windows gateway test
 `a_lost_segment_is_sent_again_alone` stopped racing the gateway's timer
 (39e520e31); another gateway test, `resets_a_connection_to_a_port_nothing_listens_on`,
-flaked once on Windows and has a row in `docs/BACKLOG.md`.
+flaked once on Windows and has a row in `docs/BACKLOG.md`. Stage 25 is Yoru, the main UI: the customer's design "Yoru WM" as the desktop's look and shell on hyprix (`docs/DESKTOP.md` §6, 2026-10-24). The tokens, the dock with its stash, the launcher's look, the widget sidebars and the wallpaper picker are built, each with a `test-compositor` boot, and so are Nocturne for GTK, `portald` and Chrome's GTK volumes; the palette, snapping, the helpers, the lock, notifications and switcher in the tokens, and a Files app are not ([its page](stage-25-yoru.md)).
 
 Stage 17's display iteration is done: `/dev/dri/card0` served by a ring-3
 virtio-gpu driver, with `cargo xtask test-display` requiring a compositor's

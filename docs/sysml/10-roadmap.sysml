@@ -748,7 +748,11 @@ package FerrixRoadmap {
              * WebGL page is faster under it (2026-10-25). nvrm follows a
              * monitor plugged, unplugged or swapped, answers
              * IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter
-             * when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13). The customer's Intel N150 box is the
+             * when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13): on the
+             * card it shut the adapter down in 1.45 s with NV_PMC_BOOT_0
+             * unchanged and no Xid, and the kept card VMs quiesce on stop or
+             * yield; the monitor following and the sync-file import ran on
+             * the card too. The customer's Intel N150 box is the
              * stage's first bare-metal machine (docs/N150.md): Ferrix booted
              * on it on 2026-10-15, its drivers (AHCI, the YT6801, a
              * firmware framebuffer, VT-d, SMBIOS, an event log) and a render
@@ -875,6 +879,31 @@ package FerrixRoadmap {
              * stock Linux. A recorded run on the card, not a boot in CI. */
     }
 
+    #inProgress requirement <'S25'> stage25Yoru : Stage {
+        attribute :>> number = 25;
+        attribute :>> status = StageStatus::InProgress;
+        attribute :>> size = "63 points estimated, about 27 built; the Files app unsized";
+        doc /* The customer's design "Yoru WM" as the desktop's look and
+             * shell on hyprix (docs/DESKTOP.md section 6, 2026-10-24;
+             * docs/roadmap/stage-25-yoru.md). Kernel lines: 0. Built, each
+             * with a test-compositor boot: Y1, the tokens (boot yoru); Y2,
+             * the dock, and its stash (yoru-dock, stash); the launcher in
+             * Yoru's look, Y3's first half (yoru-launcher); Y4, the widget
+             * sidebars, whose weather and quick settings tabs say "not kept
+             * yet" (sidebars); the wallpaper picker of Y7 (walls); Settings
+             * showing what hyprix has in force; Nocturne for GTK 3 and 4
+             * with portald; and Chrome's GTK volumes (chrome-yoru,
+             * chrome-save). Still to do: the palette (Y3, 5 points),
+             * snapping as the design has it (Y5, 13), the helpers (Y6, 8),
+             * the accent from the wallpaper and parallax (Y7), lock,
+             * notifications and the switcher in the tokens, and sounds
+             * (Y8, 5), the weather and quick settings of Y4, Y1's square
+             * bottom corners and undrawn animations, Y2's FX mark,
+             * tooltips and Bar layout, and a Files app as a follow-up.
+             * Exit: every slice of section 6.3 landed with its boot. Not
+             * met. */
+    }
+
     #inProgress requirement <'S20'> stage20SelfHosting : Stage {
         attribute :>> number = 20;
         attribute :>> status = StageStatus::InProgress;
@@ -932,6 +961,7 @@ package FerrixRoadmap {
         stage12BtrfsWrite, stage13Isolation, stageNetworking;
     dependency from stage23Endfield to stage22Steam, stage21BareMetalGpu;
     dependency from stage24GamePath to stage21BareMetalGpu, stage19HyprlandFidelity;
+    dependency from stage25Yoru to stage19HyprlandFidelity;
 
     #planned requirement <'D.fuzz'> fuzzTargetsOwed : Principles::DesignRule {
         doc /* src/tests/fuzz/ has two targets, elf_parse and frame_alloc. Every
@@ -967,6 +997,7 @@ package FerrixRoadmap {
     allocate stage8Vfs to ferrix.kernel.filesystems;
     allocate stageSysfs to ferrix.kernel.filesystems;
     allocate stageChrome to ferrix.userland;
+    allocate stage25Yoru to ferrix.userland;
     allocate stage9NativeAbi to ferrix.kernel.native;
     allocate stage10UserspaceDrivers to ferrix.kernel.devices;
     allocate stage10UserspaceDrivers to ferrix.kernel.iommu;

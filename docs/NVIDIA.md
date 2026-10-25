@@ -1862,8 +1862,8 @@ and took the recommended answer for D2, D3 and D5.
     rows (B7, B8). Owed after landing: the B14 rows and run-nvidia's Chrome
     run with its fps.
 
-* **2026-10-10 — the quiesce, built and not yet run on the card** (branch
-  `nv-quiesce`, on `nv-cardvm`; §13).
+* **2026-10-10 — the quiesce, built; run on the card since** (branch
+  `nv-quiesce`, on `nv-cardvm`, landed as b5a59302d; §13).
   * `nvrm` shuts its adapter down when `/run/nvrm-quiesce` appears: the
     device files, NVKMS's device, then NVIDIA's `nv_shutdown_adapter`.
     `xtask` asks for it over `--ssh` before it destroys the domain and waits
@@ -1872,9 +1872,10 @@ and took the recommended answer for D2, D3 and D5.
     auto-unmap assertions at a client's death were missing (§13.5).
   * Checked without the card: the build and the core's link,
     `test-nvrm` with the skeleton answering the request, `test-nvrm-link`,
-    the unit tests. The adapter's shutdown itself has never run.
-  * No certification review is owed: no ring is touched (§13.7). Owed:
-    the card test of §13.6, with the product owner's word for the card.
+    the unit tests. The adapter's shutdown itself had not run then; it
+    has run on the RTX 3060 since (§13.6).
+  * No certification review is owed: no ring is touched (§13.7). The card
+    test of §13.6 has been run (2026-10-25).
 
 ## 11. CUDA (N5)
 
@@ -3730,10 +3731,11 @@ filed" paragraph by this branch, and filed with its fix.
 
 ## 13. Quiescing the card before its machine goes away
 
-Written 2026-10-10 on branch `nv-quiesce`, with the code. **Nothing in this
-section has run on the RTX 3060 yet**: the card was in use, and the first
-card run needs the product owner's word (`AGENTS.md`, hardware). What ran
-without it is in §13.6.
+Written 2026-10-10 on branch `nv-quiesce`, with the code, and landed as
+b5a59302d. When it was written nothing in this section had run on the
+RTX 3060: the card was in use, and the first card run needs the product
+owner's word (`AGENTS.md`, hardware). It has run since (2026-10-25, §13.6);
+the text below is the design as it was written.
 
 ### 13.1 Why
 
@@ -3925,7 +3927,12 @@ on the fix.
   `releaseOwnership` causes, and the vector that is never given back.
   This is one session reading another's code, not a review in the
   standards' sense.
-* **Not checked, because only the card can:** that the files close
+* **Run on the card since** (2026-10-25, landed b5a59302d): the adapter
+  shut down in 1.45 s, `NV_PMC_BOOT_0` stayed `0xb76000a1`, no Xid was
+  logged and the card stayed on the bus; the kept card VMs quiesce on stop
+  or yield. The monitor following of ccfad5570 and `IMPORT_SYNC_FILE` of
+  3059a21c4 are on the card too.
+* **Not checked before the card run, because only the card can:** that the files close
   cleanly under live clients, that `freeDevice` blanks the head and
   returns, that `rm_shutdown_adapter` unloads the GSP firmware and returns
   in our port, how long each takes, that the next boot starts from that

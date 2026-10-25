@@ -72,6 +72,7 @@ _Generated from docs/sysml/. Every element carries the maturity keyword the mode
   - [S22 — Stage 22 steam](#s22-stage-22-steam)
   - [S23 — Stage 23 endfield](#s23-stage-23-endfield)
   - [S24 — Stage 24 game path](#s24-stage-24-game-path)
+  - [S25 — Stage 25 yoru](#s25-stage-25-yoru)
   - [S20 — Stage 20 self hosting](#s20-stage-20-self-hosting)
   - [Ordering](#ordering)
 - [Assurance](#assurance)
@@ -122,12 +123,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 7891 elements, 218 relations. Model digest `4438cbeb595d15ab`.
+27 files, 149 packages, 7897 elements, 220 relations. Model digest `2db1e5246bc13bce`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 284 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 29 | The owning stage has started; part of the element runs. |
+| `#implemented` | 285 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#inProgress` | 31 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -447,6 +448,8 @@ userland : Userland  [in progress]
   init : UserProcess  [implemented]
   shell : UserProcess  [implemented]
   devmgr : UserProcess  [implemented]
+  lode : UserProcess  [in progress]
+  portald : UserProcess  [implemented]
   drivers : DriverProcess  [implemented]
     job : Job
       processes : Process
@@ -3089,7 +3092,8 @@ flowchart TB
   n26_FerrixRoadmap_stage22Steam["S22  Stage 22 steam<br>InProgress · unsized, over 300 points"]
   n27_FerrixRoadmap_stage23Endfield["S23  Stage 23 endfield<br>InProgress · about 205 points as a first guess, step 5 unknown"]
   n28_FerrixRoadmap_stage24GamePath["S24  Stage 24 game path<br>InProgress · about 68 points before the game domain, about 190 with it and the later rows"]
-  n29_FerrixRoadmap_stage20SelfHosting["S20  Stage 20 self hosting<br>InProgress · longer"]
+  n29_FerrixRoadmap_stage25Yoru["S25  Stage 25 yoru<br>InProgress · 63 points estimated, about 27 built; the Files app unsized"]
+  n30_FerrixRoadmap_stage20SelfHosting["S20  Stage 20 self hosting<br>InProgress · longer"]
   n0_FerrixRoadmap_stage0Foundation -. "depends on" .-> n1_FerrixRoadmap_stage1Boot
   n1_FerrixRoadmap_stage1Boot -. "depends on" .-> n2_FerrixRoadmap_stage2Memory
   n2_FerrixRoadmap_stage2Memory -. "depends on" .-> n3_FerrixRoadmap_stage3TrapsInterruptsTime
@@ -3121,7 +3125,7 @@ flowchart TB
   n8_FerrixRoadmap_stage7LinuxAbi -. "depends on" .-> n22_FerrixRoadmap_stage17DisplayAndInput
   n22_FerrixRoadmap_stage17DisplayAndInput -. "depends on" .-> n23_FerrixRoadmap_stage18Compositor
   n23_FerrixRoadmap_stage18Compositor -. "depends on" .-> n24_FerrixRoadmap_stage19HyprlandFidelity
-  n21_FerrixRoadmap_stage16Rustc -. "depends on" .-> n29_FerrixRoadmap_stage20SelfHosting
+  n21_FerrixRoadmap_stage16Rustc -. "depends on" .-> n30_FerrixRoadmap_stage20SelfHosting
   n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n25_FerrixRoadmap_stage21BareMetalGpu
   n14_FerrixRoadmap_stageDynamicLinking -. "depends on" .-> n25_FerrixRoadmap_stage21BareMetalGpu
   n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n26_FerrixRoadmap_stage22Steam
@@ -3133,11 +3137,12 @@ flowchart TB
   n25_FerrixRoadmap_stage21BareMetalGpu -. "depends on" .-> n27_FerrixRoadmap_stage23Endfield
   n25_FerrixRoadmap_stage21BareMetalGpu -. "depends on" .-> n28_FerrixRoadmap_stage24GamePath
   n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n28_FerrixRoadmap_stage24GamePath
+  n24_FerrixRoadmap_stage19HyprlandFidelity -. "depends on" .-> n29_FerrixRoadmap_stage25Yoru
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
   class n0_FerrixRoadmap_stage0Foundation,n1_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixRoadmap_stage3TrapsInterruptsTime,n4_FerrixRoadmap_stage4Smp,n5_FerrixRoadmap_armv7aPort,n6_FerrixRoadmap_stage5Scheduler,n7_FerrixRoadmap_stage6UserMode,n8_FerrixRoadmap_stage7LinuxAbi,n9_FerrixRoadmap_stage8Vfs,n10_FerrixRoadmap_stage9NativeAbi,n11_FerrixRoadmap_stage10UserspaceDrivers,n12_FerrixRoadmap_stage11BtrfsRead,n13_FerrixRoadmap_stageNetworking,n14_FerrixRoadmap_stageDynamicLinking,n15_FerrixRoadmap_stageSysfs,n17_FerrixRoadmap_stage12BtrfsWrite,n18_FerrixRoadmap_stage13Isolation,n21_FerrixRoadmap_stage16Rustc,n22_FerrixRoadmap_stage17DisplayAndInput,n23_FerrixRoadmap_stage18Compositor implemented
-  class n16_FerrixRoadmap_stageChrome,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n27_FerrixRoadmap_stage23Endfield,n28_FerrixRoadmap_stage24GamePath,n29_FerrixRoadmap_stage20SelfHosting inProgress
+  class n16_FerrixRoadmap_stageChrome,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n27_FerrixRoadmap_stage23Endfield,n28_FerrixRoadmap_stage24GamePath,n29_FerrixRoadmap_stage25Yoru,n30_FerrixRoadmap_stage20SelfHosting inProgress
   class n19_FerrixRoadmap_stage14RealTime planned
 ```
 
@@ -3174,6 +3179,7 @@ flowchart TB
 | `S22` | 22 | Stage 22 steam | InProgress | unsized, over 300 points | `#inProgress` |
 | `S23` | 23 | Stage 23 endfield | InProgress | about 205 points as a first guess, step 5 unknown | `#inProgress` |
 | `S24` | 24 | Stage 24 game path | InProgress | about 68 points before the game domain, about 190 with it and the later rows | `#inProgress` |
+| `S25` | 25 | Stage 25 yoru | InProgress | 63 points estimated, about 27 built; the Files app unsized | `#inProgress` |
 | `S20` | 20 | Stage 20 self hosting | InProgress | longer | `#inProgress` |
 
 Sizes are order-of-magnitude and not a schedule.
@@ -3446,7 +3452,7 @@ The Yoru desktop (docs/DESKTOP.md section 6) carries Nocturne for GTK 3 and GTK 
 
 **InProgress**  ·  size unsized, over 100 points  ·  `#inProgress`
 
-Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. N3c, hyprix compositing on the card, is on main; run-compositor --nvidia keeps the software compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's WebGL page is faster under it (2026-10-25). nvrm follows a monitor plugged, unplugged or swapped, answers IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13). The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
+Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. N3c, hyprix compositing on the card, is on main; run-compositor --nvidia keeps the software compositor unless FERRIX_NVIDIA_VTEST=1, because Chrome's WebGL page is faster under it (2026-10-25). nvrm follows a monitor plugged, unplugged or swapped, answers IMPORT_SYNC_FILE on its dmabufs, and quiesces its adapter when /run/nvrm-quiesce appears (docs/NVIDIA.md section 13): on the card it shut the adapter down in 1.45 s with NV_PMC_BOOT_0 unchanged and no Xid, and the kept card VMs quiesce on stop or yield; the monitor following and the sync-file import ran on the card too. The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
 
 ### S22 — Stage 22 steam
 
@@ -3467,6 +3473,14 @@ The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA
 **InProgress**  ·  size about 68 points before the game domain, about 190 with it and the later rows  ·  `#inProgress`
 
 The game path: a fullscreen game faster on Ferrix than on a stock Linux desktop on the same hardware, in the time from an input to the picture that shows it and in how even the frames are under a background load. docs/GAME-PATH.md is the design and the build plan, written on 2026-10-10; the customer made it a stage the same day. R1, the frame recorder, R2, the latency probe, and R3, the load and the pinned guests, landed on 2026-10-14; nothing is measured on the card yet. In order: the measuring rig (R1 to R5, 19 to 21 points), the same binaries on both systems; then the first cut that can be compared with Linux, 47 points: the flip's time, the game lane (a fullscreen client's buffer scanned out as it is), input on its own thread, tearing, the just-in-time hold, a session with what the scheduler has, and drawing backwards from the deadline. The game domain (G1 to G5, 52 points) is stage 14's ground, in the item's core ring, and is outside this stage's points until the customer decides whether it may open stage 14 early; later rows, 73 points, are each built only on a measurement. It stands on stage 21's zero-copy work, which is not landed: displayctl v9, yserver's dmabuf hand-over and a hardware cursor, other sessions' and counted elsewhere. Nine of the design's ten questions are open. Exit, by the stage's own rig on the RTX 3060 at 1920x1080 and 60 Hz: input to scan-out with vsync on at a median of at most half a refresh plus the game's frame time plus 2 ms, and at least one refresh under stock Linux; and under the background load at most one missed refresh a minute, and fewer than stock Linux. A recorded run on the card, not a boot in CI.
+
+### S25 — Stage 25 yoru
+
+**InProgress**  ·  size 63 points estimated, about 27 built; the Files app unsized  ·  `#inProgress`
+
+The customer's design "Yoru WM" as the desktop's look and shell on hyprix (docs/DESKTOP.md section 6, 2026-10-24; docs/roadmap/stage-25-yoru.md). Kernel lines: 0. Built, each with a test-compositor boot: Y1, the tokens (boot yoru); Y2, the dock, and its stash (yoru-dock, stash); the launcher in Yoru's look, Y3's first half (yoru-launcher); Y4, the widget sidebars, whose weather and quick settings tabs say "not kept yet" (sidebars); the wallpaper picker of Y7 (walls); Settings showing what hyprix has in force; Nocturne for GTK 3 and 4 with portald; and Chrome's GTK volumes (chrome-yoru, chrome-save). Still to do: the palette (Y3, 5 points), snapping as the design has it (Y5, 13), the helpers (Y6, 8), the accent from the wallpaper and parallax (Y7), lock, notifications and the switcher in the tokens, and sounds (Y8, 5), the weather and quick settings of Y4, Y1's square bottom corners and undrawn animations, Y2's FX mark, tooltips and Bar layout, and a Files app as a follow-up. Exit: every slice of section 6.3 landed with its boot. Not met.
+
+**Allocated to: **`ferrix.userland`
 
 ### S20 — Stage 20 self hosting
 
@@ -3506,6 +3520,7 @@ Every stage ends in something that runs, and nothing is stubbed that a later sta
 - `stage22Steam` depends on `stage19HyprlandFidelity`, `stageDynamicLinking`, `stage12BtrfsWrite`, `stage13Isolation` and `stageNetworking`
 - `stage23Endfield` depends on `stage22Steam` and `stage21BareMetalGpu`
 - `stage24GamePath` depends on `stage21BareMetalGpu` and `stage19HyprlandFidelity`
+- `stage25Yoru` depends on `stage19HyprlandFidelity`
 - `stage5Scheduler` depends on `hostsRustc::kernelThreads`
 - `stage6UserMode` depends on `hostsRustc::addressSpaceScale`
 - `stage7LinuxAbi` depends on `hostsRustc::signalDelivery` and `hostsRustc::processSpawn`
@@ -3670,24 +3685,25 @@ flowchart LR
   n25_FerrixRoadmap_stageSysfs["SY  Stage sysfs"]
   n26_FerrixRoadmap_stageChrome["SC  Stage chrome"]
   n27_FerrixStructure_Ferrix_userland["userland<br>ferrix.userland"]
-  n28_FerrixRoadmap_stage9NativeAbi["S9  Stage 9 native ABI"]
-  n29_FerrixStructure_Kernel_native["native<br>ferrix.kernel.native"]
-  n30_FerrixRoadmap_stage10UserspaceDrivers["S10  Stage 10 userspace drivers"]
-  n31_FerrixStructure_Machine_devices["devices<br>ferrix.kernel.devices"]
-  n32_FerrixStructure_Machine_iommu["iommu<br>ferrix.kernel.iommu"]
-  n33_FerrixRoadmap_stage11BtrfsRead["S11  Stage 11 btrfs read"]
-  n34_FerrixStructure_Kernel_blockCore["blockCore<br>ferrix.kernel.blockCore"]
-  n35_FerrixRoadmap_stageNetworking["SN  Stage networking"]
-  n36_FerrixStructure_Kernel_netCore["netCore<br>ferrix.kernel.netCore"]
-  n37_FerrixRoadmap_stageDynamicLinking["SD  Stage dynamic linking"]
-  n38_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation"]
-  n39_FerrixStructure_Kernel_namespaces["namespaces<br>ferrix.kernel.namespaces"]
-  n40_FerrixStructure_Kernel_cgroups["cgroups<br>ferrix.kernel.cgroups"]
-  n41_FerrixStructure_Kernel_seccomp["seccomp<br>ferrix.kernel.seccomp"]
-  n42_FerrixRoadmap_stage14RealTime["S14  Stage 14 real time"]
-  n43_FerrixRoadmap_stage15Userland["S15  Stage 15 userland"]
-  n44_FerrixRoadmap_stage16Rustc["S16  Stage 16 rustc"]
-  n45_FerrixStructure_Userland_rustc["rustc<br>ferrix.userland.rustc"]
+  n28_FerrixRoadmap_stage25Yoru["S25  Stage 25 yoru"]
+  n29_FerrixRoadmap_stage9NativeAbi["S9  Stage 9 native ABI"]
+  n30_FerrixStructure_Kernel_native["native<br>ferrix.kernel.native"]
+  n31_FerrixRoadmap_stage10UserspaceDrivers["S10  Stage 10 userspace drivers"]
+  n32_FerrixStructure_Machine_devices["devices<br>ferrix.kernel.devices"]
+  n33_FerrixStructure_Machine_iommu["iommu<br>ferrix.kernel.iommu"]
+  n34_FerrixRoadmap_stage11BtrfsRead["S11  Stage 11 btrfs read"]
+  n35_FerrixStructure_Kernel_blockCore["blockCore<br>ferrix.kernel.blockCore"]
+  n36_FerrixRoadmap_stageNetworking["SN  Stage networking"]
+  n37_FerrixStructure_Kernel_netCore["netCore<br>ferrix.kernel.netCore"]
+  n38_FerrixRoadmap_stageDynamicLinking["SD  Stage dynamic linking"]
+  n39_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation"]
+  n40_FerrixStructure_Kernel_namespaces["namespaces<br>ferrix.kernel.namespaces"]
+  n41_FerrixStructure_Kernel_cgroups["cgroups<br>ferrix.kernel.cgroups"]
+  n42_FerrixStructure_Kernel_seccomp["seccomp<br>ferrix.kernel.seccomp"]
+  n43_FerrixRoadmap_stage14RealTime["S14  Stage 14 real time"]
+  n44_FerrixRoadmap_stage15Userland["S15  Stage 15 userland"]
+  n45_FerrixRoadmap_stage16Rustc["S16  Stage 16 rustc"]
+  n46_FerrixStructure_Userland_rustc["rustc<br>ferrix.userland.rustc"]
   n0_FerrixRoadmap_stage1Boot -. "satisfy" .-> n1_FerrixStructure_Ferrix_loader
   n2_FerrixRoadmap_stage2Memory -. "satisfy" .-> n3_FerrixStructure_Kernel_mm
   n2_FerrixRoadmap_stage2Memory -. "satisfy" .-> n4_FerrixStructure_Kernel_vmap
@@ -3706,25 +3722,26 @@ flowchart LR
   n22_FerrixRoadmap_stage8Vfs -. "allocate" .-> n24_FerrixStructure_Kernel_filesystems
   n25_FerrixRoadmap_stageSysfs -. "allocate" .-> n24_FerrixStructure_Kernel_filesystems
   n26_FerrixRoadmap_stageChrome -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
-  n28_FerrixRoadmap_stage9NativeAbi -. "allocate" .-> n29_FerrixStructure_Kernel_native
-  n30_FerrixRoadmap_stage10UserspaceDrivers -. "allocate" .-> n31_FerrixStructure_Machine_devices
-  n30_FerrixRoadmap_stage10UserspaceDrivers -. "allocate" .-> n32_FerrixStructure_Machine_iommu
-  n33_FerrixRoadmap_stage11BtrfsRead -. "allocate" .-> n34_FerrixStructure_Kernel_blockCore
-  n35_FerrixRoadmap_stageNetworking -. "allocate" .-> n36_FerrixStructure_Kernel_netCore
-  n37_FerrixRoadmap_stageDynamicLinking -. "allocate" .-> n19_FerrixStructure_Kernel_syscalls
-  n37_FerrixRoadmap_stageDynamicLinking -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
-  n38_FerrixRoadmap_stage13Isolation -. "allocate" .-> n39_FerrixStructure_Kernel_namespaces
-  n38_FerrixRoadmap_stage13Isolation -. "allocate" .-> n40_FerrixStructure_Kernel_cgroups
-  n38_FerrixRoadmap_stage13Isolation -. "allocate" .-> n41_FerrixStructure_Kernel_seccomp
-  n42_FerrixRoadmap_stage14RealTime -. "allocate" .-> n14_FerrixStructure_Kernel_sched
-  n43_FerrixRoadmap_stage15Userland -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
-  n44_FerrixRoadmap_stage16Rustc -. "allocate" .-> n45_FerrixStructure_Userland_rustc
+  n28_FerrixRoadmap_stage25Yoru -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
+  n29_FerrixRoadmap_stage9NativeAbi -. "allocate" .-> n30_FerrixStructure_Kernel_native
+  n31_FerrixRoadmap_stage10UserspaceDrivers -. "allocate" .-> n32_FerrixStructure_Machine_devices
+  n31_FerrixRoadmap_stage10UserspaceDrivers -. "allocate" .-> n33_FerrixStructure_Machine_iommu
+  n34_FerrixRoadmap_stage11BtrfsRead -. "allocate" .-> n35_FerrixStructure_Kernel_blockCore
+  n36_FerrixRoadmap_stageNetworking -. "allocate" .-> n37_FerrixStructure_Kernel_netCore
+  n38_FerrixRoadmap_stageDynamicLinking -. "allocate" .-> n19_FerrixStructure_Kernel_syscalls
+  n38_FerrixRoadmap_stageDynamicLinking -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
+  n39_FerrixRoadmap_stage13Isolation -. "allocate" .-> n40_FerrixStructure_Kernel_namespaces
+  n39_FerrixRoadmap_stage13Isolation -. "allocate" .-> n41_FerrixStructure_Kernel_cgroups
+  n39_FerrixRoadmap_stage13Isolation -. "allocate" .-> n42_FerrixStructure_Kernel_seccomp
+  n43_FerrixRoadmap_stage14RealTime -. "allocate" .-> n14_FerrixStructure_Kernel_sched
+  n44_FerrixRoadmap_stage15Userland -. "allocate" .-> n27_FerrixStructure_Ferrix_userland
+  n45_FerrixRoadmap_stage16Rustc -. "allocate" .-> n46_FerrixStructure_Userland_rustc
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
-  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n28_FerrixRoadmap_stage9NativeAbi,n29_FerrixStructure_Kernel_native,n30_FerrixRoadmap_stage10UserspaceDrivers,n33_FerrixRoadmap_stage11BtrfsRead,n34_FerrixStructure_Kernel_blockCore,n35_FerrixRoadmap_stageNetworking,n36_FerrixStructure_Kernel_netCore,n37_FerrixRoadmap_stageDynamicLinking,n38_FerrixRoadmap_stage13Isolation,n44_FerrixRoadmap_stage16Rustc,n45_FerrixStructure_Userland_rustc implemented
-  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n39_FerrixStructure_Kernel_namespaces,n40_FerrixStructure_Kernel_cgroups,n41_FerrixStructure_Kernel_seccomp,n43_FerrixRoadmap_stage15Userland inProgress
-  class n42_FerrixRoadmap_stage14RealTime planned
+  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n29_FerrixRoadmap_stage9NativeAbi,n30_FerrixStructure_Kernel_native,n31_FerrixRoadmap_stage10UserspaceDrivers,n34_FerrixRoadmap_stage11BtrfsRead,n35_FerrixStructure_Kernel_blockCore,n36_FerrixRoadmap_stageNetworking,n37_FerrixStructure_Kernel_netCore,n38_FerrixRoadmap_stageDynamicLinking,n39_FerrixRoadmap_stage13Isolation,n45_FerrixRoadmap_stage16Rustc,n46_FerrixStructure_Userland_rustc implemented
+  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n28_FerrixRoadmap_stage25Yoru,n40_FerrixStructure_Kernel_namespaces,n41_FerrixStructure_Kernel_cgroups,n42_FerrixStructure_Kernel_seccomp,n44_FerrixRoadmap_stage15Userland inProgress
+  class n43_FerrixRoadmap_stage14RealTime planned
 ```
 
 **Figure 19 — Stages and the parts that answer them.** Each line carries the word the model wrote: `satisfy` where the part exists, `allocate` where it is one the stage still owes. [SVG](diagrams/stages-and-parts.svg) Source: `10-roadmap.sysml`.
@@ -3805,6 +3822,7 @@ flowchart LR
 | `stage8Vfs` | `ferrix.kernel.filesystems` |
 | `stageSysfs` | `ferrix.kernel.filesystems` |
 | `stageChrome` | `ferrix.userland` |
+| `stage25Yoru` | `ferrix.userland` |
 | `stage9NativeAbi` | `ferrix.kernel.native` |
 | `stage10UserspaceDrivers` | `ferrix.kernel.devices` |
 | `stage10UserspaceDrivers` | `ferrix.kernel.iommu` |
@@ -3819,7 +3837,7 @@ flowchart LR
 | `stage15Userland` | `ferrix.userland` |
 | `stage16Rustc` | `ferrix.userland.rustc` |
 
-21 edges — each reads “requirement is allocated to element”.
+22 edges — each reads “requirement is allocated to element”.
 
 ### Verified by
 
@@ -3922,6 +3940,7 @@ flowchart LR
 | `S22` | `stage22Steam` | `dependency` | — | `#inProgress` |
 | `S23` | `stage23Endfield` | — | — | `#inProgress` |
 | `S24` | `stage24GamePath` | — | — | `#inProgress` |
+| `S25` | `stage25Yoru` | `allocate` | — | `#inProgress` |
 | `S20` | `stage20SelfHosting` | — | — | `#inProgress` |
 | `D.fuzz` | `fuzzTargetsOwed` | — | — | `#planned` |
 | `D.miri` | `miriOwed` | — | — | `#planned` |
@@ -5278,9 +5297,9 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |
-| 17 | The roadmap, stage by stage | 30 nodes, 43 edges | `10-roadmap.sysml` | [roadmap-stages.svg](diagrams/roadmap-stages.svg) |
+| 17 | The roadmap, stage by stage | 31 nodes, 44 edges | `10-roadmap.sysml` | [roadmap-stages.svg](diagrams/roadmap-stages.svg) |
 | 18 | The gates and the rules they uphold | 16 nodes, 10 edges | `11-assurance.sysml` | [gates-and-rules.svg](diagrams/gates-and-rules.svg) |
-| 19 | Stages and the parts that answer them | 46 nodes, 31 edges | `10-roadmap.sysml` | [stages-and-parts.svg](diagrams/stages-and-parts.svg) |
+| 19 | Stages and the parts that answer them | 47 nodes, 32 edges | `10-roadmap.sysml` | [stages-and-parts.svg](diagrams/stages-and-parts.svg) |
 | 20 | The boot tests and the stages they verify | 16 nodes, 21 edges | `10-roadmap.sysml` | [tests-and-stages.svg](diagrams/tests-and-stages.svg) |
 
 20 figures.

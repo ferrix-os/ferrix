@@ -411,6 +411,29 @@ package FerrixStructure {
                  * zinc, whose job control cargo xtask test-jobs types at. */
         }
         #implemented part devmgr : UserProcess;
+        #inProgress part lode : UserProcess {
+            doc /* The log manager (src/user/system/native/lode, docs/LOGGING.md):
+                 * one native program, started by init as lode.service in a
+                 * sealed job of its own, as a user of its own. It reads the
+                 * kernel log and keeps records in a store; as a reader it is
+                 * lode or journalctl through a link, and it also does
+                 * administration (status, top, level, reload, delete,
+                 * verify, cat). Built so far, by docs/LOGGING.md section
+                 * 18: the store, compression, store-and-forward, TLS to
+                 * lode-receive, crash records and the blob container; its
+                 * gates are cargo xtask test-log and test-log-remote. Still
+                 * to come: the indexes, RFC 5424 and OTLP. */
+        }
+        #implemented part portald : UserProcess {
+            doc /* The settings portal (src/user/system/linux/compositor/portald):
+                 * org.freedesktop.portal.Settings on the session bus as
+                 * org.freedesktop.portal.Desktop, dark or light, Nocturne's
+                 * accent and the GTK theme's name, fixed at its start; no
+                 * other portal is offered. The Yoru theme starts it
+                 * (exec-once), and cargo xtask test-compositor --boot
+                 * chrome-yoru requires Chrome's toolbar dark under it
+                 * (docs/DESKTOP.md section 6). */
+        }
         #implemented part drivers : DriverProcess[0..*];
         #implemented part rustc : UserProcess {
             doc /* The goal, stage 16, met on x86-64 on 2026-09-22: the

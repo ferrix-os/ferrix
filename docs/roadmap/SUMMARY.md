@@ -34,6 +34,7 @@
 - [◐ Stage 22 — Steam](stage-22-steam.md)
 - [◐ Stage 23 — Arknights: Endfield](stage-23-arknights-endfield.md)
 - [◐ Stage 24 — The game path](stage-24-game-path.md)
+- [◐ Stage 25 — Yoru, the main UI](stage-25-yoru.md)
 - [◐ Microkernel M0 — the build flags, the baselines, the checks](microkernel-m0.md)
 - [◦ Written ahead of their stage](written-ahead.md)
 - [◦ Continuously, from stage 1](continuously.md)
