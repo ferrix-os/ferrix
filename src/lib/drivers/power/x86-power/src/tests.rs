@@ -392,3 +392,42 @@ fn a_regained_claim_keeps_the_back_offs_cap_and_a_give_up() {
     assert!(given_up.done());
     assert_eq!(given_up.step(5, &cool), Action::Hold);
 }
+
+#[test]
+fn a_cool_spell_lifts_a_back_off_one_step_at_a_time() {
+    let mut policy = Policy::new(plan_of(&[30, 34, 37, 40, 44], 1), 85);
+    let cool = reading(60, 62);
+    for at in 0..5 {
+        let _ = policy.step(at, &cool);
+    }
+    assert_eq!(policy.current(), Some(4));
+    // Two back-offs, 5 s apart: 44 A to 40 A to 37 A.
+    let _ = policy.step(10, &reading(86, 86));
+    let _ = policy.step(15, &reading(87, 87));
+    assert_eq!(policy.current(), Some(2));
+    // A cool spell: 40 A, not 44 A.
+    let _ = policy.step(16, &reading(78, 78));
+    assert_eq!(
+        policy.step(16 + COOL_SECONDS, &reading(78, 78)),
+        Action::Set {
+            amps: 40,
+            why: Why::Plan
+        }
+    );
+    // Another: 44 A, the plan's top.
+    assert_eq!(
+        policy.step(17 + COOL_SECONDS, &reading(78, 78)),
+        Action::Hold
+    );
+    assert_eq!(
+        policy.step(17 + 2 * COOL_SECONDS, &reading(78, 78)),
+        Action::Set {
+            amps: 44,
+            why: Why::Plan
+        }
+    );
+    assert_eq!(
+        policy.step(17 + 3 * COOL_SECONDS, &reading(78, 78)),
+        Action::Hold
+    );
+}

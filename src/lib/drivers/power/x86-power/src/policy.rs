@@ -4,7 +4,9 @@
 //! The policy climbs the plan one step every [`Plan::seconds`]. At or above
 //! the soft limit it steps down one step, at most once every
 //! [`BACKOFF_SPACING_SECONDS`], and holds there until the hottest reading
-//! has been [`COOL_MARGIN`] C below the limit for [`COOL_SECONDS`]. A
+//! has been [`COOL_MARGIN`] C below the limit for [`COOL_SECONDS`]; each
+//! such cool spell lets it one step higher again, not straight back to the
+//! plan's top. A
 //! third back-off without such a cool spell between, or a back-off asked of
 //! the lowest step, gives up: firmware's value back, and nothing more is
 //! asked until the driver starts again.
@@ -146,8 +148,12 @@ impl Policy {
             let cool = hottest.is_some_and(|celsius| celsius <= self.hot - COOL_MARGIN);
             if cool {
                 let since = *self.cool_since.get_or_insert(elapsed);
+                // One step up a spell: on the N150 on 2026-10-25 a lifted
+                // cap went from 37 A straight back to 44 A at 80 C, and the
+                // package passed 90 C, where the kernel's backstop put
+                // firmware's 25 A back until reboot.
                 if elapsed.saturating_sub(since) >= COOL_SECONDS {
-                    self.cap = None;
+                    self.cap = self.cap.map(|cap| cap.saturating_add(1));
                     self.backoffs = 0;
                     self.cool_since = None;
                 }

@@ -273,7 +273,8 @@ outside the item. It reads its words from `/proc/cmdline`:
   Without it the driver writes nothing and only reports.
 * `ferrix.power.hot=C`: the soft limit, 50 to 99, 85 without it. At or
   above it on either sensor the driver steps down one step, at most once in
-  5 s, and holds until the hottest reads 5 C below it for 30 s; a third
+  5 s, and holds until the hottest reads 5 C below it for 30 s, each such
+  spell lifting it one step (not back to the top at once); a third
   back-off without such a spell, or one asked of the first step, puts
   firmware's value back for good.
 * `ferrix.power.test=hang@S` / `exit@S`: test only (§10).
