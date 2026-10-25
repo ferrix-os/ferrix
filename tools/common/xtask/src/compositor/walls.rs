@@ -63,6 +63,10 @@ fn changed(a: &Image, b: &Image, rows: std::ops::Range<usize>) -> usize {
 ///
 /// A step that never came, or a judgement that failed, with the
 /// transcript.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one boot read top to bottom: each key and what it must have done"
+)]
 pub(super) fn test_walls(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (mut config, mut carried) = super::yoru::desktop(arch, args, false)?;
     config.push_str("exec-once = /bin/sh /etc/walls.sh\n");

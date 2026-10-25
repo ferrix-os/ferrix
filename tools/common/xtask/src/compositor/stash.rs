@@ -100,6 +100,10 @@ fn click(qmp: &mut Qmp, (x, y): (i64, i64)) -> Result<()> {
 ///
 /// A step that never came, or a judgement that failed, with the
 /// transcript.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one boot read top to bottom: each press and what it must have done"
+)]
 pub(super) fn test_stash(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (mut config, mut carried) = super::yoru::desktop(arch, args, false)?;
     config.push_str("exec-once = /bin/sh /etc/stash-probe.sh\n");

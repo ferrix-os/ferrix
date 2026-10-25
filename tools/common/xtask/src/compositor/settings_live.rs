@@ -62,6 +62,10 @@ echo "live: done"
 /// # Errors
 ///
 /// A step that never came, with the transcript.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one boot read top to bottom: the probe, its three screendumps and their judgement"
+)]
 pub(super) fn test_settings_live(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (mut config, mut carried) = super::yoru::desktop(arch, args, false)?;
     config.push_str("exec-once = /bin/sh /etc/settings-live.sh\n");
@@ -128,7 +132,7 @@ pub(super) fn test_settings_live(arch: Arch, programs: &Programs, args: &Args) -
             image
                 .pixels
                 .chunks_exact(3)
-                .filter(|p| p[0] > 230 && p[1] < 30 && p[2] < 30)
+                .filter(|p| matches!(p, [r, g, b] if *r > 230 && *g < 30 && *b < 30))
                 .count()
         };
         if red(&before) > 200 || red(&appearance) < 2000 {

@@ -3,7 +3,8 @@
 //! press and drag (the customer on the TV, 2026-10-25: after a drag to the
 //! edge "the window's title bar stops responding to clicks and drags").
 //!
-//! On Yoru's desktop, QEMU's tablet presses on window two's bar, drags it to
+//! On Yoru's desktop, QEMU's tablet presses on the bar of the window on top
+//! (the two open cascaded, either first), drags it to
 //! the left edge and lets go; then presses on the bar where the snapped
 //! window now draws it and drags it right. A script in the guest prints
 //! `hyprctl clients` every second. Required: the window snapped to the left
@@ -97,6 +98,10 @@ fn rect_of(watching: &Watching<'_>, from: usize, title: &str) -> Option<(i64, i6
 /// # Errors
 ///
 /// The window did not snap, or its bar took no second drag.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one boot read top to bottom: two drags and what each left"
+)]
 pub(super) fn test_edge_drag(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let (mut config, mut carried) = super::yoru::desktop(arch, args, false)?;
     config.push_str("exec-once = /bin/sh /etc/edge-drag.sh\n");
@@ -142,24 +147,38 @@ pub(super) fn test_edge_drag(arch: Arch, programs: &Programs, args: &Args) -> Re
             Ok(from)
         };
         let from = wait(watching)?;
-        let Some((x, y, w, _)) = rect_of(watching, from, "two") else {
+        // The window whose bar no other window covers: the one on top. The
+        // two open cascaded, in either order.
+        let one = rect_of(watching, from, "one");
+        let two = rect_of(watching, from, "two");
+        let bar = |(x, y, w, _): (i64, i64, i64, i64)| (x + w / 2, y - BAR_MIDDLE);
+        let inside = |(px, py): (i64, i64), (x, y, w, h): (i64, i64, i64, i64)| {
+            px >= x && px < x + w && py >= y - 2 * BAR_MIDDLE && py < y + h
+        };
+        let Some((title, (x, y, w, _))) = [("two", two, one), ("one", one, two)]
+            .into_iter()
+            .find_map(|(title, own, other)| {
+                let own = own?;
+                (!other.is_some_and(|other| inside(bar(own), other))).then_some((title, own))
+            })
+        else {
             return Err(with_the_transcript(
-                &Error::new("edge-drag: no rectangle for two"),
+                &Error::new("edge-drag: no window with its bar uncovered"),
                 watching,
             ));
         };
-        println!("  {arch}: edge-drag: two at {x},{y} width {w}");
+        println!("  {arch}: edge-drag: {title} at {x},{y} width {w}");
         let dump = crate::paths::build_dir(arch).join("edge-drag-0.ppm");
         qmp.screendump(Some(crate::display::DEVICE_ID), &dump)?;
         drag(&mut qmp, (x + w / 2, y - BAR_MIDDLE), (0, 300))?;
         let from = wait(watching)?;
-        let Some((sx, sy, sw, sh)) = rect_of(watching, from, "two") else {
+        let Some((sx, sy, sw, sh)) = rect_of(watching, from, title) else {
             return Err(with_the_transcript(
                 &Error::new("edge-drag: no rectangle after the snap"),
                 watching,
             ));
         };
-        println!("  {arch}: edge-drag: after the drag to the edge two at {sx},{sy} {sw}x{sh}");
+        println!("  {arch}: edge-drag: after the drag to the edge {title} at {sx},{sy} {sw}x{sh}");
         let dump = crate::paths::build_dir(arch).join("edge-drag-1.ppm");
         qmp.screendump(Some(crate::display::DEVICE_ID), &dump)?;
         let snapped = sx <= 8 && sw >= SCREEN.0 / 2 - 40 && sw <= SCREEN.0 / 2 + 40;
@@ -169,13 +188,13 @@ pub(super) fn test_edge_drag(arch: Arch, programs: &Programs, args: &Args) -> Re
             (sx + sw / 2 + 250, sy + 120),
         )?;
         let from = wait(watching)?;
-        let Some((ax, ay, aw, ah)) = rect_of(watching, from, "two") else {
+        let Some((ax, ay, aw, ah)) = rect_of(watching, from, title) else {
             return Err(with_the_transcript(
                 &Error::new("edge-drag: no rectangle after the second drag"),
                 watching,
             ));
         };
-        println!("  {arch}: edge-drag: after the second drag two at {ax},{ay} {aw}x{ah}");
+        println!("  {arch}: edge-drag: after the second drag {title} at {ax},{ay} {aw}x{ah}");
         let mut failures = Vec::new();
         if !snapped {
             failures.push(format!("a window dragged to the left edge did not snap to the left half: {sx},{sy} {sw}x{sh}"));
