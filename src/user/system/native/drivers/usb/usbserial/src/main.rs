@@ -39,6 +39,7 @@ use ferrix_rt::native::vmo::Vmo;
 use ferrix_rt::{Bootstrap, Kernel, linux};
 use ferrix_usb_serial::blaster::{self, Command, Jtag, MAX_TAPS, SCAN_BYTES, Tap};
 use ferrix_usb_serial::ftdi::Role;
+use ferrix_usb_serial::mpsse::{self, Outcome};
 use ferrix_usb_serial::port::{Cable, Identity, Serial};
 use ferrix_usbif::{MAX_BYTES, Message};
 
@@ -90,6 +91,32 @@ fn main(bootstrap: Bootstrap) -> i32 {
     }
 }
 
+/// Whether `path`, NUL-terminated, names a file root owns, not following a
+/// last symbolic link: `statx`'s `stx_uid`, the same place on every
+/// architecture.
+fn owned_by_root(path: &[u8]) -> bool {
+    const AT_FDCWD: isize = -100;
+    const AT_SYMLINK_NOFOLLOW: usize = 0x100;
+    const STATX_UID: usize = 0x8;
+    let mut statx = [0_u8; 256];
+    // SAFETY: `path` is NUL-terminated and `statx` is 256 bytes, what the
+    // call writes, both alive for the call.
+    let found = unsafe {
+        linux::call(
+            linux::numbers::STATX,
+            [
+                AT_FDCWD as usize,
+                path.as_ptr().addr(),
+                AT_SYMLINK_NOFOLLOW,
+                STATX_UID,
+                statx.as_mut_ptr().addr(),
+                0,
+            ],
+        )
+    };
+    found.is_ok() && statx.get(20..24) == Some(&[0, 0, 0, 0])
+}
+
 /// The first message on `channel` and its one handle.
 fn first(channel: &Channel<Kernel>) -> Option<(Message, OwnedHandle<Kernel>)> {
     let _ = channel.wait_one(Signals::READABLE, Deadline::Never).ok()?;
@@ -136,6 +163,8 @@ struct Driver {
     port: Port<Kernel>,
     port_fd: i32,
     armed: bool,
+    /// The modem lines last said on the console.
+    modem_said: Option<u8>,
 }
 
 fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
@@ -219,6 +248,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         port,
         port_fd,
         armed: false,
+        modem_said: None,
     };
     if driver.serial.role == Role::Blaster {
         driver.say_chain();
@@ -257,7 +287,11 @@ impl Driver {
                 return Ok(());
             }
             match self.serial.role {
-                Role::Uart => self.pump_uart(),
+                Role::Uart => {
+                    self.pump_uart();
+                    self.say_modem();
+                    self.loopback_if_asked();
+                }
                 Role::Blaster => self.take_commands(),
             }
         }
@@ -354,6 +388,80 @@ impl Driver {
             ferrix_rt::warn!(
                 "usbserial: serial {number} lost {lost} bytes to a stalled OUT endpoint"
             );
+        }
+    }
+
+    /// Say the modem lines when they change, as the chip's status bytes
+    /// give them.
+    fn say_modem(&mut self) {
+        let modem = self.serial.modem;
+        if !self.serial.seen() || self.modem_said == Some(modem) {
+            return;
+        }
+        self.modem_said = Some(modem);
+        let bit = |mask: u8| u8::from(modem & mask != 0);
+        ferrix_rt::info!(
+            "usbserial: serial {} modem lines: CTS {} DSR {} RI {} DCD {}",
+            self.number,
+            bit(ferrix_usb_serial::ftdi::MODEM_CTS),
+            bit(ferrix_usb_serial::ftdi::MODEM_DSR),
+            bit(ferrix_usb_serial::ftdi::MODEM_RI),
+            bit(ferrix_usb_serial::ftdi::MODEM_DCD)
+        );
+    }
+
+    /// The MPSSE loopback ([`mpsse::loopback`]), when root asks for it with
+    /// an empty file `/tmp/usbserial-loopback-<N>` of its own: the
+    /// diagnostic that shows a chip's pipes carry bytes both ways with
+    /// nothing wired to its pins. The file is taken away first, so it runs
+    /// once a file.
+    fn loopback_if_asked(&mut self) {
+        let mut path = [0_u8; 48];
+        let mut at = 0;
+        let mut put = |text: &[u8]| {
+            for &byte in text {
+                if let Some(slot) = path.get_mut(at) {
+                    *slot = byte;
+                    at += 1;
+                }
+            }
+        };
+        put(b"/tmp/usbserial-loopback-");
+        let mut digits = [0_u8; 3];
+        let mut number = self.number;
+        let mut count = 0;
+        loop {
+            if let Some(slot) = digits.get_mut(count) {
+                *slot = b'0' + number % 10;
+            }
+            count += 1;
+            number /= 10;
+            if number == 0 {
+                break;
+            }
+        }
+        for index in (0..count).rev() {
+            put(&[digits.get(index).copied().unwrap_or(b'0')]);
+        }
+        if !owned_by_root(&path) {
+            return;
+        }
+        let _ = linux::unlink(&path);
+        let pattern: [u8; mpsse::MAX_PATTERN] =
+            core::array::from_fn(|at| (at as u32).wrapping_mul(2_654_435_761).to_le_bytes()[3]);
+        let number = self.number;
+        match mpsse::loopback(&mut self.link, &mut self.serial, &pattern) {
+            Ok(Outcome::Equal) => ferrix_rt::info!(
+                "usbserial: serial {number} loopback through the chip's MPSSE: {} bytes back as sent",
+                pattern.len()
+            ),
+            Ok(Outcome::Differs(at)) => ferrix_rt::warn!(
+                "usbserial: serial {number} loopback through the chip's MPSSE: byte {at} came back otherwise"
+            ),
+            Ok(Outcome::NoEngine) => ferrix_rt::warn!(
+                "usbserial: serial {number} loopback: the chip's MPSSE did not answer"
+            ),
+            Err(error) => ferrix_rt::warn!("usbserial: serial {number} loopback failed: {error:?}"),
         }
     }
 

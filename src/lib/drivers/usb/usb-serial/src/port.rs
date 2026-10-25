@@ -181,6 +181,12 @@ impl Serial {
             .unwrap_or(self.line.baud)
     }
 
+    /// Whether a packet has come yet, so [`Serial::modem`] says the lines.
+    #[must_use]
+    pub const fn seen(&self) -> bool {
+        self.seen
+    }
+
     /// Set DTR and RTS.
     ///
     /// # Errors
@@ -346,13 +352,20 @@ pub struct Cable<'a, U> {
 impl<'a, U: Usb> Cable<'a, U> {
     /// The cable behind `serial`, which must be a Blaster's.
     pub fn new(usb: &'a mut U, serial: &Serial) -> Option<Self> {
-        (serial.role == Role::Blaster).then_some(Cable {
+        (serial.role == Role::Blaster).then(|| Cable::raw(usb, serial))
+    }
+
+    /// Bytes to and from `serial`'s chip as they are, status bytes
+    /// stripped, whatever it is used as: for a chip in a mode of its own,
+    /// such as MPSSE ([`crate::mpsse`]).
+    pub fn raw(usb: &'a mut U, serial: &Serial) -> Self {
+        Cable {
             usb,
             max_packet: usize::from(serial.max_packet).max(2),
             held: [0; CHUNK_BYTES],
             at: 0,
             len: 0,
-        })
+        }
     }
 }
 

@@ -32,6 +32,9 @@ ferrix-adb.workspace = true
 # vdagent's framing and messages, for `test-clipboard`'s host half: it speaks
 # the protocol to the guest's agent with the bytes the agent itself decodes.
 ferrix-vdagent.workspace = true
+# The FTDI chips' divisors: `test-ft232h` holds the driver's "on the chip"
+# rates to the arithmetic the driver itself does, not to a second copy.
+ferrix-usb-serial.workspace = true
 # The display protocol's EDID reader and checker: `edid.rs` finds this
 # machine's monitor by what its EDID says, and checks the bytes it carries into
 # an image the way the kernel will check them when `drm.edid_firmware` names

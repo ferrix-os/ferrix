@@ -1394,6 +1394,7 @@ dependencies = [
  "ferrix-partition",
  "ferrix-pkg",
  "ferrix-slots",
+ "ferrix-usb-serial",
  "ferrix-vdagent",
 ]
 

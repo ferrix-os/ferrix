@@ -3093,6 +3093,25 @@ fn attach_asked_for(command: &mut Command, arch: Arch, args: &Args, binary: &Pat
     attach_audio(command, arch, args, binary);
     attach_usb(command, arch, args);
     attach_usb_serial(command, arch, args);
+    attach_usb_host(command, arch, args);
+}
+
+/// `test-ft232h`'s device: one of the host's own, by QEMU's `usb-host`
+/// properties, on a `qemu-xhci` controller of its own. Only that gate sets
+/// it, for the one adapter the customer approved; QEMU detaches the host's
+/// driver from that device alone and gives it back when it exits.
+fn attach_usb_host(command: &mut Command, arch: Arch, args: &Args) {
+    let Some(properties) = &args.usb_host else {
+        return;
+    };
+    println!("  {arch}: the host's USB device {properties}, passed through on qemu-xhci");
+    if args.usb.is_none() && args.usb_serial.is_none() {
+        let _ = command.args(["-device", &format!("qemu-xhci,id={USB_BUS}")]);
+    }
+    let _ = command.args([
+        "-device",
+        &format!("usb-host,bus={USB_BUS}.0,{properties},id=hostusb"),
+    ]);
 }
 
 /// A virtio-snd card (`docs/AUDIO.md` §4), when `--audio` names a backend,

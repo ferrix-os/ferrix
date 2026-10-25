@@ -803,3 +803,81 @@ fn a_uart_is_no_jtag_cable() {
     let serial = bind(&model, &mut bus);
     assert!(Link::new(&mut driver(&model, &mut bus), &serial).is_none());
 }
+
+// ---------------------------------------------------------------------------
+// The FT232H's MPSSE loopback
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_ft232h_s_mpsse_loopback_brings_the_pattern_back_and_the_uart_too() {
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    let line = Line {
+        baud: 115_200,
+        ..Line::DEFAULT
+    };
+    serial
+        .configure(&mut driver(&model, &mut bus), &line)
+        .expect("configured");
+    model.borrow_mut().serials[0].mpsse = Some(super::model::ftdi::Mpsse::default());
+    let before = vendor_requests(&model, device).len();
+    let pattern: Vec<u8> = (0..4096_u32).map(|at| (at * 37 % 251) as u8).collect();
+    let outcome =
+        ferrix_usb_serial::mpsse::loopback(&mut driver(&model, &mut bus), &mut serial, &pattern);
+    assert_eq!(outcome, Ok(ferrix_usb_serial::mpsse::Outcome::Equal));
+    let requests = &vendor_requests(&model, device)[before..];
+    // MPSSE in, and the chip's own mode again after, and the line it had.
+    assert!(requests.contains(&(0x0B, 0x0200, 1)), "{requests:?}");
+    assert_eq!(
+        requests.iter().filter(|r| **r == (0x0B, 0x0000, 1)).count(),
+        2
+    );
+    let divisor = ftdi::divisor(Chip::H, 115_200).expect("a divisor");
+    assert!(requests.contains(&(3, divisor as u16, (((divisor >> 16) as u16) << 8) | 1)));
+    assert_eq!(serial.line, line);
+    no_violations(&model);
+}
+
+#[test]
+fn a_loopback_that_does_not_loop_says_where_it_differs() {
+    let (model, mut bus, _) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    let mut broken = super::model::ftdi::Mpsse::default();
+    broken.broken = true;
+    model.borrow_mut().serials[0].mpsse = Some(broken);
+    let pattern = [0x55_u8; 64];
+    assert_eq!(
+        ferrix_usb_serial::mpsse::loopback(&mut driver(&model, &mut bus), &mut serial, &pattern),
+        Ok(ferrix_usb_serial::mpsse::Outcome::Differs(0))
+    );
+    // A chip with no engine answers no synchronisation.
+    let (model, mut bus, _) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    assert_eq!(
+        ferrix_usb_serial::mpsse::loopback(&mut driver(&model, &mut bus), &mut serial, &pattern),
+        Err(port::Error::Timeout)
+    );
+    // And a B-family chip has no engine to run it on.
+    let (model, mut bus, _) = board(
+        chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400),
+        0,
+        None,
+    );
+    let mut serial = bind(&model, &mut bus);
+    assert_eq!(
+        ferrix_usb_serial::mpsse::loopback(&mut driver(&model, &mut bus), &mut serial, &pattern),
+        Err(port::Error::Unknown)
+    );
+}

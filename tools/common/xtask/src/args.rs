@@ -419,6 +419,11 @@ pub(crate) struct Args {
     /// its baud-rate trace written beside it (`docs/USB-SERIAL.md` §5). No
     /// flag sets it: `test-usb-serial` does.
     pub(crate) usb_serial: Option<std::path::PathBuf>,
+    /// A device of the host's, passed through to the guest on a `qemu-xhci`
+    /// controller: the properties of QEMU's `usb-host` that pick it. No
+    /// flag sets it: only `test-ft232h` does, for the one adapter the
+    /// customer approved (docs/USB-SERIAL.md §3).
+    pub(crate) usb_host: Option<String>,
     /// `--screens N`: how many virtio-gpu devices are on the bus, one
     /// screen each. Zero and one both mean one. A second device rather than
     /// a second output of the first, because QEMU enables a second output

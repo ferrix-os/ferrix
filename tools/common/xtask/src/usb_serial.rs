@@ -134,6 +134,14 @@ fn script(lines: [&str; 3], len: usize) -> String {
     )
 }
 
+/// The rate an FT232H runs at for `baud`, by the driver's own divisor.
+pub(crate) fn h_rate(baud: u32) -> u32 {
+    use ferrix_usb_serial::ftdi::{Chip, divisor, rate};
+    divisor(Chip::H, baud)
+        .and_then(|value| rate(Chip::H, value))
+        .unwrap_or(0)
+}
+
 /// A number no earlier run had.
 fn nonce() -> u64 {
     let now = SystemTime::now()
@@ -143,7 +151,7 @@ fn nonce() -> u64 {
 }
 
 /// Busybox for `arch`: `--init`'s, or the static one `test-shell` boots.
-fn busybox(arch: Arch, args: &Args) -> Result<PathBuf> {
+pub(crate) fn busybox(arch: Arch, args: &Args) -> Result<PathBuf> {
     if let Some(init) = &args.init {
         return Ok(PathBuf::from(init.replace("{arch}", arch.name())));
     }

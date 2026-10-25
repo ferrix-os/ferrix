@@ -131,6 +131,7 @@ mod ferrousli;
 mod flags;
 mod flash;
 mod frames;
+mod ft232h;
 mod fuzzel;
 mod game_rig;
 mod gate_rows;
@@ -568,6 +569,7 @@ const TASKS: &[&[Task]] = &[
     everything::TASKS,
     flags::TASKS,
     flash::TASKS,
+    ft232h::TASKS,
     frames::TASKS,
     gate_rows::TASKS,
     hotpath::TASKS,

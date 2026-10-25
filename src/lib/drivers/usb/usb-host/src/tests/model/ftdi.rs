@@ -42,6 +42,50 @@ pub(in crate::tests) struct Serial {
     pub(in crate::tests) stall_out: bool,
     /// A USB-Blaster's CPLD and chain.
     pub(in crate::tests) cable: Option<Cable>,
+    /// An FT232H's MPSSE engine, once the test says the chip is in it.
+    pub(in crate::tests) mpsse: Option<Mpsse>,
+}
+
+/// The MPSSE engine, as far as [`crate::tests`] drives it: the bad-command
+/// answer, the loopback switch, the divisor, and bytes clocked out and in.
+#[derive(Clone, Debug, Default)]
+pub(in crate::tests) struct Mpsse {
+    /// The loopback is on: what is clocked out comes back.
+    looped: bool,
+    /// Whether 0x84 turns it on: a chip whose loopback is broken does not.
+    pub(in crate::tests) broken: bool,
+    /// Bytes of the command being taken.
+    pending: Vec<u8>,
+    /// Data bytes a clocking command still takes.
+    clocking: usize,
+}
+
+impl Mpsse {
+    fn take(&mut self, byte: u8, answer: &mut VecDeque<u8>) {
+        if self.clocking > 0 {
+            self.clocking -= 1;
+            answer.push_back(if self.looped { byte } else { 0xFF });
+            return;
+        }
+        self.pending.push(byte);
+        let command = self.pending.clone();
+        match command.as_slice() {
+            [0x84] => self.looped = !self.broken,
+            [0x85] => self.looped = false,
+            [0x87 | 0x8A] => {}
+            [0x86 | 0x31] | [0x86 | 0x31, _] => return,
+            [0x86, _, _] => {}
+            [0x31, low, high] => {
+                self.clocking = usize::from(u16::from_le_bytes([*low, *high])) + 1;
+            }
+            [other] => {
+                answer.push_back(0xFA);
+                answer.push_back(*other);
+            }
+            _ => {}
+        }
+        self.pending.clear();
+    }
 }
 
 impl Serial {
@@ -53,6 +97,7 @@ impl Serial {
             status_only: 0,
             line_error: 0,
             from_host: Vec::new(),
+            mpsse: None,
             hold_out: false,
             modem: MODEM,
             stall_out: false,
@@ -85,6 +130,11 @@ impl Serial {
     /// The host's OUT data.
     pub(in crate::tests) fn bulk_out(&mut self, bytes: &[u8]) {
         self.from_host.extend_from_slice(bytes);
+        if let Some(mpsse) = &mut self.mpsse {
+            for &byte in bytes {
+                mpsse.take(byte, &mut self.to_host);
+            }
+        }
         if let Some(cable) = &mut self.cable {
             for &byte in bytes {
                 if let Some(answer) = cable.take(byte) {

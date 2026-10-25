@@ -18,6 +18,7 @@
 
 pub mod blaster;
 pub mod ftdi;
+pub mod mpsse;
 pub mod port;
 
 #[cfg(test)]
