@@ -178,6 +178,13 @@
       "branch": "bugfix/sched-wake-latency",
       "date": "2026-10-24",
       "purpose": "docs/PREEMPTIBLE-WAITS.md, F-95 (consultant OK IF (1)-(24), ledger 3950, condition 10): H.SCHED.16 a woken task of one job runs within the stated bound under another job's saturating ring-3 load, with L.sched for the preemptible wait rule, its fairness bound and the reaper's busy-processor share; H.SCHED.17 a spin-lock hold a ring-3 request causes is at most P pages of work, with one L.user per batched operation (give_back, take_down, take_range, Vmo::fork, detach)"
+    },
+    {
+      "ids": ["H.SIGN.7", "L.bootpolicy.1-12", "L.uefisig.1-5", "L.slots.1-20"],
+      "owner": "product-signing",
+      "branch": "feature/signing-s4",
+      "date": "2026-10-24",
+      "purpose": "docs/SIGNING.md §10.6, slice S4 (consultant OK IF (1)-(12), ledger 4016, condition 1): H.SIGN.7, the loader starts a slot only on ferrix-boot-policy's Start with every blob matched; L.bootpolicy.1-12, ferrix-boot-policy's decisions; L.uefisig.1-5, the loader's own behaviour checked by boots (§8.1's sig-loader-* rows, ledger 4032 (1)); L.slots.1-20, ferrix-slots moving into the item, listed before its code review"
     }
   ]
 }

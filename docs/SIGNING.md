@@ -730,13 +730,14 @@ There are three kinds of image, and they never mix:
 
 * **How the gate's image is made.** xtask builds the named profile, then
   links the loader again with only its anchor table replaced. The table
-  sits in a section of its own, `.ferrix_anchors`, of fixed size. The gate
+  sits in a section of its own, `.fxanch` (§10.6: PE names are at most 8
+  bytes), of fixed size. The gate
   image's build line says `anchors=development` and `level=none`, and the
   boot check compares that line with the profile file under BUILD-FLAGS rule
   6 a. So the image cannot pass as the profile's.
 * **The two loaders differ only in the table.** The gate compares the gate
   loader's PE with the shipped loader built from the same commit, byte for
-  byte, outside `.ferrix_anchors` and the PE checksum and Authenticode
+  byte, outside `.fxanch` and the PE checksum and Authenticode
   fields. A difference anywhere else fails the gate. Its control is a
   one-byte change outside the section, which must read FIRED.
 * **What S3 refuses, from today (D1).** At build time, xtask refuses the
@@ -764,6 +765,13 @@ There are three kinds of image, and they never mix:
 | Firmware state | `SecureBoot` and `SetupMode` on the loader's line, in its words and in the start-up audit record; the authenticity claim needs `on` and `user` | FAU_GEN.1 b; the claim's condition is visible per boot |
 | Development | Development anchors only in development images (profile 0xFF) and the gate's relinked loader (`level=none anchors=development`); a byte comparison outside the anchor section, and a search of shipped images, each with a control | Gates can sign; a shipped image never trusts a development key |
 | Soft signer | `ferrix-softsign`: the PKCS #11 3.1 HSS subset, `q` committed before release, a reuse check against its own log, development keys only, never for a release | The customer's decision; ledger 3731 (D1)-(D5) |
+
+### 6.5 A CI development key
+
+The customer decided on 2026-10-24 that CI signs with a development key
+of its own. Its design, reviewed OK IF (1)-(8) at ledger 4005 and still
+waiting for the customer's own OK, is parked on branch
+`feature/signing-ci-key`. No key or secret exists.
 
 ## 7. (P7) Revocation and anti-rollback
 
@@ -1221,7 +1229,7 @@ slot); and a fallback refused below the floor after a raise.
 
 | Key | Values | `max` | `fast` | `present` | `desktop` | Note |
 |---|---|---|---|---|---|---|
-| `slot_signing` (image, new) | `off`, `required` | `off` until M7, with no slot path: `max` is updated by a fresh install (§12 Q9) | `required` | `required` once S4 lands, a dated change | `off` | Says whether the loader refuses header version 1 and the unsigned rescue files |
+| `slot_signing` (image, new) | `off`, `required` | `off` until M7, with no slot path: `max` is updated by a fresh install (§12 Q9) | `required` | `off` until a release key exists, then `required` as a dated change (§10.6) | `off` | Says whether the loader refuses header version 1 and the unsigned rescue files |
 | `rollback` (image, new) | `absent`, `tpm` | per claimed family | per claimed family | `tpm` on the families that have it | `absent` | A profile names the families its rollback claim covers |
 | `config_updates` (3564 (S11)) | `absent`, `signed` | `absent` (3564 Q4) | `absent` until (S1)-(S6) exist, then `signed` as a dated change | not set by this design | not set | This design is the signing half of (S4) only |
 | `driver_updates` | `absent`, … | `absent` | `absent` | `absent` | `absent` | D3 becomes buildable; the reference configuration stays `absent` (3564 (S11)); a live driver swap is a live change |
@@ -1283,12 +1291,282 @@ slices, reserved the same way.
 | S1 | `ferrix-sha256` (new; `ferrix-slots` moves onto it in S4); `ferrix-sigverify` (format, LM-OTS, LMS, HSS, policy), its host tests, vectors, controls, fuzz target and coverage; `ferrix-softsign`, the development soft signer (§6.4) | S0; the reservation of §10.4 | 8 |
 | S2 | The DK1 measurement of §2.3 and `MEMORY-AND-TIMING.md`'s bound | S1; the product owner's OK for the board | 2 |
 | S3 | The anchors file; xtask's refusal of development keys in claimed images and of the verifier in any kernel; `check-signing-anchors.py`; the hardware-family registry; the kernel-closure and no-signing-dependency rules | S1 | 3 |
-| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; the generated anchor tables in the loader, `init` and `devmgr`, with the release-image scan; the gate's relinked loader and its byte comparison; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
+| S4 | The loader: header version 2, the slot and rescue paths, refusal lines; the generated anchor table in the loader (`init`'s and `devmgr`'s come with S8 and S9, §10.6), with the release-image scan; the gate's relinked loader and its byte comparison; `bootctl try`'s check; `test-ab-boot` S1-S3 | S1, S3 | 5 |
 | S5 | TPM floors: the installer's provisioning (owner and lockout authorisations, `ownerPolicy`), the loader's `TPMA_PERMANENT` check, read, raise and lock through TCG2, the words; `bootctl sync`; `test-ab-boot` S4-S11 with `swtpm`; the check on the N150's PTT | S4; §12 Q10; the consultant's re-review of §7.2; the product owner's OK for the box | 8 |
 | S6 | The PKCS #11 module backend of the `Token` trait, the signature log repository, the runbook of §4, the HSM acceptance test | the HSMs, bought for the first claimed release with signed updates (§12 Q2) | 5 |
 | S7 | Revocation manifests (kind 4) in the loader | S5 | 3 |
 | S8 | init's configuration verifier | 3564 (S1)-(S6) | theirs |
 | S9 | `devmgr`'s check (D3) | S1, S3 | 3 |
+
+### 10.6 Slice S4's design (reviewed, ledger 4016; 2026-10-24)
+
+S4 makes the UEFI loader verify a slot's manifest. This section is S4's
+plan as the code will build it. Where it departs from the text above, it
+says so.
+
+**What does not change.** A slot or ESP written today keeps booting.
+
+* The control record, header version 1 and the boot info are unchanged.
+* The loader's command-line words keep their form. S4 adds one word at
+  the end of them, `ferrix.slot.sig=<anchor id>|none`. The kernel
+  ignores it, and `bootctl` reads words first-match.
+* Every profile that builds an image today keeps `slot_signing = "off"`
+  (below). With it off, the loader still boots header version 1 and the
+  ESP's unsigned files, exactly as today.
+* nazuna's SN720 runs a development image's loader from the ESP, with
+  slot B written as header version 1. A new loader of a development image
+  boots it unchanged. It reaches nazuna only when that disk is installed
+  again.
+
+**Header version 2** (§1.3, in `ferrix-slots`):
+
+* version 2, bytes 16..24 (`generation`) zero, refused otherwise (§1.2);
+* bytes 4096..8192 the manifest block, every blob at or after 8192;
+* `SlotHeader::lay_out` gains a version argument. Version 1 keeps today's
+  layout. `bootctl` writes the version its image is told to.
+
+**The decision, in an item crate.** §5.3 asks for the enforcement point
+to move into an `item` crate. S4 builds it as **`ferrix-boot-policy`**,
+in `src/lib/proto/boot-policy`, `no_std`, no `unsafe`, no allocation. Its
+one entry point takes:
+
+* the slot header page and manifest block as read;
+* the trust policy (below);
+* the detected family;
+* the floors, all zero until S5.
+
+It returns either `Start { anchor_id, security_version }` or a `Refusal`
+with its reason. The blobs' hashes are still compared in `ferrix-slots`
+(`Blob::matches`), on the one copy the loader hands over. The loader's
+`slots.rs` keeps the Block I/O, and it starts a slot only on `Start` with
+every blob matched. `ferrix-slots` moves onto `ferrix-sha256` and becomes
+`item` too, as §5.3 says, since the signed seal passes through it.
+
+| Header | `slot_signing = off` | `slot_signing = required` |
+|---|---|---|
+| version 1 | started on its hashes, as today; `ferrix.slot.sig=none` | refused, `Unsigned` |
+| version 2 | verified; refused on any refusal | verified; refused on any refusal |
+| ESP, no slots (`run`, the DK1 card, a bare image) | today's unsigned files | `FERRIX/RESCUE.SLT` only, verified as a slot (§9.2); the unsigned files are not read |
+
+With `off`, a version-2 header is never started unverified. `off` means
+"unsigned slots are accepted", not "signatures are ignored", so a
+version-2 slot cannot be downgraded to its hashes alone.
+
+**The trust policy.** One generated block holds the slot-signing mode
+and the slot kind's anchors: `version u16, mode u8, count u8`, then up
+to eight entries of `kind u16, anchor_id u16, public_key [u8; 52]`
+(56 bytes each), padded to 512 bytes. Each key's root `T` stays
+contiguous, so S3's match by `T` still finds it.
+
+* It sits in a PE section of its own, `.fxanch`. PE images limit section
+  names to 8 bytes, so the first draft's `.ferrix_anchors` could not be
+  used (§6.4 now says `.fxanch`).
+* The loader reads the block through `core::hint::black_box` of its
+  address, so the compiler cannot fold the anchors into code outside the
+  section. The byte comparison below holds that.
+* `xtask gen-anchors` writes the block from `signing-anchors.toml` and the
+  profile into `src/boot/common/uefi/anchors/<table>.bin`, one per table:
+  `release-off`, `release-required`, `development-off` and
+  `development-required`. `--check`, in `cargo xtask check`, refuses a
+  file that differs from what the generator would write.
+* Which block a build takes is an environment variable read by the
+  loader's `build.rs` (`FERRIX_ANCHORS`), set only by xtask. It is a build
+  input, not a Cargo feature or `cfg`, so the loader keeps §8's "no
+  feature, no cfg".
+
+| Image | Its block |
+|---|---|
+| Development image (no profile) | `development-off` |
+| An image of a profile (`max`, `fast`, `present`, `desktop`) | `release-<its slot_signing>` |
+| The signing gate's image | `development-required`, the profile's own otherwise; its build line says `anchors=development slot_signing=required level=none` |
+
+The release table is empty until the HSMs exist. **A profile set to
+`required` therefore refuses every slot and has no rescue path**, so no
+profile buildable today can be `required` yet.
+
+**The profile key** `slot_signing` goes in each profile file's `image`
+table, beside `slot_families`, the families the loader accepts in order.
+This departs from §10.1, which set `present` to `required` once S4 lands.
+
+| Profile | `slot_signing` | `slot_families` | Note |
+|---|---|---|---|
+| `present` | `off` | its claim's families | `required` is a dated change once a release key exists (S6); flipping it before then makes every installed `present` disk unbootable |
+| `fast` | `required` | its claim's families | Not buildable before M5 |
+| `max` | `off` | none | No slot path (§12 Q9) |
+| `desktop` | `off` | its own family, then the generic one | §1.4 |
+
+The generator refuses `required` in a profile that is buildable today
+while `[release]` is empty, with its own self-test.
+
+**The family** is detected by the registry's rule where the loader already
+has the data:
+
+* SMBIOS through `ferrix-smbios` for the N150 and QEMU;
+* the architecture's generic family otherwise.
+
+The DK1's device-tree rule is not built, because the DK1 card has no slot
+path (AB-BOOT §4 step 1).
+`ferrix-boot-policy` holds the rule from the registry. The loader passes
+it the SMBIOS strings.
+
+**Floors and revocation.** `ferrix.rollback=absent` on every board until
+S5: the floors passed are zero, and the line says so. The revoked list is
+empty until S7.
+
+**Refusal lines** (§9.3), before the attempt line the loader already
+prints:
+`  sign     refused slot <a|b|rescue>: <reason> (kind <k> anchor <a> version <v> floor <f>)`,
+and on a start, `  sign     slot <a|b|rescue> anchor <a> version <v>`.
+
+**`bootctl try`'s check** uses `ferrix-boot-policy` with the running
+image's block, which the running system cannot read from the loader. So
+`bootctl` is built with
+the same generated block as its image's loader, from the same build
+variable, and writes nothing to the idle slot on a refusal (§9.1). The
+check is advisory: the loader alone decides.
+
+**The release-image scan** (§6.4, "what comes with S4's tables"). This
+replaces nothing S3 does; it adds a check at the same two points
+(`fat::write_image_carrying`, `flash`). The loader of an image of a
+profile must hold `.fxanch` byte-equal to `release-<mode>`. Anything
+else is refused, and so is a development root anywhere. Its control
+plants a development block in a `present` image, which must read FIRED.
+
+**The gate's relinked loader** (§6.4). `test-ab-boot --signed` builds the
+named profile's loader, then builds it again with
+`FERRIX_ANCHORS=development-required`. It compares the two PE files byte
+for byte, outside `.fxanch` and the PE checksum, and fails on any other
+difference. Its control changes one byte outside the section, and must
+read FIRED. The gate's image is written only under the gate's output
+directory, never to `build/`.
+
+**`init` and `devmgr`.** §10.5 put their generated tables in S4. They
+have no verifier to read them until S8 and S9, so a table there would be
+dead data that no test reaches. S4 builds the generator and the scan for
+any binary, and **S8 and S9 add the two tables**, with their own scan
+rows. This departs from §10.5; the consultant accepted it (ledger 4016).
+
+**The gate.** `test-ab-boot --signed` on x86-64 runs §8.4's S1-S3 and
+S10, with a rescue case:
+
+* S1, wrong kind;
+* S2, a flipped kernel byte;
+* S3, a wrong family;
+* S10, a non-zero `generation`;
+* R1, a signed `RESCUE.SLT` boots when both slots are refused, and a
+  missing one panics with each slot's reason.
+
+The unsigned cases of AB-BOOT §9 keep running as they are, against
+development images with `off`. S4-S9 and S11 need S5.
+
+**Requirements.** The loader's ids are reserved before code (§10.4), in
+a docs-only landing with the consultant's review (ledger 4032):
+
+* `L.bootpolicy.1-12` for `ferrix-boot-policy`;
+* `L.uefisig.1-5` for the loader's own behaviour, §8.1's `sig-loader-*`
+  rows (AB-BOOT's P6 onwards);
+* `H.SIGN.7`, the loader starts only what the policy returned `Start`
+  for;
+* `L.slots.1-20` for `ferrix-slots`.
+
+Each is listed below with its statement and check.
+
+**The DK1's slot-hash cost.** Measured and fixed in this slice: 2.29 s
+per 32 MiB in software (MEMORY-AND-TIMING §2.2z). HASH1 waits for the
+consultant's ruling on a peripheral in the trust path.
+
+**The consultant's review** of this design is **OK IF (1)-(12)**, ledger
+4016. (1) is the reservation, and (2) is this text. The rest bind the code:
+
+3. **The block fails closed.** `ferrix-boot-policy` parses it, and each of
+   these refuses every slot with its own `Refusal`, with a host test and a
+   control: an unknown version or mode, a count above 8, non-zero padding,
+   a kind other than the slot kind, and a block shorter than 512 bytes.
+4. **The build fails closed.** The loader's `build.rs` declares
+   `rerun-if-env-changed=FERRIX_ANCHORS` and `rerun-if-changed` on the four
+   block files. `FERRIX_ANCHORS` unset or unknown is a build error, never a
+   default block. `.fxanch` is read-only, and the scan checks its flags and
+   size.
+5. **The comparison is the evidence.** `black_box` is only the means. The
+   two builds are reproducible apart from the section and the PE checksum,
+   and a third build of the same block compares equal to show it.
+6. **The family fails closed.** Missing or bad SMBIOS gives the generic
+   family, which a claimed profile without the generic one refuses. The
+   sentence on a DK1 rescue image was dropped, since nothing tests it.
+7. **Gate cases for this slice's own rules**, beside S1-S3, S10 and R1:
+   * N1, a version-2 slot with a bad signature under `off` is refused;
+   * N2, a version-1 slot under `required` is refused (`Unsigned`), and the
+     ESP's unsigned files are not read;
+   * N3, a version-2 slot under `release-off` (an empty table) is refused;
+   * N4, a slot command line carrying `ferrix.slot.sig=` changes nothing.
+
+   Controls, each FIRED by the case named: the downgrade (N1), unsigned
+   (N2), a start on a `Refusal` (S1, S3), a start without every blob
+   matched (S2), the generation (S10), the scan and the relink.
+8. **`ferrix-slots` into the item.** Its own SHA-256 is removed for
+   `ferrix-sha256`, with identical digests. `certification-item.json`
+   gains both crates. The traceability, fallible-allocation and unsafe
+   baselines are updated, host coverage covers both, and after the final
+   rebase carry-coverage then `gen-coverage-justification --check` run,
+   with dropped anchors listed.
+9. **Transcripts.** The new `sign` lines, and the recorded transcripts they
+   change, are listed for all four boots (ARMv7-A at `--smp 2`). Under
+   `off` with version 1, the lines match the merge base apart from
+   `ferrix.slot.sig=none`.
+10. **`present`.** No document claims signed slots for `present` until S6
+    flips it. SECURITY-TARGET and CLAIM.md state the residual: an unsigned
+    version-1 slot boots on `present`. S6's design writes signed slots
+    before the loader goes `required`. The customer is told of this
+    departure from §10.1 through the product owner.
+11. **`bootctl`'s check is advisory.** The loader alone decides. A mismatch
+    between the two at worst refuses a trial.
+12. **Rows on the landing hash:** `check` and check-docs; `test-ab-boot`
+    unsigned and `--signed` (x86-64, KVM); `test-boot` on all four boots;
+    the scan and relink controls; the verify cost stated.
+
+**The requirement ids** (reserved in
+`tools/common/data/requirement-reservations.json`; each has one check):
+
+| Id | Statement | Check |
+|---|---|---|
+| H.SIGN.7 | The loader starts a slot only when `ferrix-boot-policy` returned `Start` for it and every blob matched its signed digest on the copy it starts | boot: S1-S3, N1, N2 with controls |
+| L.bootpolicy.1 | A policy block that is short, of an unknown version or mode, with a count above 8, non-zero padding or a non-slot kind refuses every slot, by its own refusal | host: one test and one control per case (condition 3): `a_short_block_refuses_every_slot`, `an_unknown_block_version_or_mode_refuses_every_slot`, `a_count_above_eight_refuses_every_slot`, `non_zero_block_padding_refuses_every_slot`, `a_non_slot_anchor_kind_refuses_every_slot` |
+| L.bootpolicy.2 | A version-1 header is started on its hashes under `off`, with no anchor, and refused `Unsigned` under `required` | host |
+| L.bootpolicy.3 | A version-2 header with a non-zero `generation` is refused | host |
+| L.bootpolicy.4 | A version-2 header's manifest is verified against the block's anchors with the slot kind expected, and any refusal is returned | host |
+| L.bootpolicy.5 | A version-2 header is never started unverified, under either mode | host |
+| L.bootpolicy.6 | The manifest's payload is the header's seal and length, or the slot is refused `PayloadMismatch` | host |
+| L.bootpolicy.7 | A manifest whose profile or arch differs from the build's is refused, by its own refusal | host |
+| L.bootpolicy.8 | The family is the registry's rule over the SMBIOS strings; missing or bad strings give the generic family; a claimed profile accepts exactly its families | host |
+| L.bootpolicy.9 | The floors passed are the caller's (all zero while `rollback = absent`) | host |
+| L.bootpolicy.10 | Under `required`, a disk with no verified slot yields only the rescue slot image, never the unsigned files | host |
+| L.bootpolicy.11 | `Start` carries the anchor id and security version the loader prints and writes as `ferrix.slot.sig` | host |
+| L.bootpolicy.12 | Every input gives `Start` or one `Refusal`, with no panic | host: the fuzz target and the panic audit |
+| L.uefisig.1 | The loader refuses a version-2 slot with a bad signature under `off` | boot: N1 |
+| L.uefisig.2 | The loader refuses a version-1 slot under `required`, and a version-2 slot under an empty table | boot: N2, N3 |
+| L.uefisig.3 | The loader refuses a wrong kind, a wrong family and a flipped kernel byte, and boots the other slot | boot: one case and one control each (condition 7): S1 (wrong kind, k-start), S2 (flipped byte, k-blob), S3 (wrong family, k-start) |
+| L.uefisig.4 | The loader refuses a version-2 header with a non-zero `generation` | boot: S10 |
+| L.uefisig.5 | With both slots refused, a signed rescue image boots, and without one the loader panics with each slot's reason | boot: R1 |
+
+`L.bootpolicy.1-12` are `ferrix-boot-policy`'s, checked on the host.
+`L.uefisig.1-5` are the loader's own behaviour (`src/boot/common/uefi`,
+in no ring), checked by boots: they are §8.1's `sig-loader-*` rows. One
+namespace holds one crate's units (ledger 4032 (1)).
+
+`L.slots.1-20` hold `ferrix-slots`' behaviour as AB-BOOT §2-§4 states it
+(the header, the record, the GPT scan, the plan, the words). They are
+reserved without a list. The slice that moves `ferrix-slots` into the
+item lists each id with its statement and one check before its code
+review, and releases the ids it does not use (4032 (6)).
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Today's slots | Header version 1, the record and the boot info unchanged; `off` boots them | nazuna's slot B, and every install so far |
+| `off` and version 2 | Verified, never downgraded | A signed slot cannot lose its signature by a profile setting |
+| `present` | Stays `off` until a release key exists | An empty release table under `required` boots nothing |
+| Policy | `ferrix-boot-policy`, `item` | §5.3 |
+| Section | `.fxanch`, a 512-byte block, read through `black_box` | The PE 8-byte name limit; nothing folded outside the section |
+| init and devmgr tables | S8 and S9 | No reader before then |
 
 ## 11. Sources
 
