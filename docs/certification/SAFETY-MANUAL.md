@@ -244,8 +244,18 @@ element. (Finding F-21b.)
 The claims hold for the reference configuration and no other. Changing the
 toolchain, enabling a Cargo feature, building with `--mitigations off`,
 booting with `ferrix.devmgr=init` (AoU-13), `ferrix.efifb` (AoU-31) or
-`ferrix.vtd=off` or `ferrix.amdvi=off`, or moving a file between rings
-changes what is claimed. `ferrix.amdvi=off` does to every AMD-Vi unit what
+`ferrix.vtd=off` or `ferrix.amdvi=off` or `ferrix.unisolated`, or moving a
+file between rings changes what is claimed. `ferrix.unisolated` lets devmgr
+start the drivers of bus masters that are not isolated -- their DMA not
+translated, or (but on AArch64) their interrupts not isolated -- each said on
+an `UNISOLATED` line, after the kernel's stage 10 line and the audit
+record's `Unisolated` 1; such a driver is trusted with all of memory
+(`L.device.58`, `L.device.59`, `docs/DMA-GATE.md`). No certified profile
+permits it. Every ARMv7-A image carries it, ARMv7-A being outside the claim
+until an SMMU is driven there (the customer's G4, CLAIM.md). With every
+unit left alone, `ferrix.vtd=off` and `ferrix.amdvi=off` leave no bus master
+isolated, so devmgr starts no driver: a recovery boot carries
+`ferrix.unisolated` as well (ledger 4153 (3)). `ferrix.amdvi=off` does to every AMD-Vi unit what
 `ferrix.vtd=off` does to VT-d's, and its boot line says it was taken
 (`L.iommu.98`). `ferrix.vtd=off` leaves every VT-d unit alone, so
 no DMA is translated and no interrupt remapped and the isolated-interrupts

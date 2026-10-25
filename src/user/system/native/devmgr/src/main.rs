@@ -17,12 +17,15 @@
 #![no_std]
 #![no_main]
 
+mod arch;
+
 use core::fmt;
 use core::time::Duration;
 use ferrix_rt::log::Level;
 
 use ferrix_blkring::control::{Block, CONTROL_RIGHTS, DEVICE_RIGHTS, Message as Ring, Start};
 use ferrix_blkring::identity::DiskName;
+use ferrix_devmgr_proto::admission::{self, Admit, Admitted};
 use ferrix_devmgr_proto::choice::{self, Chooser, Wanted};
 use ferrix_devmgr_proto::gpu::{self, HandOver, SetRefused, Unanswered};
 use ferrix_devmgr_proto::{
@@ -425,6 +428,9 @@ struct Started {
     /// The device's place among the DEVICES the kernel sent: what BOUND,
     /// UNBOUND, BIND and UNBIND name it by.
     index: u32,
+    /// Whether it was started only under `ferrix.unisolated`, for the count
+    /// [`report`] says.
+    unisolated: bool,
     /// The driver's place among DEVICES' names.
     driver: u16,
     /// The device's PCI address word, as START and HELLO carry it.
@@ -492,6 +498,9 @@ struct Given {
     names: [[u8; NAME_BYTES]; MAX_DRIVERS],
     /// How many of `images` and `names` are filled.
     drivers: usize,
+    /// Whether the boot carries `ferrix.unisolated`, from the first
+    /// message's flags (`ferrix_devmgr_proto::admission`).
+    unisolated_allowed: bool,
 }
 
 fn main(bootstrap: Bootstrap) -> i32 {
@@ -533,7 +542,8 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     // Which GPU `nvrm` drives, chosen at the first one met: read from the
     // command line only on a machine that has one.
     let mut gpus: Option<Chooser> = None;
-    let drv = Drivers::new(&job, &given.names, given.drivers, &given.images);
+    let mut drv = Drivers::new(&job, &given.names, given.drivers, &given.images);
+    drv.unisolated_allowed = given.unisolated_allowed;
     for (index, pair) in given.devices.into_iter().take(given.count).enumerate() {
         let Some((device, keep)) = pair else {
             continue;
@@ -567,14 +577,17 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         {
             continue;
         }
-        // A GPU is handed over only once marked, isolated and budgeted,
-        // through the handle devmgr keeps, which alone has `SET_LIMIT`. One
-        // that is not stays unstarted, with its line, and counts as failed.
-        if matches!(plan, Plan::Gpu(_)) && !hand_over_gpu(&keep, &info) {
+        // Every device handed to a driver passes the one admission rule,
+        // isolated or under the opt-out (`docs/DMA-GATE.md`), and a GPU its
+        // hand-over first; one that does not stays unstarted, with its line,
+        // and counts as failed.
+        let Some(admitted) = admit_first(&keep, &info, plan, &drv) else {
             failed += 1;
             continue;
-        }
-        match start(&drv, device, image, &info, plan, &port, u64::from(count)) {
+        };
+        let alone = admitted.unisolated();
+        let key = u64::from(count);
+        match start(&drv, admitted, device, image, &info, plan, &port, key) {
             Ok((job, process, bootstrap)) => {
                 // A bus host says when the devices plugged in at boot are
                 // published, and init -- which the kernel starts at REPORT --
@@ -583,14 +596,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     await_settled(&bootstrap);
                 }
                 drop(bootstrap);
-                let published = settle(
-                    channel,
-                    &port,
-                    kind,
-                    info.location,
-                    u64::from(count),
-                    &mut inbox,
-                );
+                let published = settle(channel, &port, kind, info.location, key, &mut inbox);
                 let idle = !published && stopped_idle(&process);
                 say_started(name, &info, published, idle, &process);
                 if idle {
@@ -603,6 +609,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 }
                 *slot = Some(Started {
                     index,
+                    unisolated: alone,
                     driver,
                     location: info.location,
                     info,
@@ -627,7 +634,6 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             }
         }
     }
-
     report(channel, &mut started, failed)?;
     serve(channel, &port, &mut started, &drv, &mut inbox)
 }
@@ -921,6 +927,17 @@ fn report(
     started: &mut [Option<Started>; MAX_DEVICES],
     mut failed: u32,
 ) -> Result<(), Step> {
+    let unisolated = started
+        .iter()
+        .flatten()
+        .filter(|entry| entry.unisolated)
+        .count();
+    if unisolated != 0 {
+        ferrix_rt::warn!(
+            "devmgr   {unisolated} devices started under ferrix.unisolated: their drivers are \
+             trusted with all of memory, and this boot carries no claim"
+        );
+    }
     let mut published = 0_u32;
     for entry in started.iter_mut().flatten() {
         if entry.published {
@@ -1036,6 +1053,8 @@ struct Drivers<'a> {
     /// the kernel hands images without `DUPLICATE`, and a keeper is given
     /// a read-only duplicate of this at every start.
     worker: Option<Vmo<Kernel>>,
+    /// Whether the boot carries `ferrix.unisolated`.
+    unisolated_allowed: bool,
 }
 
 impl<'a> Drivers<'a> {
@@ -1056,6 +1075,7 @@ impl<'a> Drivers<'a> {
             count,
             images,
             worker,
+            unisolated_allowed: false,
         }
     }
 }
@@ -1069,6 +1089,7 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
         count: 0,
         images: [const { None }; MAX_DRIVERS],
         names: [[0; NAME_BYTES]; MAX_DRIVERS],
+        unisolated_allowed: false,
         drivers: 0,
     };
     loop {
@@ -1098,6 +1119,7 @@ fn receive(channel: &Channel<Kernel>) -> Result<Given, Step> {
         };
         let base = usize::from(view.first);
         if view.first {
+            given.unisolated_allowed = view.unisolated_allowed;
             given.job = Some(Job::from_owned(owned(0)));
             given.drivers = drivers;
             for j in 0..drivers {
@@ -1806,9 +1828,24 @@ fn launch_again(
     };
     let generation = entry.generation.wrapping_add(1);
     let key = key_of(slot, generation);
-    let Ok((job, process, _bootstrap)) =
-        start(drivers, device, image, &entry.info, entry.plan, port, key)
-    else {
+    let Some(admitted) = admit(
+        &entry.device,
+        &entry.info,
+        plan_name(entry.plan),
+        drivers.unisolated_allowed,
+    ) else {
+        return false;
+    };
+    let Ok((job, process, _bootstrap)) = start(
+        drivers,
+        admitted,
+        device,
+        image,
+        &entry.info,
+        entry.plan,
+        port,
+        key,
+    ) else {
         return false;
     };
     entry.generation = generation;
@@ -1912,8 +1949,13 @@ fn driver_name(names: &[[u8; NAME_BYTES]; MAX_DRIVERS], driver: u16) -> &str {
 
 /// Start `image` on `device`: a ring of the kind the table names, a job, a
 /// process, START over its bootstrap, a watch on its end, and go.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one driver's start, every part of it named, its admission among them"
+)]
 fn start(
     drivers: &Drivers<'_>,
+    admitted: Admitted,
     device: Device<Kernel>,
     image: &Vmo<Kernel>,
     info: &DeviceInfo,
@@ -1921,6 +1963,12 @@ fn start(
     port: &Port<Kernel>,
     key: u64,
 ) -> Result<Launched, ()> {
+    // Taken by value, so no start is written without an admission, and it
+    // must be this device's: one admission starts one device (ledger 4153
+    // (1)). What it admitted is said where it was decided (`admit`).
+    if !admitted.starts(info.location) {
+        return Err(());
+    }
     let job = drivers.job;
     if let (Plan::Engine(program), Some(worker)) = (plan, worker_image(plan, drivers)) {
         return start_keeper(job, device, image, info, port, key, program, worker);
@@ -1937,6 +1985,65 @@ fn start(
         Plan::Gadget => start_plain(job, device, image, info, port, key, "usbdev"),
         Plan::Gpu(program) => start_plain(job, device, image, info, port, key, program),
         Plan::Power => start_plain(job, device, image, info, port, key, "power"),
+    }
+}
+
+/// Whether `keep`'s device may be handed to its driver: the admission
+/// rule on what `device_isolation` answers (`ferrix_devmgr_proto::
+/// admission`), translation alone on AArch64 (the customer's G4), the
+/// opt-out when the boot carries `ferrix.unisolated`. A device refused, or
+/// admitted only by the opt-out, is said on its line.
+fn admit(
+    keep: &Device<Kernel>,
+    info: &DeviceInfo,
+    what: &str,
+    unisolated_allowed: bool,
+) -> Option<Admitted> {
+    let bits = keep.isolation().ok();
+    let decided = admission::admit(bits, arch::AARCH64, unisolated_allowed, info.location);
+    if let Some(line) = decided.line(what, info.location) {
+        let level = if matches!(decided, Admit::Start(_)) {
+            Level::Warning
+        } else {
+            Level::Notice
+        };
+        say(level, format_args!("{line}"));
+    }
+    match decided {
+        Admit::Start(admitted) => Some(admitted),
+        Admit::Refused { .. } | Admit::Unread => None,
+    }
+}
+
+/// [`admit`] for `keep`'s device under `plan`, a GPU's hand-over first: a
+/// GPU is handed over only once marked, isolated and budgeted, through the
+/// handle devmgr keeps, which alone has `SET_LIMIT`.
+fn admit_first(
+    keep: &Device<Kernel>,
+    info: &DeviceInfo,
+    plan: Plan,
+    drivers: &Drivers<'_>,
+) -> Option<Admitted> {
+    if matches!(plan, Plan::Gpu(_)) && !hand_over_gpu(keep, info) {
+        return None;
+    }
+    admit(keep, info, plan_name(plan), drivers.unisolated_allowed)
+}
+
+/// A plan's driver name, for its admission's line.
+const fn plan_name(plan: Plan) -> &'static str {
+    match plan {
+        Plan::Block(_) => "disk",
+        Plan::Net => "net",
+        Plan::Display => "card",
+        Plan::Input => "input",
+        Plan::Sound => "sound",
+        Plan::Port => "port",
+        Plan::Host => "host",
+        Plan::Engine(program) => program,
+        Plan::Gpu(_) => "gpu",
+        Plan::Gadget => "gadget",
+        Plan::Power => "power",
     }
 }
 

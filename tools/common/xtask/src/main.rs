@@ -960,6 +960,30 @@ pub(crate) fn image_cmdline(args: &Args) -> Option<String> {
     (!options.is_empty()).then(|| format!("{}\n", options.join(" ")))
 }
 
+/// The word every ARMv7-A image carries: `ferrix.unisolated`. ARMv7-A
+/// drives no IOMMU, so devmgr would start none of its drivers without it
+/// (`docs/DMA-GATE.md`); the customer took ARMv7-A out of the claim
+/// (2026-10-24, G4 "(a), take it off"), and its rows are development rows,
+/// whose boots carry the word and no claim.
+pub(crate) const ARMV7A_DEVELOPMENT_WORD: &str = "ferrix.unisolated";
+
+/// [`image_cmdline`] for an image of `arch`: on ARMv7-A with
+/// [`ARMV7A_DEVELOPMENT_WORD`] after it, and on AArch64 too when
+/// `FERRIX_ARM_MACHINE` asks for `acpi=off`: the device-tree path brings no
+/// SMMU up, so no device's DMA is translated there (`qemu.rs`'s
+/// `fault_problem`), and it is the Pixel 7's path, a development one.
+pub(crate) fn arch_cmdline(arch: Arch, args: &Args) -> Option<String> {
+    let line = image_cmdline(args);
+    let without_acpi = std::env::var("FERRIX_ARM_MACHINE").is_ok_and(|m| m.contains("acpi=off"));
+    if arch != Arch::Armv7a && !(arch == Arch::AArch64 && without_acpi) {
+        return line;
+    }
+    Some(match line {
+        Some(line) => format!("{} {ARMV7A_DEVELOPMENT_WORD}\n", line.trim_end()),
+        None => format!("{ARMV7A_DEVELOPMENT_WORD}\n"),
+    })
+}
+
 /// Compile both halves for `arch` and assemble the bootable image.
 ///
 /// The kernel ELF comes back beside the image, because it is what a panic
@@ -989,7 +1013,7 @@ pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)>
         let (loader, kernel) = build_halves(arch, args)?;
         let mut links = rustc::default_links(args);
         links.extend(service);
-        let cmdline = image_cmdline(args);
+        let cmdline = arch_cmdline(arch, args);
         let image = if links.is_empty() {
             fat::write_image(arch, &loader, &kernel, &natives, cmdline.as_deref())?
         } else {
@@ -1016,7 +1040,7 @@ pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)>
         &utilities,
         &ports,
     )?;
-    let cmdline = image_cmdline(args);
+    let cmdline = arch_cmdline(arch, args);
     let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, cmdline.as_deref())?;
     Ok((image, kernel.elf))
 }
@@ -1048,7 +1072,7 @@ fn build_init_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
     let initramfs =
         initramfs::build_with_utilities(None, &natives, shell.as_deref(), &utilities, &carried)?;
     let mut cmdline = init::command_line();
-    if let Some(extra) = image_cmdline(args) {
+    if let Some(extra) = arch_cmdline(arch, args) {
         cmdline = format!("{} {extra}", cmdline.trim_end());
     }
     let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&cmdline))?;
@@ -1074,7 +1098,7 @@ pub(crate) fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardF
             loader,
             kernel,
             initramfs: initramfs::build(None, &natives, None, &[])?,
-            defaults: None,
+            defaults: board_defaults(arch),
         });
     };
     let loader = cargo::build_loader(arch, args.release)?;
@@ -1092,8 +1116,14 @@ pub(crate) fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardF
         loader,
         kernel,
         initramfs,
-        defaults: None,
+        defaults: board_defaults(arch),
     })
+}
+
+/// A board card's `FERRIX/DEFAULTS.TXT`: on ARMv7-A (the DK1)
+/// [`ARMV7A_DEVELOPMENT_WORD`], as every ARMv7-A image carries it.
+fn board_defaults(arch: Arch) -> Option<&'static str> {
+    (arch == Arch::Armv7a).then_some("ferrix.unisolated\n")
 }
 
 /// The program `init` names for `arch`, with `{arch}` replaced by its name,

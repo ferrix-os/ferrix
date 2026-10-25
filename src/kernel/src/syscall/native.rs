@@ -2872,6 +2872,10 @@ fn device_isolation(process: &Process, device: Handle) -> Result<usize, Errno> {
     if node.interrupts_isolated() {
         bits |= types::DEVICE_ISOLATION_INTERRUPTS;
     }
+    // A node that reaches no memory has no DMA to isolate (`L.device.57`).
+    if !node.reaches_memory() {
+        bits |= types::DEVICE_ISOLATION_NO_DMA;
+    }
     Ok(bits as usize)
 }
 

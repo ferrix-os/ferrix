@@ -42,6 +42,7 @@ runtime_settings = "live"
 "ferrix.pstore" = ["on", "off"]
 "ferrix.efifb" = true
 "ferrix.intelgpu" = true
+"ferrix.unisolated" = true
 "ferrix.apic" = ["x2apic", "xapic"]
 "ferrix.epp" = ["*"]
 "ferrix.btrfs" = ["*"]

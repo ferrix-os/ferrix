@@ -524,10 +524,21 @@ fn judge_refused(lines: &[String], refusal: &str) -> Option<String> {
             "nvrm ran although devmgr refused the device (`{refused}`): `{line}`"
         ));
     }
+    // Every device devmgr refused says so on its line: on the unisolated
+    // boot every bus master is refused, the GPU among them
+    // (`docs/DMA-GATE.md`, ledger 3906 (8)); on the budget's, the GPU alone.
+    let refusals = lines
+        .iter()
+        .filter(|line| line.contains("devmgr   ") && line.contains(" not started: "))
+        .count();
     match report(lines) {
-        Some((_, 1)) => None,
+        Some((_, failed))
+            if usize::try_from(failed).is_ok_and(|n| n == refusals) && failed >= 1 =>
+        {
+            None
+        }
         Some((_, failed)) => Some(format!(
-            "devmgr reported {failed} failed, not the one GPU it refused"
+            "devmgr reported {failed} failed, not the {refusals} devices it said it refused"
         )),
         None => Some("the kernel never printed devmgr's report".to_owned()),
     }

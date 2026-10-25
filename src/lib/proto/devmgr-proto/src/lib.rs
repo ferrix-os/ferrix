@@ -46,6 +46,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod admission;
 pub mod budget;
 pub mod choice;
 pub mod gpu;
@@ -112,6 +113,13 @@ pub const DEVICES_MAX_BYTES: usize = DEVICES_HEADER_BYTES + MAX_DRIVERS * NAME_B
 /// `flags` bit: this is the first DEVICES message, carrying the job and the
 /// images.
 pub const FLAG_FIRST: u32 = 1;
+/// `flags` bit: the boot carries `ferrix.unisolated`, so `devmgr` may start
+/// a bus master whose DMA is not translated or whose interrupts are not
+/// isolated, saying so each time (`admission`, `docs/DMA-GATE.md`). Any
+/// other bit unknown to this crate gives no opt-out (ledger 3906 (2)).
+pub const FLAG_UNISOLATED_ALLOWED: u32 = 1 << 1;
+/// Every `flags` bit this crate defines.
+const FLAGS_KNOWN: u32 = FLAG_FIRST | FLAG_UNISOLATED_ALLOWED;
 
 /// Why bytes on the channel are not a message.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -136,6 +144,8 @@ pub struct Devices<'a> {
     pub first: bool,
     /// The drivers' names, one per image handle; empty unless `first`.
     pub names: &'a [[u8; NAME_BYTES]],
+    /// Whether the boot carries `ferrix.unisolated` ([`FLAG_UNISOLATED_ALLOWED`]).
+    pub unisolated_allowed: bool,
 }
 
 impl Devices<'_> {
@@ -173,11 +183,13 @@ impl Devices<'_> {
         put(out, 8, &self.devices.to_le_bytes());
         put(out, 12, &(self.names.len() as u32).to_le_bytes());
         put(out, 16, &self.more.to_le_bytes());
-        put(
-            out,
-            20,
-            &(if self.first { FLAG_FIRST } else { 0 }).to_le_bytes(),
-        );
+        let flags = if self.first { FLAG_FIRST } else { 0 }
+            | if self.unisolated_allowed {
+                FLAG_UNISOLATED_ALLOWED
+            } else {
+                0
+            };
+        put(out, 20, &flags.to_le_bytes());
         for (i, name) in self.names.iter().enumerate() {
             put(out, DEVICES_HEADER_BYTES + i * NAME_BYTES, name);
         }
@@ -196,6 +208,9 @@ pub struct DevicesView<'a> {
     pub more: u32,
     /// Whether this is the first message, with the job and the images.
     pub first: bool,
+    /// Whether the boot carries `ferrix.unisolated`: only with that bit set
+    /// and no bit this crate does not define.
+    pub unisolated_allowed: bool,
     names: &'a [u8],
 }
 
@@ -254,6 +269,7 @@ impl DevicesView<'_> {
             drivers,
             more,
             first: flags & FLAG_FIRST != 0,
+            unisolated_allowed: flags & FLAG_UNISOLATED_ALLOWED != 0 && flags & !FLAGS_KNOWN == 0,
             names: bytes.get(DEVICES_HEADER_BYTES..).unwrap_or(&[]),
         })
     }
@@ -469,6 +485,9 @@ mod budget_tests;
 
 #[cfg(test)]
 mod isolation_tests;
+
+#[cfg(test)]
+mod admission_tests;
 
 #[cfg(test)]
 mod gpu_tests;

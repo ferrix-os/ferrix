@@ -24,11 +24,15 @@ pub(crate) const RAMOOPS_CONSOLE_SIZE: u64 = 0x20_0000;
 /// No `nosmp`: all eight cores start, at EL2 through TF-A's PSCI, and the
 /// kernel's secondary entry drops each to EL1.
 ///
+/// `ferrix.unisolated`: no IOMMU is driven on the phone, so without it devmgr
+/// would start none of its drivers (`docs/DMA-GATE.md`); the Pixel 7 is a
+/// development platform, outside the claim, and its boots say so.
+///
 /// Anything in `FERRIX_PIXEL7_CMDLINE_EXTRA` when the loader was built is
 /// appended (`build.rs`), and then every `ferrix.*` word of ABL's `bootargs`,
 /// which carry the boot image header's command line (`main.rs`).
 pub(crate) const CMDLINE: &str = concat!(
-    "console=ramoops,0xfd3ff000,0x200000 ferrix.fbcon",
+    "console=ramoops,0xfd3ff000,0x200000 ferrix.fbcon ferrix.unisolated",
     env!("PIXEL7_CMDLINE_EXTRA")
 );
 
@@ -41,8 +45,9 @@ pub(crate) const GUEST_UART: u64 = 0x3f8;
 /// the console is crosvm's 16550, which crosvm connects to its own output.
 /// Every `ferrix.*` word of crosvm's own `bootargs`, which `crosvm run -p`
 /// adds to, is appended to it (`main.rs`), so each guest can be given its
-/// own.
-pub(crate) const GUEST_CMDLINE: &str = "console=uart8250,mmio,0x3f8";
+/// own. `ferrix.unisolated` as on the phone: crosvm's virtio-mmio devices
+/// are behind no IOMMU the kernel drives.
+pub(crate) const GUEST_CMDLINE: &str = "console=uart8250,mmio,0x3f8 ferrix.unisolated";
 
 /// Whether the loader runs as a guest of crosvm rather than on the phone.
 static GUEST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

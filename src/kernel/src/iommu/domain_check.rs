@@ -112,6 +112,9 @@ pub fn check_iommu() {
         ),
     }
     report_intel_gpu_budget();
+    // Last, since it asks every node and so makes every domain not made
+    // yet, as devmgr's admission of each device does next.
+    say_line(check_no_dma().map(Some));
 }
 
 /// Say a stage 10 check's line, if it has one, or halt on its problem.
@@ -744,6 +747,72 @@ fn check_isolation_before_pin() -> Result<Option<alloc::string::String>, &'stati
     })();
     side.close_everything();
     outcome.map(Some)
+}
+
+/// `L.device.57`: `device_isolation` answers `NO_DMA` (bit 2) exactly for
+/// the nodes that reach no memory -- the firmware framebuffer's, the x86-64
+/// power node -- asked of every node; and each such node has no domain and
+/// is refused `vmo_pin` `WRONG_TYPE`, so devmgr's admission of it on bit 2
+/// admits a node that can take no DMA at all.
+///
+/// # Errors
+///
+/// A node's answer had bit 2 where it reaches memory, or lacked it where it
+/// does not; or such a node had a domain or was not refused its pin.
+///
+/// Verifies: L.device.57
+fn check_no_dma() -> Result<alloc::string::String, &'static str> {
+    use ferrix_native_abi::nr;
+    use ferrix_native_abi::rights::Rights;
+    use ferrix_native_abi::status;
+    use ferrix_native_abi::types::DEVICE_ISOLATION_NO_DMA;
+
+    let side = object::check::Side::new()?;
+    let outcome = (|| {
+        let (mut without, mut with) = (0_usize, 0_usize);
+        for node in device::devices() {
+            let handle = side
+                .process
+                .with_handles(|table| {
+                    table.insert(object::Object::Device(Arc::clone(node)), Rights::MANAGE)
+                })
+                .map_err(|_| "no room for a device handle")?;
+            let bits = side
+                .call(nr::DEVICE_ISOLATION, &[object::check::reg(handle)])
+                .map_err(|_| "device_isolation refused")?;
+            let no_dma = bits & DEVICE_ISOLATION_NO_DMA as usize != 0;
+            if no_dma == node.reaches_memory() {
+                return Err(if no_dma {
+                    "device_isolation said NO_DMA of a node that reaches memory"
+                } else {
+                    "device_isolation did not say NO_DMA of a node that reaches no memory"
+                });
+            }
+            if node.reaches_memory() {
+                with += 1;
+                continue;
+            }
+            if node.domain_made().is_some() {
+                return Err("a node that reaches no memory was given a domain");
+            }
+            // The pin is refused on the node before its VMO is looked at.
+            let pin = side.call(
+                nr::VMO_PIN,
+                &[object::check::reg(handle), 0, 0, PAGE_SIZE, 0],
+            );
+            if pin != Err(status::WRONG_TYPE) {
+                return Err("a node that reaches no memory was not refused vmo_pin WRONG_TYPE");
+            }
+            without += 1;
+        }
+        Ok(alloc::format!(
+            "device_isolation's NO_DMA: {without} nodes reaching no memory answered bit 2, each \
+             with no domain and refused vmo_pin WRONG_TYPE; {with} nodes that reach memory \
+             answered without it"
+        ))
+    })();
+    side.close_everything();
+    outcome
 }
 
 /// `L.device.28`: while a unit remaps, a requester ID that no unit places as

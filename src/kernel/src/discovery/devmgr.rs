@@ -524,6 +524,7 @@ fn write_devices(
             more: u32::try_from(nodes.len() - index - take).map_err(|_| "too many devices")?,
             first,
             names: if first { &names } else { &[] },
+            unisolated_allowed: unisolated_allowed(),
         };
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message
@@ -613,9 +614,19 @@ const OPTION: &str = "ferrix.devmgr";
 /// Whether the command line said `ferrix.devmgr=init`.
 static BY_INIT: AtomicBool = AtomicBool::new(false);
 
-/// Read [`OPTION`], once, early.
+/// The command-line word that lets `devmgr` start a bus master whose DMA
+/// is not translated or whose interrupts are not isolated
+/// (`docs/DMA-GATE.md`, `L.device.58`): the bare word only; no certified
+/// profile permits it, so a boot with it carries no claim.
+const UNISOLATED_OPTION: &str = "ferrix.unisolated";
+
+/// Whether the command line carries [`UNISOLATED_OPTION`] as a bare word.
+static UNISOLATED: AtomicBool = AtomicBool::new(false);
+
+/// Read [`OPTION`] and [`UNISOLATED_OPTION`], once, early.
 pub fn read_option(view: &BootView<'_>) {
     let tree = crate::discovery::fdt::open(view).ok();
+    read_unisolated(view, tree.as_ref());
     let value = view.option(OPTION).or_else(|| {
         tree.as_ref()
             .and_then(|tree| option_in(tree.bootargs()?, OPTION))
@@ -632,6 +643,40 @@ pub fn read_option(view: &BootView<'_>) {
             "  devmgr   {OPTION}={other} is not understood; the kernel starts devmgr"
         ),
     }
+}
+
+/// Read [`UNISOLATED_OPTION`]: the bare word turns it on, said on its line
+/// and recorded in the audit configuration (`Config::Unisolated`) at
+/// bring-up; a word with a value is said and ignored (ledger 3906 (2), (4)).
+fn read_unisolated(view: &BootView<'_>, tree: Option<&ferrix_fdt::Fdt<'_>>) {
+    let bootargs = tree.and_then(ferrix_fdt::Fdt::bootargs);
+    let bare = view.flag(UNISOLATED_OPTION)
+        || bootargs.is_some_and(|args| ferrix_bootinfo::flag_in(args, UNISOLATED_OPTION));
+    let valued = view.option(UNISOLATED_OPTION).is_some()
+        || bootargs.is_some_and(|args| option_in(args, UNISOLATED_OPTION).is_some());
+    // The bare word alone; a value, beside it or not, gives no opt-out
+    // (ledger 3906 (2), 4153 (2)).
+    match ferrix_devmgr_proto::admission::opt_out(bare, valued) {
+        ferrix_devmgr_proto::admission::OptOut::Absent => {}
+        ferrix_devmgr_proto::admission::OptOut::Ignored => crate::console::println!(
+            "  devmgr   {UNISOLATED_OPTION} takes no value: ignored, and every bus master \
+             still needs its DMA translated and its interrupts isolated"
+        ),
+        ferrix_devmgr_proto::admission::OptOut::On => {
+            UNISOLATED.store(true, Ordering::Relaxed);
+            crate::console::println!(
+                "  devmgr   {UNISOLATED_OPTION}: devmgr may start drivers of devices whose DMA \
+                 is not translated or whose interrupts are not isolated; their drivers are \
+                 trusted with all of memory; this configuration carries no claim"
+            );
+        }
+    }
+}
+
+/// Whether the command line carries `ferrix.unisolated`, for the audit
+/// configuration and DEVICES' flags.
+pub fn unisolated_allowed() -> bool {
+    UNISOLATED.load(Ordering::Relaxed)
 }
 
 /// Whether pid 1 starts `devmgr` on this boot.

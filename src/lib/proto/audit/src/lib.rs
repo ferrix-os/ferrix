@@ -298,6 +298,11 @@ pub enum Config {
     /// describes, 0 when `ferrix.amdvi=off` left every one alone (a
     /// recovery configuration, not an evaluated one, `L.iommu.98`).
     AmdVi = 9,
+    /// `ferrix.unisolated`: 1 when the boot lets devmgr start drivers of
+    /// devices whose DMA is not translated or whose interrupts are not
+    /// isolated, 0 when every bus master needs both (a development
+    /// configuration, carrying no claim, `L.device.58`).
+    Unisolated = 10,
 }
 
 /// Whether the decision recorded went for the subject or against it.

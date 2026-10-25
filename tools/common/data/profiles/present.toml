@@ -7,7 +7,10 @@
 profile = "present"
 level = "present"
 claim = "EAL5+, DO-178C DAL C, IEC 62304 Class C, EN 50716 SIL 2 (ledger 869), until M5's flip"
-claim_architectures = ["x86_64", "aarch64", "armv7a"]
+# ARMv7-A left the claim on 2026-10-24 (the customer's G4, ledger 3906): no
+# IOMMU is driven there, so its images boot with ferrix.unisolated and its
+# rows are development rows, until an SMMU is driven on ARMv7-A.
+claim_architectures = ["x86_64", "aarch64"]
 buildable_from = "today"
 image = { driver_updates = "absent", settings_writer = "present" }
 

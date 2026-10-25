@@ -28,7 +28,9 @@
       "A certificate attaches to a configuration, not to a repository. This is",
       "the one under evaluation: the `present` kernel profile",
       "(tools/common/data/profiles/present.toml, docs/BUILD-FLAGS.md BF1), on",
-      "three architectures, release profile, the gate set cargo xtask check",
+      "two architectures (ARMv7-A left the claim on 2026-10-24, the customer's",
+      "G4, ledger 3906, until an SMMU is driven there), release profile, the",
+      "gate set cargo xtask check",
       "runs, and the toolchain rust-toolchain.toml pins. Seven Cargo features",
       "exist in the whole workspace and none is in src/kernel/ or",
       "src/boot/common/uefi/, so there is no Cargo configuration space to",
@@ -50,8 +52,7 @@
     "kernel_profile": "present",
     "architectures": [
       "x86_64",
-      "aarch64",
-      "armv7a"
+      "aarch64"
     ],
     "profile": "release",
     "toolchain": "1.97.1",

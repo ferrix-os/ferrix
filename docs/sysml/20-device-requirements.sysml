@@ -689,6 +689,54 @@ package FerrixDeviceRequirements {
             attribute :>> parent = ("H.DMA.9", "H.DEV.1");
             attribute :>> unit = "syscall::native::device_isolation";
         }
+        requirement <'L.device.57'> noDmaAnsweredForNodesReachingNoMemory : ItemLowLevel {
+            attribute :>> statement = "device_isolation shall answer bit 2,
+                NO_DMA, for a node exactly when nothing behind it reaches memory
+                -- the firmware framebuffer's node, the x86-64 power node -- and
+                such a node shall have no domain and be refused vmo_pin.";
+            attribute :>> criterion = "Stage 10's check asks device_isolation of
+                every node: bit 2 is set exactly for the nodes that reach no
+                memory, each of which has no domain and is refused vmo_pin
+                WRONG_TYPE; with the bit never set, a boot with such a node
+                (test-power's) panics.";
+            attribute :>> parent = "H.DMA.9";
+            attribute :>> unit = "syscall::native::device_isolation";
+        }
+        requirement <'L.device.58'> unisolatedWordForwardedSaidAudited : ItemLowLevel {
+            attribute :>> statement = "The bare boot word ferrix.unisolated shall
+                be said on its own line at bring-up, recorded in the audit
+                configuration as Config::Unisolated 1 before devmgr starts, and
+                forwarded to devmgr in DEVICES' flags; without it, or given a
+                value, devmgr shall be forwarded no opt-out, and a value shall be
+                said and ignored. No certified profile shall permit it.";
+            attribute :>> criterion = "devmgr-proto's host test encodes and
+                decodes DEVICES' flags, and an unknown flag gives no opt-out; the
+                audit check reads Config::Unisolated as the boot was told;
+                check-item-boundary refuses a certified profile that permits the
+                word; every ARMv7-A row boots with it and test-boot requires the
+                kernel's line there, and its absence elsewhere.";
+            attribute :>> parent = ("H.DMA.9", "H.AUD.7");
+            attribute :>> unit = ("discovery::devmgr::read_unisolated",
+                "discovery::devmgr::write_devices");
+        }
+        requirement <'L.device.59'> busMastersAdmittedOnlyIsolated : ItemLowLevel {
+            attribute :>> statement = "devmgr shall hand a device that reaches
+                memory to its driver only when device_isolation answers its DMA
+                translated and its interrupts isolated -- on AArch64 its DMA
+                translated alone, until GICv3 ITS rows exist -- or when the
+                forwarded opt-out is set, and then with an UNISOLATED line for
+                each such device and a count of them; a device whose
+                device_isolation cannot be read shall not be handed over.";
+            attribute :>> criterion = "devmgr-proto's host test of admission over
+                every combination of bits 0 to 2, on AArch64 and elsewhere, with
+                and without the opt-out, and every line; with bit 0 ignored it
+                fails. test-boot requires, on ARMv7-A, an UNISOLATED line for
+                every device started and the count, and none on the other
+                architectures; test-nvrm's intremap=off boot requires a refusal
+                for every device devmgr reports failed.";
+            attribute :>> parent = ("H.DMA.9", "H.DEV.1");
+            attribute :>> unit = "syscall::native::device_isolation";
+        }
         requirement <'L.device.35'> heldOffFunctionGetsItsTablePage : ItemLowLevel {
             attribute :>> statement = "A PCI function in the build's MSI-preferred
                 list (ferrix_pci::msix::MSI_PREFERRED, exactly 1F0A:6801) with both an

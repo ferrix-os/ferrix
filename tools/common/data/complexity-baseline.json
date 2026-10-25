@@ -51,7 +51,7 @@
     },
     "discovery/devmgr.rs::write_devices": {
       "complexity": 17,
-      "lines": 54,
+      "lines": 55,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {

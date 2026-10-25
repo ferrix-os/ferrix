@@ -242,6 +242,7 @@ pub(crate) fn judge(
         fallback_problem(lines),
         entropy_problem(lines, qemu),
         devmgr_problem(lines),
+        unisolated_problem(arch, lines),
         msi_problem(arch, lines),
         held_off_problem(arch, lines),
         (!args.amd_vi)
@@ -940,7 +941,12 @@ const DEVMGR_FAILED: &str = " failed";
 /// Every machine this tool boots has a virtio-blk disk for it. An image
 /// without `devmgr` prints that it was not started, which is not a failure.
 fn devmgr_problem(lines: &[String]) -> Option<String> {
-    let Some(line) = lines.iter().find(|line| line.contains("  devmgr   ")) else {
+    // The kernel's report, not its line for `ferrix.unisolated`, which
+    // comes first on a boot with the word.
+    let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("  devmgr   ") && !line.contains("ferrix.unisolated"))
+    else {
         return Some("the kernel never reported on devmgr".to_owned());
     };
     if line.contains("not started") {
@@ -959,6 +965,60 @@ fn devmgr_problem(lines: &[String]) -> Option<String> {
             line.trim()
         )),
     }
+}
+
+/// The kernel's line for `ferrix.unisolated` (`discovery/devmgr.rs`).
+const UNISOLATED_SAID: &str = "devmgr   ferrix.unisolated: devmgr may start drivers";
+
+/// devmgr's line for each device it starts only under the word
+/// (`devmgr-proto::admission`).
+const UNISOLATED_STARTED: &str = "devmgr   UNISOLATED: ";
+
+/// devmgr's count of them.
+const UNISOLATED_COUNTED: &str = " devices started under ferrix.unisolated";
+
+/// Why a boot's `ferrix.unisolated` lines are wrong, if they are
+/// (`docs/DMA-GATE.md`, `L.device.58`, `L.device.59`).
+///
+/// Every ARMv7-A image carries the word (outside the claim, the customer's
+/// G4), so its boot must say it, and devmgr must say each device it starts
+/// so and count them. A boot without the word must have no device started
+/// so: on x86-64 and AArch64 every bus master is isolated on QEMU's
+/// machines, and one that is not is refused, which `devmgr_problem` fails.
+///
+/// Verifies: L.device.58, L.device.59
+fn unisolated_problem(arch: Arch, lines: &[String]) -> Option<String> {
+    let said = lines.iter().any(|line| line.contains(UNISOLATED_SAID));
+    let started = lines
+        .iter()
+        .filter(|line| line.contains(UNISOLATED_STARTED))
+        .count();
+    if !said {
+        if arch == Arch::Armv7a {
+            return Some(format!(
+                "the ARMv7-A image's boot never said `{UNISOLATED_SAID}`"
+            ));
+        }
+        return (started != 0).then(|| {
+            format!("devmgr started {started} devices unisolated on a boot without the word")
+        });
+    }
+    let counted = lines
+        .iter()
+        .find_map(|line| {
+            let before = line.split(UNISOLATED_COUNTED).next()?;
+            line.contains(UNISOLATED_COUNTED)
+                .then(|| before.rsplit(' ').next()?.parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    if counted != started || (arch == Arch::Armv7a && started == 0) {
+        return Some(format!(
+            "under ferrix.unisolated devmgr said {started} devices started unisolated and \
+             counted {counted}"
+        ));
+    }
+    None
 }
 
 /// Why a boot on a machine whose IOMMU translates still failed the stage 10
@@ -4166,7 +4226,7 @@ mod tests {
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fallback_problem,
         fault_problem, held_off_problem, iommu_problem, msi_problem, namespace_problem,
         parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
-        version_translates, walk_problem, xstate_problem,
+        unisolated_problem, version_translates, walk_problem, xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -4827,5 +4887,27 @@ mod tests {
             "QEMU emulator version 11.1.0 (whpx-gvax)\n"
         ));
         assert!(!version_translates(""));
+    }
+    /// Verifies: L.device.58, L.device.59
+    #[test]
+    fn unisolated_lines_are_required_on_armv7a_and_refused_elsewhere() {
+        let lines = |text: &[&str]| {
+            text.iter()
+                .map(|line| (*line).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let said = "  devmgr   ferrix.unisolated: devmgr may start drivers of devices whose DMA";
+        let one = "devmgr   UNISOLATED: net 00:01.0 started under ferrix.unisolated: its DMA";
+        let count = "devmgr   1 devices started under ferrix.unisolated: their drivers are";
+        assert_eq!(
+            unisolated_problem(Arch::Armv7a, &lines(&[said, one, count])),
+            None
+        );
+        assert!(unisolated_problem(Arch::Armv7a, &lines(&[one, count])).is_some());
+        assert!(unisolated_problem(Arch::Armv7a, &lines(&[said])).is_some());
+        assert!(unisolated_problem(Arch::Armv7a, &lines(&[said, one])).is_some());
+        assert_eq!(unisolated_problem(Arch::X86_64, &lines(&[])), None);
+        assert_eq!(unisolated_problem(Arch::X86_64, &lines(&[said])), None);
+        assert!(unisolated_problem(Arch::X86_64, &lines(&[one, count])).is_some());
     }
 }

@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["L.device.57-59"],
-      "owner": "amd-vi",
-      "branch": "feature/devmgr-isolation-gate",
-      "date": "2026-10-24",
-      "purpose": "docs/DMA-GATE.md, every bus master gated on isolation (the customer's decision, ledger 3905; consultant OK IF (1)-(9), ledger 3906): device_isolation's NO_DMA bit, ferrix.unisolated forwarded to devmgr said and audited, and devmgr's one admission rule"
-    },
-    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",

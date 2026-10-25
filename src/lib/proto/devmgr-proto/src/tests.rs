@@ -2,8 +2,9 @@
 
 use super::{
     ANSWER_BUSY, ANSWER_DONE, BIND, BOUND, BUS_PLATFORM, DEVICES, DEVICES_HEADER_BYTES,
-    DEVICES_MAX_BYTES, DIED, DONE, DRIVER, Devices, DevicesView, FLAG_FIRST, MAX_DRIVERS,
-    Malformed, Message, NAME_BYTES, PUBLISHED, REPORT, RESTARTED, SHORT_BYTES, UNBIND, UNBOUND,
+    DEVICES_MAX_BYTES, DIED, DONE, DRIVER, Devices, DevicesView, FLAG_FIRST,
+    FLAG_UNISOLATED_ALLOWED, MAX_DRIVERS, Malformed, Message, NAME_BYTES, PUBLISHED, REPORT,
+    RESTARTED, SHORT_BYTES, UNBIND, UNBOUND,
 };
 
 fn name(text: &str) -> [u8; NAME_BYTES] {
@@ -20,6 +21,7 @@ fn devices_round_trips_and_counts_its_handles() {
         more: 30,
         first: true,
         names: &names,
+        unisolated_allowed: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -55,6 +57,7 @@ fn a_continuation_carries_devices_only() {
         more: 0,
         first: false,
         names: &[],
+        unisolated_allowed: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("fits");
@@ -69,7 +72,8 @@ fn a_continuation_carries_devices_only() {
             devices: 1,
             more: 0,
             first: false,
-            names: &named
+            names: &named,
+            unisolated_allowed: false,
         }
         .encode(&mut bytes),
         None,
@@ -89,6 +93,7 @@ fn devices_carries_max_drivers_with_room_for_a_device() {
         more: 0,
         first: true,
         names: &names,
+        unisolated_allowed: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = message.encode(&mut bytes).expect("MAX_DRIVERS names fit");
@@ -109,7 +114,8 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             devices: 0,
             more: 0,
             first: true,
-            names: &names
+            names: &names,
+            unisolated_allowed: false,
         }
         .encode(&mut bytes),
         None,
@@ -122,7 +128,8 @@ fn devices_refuses_too_many_drivers_and_a_small_buffer() {
             devices: 1,
             more: 0,
             first: true,
-            names: &one
+            names: &one,
+            unisolated_allowed: false,
         }
         .encode(&mut small),
         None,
@@ -202,6 +209,7 @@ fn bytes_that_are_not_a_message_are_malformed() {
         more: 0,
         first: true,
         names: &[],
+        unisolated_allowed: false,
     };
     let mut bytes = [0_u8; DEVICES_MAX_BYTES];
     let len = devices.encode(&mut bytes).expect("fits");
@@ -307,5 +315,46 @@ fn the_binding_messages_are_laid_out_as_documented() {
     assert_eq!(
         Message::Unbound { device: 1 }.encode()[0..4],
         UNBOUND.to_le_bytes()
+    );
+}
+
+/// The opt-out word's flag rides in DEVICES' flags, and only alone with
+/// the bits this crate defines does it give the opt-out (ledger 3906 (2),
+/// (4)).
+///
+/// Verifies: L.device.58
+#[test]
+fn the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out() {
+    let message = Devices {
+        devices: 1,
+        more: 0,
+        first: false,
+        names: &[],
+        unisolated_allowed: true,
+    };
+    let mut bytes = [0_u8; DEVICES_MAX_BYTES];
+    let len = message.encode(&mut bytes).expect("fits");
+    assert_eq!(bytes[20..24], FLAG_UNISOLATED_ALLOWED.to_le_bytes());
+    assert!(
+        DevicesView::decode(&bytes[..len])
+            .unwrap()
+            .unisolated_allowed
+    );
+    let off = Devices {
+        unisolated_allowed: false,
+        ..message
+    };
+    let len = off.encode(&mut bytes).expect("fits");
+    assert!(
+        !DevicesView::decode(&bytes[..len])
+            .unwrap()
+            .unisolated_allowed
+    );
+    bytes[20..24].copy_from_slice(&(FLAG_UNISOLATED_ALLOWED | 1 << 7).to_le_bytes());
+    assert!(
+        !DevicesView::decode(&bytes[..len])
+            .unwrap()
+            .unisolated_allowed,
+        "an unknown bit beside it"
     );
 }

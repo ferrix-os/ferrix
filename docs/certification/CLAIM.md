@@ -17,6 +17,26 @@
 > no other document should cite it as one. Figures marked *guess* are the
 > consultant's estimates, not measurements. Points are for the product owner
 > to convert.
+>
+> **Decided (customer, 2026-10-24, G4 of `docs/DMA-GATE.md`, ledger 3906):**
+> every bus master gets a driver only once it is isolated (the customer's
+> D9, ledger 3905), and the Arm architectures take that rule as follows.
+>
+> * **AArch64: the partial rule, (c).** A bus master needs its DMA
+>   translated (`DMA_TRANSLATED`) alone. The interrupt residual stays as
+>   VULNERABILITY-ANALYSIS V-03 states it, since GICv2m never isolates
+>   interrupts. *Ends* when GICv3 ITS rows exist and isolate interrupts:
+>   the rule then requires both bits on AArch64 too, and this entry is
+>   removed.
+> * **ARMv7-A: out of the claim, (a).** No IOMMU is driven there, so no
+>   bus master's DMA is translated. ARMv7-A leaves the claimed
+>   architectures (`present.toml`'s `claim_architectures`,
+>   `certification-item.json`'s `reference_configuration.architectures`).
+>   Every ARMv7-A image boots with `ferrix.unisolated`, and its rows are
+>   development rows, not claim evidence; the DK1 stays a development
+>   board. *Ends* when an SMMU is driven on ARMv7-A and its rows boot
+>   without the word: ARMv7-A then returns to both lists, by a decision of
+>   the customer's, reviewed by the consultant.
 
 The customer has named Ferrix's differentiator: run Linux software on a
 kernel that can be assured. That means unmodified Linux binaries (Chrome,

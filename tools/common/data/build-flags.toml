@@ -268,6 +268,11 @@ why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71
 values = ["on", "off"]
 why = "whether the kernel drives the AMD-Vi units the IVRS describes (iommu/ivrs.rs, L.iommu.98): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only, as ferrix.vtd=off is for VT-d (SAFETY-MANUAL AoU-8, docs/AMD-VI.md O1)"
 
+[boot_options."ferrix.unisolated"]
+kind = "flag"
+claimless = true
+why = "let devmgr start drivers of devices whose DMA is not translated or whose interrupts are not isolated (discovery/devmgr.rs, L.device.58; docs/DMA-GATE.md): the kernel says it at stage 10, records it in the audit configuration (Config::Unisolated) and forwards it in DEVICES' flags; devmgr then starts each such device with an UNISOLATED line (L.device.59). Off by default. `claimless`: a certified profile that permits it fails the profile rule, so a claimed image is one booted without it (SAFETY-MANUAL AoU-8); every ARMv7-A image carries it, ARMv7-A being outside the claim until an SMMU is driven (the customer's G4, ledger 3906)"
+
 [boot_options."ferrix.btrfs"]
 values = ["*"]
 test_only = true

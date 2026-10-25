@@ -111,6 +111,10 @@ pub const DEVICE_ISOLATION_DMA_TRANSLATED: u64 = 1 << 0;
 /// interrupt remapping unit remaps with compatibility format blocked, and
 /// no function bypasses them -- and the device's messages are remapped.
 pub const DEVICE_ISOLATION_INTERRUPTS: u64 = 1 << 1;
+/// `device_isolation`'s bit: the node reaches no memory -- the firmware
+/// framebuffer's node, the x86-64 power node -- so it has no DMA to isolate
+/// (`docs/DMA-GATE.md`, `L.device.57`).
+pub const DEVICE_ISOLATION_NO_DMA: u64 = 1 << 2;
 
 /// `job_set_limit` and `job_get_quota`'s resource: physical memory, in bytes.
 pub const JOB_MEMORY: u64 = 0;

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2388 declarations in the core's files, 174 in the item's; 71 checks-only.
+2389 declarations in the core's files, 175 in the item's; 71 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1199,6 +1199,7 @@ checks above is `pub` for raised checks (F3).
 | `Expected::kaslr` | field | bin |  |
 | `Expected::mitigations` | field | bin |  |
 | `Expected::pstore` | field | item, load, bin |  |
+| `Expected::unisolated` | field | bin |  |
 | `Expected::vtd` | field | load, bin |  |
 | `Report::budgets` | field | bin |  |
 | `Report::configs` | field | bin |  |
@@ -3094,6 +3095,7 @@ checks above is `pub` for raised checks (F3).
 | `register_reader` | fn | load |  |
 | `request` | fn | load |  |
 | `start` | fn | bin |  |
+| `unisolated_allowed` | fn | bin |  |
 | `wait_reported` | fn | load |  |
 | `DriverName` | struct | - |  |
 | `Report` | struct | load, bin |  |

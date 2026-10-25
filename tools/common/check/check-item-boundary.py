@@ -2614,6 +2614,8 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
             problems.append(f"{option}: permits values the registry does not declare")
         if level != "none" and entry.get("test_only"):
             problems.append(f"a certified profile permits the test-only option {option}")
+        if level != "none" and entry.get("claimless"):
+            problems.append(f"a certified profile permits {option}, which carries no claim")
     if level != "none" and profile.get("boot_options", {}).get("ferrix.checks", ["run"]) != ["run"]:
         problems.append("a certified profile permits ferrix.checks only with the checks running")
     for arch in profile.get("claim_architectures", []):
@@ -2785,7 +2787,8 @@ def _profile_self_test() -> list[str]:
             "b": {"allows": ["sc2", "none"], "lands": "M3", "built": "yes"},
             "c": {"allows": ["none"], "lands": "M0", "built": "stand-in", "stands_in": "a"},
         }}},
-        "boot_options": {"ferrix.checks": {"values": ["run", "skip"]}},
+        "boot_options": {"ferrix.checks": {"values": ["run", "skip"]},
+                         "ferrix.unisolated": {"kind": "flag", "claimless": True}},
     }
     if flag_file_problems(flags):
         failures.append(f"a consistent flag file was refused: {flag_file_problems(flags)}")
@@ -2803,6 +2806,13 @@ def _profile_self_test() -> list[str]:
                 "exceptions": [dict(e) for e in exceptions], "boot_options": {"ferrix.checks": ["run"]}}
     if profile_problems("p", profile("sc2", "b"), flags)[0]:
         failures.append("a value allowing sc2 was refused at sc2")
+    claimless = profile("sc2", "b")
+    claimless["boot_options"]["ferrix.unisolated"] = True
+    if not any("carries no claim" in p for p in profile_problems("p", claimless, flags)[0]):
+        failures.append("a certified profile permitting a claimless option was accepted")
+    claimless["level"] = "none"
+    if any("carries no claim" in p for p in profile_problems("p", claimless, flags)[0]):
+        failures.append("a profile of no level was refused a claimless option")
     if not profile_problems("p", profile("present", "b"), flags)[0]:
         failures.append("a value allowing sc2 was accepted at present, which sc2 does not cover")
     if not profile_problems("p", profile("sc4", "c"), flags)[0]:
