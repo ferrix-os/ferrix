@@ -259,6 +259,8 @@ void nvrm_drm_close(void *file);
 int nvrm_drm_ioctl(void *file, NvU64 request, NvU32 cmd, NvU64 arg);
 void nvrm_drm_mmap(void *file, const struct nvos_request *request);
 void nvrm_drm_released(NvU64 cookie);
+/* A program's IMPORT_SYNC_FILE on the dmabuf `cookie` (K5): 0 or -errno. */
+int nvrm_drm_dmabuf_import(NvU64 cookie, NvU32 flags, NvU64 kind, NvU64 value);
 
 /* The ioctl encoding of Linux's asm-generic/ioctl.h, which RM's numbers use. */
 #define _IOC_NRBITS     8

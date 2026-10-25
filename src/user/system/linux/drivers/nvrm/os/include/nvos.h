@@ -114,6 +114,13 @@ struct nvos_request {
 #define NVOS_REQUEST_MMAP    4
 /* The last descriptor of a dmabuf went: `arg` its cookie; not answered. */
 #define NVOS_REQUEST_DMABUF_RELEASE 5
+/* A program's IMPORT_SYNC_FILE on one of nvrm's dmabufs (K5): arg the
+ * dmabuf's cookie, cmd the flags (1 read, 2 write), pages the fence's kind,
+ * file its cookie (own) or status (signalled); answered as an ioctl. */
+#define NVOS_REQUEST_DMABUF_IMPORT 6
+#define NVOS_IMPORT_OWN       1
+#define NVOS_IMPORT_SIGNALLED 2
+#define NVOS_IMPORT_FOREIGN   3
 /* ferrix_chardevctl::message's MAP_* reply kinds. */
 #define NVOS_MAP_VMO               1
 #define NVOS_MAP_APERTURE          2
@@ -134,6 +141,8 @@ NvS64 nvos_chardev_file(NvU64 id, int fd);
 #define NVOS_DMABUF_TELL_MADE 4
 #define NVOS_DMABUF_MADE     (1LL << 31)
 NvS64 nvos_chardev_dmabuf_install(NvU64 id, NvU32 vmo, NvU64 cookie, NvU32 flags);
+/* A new unsignalled fence `cookie` in dmabuf `dmabuf`'s slot (K5). */
+int nvos_chardev_dmabuf_fence(NvU64 dmabuf, NvU64 cookie, NvU32 deadline_ms);
 /*
  * A name-only dmabuf of `size` bytes (video memory): no VMO, unmappable,
  * meaningful only to this driver's resolve (docs/NVIDIA.md §4.4, N3b).

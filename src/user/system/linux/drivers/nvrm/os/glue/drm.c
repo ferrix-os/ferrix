@@ -704,15 +704,76 @@ static int drm_semsurf_ctx_create(struct drm_file *file, NvU64 arg)
 struct drm_fence {
     NvU64 cookie;
     struct drm_gem *ctx;
+    /* In `live` while KAPI may still call back for it. */
+    struct drm_fence *next;
 };
 
 static NvU64 next_fence_cookie = 1;
 extern int nvrm_trace_drm;
 
+/*
+ * K5's sync-file import on nvrm's dmabufs. A program's IMPORT_SYNC_FILE of
+ * one of nvrm's own fences, not yet reached, puts a new fence of the kernel's
+ * in the dmabuf's slot (nvos_chardev_dmabuf_fence) and links it here to the
+ * fence it waits for: a program's EXPORT_SYNC_FILE of the dmabuf then waits
+ * for what was imported, as on Linux, where the import adds the fence to
+ * the buffer's reservation. `live` holds the fences registered with KAPI and
+ * not yet reached, `links` the slot fences tied to them; both under
+ * gems_lock, which no holder keeps across a call into RM.
+ */
+struct drm_link {
+    NvU64 fence;
+    NvU64 slot;
+    struct drm_link *next;
+};
+
+static struct drm_fence *live;
+static struct drm_link *links;
+
+/* Take `fence` out of `live`, and the links to it out of `links` into
+ * `*taken`; under gems_lock. */
+static void fence_unlive_locked(struct drm_fence *fence, struct drm_link **taken)
+{
+    struct drm_fence **at;
+    struct drm_link **link;
+
+    for (at = &live; *at != NULL; at = &(*at)->next)
+        if (*at == fence)
+        {
+            *at = fence->next;
+            break;
+        }
+    for (link = &links; *link != NULL;)
+    {
+        struct drm_link *one = *link;
+        if (one->fence == fence->cookie)
+        {
+            *link = one->next;
+            one->next = *taken;
+            *taken = one;
+        }
+        else
+            link = &one->next;
+    }
+}
+
+/* Signal the slot fences `taken` with `status` and free them; no lock. */
+static void links_signal(struct drm_link *taken, int status)
+{
+    while (taken != NULL)
+    {
+        struct drm_link *next = taken->next;
+        (void)nvos_chardev_sync_signal(taken->slot, status);
+        free(taken);
+        taken = next;
+    }
+}
+
 /* KAPI's callback: the semaphore reached the value. */
 static void drm_fence_reached(void *data)
 {
     struct drm_fence *fence = data;
+    struct drm_link *taken = NULL;
     int rc = nvos_chardev_sync_signal(fence->cookie, 0);
 
     if (nvrm_trace_drm)
@@ -726,7 +787,9 @@ static void drm_fence_reached(void *data)
      */
     nvos_mutex_lock(&gems_lock);
     fence->ctx->fences--;
+    fence_unlive_locked(fence, &taken);
     nvos_mutex_unlock(&gems_lock);
+    links_signal(taken, 0);
     free(fence);
 }
 
@@ -816,6 +879,11 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
      * freed, and its context closed, before the next line here runs. So
      * what is said below was copied out first.
      */
+    /* Live before it is registered: the callback may come at once. */
+    nvos_mutex_lock(&gems_lock);
+    fence->next = live;
+    live = fence;
+    nvos_mutex_unlock(&gems_lock);
     result = kapi->registerSemaphoreSurfaceCallback(device, ctx->semsurf, drm_fence_reached, fence,
                                                     sem_index, p.wait_value, 0, &handle);
     if (nvrm_trace_drm)
@@ -824,15 +892,92 @@ static int drm_semsurf_fence_create(struct drm_file *file, NvU64 request, NvU64 
                 (unsigned long long)p.wait_value, p.fd, (int)result);
     if (result != NVKMS_KAPI_REG_WAITER_SUCCESS)
     {
-        /* Reached already: signalled now. Not registered: an error. */
-        (void)nvos_chardev_sync_signal(cookie,
-                                       result == NVKMS_KAPI_REG_WAITER_ALREADY_SIGNALLED ? 0 : -EIO);
+        int status = result == NVKMS_KAPI_REG_WAITER_ALREADY_SIGNALLED ? 0 : -EIO;
+        struct drm_link *taken = NULL;
+
+        /* Reached already: signalled now. Not registered: an error. What an
+         * import tied to it meanwhile goes the same way. */
+        nvos_mutex_lock(&gems_lock);
+        fence_unlive_locked(fence, &taken);
+        nvos_mutex_unlock(&gems_lock);
+        (void)nvos_chardev_sync_signal(cookie, status);
+        links_signal(taken, status);
         /* No callback will come for it: the context is let go here, and
          * ends here if it was closed meanwhile. */
         fence_context_drop(ctx);
         free(fence);
     }
     return copy_out(arg, &p, sizeof(p));
+}
+
+/*
+ * A program's DMA_BUF_IOCTL_IMPORT_SYNC_FILE on nvrm's dmabuf `cookie`
+ * (K5): `flags` is DMA_BUF_SYNC_READ 1 and/or WRITE 2, `kind` what the fence
+ * is. A signalled fence asks nothing; one of nvrm's own, not yet reached, is
+ * waited for by a new fence in the dmabuf's slot that is signalled with it;
+ * another maker's is refused, as the Intel driver refuses one, since nvrm
+ * can neither name nor wait on it. 0, or a negative errno.
+ */
+int nvrm_drm_dmabuf_import(NvU64 cookie, NvU32 flags, NvU64 kind, NvU64 value)
+{
+    struct drm_link *link;
+    struct drm_fence *fence;
+    NvBool found = NV_FALSE;
+    NvU64 slot;
+    int rc;
+
+    if (flags == 0 || (flags & ~3u) != 0)
+        return -EINVAL;
+    nvos_mutex_lock(&gems_lock);
+    found = gem_by_cookie_locked(cookie) != NULL;
+    slot = next_fence_cookie++;
+    nvos_mutex_unlock(&gems_lock);
+    if (!found)
+        return -ENOENT;
+    if (kind == NVOS_IMPORT_SIGNALLED)
+        return 0;
+    if (kind == NVOS_IMPORT_FOREIGN)
+        return -EOPNOTSUPP;
+    if (kind != NVOS_IMPORT_OWN)
+        return -EINVAL;
+    link = calloc(1, sizeof(*link));
+    if (link == NULL)
+        return -ENOMEM;
+    /* The slot's fence first, so that the reach that signals it can come
+     * at any moment after the link is made. */
+    rc = nvos_chardev_dmabuf_fence(cookie, slot, 0);
+    if (rc < 0)
+    {
+        free(link);
+        return rc;
+    }
+    link->fence = value;
+    link->slot = slot;
+    found = NV_FALSE;
+    nvos_mutex_lock(&gems_lock);
+    for (fence = live; fence != NULL; fence = fence->next)
+        if (fence->cookie == value)
+        {
+            found = NV_TRUE;
+            break;
+        }
+    if (found)
+    {
+        link->next = links;
+        links = link;
+    }
+    nvos_mutex_unlock(&gems_lock);
+    if (!found)
+    {
+        /* Reached already, or no fence of nvrm's: nothing to wait for. */
+        (void)nvos_chardev_sync_signal(slot, 0);
+        free(link);
+    }
+    if (nvrm_trace_drm)
+        drm_say("dmabuf %llu: fence %llu imported (%s), slot fence %llu\n",
+                (unsigned long long)cookie, (unsigned long long)value,
+                found ? "waiting" : "reached", (unsigned long long)slot);
+    return 0;
 }
 
 static int drm_export_nvkms(struct drm_file *file, NvU64 arg)

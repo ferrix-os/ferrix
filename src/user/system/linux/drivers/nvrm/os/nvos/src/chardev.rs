@@ -179,18 +179,15 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                     Op::Release => 3,
                     Op::Mmap => 4,
                     Op::DmabufRelease => 5,
-                    // A program's IMPORT_SYNC_FILE on one of RM's dmabufs:
-                    // RM keeps no fences on them, so the import is refused
-                    // as nvidia-drm's dmabufs did before Linux 6.0, and as
-                    // Ferrix's did before K5 (`docs/INTEL-GPU.md` §5).
+                    // A program's IMPORT_SYNC_FILE on one of RM's dmabufs
+                    // (K5, `docs/INTEL-GPU.md` §5): os/glue/drm.c ties the
+                    // fence to the dmabuf's slot. `arg` is the dmabuf's
+                    // cookie, `cmd` the flags, `pages` the fence's kind and
+                    // `file` its cookie or status.
+                    Op::DmabufImport => 6,
                     // Sent only to a driver whose HELLO asked for it,
                     // which this one's does not.
                     Op::Interrupt => continue,
-                    Op::DmabufImport => {
-                        const ENOTTY: i32 = 25;
-                        let _ = nvos_chardev_reply(request.id, -ENOTTY, 0);
-                        continue;
-                    }
                 };
                 // SAFETY: the caller vouches for `out`.
                 unsafe {
@@ -373,6 +370,32 @@ pub extern "C" fn nvos_chardev_sync_install(
     ) {
         Ok(fd) => i64::try_from(fd).unwrap_or(-9),
         Err(errno) => i64::from(errno),
+    }
+}
+
+/// A new unsignalled fence `cookie` in the fence slot of this control's
+/// dmabuf `dmabuf` (`chardev_dmabuf_fence`, K5), which a program's
+/// `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` then snapshots: what an
+/// IMPORT_SYNC_FILE of one of nvrm's own fences leaves on the buffer. It
+/// reads as signalled with ETIMEDOUT after `deadline_ms` (0 is the
+/// kernel's default). Signal it with [`nvos_chardev_sync_signal`]. 0, or a
+/// negative errno.
+#[unsafe(no_mangle)]
+pub extern "C" fn nvos_chardev_dmabuf_fence(dmabuf: u64, cookie: u64, deadline_ms: u32) -> i32 {
+    let control = CONTROL.load(Ordering::Acquire) as usize;
+    match native(
+        nr::CHARDEV_DMABUF_FENCE,
+        [
+            control,
+            dmabuf as usize,
+            cookie as usize,
+            deadline_ms as usize,
+            0,
+            0,
+        ],
+    ) {
+        Ok(_) => 0,
+        Err(errno) => errno,
     }
 }
 

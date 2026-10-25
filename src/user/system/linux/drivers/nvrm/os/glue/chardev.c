@@ -410,6 +410,20 @@ static void handle(const struct nvos_request *request)
             request_leave();
             return;
 
+        case NVOS_REQUEST_DMABUF_IMPORT:
+            /* Answered as an ioctl; refused once the service has ended. */
+            if (!request_enter())
+            {
+                (void)nvos_chardev_reply(request->id, -ENODEV, 0);
+                return;
+            }
+            (void)nvos_chardev_reply(request->id,
+                                     nvrm_drm_dmabuf_import(request->arg, request->cmd,
+                                                            request->pages, request->file),
+                                     0);
+            request_leave();
+            return;
+
         case NVOS_REQUEST_OPEN:
         case NVOS_REQUEST_IOCTL:
         case NVOS_REQUEST_MMAP:
