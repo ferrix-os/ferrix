@@ -135,3 +135,36 @@ fn an_alert_line_is_a_notification() {
     assert_eq!(from_alert_line("died gpu 0x10 13"), None);
     assert_eq!(from_alert_line("alert flood"), None);
 }
+
+/// Do not disturb: a notification goes to the list, no banner, unless it
+/// is critical; off again, the next one shows.
+#[test]
+fn do_not_disturb_keeps_banners_off_but_critical_ones() {
+    let mut store = Store::default();
+    store.set_quiet(true);
+    let (_, pushed) =
+        store.notify_keyed("a", "Quiet".to_owned(), String::new(), Urgency::Normal, 0);
+    assert!(pushed.is_empty());
+    assert!(store.shown().is_empty(), "no banner while quiet");
+    assert_eq!(store.history().len(), 1, "but in the list");
+    let _ = store.notify_keyed("b", "Disk".to_owned(), String::new(), Urgency::Critical, 0);
+    assert_eq!(store.shown().len(), 1, "a critical one still shows");
+    store.set_quiet(false);
+    let _ = store.notify_keyed("c", "Loud".to_owned(), String::new(), Urgency::Normal, 0);
+    assert_eq!(store.shown().len(), 2);
+    assert_eq!(store.history().len(), 3);
+}
+
+#[test]
+fn the_quiet_file_is_under_the_config_home() {
+    use crate::store::quiet_file;
+    assert_eq!(
+        quiet_file(Some("/c"), Some("/h")),
+        Some("/c/notifyd/do-not-disturb".into())
+    );
+    assert_eq!(
+        quiet_file(Some(""), Some("/h")),
+        Some("/h/.config/notifyd/do-not-disturb".into())
+    );
+    assert_eq!(quiet_file(None, None), None);
+}

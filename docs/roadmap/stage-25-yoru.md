@@ -1,4 +1,4 @@
-# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 27 built*
+# Stage 25 — Yoru, the main UI  ·  *63 points estimated; about 28 built*
 
 The customer's design "Yoru WM" becomes the look and the shell of Ferrix's
 desktop on hyprix: the default of `run-compositor --everything` and of the
@@ -17,8 +17,9 @@ tokens. Not met.
 
 ## Built
 
-The count is by slice: Y1 5, Y2 8, Y3 3 of 8, Y4 6 of 8 (the sidebars, the
-clock, the to-do and the weather; quick settings not), Y7 5 of 8 (the
+The count is by slice: Y1 5, Y2 8, Y3 3 of 8, Y4 7 of 8 (the sidebars, the
+clock, the to-do, the weather and most quick settings; volume, the
+microphone, Wi-Fi, Bluetooth, night light and a light look not), Y7 5 of 8 (the
 picker; the accent from the wallpaper and parallax not). The stash, Settings
 live, and GTK and Chrome in the tokens are of the exit, outside the slices'
 estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
@@ -32,7 +33,9 @@ estimates. `docs/DESKTOP.md` §6.7 is the design feature by feature.
   `yoru-launcher`.
 * **Y4, the widget sidebars (8)**: both edges, reveal, pin, tabs, the clock
   and month, the to-do; boot `sidebars`. The weather, strictly opt-in
-  (§6.6); boot `weather`. The quick settings tab says "not kept yet".
+  (§6.6); boot `weather`. Quick settings: focus mode, auto-tile, the theme
+  colour (kept as Settings keeps them), do not disturb (notifyd's file),
+  brightness where there is a backlight; boot `quick`.
 * **Y7's wallpaper picker**: `yoru-shell --walls` on SUPER I; boot `walls`.
 * **Files is shelf** on Yoru: the dock's Files, the stash's folder button
   and a folder's default handler open it; boot `files`.
@@ -57,7 +60,9 @@ of §6.7:
   clock's time zone beyond UTC offsets.
 * Y3's second half (5): the palette in `yoru-shell`, with windows, actions
   and workspaces.
-* Y4: quick settings.
+* Y4: the quick settings' volume and microphone (pulsed; capture first),
+  Wi-Fi, Bluetooth, night light (gamma), a light Nocturne for Auto and
+  Light; auto-tile per workspace rather than for all.
 * Y5 (13): snapping as the design has it: quarters, the layouts picker,
   guides, linked edges, tabs in the title bar.
 * Y6 (8): scratchpad, focus mode, the shortcut sheet, jump hints,

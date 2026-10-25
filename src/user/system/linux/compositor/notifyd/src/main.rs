@@ -21,7 +21,7 @@ use compositor_dbus::{Connection, Message, session_path};
 use compositor_notifyd::bridge::{Lines, SOCKET};
 use compositor_notifyd::bus::{self, NAME, closed, invoked};
 use compositor_notifyd::paint::{self, Area, Hit};
-use compositor_notifyd::store::{Reason, Store, from_alert_line, from_driver_line};
+use compositor_notifyd::store::{Reason, Store, from_alert_line, from_driver_line, quiet_file};
 use compositor_text::Fonts;
 use compositor_text::tiny_skia::{Pixmap, PixmapPaint, Transform};
 use compositor_toolkit::{
@@ -121,6 +121,7 @@ fn run() -> Result<(), String> {
         expiry: None,
         retry,
     };
+    daemon.check_quiet();
     daemon.connect_bus();
     daemon.connect_events();
     daemon.connect_alerts();
@@ -187,6 +188,7 @@ impl Daemon {
                 self.changed();
             }
             Event::Timer(timer) if timer == self.retry => {
+                self.check_quiet();
                 if self.bus.is_none() {
                     self.connect_bus();
                 }
@@ -202,6 +204,7 @@ impl Daemon {
                 self.changed();
             }
             Event::Readable(watch) => {
+                self.check_quiet();
                 if self.bus.as_ref().is_some_and(|(_, ours)| *ours == watch) {
                     self.read_bus();
                 } else if self.events.as_ref().is_some_and(|(_, ours)| *ours == watch) {
@@ -211,6 +214,20 @@ impl Daemon {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Do not disturb follows its file; said when it changes.
+    fn check_quiet(&mut self) {
+        let config = std::env::var("XDG_CONFIG_HOME").ok();
+        let home = std::env::var("HOME").ok();
+        let quiet = quiet_file(config.as_deref(), home.as_deref()).is_some_and(|f| f.exists());
+        if quiet != self.store.quiet() {
+            self.store.set_quiet(quiet);
+            say(&format!(
+                "notifyd: do not disturb {}",
+                if quiet { "on" } else { "off" }
+            ));
         }
     }
 

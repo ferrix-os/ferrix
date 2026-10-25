@@ -103,6 +103,22 @@ pub struct Store {
     shown: Vec<Note>,
     history: Vec<Note>,
     next_id: u32,
+    /// Do not disturb: a notification goes to the list without a banner,
+    /// unless it is critical.
+    quiet: bool,
+}
+
+/// The do-not-disturb file, which the desktop's quick settings make and
+/// take away: `$XDG_CONFIG_HOME/notifyd/do-not-disturb`, else under
+/// `~/.config`. While it is there, banners stay off (`Store::set_quiet`).
+#[must_use]
+pub fn quiet_file(config_home: Option<&str>, home: Option<&str>) -> Option<std::path::PathBuf> {
+    let base = match (config_home, home) {
+        (Some(dir), _) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        (_, Some(home)) if !home.is_empty() => std::path::Path::new(home).join(".config"),
+        _ => return None,
+    };
+    Some(base.join("notifyd/do-not-disturb"))
 }
 
 /// How many notifications the list keeps.
@@ -199,11 +215,25 @@ impl Store {
         self.next_id
     }
 
+    /// Do not disturb on or off. Banners already up stay until they go.
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
+    }
+
+    /// Whether do not disturb is on.
+    #[must_use]
+    pub fn quiet(&self) -> bool {
+        self.quiet
+    }
+
     fn put(&mut self, note: Note) -> (u32, Vec<u32>) {
         let id = note.id;
         self.history.retain(|kept| kept.id != id);
         self.history.insert(0, note.clone());
         self.history.truncate(HISTORY);
+        if self.quiet && note.urgency != Urgency::Critical {
+            return (id, Vec::new());
+        }
         match self.shown.iter_mut().find(|shown| shown.id == id) {
             Some(shown) => *shown = note,
             None => self.shown.push(note),

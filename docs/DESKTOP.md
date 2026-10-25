@@ -766,7 +766,7 @@ boot that screenshots it:
 | Y1 | tokens: `yoru.conf` (floating, rounding, shadows, glow border, blur, curves) and its keys, themable title bars, the Nocturne wallpaper, Phosphor vendored; Yoru the default of `--everything` and the desktop image; boot `yoru` | 5 |
 | Y2 | the dock: tole layer-shell windows; `yoru-shell` with workspaces, launchers, tools, pomodoro, clock; boot `yoru-dock` | 8 |
 | Y3 | the launcher: fuzzel in Nocturne; then the palette in `yoru-shell` | 3 + 5 |
-| Y4 | widget sidebars: clock and calendar, quick settings, to-do (built: `yoru-shell --sidebar left` and `right`, edge reveal, pin, tabs, move and remove, clock and month, to-do kept in the person's file; weather and quick settings say "not kept yet"; boot `sidebars`) | 8 |
+| Y4 | widget sidebars: clock and calendar, quick settings, to-do (built: `yoru-shell --sidebar left` and `right`, edge reveal, pin, tabs, move and remove, clock and month, to-do kept in the person's file, boot `sidebars`; the weather, opt-in, boot `weather`; quick settings: focus mode, auto-tile, theme colour, do not disturb, brightness on a backlight, boot `quick`) | 8 |
 | Y5 | snapping as the design has it: quarters, layouts picker, guides, linked edges; tabs in the title bar | 13 |
 | Y6 | helpers: scratchpad, focus mode, shortcut sheet, jump hints, clipboard history, toasts | 8 |
 | Y7 | wallpaper picker (built: `yoru-shell --walls` on SUPER I, cover and grid, folders, colour filter and sorts, boot `walls`) and the accent from the wallpaper; parallax | 8 |
@@ -936,8 +936,14 @@ applications, in `yoru-shell` -- is still to come (5 points).
   tiles that opens them; boot `stash`.
 * **The widget sidebars** (Y4): `yoru-shell --sidebar left` and `right`,
   edge reveal, pin, tabs, move and remove, the clock and month, the to-do,
-  and the weather, opt-in (§6.6; boot `weather`); quick settings say "not
-  kept yet". Boot `sidebars`.
+  and the weather, opt-in (§6.6; boot `weather`); quick settings (boot `quick`): focus
+  mode (`decoration:dim_inactive`, as the dock's button), auto-tile
+  (`general:layout`) and the theme colour (Settings' accents) kept by
+  `hyprctl setting` as Settings keeps them, do not disturb as notifyd's
+  `do-not-disturb` file (banners off but critical ones, the list kept),
+  brightness where `/sys/class/backlight` has one; volume, the microphone,
+  Wi-Fi, Bluetooth, night light and Auto and Light are drawn faint with
+  why. Boot `sidebars`.
 * **GTK and Chrome in the tokens**: Nocturne for GTK 3 and 4 and GTK's
   settings naming it; `portald`, answering `org.freedesktop.portal.Settings`
   (dark, the accent, the theme) and `FileChooser` with Ferrix's own dialog
@@ -992,7 +998,7 @@ built and the size of what is not (points as the backlog counts them).
 | Widget sidebars, edge reveal, pin to reserve room | yes (boot `sidebars`) | |
 | Widgets: clock and month calendar | yes | |
 | Widgets: weather (Open-Meteo, opt-in, §6.6) | yes: off until a place is typed, a name looked up once and kept as rounded coordinates, now and feels like, seven days, eight hours (boot `weather`) | |
-| Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | no | 8 |
+| Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | partly: focus, auto-tile (for every workspace), theme colour, DND, brightness on a backlight (boot `quick`); not volume, mic, Wi-Fi, Bluetooth, night light, Auto and Light | 3 |
 | Widgets: to-do | yes, kept in the person's file | |
 | Command palette: windows, actions, workspaces, fuzzy | applications only, fuzzel (Y3) | 5 |
 | Switcher cards | hyprix's own | restyle -- 2 |
@@ -1009,7 +1015,7 @@ built and the size of what is not (points as the backlog counts them).
 | Sounds on snap, open, close | no | 2 |
 | Chrome and GTK apps in the tokens | yes: Nocturne for GTK 3 and 4, portald's settings, GTK in Chrome's volume (boot `chrome-yoru`), and Ferrix's file chooser for GTK and Chrome through the portal (boots `chrome-save`, `gtk-chooser`) | |
 
-The stash, the wallpaper picker and the widgets (but weather and quick
-settings) are built, as the customer asked them in that order; and Files is
+The stash, the wallpaper picker and the widgets (the weather and most
+quick settings with them) are built, as the customer asked them in that order; and Files is
 shelf, wired into Yoru: the dock's Files, the stash's folder and a folder's
 default handler (`inode/directory`, `xdg-open`) open it (boot `files`).
