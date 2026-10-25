@@ -156,6 +156,8 @@ pub(super) fn desktop(arch: Arch, args: &Args, launcher: bool) -> Result<(String
     carried
         .ports
         .push(program(arch, "yoru-shell", super::theme::DOCK)?);
+    // The file chooser, which portald opens for GTK's and Chrome's dialogs.
+    carried.ports.push(program(arch, "chooser", "bin/chooser")?);
     let mut config = format!(
         "monitor = , {}x{}@60, auto, 1\n{CONFIG}",
         SCREEN.0, SCREEN.1

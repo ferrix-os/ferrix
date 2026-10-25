@@ -779,6 +779,20 @@ and GTK 4 (hyprix's `themes/gtk`, as `/usr/share/themes/Nocturne` and
 accent, the theme's name -- what GTK 4, libadwaita and Chrome read for
 their own dark mode. It offers no other portal.
 
+The file chooser is Ferrix's own on Yoru: portald answers
+`org.freedesktop.portal.FileChooser` (OpenFile and SaveFile, the filters,
+the current folder and name) by opening the `chooser` app, tole's
+`FileDialog` after the customer's Key File Dialog design, with a name
+field when saving; the session's environment has `GTK_USE_PORTAL=1` and
+`GDK_DEBUG=portals`, so GTK 3's and GTK 4's dialogs and Chrome's go there
+rather than to GTK's own (`test-compositor --boot chrome-save` and
+`--boot gtk-chooser`). It needs a session bus. Not yet: several files at
+once (`multiple` answers one), and choosing a folder as such.
+
+Follow-up, not built: the Files app in the same design language -- tabs,
+places and pinned folders, list and grid -- the window beside the dialog
+in the customer's design.
+
 Measured on the GPU path where it costs: the dock's and sidebars' blur
 (`layerrule = blur`), the focused window's glow, and the workspace slide,
 as frame times from hyprix's frame statistics with and without each.

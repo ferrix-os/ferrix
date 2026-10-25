@@ -250,6 +250,10 @@ fn named_keys(named: &[String]) -> Result<Vec<String>> {
 /// No `sshdt` built for `arch` (`cargo xtask build-apps --app sshdt`), or a key
 /// `ssh-keygen` could not make.
 pub(crate) fn test_server(arch: crate::paths::Arch) -> Result<(Vec<File>, String)> {
+    // Built here where it is not yet: sshdt is a script app, which nothing
+    // else builds before a boot that needs it, so a gate slot that had not
+    // run test-apps refused the boot (2026-10-25).
+    let _ = crate::apps::build_unless_built(arch, "sshdt", false)?;
     let mut files = crate::apps::taken(arch, &["sshdt"])?;
     if !files.iter().any(|file| file.path == SERVER_PATH) {
         return Err(Error::new(format!(

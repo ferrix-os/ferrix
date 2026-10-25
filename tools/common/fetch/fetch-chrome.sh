@@ -25,9 +25,9 @@
 # than on Ferrix.
 #
 # Writes $FERRIX_CHROME_VOLUME/chrome.img (default
-# ~/.local/share/ferrix/chrome-3/chrome.img). Needs curl, sha256sum, dpkg-deb,
-# unzip, readelf, mkfs.btrfs, glib-compile-schemas and update-mime-database;
-# no root.
+# ~/.local/share/ferrix/chrome-4/chrome.img). Needs curl, sha256sum, dpkg-deb,
+# unzip, readelf, mkfs.btrfs, glib-compile-schemas, update-mime-database and
+# a C compiler (cc); no root.
 #
 # Usage: tools/common/fetch/fetch-chrome.sh
 
@@ -38,8 +38,9 @@ security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
 chrome_dist=${CHROME_FOR_TESTING:-https://storage.googleapis.com/chrome-for-testing-public}
 # The volume's directory is versioned (xtask's chrome::VOLUME names the same):
 # chrome-2 added GTK 3, chrome-3 GTK's file chooser (its schemas, SVG and
-# gdk-pixbuf's loaders' cache); the earlier ones are left as they were.
-out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome-3}
+# gdk-pixbuf's loaders' cache), chrome-4 a session bus, GTK 4 and zenity,
+# and gtk3-open; the earlier ones are left as they were.
+out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome-4}
 # Where a pinned Debian file comes from once the mirror has dropped it, as
 # trixie-security drops a package's update when the next one comes:
 # snapshot.debian.org's archive as it was on the days the pins were taken,
@@ -146,6 +147,40 @@ debs=(
     "main/d/dav1d/libdav1d7_1.5.1-1_amd64.deb 8c64de4465a8ae1ca23e1dada1dfc73d7b431540fd5ae18f21430928576d5b05"
     "main/libr/librsvg/librsvg2-2_2.60.0+dfsg-1_amd64.deb 81fd7a825f06e344dc42fb7af92577ec242b6d24237b8a0bf79ea203a7f377c9"
     "main/libr/librsvg/librsvg2-common_2.60.0+dfsg-1_amd64.deb aba248f2913dbcbb2bde40621b7478575983bfc18fdf61562413c82a4bef9995"
+    # A session bus (dbus-daemon), which the desktop portal is reached on, and
+    # GTK 4 with zenity, a GTK 4 program whose file dialog a boot opens
+    # through the portal (docs/CHROME.md §10).
+    "main/d/dbus/dbus-bin_1.16.2-2_amd64.deb a7c0785f89d3763bb83e2912237135a7d1c610e06f487c39b1d6408e88d46fb5"
+    "main/d/dbus/dbus-daemon_1.16.2-2_amd64.deb c91558cbd019bd5ec3e9fde0084976d5f61977f4ef0a9ed1ff48fe3a129b91d4"
+    "main/d/dbus/dbus-session-bus-common_1.16.2-2_all.deb 98bd27836c7170839ed9c84b00daad9ed7155bd3d42e3f0ec3faf497aafa5f5f"
+    "main/liba/libadwaita-1/libadwaita-1-0_1.7.6-1~deb13u1_amd64.deb b3ff133512acc2d303892eba6eeac29506efd579e418fdbce6af6dcb50b3de4c"
+    "main/a/apparmor/libapparmor1_4.1.0-1_amd64.deb 4158976c77038b93021967f425b4cc505df18c4f5e3f444732399e7ed4af4419"
+    "main/a/appstream/libappstream5_1.0.5-1_amd64.deb 532cdb01d8b8bc522719bba46fa61d16f91a3efbad32394466b97d4a69340a7d"
+    "main/a/audit/libaudit1_4.0.2-2+deb13u1_amd64.deb 3d1dd3f031a56f01b747e2acc0e14575212580e6fa63d800c44cb0a31f1edfd7"
+    "main/a/audit/libaudit-common_4.0.2-2+deb13u1_all.deb b9d32e5ff04fd747aacb7d6b3ebbbbf734ddefb2f1695f0b1b2a4b5e51b1052e"
+    "main/c/cairo/libcairo-script-interpreter2_1.18.4-1+b1_amd64.deb 52b45eb6e49c53c0a35ef45555a9457b094482eafef27d27cd777b916a2f06de"
+    "main/libc/libcap-ng/libcap-ng0_0.8.5-4+b1_amd64.deb 20a9e4b0619a3eb2566338223bed135dde5a601eaa2f8fdd5f20b94506addcac"
+    "main/c/curl/libcurl3t64-gnutls_8.14.1-2+deb13u5_amd64.deb 19da93544615a4c9a3d7df473f5bf8ebca99442454622e9b0460168dadf7b8ae"
+    "main/d/db5.3/libdb5.3t64_5.3.28+dfsg2-9_amd64.deb 18d02510ee78b67e4504ba050176797a200ff24214a7cd318082ab60ad7bf3fc"
+    "main/libg/libglvnd/libgles2_1.7.0-1+b2_amd64.deb e12c18aa77939d122ee1dea520ba0440b97dc19200b7396e03dff03a3ece74c1"
+    "main/libg/libglvnd/libglvnd0_1.7.0-1+b2_amd64.deb 887f74008166549ce9e100c906aa937e95d6e5ce1c8d86efe8c95fd953359b9c"
+    "main/g/graphene/libgraphene-1.0-0_1.10.8-5_amd64.deb ddcf98f17f6c0a7c76974d7238be1468e59c186034c1b806638d32d9f446ea6e"
+    "main/g/gtk4/libgtk-4-1_4.18.6+ds-2_amd64.deb 51ab1114a57702e703cce745c24caf5bd31ec1d2a900c72fd15fe47c6c030e68"
+    "main/g/gtk4/libgtk-4-common_4.18.6+ds-2_all.deb 32f0ad042f983b1d53cd2c260d4042eda9041b6debb71beb91937196b1ff3f6b"
+    "main/h/harfbuzz/libharfbuzz-subset0_10.2.0-1+deb13u1_amd64.deb 2d0de8588408af221927b372c3c8d439d638a0a8abb549660ed5813ab529e6bc"
+    "main/o/openldap/libldap2_2.6.10+dfsg-1_amd64.deb 60069e4a550ca890113fa89d3001417781b18e146ec5d637d31e368dec9909bd"
+    "main/l/lzo2/liblzo2-2_2.10-3+b1_amd64.deb f3032201fe2928a87e13f05ce256ff3ac2a7860c7e594dc51ae6d7348a4466ce"
+    "main/n/nghttp3/libnghttp3-9_1.8.0-1_amd64.deb 388e4c33b72829cbf0d098afdc8539fa5ba7458eddb077f5538fdb4d5538716b"
+    "main/libp/libpsl/libpsl5t64_0.21.2-1.1+b1_amd64.deb 59d42bb1f9ebc0d1776fe616efb08a7a8568b05982e00f70b03c63863db768ab"
+    "main/r/rtmpdump/librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb 93baa2004cbe6c8721b9e81beed078612540aef120970b4751305c51c6697368"
+    "main/c/cyrus-sasl2/libsasl2-2_2.1.28+dfsg1-9_amd64.deb 66e49d7ae026811b49a0050f18b0325960a2625ffd1ff60d91b7844a815fa9d2"
+    "main/c/cyrus-sasl2/libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb a5c38659fbd62c33c6d9bfa2be43e75a572d1818531aad32dd74d0a58cc4bd19"
+    "main/s/snowball/libstemmer0d_2.2.0-4+b2_amd64.deb ee9510a4f48b6efad845cad80b8773d72219291d325e4e3c3d07b3930a7bf2ee"
+    "main/v/vulkan-loader/libvulkan1_1.4.309.0-1_amd64.deb f47da79cd140264fe21cceb08bc87a71bc7fec05819e4a421f3f518d21101a37"
+    "main/libx/libxmlb/libxmlb2_0.3.22-1_amd64.deb 21288db65dd4b5b4e7f054674d383a5af328663d0cd81e6871e8bcde221b2f0e"
+    "main/liby/libyaml/libyaml-0-2_0.2.5-2_amd64.deb 8a5475402801de445a17887bb72d03613565a6a84b216b4b606d1462c613eeb2"
+    "main/z/zenity/zenity_4.1.90-1_amd64.deb ac56ebaf225e62c8413101d7ddc255eff459b683c8c6a0801da978cfa473bbbd"
+    "main/z/zenity/zenity-common_4.1.90-1_all.deb f058842a23605662eb92efc602aee198906db888ed61301e5b8f061e042f91d0"
     # The keyboard's layouts, which GTK's xkbcommon reads and aborts without.
     "main/x/xkeyboard-config/xkb-data_2.42-1_all.deb 196ff18533382f64e057ea49df2bb486bd4275a4cc0917361edb560b8756dada"
     "main/a/adwaita-icon-theme/adwaita-icon-theme_48.1-1_all.deb f60b0577aee314d43d6908ca7f0b8f07dc48e2bb766e7e25035330817e0e827c"
@@ -189,6 +224,11 @@ security_debs=(
     "updates/main/k/krb5/libkrb5-3_1.21.3-5+deb13u1_amd64.deb 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97"
     "updates/main/k/krb5/libkrb5support0_1.21.3-5+deb13u1_amd64.deb 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117"
     # GTK 3's, from the security archive.
+    "updates/main/n/nghttp2/libnghttp2-14_1.64.0-1.1+deb13u1_amd64.deb 896cb217537c09251fb909b8541349010ac279d802d871e98c06a62a2c67ce2c"
+    "updates/main/n/ngtcp2/libngtcp2-16_1.11.0-1+deb13u1_amd64.deb 627eec81ebbd48c4e6091f5cd9dc5070b792b7075000eed60ab08c7daa961caf"
+    "updates/main/n/ngtcp2/libngtcp2-crypto-gnutls8_1.11.0-1+deb13u1_amd64.deb 2a7f109c0c4db6a800e4661c5e5e34e1f1f83c8162482276183d1ada9da7c96c"
+    "updates/main/libs/libssh2/libssh2-1t64_1.11.1-1+deb13u1_amd64.deb 915c4ec450a369d430e0151f9e10e25044ea2f0d6e41901e00a9317e232e5683"
+    "updates/main/o/openssl/libssl3t64_3.5.7-1~deb13u2_amd64.deb 916f7f40b34a06e6ebfaefcdab331bff458328411da672598f126a760472467d"
     "updates/main/libx/libxml2/libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u1_amd64.deb b4743a0fd8e86379ec2bdfb6b97b99fb1c92a925e538920052316814470e99f8"
     "updates/main/g/gdk-pixbuf/libgdk-pixbuf-2.0-0_2.42.12+dfsg-4+deb13u1_amd64.deb 94150fb955b2d3a9a5e054e31c5a4b048bad4a479207e86cde46fbc975c838b4"
     "updates/main/g/gdk-pixbuf/libgdk-pixbuf2.0-common_2.42.12+dfsg-4+deb13u1_all.deb 9f0c64e33cf5bb3226a5a6ddf630dd76530596e476e6b47a8b27da444ff43a03"
@@ -196,7 +236,7 @@ security_debs=(
     "updates/main/t/tiff/libtiff6_4.7.0-3+deb13u3_amd64.deb 6bb2038f36817ae1ee6d33df03917b21835dcc2e0f3e3e80a71390e83c171173"
 )
 
-for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs glib-compile-schemas update-mime-database; do
+for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs glib-compile-schemas update-mime-database cc; do
     command -v "$tool" > /dev/null || { echo "fetch-chrome: $tool is not installed" >&2; exit 1; }
 done
 
@@ -286,6 +326,15 @@ test -x "$tree/chrome-window/chrome" \
 test -e "$tree/usr/lib64/ld-linux-x86-64.so.2" \
     || { echo "fetch-chrome: no linker at usr/lib64" >&2; exit 1; }
 
+# gtk3-open (gtk3-open.c beside this script): GTK 3's native file chooser,
+# for the boot that shows a GTK 3 program's dialog is Ferrix's. Linked
+# against the volume's GTK, by the host's compiler: it calls four of GTK's
+# functions and printf.
+mkdir -p "$tree/usr/local/bin"
+cc -O2 -o "$tree/usr/local/bin/gtk3-open" "$(dirname "$0")/gtk3-open.c" \
+    "$tree/usr/lib/x86_64-linux-gnu/libgtk-3.so.0" \
+    -Wl,-rpath-link,"$tree/usr/lib/x86_64-linux-gnu" -Wl,--allow-shlib-undefined
+
 # Every library an ELF file on the volume needs must be on it: in glibc's
 # directory, beside Chrome, or glibc itself.
 missing=0
@@ -309,6 +358,7 @@ while IFS= read -r -d '' file; do
         fi
     done
 done < <(find "$tree/chrome" "$tree/chrome-window" "$tree/usr/lib/x86_64-linux-gnu" \
+    "$tree/usr/bin" "$tree/usr/local/bin" \
     "$tree/usr/lib/x86_64-linux-gnu/pulseaudio" -maxdepth 1 -type f -print0)
 [ "$missing" = 0 ] || exit 1
 

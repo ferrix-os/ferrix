@@ -642,8 +642,9 @@ pub(crate) fn pulse_volume() -> Result<std::path::PathBuf> {
 /// volume with new contents gets a directory of its own, so every machine
 /// keeps the one it had until the commit that names the new one lands. 2
 /// added GTK 3 (2026-10-25), 3 its file chooser's schemas, SVG and
-/// gdk-pixbuf's loaders' cache; the earlier ones are left where they are.
-pub(crate) const VOLUME: &str = "chrome-3";
+/// gdk-pixbuf's loaders' cache, 4 a session bus, GTK 4, zenity and
+/// gtk3-open; the earlier ones are left where they are.
+pub(crate) const VOLUME: &str = "chrome-4";
 
 /// Where `tools/common/fetch/fetch-chrome.sh` writes, unless `FERRIX_CHROME_VOLUME`
 /// names another directory.

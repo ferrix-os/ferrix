@@ -30,6 +30,8 @@ const DESKTOP_APPS: &[(&str, &str)] = &[
     ("hyprlock", "hyprlock"),
     // Yoru's dock (docs/DESKTOP.md §6), which its theme starts.
     ("yoru-shell", "yoru-shell"),
+    // The file chooser portald opens for GTK and Chrome on Yoru.
+    ("chooser", "chooser"),
 ];
 
 /// Where `run-compositor` puts the wallpaper it carries.

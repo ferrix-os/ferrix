@@ -1282,3 +1282,11 @@ loader for the SVG icons. The image links `usr/share/glib-2.0` and
 `usr/share/mime` to the volume's. `test-compositor --boot chrome-save`
 presses Ctrl+S in Chrome under Yoru and requires GTK's "Save File" window,
 gone again at Escape with Chrome still running.
+
+The fourth, `chrome-4`, carries what Ferrix's own file chooser is shown
+with through the desktop portal: a session bus (Debian's `dbus-daemon`,
+which the portal boots start), GTK 4 and zenity, and `gtk3-open`, four
+calls of GTK 3's native chooser built by the script against the volume's
+GTK (`tools/common/fetch/gtk3-open.c`). With them, `test-compositor --boot
+chrome-save` requires Chrome's Save-as to be Ferrix's chooser, not GTK's,
+and `--boot gtk-chooser` the same of a GTK 3 and a GTK 4 program.

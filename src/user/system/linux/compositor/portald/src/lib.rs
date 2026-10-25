@@ -7,11 +7,17 @@
 //! for its own dark mode -- each through `ReadOne` (version 2) or the older
 //! `Read`, whose answer is a variant in a variant.
 //!
+//! It also answers `org.freedesktop.portal.FileChooser` ([`chooser`]):
+//! Open and Save are Ferrix's own dialog, tole's `FileDialog`, so GTK's and
+//! Chrome's dialogs on Yoru are that one.
+//!
 //! What it says is fixed at its start (`--light` for a light desktop):
 //! nothing is read from the person, nothing is written, and no other
-//! portal is offered -- a program that asks for a file chooser or a
-//! screenshot gets the bus's "no such interface" and falls back as it does
-//! where no portal runs.
+//! portal is offered -- a program that asks for a screenshot gets the
+//! bus's "no such interface" and falls back as it does where no portal
+//! runs.
+
+pub mod chooser;
 
 use compositor_dbus::{Message, Writer};
 
@@ -130,6 +136,41 @@ fn write_keys(out: &mut Writer, all: &[(&str, &str, Value)], namespace: &str) {
     }
 }
 
+/// A file chooser's call: the reply naming its request, the request's
+/// path, the caller, and what the dialog is asked; `None` for any other
+/// message.
+#[must_use]
+pub fn dialog(call: &Message, serial: u64) -> Option<(Message, String, String, chooser::Asked)> {
+    let save = if call.is_call(chooser::FILE_CHOOSER, "SaveFile") {
+        true
+    } else if call.is_call(chooser::FILE_CHOOSER, "OpenFile") {
+        false
+    } else {
+        return None;
+    };
+    let sender = call.sender.clone().unwrap_or_default();
+    let Ok(mut asked) = chooser::asked(call, save) else {
+        return Some((
+            Message::error_to(
+                call,
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "OpenFile and SaveFile take (s parent_window, s title, a{sv} options)",
+            ),
+            String::new(),
+            sender,
+            chooser::Asked::default(),
+        ));
+    };
+    if asked.token.is_empty() {
+        asked.token = format!("portald{serial}");
+    }
+    let path = chooser::request_path(&sender, &asked.token);
+    let mut body = Writer::new();
+    body.string(&path);
+    let reply = Message::reply_to(call).with_body("o", body);
+    Some((reply, path, sender, asked))
+}
+
 /// The answer to `call`, or `None` for a message that wants none.
 #[must_use]
 pub fn answer(call: &Message, dark: bool) -> Option<Message> {
@@ -180,9 +221,16 @@ pub fn answer(call: &Message, dark: bool) -> Option<Message> {
     if call.is_call("org.freedesktop.DBus.Properties", "Get") {
         let interface = reader.string().unwrap_or_default();
         let property = reader.string().unwrap_or_default();
-        if interface == SETTINGS && property == "version" {
+        let version = match interface {
+            SETTINGS => Some(VERSION),
+            chooser::FILE_CHOOSER => Some(chooser::VERSION),
+            _ => None,
+        };
+        if let Some(version) = version
+            && property == "version"
+        {
             let mut body = Writer::new();
-            Value::U32(VERSION).write_variant(&mut body);
+            Value::U32(version).write_variant(&mut body);
             return Some(Message::reply_to(call).with_body("v", body));
         }
         return Some(Message::error_to(
@@ -195,10 +243,15 @@ pub fn answer(call: &Message, dark: bool) -> Option<Message> {
         let interface = reader.string().unwrap_or_default();
         let mut body = Writer::new();
         body.array(8, |out| {
-            if interface == SETTINGS {
+            let version = match interface {
+                SETTINGS => Some(VERSION),
+                chooser::FILE_CHOOSER => Some(chooser::VERSION),
+                _ => None,
+            };
+            if let Some(version) = version {
                 out.align(8);
                 out.string("version");
-                Value::U32(VERSION).write_variant(out);
+                Value::U32(version).write_variant(out);
             }
         });
         return Some(Message::reply_to(call).with_body("a{sv}", body));
@@ -208,13 +261,14 @@ pub fn answer(call: &Message, dark: bool) -> Option<Message> {
         body.string(INTROSPECTION);
         return Some(Message::reply_to(call).with_body("s", body));
     }
-    if call.is_call("org.freedesktop.DBus.Peer", "Ping") {
+    if call.is_call("org.freedesktop.DBus.Peer", "Ping") || call.is_call(chooser::REQUEST, "Close")
+    {
         return Some(Message::reply_to(call));
     }
     Some(Message::error_to(
         call,
         "org.freedesktop.DBus.Error.UnknownMethod",
-        "portald offers org.freedesktop.portal.Settings alone",
+        "portald offers org.freedesktop.portal.Settings and FileChooser alone",
     ))
 }
 
@@ -226,6 +280,11 @@ pub const INTROSPECTION: &str = r#"<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-
   <method name="Read"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
   <method name="ReadOne"><arg type="s" name="namespace" direction="in"/><arg type="s" name="key" direction="in"/><arg type="v" name="value" direction="out"/></method>
   <signal name="SettingChanged"><arg type="s" name="namespace"/><arg type="s" name="key"/><arg type="v" name="value"/></signal>
+  <property name="version" type="u" access="read"/>
+ </interface>
+ <interface name="org.freedesktop.portal.FileChooser">
+  <method name="OpenFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
+  <method name="SaveFile"><arg type="s" name="parent_window" direction="in"/><arg type="s" name="title" direction="in"/><arg type="a{sv}" name="options" direction="in"/><arg type="o" name="handle" direction="out"/></method>
   <property name="version" type="u" access="read"/>
  </interface>
 </node>
