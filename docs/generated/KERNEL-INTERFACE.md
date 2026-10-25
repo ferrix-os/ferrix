@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2389 declarations in the core's files, 175 in the item's; 71 checks-only.
+2384 declarations in the core's files, 175 in the item's; 71 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1518,12 +1518,7 @@ checks above is `pub` for raised checks (F3).
 | `order` | fn | bin |  |
 | `reserved` | fn | bin |  |
 | `HELD_OFF` | static | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Policy` | struct | bin |  |
-| `DecodingRefusal` | type | - |  |
-| `Policy::decoding_refusal` | field | item, bin |  |
-| `Policy::kernel_mapping` | field | bin |  |
-| `Policy::may_lend` | field | item, load, bin |  |
-| `Policy::refuses` | field | item, load, bin |  |
+| `Policy` | trait | bin |  |
 
 ### `discovery`
 
@@ -1960,7 +1955,7 @@ checks above is `pub` for raised checks (F3).
 | `Interrupt` | struct | item, load |  |
 | `Delivery::fire` | method | load |  |
 | `Interrupt::acknowledge` | method | item, load |  |
-| `Interrupt::bind` | method | item, load, bin |  |
+| `Interrupt::bind` | method | item, load |  |
 | `Interrupt::coalesces` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Interrupt::new` | method | item, load, bin |  |
 | `Interrupt::reads_masked` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2814,7 +2809,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `cache` | mod | load |  |
 | `check` | mod | bin (checks) | pub for raised checks |
-| `memory_type` | mod | item, load |  |
+| `memory_type` | mod | item, load, bin |  |
 | `space` | mod | item, load |  |
 | `vmo` | mod | item, load, bin |  |
 
@@ -2854,7 +2849,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `MemoryType` | enum | item, load |  |
+| `MemoryType` | enum | item, load, bin |  |
 | `Refused` | enum | item, load |  |
 | `claims` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `hold` | fn | item |  |

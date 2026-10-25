@@ -747,7 +747,7 @@ fn check_noexec_scopes(
         }
         *refusals += 1;
     }
-    if (crate::setters::bound().sysctl_memfd_noexec)(process, b"2") != Ok(1) {
+    if crate::setters::sysctl_memfd_noexec(process, b"2") != Ok(1) {
         return Err("vm.memfd_noexec would not be set to 2");
     }
     refused(

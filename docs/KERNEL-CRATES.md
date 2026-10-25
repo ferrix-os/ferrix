@@ -750,58 +750,61 @@ flag is the configuration record of it (3558 addendum (a)).
    `#[no_mangle]`, `export_name`, `#[used]` or `#[link_section]` item and no
    link-time hook (3623 (R2)), so a link that does not name it keeps
    nothing of it.
-2. **Load defines one small typed interface**, a struct of function
-   pointers in a load file of its own (`setters.rs`: `Setters`, twelve
-   fields, `ENTRIES = 12`), with no `Default` and no constructor; its two
-   bindings are statics, the crate's `SETTERS` and the load's **`ABSENT`**,
-   so they can be told apart by address. It is registered once at bring-up,
-   before the first user program (`setters::bind`, a second registration
-   refused), and read through one accessor (`setters::bound`), which
-   answers `ABSENT` before registration: the interface fails closed. Every
-   load call site goes through it, one call per site.
-3. **The composition root binds it** (`main.rs`):
+2. **Load defines one small typed interface**: a trait, generated with
+   everything its binding needs by `seam!` (`seam.rs`) from one list in a
+   load file of its own (`setters.rs`: trait `Setters`, twelve entries, each
+   a name, its symbol `__ferrix_setters_<entry>` and its signature), with the
+   load's implementation `Absent` beside it, written against the trait. The
+   load's call sites call the module's function of an entry,
+   `setters::<entry>(..)`, whose one `unsafe` block calls the symbol; the
+   symbols are declared `extern "Rust"` and defined only by the binding
+   macro (§6.3, ledger 3934).
+3. **The composition root binds it** (`main.rs`), once, statically:
    ```rust
    #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
-   const SETTERS: &setters::Setters = &ferrix_kernel_settings::SETTERS;
+   ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
    #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
-   const SETTERS: &setters::Setters = &setters::ABSENT;
+   ferrix_kernel_load::bind_setters!(setters::Absent);
    ```
-   `bind_setters`, right after the system calls are registered, binds
-   `SETTERS` and requires `bound()` to be it by address, stopping the boot
-   under `LOAD_REGISTRATION` (FX-0006) otherwise or on a second
-   registration (3623 (R4)). That identity check sits inside
-   `bind_setters`, so a build whose root never calls `bind_setters` is
-   caught only by the boot checks that go through `bound()`: it fails
-   closed, a `live` build without its registration answering as `fixed`
-   does (EPERM). A check that holds without the call is owed before
-   `ferrix-kernel-crash` lands (`docs/backlog/p2.md`; ledger 3762 (2)).
-   The crate's flag-word assert is under
-   `cfg(ferrix_runtime_settings = "live")` too. Under `fixed` the binary
-   names the crate nowhere, so rustc never loads it and the linker never
-   sees it; the crate-level `#![cfg_attr(ferrix_runtime_settings = "fixed",
+   Each invocation defines every symbol as a `#[unsafe(no_mangle)]`,
+   out-of-line Rust-ABI function calling its type's implementation, from the
+   same tokens as the declarations, so the two cannot differ. There is no
+   run-time registration: a root with no invocation leaves the symbols
+   undefined and one with two defines them twice, and neither links -- the
+   registration check is the linker's, which closes ledger 3762 (2). The
+   crate's flag-word assert is under `cfg(ferrix_runtime_settings = "live")`
+   too. Under `fixed` the binary names the crate nowhere, so rustc never
+   loads it and the linker never sees it; the crate-level
+   `#![cfg_attr(ferrix_runtime_settings = "fixed",
    expect(unused_crate_dependencies, ..))]` is the one lint attribute that
    build needs (3623 (R3)): `expect` is fulfilled there, and `live` builds
    keep the lint under `-D warnings`.
 4. **The manifest records it**: `composition_root.removable`, one entry
    per crate: `flag`, `present_when`, `interface`, `defined_in`, `absent`,
-   `binding` (one path per value of the flag), `fields`, `calls` (the load
-   files calling through the interface), `lint_expect`, `symbol` and
-   `absent_symbols` (the load's mechanisms only the crate calls).
+   `binding` (one type per value of the flag), `bind_macro`, `methods`,
+   `seam_symbols`, `calls` (the load files calling through the interface),
+   `lint_expect`, `symbol` and `absent_symbols` (the load's mechanisms only
+   the crate calls).
    `ferrix-kernel-crash` adds its own entry (`crash_capture`, `hold`, its
    `CrashHook`, ...) and a line in xtask's `REMOVABLE`, and no new check code.
 5. **The checks are generic over that record** (3558 (11), 3595 (C4)):
-   * `check-item-boundary.py`'s `removable_problems` (ten self-test
+   * `check-item-boundary.py`'s `removable_problems` (eleven self-test
      cases): the crate depends on the load and only the binary on it, the
      binary's manifest lists it; no kernel file but the root names it; the
      crate exports nothing a link would keep; every reference to it in the
      root sits under `cfg(ferrix_<flag> = "<present_when>")`; the
      `lint_expect` attribute is there; each value of the flag has exactly
-     one binding, to the recorded path; the interface has exactly the
-     recorded fields, `ENTRIES` their count, no `Default`, no value built
-     outside `defined_in` and the crate; the files calling through it are
-     the recorded ones; and every profile file, buildable or not, is
-     refused if its value is not `present_when` and its binary would name
-     the crate, or if it is and would not.
+     one invocation of the binding macro, of the recorded type; the seam's
+     list has exactly the recorded entries and symbols; only `Absent` in
+     `defined_in` and the crate's type implement the trait; the files
+     calling through it are the recorded ones; and every profile file,
+     buildable or not, is refused if its value is not `present_when` and
+     its binary would name the crate, or if it is and would not. And
+     `seam_scan_problems` (four self-test cases) over every Rust file of
+     every path crate `ferrix-kernel` reaches in the cargo metadata graph,
+     `src/lib` included (3934 (2), (3)): no file defines a `__ferrix_`
+     symbol by name -- `no_mangle`, `export_name` or an assembly `.globl` --
+     and none but the seam's own list and macro names one.
    * **The ELF is the dependency evidence of record** (3623 (R1)): Cargo
      lists the crate in every build, since it has no way to make a
      dependency conditional on a build-script `--cfg` without a feature,
@@ -811,8 +814,10 @@ flag is the configuration record of it (3558 addendum (a)).
      C --value V` (four self-test cases) reads `nm --demangle`: no symbol
      of the crate, nor any of `absent_symbols`, in a kernel built with an
      absent value; at least one of the crate's in one built with the
-     present value (its `SETTERS` static is always kept, its address
-     registered). `cargo xtask test-removable` links the release kernel
+     present value. And each of the record's `seam_symbols` is defined
+     exactly once, and in a present build each one's code calls into the
+     crate (its implementation's methods are out of line for this; llvm's
+     objdump reads every architecture's ELF) (3934 (4)). `cargo xtask test-removable` links the release kernel
      with each value on the three architectures, keeps each ELF under
      `target/removable/` and runs the check on it.
    * `check-build-flags.py` rule 6e (one self-test case): a cfg of a
@@ -893,8 +898,10 @@ same answers byte for byte, the same boot lines.
    ```
    Every call is a direct call the linker resolves to the chosen
    implementation's function: static dispatch, nothing chosen at run time.
-   The crate's `SETTERS` static and the load's `ABSENT` static, `bind`,
-   `bound` and `ENTRIES` go; the crate gains `pub struct Live;` and its
+   The crate's `SETTERS` static and the load's `ABSENT` static, `bind`
+   and `bound` go; `ENTRIES` stays, generated by `seam!` with the rest
+   (the entries' count, which the absent setters' check holds its calls
+   to); the crate gains `pub struct Live;` and its
    `impl Setters for Live`, forwarding to the moved entries, which stay as
    they are. The `#[unsafe(no_mangle)]` items are the binary root's, from
    the load's macro, never the crate's: 3623 (R2) stands (the crate exports
@@ -956,6 +963,14 @@ invocation removed and made twice, read `FIRED`. `trap::ReturnPath` does not
 join now: it is a core interface whose `fault_signal` 3570 (2) changes
 under its own requirement, so it comes later and alone, after `CrashHook`,
 with its own review (`docs/BACKLOG.md`).
+
+**Code review**: OK IF (1)-(4), ledger line 4406 (heading 4404), for the
+landing of Setters and Policy: (1)-(8) met in the code; the rows and
+controls run on 84b80b931 count for the rebased commit, whose rebase
+conflicted only on derived evidence pages, so check re-ran; boot lines
+need no base runs, since the change adds and alters no output statement
+(it removes only `bind_setters`'s two never-reached `fatal!` calls,
+whose job the link now does); `CrashHook` (9) follows in its own landing.
 
 **Order**: this design, reviewed; then Setters and Policy ported and landed
 (no behaviour change; rows: check, test-boot on the four boots, test-removable,
@@ -1036,15 +1051,16 @@ real-time clock; `devmgr::request` is `devmgr`'s own (item);
 `power::request_boot_mode` and the stm32mp1 TAMP write keep
 `service_check.rs`'s check of a word no board knows.
 
-**The boot checks that call a moved entry** go through
-`setters::bound()`: `syscall/check.rs`'s `clock_settime` and
+**The boot checks that call a moved entry** go through the setters
+module's wrappers (`setters::<entry>(..)`): `syscall/check.rs`'s `clock_settime` and
 `sethostname` checks and `fs/memfd_check.rs`'s `memfd_noexec` write
 (3623 (R8)); `fs/smallns_check.rs`'s programs set a hostname by the
 system call, so through the dispatch. **Statement settings-1** (a load
 statement in LOGGING.md §21.7's form, 3623 (R16)): *every entry of
-`setters::ABSENT` answers `EPERM` without reading an argument*; boot
+`setters::Absent` answers `EPERM` without reading an argument*; boot
 sub-case `syscall/check.rs`'s `check_absent_setters_refuse`, which calls
-each field directly in every build and requires `ENTRIES` answers;
+each `<Absent as Setters>` entry directly in every build and requires as
+many answers as `seam!`'s `ENTRIES`;
 control (j). "A fixed kernel contains no setting entry" is a
 configuration statement the ELF check proves, not a requirement, and no
 `L` id is reserved: ids come only when a fixed profile claims it in the

@@ -319,7 +319,7 @@ fn nothing(_: &Kernel) -> Result<Vec<u8>> {
 
 /// `/proc/sysrq-trigger`'s write, a run-time setting (`crate::setters`).
 fn sysrq_trigger(kernel: &Kernel, data: &[u8]) -> Result<usize> {
-    (crate::setters::bound().sysrq_trigger)(kernel, data)
+    crate::setters::sysrq_trigger(kernel, data)
 }
 
 /// A directory of `/proc` whose files only report, so a write to one is

@@ -5,7 +5,7 @@
 //! certification consultant's ledger lines 3558 (9) and 3623). It depends on
 //! `ferrix-kernel-load` and nothing depends on it but the binary, whose
 //! composition root names it only in a `runtime_settings = "live"` build:
-//! there it registers [`SETTERS`] into the load's `setters::Setters`, and in
+//! there it binds [`Live`] as the load's `setters::Setters`, and in
 //! a `fixed` build it names this crate nowhere, so none of it is linked.
 //!
 //! The entries moved here whole from the load files that dispatch them, each
@@ -55,20 +55,80 @@ pub mod settings {
     pub mod uts;
 }
 
-/// This crate's binding of the load's run-time setting entries, which a
-/// `runtime_settings = "live"` composition root registers.
+/// This crate's implementation of the load's run-time setting entries, which
+/// a `runtime_settings = "live"` composition root binds
+/// (`ferrix_kernel_load::bind_setters!`).
 #[cfg(ferrix_linux_abi = "on")]
-pub static SETTERS: ferrix_kernel_load::setters::Setters = ferrix_kernel_load::setters::Setters {
-    sethostname: settings::uts::sys_sethostname,
-    setdomainname: settings::uts::sys_setdomainname,
-    syslog_clear: settings::log::clear,
-    syslog_read_clear: settings::log::read_clear,
-    restart_with_word: settings::reboot::restart_with_word,
-    clock_settime: settings::clock::sys_clock_settime,
-    settimeofday: settings::clock::sys_settimeofday,
-    sysrq_trigger: settings::sysrq::sysrq_trigger,
-    sysctl_hostname: settings::sysctl::set_hostname,
-    sysctl_domainname: settings::sysctl::set_domainname,
-    sysctl_memfd_noexec: settings::memfd_noexec::set_noexec,
-    driver_bind: settings::driver_bind::driver_bind,
-};
+#[derive(Debug, Clone, Copy)]
+pub struct Live;
+
+#[cfg(ferrix_linux_abi = "on")]
+mod live {
+    use ferrix_kernel_load::setters::{Bus, Errno, Kernel, Process, Setters, TimeWidth};
+
+    use super::{Live, settings};
+
+    // Out of line, so each `__ferrix_setters_*` symbol of a `live` kernel
+    // shows the call into this crate (check-removable-symbols, ledger 3934
+    // (4)).
+    impl Setters for Live {
+        #[inline(never)]
+        fn sethostname(process: &Process, name: u64, len: i32) -> Result<usize, Errno> {
+            settings::uts::sys_sethostname(process, name, len)
+        }
+        #[inline(never)]
+        fn setdomainname(process: &Process, name: u64, len: i32) -> Result<usize, Errno> {
+            settings::uts::sys_setdomainname(process, name, len)
+        }
+        #[inline(never)]
+        fn syslog_clear(process: &Process) -> Result<usize, Errno> {
+            settings::log::clear(process)
+        }
+        #[inline(never)]
+        fn syslog_read_clear(process: &Process, buf: u64, len: i32) -> Result<usize, Errno> {
+            settings::log::read_clear(process, buf, len)
+        }
+        #[inline(never)]
+        fn restart_with_word(process: &Process, word: u64) -> Result<usize, Errno> {
+            settings::reboot::restart_with_word(process, word)
+        }
+        #[inline(never)]
+        fn clock_settime(
+            process: &Process,
+            clock: i32,
+            at: u64,
+            width: TimeWidth,
+        ) -> Result<usize, Errno> {
+            settings::clock::sys_clock_settime(process, clock, at, width)
+        }
+        #[inline(never)]
+        fn settimeofday(
+            process: &Process,
+            tv: u64,
+            tz: u64,
+            width: TimeWidth,
+        ) -> Result<usize, Errno> {
+            settings::clock::sys_settimeofday(process, tv, tz, width)
+        }
+        #[inline(never)]
+        fn sysrq_trigger(kernel: &Kernel, data: &[u8]) -> Result<usize, Errno> {
+            settings::sysrq::sysrq_trigger(kernel, data)
+        }
+        #[inline(never)]
+        fn sysctl_hostname(kernel: &Kernel, data: &[u8]) -> Result<usize, Errno> {
+            settings::sysctl::set_hostname(kernel, data)
+        }
+        #[inline(never)]
+        fn sysctl_domainname(kernel: &Kernel, data: &[u8]) -> Result<usize, Errno> {
+            settings::sysctl::set_domainname(kernel, data)
+        }
+        #[inline(never)]
+        fn sysctl_memfd_noexec(process: &Process, data: &[u8]) -> Result<usize, Errno> {
+            settings::memfd_noexec::set_noexec(process, data)
+        }
+        #[inline(never)]
+        fn driver_bind(bus: Bus, driver: u16, unbind: bool, data: &[u8]) -> Result<usize, Errno> {
+            settings::driver_bind::driver_bind(bus, driver, unbind, data)
+        }
+    }
+}

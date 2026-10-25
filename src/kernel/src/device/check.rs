@@ -893,38 +893,40 @@ impl Write for Fnv {
     }
 }
 
-/// PCI's refusal to turn a function's memory decoding on: its own BARs,
-/// every other function's, and the reserved ranges, to why it is refused.
-pub type DecodingRefusal = fn(&[(u64, u64)], &[(u64, u64)], &Reserved) -> Option<&'static str>;
-
 /// The item's discovery policy that [`check_decoding_refusals`] and
 /// [`check_lent_framebuffer`] hold the nodes to: PCI's refusal to turn memory
 /// decoding on, and the firmware framebuffer's lending (`discovery::pci`,
-/// `discovery::firmware`). The core may not name the item, so the item hands
-/// it to [`super::publish`] (`docs/KERNEL-CRATES.md`, ledger 3294).
-#[derive(Debug, Clone, Copy)]
-pub struct Policy {
-    /// `discovery::pci::decoding_refusal`.
-    pub decoding_refusal: DecodingRefusal,
+/// `discovery::firmware`). The core may not name the item, so the item's
+/// binary implements it on a type of its own and instantiates
+/// [`super::publish`] with it (`docs/KERNEL-CRATES.md` §6.3, ledger 3294,
+/// 3934): associated functions and a constant, no state.
+pub trait Policy {
+    /// `discovery::pci::decoding_refusal`: PCI's refusal to turn a
+    /// function's memory decoding on, given its own BARs, every other
+    /// function's, and the reserved ranges.
+    fn decoding_refusal(
+        own: &[(u64, u64)],
+        others: &[(u64, u64)],
+        reserved: &Reserved,
+    ) -> Option<&'static str>;
     /// `discovery::firmware::may_lend`.
-    pub may_lend: fn() -> bool,
+    fn may_lend() -> bool;
     /// `discovery::firmware::refuses`.
-    pub refuses: fn(u64, u64, crate::user::memory_type::MemoryType) -> bool,
+    fn refuses(base: u64, len: u64, kind: crate::user::memory_type::MemoryType) -> bool;
     /// `discovery::firmware::KERNEL_MAPPING`.
-    pub kernel_mapping: crate::user::memory_type::MemoryType,
+    const KERNEL_MAPPING: crate::user::memory_type::MemoryType;
 }
 
 /// What holds of the nodes taken together rather than one at a time:
 /// [`check_exclusive`], [`check_input_functions`] and
 /// [`check_lent_framebuffer`].
-pub(super) fn check_together(
+pub(super) fn check_together<P: Policy>(
     nodes: &[DeviceNode],
     reserved: &Reserved,
-    policy: &Policy,
 ) -> Result<(), Failure> {
     check_exclusive(nodes)?;
     check_widening()
-        .and_then(|()| check_decoding_refusals(policy))
+        .and_then(|()| check_decoding_refusals::<P>())
         .map_err(|what| Failure {
             location: Location::Tree(0),
             what,
@@ -934,7 +936,7 @@ pub(super) fn check_together(
         location: Location::Tree(0),
         what,
     })?;
-    check_lent_framebuffer(nodes, reserved, policy)
+    check_lent_framebuffer::<P>(nodes, reserved)
 }
 
 /// The Intel integrated GPU is not driven without `ferrix.intelgpu`
@@ -1059,8 +1061,8 @@ fn check_widening() -> Result<(), &'static str> {
 /// another function's BAR may not.
 ///
 /// Verifies: L.device.1
-fn check_decoding_refusals(policy: &Policy) -> Result<(), &'static str> {
-    let decoding_refusal = policy.decoding_refusal;
+fn check_decoding_refusals<P: Policy>() -> Result<(), &'static str> {
+    let decoding_refusal = P::decoding_refusal;
 
     const AT: u64 = 0x7f00_0000_0000;
     const SIZE: u64 = 0x4000;
@@ -1085,12 +1087,11 @@ fn check_decoding_refusals(policy: &Policy) -> Result<(), &'static str> {
 
 /// [`check_framebuffer`] on the published nodes, then [`check_lending`]
 /// against made-up ones.
-fn check_lent_framebuffer(
+fn check_lent_framebuffer<P: Policy>(
     nodes: &[DeviceNode],
     reserved: &Reserved,
-    policy: &Policy,
 ) -> Result<(), Failure> {
-    check_framebuffer(nodes, reserved, policy)?;
+    check_framebuffer::<P>(nodes, reserved)?;
     check_lending().map_err(|what| Failure {
         location: Location::Tree(0),
         what,
@@ -1105,11 +1106,7 @@ fn check_lent_framebuffer(
 /// reserved test already holds of every other. At most one such node.
 ///
 /// Verifies: L.device.1, L.device.38, L.device.39, L.device.40, L.device.41, L.device.43
-fn check_framebuffer(
-    nodes: &[DeviceNode],
-    reserved: &Reserved,
-    policy: &Policy,
-) -> Result<(), Failure> {
+fn check_framebuffer<P: Policy>(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
     let mut seen = 0;
     // Only the framebuffer's own node holds a lent aperture, or, under
     // `ferrix.intelgpu`, the Intel GPU holding it, in place of that node
@@ -1145,7 +1142,7 @@ fn check_framebuffer(
         if seen > 1 {
             return Err(fail("a second firmware framebuffer node"));
         }
-        if !(policy.may_lend)() {
+        if !P::may_lend() {
             return Err(fail(
                 "a firmware framebuffer node without ferrix.efifb on x86-64",
             ));
@@ -1181,7 +1178,7 @@ fn check_framebuffer(
         // The kernel's type hold: write-combining, the type of its own
         // window; an uncached mapping is refused, a write-combining one is
         // not.
-        let refuses = policy.refuses;
+        let refuses = P::refuses;
         use crate::user::memory_type::MemoryType;
         if !refuses(aperture.phys, aperture.len, MemoryType::Device)
             || !refuses(aperture.phys, aperture.len, MemoryType::Cached)
@@ -1191,7 +1188,7 @@ fn check_framebuffer(
                 "the framebuffer's memory type is not held as the kernel's",
             ));
         }
-        check_combining(aperture, policy).map_err(fail)?;
+        check_combining::<P>(aperture).map_err(fail)?;
         // The boot console, which draws through a slice it holds alone, has
         // stopped: a driver can map the window from now on.
         if crate::console::screen::drawing() {
@@ -1641,7 +1638,7 @@ pub fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Result<(), F
 /// W8 reads a driver's mapping of it back the same way.
 ///
 /// Verifies: L.device.38, L.device.39, L.device.43
-fn check_combining(aperture: &super::Aperture, policy: &Policy) -> Result<(), &'static str> {
+fn check_combining<P: Policy>(aperture: &super::Aperture) -> Result<(), &'static str> {
     use crate::user::memory_type::MemoryType;
     if !aperture.cacheable {
         return Err("the firmware framebuffer's aperture is not prefetchable");
@@ -1658,10 +1655,7 @@ fn check_combining(aperture: &super::Aperture, policy: &Policy) -> Result<(), &'
         let flags = crate::mm::flags_in(root, window + page * PAGE_SIZE)
             .ok_or("the kernel's window on the lent framebuffer has a hole")?;
         let kind = MemoryType::of(false, flags.write_combining && !flags.device);
-        if kind != MemoryType::Combining
-            || kind != policy.kernel_mapping
-            || !flags.write
-            || flags.user
+        if kind != MemoryType::Combining || kind != P::KERNEL_MAPPING || !flags.write || flags.user
         {
             return Err("the kernel's window on the lent framebuffer is not write-combining");
         }

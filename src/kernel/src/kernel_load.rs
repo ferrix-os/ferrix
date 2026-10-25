@@ -27,6 +27,12 @@
 )]
 
 extern crate alloc;
+// The load by its own name, so a seam's signatures (`seam!`) resolve both
+// here and in the binary's root where its binding macro expands.
+extern crate self as ferrix_kernel_load;
+
+/// One composition-root seam from one list (`seam!`, KERNEL-CRATES §6.3).
+mod seam;
 
 /// The build flags this crate was compiled with (`build_flag_word!`, ledger
 /// line 3282, (K4)).

@@ -71,16 +71,18 @@ const _: () = assert!(
     "ferrix-kernel-settings was compiled with other build flags than the binary"
 );
 
-// The run-time setting entries' binding (docs/KERNEL-CRATES.md §6; ledger
-// 3558 (9), 3623): the removable crate's in a `live` build, the load's
-// `ABSENT` in a `fixed` one, recorded in certification-item.json's
-// `composition_root.removable`. These, and the flag word's assert above, are
+// The run-time setting entries' binding (docs/KERNEL-CRATES.md §6.3; ledger
+// 3558 (9), 3623, 3934): the removable crate's `Live` in a `live` build, the
+// load's `Absent` in a `fixed` one, recorded in certification-item.json's
+// `composition_root.removable`. Each invocation defines the load's
+// `__ferrix_setters_*` symbols as calls into its type, so a build binds
+// exactly one or does not link. These, and the flag word's assert above, are
 // the only places the tree names `ferrix_runtime_settings` outside the flag
 // lists, and the only ones that name the crate.
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
-const SETTERS: &setters::Setters = &ferrix_kernel_settings::SETTERS;
+ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
-const SETTERS: &setters::Setters = &setters::ABSENT;
+ferrix_kernel_load::bind_setters!(setters::Absent);
 
 #[cfg(ferrix_linux_abi = "on")]
 pub mod stages_check;
@@ -158,30 +160,6 @@ extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 fn register_system_calls() {
     trap::set_syscall_entry(syscall::dispatch_with::<syscall::linux::Linux>);
     trap::set_quiet_syscall_filter(syscall::seccomp::check);
-    // The run-time setting entries, before the first user program, a boot
-    // check below.
-    bind_setters();
-}
-
-/// Register the build's run-time setting entries ([`SETTERS`]) and check
-/// that the load answers with them: by address, so that the crate's binding
-/// in a `live` build and `setters::ABSENT` in a `fixed` one cannot be
-/// mistaken for each other (ledger 3623 (R4)). A second registration stops
-/// the boot. Not gated by `ferrix.checks`: it costs one comparison.
-#[cfg(ferrix_linux_abi = "on")]
-fn bind_setters() {
-    if setters::bind(SETTERS).is_err() {
-        fatal!(
-            catalog::LOAD_REGISTRATION,
-            "the run-time setting entries were registered twice"
-        );
-    }
-    if !core::ptr::eq(setters::bound(), SETTERS) {
-        fatal!(
-            catalog::LOAD_REGISTRATION,
-            "the load does not answer with the run-time setting entries the build registered"
-        );
-    }
 }
 
 /// Without the Linux ABI (`linux_abi=off`, `docs/LINUX-ABI-SEPARATION.md`
@@ -939,14 +917,27 @@ fn check_btrfs_write() {
 }
 
 /// The item's discovery policy that stage 10's checks of the nodes hold
-/// them to, handed to the core's `device::publish` (`device::check::Policy`,
-/// ledger 3294): the core may not name the item.
-const DISCOVERY_POLICY: device::check::Policy = device::check::Policy {
-    decoding_refusal: pci::decoding_refusal,
-    may_lend: firmware::may_lend,
-    refuses: firmware::refuses,
-    kernel_mapping: firmware::KERNEL_MAPPING,
-};
+/// them to, the core's `device::publish` instantiated with it
+/// (`device::check::Policy`, ledger 3294, 3934): the core may not name the
+/// item.
+struct Discovery;
+
+impl device::check::Policy for Discovery {
+    fn decoding_refusal(
+        own: &[(u64, u64)],
+        others: &[(u64, u64)],
+        reserved: &device::Reserved,
+    ) -> Option<&'static str> {
+        pci::decoding_refusal(own, others, reserved)
+    }
+    fn may_lend() -> bool {
+        firmware::may_lend()
+    }
+    fn refuses(base: u64, len: u64, kind: user::memory_type::MemoryType) -> bool {
+        firmware::refuses(base, len, kind)
+    }
+    const KERNEL_MAPPING: user::memory_type::MemoryType = firmware::KERNEL_MAPPING;
+}
 
 /// Stage 10's discovery: run every finder in precedence order, reserving the
 /// ranges they read, and publish what they found.
@@ -979,7 +970,7 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
         &mut framebuffer,
         &mut power,
     ];
-    let report = match device::publish(&mut finders, &reserved, &DISCOVERY_POLICY) {
+    let report = match device::publish::<Discovery>(&mut finders, &reserved) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.
         Err(device::Stopped::Finder { name: "pci", why }) => {

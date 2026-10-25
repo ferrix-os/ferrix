@@ -3100,10 +3100,9 @@ fn yield_intel_gpu(nodes: &mut [DeviceNode], allowed: bool) {
 /// mint, holds an aperture overlapping reserved memory, shares an aperture
 /// or vector with another node, or mints an MSI-X vector that does not
 /// behave as one.
-pub fn publish<'f>(
+pub fn publish<'f, P: check::Policy>(
     finders: &'f mut [&mut dyn Finder],
     reserved: &Reserved,
-    policy: &check::Policy,
 ) -> Result<Report, Stopped<'f>> {
     if PUBLISHING.swap(true, Ordering::AcqRel) {
         return Err(Stopped::Again);
@@ -3162,7 +3161,7 @@ pub fn publish<'f>(
     for node in &nodes {
         check::check_node(node, reserved, &mut report)?;
     }
-    check::check_together(&nodes, reserved, policy)?;
+    check::check_together::<P>(&nodes, reserved)?;
 
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());

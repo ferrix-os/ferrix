@@ -393,6 +393,7 @@
         "syscall/vdso.rs",
         "syscall/vdso_check.rs",
         "kernel_load.rs",
+        "seam.rs",
         "setters.rs",
         "settings/**",
         "kernel_settings.rs"
@@ -621,7 +622,7 @@
         "decoding_refusal": "pci::decoding_refusal",
         "may_lend": "firmware::may_lend",
         "refuses": "firmware::refuses",
-        "kernel_mapping": "firmware::KERNEL_MAPPING"
+        "KERNEL_MAPPING": "firmware::KERNEL_MAPPING"
       }
     },
     "//removable": [
@@ -644,12 +645,13 @@
         "present_when": "live",
         "interface": "setters::Setters",
         "defined_in": "setters.rs",
-        "absent": "setters::ABSENT",
+        "absent": "setters::Absent",
         "binding": {
-          "live": "ferrix_kernel_settings::SETTERS",
-          "fixed": "setters::ABSENT"
+          "live": "ferrix_kernel_settings::Live",
+          "fixed": "setters::Absent"
         },
-        "fields": [
+        "bind_macro": "bind_setters",
+        "methods": [
           "sethostname",
           "setdomainname",
           "syslog_clear",
@@ -662,6 +664,20 @@
           "sysctl_domainname",
           "sysctl_memfd_noexec",
           "driver_bind"
+        ],
+        "seam_symbols": [
+          "__ferrix_setters_sethostname",
+          "__ferrix_setters_setdomainname",
+          "__ferrix_setters_syslog_clear",
+          "__ferrix_setters_syslog_read_clear",
+          "__ferrix_setters_restart_with_word",
+          "__ferrix_setters_clock_settime",
+          "__ferrix_setters_settimeofday",
+          "__ferrix_setters_sysrq_trigger",
+          "__ferrix_setters_sysctl_hostname",
+          "__ferrix_setters_sysctl_domainname",
+          "__ferrix_setters_sysctl_memfd_noexec",
+          "__ferrix_setters_driver_bind"
         ],
         "calls": [
           "fs/memfd_check.rs",

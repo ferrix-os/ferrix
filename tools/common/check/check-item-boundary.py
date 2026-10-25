@@ -149,6 +149,7 @@ import argparse
 import fnmatch
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from collections import defaultdict
@@ -426,6 +427,10 @@ def parse_file(rel: str, source: str, modules: dict[ModPath, Module], refs: list
             # the macro `console.rs` defines, so the root binds the name there.
             if i >= 4 and toks[i - 4 : i] == ["#", "[", "macro_export", "]"]:
                 module(()).macros[_name(toks[i + 2])] = here
+        elif tok == "bind" and i + 4 < n and toks[i + 2] == "in" and toks[i + 4] == ";":
+            # A seam's binding macro (`seam!`, KERNEL-CRATES §6.3): the macro
+            # defines it `#[macro_export]`, so it sits at the crate's root.
+            module(()).macros[_name(toks[i + 1])] = here
         elif tok == "use" and prev not in ("::", ".", "$"):
             public = prev == "pub" or (prev == ")" and _opens_pub(toks, i - 1))
             leaves: list = []
@@ -1300,7 +1305,7 @@ def _uncommented(source: str) -> str:
     return "".join(out)
 
 
-_ITEM_START = re.compile(r"^(?:pub(?:\([a-z]+\))?\s+)?(?:const|static|fn|use|struct|enum|impl|mod|type|trait|extern|unsafe|#\[)")
+_ITEM_START = re.compile(r"^(?:pub(?:\([a-z]+\))?\s+)?(?:const|static|fn|use|struct|enum|impl|mod|type|trait|extern|unsafe|#\[|[a-z_][\w:]*!)")
 
 
 def _item_attributes(code: str, at: int) -> list[str]:
@@ -1409,11 +1414,14 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
         expect = entry.get("lint_expect")
         if expect and not re.search(rf'#!\[cfg_attr\(\s*{cfg_name}\s*=\s*"(?:[a-z_]+)"\s*,\s*expect\(\s*{expect}\b', code):
             problems.append(f"{root}: no crate-level expect({expect}) under {cfg_name} for the build that leaves {package} out (R3)")
-        # One binding per value, to the recorded path.
+        # One binding per value, to the recorded type: one invocation of the
+        # seam's binding macro under the value's cfg (KERNEL-CRATES §6.3).
         binding = entry.get("binding", {})
         interface = entry.get("interface", "").split("::")[-1]
+        module = entry.get("interface", "").split("::")[0]
+        bind_macro = entry.get("bind_macro", "")
         found_bindings: dict[str, list[str]] = defaultdict(list)
-        for match in re.finditer(rf"\bconst\s+[A-Z_]+\s*:\s*&[\w:]*\b{interface}\s*=\s*&([\w:]+)\s*;", code):
+        for match in re.finditer(rf"\b(?:ferrix_kernel_load::)?{re.escape(bind_macro)}!\s*\(\s*([\w:]+)\s*\)\s*;", code):
             admitted = _admits(_item_attributes(code, match.start()), cfg_name, values)
             for value in admitted:
                 found_bindings[value].append(match.group(1))
@@ -1424,46 +1432,52 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
             elif bound[0] != binding.get(value):
                 problems.append(f"{root}: {interface} for {flag}={value} is bound to {bound[0]}, "
                                 f"composition_root.removable says {binding.get(value)}")
-        # The interface: its recorded fields, no Default, its count, its calls.
+        # The interface: the seam's one list, its entries the recorded methods
+        # and its symbols the recorded ones (3934 (1)).
         defined_in = entry.get("defined_in")
         definition = read(defined_in) if defined_in else None
         if definition is None:
             problems.append(f"composition_root.removable.{package}: cannot read {defined_in}")
             continue
         dmask = rustlex.mask(definition)
-        start = dmask.find(f"pub struct {interface} {{")
+        start = dmask.find("crate::seam! {")
         if start < 0:
-            problems.append(f"{defined_in}: defines no `pub struct {interface}`")
+            problems.append(f"{defined_in}: defines no seam (`crate::seam! {{ .. }}`)")
         else:
             body = dmask[start:_closing(dmask, dmask.index("{", start))]
-            fields = re.findall(r"\bpub\s+([a-z_][a-z0-9_]*)\s*:", body)
-            if fields != entry.get("fields", []):
-                problems.append(f"{defined_in}: {interface}'s fields are {fields}, the record says {entry.get('fields')}")
-            attributes = dmask[max(0, start - 300):start].split("\n\n")[-1]
-            if "Default" in attributes or re.search(rf"impl\s+Default\s+for\s+{interface}\b", dmask):
-                problems.append(f"{defined_in}: {interface} has a Default; it fails closed only through its absent binding")
-            count = re.search(r"pub const ENTRIES: usize = (\d+);", dmask)
-            if count is None or int(count.group(1)) != len(entry.get("fields", [])):
-                problems.append(f"{defined_in}: ENTRIES is not the record's {len(entry.get('fields', []))} fields (R15)")
+            if not re.search(rf"\btrait\s+{interface}\s*;", body) or \
+                    not re.search(rf"\bbind\s+{re.escape(bind_macro)}\s+in\s+{module}\s*;", body):
+                problems.append(f"{defined_in}: the seam is not trait {interface}, bound by {bind_macro} in {module}")
+            listed = re.findall(r"\bfn\s+([a-z_][a-z0-9_]*)\s+as\s+(__ferrix_[a-z0-9_]+)\s*\(", body)
+            methods = [name for name, _ in listed]
+            if methods != entry.get("methods", []):
+                problems.append(f"{defined_in}: {interface}'s entries are {methods}, the record says {entry.get('methods')}")
+            if [symbol for _, symbol in listed] != entry.get("seam_symbols", []):
+                problems.append(f"{defined_in}: {interface}'s symbols are not the record's seam_symbols")
         callers = set()
-        literals = []
+        implementors = []
+        method_names = "|".join(re.escape(name) for name in entry.get("methods", [])) or "$^"
         for rel in sorted(crate_files.get("kernel", [])):
             text = read(rel)
             if text is None:
                 continue
             tmask = rustlex.mask(text)
-            if re.search(r"\bsetters::bound\(\)", tmask) and rel not in (root, defined_in):
+            if re.search(rf"\b{module}::(?:{method_names})\s*\(", tmask) and rel not in (root, defined_in):
                 callers.add(rel)
-            for match in re.finditer(rf"(?<![\w:])(?:[\w:]*::)?{interface}\s*\{{", tmask):
-                if tmask[max(0, match.start() - 7):match.start()].rstrip().endswith("struct"):
-                    continue
-                literals.append(rel)
+            for match in re.finditer(rf"\bimpl\s+(?:[\w:]*::)?{interface}\s+for\s+(\w+)", tmask):
+                implementors.append((rel, match.group(1)))
+        for rel in sorted(crate_files.get(package, [])):
+            text = read(rel)
+            for match in re.finditer(rf"\bimpl\s+(?:[\w:]*::)?{interface}\s+for\s+(\w+)", rustlex.mask(text or "")):
+                implementors.append((rel, match.group(1)))
         if callers != set(entry.get("calls", [])):
             problems.append(f"the files calling through {interface} are {sorted(callers)}, the record says "
                             f"{sorted(entry.get('calls', []))}")
-        for rel in literals:
-            if rel != defined_in and rel not in crate_files.get(package, []):
-                problems.append(f"{rel}: builds a {interface}; only {defined_in}'s absent binding and {package} may")
+        allowed = {binding.get(value, "").split("::")[-1] for value in values}
+        for rel, kind in implementors:
+            if kind not in allowed or (rel != defined_in and rel not in crate_files.get(package, [])):
+                problems.append(f"{rel}: implements {interface} for {kind}; only {defined_in}'s and {package}'s "
+                                f"bound types may")
         # Every profile, buildable or not: its binary names the crate exactly
         # when its value is the present one (3558 (11)).
         for name, profile in sorted(profiles.items()):
@@ -1478,16 +1492,17 @@ def removable_problems(removable: dict, read, crate_files: dict[str, list[str]],
 
 
 _REMOVABLE_RECORD = {"pkg-x": {"flag": "f", "present_when": "on", "interface": "hooks::Hooks", "defined_in": "hooks.rs",
-                               "binding": {"on": "pkg_x::HOOKS", "off": "hooks::ABSENT"}, "fields": ["a"],
+                               "binding": {"on": "pkg_x::Live", "off": "ferrix_kernel_load::hooks::Absent"},
+                               "bind_macro": "bind_hooks", "methods": ["a"], "seam_symbols": ["__ferrix_hooks_a"],
                                "calls": ["user.rs"], "lint_expect": "unused_crate_dependencies", "symbol": "pkg_x"}}
 _REMOVABLE_TREE = {
     "main.rs": '#![cfg_attr(\n    ferrix_f = "off",\n    expect(unused_crate_dependencies, reason = "r")\n)]\n\n'
-               '#[cfg(ferrix_f = "on")]\nconst HOOKS: &hooks::Hooks = &pkg_x::HOOKS;\n'
-               '#[cfg(ferrix_f = "off")]\nconst HOOKS: &hooks::Hooks = &hooks::ABSENT;\n',
-    "hooks.rs": "pub struct Hooks {\n    pub a: fn(),\n}\npub const ENTRIES: usize = 1;\npub static ABSENT: Hooks = Hooks { a: || {} };\n"
-                "pub fn bound() -> &'static Hooks { &ABSENT }\n",
-    "user.rs": "fn u() { (crate::hooks::bound().a)() }\n",
-    "x/root.rs": "pub static HOOKS: Hooks = Hooks { a: f };\n",
+               '#[cfg(ferrix_f = "on")]\nferrix_kernel_load::bind_hooks!(pkg_x::Live);\n'
+               '#[cfg(ferrix_f = "off")]\nferrix_kernel_load::bind_hooks!(ferrix_kernel_load::hooks::Absent);\n',
+    "hooks.rs": "crate::seam! {\n    $;\n    trait Hooks;\n    bind bind_hooks in hooks;\n"
+                "    fn a as __ferrix_hooks_a() -> ();\n}\npub struct Absent;\nimpl Hooks for Absent {\n    fn a() {}\n}\n",
+    "user.rs": "fn u() { crate::hooks::a() }\n",
+    "x/root.rs": "pub struct Live;\nimpl Hooks for Live {\n    fn a() {}\n}\n",
 }
 _REMOVABLE_PACKAGES = {
     "ferrix-kernel": ("src/kernel", {"dependencies": {"pkg-x": {}}}),
@@ -1500,44 +1515,60 @@ _REMOVABLE_PROFILES = {"lo": {"flags": {"f": "off"}}, "hi": {"flags": {"f": "on"
 def _removable_self_test() -> list[str]:
     failures = []
     files = {"kernel": ["main.rs", "hooks.rs", "user.rs"], "pkg-x": ["x/root.rs"]}
-    record = {k: dict(v, calls=["user.rs"]) for k, v in _REMOVABLE_RECORD.items()}
-    record["pkg-x"]["interface"] = "hooks::Hooks"
+    record = {k: dict(v) for k, v in _REMOVABLE_RECORD.items()}
     def run(tree=None, packages=None, profiles=None):
         tree = {**_REMOVABLE_TREE, **(tree or {})}
-        # user.rs calls `hooks::bound()`, the record's own name for the accessor
-        tree = {k: v.replace("hooks::bound()", "setters::bound()") for k, v in tree.items()}
         return removable_problems(record, tree.get, files, "main.rs", packages or _REMOVABLE_PACKAGES,
                                   profiles or _REMOVABLE_PROFILES, {"f": ["off", "on"]})
     found = run()
     if found:
         failures.append(f"removable: a tree that keeps the rule was refused: {found}")
     main = _REMOVABLE_TREE["main.rs"]
+    hooks = _REMOVABLE_TREE["hooks.rs"]
     for what, args, expect in [
         ("a planted unconditional dependency", {"tree": {"main.rs": main + "use pkg_x as _;\n"}},
          "would depend on pkg-x"),
-        ("a live binding to the absent one", {"tree": {"main.rs": main.replace("&pkg_x::HOOKS", "&hooks::ABSENT")}},
+        ("a live binding to the absent one", {"tree": {"main.rs": main.replace(
+            "bind_hooks!(pkg_x::Live)", "bind_hooks!(ferrix_kernel_load::hooks::Absent)")}},
          "would not depend on pkg-x"),
-        ("a reference from a load file", {"tree": {"user.rs": "fn u() { pkg_x::f(); (crate::setters::bound().a)() }\n"}},
+        ("a binding made twice", {"tree": {"main.rs": main + '#[cfg(ferrix_f = "on")]\n'
+                                                             "ferrix_kernel_load::bind_hooks!(pkg_x::Live);\n"}},
+         "2 bindings"),
+        ("a reference from a load file", {"tree": {"user.rs": "fn u() { pkg_x::f(); crate::hooks::a() }\n"}},
          "only the composition root"),
         ("an exported item in the crate", {"tree": {"x/root.rs": "#[unsafe(no_mangle)]\npub fn e() {}\n"
-                                                                  "pub static HOOKS: Hooks = Hooks { a: f };\n"}},
+                                                                  + _REMOVABLE_TREE["x/root.rs"]}},
          "exports or keeps"),
         ("the lint expectation missing", {"tree": {"main.rs": main.split("\n\n", 1)[1]}}, "no crate-level expect"),
-        ("a field not recorded", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"].replace(
-            "pub a: fn(),", "pub a: fn(),\n    pub b: fn(),")}}, "fields are"),
-        ("the count not the fields'", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"].replace(
-            "ENTRIES: usize = 1", "ENTRIES: usize = 2")}}, "ENTRIES is not"),
-        ("an unrecorded caller", {"tree": {"hooks.rs": _REMOVABLE_TREE["hooks.rs"],
-                                           "main.rs": main + "fn m() { (setters::bound().a)() }\n"}},
-         None),
+        ("an entry not recorded", {"tree": {"hooks.rs": hooks.replace(
+            "    fn a as __ferrix_hooks_a() -> ();\n",
+            "    fn a as __ferrix_hooks_a() -> ();\n    fn b as __ferrix_hooks_b() -> ();\n")}}, "entries are"),
+        ("a symbol not recorded", {"tree": {"hooks.rs": hooks.replace("__ferrix_hooks_a", "__ferrix_hooks_z")}},
+         "symbols are not"),
         ("a load manifest naming the crate", {"packages": {**_REMOVABLE_PACKAGES, "ferrix-kernel-load": (
             "src/kernel/load", {"dependencies": {"pkg-x": {}}})}}, "only the binary may"),
-        ("a struct built outside the crate", {"tree": {"user.rs": "fn u() { let _ = Hooks { a: f }; (crate::setters::bound().a)() }\n"}},
-         "builds a Hooks"),
+        ("an implementation outside the crate", {"tree": {"user.rs": "struct Other;\nimpl Hooks for Other {}\n"
+                                                                     "fn u() { crate::hooks::a() }\n"}},
+         "implements Hooks for Other"),
+        ("an unrecorded caller", {"tree": {"main.rs": main, "user.rs": "fn u() {}\n"}}, "the files calling"),
     ]:
-        if expect is None:
-            continue
         found = run(**args)
+        if not any(expect in problem for problem in found):
+            failures.append(f"removable: {what} passed ({found})")
+    # The scans over the linked crates (3934 (2), (3)).
+    clean = {"src/kernel/src/hooks.rs": hooks, "src/kernel/src/user.rs": "fn u() { crate::hooks::a() }\n"}
+    if seam_scan_problems(record, clean, "seam.rs"):
+        failures.append(f"removable: a clean tree's seam scan was refused: {seam_scan_problems(record, clean, 'seam.rs')}")
+    for what, extra, expect in [
+        ("a definer by name", {"src/lib/x/lib.rs": "#[unsafe(no_mangle)]\nfn __ferrix_hooks_a() {}\n"}, "defines a __ferrix_"),
+        ("an export_name definer", {"src/lib/x/lib.rs": '#[unsafe(export_name = "__ferrix_hooks_a")]\nfn f() {}\n'},
+         "defines a __ferrix_"),
+        ("an assembly definer", {"src/lib/x/lib.rs": 'core::arch::global_asm!(".globl __ferrix_hooks_a");\n'},
+         "defines a __ferrix_"),
+        ("a call around the wrapper", {"src/kernel/src/user.rs": "fn u() { unsafe { __ferrix_hooks_a() } }\n"},
+         "only the seam's wrappers"),
+    ]:
+        found = seam_scan_problems(record, {**clean, **extra}, "seam.rs")
         if not any(expect in problem for problem in found):
             failures.append(f"removable: {what} passed ({found})")
     return failures
@@ -2114,71 +2145,69 @@ _HOOK_BREAKS = [
 ]
 
 
-_POLICY_FIELD = re.compile(r"^\s*pub\s+(\w+)\s*:", re.M)
-_POLICY_LITERAL = re.compile(r"(?<![\w:])(?:[\w:]*::)?Policy\s*\{")
-_BINDING = re.compile(r"(\w+)\s*:\s*([\w:]+)\s*,?")
+_POLICY_IMPL = re.compile(r"\bimpl\s+(?:[\w:]*::)?Policy\s+for\s+(\w+)\s*\{")
 
 
 def policy_problems(files: list[str], read, policy: dict, root: str | None) -> list[str]:
-    """The item's discovery policy the core's device checks are handed
-    (`device::check::Policy`, ledger line 3331, (P2), (P3)): the struct is
-    defined in `policy["defined_in"]` with exactly the fields
-    `policy["fields"]` records, and derives and implements no `Default`; a
-    value is built in the composition root alone, once, binding each field to
-    the item path the manifest records -- a wrong binding would have the
-    checks verify the wrong function on every boot, which no boot can see."""
+    """The item's discovery policy the core's device checks are held to
+    (`device::check::Policy`, ledger lines 3331, 3934 (6)): a trait defined in
+    `policy["defined_in"]` with exactly the members `policy["fields"]` records,
+    associated functions and constants only; one implementation, in the
+    composition root, each member forwarding to the item path the manifest
+    records -- a wrong one would have the checks verify the wrong function on
+    every boot, which no boot can see -- and `publish` instantiated with it."""
     problems: list[str] = []
     fields = policy.get("fields", {})
     defined_in = policy.get("defined_in")
     if not fields or defined_in is None:
         return ["composition_root.policy records no fields or no defined_in"]
-    literals = 0
+    impls = []
     for rel in sorted(files):
         source = read(rel)
         if source is None:
             continue
         masked = rustlex.mask(source)
         if rel == defined_in:
-            start = masked.find("pub struct Policy {")
+            start = masked.find("pub trait Policy {")
             if start < 0:
-                problems.append(f"{rel}: defines no `pub struct Policy`")
+                problems.append(f"{rel}: defines no `pub trait Policy`")
                 continue
             body = masked[start:_closing(masked, masked.index("{", start))]
-            found = _POLICY_FIELD.findall(body)
+            found = re.findall(r"\b(?:fn|const)\s+(\w+)", body)
             if sorted(found) != sorted(fields):
-                problems.append(f"{rel}: Policy's fields are {sorted(found)}, composition_root.policy records "
+                problems.append(f"{rel}: Policy's members are {sorted(found)}, composition_root.policy records "
                                 f"{sorted(fields)}")
-            attributes = masked[max(0, start - 300):start].split("\n\n")[-1]
-            if "Default" in attributes or re.search(r"impl\s+Default\s+for\s+Policy\b", masked):
-                problems.append(f"{rel}: Policy has a Default; it fails closed only when every field is bound")
-        for match in _POLICY_LITERAL.finditer(masked):
-            if masked[max(0, match.start() - 7):match.start()].rstrip().endswith("struct"):
-                continue
+            if re.search(r"&\s*self\b|\bself\s*:", body):
+                problems.append(f"{rel}: Policy has a method on self; it holds associated functions and constants only")
+        for match in _POLICY_IMPL.finditer(masked):
             line = masked.count("\n", 0, match.start()) + 1
             if rel != root:
-                problems.append(f"{rel}:{line}: builds a Policy value; only the composition root ({root}) may")
+                problems.append(f"{rel}:{line}: implements Policy; only the composition root ({root}) may")
                 continue
-            literals += 1
             body = masked[match.end():_closing(masked, match.end() - 1)]
-            bound = dict(_BINDING.findall(body))
-            for field, path in sorted(fields.items()):
-                if bound.get(field) != path:
-                    problems.append(f"{rel}:{line}: Policy's {field} is bound to {bound.get(field)}, "
-                                    f"composition_root.policy says {path}")
-            for field in sorted(set(bound) - set(fields)):
-                problems.append(f"{rel}:{line}: Policy's {field} is bound and not recorded")
-    if literals != 1:
-        problems.append(f"{root}: builds {literals} Policy values; the composition root builds exactly one")
+            impls.append(match.group(1))
+            for member, path in sorted(fields.items()):
+                function = re.search(rf"\bfn\s+{member}\s*\([^)]*\)[^{{]*\{{\s*{re.escape(path)}\s*\(", body)
+                constant = re.search(rf"\bconst\s+{member}\s*:[^=]*=\s*{re.escape(path)}\s*;", body)
+                if not (function or constant):
+                    problems.append(f"{rel}:{line}: Policy's {member} does not forward to {path}, as "
+                                    f"composition_root.policy records")
+    if len(impls) != 1:
+        problems.append(f"{root}: implements Policy {len(impls)} times; the composition root implements it once")
+    else:
+        text = rustlex.mask(read(root) or "")
+        if not re.search(rf"\bdevice::publish::<{impls[0]}>\s*\(", text):
+            problems.append(f"{root}: does not instantiate device::publish with {impls[0]}")
     return problems
 
 
 _POLICY_RECORD = {"defined_in": "device/check.rs", "fields": {"may_lend": "firmware::may_lend",
                                                               "refuses": "firmware::refuses"}}
 _POLICY_TREE = {
-    "device/check.rs": "#[derive(Debug, Clone, Copy)]\npub struct Policy {\n    pub may_lend: fn() -> bool,\n"
-                       "    pub refuses: fn(u64) -> bool,\n}\n",
-    "main.rs": "const P: device::check::Policy = device::check::Policy {\n    may_lend: firmware::may_lend,\n"
-               "    refuses: firmware::refuses,\n};\n",
+    "device/check.rs": "pub trait Policy {\n    fn may_lend() -> bool;\n    fn refuses(at: u64) -> bool;\n}\n",
+    "main.rs": "struct D;\nimpl device::check::Policy for D {\n    fn may_lend() -> bool {\n        firmware::may_lend()\n"
+               "    }\n    fn refuses(at: u64) -> bool {\n        firmware::refuses(at)\n    }\n}\n"
+               "fn p() { device::publish::<D>(a, b); }\n",
     "discovery/firmware.rs": "pub fn may_lend() -> bool { false }\n",
 }
 
@@ -2190,15 +2219,16 @@ def _policy_self_test() -> list[str]:
     if found:
         failures.append(f"policy: a tree that keeps the rule was refused: {found}")
     for what, change, expect in [
-        ("a field bound to another function", {"main.rs": _POLICY_TREE["main.rs"].replace(
-            "may_lend: firmware::may_lend", "may_lend: yes")}, "may_lend is bound to yes"),
-        ("a Policy built outside the composition root", {"discovery/firmware.rs": _POLICY_TREE[
-            "discovery/firmware.rs"] + "const Q: Policy = Policy { may_lend: f, refuses: g };\n"},
-         "only the composition root"),
-        ("a field the manifest does not record", {"device/check.rs": _POLICY_TREE["device/check.rs"].replace(
-            "}\n", "    pub extra: u8,\n}\n")}, "Policy's fields are"),
-        ("a Default on Policy", {"device/check.rs": _POLICY_TREE["device/check.rs"].replace(
-            "Clone, Copy", "Clone, Copy, Default")}, "Policy has a Default"),
+        ("a member forwarding to another function", {"main.rs": _POLICY_TREE["main.rs"].replace(
+            "firmware::may_lend()", "yes()")}, "may_lend does not forward"),
+        ("a Policy implemented outside the composition root", {"discovery/firmware.rs": _POLICY_TREE[
+            "discovery/firmware.rs"] + "impl Policy for Q {\n}\n"}, "only the composition root"),
+        ("a member the manifest does not record", {"device/check.rs": _POLICY_TREE["device/check.rs"].replace(
+            "}\n", "    fn extra() -> u8;\n}\n")}, "Policy's members are"),
+        ("a method on self", {"device/check.rs": _POLICY_TREE["device/check.rs"].replace(
+            "fn may_lend() -> bool;", "fn may_lend(&self) -> bool;")}, "a method on self"),
+        ("publish not instantiated with it", {"main.rs": _POLICY_TREE["main.rs"].replace(
+            "device::publish::<D>", "device::publish::<E>")}, "does not instantiate"),
     ]:
         tree = {**_POLICY_TREE, **change}
         found = policy_problems(files, tree.get, _POLICY_RECORD, "main.rs")
@@ -2723,6 +2753,71 @@ def judge_profile(name: str, profile: dict, flags: dict, manifest: dict) -> tupl
 
 
 
+_SEAM_DEFINERS = re.compile(r"no_mangle\s*\)?\s*\]\s*(?:pub\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+__ferrix_")
+# Read in the unmasked text, since a mask blanks the strings they are in.
+_SEAM_STRING_DEFINERS = re.compile(r"export_name\s*=\s*\"__ferrix_|\.glob(?:a)?l\s+__ferrix_")
+
+
+def seam_scan_problems(removable: dict, linked: dict[str, str], seam_file: str) -> list[str]:
+    """Ledger 3934 (2) and (3) over every source file of every crate the kernel
+    links (`linked`: path to text): no file defines a `__ferrix_` symbol by
+    name -- the seam macro's binding is their only definer -- and none but
+    a seam's own list and the macro names one, so no call site calls a symbol
+    but through the seam's wrappers."""
+    problems = []
+    lists = {entry.get("defined_in") for entry in removable.values() if isinstance(entry, dict)}
+    for rel, text in sorted(linked.items()):
+        masked = rustlex.mask(text)
+        found = [match.start() for match in _SEAM_DEFINERS.finditer(masked)]
+        found += [match.start() for match in _SEAM_STRING_DEFINERS.finditer(text)]
+        for start in sorted(found):
+            line = text.count("\n", 0, start) + 1
+            problems.append(f"{rel}:{line}: defines a __ferrix_ symbol by name; only a seam's binding macro may (3934 (3))")
+        if any(rel.endswith("/" + listed) or rel == listed for listed in lists if listed) or rel.endswith(seam_file):
+            continue
+        for match in re.finditer(r"\b__ferrix_[a-z0-9_]+", masked):
+            line = text.count("\n", 0, match.start()) + 1
+            problems.append(f"{rel}:{line}: names {match.group(0)}; only the seam's wrappers call it (3934 (2))")
+    return problems
+
+
+def linked_sources() -> dict[str, str]:
+    """Every Rust file of every path crate `ferrix-kernel` reaches in the cargo
+    metadata graph, `src/lib` included."""
+    out = subprocess.run(["cargo", "metadata", "--format-version", "1", "--offline"], cwd=ROOT,
+                         capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        out = subprocess.run(["cargo", "metadata", "--format-version", "1"], cwd=ROOT,
+                             capture_output=True, text=True, check=True)
+    data = json.loads(out.stdout)
+    packages = {package["id"]: package for package in data["packages"]}
+    nodes = {node["id"]: node for node in data["resolve"]["nodes"]}
+    start = [pid for pid, package in packages.items() if package["name"] == "ferrix-kernel"]
+    seen, todo = set(), list(start)
+    while todo:
+        pid = todo.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        todo.extend(dep["pkg"] for dep in nodes.get(pid, {}).get("deps", []))
+    texts = {}
+    for pid in seen:
+        package = packages[pid]
+        if package.get("source") is not None:
+            continue
+        top = Path(package["manifest_path"]).parent
+        dirs = {top}
+        for target in package.get("targets", []):
+            dirs.add(Path(target["src_path"]).parent)
+        for directory in dirs:
+            for path in directory.rglob("*.rs"):
+                if "target" in path.parts:
+                    continue
+                rel = str(path.relative_to(ROOT))
+                texts[rel] = path.read_text(encoding="utf-8", errors="replace")
+    return texts
+
+
 def run_removable(manifest: dict, files: list[str], root: str | None) -> list[str]:
     """[`removable_problems`] over the tree."""
     removable = manifest.get("composition_root", {}).get("removable", {})
@@ -2744,7 +2839,7 @@ def run_removable(manifest: dict, files: list[str], root: str | None) -> list[st
         with path.open("rb") as handle:
             profiles[path.stem] = tomllib.load(handle)
     return removable_problems(removable, read, crate_files, root or "main.rs", workspace_packages(),
-                              profiles, values)
+                              profiles, values) + seam_scan_problems(removable, linked_sources(), "seam.rs")
 
 
 def profile_rule(manifest: dict) -> tuple[list[str], list[str]]:

@@ -193,15 +193,9 @@ pub(crate) fn dispatch(
     let native = TimeWidth::Native.in_abi(abi);
     let wide = TimeWidth::Wide.in_abi(abi);
     let answer = match call {
-        Syscall::ClockSettime => {
-            (crate::setters::bound().clock_settime)(process, int(a[0]), a[1], native)
-        }
-        Syscall::ClockSettime64 => {
-            (crate::setters::bound().clock_settime)(process, int(a[0]), a[1], wide)
-        }
-        Syscall::Settimeofday => {
-            (crate::setters::bound().settimeofday)(process, a[0], a[1], native)
-        }
+        Syscall::ClockSettime => crate::setters::clock_settime(process, int(a[0]), a[1], native),
+        Syscall::ClockSettime64 => crate::setters::clock_settime(process, int(a[0]), a[1], wide),
+        Syscall::Settimeofday => crate::setters::settimeofday(process, a[0], a[1], native),
         Syscall::Adjtimex => sys_adjtimex(process, a[0], native),
         Syscall::ClockAdjtime => sys_clock_adjtime(process, int(a[0]), a[1], native),
         Syscall::ClockAdjtime64 => sys_clock_adjtime(process, int(a[0]), a[1], wide),

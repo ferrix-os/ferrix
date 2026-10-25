@@ -1925,7 +1925,7 @@ fn write(dir: Dir, attr: Attr, data: &[u8]) -> Result<usize> {
     let (Dir::Driver(bus, driver), Attr::Bind | Attr::Unbind) = (dir, attr) else {
         return Err(Errno::EACCES);
     };
-    (crate::setters::bound().driver_bind)(bus, driver, attr == Attr::Unbind, data)
+    crate::setters::driver_bind(bus, driver, attr == Attr::Unbind, data)
 }
 
 // -- The inode -----------------------------------------------------------------

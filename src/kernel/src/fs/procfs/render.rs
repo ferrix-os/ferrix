@@ -711,17 +711,17 @@ pub(super) fn memfd_noexec(_: &Kernel) -> Result<Vec<u8>> {
 /// process to judge.
 pub(super) fn set_memfd_noexec(_: &Kernel, data: &[u8]) -> Result<usize> {
     let writer = userns::acting().ok_or(Errno::EPERM)?;
-    (crate::setters::bound().sysctl_memfd_noexec)(&writer, data)
+    crate::setters::sysctl_memfd_noexec(&writer, data)
 }
 
 /// A write to `kernel/hostname`, a run-time setting (`crate::setters`).
 pub(super) fn set_hostname(kernel: &Kernel, data: &[u8]) -> Result<usize> {
-    (crate::setters::bound().sysctl_hostname)(kernel, data)
+    crate::setters::sysctl_hostname(kernel, data)
 }
 
 /// A write to `kernel/domainname`, a run-time setting (`crate::setters`).
 pub(super) fn set_domainname(kernel: &Kernel, data: &[u8]) -> Result<usize> {
-    (crate::setters::bound().sysctl_domainname)(kernel, data)
+    crate::setters::sysctl_domainname(kernel, data)
 }
 
 /// `vm/overcommit_memory`: 1, Linux's `OVERCOMMIT_ALWAYS`.

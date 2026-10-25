@@ -245,8 +245,8 @@ pub(crate) fn dispatch(
     process: &Process,
 ) -> Option<Result<usize, Errno>> {
     let answer = match call {
-        Syscall::Sethostname => (crate::setters::bound().sethostname)(process, a[0], int(a[1])),
-        Syscall::Setdomainname => (crate::setters::bound().setdomainname)(process, a[0], int(a[1])),
+        Syscall::Sethostname => crate::setters::sethostname(process, a[0], int(a[1])),
+        Syscall::Setdomainname => crate::setters::setdomainname(process, a[0], int(a[1])),
         Syscall::Getcpu => sys_getcpu(process, a[0], a[1]),
         Syscall::Syslog => sys_syslog(process, int(a[0]), a[1], int(a[2])),
         Syscall::Reboot => sys_reboot(process, a[0] as u32, a[1] as u32, a[2] as u32, a[3]),
@@ -520,8 +520,8 @@ pub(crate) fn sys_syslog(
             }
         }
         // The clears are run-time settings (`crate::setters`).
-        4 => (crate::setters::bound().syslog_read_clear)(process, buf, len),
-        5 => (crate::setters::bound().syslog_clear)(process),
+        4 => crate::setters::syslog_read_clear(process, buf, len),
+        5 => crate::setters::syslog_clear(process),
         // Console level.
         8 if (1..=8).contains(&len) => Ok(0),
         9 => size_unread(),
@@ -796,7 +796,7 @@ pub(crate) fn sys_reboot(
     // A restart with a word for the firmware is a run-time setting
     // (`crate::setters`): it makes the commits and the record below itself.
     if cmd == command::RESTART2 {
-        return (crate::setters::bound().restart_with_word)(process, arg);
+        return crate::setters::restart_with_word(process, arg);
     }
     if matches!(cmd, command::POWER_OFF | command::HALT | command::RESTART) {
         crate::power::sync_disks();
