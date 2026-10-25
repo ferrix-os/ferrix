@@ -255,6 +255,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-portald"
+version = "0.1.0"
+dependencies = [
+ "compositor-dbus",
+]
+
+[[package]]
 name = "compositor-protocol"
 version = "0.1.0"
 dependencies = [

@@ -772,6 +772,13 @@ boot that screenshots it:
 | Y7 | wallpaper picker (built: `yoru-shell --walls` on SUPER I, cover and grid, folders, colour filter and sorts, boot `walls`) and the accent from the wallpaper; parallax | 8 |
 | Y8 | lock, notifications and switcher in the tokens; sounds | 5 |
 
+GTK and Chrome in the tokens: a Yoru desktop carries Nocturne for GTK 3
+and GTK 4 (hyprix's `themes/gtk`, as `/usr/share/themes/Nocturne` and
+`/etc/gtk-{3,4}.0/settings.ini`), and starts `portald`, which answers
+`org.freedesktop.portal.Settings` on the session bus: dark, Nocturne's
+accent, the theme's name -- what GTK 4, libadwaita and Chrome read for
+their own dark mode. It offers no other portal.
+
 Measured on the GPU path where it costs: the dock's and sidebars' blur
 (`layerrule = blur`), the focused window's glow, and the workspace slide,
 as frame times from hyprix's frame statistics with and without each.

@@ -46,6 +46,20 @@ const FACES: [(&str, &str); 4] = [
     ),
 ];
 
+/// Nocturne for GTK, from hyprix's `themes/gtk`, and where each goes.
+const GTK: [(&str, &str); 4] = [
+    (
+        "gtk/Nocturne/gtk-3.0/gtk.css",
+        "usr/share/themes/Nocturne/gtk-3.0/gtk.css",
+    ),
+    (
+        "gtk/Nocturne/gtk-4.0/gtk.css",
+        "usr/share/themes/Nocturne/gtk-4.0/gtk.css",
+    ),
+    ("gtk/Nocturne/settings.ini", "etc/gtk-3.0/settings.ini"),
+    ("gtk/Nocturne/settings.ini", "etc/gtk-4.0/settings.ini"),
+];
+
 /// Yoru's dock, the `yoru-shell` app, which every desktop carries
 /// (`desktop::DESKTOP_APPS`).
 pub(super) const DOCK: &str = "bin/yoru-shell";
@@ -170,6 +184,11 @@ pub(super) fn apply(config: String, args: &Args, files: &mut Vec<File>) -> Resul
         )?;
         for (from, to) in FACES {
             carry(root.join(from), to.to_owned())?;
+        }
+        // GTK in Nocturne: the theme, and GTK's own settings naming it,
+        // dark, which portald says too (`docs/DESKTOP.md` §6).
+        for (from, to) in GTK {
+            carry(themes.join(from), to.to_owned())?;
         }
     }
     println!(

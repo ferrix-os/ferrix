@@ -360,6 +360,7 @@ const LOCK_PATH: &str = "bin/lock";
 const VKBD_PATH: &str = "bin/vkbd";
 const VDAGENT_PATH: &str = "bin/vdagent";
 const NOTIFYD_PATH: &str = "bin/notifyd";
+const PORTALD_PATH: &str = "bin/portald";
 /// `wallpaper`, which shows the shipped wallpaper on every screen.
 pub(crate) const WALLPAPER_CLIENT_PATH: &str = "bin/wallpaper";
 
@@ -411,6 +412,9 @@ struct Programs {
     /// `notifyd`, the notifications and devmgr's driver events
     /// (docs/DESKTOP.md §4), which the Ferrix light theme starts.
     notifyd: PathBuf,
+    /// `portald`, the settings portal Yoru starts: dark, its accent, and
+    /// Nocturne for GTK and Chrome.
+    portald: PathBuf,
     /// `wallpaper`, a picture behind everything on every screen.
     wallpaper: PathBuf,
 }
@@ -442,12 +446,13 @@ impl Programs {
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
             sessiond,
             notifyd: build(arch, "compositor-notifyd", "notifyd")?,
+            portald: build(arch, "compositor-portald", "portald")?,
             wallpaper: build(arch, "compositor-wallpaper", "wallpaper")?,
         })
     }
 
     /// The ones the initramfs carries, each with the path it goes at.
-    fn carried(&self) -> [(&'static str, &Path); 16] {
+    fn carried(&self) -> [(&'static str, &Path); 17] {
         [
             (CLIENT_PATH, self.client.as_path()),
             (CTL_PATH, self.ctl.as_path()),
@@ -464,6 +469,7 @@ impl Programs {
             (VDAGENT_PATH, self.vdagent.as_path()),
             (SESSIOND_PATH, self.sessiond.as_path()),
             (NOTIFYD_PATH, self.notifyd.as_path()),
+            (PORTALD_PATH, self.portald.as_path()),
             (WALLPAPER_CLIENT_PATH, self.wallpaper.as_path()),
         ]
     }

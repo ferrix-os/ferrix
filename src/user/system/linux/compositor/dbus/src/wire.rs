@@ -82,6 +82,12 @@ impl Writer {
         self.u32(value.cast_unsigned());
     }
 
+    /// `d`: an IEEE 754 double, aligned to 8.
+    pub fn f64(&mut self, value: f64) {
+        self.align(8);
+        self.bytes.extend(value.to_le_bytes());
+    }
+
     /// `b`: a `u32` of 0 or 1.
     pub fn bool(&mut self, value: bool) {
         self.u32(u32::from(value));
@@ -191,6 +197,19 @@ impl<'a> Reader<'a> {
         self.align(4)?;
         let bytes = self.take(4)?;
         Ok(u32::from_le_bytes(
+            bytes.try_into().map_err(|_| Malformed::Short)?,
+        ))
+    }
+
+    /// `d`.
+    ///
+    /// # Errors
+    ///
+    /// [`Malformed::Short`].
+    pub fn f64(&mut self) -> Result<f64, Malformed> {
+        self.align(8)?;
+        let bytes = self.take(8)?;
+        Ok(f64::from_le_bytes(
             bytes.try_into().map_err(|_| Malformed::Short)?,
         ))
     }

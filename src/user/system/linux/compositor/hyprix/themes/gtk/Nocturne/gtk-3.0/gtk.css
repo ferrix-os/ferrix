@@ -1,0 +1,60 @@
+/* Nocturne for GTK 3: Yoru's tokens (Ferrix's docs/DESKTOP.md §6) over
+ * GTK's own dark Adwaita, which every GTK 3 carries compiled in. Only the
+ * colours are Yoru's; the shapes are Adwaita's. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+
+@define-color theme_bg_color #161826;
+@define-color theme_base_color #1c1e2c;
+@define-color theme_fg_color #e9e9ed;
+@define-color theme_text_color #e9e9ed;
+@define-color theme_selected_bg_color #9184d9;
+@define-color theme_selected_fg_color #161826;
+@define-color insensitive_bg_color #232532;
+@define-color insensitive_fg_color #75798c;
+@define-color unfocused_bg_color #161826;
+@define-color borders #3f424d;
+@define-color unfocused_borders #292b31;
+@define-color accent_color #b5abfc;
+@define-color accent_bg_color #9184d9;
+
+window, .background {
+    background-color: #161826;
+    color: #e9e9ed;
+}
+
+headerbar, .titlebar {
+    background: #232532;
+    border-color: #3f424d;
+    box-shadow: none;
+}
+
+entry, textview text, treeview.view, list, iconview {
+    background-color: #1c1e2c;
+    color: #e9e9ed;
+}
+
+entry:focus, entry:focus-within {
+    border-color: #968ae0;
+    box-shadow: inset 0 0 0 1px #968ae0;
+}
+
+button.suggested-action, button.default {
+    background: #9184d9;
+    color: #161826;
+    border-color: #796cbf;
+}
+
+selection, *:selected, treeview.view:selected, row:selected {
+    background-color: #423a6a;
+    color: #e7e5fe;
+}
+
+scrollbar slider {
+    background-color: #595d6c;
+}
+
+tooltip, tooltip.background {
+    background-color: #232532;
+    color: #e9e9ed;
+    border: 1px solid #3f424d;
+}

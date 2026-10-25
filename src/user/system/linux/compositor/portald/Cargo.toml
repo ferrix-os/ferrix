@@ -1,0 +1,22 @@
+[package]
+name = "compositor-portald"
+description = "portald: org.freedesktop.portal.Settings on the session bus -- the desktop's colour scheme, accent and GTK theme, which GTK and Chrome read to draw in the desktop's look (docs/DESKTOP.md 6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "portald"
+path = "src/main.rs"
+
+[lib]
+name = "compositor_portald"
+path = "src/lib.rs"
+
+[dependencies]
+compositor-dbus = { path = "../dbus" }
+
+[lints]
+workspace = true

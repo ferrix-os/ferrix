@@ -145,6 +145,8 @@ paths = [
     "usr/share/ferrix/start/*",
     "usr/share/icons/hicolor/index.theme",
     "usr/share/icons/hicolor/scalable/apps/ferrix-*.svg",
+    # Nocturne for GTK (hyprix's themes/gtk), on a Yoru desktop.
+    "usr/share/themes/Nocturne/**",
     ".ferrix/**",
     "bin/hyprix",
     "bin/hyprctl",
@@ -160,6 +162,7 @@ paths = [
     "bin/vdagent",
     "bin/sessiond",
     "bin/notifyd",
+    "bin/portald",
     "bin/wallpaper",
     "bin/pkg",
     "bin/dhcpc",
