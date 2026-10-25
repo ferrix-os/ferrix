@@ -6,8 +6,18 @@ otherwise it is not a microkernel.* This document says what that takes,
 where Ferrix breaks the rule today, and the interface that closes each gap.
 It extends `MICROKERNEL.md` §3 K8 (devmgr decides which driver gets a PCI
 function) to every bus and every shared platform resource, and it builds on
-`CHARDEV.md` (ledger 4352) and `USB-SERIAL.md` §5 (ledger 4317). It needs
-the certification consultant's verdict before any code.
+`CHARDEV.md` (ledger 4352) and `USB-SERIAL.md` §5 (ledger 4317).
+
+**Reviewed** (ledger 4475). OK IF conditions D1-D23 for §1-§5, §7 and §8;
+OK for §6 and §10; §9's order as amended in §9 below. **NOT YET:**
+* **B1**, the virtual interrupt object (§4.3 shape 2): use §4.1's
+  interrupt channel bound to a port instead, unless a measured row shows
+  the channel's cost matters for a named consumer.
+* **B2**, the SMC firmware-call object (§4.4).
+* **B3**, acpid (§4.4).
+
+The condition labels are the ledger entry's; each section below carries
+its own. Two decisions are the customer's (§11).
 
 ## 1. The rule, made testable
 
@@ -31,10 +41,13 @@ architectural timers, the IOMMU (`MICROKERNEL.md` K8: its registers are
 never mapped to ring 3), the memory map, the early console, and parsing the
 firmware's descriptions (device tree, ACPI tables, PCI configuration
 space). A port to a new CPU architecture or interrupt controller is a
-kernel port, not a driver. A **check** makes the rule testable: §8's
-`xtask test-driver-model` builds a driver for a device class and a board
-peripheral the kernel has never heard of, boots it on an unchanged kernel
-image (byte-identical), and requires it to serve.
+kernel port, not a driver. So is a new **typed core** (§6). A **check**
+makes the rule testable: §8's `xtask test-driver-model` builds a driver
+for a device class and a board peripheral the kernel has never heard of,
+boots it on an unchanged kernel image, and requires it to serve. **(D1)**
+"Unchanged" means each architecture's kernel ELF, and the loader if it
+carries per-board data, is byte-identical by sha256 from one build. Only
+the initramfs, devmgr's table and the DTB may differ.
 
 ## 2. Where Ferrix breaks the rule today
 
@@ -50,8 +63,14 @@ Measured on develop 455acdee6:
 | G6. Firmware calls (Arm SMC/SCMI, PSCI beyond CPU on/off, OP-TEE; ACPI AML methods) | only the kernel can `smc`; no AML in ring 3 | Clocks the secure world owns, and x86 device power, need kernel code |
 | G7. At most 32 driver images, all in the initramfs's first DEVICES message | `MAX_DRIVERS`, `discovery/devmgr.rs` (item) | A product with more drivers needs a kernel limit raised |
 
-PCI already meets the rule (devmgr matches vendor, device and class in
-`PCI_DRIVERS`; the kernel mints BARs and MSI generically), apart from G7.
+PCI **partly** meets the rule: devmgr matches vendor, device and class in
+`PCI_DRIVERS`, and the kernel mints BARs and MSI generically. But two
+further gaps remain (D2):
+
+| Gap | Where | Effect |
+|---|---|---|
+| G8. Device knowledge in core predicates: `input_functions` (by the xHCI class code), `intel_gpu` (vendor and class), `reads_log` (`TREE_GS201_DWC3`), `may_have_client_nodes` | `device.rs` | A new device of those kinds needs a core change. Each predicate either leaves, as a devmgr grant or an admission rule, or stays with its stated security reason |
+| G9. No I/O-port grant exists at all | kernel, native ABI | A ring-3 driver for a legacy-port device, and acpid (§4.4), have nothing to use |
 
 ## 3. Generic device-tree nodes (closes G1)
 
@@ -89,6 +108,38 @@ The 7 `TREE_*` bindings become ordinary generic nodes, and their drivers
 match by `compatible` in devmgr's table. The `BoardBinding` registry, the
 board `prepare` functions and the `clock` hook leave the kernel (§9).
 
+The conditions (ledger 4475):
+
+* **(D3) Kernel-owned by use.** It is every node a kernel subsystem
+  claimed through one registration before a seal point. A claim after the
+  seal is refused, and that is checked. The set also covers pstore, the
+  spin-table release addresses, a framebuffer the kernel draws on, a
+  watchdog it pets, an RNG `random.rs` reads, and the power-off/restart
+  node.
+* **(D4)** A node referenced, even transitively, by a kernel-owned node
+  (clocks, resets, power-domains, pinctrl, supplies, interconnects) is
+  published with a **KERNEL_DEPENDS** flag. devmgr's admission refuses a
+  driver for it in claimed configurations and admits it on armv7a.
+  Otherwise a ring-3 RCC could gate the console's clock, or STGEN's, which
+  drives the kernel's timer.
+* **(D5) DMA fails closed.** Every tree node reaches memory. NO_DMA comes
+  only from nodes the kernel describes itself, never from a tree property.
+  `iommus` counts as translated only once the core binds platform stream
+  ids, which needs a design of its own.
+* **(D6)** On claimed architectures, an untranslated generic peripheral
+  starts only on an integrator's per-compatible "not a bus master" entry in
+  devmgr's image-time table. The entry carries a written reason, an AoU in
+  SAFETY-MANUAL and an assumption in the SECURITY-TARGET. This is an
+  exemption to the DMA gate and is **the customer's decision** (§11).
+* **(D7)** Overlap is tested on page-rounded ranges, against kernel-owned
+  ranges and between published nodes. A page shared by two published nodes
+  is minted to neither, unless both go to one driver.
+* **(D8)** Only SPIs are minted to ring 3, never SGIs or PPIs, and each
+  line has one owner.
+* **(D9)** Tree parsing has stated bounds, a host test and fuzzing.
+* **(D10)** No node is published by both the `TREE_*` path and the generic
+  path, and a check proves it.
+
 ## 4. Platform resources served from ring 3 (closes G2, G5, G6)
 
 ### 4.1 Providers
@@ -112,7 +163,8 @@ serves one **resource protocol** per kind, on channels:
 
 These are ring-3 message protocols in a crate of their own
 (`ferrix-platformctl`), versioned like `chardevctl`. The kernel neither
-carries nor reads them.
+carries nor reads them. **(D11)** The dma kind passes VMOs, and the
+provider pins them for its own device. No cross-domain pin is added.
 
 ### 4.2 Wiring by devmgr
 
@@ -133,6 +185,11 @@ in the provider.
   kernel-owned (§3) and run on the clocks firmware left on. The RCC provider
   is told which clocks are firmware-critical (`/chosen`, `clock-critical`,
   `protected-clocks`) and never gates them.
+* **(D12)** A provider restarted by T0 first reads the hardware state back.
+  Until its consumers have rebound, or devmgr's bounded deadline passes, it
+  gates, resets and powers off nothing.
+* **(D13)** devmgr refuses a reference cycle or a missing provider at
+  start, naming the nodes.
 
 ### 4.3 Interrupts behind a secondary controller
 
@@ -148,13 +205,28 @@ Two shapes, both generic:
    claim.
 2. **A truly cascaded controller**, such as a GPIO expander on I2C or a
    PMIC, whose one parent line fans out. The provider gets the parent vector
-   and signals each child through a **virtual interrupt**: a kernel object
-   the provider triggers and the consumer waits on like a vector (port
-   packet, ack). This is one generic object; Zircon has the same, as
-   `zx_interrupt_create(VIRTUAL)`. It costs one extra wake, as Linux's
-   threaded nested IRQs do.
+   and signals each child on §4.1's **interrupt channel** (request, mask,
+   unmask, ack), bound to the consumer's port. It costs one extra wake, as
+   Linux's threaded nested IRQs do. *A virtual interrupt object (Zircon's
+   `zx_interrupt_create(VIRTUAL)`) was proposed and is NOT YET (B1). It
+   comes back only with a measured row showing the channel's cost matters
+   for a named consumer.*
+
+The conditions:
+
+* **(D14)** Routes come only from the DT-spec forms: `interrupt-map` with
+  its mask, matched cell for cell, and the parent chain.
+* **(D15)** For each nexus, the doc says who clears its latch. STM32 EXTI
+  latches pending in its own registers, which the provider clears, so EXTI
+  is **shape 2**, not shape 1. A line shared across GPIO banks is shape 2
+  too.
+* **(D16)** A residual, stated: through mask and trigger, a provider has
+  reach over its consumer's line.
 
 ### 4.4 Firmware calls
+
+**Both halves of this section are NOT YET (B2, B3).** What follows is the
+proposal, and below it what each needs before it comes back.
 
 * **Arm SMC/HVC** (SCMI, OP-TEE, vendor SiP calls): a **firmware-call
   object** minted for a node whose binding names its function ids in the
@@ -171,6 +243,30 @@ Two shapes, both generic:
   sleep). This is how Fuchsia runs ACPI, and it removes the reason the x86
   power node (`TREE_X86_POWER`) exists in the kernel.
 
+**B2, the SMC object.** An id list does not bound what the calls reach.
+OP-TEE's standard calls and many SiP calls take non-secure physical
+addresses, so the object can read and write any non-secure memory by
+proxy. It comes back with a design that:
+* admits it under the DMA gate as an untranslated device;
+* never allows SMCCC owner 0 (Arm Architecture, including ARCH_WORKAROUND)
+  or owner 4 (PSCI, SDEI, TRNG), whatever the tree lists;
+* checks the conduit against the kernel's PSCI conduit;
+* states the unbounded secure-world time in MEMORY-AND-TIMING.
+
+One object per node, with that node's id list.
+
+**B3, acpid.** It needs a new I/O-port mechanism (G9, the x86-64 TSS
+bitmap), designed on its own. That mechanism must refuse:
+* the ports the kernel uses;
+* 0xCF8-0xCFF, because configuration space stays kernel-mediated (K8);
+* the ISA DMA ports;
+* SystemMemory regions in usable RAM.
+
+Through the SMI port, acpid holds integrity authority via SMM. So in a
+claimed configuration it is either a certified user-space component or
+outside the claim: **the customer's decision** (§11). `TREE_X86_POWER`
+stays until then.
+
 ## 5. Buses that ring-3 drivers own (closes G4)
 
 R2 made the USB host export each interface to a class driver. This design
@@ -181,9 +277,17 @@ ids and class, a DT `compatible` from the controller's subtree, an ACPI
 `_HID` from `acpid`), and a channel to its parent driver that carries the
 bus's transfers. devmgr matches and starts the child's driver exactly as it
 does for kernel nodes. The kernel takes no part: the child has no
-apertures and no vectors, only channels. An interrupt comes as a virtual
-interrupt (§4.3) or as the child's own primary vector, if the tree gives it
-one.
+apertures and no vectors, only channels. An interrupt comes on an
+interrupt channel (§4.3), or as the child's own primary vector if the tree
+gives it one.
+
+* **(D17)** If the kernel's DEVICES, PUBLISHED or REPORT messages change,
+  `discovery/devmgr.rs` (item) comes back for review. devmgr verifies the
+  identities it can: device-tree children against the kernel's subtree
+  blob, and ACPI `_HID` once acpid exists. USB and I2C identities are the
+  parent's word, and stated as such.
+* **(D18)** A lying parent can obtain names, never more authority than it
+  has.
 
 ## 6. Classes (closes G3)
 
@@ -207,7 +311,9 @@ later a sealed, measured package volume, `MICROKERNEL.md` K14) and loads
 drivers from it with the user-space loader (K15). The kernel's cap becomes
 a cap on devmgr's memory, which is charged to its job. Adding a driver to
 a product is then an image change and never a kernel change. Updating one
-at run time already works (`DEVMGR.md` §4.1).
+at run time already works (`DEVMGR.md` §4.1). **(D19)** The store comes
+after K15 (M2), and after K14 (M3) for certified drivers. The DEVICES change
+gets its own `L.discovery` id at that step.
 
 ## 8. Evidence
 
@@ -217,7 +323,7 @@ at run time already works (`DEVMGR.md` §4.1).
   added to QEMU `virt`'s tree (dumped with `-machine dumpdtb`, edited, and
   passed back with `-dtb`) over a memory region a test device backs, and
   served by a ring-3 test driver. That driver uses a clock, a reset and a pinctrl
-  state from a ring-3 test provider, a virtual interrupt from a test
+  state from a ring-3 test provider, an interrupt channel from a test
   cascade, and a generic chardev for programs. The check requires the
   kernel hash unchanged and the device working. **Negative control:** the
   same driver with the provider absent must not start, and devmgr reports
@@ -230,8 +336,29 @@ at run time already works (`DEVMGR.md` §4.1).
   * a vector routed through a nexus is minted only along the tree's route,
     and a forged route is refused;
   * a firmware-call object refuses an id the tree did not list;
-  * a virtual interrupt is triggerable only by its provider's handle;
+  * an interrupt channel is served only by the provider devmgr bound it to;
   * an AML operation region overlapping a kernel range is refused.
+* **(D20)** The made-up node is backed by a device QEMU actually models
+  (`virt`'s pl061 or pl031 under a made-up compatible). On aarch64 it is
+  admitted by a test-only (D6) entry or the unclaimed boot word. A control
+  changes one kernel byte, to show the hash comparison fails.
+* **(D21)** More self-checks, each with a gate.sh control:
+  * a shared page minted to neither;
+  * a PPI refused;
+  * KERNEL_DEPENDS set across a transitive reference;
+  * a kernel claim after the seal refused;
+  * a tree node never NO_DMA;
+  * no double publication.
+* **(D22)** V-19, and a CLAIM.md sentence for armv7a: the DMA-capable
+  peripherals' drivers can reach all memory (DMA1/DMA2/MDMA, SDMMC IDMA,
+  USB, LTDC, ETH). Wherever firmware leaves RCC, SYSCFG, DDRCTRL, BSEC and
+  DBGMCU non-secure, their drivers hold the SoC's integrity.
+* **(D23)** Rows `run: PASSED` by hash: check, test-driver-model, test-boot
+  on all four boots, and the board rows each step touches. Board rows run
+  on hardware, and the product owner schedules them.
+* **IDs for step 1**, reserved in a docs-only landing before its code and
+  shrunk at landing: H.DEV.7-8, L.discovery.8-12, L.device.60-65, V-19.
+  `L.discovery.7` is already the chardev root grant's.
 * **On the DK1** (when the customer schedules it): I2C5, SPI5 and the PF3
   interrupt served by ring-3 drivers against the FPGA test target, with the
   RCC, pinctrl/EXTI and PWR providers in ring 3, on a kernel built before
@@ -244,6 +371,19 @@ at run time already works (`DEVMGR.md` §4.1).
 
 ## 9. What leaves the kernel, and in what order
 
+**The order as reviewed** (ledger 4475, against `MICROKERNEL.md`):
+* Steps 1 and 3 (shape 1) are K8's device-tree half, recorded as **K8b**,
+  and land ahead of M5. They need neither the lift nor K13.
+* Step 2's kernel deletions are M6's "board glue out", moved earlier. Each
+  is its own reviewed landing, made after its ring-3 provider passes the
+  board's rows.
+* Step 4 is ring 3, any time after R2.
+* Step 5 waits for B2 and B3.
+* Step 6 follows K15, plus K14 for certified drivers.
+* Step 7 goes with step 1.
+
+The original list:
+
 1. **Generic device-tree nodes beside the bindings** (§3). Both paths exist
    until each `TREE_*` driver has moved to matching by `compatible`. Core
    files: `discovery/{board,tree,finder,description}.rs`, `device.rs`.
@@ -253,8 +393,8 @@ at run time already works (`DEVMGR.md` §4.1).
    driver moves: LTDC/HDMI, USB host, GPU, SDMMC. `platform/st/stm32mp1/**`
    shrinks to what the kernel itself uses (the console's clock check, if
    any).
-3. **Interrupts** (§4.3): nexus routing from the tree, and the virtual
-   interrupt object, a new native object (core, `L.object.*`).
+3. **Interrupts** (§4.3): nexus routing from the tree (core), and the
+   interrupt channel for cascades and EXTI (ring 3, no new object, B1).
 4. **Child devices** (§5) in devmgr's protocol, with USB's R2 moved onto it.
 5. **Firmware calls** (§4.4): the SMC object first (the DK1's OP-TEE and SCMI
    clocks), then `acpid`, and `TREE_X86_POWER` leaves.
@@ -274,19 +414,27 @@ provider's otherwise.
 | New driver needs a kernel change | yes (in-tree module, or out-of-tree against an unstable API) | no | no (but static system build) | no |
 | Clocks, resets, pinctrl | in kernel (CCF, pinctrl) | ring-3 drivers (platform bus) | per-system components | ring-3 providers, wired by devmgr |
 | Device-tree matching | in kernel | ring-3 driver manager | build-time | ring-3 devmgr; the kernel publishes nodes only |
-| Cascaded interrupts | in kernel (irqchip) | virtual interrupts | notifications | virtual interrupts; nexus lines direct |
+| Cascaded interrupts | in kernel (irqchip) | virtual interrupts | notifications | interrupt channels; routed lines direct |
 | A provider fault | kernel crash | restart, consumers rebind | depends on system | T0 restart, consumers rebind (K13) |
 
-## 11. Questions for the consultant and the customer
+## 11. Questions, answered (ledger 4475), and the customer's two
 
-1. Is §3's "kernel-owned by use, not by list" acceptable as the boundary,
-   and is publishing every other enabled node acceptable under `T.DMA` on
-   machines without an IOMMU (the STM32MP1)? The customer's DMA gate
-   decision (G4: armv7a is outside the DMA claim) may already settle it.
-2. The virtual interrupt is a new native object, a core change. Is there a
-   reason a port packet signalled by the provider cannot serve? That would
-   need no new object, but has no ack/mask semantics.
-3. The firmware-call object: one object per node with an id list, or one
-   per id?
-4. Ordering against `MICROKERNEL.md`: step 6 needs K15. Should steps 1-5
-   precede the M-stages, or be folded into K8?
+1. **Is "kernel-owned by use" acceptable?** Yes, under D3-D10. On the
+   STM32MP1 it is acceptable under `T.DMA` because armv7a is outside the
+   claim (DMA gate G4 (a)), and every armv7a image carries
+   `ferrix.unisolated`. It widens what that unclaimed configuration
+   exposes, which D22 states. The end condition, an SMMU driven, is
+   unchanged.
+2. **Does the virtual interrupt need a new object?** No: the interrupt
+   channel serves, so there is no new object (B1).
+3. **One firmware-call object per node, or per id?** Per node, after B2's
+   owner filter, and only once B2's design exists.
+4. **What order against `MICROKERNEL.md`?** See §9, as reviewed.
+
+**For the customer, through the product owner:**
+
+* **D6:** may an integrator's per-compatible "not a bus master" entry
+  exempt an untranslated peripheral from the DMA gate on claimed
+  architectures?
+* **B3:** does acpid become a certified user-space component, or does
+  ring-3 ACPI stay outside the claim?
