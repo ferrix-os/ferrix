@@ -36,8 +36,8 @@ qemu-system-x86_64 \
   -device intel-iommu,intremap=on,eim=off \
   -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
   -drive if=pflash,format=raw,file=ferrix-vars.fd \
-  -vga none -device VGA,addr=0xa \
-  -device virtio-gpu-pci,addr=0x10,disable-legacy=on,iommu_platform=on,edid=on,xres=1920,yres=1080 \
+  -vga none \
+  -device virtio-gpu-pci,disable-legacy=on,iommu_platform=on,edid=on,xres=1920,yres=1080 \
   -device virtio-keyboard-pci,disable-legacy=on,iommu_platform=on \
   -device virtio-tablet-pci,disable-legacy=on,iommu_platform=on \
   -netdev user,id=net0 \
@@ -106,7 +106,8 @@ launcher to open it again.
 * SUPER+Q closes a window, SUPER+1 to 4 switch workspaces.
 * Try `ferrofetch`, `btop`, `curl https://example.com`, `git`.
 
-Nothing you do in the live session is kept: `/` is in memory.
+Nothing you do in the live session is kept: `/` is in memory. Give the
+machine 4 GiB: with much less, the session can run out of memory.
 
 ## The installer
 
@@ -124,6 +125,9 @@ It asks, page by page:
 
 The installed system starts with your session locked: your password opens
 it. Its disk has an EFI system partition and a btrfs root.
+
+The dock's clock shows UTC whatever the time zone; programs (`date`, the
+lock screen's clock) follow the zone you chose.
 
 It cannot yet resize another system's partition, add a boot entry to the
 firmware (on a disk shared with another system, pick Ferrix in the
