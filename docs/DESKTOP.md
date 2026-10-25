@@ -935,8 +935,9 @@ applications, in `yoru-shell` -- is still to come (5 points).
   (a drag's `text/uri-list`) or given to `yoru-shell --stash`, the panel of
   tiles that opens them; boot `stash`.
 * **The widget sidebars** (Y4): `yoru-shell --sidebar left` and `right`,
-  edge reveal, pin, tabs, move and remove, the clock and month, the to-do;
-  weather and quick settings say "not kept yet". Boot `sidebars`.
+  edge reveal, pin, tabs, move and remove, the clock and month, the to-do,
+  and the weather, opt-in (§6.6; boot `weather`); quick settings say "not
+  kept yet". Boot `sidebars`.
 * **GTK and Chrome in the tokens**: Nocturne for GTK 3 and 4 and GTK's
   settings naming it; `portald`, answering `org.freedesktop.portal.Settings`
   (dark, the accent, the theme) and `FileChooser` with Ferrix's own dialog
@@ -962,6 +963,10 @@ widget exists:
   setting says so in those words. Nothing else is sent.
 * **Kept locally.** The location is in the person's own settings file and
   nowhere else; turning weather off stops every request.
+* **Built** (2026-10-25): the sidebar's Weather tab holds to all of this;
+  `test-compositor --boot weather` requires no host asked while it is off,
+  the geocoding host and then the forecast's once a place is typed, and
+  none after "Turn off weather".
 * **Checked.** A host test holds that an unconfigured shell, one turned
   off with a location kept, and one on with no location make no request,
   and that coordinates leave rounded.
@@ -986,7 +991,7 @@ built and the size of what is not (points as the backlog counts them).
 | Bar layout (40 px bottom bar with a task list) | no | 3 |
 | Widget sidebars, edge reveal, pin to reserve room | yes (boot `sidebars`) | |
 | Widgets: clock and month calendar | yes | |
-| Widgets: weather (Open-Meteo, opt-in, §6.6) | the opt-in rule | 3 |
+| Widgets: weather (Open-Meteo, opt-in, §6.6) | yes: off until a place is typed, a name looked up once and kept as rounded coordinates, now and feels like, seven days, eight hours (boot `weather`) | |
 | Widgets: quick settings (brightness, volume, mic, appearance, theme colour, Wi-Fi, Bluetooth, DND, night light, focus, auto-tile) | no | 8 |
 | Widgets: to-do | yes, kept in the person's file | |
 | Command palette: windows, actions, workspaces, fuzzy | applications only, fuzzel (Y3) | 5 |

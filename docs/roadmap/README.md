@@ -207,7 +207,7 @@ single file across.
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
 | 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ◐ in progress | ≈ 205 points as a first guess, step 5 unknown |
 | 24 | [The game path](stage-24-game-path.md) | ◐ in progress | ≈ 68 points before the game domain, about 190 with it and the later rows |
-| 25 | [Yoru, the main UI](stage-25-yoru.md) | ◐ in progress | 63 points estimated; about 25 built |
+| 25 | [Yoru, the main UI](stage-25-yoru.md) | ◐ in progress | 63 points estimated; about 27 built |
 |  | [Microkernel M0 — the build flags, the baselines, the checks](microkernel-m0.md) | ◐ in progress | ≈ 45–60 points |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |
