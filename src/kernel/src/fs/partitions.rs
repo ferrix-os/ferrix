@@ -69,6 +69,10 @@ impl BlockDevice for Partition {
         self.disk.read_only()
     }
 
+    fn offline(&self) -> bool {
+        self.disk.offline()
+    }
+
     fn write(&self, sector: u64, buf: &[u8]) -> Result<(), Errno> {
         self.disk.write(self.on_disk(sector, buf.len())?, buf)
     }

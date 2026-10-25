@@ -52,6 +52,14 @@ pub(crate) trait BlockDevice: Send + Sync + fmt::Debug {
     /// [`BlockDevice::sectors`] says.
     fn read_only(&self) -> bool;
 
+    /// Whether the disk was taken offline, its every request answered EIO
+    /// at once: a block ring's disk whose driver went silent
+    /// (`interfaces::block_ring`, "A disk that stops answering"). `false`
+    /// for a disk that cannot be.
+    fn offline(&self) -> bool {
+        false
+    }
+
     /// Write whole sectors from `buf`, whose length is a whole number of
     /// sectors, at `sector`. Called with no spin lock held; may sleep.
     ///

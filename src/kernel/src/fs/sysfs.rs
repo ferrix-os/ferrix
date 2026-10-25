@@ -380,6 +380,10 @@ enum Attr {
     Dev,
     Size,
     Ro,
+    /// A disk's `state`: `running`, or `offline` once its driver went
+    /// silent (`interfaces::block_ring`, "A disk that stops answering");
+    /// where Linux has a SCSI disk's `device/state`.
+    State,
     Removable,
     Range,
     Serial,
@@ -442,6 +446,7 @@ impl Attr {
             Attr::Dev => b"dev",
             Attr::Size => b"size",
             Attr::Ro => b"ro",
+            Attr::State => b"state",
             Attr::Removable => b"removable",
             Attr::Range => b"range",
             Attr::Serial => b"serial",
@@ -1184,6 +1189,7 @@ fn drm_and_disk_entries(list: &mut Listing, dir: Dir) -> Result<()> {
                     Attr::Removable,
                     Attr::Ro,
                     Attr::Size,
+                    Attr::State,
                     Attr::Uevent,
                 ],
             );
@@ -1732,6 +1738,14 @@ fn render_disk(out: &mut Vec<u8>, registration: u64, attr: Attr) -> Result<()> {
             attr::size_in_512_byte_sectors(device.sectors(), device.sector_size()),
         ),
         Attr::Ro => attr::flag(out, device.read_only()),
+        Attr::State => attr::line(
+            out,
+            if device.offline() {
+                b"offline"
+            } else {
+                b"running"
+            },
+        ),
         Attr::Removable => attr::flag(out, false),
         // Minors a disk owns: itself and its partitions, as `DiskName`
         // numbers them.

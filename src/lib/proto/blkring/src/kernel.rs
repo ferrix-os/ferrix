@@ -129,6 +129,25 @@ pub struct Completed {
     pub device_ticks: u32,
 }
 
+/// Whether a disk whose driver last answered anything at `last_answer` has
+/// gone silent by `now` -- every time in nanoseconds on one clock -- and is
+/// to be taken offline: a request is still waiting for its answer
+/// (`outstanding`), and the driver has completed nothing at all for at least
+/// `patience`.
+///
+/// A driver that answers other requests is alive, if slow, and its disk
+/// stays: only the one request that waited out its patience fails. One that
+/// answers nothing while a request has waited a whole patience is a hung
+/// drive behind it or a driver that cannot recover it, which Linux's SCSI
+/// error handler takes offline once its retries and resets have failed; the
+/// driver did those already (`docs/BLOCK-RING.md`, "A disk that stops
+/// answering"). A clock that went back, or a `last_answer` from the future,
+/// is never silence.
+#[must_use]
+pub const fn gone_silent(now: u64, last_answer: u64, outstanding: bool, patience: u64) -> bool {
+    outstanding && now >= last_answer && now - last_answer >= patience
+}
+
 /// How the glue learned the ring is over.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ending {

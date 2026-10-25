@@ -404,6 +404,51 @@ and `serial` are carried as given: stage 11 validates neither beyond size.
   to those frames. The pages stay held (leaked) until devmgr has reset the
   device, or a translated domain has unmapped them. The kernel's own copies are
   already safe. (ferrix-d9 documents the same rule on `Domain::unpin`.)
+* **A disk that stops answering** (since 2026-10-25, BACKLOG p1-034; the
+  certification consultant's design review, ledger 4260). A driver that is
+  alive but whose device hangs -- or that cannot recover it -- cannot say so,
+  and before this every request to such a disk waited its own 30-second
+  patience and then failed alone, and every file read the page cache missed
+  waited behind it: the N150 box answered nothing over ssh for ten minutes
+  after one failed write. Retrying and resetting are the driver's (`ahci`
+  retries a command, COMRESETs after a timeout and answers within about
+  20 s, `docs/AHCI.md` §2). The kernel's part is Linux's SCSI error
+  handler's last step, taking the device offline:
+  * **The rule.** When a request's 30-second patience runs out unanswered
+    and the driver has completed nothing at all for 30 seconds while a
+    request waited (`ferrix_blkring::kernel::gone_silent`), the disk is
+    offline. A driver that answered anything else in that time is alive:
+    only the request that waited out its patience fails, as before. The
+    edge: one command a slow but live device takes longer than 30 s over
+    -- an SMR drive's flush, a USB disk spinning up -- with nothing else
+    answered meanwhile now takes the whole disk offline where it failed one
+    request; Linux's 30-second SCSI timeout followed by its error handler
+    does the same.
+  * **Offline.** Said once on the console (`block    vdd offline: ...`,
+    which lode keeps as a kernel record) and in `/sys/block/<disk>/state`
+    (`running` or `offline`, where Linux has a SCSI disk's `device/state`).
+    Every request without an answer is answered EIO and its caller woken;
+    every new request is answered EIO at once; the ring's task answers every
+    command still queued, and every one on the ring, as failed and sends
+    nothing more. A command answered as failed is therefore never sent
+    later, to this driver or the next: a park after going offline puts none
+    back. What is already on the ring cannot be recalled, and the device
+    may still carry it out; a late completion of one changes no answer (an
+    answer once given is never replaced) and gives its region back, and its
+    regions are not handed out again on that ring.
+  * **Why the filesystem's commit survives a late write (H.STORE.8).** The
+    btrfs write path waits for each write, so a commit's superblock is
+    written only after every node and data write of that commit and the
+    flush before it were answered OK. A write answered EIO aborts the
+    transaction, and its commit's superblock is never issued. A late write
+    can therefore only be a block of a transaction that was aborted, which
+    no superblock on the disk reaches; or the superblock of a commit whose
+    every earlier write had succeeded, which lands a whole commit.
+  * **Back.** Only a new driver's HELLO taking the disk up -- devmgr starting
+    its driver again after the old one died, or was killed -- brings it back
+    online, with an empty queue. devmgr does not restart a driver that is
+    alive, so an offline disk otherwise stays so until the machine restarts.
+    A late completion never brings it back.
 * **A driver never faults on a file mapping of its own disk** (decision of
   2026-09-13, recorded in `docs/BACKLOG.md`). A page fault on such a mapping
   fills through this ring, and the only driver that could complete that fill is

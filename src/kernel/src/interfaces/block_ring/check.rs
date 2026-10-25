@@ -146,6 +146,8 @@ pub fn run() -> Result<Report, &'static str> {
     let rewrites = super::reread_check::run()?.rewrites;
     // Nor here: its two tree nodes are its own, and it leaves `vda` free.
     super::tree_check::run()?;
+    // Nor here: a disk of its own that no ring serves.
+    super::offline_check::run()?;
     let (subject, passed_over) = subject()?;
     let Some(node) = subject else {
         return Ok(Report {

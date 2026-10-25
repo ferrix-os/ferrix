@@ -118,6 +118,7 @@ mod container;
 mod coverage;
 mod devloop;
 mod dhcp;
+mod disk_offline;
 mod display;
 mod dma_faults;
 mod dmesg;
@@ -594,6 +595,7 @@ const TASKS: &[&[Task]] = &[
     powerfail::TASKS,
     pty::TASKS,
     remote::TASKS,
+    disk_offline::TASKS,
     rename_crash::TASKS,
     restart::TASKS,
     rows_bench::TASKS,

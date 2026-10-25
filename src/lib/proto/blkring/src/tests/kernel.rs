@@ -557,3 +557,52 @@ fn table_step(table: &mut Table<'_>, map: &mut BTreeMap<u64, ()>, op: u64, id: u
         ),
     }
 }
+
+/// A driver that answered anything within the patience keeps its disk; one
+/// that answered nothing for a whole patience while a request waits loses it.
+#[test]
+fn a_disk_goes_silent_only_when_nothing_was_answered_for_a_whole_patience() {
+    use crate::kernel::gone_silent;
+    const PATIENCE: u64 = 30_000_000_000;
+    // One request timed out, but the driver answered another 10 s ago.
+    assert!(!gone_silent(
+        100_000_000_000,
+        90_000_000_000,
+        true,
+        PATIENCE
+    ));
+    // Nothing answered for exactly the patience, or longer.
+    assert!(gone_silent(
+        130_000_000_000,
+        100_000_000_000,
+        true,
+        PATIENCE
+    ));
+    assert!(gone_silent(
+        500_000_000_000,
+        100_000_000_000,
+        true,
+        PATIENCE
+    ));
+    // Nothing waits: an idle disk is not a dead one.
+    assert!(!gone_silent(
+        500_000_000_000,
+        100_000_000_000,
+        false,
+        PATIENCE
+    ));
+    // A clock that went back is never silence.
+    assert!(!gone_silent(
+        50_000_000_000,
+        100_000_000_000,
+        true,
+        PATIENCE
+    ));
+    // Just short of the patience.
+    assert!(!gone_silent(
+        129_999_999_999,
+        100_000_000_000,
+        true,
+        PATIENCE
+    ));
+}

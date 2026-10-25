@@ -3618,7 +3618,8 @@ fn attach_install_disks(command: &mut Command, arch: Arch, image: &Path, args: &
 /// `test-init`, whose pid 1 the switch moves onto it (`docs/INIT.md` §7.3),
 /// `test-clipboard`, whose driver starts before that switch and whose agent
 /// after it, and `test-chrome-window`, `test-restart` and
-/// `test-rename-crash` under `--btrfs-root`; the last keeps it between its
+/// `test-rename-crash` and `test-disk-offline` under `--btrfs-root`; the
+/// last two keep it between their
 /// boots once it asks (`btrfs_disk::keep_test_root`).
 fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()> {
     // A test's root is made fresh for it, so its boot still depends on
@@ -3626,7 +3627,13 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
     let test = (args.btrfs_root
         && matches!(
             args.command.as_deref(),
-            Some("test-chrome-window" | "test-restart" | "test-nvme" | "test-rename-crash")
+            Some(
+                "test-chrome-window"
+                    | "test-restart"
+                    | "test-nvme"
+                    | "test-rename-crash"
+                    | "test-disk-offline"
+            )
         ))
         || matches!(
             args.command.as_deref(),

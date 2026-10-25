@@ -38,6 +38,21 @@
 //! at once, and each waiting request has its own patience as before; a HELLO
 //! describing another disk on that location ends the parked one first.
 //!
+//! # A disk that stops answering
+//!
+//! A request whose 30 s patience ([`READ_PATIENCE_NANOS`]) runs out while
+//! the driver has completed nothing at all for [`OFFLINE_PATIENCE_NANOS`]
+//! takes the disk offline, as Linux's SCSI error handler does once its
+//! retries and resets failed: one console line, `/sys/block/<disk>/state`
+//! reads `offline`, every request without an answer is answered EIO, new
+//! ones are refused at once, and the ring's task answers every queued
+//! command and every one on the ring as failed and sends nothing more, so a
+//! command answered as failed is never sent later (a park puts none back).
+//! An answer once given is never replaced, so a late completion changes
+//! nothing but its region. Only a new driver taking the disk up brings it
+//! back. `docs/BLOCK-RING.md` §6.3 says why, the edge of one slow command,
+//! and why a late write leaves btrfs's last commit whole.
+//!
 //! # The kernel never serves a disk
 //!
 //! It issues requests and copies payloads. Whatever answers a request is the
@@ -94,6 +109,7 @@ use crate::syscall::native;
 pub mod check;
 pub mod driver_check;
 pub(crate) mod hop_check;
+mod offline_check;
 pub(crate) mod reread_check;
 pub(crate) mod tree_check;
 pub(crate) mod trip_check;
@@ -116,6 +132,13 @@ const READ_PATIENCE_NANOS: u64 = 30_000_000_000;
 /// How long a parked disk waits for a driver to take it up again before a
 /// new request is answered EIO at once rather than left to wait.
 const PARK_PATIENCE_NANOS: u64 = READ_PATIENCE_NANOS;
+
+/// How long a disk's driver may answer nothing at all while a request waits
+/// before the disk is taken offline (`ferrix_blkring::kernel::gone_silent`,
+/// "A disk that stops answering" above): one read's patience, so a request
+/// that waited it out with nothing else answered meanwhile takes the disk
+/// with it.
+const OFFLINE_PATIENCE_NANOS: u64 = READ_PATIENCE_NANOS;
 
 /// How long the ring's task sleeps before looking again of its own accord.
 const RECHECK_NANOS: u64 = 50_000_000;
@@ -785,7 +808,12 @@ fn take_up<'s>(
             (parked.disk, parked.registration)
         }
         None => {
-            let disk = Arc::new(RingDisk::new(device, limits, Arc::clone(&kernel_port)));
+            let disk = Arc::new(RingDisk::new(
+                device,
+                name,
+                limits,
+                Arc::clone(&kernel_port),
+            ));
             let registration = publish_disk(start, &name, accepted.serial, &disk)?;
             (disk, registration)
         }
@@ -1256,6 +1284,15 @@ struct DiskState {
     ended: bool,
     /// When its driver died, while it waits parked for the next one.
     parked_at: Option<u64>,
+    /// When its driver last completed anything, on `timer::now_nanos`'s
+    /// clock: set when the disk is made and served, and at every completion
+    /// taken off the ring, whatever its status.
+    last_answer: u64,
+    /// Taken offline: its driver answered nothing for
+    /// [`OFFLINE_PATIENCE_NANOS`] while a request waited. Every request is
+    /// answered EIO at once from then on, and nothing queued is sent, until a
+    /// new driver takes the disk up ([`RingDisk::take_up`]).
+    offline: bool,
     /// The serving ring's data regions, while a ring serves the disk.
     data: Option<Arc<Regions>>,
     /// Its regions not in use. Its capacity is every region, so giving one
@@ -1275,7 +1312,7 @@ struct DiskState {
 impl DiskState {
     /// Whether the task could put something on the ring now.
     fn dispatchable(&self) -> bool {
-        !self.held_back && !self.free.is_empty() && self.queue.queued() > 0
+        !self.offline && !self.held_back && !self.free.is_empty() && self.queue.queued() > 0
     }
 
     /// Asked, under the disk's lock, by whoever just made something
@@ -1295,6 +1332,27 @@ impl DiskState {
             return true;
         }
         false
+    }
+
+    /// [`Serving::drain_offline`]'s work on the disk's state, given the
+    /// tokens on the ring: on an offline disk, answer each of them and every
+    /// command still queued as failed, taking each out of the queue for good,
+    /// and answer `true`; on one that is not, change nothing and answer
+    /// `false`. Its own function so that `offline_check` drives it with
+    /// commands it holds itself.
+    fn drain_offline(&mut self, flying: impl Iterator<Item = u64>) -> bool {
+        if !self.offline {
+            return false;
+        }
+        for token in flying {
+            let _ = answer(self, Token::from_raw(token), Err(Errno::EIO), None);
+        }
+        while let Some(command) = self.queue.dispatch(ticks()) {
+            let token = command.token;
+            let _ = answer(self, token, Err(Errno::EIO), None);
+        }
+        self.held_back = false;
+        true
     }
 
     /// Put `region` back on the free list.
@@ -1336,6 +1394,8 @@ impl DiskState {
 pub(crate) struct RingDisk {
     /// The device, as HELLO described it.
     device: Device,
+    /// Its name, as HELLO gave it, for the console.
+    name: DiskName,
     /// Reads, shared with the ring's task.
     state: SpinLock<DiskState>,
     /// Woken when a request finishes, each its own caller's queue, and all
@@ -1358,15 +1418,18 @@ impl fmt::Debug for RingDisk {
 
 impl RingDisk {
     /// A disk for `device`, whose queue takes `limits`, nudging `port`.
-    fn new(device: Device, limits: Limits, port: Arc<Port>) -> RingDisk {
+    fn new(device: Device, name: DiskName, limits: Limits, port: Arc<Port>) -> RingDisk {
         RingDisk {
             device,
+            name,
             state: SpinLock::new(DiskState {
                 queue: Queue::new(limits, Config::fast_device()),
                 reads: BTreeMap::new(),
                 next_id: 0,
                 ended: false,
                 parked_at: None,
+                last_answer: timer::now_nanos(),
+                offline: false,
                 data: None,
                 free: Vec::new(),
                 leases: Vec::new(),
@@ -1382,7 +1445,19 @@ impl RingDisk {
     /// Be served by a new ring, which `port` is the completion port of.
     fn take_up(&self, port: Arc<Port>) {
         *self.port.lock() = port;
-        self.state.lock().parked_at = None;
+        let mut state = self.state.lock();
+        state.parked_at = None;
+        // A new driver, after the old one was restarted: what took the disk
+        // offline was the old one's silence. Its queue is empty -- going
+        // offline answered everything in it, and nothing was let in since.
+        if state.offline {
+            state.offline = false;
+            crate::console::println!(
+                "  block    {} back online: a new driver took it up",
+                self.name
+            );
+        }
+        state.last_answer = timer::now_nanos();
     }
 
     /// Hand out `fresh`'s regions from now on: the serving ring's, whose
@@ -1401,6 +1476,7 @@ impl RingDisk {
             core::mem::swap(&mut state.leases, &mut leases);
             state.held_back = false;
             state.task = TaskIs::Awake;
+            state.last_answer = timer::now_nanos();
         }
         // Whatever an earlier ring left, let go of outside the lock.
         drop((data, free, leases));
@@ -1490,7 +1566,7 @@ impl RingDisk {
         let given_up = state
             .parked_at
             .is_some_and(|at| timer::now_nanos().saturating_sub(at) > PARK_PATIENCE_NANOS);
-        if state.ended || given_up {
+        if state.ended || given_up || state.offline {
             return Err(Errno::EIO);
         }
         let id = state.next_id;
@@ -1541,6 +1617,67 @@ impl RingDisk {
         let deadline = timer::now_nanos().saturating_add(READ_PATIENCE_NANOS);
         let _ = queue.wait_until_deadline(|| self.finished(ids), deadline);
         sched::trip::reader_running(queue);
+        if !self.finished(ids) {
+            self.offline_if_silent(OFFLINE_PATIENCE_NANOS);
+        }
+    }
+
+    /// A request waited out its patience: take the disk offline if its
+    /// driver answered nothing else in that time either ("A disk that stops
+    /// answering"). Once, under the disk's lock: every request without an
+    /// answer is answered EIO and its caller woken, new ones are refused in
+    /// [`RingDisk::submit`], and the ring's task, nudged, answers what is
+    /// queued and on the ring as failed and sends nothing more
+    /// ([`Serving::drain_offline`]).
+    ///
+    /// `patience` is [`OFFLINE_PATIENCE_NANOS`]; `offline_check` passes 0,
+    /// so that a disk it made a moment ago is silent at once.
+    fn offline_if_silent(&self, patience: u64) {
+        let silent_for = {
+            let mut state = self.state.lock();
+            let outstanding = state
+                .reads
+                .values()
+                .any(|pending| pending.result.is_none() && !pending.abandoned);
+            let now = timer::now_nanos();
+            if state.ended
+                || state.offline
+                || !ferrix_blkring::kernel::gone_silent(
+                    now,
+                    state.last_answer,
+                    outstanding,
+                    patience,
+                )
+            {
+                return;
+            }
+            state.offline = true;
+            // A reader that gave up is not coming back for its answer; the
+            // others get theirs now. Bounded by the requests outstanding,
+            // which the queue's limits bound.
+            state.reads.retain(|_, pending| !pending.abandoned);
+            for pending in state.reads.values_mut() {
+                if pending.result.is_none() {
+                    pending.result = Some(Err(Errno::EIO));
+                }
+            }
+            // The task answers the queue's commands; nudged, unless it is
+            // awake and will look anyway.
+            if state.task == TaskIs::Idle {
+                state.task = TaskIs::Nudged;
+                self.nudge();
+            }
+            now.saturating_sub(state.last_answer) / 1_000_000_000
+        };
+        crate::console::println!(
+            "  block    {} offline: its driver answered nothing for {silent_for} s while a \
+             request waited; every request answers EIO from here, until a driver is started \
+             for it again",
+            self.name
+        );
+        for queue in &self.done {
+            queue.wake_all();
+        }
     }
 
     /// Whether every request `ids` names has an answer, or the ring is over.
@@ -1697,6 +1834,10 @@ impl BlockDevice for RingDisk {
 
     fn read_only(&self) -> bool {
         self.device.flags().contains(DeviceFlags::READ_ONLY)
+    }
+
+    fn offline(&self) -> bool {
+        self.state.lock().offline
     }
 
     /// Write whole sectors, split like a read into what the device takes at
@@ -1897,6 +2038,9 @@ impl Serving<'_> {
     fn dispatch(&mut self) -> u64 {
         let mut wake = 0;
         let mut dispatched = 0;
+        if self.drain_offline() {
+            return 0;
+        }
         {
             let mut state = self.disk.state.lock();
             state.held_back = false;
@@ -1955,6 +2099,23 @@ impl Serving<'_> {
         dispatched
     }
 
+    /// On an offline disk, answer every command on the ring and every one
+    /// still queued as failed, and send none: so a write the filesystem was
+    /// told failed never reaches a driver that recovers, or the next one.
+    /// The ring's own entries for the commands on it stay in `flying`, whose
+    /// regions are not handed out again while the driver may still use them
+    /// (nothing is dispatched on an offline disk), and a late completion of
+    /// one gives its region back and changes no answer ([`answer`]). Bounded:
+    /// the commands on the ring are at most its entries, and each pass of
+    /// the queue takes one command out of it for good. Answers whether the
+    /// disk is offline.
+    fn drain_offline(&mut self) -> bool {
+        self.disk
+            .state
+            .lock()
+            .drain_offline(self.flying.keys().copied())
+    }
+
     /// The trip trace's `OnRing` for the callers `slots` names.
     fn stamp_on_ring(&self, slots: u64) {
         let port = self.kernel_port.waiters();
@@ -1968,6 +2129,8 @@ impl Serving<'_> {
         while let Some(completed) = self.side.poll()? {
             let token = completed.submission.id;
             let Some(region) = self.flying.remove(&token) else {
+                // Not one of ours, but an answer all the same.
+                self.disk.state.lock().last_answer = timer::now_nanos();
                 continue;
             };
             crate::fs::seam::completed();
@@ -1979,6 +2142,9 @@ impl Serving<'_> {
             let result = outcome(&completed);
             let offset = u64::from(region) * self.regions.region_bytes;
             let mut state = self.disk.state.lock();
+            // The driver answered: whatever the status, and whether or not
+            // anyone still waits for it, it is not silent.
+            state.last_answer = timer::now_nanos();
             let answered = answer(
                 &mut state,
                 Token::from_raw(token),
@@ -2047,6 +2213,11 @@ impl Serving<'_> {
             self.disk.end();
             return;
         }
+        // An offline disk's commands were answered as failed: none is put
+        // back for the next driver, whatever the dead one had on its ring.
+        // Drained first, so every command of an offline disk is answered
+        // and out of the queue, and the requeue below finds none of them.
+        let _ = self.drain_offline();
         {
             let mut state = self.disk.state.lock();
             for &token in self.flying.keys() {
@@ -2100,6 +2271,11 @@ fn answer(
         };
         if pending.abandoned {
             let _ = state.reads.remove(&part.id.0);
+            continue;
+        }
+        // Answered already -- by going offline -- and never answered again:
+        // a late completion changes nothing its caller may have read.
+        if pending.result.is_some() {
             continue;
         }
         let answered = result.and_then(|()| {

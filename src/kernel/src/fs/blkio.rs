@@ -283,6 +283,10 @@ impl BlockDevice for Accounted {
         self.inner.read_only()
     }
 
+    fn offline(&self) -> bool {
+        self.inner.offline()
+    }
+
     fn write(&self, sector: u64, buf: &[u8]) -> Result<(), Errno> {
         account((self.major, self.minor), Direction::Write, buf.len() as u64);
         self.inner.write(sector, buf)
