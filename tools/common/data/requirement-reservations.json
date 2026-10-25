@@ -199,6 +199,13 @@
       "branch": "chardev-design",
       "date": "2026-10-25",
       "purpose": "docs/CHARDEV.md step 1, character devices served from ring 3 (customer, 2026-10-25; consultant OK IF, ledger 4352 (G1)): the root chardev grant carried to devmgr in DEVICES through a hook the load ring registers"
+    },
+    {
+      "ids": ["H.DEV.7-8", "L.discovery.8-12", "L.device.60-65"],
+      "owner": "driver-model",
+      "branch": "driver-model-step1",
+      "date": "2026-10-25",
+      "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
     }
   ]
 }
