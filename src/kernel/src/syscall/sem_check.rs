@@ -11,7 +11,7 @@
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_linux_abi::errno::Errno;
 
@@ -208,6 +208,15 @@ static ANSWER: SpinLock<Option<Result<usize, Errno>>> = SpinLock::new(None);
 /// Woken as the waiter answers.
 static ANSWERED: WaitQueue = WaitQueue::new();
 
+/// When the waiter called `semop`, on the counter: what tells a waiter that
+/// timed out at its deadline from one that began after it.
+static ENTERED: AtomicU64 = AtomicU64::new(0);
+
+/// When the waiter's `semop` came back, on the counter: what the deadline
+/// case judges "not before its deadline" by, rather than by when the checker
+/// got round to looking.
+static RETURNED: AtomicU64 = AtomicU64::new(0);
+
 /// The waiter task: one `semop` on what [`SUBJECT`] names, in its job.
 fn waiter(_argument: usize) {
     let Some(subject) = SUBJECT.lock().take() else {
@@ -217,6 +226,7 @@ fn waiter(_argument: usize) {
     };
     let own = sched::running_group();
     sched::set_current_group(subject.group);
+    ENTERED.store(crate::timer::now_nanos(), Ordering::Release);
     let answer = sem::semop(
         &root(),
         &subject.undo,
@@ -225,6 +235,7 @@ fn waiter(_argument: usize) {
         subject.deadline,
         &Flagged,
     );
+    RETURNED.store(crate::timer::now_nanos(), Ordering::Release);
     // What its process owes is paid, as its end would pay it, still in its
     // job, so the undo record's charge comes back with it.
     sem::exit(&subject.undo, 4242);
@@ -236,6 +247,16 @@ fn waiter(_argument: usize) {
 
 /// Start the waiter on `sops` against set `id` in `job`, and wait until
 /// `semctl(query)` of semaphore 0 reads one waiter.
+///
+/// **A waiter with a deadline may be done before it is seen.** Its
+/// `semtimedop` waits until the deadline and then answers on its own, so a
+/// checker kept off its processor for longer than the deadline's distance
+/// -- a TCG boot under a loaded host, 2026-10-25 (`s4r-x86-tcg`,
+/// `sl3-b-locked`: "a waiter returned without waiting") -- finds the answer
+/// before it ever reads the waiter counted. For such a waiter an answer
+/// already there is not a failure here; `deadline_ends_it` judges it. A
+/// waiter with no deadline can only be answered by what the check does after
+/// this returns, so an answer before then is a failure, and says what it was.
 fn start_waiter(
     id: i32,
     sops: Vec<SemBuf>,
@@ -243,7 +264,22 @@ fn start_waiter(
     job: &Job,
     query: i32,
 ) -> Result<Arc<sched::Task>, &'static str> {
+    start_waiter_late(id, sops, deadline, job, query, 0)
+}
+
+/// [`start_waiter`], with the checker kept away for `late` nanoseconds
+/// before its first look: what a loaded host does to it, done on purpose.
+fn start_waiter_late(
+    id: i32,
+    sops: Vec<SemBuf>,
+    deadline: Option<u64>,
+    job: &Job,
+    query: i32,
+    late: u64,
+) -> Result<Arc<sched::Task>, &'static str> {
     INTERRUPT.store(false, Ordering::Release);
+    ENTERED.store(0, Ordering::Release);
+    RETURNED.store(0, Ordering::Release);
     *ANSWER.lock() = None;
     *SUBJECT.lock() = Some(Subject {
         id,
@@ -253,9 +289,18 @@ fn start_waiter(
         undo: Arc::new(UndoList::new()),
     });
     let task = sched::spawn("sem-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    if late != 0 {
+        sched::sleep_for(late);
+    }
     let until = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while ctl(id, 0, query, 0) != Ok(1) {
-        if ANSWER.lock().is_some() {
+        if let Some(answer) = *ANSWER.lock() {
+            if deadline.is_some() {
+                break;
+            }
+            crate::console::println!(
+                "  sem      a waiter with no deadline answered {answer:?} unwoken"
+            );
             return Err("sem: a waiter returned without waiting");
         }
         if crate::timer::now_nanos() >= until {
@@ -827,26 +872,7 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
     if ctl(id, 0, cmd::GETNCNT, 0) != Ok(0) {
         return Err("sem: an interrupted waiter was still counted");
     }
-    // Its deadline.
-    let deadline = crate::timer::now_nanos().saturating_add(20_000_000);
-    let task = start_waiter(
-        id,
-        vec![SemBuf::new(0, -1, 0)],
-        Some(deadline),
-        &job,
-        cmd::GETNCNT,
-    )?;
-    ended(
-        report,
-        &job,
-        waiter_answer()?,
-        Err(Errno::EAGAIN),
-        "its deadline",
-    )?;
-    if crate::timer::now_nanos() < deadline {
-        return Err("sem: a semtimedop timed out before its deadline");
-    }
-    drop(task);
+    deadline_ends_it(report, &job, id)?;
     // Its set removed.
     let task = start_waiter(id, vec![SemBuf::new(0, -1, 0)], None, &job, cmd::GETNCNT)?;
     drop(set);
@@ -859,6 +885,65 @@ fn waits(report: &mut Report, tree: &Arc<Job>) -> Result<(), &'static str> {
     )?;
     drop(task);
     Ok(())
+}
+
+/// How far ahead the deadline case puts its deadline.
+const DEADLINE_NANOS: u64 = 20_000_000;
+
+/// Tries the deadline case gets for a waiter that called `semop` before its
+/// deadline: one that began after it answers at once, as Linux does, and
+/// shows nothing about the wait.
+const DEADLINE_TRIES: usize = 3;
+
+/// A blocked `semtimedop` ends at its deadline with `EAGAIN`, and not
+/// before: answered no earlier than the deadline, by a waiter that called
+/// `semop` before it. A waiter that began after its deadline -- its task
+/// kept off a processor for 20 ms -- is tried again, up to
+/// [`DEADLINE_TRIES`] times. Run twice: once as a checker would look, and
+/// once with the checker kept away past the deadline before its first look,
+/// so that the waiter has answered before it is ever seen counted -- the
+/// order a loaded host made by chance (FX-0702 "a waiter returned without
+/// waiting", 2026-10-25), made every boot.
+fn deadline_ends_it(report: &mut Report, job: &Job, id: i32) -> Result<(), &'static str> {
+    deadline_ends_it_with(report, job, id, 0)?;
+    deadline_ends_it_with(report, job, id, 2 * DEADLINE_NANOS)
+}
+
+/// [`deadline_ends_it`] with the checker `late` before its first look.
+fn deadline_ends_it_with(
+    report: &mut Report,
+    job: &Job,
+    id: i32,
+    late: u64,
+) -> Result<(), &'static str> {
+    for _ in 0..DEADLINE_TRIES {
+        let deadline = crate::timer::now_nanos().saturating_add(DEADLINE_NANOS);
+        let task = start_waiter_late(
+            id,
+            vec![SemBuf::new(0, -1, 0)],
+            Some(deadline),
+            job,
+            cmd::GETNCNT,
+            late,
+        )?;
+        ended(
+            report,
+            job,
+            waiter_answer()?,
+            Err(Errno::EAGAIN),
+            "its deadline",
+        )?;
+        let answered = RETURNED.load(Ordering::Acquire);
+        drop(task);
+        if answered < deadline {
+            return Err("sem: a semtimedop timed out before its deadline");
+        }
+        let entered = ENTERED.load(Ordering::Acquire);
+        if entered != 0 && entered < deadline {
+            return Ok(());
+        }
+    }
+    Err("sem: the deadline case's waiter began after its deadline in every try")
 }
 
 /// Check a waiter's answer, and that `job` holds no heap once it is gone.

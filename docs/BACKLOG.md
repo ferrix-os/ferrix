@@ -447,12 +447,14 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | nvos's host test `timer::tests::a_timer_fires_once_and_a_cancelled_one_never` failed once in `check` at host load 42 (2026-10-24, minimized-restore ed553b158, a compositor change); 3 of 3 reruns passed. [more](backlog/flakes.md#fl-080) | open | 19 |
 | Endfield's start on the N150 reaches the world 5 of 11 times (2026-10-24; debug-logging yserver worse), and under a game load woken programs on every processor waited 0.9-3.2 s while syscalls and the kernel's own timers kept time; the Intel driver was once out 65 s. Tally starts here. [more](backlog/flakes.md#fl-081) | open | 5 |
 | The N150's YT6801 did not take its link back after a cable swap while Ferrix ran (2026-10-24): ARP to the box failed for 25+ min with the plug on, until a cold start. Detect link loss and renegotiate. [more](backlog/flakes.md#fl-082) | open | 3 |
+| Stage 4's lock check stopped release boots four times with "no two processors' increments overlapped in any round" (2026-10-24, F-95's sched-wake-latency, `test-stall --release` at host load 35-80), with and without F-95's option A; never in a debug boot. Rerun once. [more](backlog/flakes.md#fl-083) | open | 4 |
+| The System V semaphore check's deadline case failed boots under load, "a waiter returned without waiting" (FX-0702, 2026-10-25): the check's timing; fixed on sem-waiter. [more](backlog/flakes.md#fl-084) | fixed | 7 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
 * **`trap::ReturnPath` as a static trait seam** (the consultant, ledger 3934 (b)): the personality's return-path hooks, a struct of function pointers the load registers in the core at run time, would follow `docs/KERNEL-CRATES.md` §6.3's link-time binding. It is a core interface whose `fault_signal` changes under 3570 (2), so it comes after `CrashHook` and that change, alone, with its own design review. Open.
 
-182 items: performance, hardening, certification follow-ups the
+184 items: performance, hardening, certification follow-ups the
 consultant asked to ride with a later landing, and compatibility gaps that
 block nothing now. They are in [backlog/p2.md](backlog/p2.md). Read it
 when you take P2 work, or before touching an area to see what is owed there
