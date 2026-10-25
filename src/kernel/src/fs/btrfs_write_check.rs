@@ -33,6 +33,7 @@ use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
 mod reclaim_check;
+mod stuck_check;
 
 /// Where the writable disk is mounted.
 const MOUNT_POINT: &[u8] = b"/mnt-rw";
@@ -364,6 +365,27 @@ pub fn run() -> Result<Report, &'static str> {
         reclaim.dirty,
         reclaim.stolen_at_max,
         reclaim.stolen_by_fill,
+    );
+    // The disk to itself for a mount of its own, then back at /mnt-rw.
+    let place = ns
+        .resolve(&ctx, None, MOUNT_POINT, true)
+        .map_err(|_| "the mount point could not be resolved before the stuck-file check")?;
+    place
+        .mount
+        .filesystem()
+        .sync()
+        .map_err(|_| "the volume could not be synced before the stuck-file check")?;
+    ns.unmount(&place)
+        .map_err(|_| "the volume could not be unmounted before the stuck-file check")?;
+    stuck_check::run(rdev)?;
+    let back = fs::btrfs::mount_rw(rdev)
+        .map_err(|_| "the volume would not mount again after the stuck-file check")?;
+    let _ = ns
+        .mount(back, &at)
+        .map_err(|_| "the volume could not be mounted again after the stuck-file check")?;
+    crate::console::println!(
+        "  btrfs-rw a sync past a file whose writeback failed answered ENOMEM and still \
+         committed the other file; the next sync committed the first"
     );
     Ok(report)
 }

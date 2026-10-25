@@ -460,7 +460,15 @@ impl<D: WriteHandle> Shared<D> {
     ///
     /// An inode the volume has no room for keeps its pages dirty and the
     /// rest are written back and committed all the same, so what fit is
-    /// kept; the answer is then `ENOSPC`.
+    /// kept; the answer is then `ENOSPC`. So is one whose writeback failed
+    /// otherwise -- memory refused while its pages were copied, say -- and
+    /// the answer is then that first error: before 2026-10-25 the first such
+    /// file ended the sync before the commit, so one file that failed every
+    /// time stopped every periodic commit for good, while an `fsync` of any
+    /// other still committed (F-96's residual; on the N150 a file replaced
+    /// seven minutes before a power cut was empty). Once the transaction is
+    /// aborted nothing more is written back, and the answer is still the
+    /// first failure.
     fn sync_all(&self) -> Result<()> {
         self.write_back_in_slices();
         let live: Vec<Arc<Node<D>>> = self
@@ -482,13 +490,19 @@ impl<D: WriteHandle> Shared<D> {
         // the writeback that wanted it; so a writeback that ran out, when
         // that commit made room, goes once more.
         let mut full = false;
+        let mut failed: Option<Errno> = None;
         for pass in 0..2 {
             full = false;
             for node in &live {
+                if volume.aborted().is_some() {
+                    break;
+                }
                 match node.write_back(&mut volume) {
                     Ok(()) => {}
                     Err(Errno::ENOSPC) => full = true,
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        let _ = failed.get_or_insert(error);
+                    }
                 }
             }
             let before = volume.data_room();
@@ -496,13 +510,21 @@ impl<D: WriteHandle> Shared<D> {
             *self.structural.lock() = false;
             let committed = volume.commit().map_err(errno);
             self.note_room(&volume);
-            committed?;
+            // A commit refused after a writeback failed -- the failure
+            // aborted the transaction -- answers what failed first.
+            if let Err(error) = committed {
+                return Err(failed.unwrap_or(error));
+            }
             *self.freed.lock() = false;
             if !full || pass == 1 || volume.data_room() <= before {
                 break;
             }
         }
-        if full { Err(Errno::ENOSPC) } else { Ok(()) }
+        match failed {
+            Some(error) => Err(error),
+            None if full => Err(Errno::ENOSPC),
+            None => Ok(()),
+        }
     }
 
     /// Note that the shape of the tree changed; see `structural`.

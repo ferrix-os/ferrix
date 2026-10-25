@@ -1204,3 +1204,126 @@ fn a_file_renamed_over_another_is_whole_after_a_sync_and_reads_back_meanwhile() 
     want.extend_from_slice(b"tail");
     assert_eq!(target_after_a_cut(&disk), want);
 }
+
+/// A store whose next allocation makes pages that refuse to be read while
+/// [`Poisoning::failing`] is set: one file whose writeback fails with
+/// `ENOMEM`, as a copy refused memory would.
+#[derive(Debug)]
+struct Poisoning {
+    heap: HeapStorage,
+    next: std::sync::atomic::AtomicBool,
+    failing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Default for Poisoning {
+    fn default() -> Poisoning {
+        Poisoning {
+            heap: HeapStorage::new(1 << 30),
+            next: std::sync::atomic::AtomicBool::new(false),
+            failing: Arc::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PoisonedPages {
+    pages: Box<dyn ferrix_vfs::tmpfs::Pages>,
+    failing: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
+
+impl ferrix_vfs::tmpfs::Pages for PoisonedPages {
+    fn read(&self, offset: u64, buf: &mut [u8]) -> ferrix_vfs::Result<()> {
+        if self
+            .failing
+            .as_ref()
+            .is_some_and(|failing| failing.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            return Err(Errno::ENOMEM);
+        }
+        self.pages.read(offset, buf)
+    }
+    fn write(&self, offset: u64, data: &[u8]) -> ferrix_vfs::Result<()> {
+        self.pages.write(offset, data)
+    }
+    fn discard_from(&self, offset: u64) {
+        self.pages.discard_from(offset);
+    }
+    fn committed_bytes(&self) -> u64 {
+        self.pages.committed_bytes()
+    }
+    fn resize(&self, len: u64) {
+        self.pages.resize(len);
+    }
+}
+
+impl Storage for Poisoning {
+    fn allocate(&self) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        let pages = self.heap.allocate()?;
+        Ok(self.wrap(pages))
+    }
+    fn allocate_with(
+        &self,
+        source: Arc<dyn ferrix_vfs::tmpfs::PageSource>,
+    ) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        let pages = self.heap.allocate_with(source)?;
+        Ok(self.wrap(pages))
+    }
+    fn max_file_size(&self) -> u64 {
+        self.heap.max_file_size()
+    }
+}
+
+impl Poisoning {
+    fn wrap(&self, pages: Box<dyn ferrix_vfs::tmpfs::Pages>) -> Box<dyn ferrix_vfs::tmpfs::Pages> {
+        let poisoned = self.next.swap(false, std::sync::atomic::Ordering::SeqCst);
+        Box::new(PoisonedPages {
+            pages,
+            failing: poisoned.then(|| Arc::clone(&self.failing)),
+        })
+    }
+}
+
+#[test]
+fn a_file_whose_writeback_fails_holds_back_no_other_files_commit() {
+    // One file's writeback refused memory every time used to end the sync
+    // before its commit, so the periodic commit never committed again.
+    let disk = Disk::new(BLANK);
+    let storage = Arc::new(Poisoning::default());
+    let fs = RwBtrfs::mount(
+        disk.clone(),
+        0x0800_0014,
+        Arc::clone(&storage) as Arc<dyn Storage>,
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let root = fs.root();
+    // The failing file first, so it is met first, as by inode number.
+    storage
+        .next
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let stuck = make_file(&root, b"stuck", &[3u8; 30_000]);
+    let kept = make_file(&root, b"kept", &[4u8; 50_000]);
+    storage
+        .failing
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(fs.sync(), Err(Errno::ENOMEM), "the first error is answered");
+    let after = mount(&power_cut(&disk));
+    assert_eq!(
+        read_all(&after.root().lookup(b"kept").unwrap()),
+        vec![4u8; 50_000],
+        "the other file was committed"
+    );
+    // The failing file's pages stayed dirty, and go at the next sync.
+    storage
+        .failing
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    fs.sync().unwrap();
+    let after = mount(&power_cut(&disk));
+    assert_eq!(
+        read_all(&after.root().lookup(b"stuck").unwrap()),
+        vec![3u8; 30_000]
+    );
+    drop((stuck, kept));
+}

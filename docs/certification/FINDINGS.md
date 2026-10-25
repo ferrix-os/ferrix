@@ -3935,6 +3935,7 @@ returns at the first file whose writeback fails with anything but
 `ENOSPC`, before it commits, so one file failing every time stops every
 periodic commit while each `fsync` still commits its own; the console
 says `the periodic commit of / failed`, and the box's log of that boot is
-lost (its journal ends on 2026-10-24, no pstore copy). BACKLOG p1-035 owes
-a commit that goes on past one file's failure, and p1-033 the box's cause.
+lost (its journal ends on 2026-10-24, no pstore copy). BACKLOG p1-035,
+a commit that goes on past one file's failure, was built the same day
+(stage 12's `stuck-check`); p1-033 still owes the box's cause.
 A rename over a file on a full volume (above) is the other residual.
