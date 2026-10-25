@@ -13,6 +13,17 @@
 //!                         [--floors a,b,c,d] [--target-kind <k>]
 //!                         [--revoked <hex I>]...
 //! common: [--dir <keys dir>] [--release-anchors <file of hex keys>]
+//!
+//! The CI development key (`docs/SIGNING.md` §6.5), with no state file:
+//! ferrix-softsign ci-keygen --secret-out <file>   (prints the public key)
+//! ferrix-softsign ci-range  --run-number <n> --run-attempt <a>
+//! ferrix-softsign ci-sign   --run-number <n> --run-attempt <a>
+//!                           --prior-logs <file> --log <file>
+//!                           --anchors <signing-anchors.toml> --workflow <path>
+//!                           <sign's manifest flags> --payload <file>
+//!                           --out <file> [--into <slot image>]
+//!                           (the key from FERRIX_CI_SIGNING_KEY)
+//! ferrix-softsign ci-audit  <file of logs>
 //! ```
 
 #![allow(
@@ -26,6 +37,7 @@ use ferrix_sigverify as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use ferrix_softsign::ci;
 use ferrix_softsign::lms::{
     LMOTS_SHA256_N24_W4, LMS_SHA256_M24_H10, LMS_SHA256_M24_H15, LMS_SHA256_M24_H20,
 };
@@ -130,8 +142,131 @@ fn token(args: &Args) -> Result<SoftToken, String> {
     SoftToken::open(&dir, release).map_err(|e| e.to_string())
 }
 
+/// The CI key's commands (`docs/SIGNING.md` §6.5); `None` when `command`
+/// is none of them.
+fn ci(command: &str, args: &Args) -> Option<Result<(), String>> {
+    let number = |name: &str| args.need(name).and_then(number);
+    let run = |args: &Args| -> Result<std::ops::Range<u32>, String> {
+        let number = |name: &str| args.need(name).and_then(number);
+        ci::leaf_range(number("run-number")?, number("run-attempt")?, 1 << 20)
+            .map_err(|e| e.to_string())
+    };
+    Some(match command {
+        "ci-range" => run(args).map(|range| println!("{} {}", range.start, range.end)),
+        "ci-keygen" => ci_keygen(args),
+        "ci-audit" => (|| {
+            let file = args.words.get(1).ok_or("ci-audit <file of logs>")?;
+            let text = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
+            let entries = ci::audit(&text).map_err(|e| e.to_string())?;
+            println!("{entries} signature(s), no (I, q) twice");
+            Ok(())
+        })(),
+        "ci-sign" => (|| {
+            let range = run(args)?;
+            let secret = std::env::var("FERRIX_CI_SIGNING_KEY")
+                .map_err(|_| "FERRIX_CI_SIGNING_KEY is not set".to_owned())?;
+            let key = ci::parse_secret(&secret).map_err(|e| e.to_string())?;
+            drop(secret);
+            let prior = match args.get("prior-logs") {
+                Some(file) => std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?,
+                None => {
+                    return Err(
+                        "--prior-logs is required: the logs of every earlier run".to_owned()
+                    );
+                }
+            };
+            let log = PathBuf::from(args.need("log")?);
+            // The anchors file is required (ledger 4188 (4), (5)): its
+            // release keys are refused (D1), its CI anchor must hold this
+            // key, and an expired key signs nothing.
+            let body = body(args)?;
+            let (release, anchor) =
+                ci::anchors_from(args.get("anchors"), body.anchor_id).map_err(|e| e.to_string())?;
+            ci::refuse_expired(&anchor, &ci::today()).map_err(|e| e.to_string())?;
+            let context = ci::RunContext {
+                run_number: number("run-number")?,
+                run_attempt: number("run-attempt")?,
+                workflow: args.need("workflow")?.to_owned(),
+            };
+            let mut signer = ci::Signer::open(key, range, &prior, &log, &release, &context)
+                .map_err(|e| e.to_string())?;
+            if signer.public_key() != anchor.public_key {
+                return Err(ci::CiError::WrongKey.to_string());
+            }
+            let bytes = body.encode();
+            let signature = signer.sign(&bytes).map_err(|e| e.to_string())?;
+            let block = manifest::assemble(&bytes, &signature);
+            let out = args.need("out")?;
+            std::fs::write(out, &block).map_err(|e| format!("{out}: {e}"))?;
+            if let Some(image) = args.get("into") {
+                let mut slot = std::fs::read(image).map_err(|e| format!("{image}: {e}"))?;
+                slot.get_mut(4096..8192)
+                    .ok_or_else(|| format!("{image}: shorter than its manifest block"))?
+                    .copy_from_slice(&block);
+                std::fs::write(image, slot).map_err(|e| format!("{image}: {e}"))?;
+            }
+            Ok(())
+        })(),
+        _ => return None,
+    })
+}
+
+/// `ci-keygen`: a fresh H20 key, its secret text written to a new file only
+/// its owner may read, outside any git work tree; the public key printed.
+fn ci_keygen(args: &Args) -> Result<(), String> {
+    use std::io::{Read as _, Write as _};
+    let out = PathBuf::from(args.need("secret-out")?);
+    let parent = out
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let mut at = Some(parent.as_path());
+    while let Some(dir) = at {
+        if dir.join(".git").exists() {
+            return Err(format!("{}: inside a git work tree (D5)", out.display()));
+        }
+        at = dir.parent();
+    }
+    let mut random = [0u8; 16 + ferrix_softsign::lms::N];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut random))
+        .map_err(|e| format!("/dev/urandom: {e}"))?;
+    let (id, seed) = random.split_at(16);
+    let key = ferrix_softsign::lms::Key {
+        lms_type: LMS_SHA256_M24_H20,
+        id: id.try_into().map_err(|_| "id")?,
+        seed: seed.try_into().map_err(|_| "seed")?,
+    };
+    let mut options = std::fs::OpenOptions::new();
+    let _ = options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = options.mode(0o600);
+    }
+    let mut file = options
+        .open(&out)
+        .map_err(|e| format!("{}: {e}", out.display()))?;
+    file.write_all(ci::render_secret(&key).as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| format!("{}: {e}", out.display()))?;
+    let context = ci::RunContext {
+        run_number: 0,
+        run_attempt: 0,
+        workflow: String::new(),
+    };
+    let signer = ci::Signer::open(key, 0..0, "", &out, &[], &context).map_err(|e| e.to_string())?;
+    println!("{}", hex(&signer.public_key()));
+    Ok(())
+}
+
 fn run(raw: Vec<String>) -> Result<(), String> {
     let args = Args::parse(raw)?;
+    if let Some(command) = args.words.first()
+        && let Some(done) = ci(command, &args)
+    {
+        return done;
+    }
     let (command, label) = match args.words.as_slice() {
         [command, label] => (command.as_str(), label.clone()),
         _ => {

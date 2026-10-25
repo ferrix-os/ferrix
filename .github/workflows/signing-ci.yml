@@ -1,0 +1,129 @@
+# The CI development key's one job (docs/SIGNING.md §6.5; the
+# certification consultant's OK IF (1)-(8), ledger 4005).
+#
+# It builds the x86-64 desktop image's slot as header version 2, signs it
+# with the CI development key (anchor 36864, 0x9000, in
+# tools/common/data/signing-anchors.toml) and checks that the signing
+# gate's loader would start it. Claimed images refuse this key: their
+# loader carries the release table alone, and xtask refuses any image of a
+# claimed profile holding a development key's root (S3).
+#
+# The rules this file keeps, which tools/common/check/check-signing-anchors.py
+# holds in `cargo xtask check`:
+# * it runs on pushes to develop and main only: no pull_request,
+#   pull_request_target, workflow_run or workflow_dispatch path reaches the
+#   key, and the signing-ci environment's branch rule allows only those two
+#   branches;
+# * exactly one job, `sign`, has the environment, with no matrix: one
+#   holder per run attempt, whose leaves are a pure function of its run
+#   number and attempt (16 leaves, at most 4 attempts);
+# * the key is a step-level environment variable of the one step that
+#   signs, masked by GitHub in the form it is passed, never echoed and
+#   never written to disk;
+# * before signing, every earlier run's signature log is fetched, and a
+#   leaf any of them used is refused; after, every log is audited for an
+#   (I, q) twice. The logs are kept 90 days, and the key expires 85 days
+#   after it was made (the anchors file's `expires`, which the signer
+#   refuses on and after), so the audit always covers every log since the
+#   key was made.
+# * every action is pinned to a commit.
+# * no other workflow names the key or the environment.
+
+name: Signing CI
+
+on:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  actions: read
+
+# bash -eo pipefail for every step: a failed listing, fetch or unzip
+# fails the job before Sign (ledger 4188 (3)).
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sign:
+    name: Sign the development slot
+    runs-on: ubuntu-latest
+    environment: signing-ci
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97.1
+        with:
+          targets: x86_64-unknown-none, x86_64-unknown-uefi, x86_64-unknown-linux-musl
+
+      - name: Build the desktop image's slot, header version 2
+        run: cargo xtask signed-slot-image --arch x86_64 --release --kernel-profile desktop
+
+      - name: Build the soft signer
+        run: cargo build --release -p ferrix-softsign
+
+      - name: Fetch every earlier run's signature log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          : > "$RUNNER_TEMP/prior.log"
+          # This repository's runs on develop and main only (ledger 4188 (6)).
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[]
+              | select(.expired == false and (.name | startswith("signing-ci-log-")))
+              | select(.workflow_run.head_branch == "develop" or .workflow_run.head_branch == "main")
+              | select(.workflow_run.head_repository_id == .workflow_run.repository_id)
+              | "\(.id) \(.archive_download_url)"' > "$RUNNER_TEMP/artifacts.txt"
+          fetched=0
+          while read -r id url; do
+            gh api "$url" > "$RUNNER_TEMP/logs/$id.zip"
+            unzip -p "$RUNNER_TEMP/logs/$id.zip" >> "$RUNNER_TEMP/prior.log"
+            fetched=$((fetched + 1))
+          done < "$RUNNER_TEMP/artifacts.txt"
+          echo "fetched $fetched earlier signature log(s)"
+          target/release/ferrix-softsign ci-audit "$RUNNER_TEMP/prior.log"
+
+      - name: Sign
+        env:
+          FERRIX_CI_SIGNING_KEY: ${{ secrets.FERRIX_CI_SIGNING_KEY }}
+        run: |
+          target/release/ferrix-softsign ci-sign \
+            --run-number "$GITHUB_RUN_NUMBER" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --prior-logs "$RUNNER_TEMP/prior.log" --log signing-ci.log \
+            --anchors tools/common/data/signing-anchors.toml \
+            --workflow .github/workflows/signing-ci.yml \
+            --kind slot --anchor-id 36864 --profile 4 --arch 1 --family 257 \
+            --security-version 1 --label "ferrix ci $GITHUB_RUN_NUMBER" \
+            --payload build/x86_64/ferrix-slot.payload \
+            --out build/x86_64/ferrix-slot.manifest --into build/x86_64/ferrix-slot.img
+
+      - name: Keep the signature log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signing-ci-log-${{ github.run_number }}-${{ github.run_attempt }}
+          path: signing-ci.log
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Audit every log with this one
+        run: |
+          cat "$RUNNER_TEMP/prior.log" signing-ci.log > "$RUNNER_TEMP/all.log"
+          target/release/ferrix-softsign ci-audit "$RUNNER_TEMP/all.log"
+
+      - name: The signing gate's loader would start it
+        run: cargo xtask verify-signed-slot --arch x86_64 --release --kernel-profile desktop
+
+      - name: Upload the signed slot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ferrix-x86_64-signed-slot
+          path: |
+            build/x86_64/ferrix-slot.img
+            build/x86_64/ferrix-slot.manifest
+          retention-days: 30
+          if-no-files-found: error

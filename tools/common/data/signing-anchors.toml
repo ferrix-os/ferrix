@@ -36,3 +36,20 @@ kind = "driver"
 anchor_id = 32770
 public_key = "000000010000000c00000007f8b9fdf561e778cfb3b30de16bb66091e76d5f008c139e2239a504a2bfb1a7ef17299fc3c521f84c"
 made = "2026-10-24, ferrix-softsign keygen dev-driver --height 15, on nazuna"
+
+# The CI development key (docs/SIGNING.md §6.5; consultant OK IF (1)-(8),
+# ledger 4005, and OK IF (1)-(10), ledger 4188; the customer's OK of
+# 2026-10-25, relayed by the product owner). Generated on 2026-10-25 on
+# nazuna by the product-signing agent with `ferrix-softsign ci-keygen`; its
+# secret was written once to the signing-ci environment's
+# FERRIX_CI_SIGNING_KEY and the local file shredded. Only
+# .github/workflows/signing-ci.yml signs with it, and it expires 85 days
+# after it was made, inside the signature logs' 90-day retention.
+[development.ci-slot-1]
+kind = "slot"
+anchor_id = 36864
+public_key = "000000010000000d00000007d42d22cf60a2829eccafe0de96566b4f866f315ea0a93e972542264f2fb266d6c9b8f195ac8263aa"
+made = "CI"
+created = "2026-10-25"
+expires = "2027-01-18"
+workflow = ".github/workflows/signing-ci.yml"

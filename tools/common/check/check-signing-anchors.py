@@ -46,6 +46,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import datetime
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -56,6 +57,16 @@ KINDS = {"slot", "config", "driver"}
 PRODUCT_LMS = {0x0B, 0x0C, 0x0D}
 LMOTS_N24_W4 = 0x07
 DEVELOPMENT_MIN = 0x8000
+# The CI development keys' block of ids (docs/SIGNING.md §6.5; ledger 4005 (6)).
+CI_MIN = 0x9000
+# The one workflow that holds a CI key, the secret's name and its environment.
+CI_WORKFLOW = ".github/workflows/signing-ci.yml"
+CI_SECRET = "FERRIX_CI_SIGNING_KEY"
+CI_ENVIRONMENT = "signing-ci"
+# How long a CI key lives: strictly less than the signature logs' artifacts
+# are kept (90 days), so the audit covers every log since the key was made
+# (4005 (4); 4188 (4)).
+CI_DAYS = 85
 
 
 def problems_of(data: dict) -> list[str]:
@@ -98,7 +109,95 @@ def problems_of(data: dict) -> list[str]:
             if key in keys:
                 out.append(f"{where}: the same key as {keys[key]}")
             keys[key] = where
+            if section == "development":
+                out += ci_anchor_problems(where, anchor)
     return out
+
+
+def ci_anchor_problems(where: str, anchor: dict, today: datetime.date | None = None) -> list[str]:
+    """A CI key's entry (ledger 4005 (6), (4)): ids at or above 0x9000 are
+    CI's alone, made "CI", for the one workflow, created and expiring no more
+    than CI_DAYS apart, and not expired."""
+    today = today or datetime.date.today()
+    ident = anchor.get("anchor_id", 0)
+    ci = anchor.get("made") == "CI"
+    out = []
+    if ci != (ident >= CI_MIN):
+        out.append(f"{where}: anchor ids {CI_MIN} (0x9000) and up are CI keys, made = \"CI\", and only they")
+    if not ci:
+        return out
+    if anchor.get("workflow") != CI_WORKFLOW:
+        out.append(f"{where}: a CI key's workflow is {CI_WORKFLOW}, not {anchor.get('workflow')!r}")
+    try:
+        created = datetime.date.fromisoformat(anchor.get("created", ""))
+        expires = datetime.date.fromisoformat(anchor.get("expires", ""))
+    except ValueError:
+        return out + [f"{where}: a CI key names its created and expires dates (YYYY-MM-DD)"]
+    if (expires - created).days > CI_DAYS or expires < created:
+        out.append(f"{where}: a CI key lives at most {CI_DAYS} days, the logs' retention")
+    if today > expires:
+        out.append(f"{where}: the CI key expired on {expires}: rotate it (docs/SIGNING.md 6.5)")
+    return out
+
+
+def workflow_problems(files: dict[str, str]) -> list[str]:
+    """The CI key's workflow rules (ledger 4005 (1), (2), (5), (7)), over the
+    workflow files' texts by path: only CI_WORKFLOW names the secret or the
+    environment; it runs on pushes to develop and main only; one job holds
+    the environment, with no matrix; the secret is one step's env, and
+    nothing traces commands."""
+    out = []
+    for path, text in sorted(files.items()):
+        if path != CI_WORKFLOW and (CI_SECRET in text or CI_ENVIRONMENT in text):
+            out.append(f"{path}: names the CI key or its environment; only {CI_WORKFLOW} may (4005 (7))")
+    text = files.get(CI_WORKFLOW)
+    if text is None:
+        return out + [f"{CI_WORKFLOW} is missing, and a CI key names it"]
+    code = "\n".join(line.split("#", 1)[0].rstrip() for line in text.splitlines())
+    for trigger in ("pull_request", "pull_request_target", "workflow_run", "workflow_dispatch", "schedule", "repository_dispatch", "workflow_call"):
+        if re.search(rf"^\s*{trigger}\s*:|[\[,]\s*{trigger}\s*[\],]", code, re.M):
+            out.append(f"{CI_WORKFLOW}: the trigger {trigger} is a path to the key; only pushes to develop and main may run it (4005 (2))")
+    # An allowlist (4188 (1)): one top-level `on:`, whose block is exactly a
+    # push to develop and main, the next non-blank line at column 0.
+    lines = code.splitlines()
+    tops = [n for n, line in enumerate(lines) if re.match(r"""^(on|"on"|'on'|true|yes|"true"|'true'):""", line)]
+    block = []
+    if len(tops) == 1 and lines[tops[0]] == "on:":
+        for line in lines[tops[0] + 1:]:
+            if not line.strip():
+                continue
+            if not line.startswith(" "):
+                break
+            block.append(line)
+    if block != ["  push:", "    branches: [develop, main]"]:
+        out.append(f"{CI_WORKFLOW}: `on:` must be exactly a push to [develop, main], and nothing else (4005 (2); 4188 (1))")
+    if not re.search(r"^defaults:\n  run:\n    shell: bash$", code, re.M) or re.search(r"^\s+shell:(?! bash$)", code, re.M):
+        out.append(f"{CI_WORKFLOW}: every step runs under `shell: bash` (-eo pipefail), set in defaults.run (4188 (3))")
+    for line in code.splitlines():
+        used = re.search(r"\buses:\s*(\S+)", line)
+        if used and not re.fullmatch(r"[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}", used.group(1)):
+            out.append(f"{CI_WORKFLOW}: `{used.group(1)}` is not pinned to a commit (4188 (2))")
+    if re.search(r"toJSON\(\s*secrets", code) or re.search(r"\bsecrets\s*\[", code):
+        out.append(f"{CI_WORKFLOW}: no toJSON(secrets) or secrets[...]: only the one step's env names a secret (4188 (2))")
+    if len(re.findall(r"\bsecrets\.", code)) != 1:
+        out.append(f"{CI_WORKFLOW}: exactly one `secrets.` reference, the signing step's env (4188 (2))")
+    if len(re.findall(rf"^\s+environment:\s*{CI_ENVIRONMENT}\s*$", code, re.M)) != 1:
+        out.append(f"{CI_WORKFLOW}: exactly one job has environment {CI_ENVIRONMENT} (4005 (1))")
+    if re.search(r"^\s+(strategy|matrix):", code, re.M):
+        out.append(f"{CI_WORKFLOW}: no matrix: one holder per run attempt (4005 (1))")
+    uses = [line for line in code.splitlines() if CI_SECRET in line]
+    if len(uses) != 1 or not any(re.fullmatch(rf"\s{{10}}{CI_SECRET}: \$\{{\{{ secrets\.{CI_SECRET} \}}\}}", u) for u in uses):
+        out.append(f"{CI_WORKFLOW}: the key is one step's env, `{CI_SECRET}: ${{{{ secrets.{CI_SECRET} }}}}`, and named nowhere else (4005 (5))")
+    if re.search(r"set -x|set -o xtrace|ACTIONS_STEP_DEBUG|ACTIONS_RUNNER_DEBUG", code):
+        out.append(f"{CI_WORKFLOW}: no command tracing or debug logging (4005 (5))")
+    return out
+
+
+def workflow_files() -> dict[str, str]:
+    return {
+        str(p.relative_to(ROOT)): p.read_text()
+        for p in sorted((ROOT / ".github/workflows").glob("*.y*ml"))
+    }
 
 
 def family_problems(data: dict) -> list[str]:
@@ -322,6 +421,49 @@ def self_test() -> int:
     if not any("the same key" in p for p in problems_of(shared)):
         print("signing-anchors: self-test: a development key in release was NOT refused", file=sys.stderr)
         return 1
+    ci_anchor = {"kind": "slot", "anchor_id": 0x9000, "public_key": "00" * 52, "made": "CI",
+                 "created": "2026-10-25", "expires": "2027-01-18", "workflow": CI_WORKFLOW}
+    on_day = datetime.date(2026, 11, 1)
+    if ci_anchor_problems("[x]", ci_anchor, on_day):
+        print("signing-anchors: self-test: a good CI anchor was refused", file=sys.stderr)
+        return 1
+    for why, edit, day in [
+        ("a CI key below 0x9000", {"anchor_id": 0x8003}, on_day),
+        ("a non-CI key at 0x9000", {"made": "nazuna"}, on_day),
+        ("another workflow", {"workflow": ".github/workflows/ci.yml"}, on_day),
+        ("a life past 85 days", {"expires": "2027-01-19"}, on_day),
+        ("an expired key", {}, datetime.date(2027, 1, 19)),
+        ("no dates", {"created": "soon"}, on_day),
+    ]:
+        if not ci_anchor_problems("[x]", dict(ci_anchor, **edit), day):
+            print(f"signing-anchors: self-test: {why} was NOT refused", file=sys.stderr)
+            return 1
+    good = (ROOT / CI_WORKFLOW).read_text() if (ROOT / CI_WORKFLOW).exists() else None
+    if good is None or workflow_problems({CI_WORKFLOW: good}):
+        print("signing-anchors: self-test: the real CI workflow is refused or missing", file=sys.stderr)
+        return 1
+    for why, files in {
+        "a second workflow naming the key": {CI_WORKFLOW: good, ".github/workflows/x.yml": f"env:\n  A: ${{{{ secrets.{CI_SECRET} }}}}\n"},
+        "a renamed workflow": {".github/workflows/signing.yml": good},
+        "a pull_request trigger": {CI_WORKFLOW: good.replace("on:\n  push:", "on:\n  pull_request:\n  push:")},
+        "a workflow_dispatch trigger": {CI_WORKFLOW: good.replace("    branches: [develop, main]\n", "    branches: [develop, main]\n  workflow_dispatch:\n")},
+        "another branch": {CI_WORKFLOW: good.replace("[develop, main]", "[develop, main, '**']")},
+        "a matrix": {CI_WORKFLOW: good.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        n: [1, 2]\n", 1)},
+        "a second job in the environment": {CI_WORKFLOW: good + f"  again:\n    runs-on: ubuntu-latest\n    environment: {CI_ENVIRONMENT}\n    steps: []\n"},
+        "the key in a job's env": {CI_WORKFLOW: good.replace("    environment: signing-ci\n", f"    environment: signing-ci\n    env:\n      X: ${{{{ secrets.{CI_SECRET} }}}}\n")},
+        "set -x": {CI_WORKFLOW: good.replace("        run: |\n          target/release/ferrix-softsign ci-sign", "        run: |\n          set -x\n          target/release/ferrix-softsign ci-sign")},
+        "pull_request_target after push": {CI_WORKFLOW: good.replace("    branches: [develop, main]\n", "    branches: [develop, main]\n  pull_request_target:\n")},
+        "tags after branches": {CI_WORKFLOW: good.replace("    branches: [develop, main]\n", "    branches: [develop, main]\n    tags: ['*']\n")},
+        "a second top-level on": {CI_WORKFLOW: good + "\n'on':\n  pull_request:\n"},
+        "toJSON(secrets)": {CI_WORKFLOW: good.replace("          GH_TOKEN: ${{ github.token }}\n", "          GH_TOKEN: ${{ github.token }}\n          ALL: ${{ toJSON(secrets) }}\n")},
+        "another secret": {CI_WORKFLOW: good.replace("          GH_TOKEN: ${{ github.token }}\n", "          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n")},
+        "an action by tag": {CI_WORKFLOW: good.replace("actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803", "actions/checkout@v6")},
+        "no bash default": {CI_WORKFLOW: good.replace("defaults:\n  run:\n    shell: bash\n", "")},
+        "a step's own shell": {CI_WORKFLOW: good.replace("      - name: Sign\n", "      - name: Sign\n        shell: sh\n")},
+    }.items():
+        if not workflow_problems(files):
+            print(f"signing-anchors: self-test: {why} was NOT refused", file=sys.stderr)
+            return 1
     print("signing-anchors: self-test passed: a planted development key root, each malformed anchor and family, a planted signer dependency and an indirect kernel path to the verifier are refused")
     return 0
 
@@ -334,8 +476,10 @@ def main() -> int:
     if args.self_test:
         return self_test()
     data = tomllib.loads(ANCHORS.read_text())
+    has_ci = any(a.get("made") == "CI" for a in data.get("development", {}).values())
     problems = (
         problems_of(data)
+        + (workflow_problems(workflow_files()) if has_ci else [])
         + family_problems(tomllib.loads(FAMILIES.read_text()))
         + dependency_problems(workspace_manifests())
         + closure_problems(*metadata_graph())

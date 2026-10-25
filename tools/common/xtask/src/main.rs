@@ -613,6 +613,7 @@ const TASKS: &[&[Task]] = &[
     wine_socket::TASKS,
     wine_sync::TASKS,
     yserver::TASKS,
+    signing::TASKS,
 ];
 
 /// The commands this file carries out itself.

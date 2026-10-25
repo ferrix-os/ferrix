@@ -9,9 +9,9 @@
 //! `ferrix.img` itself too).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 
-use ferrix_slots::slot::{SlotHeader, VERSION_1};
+use ferrix_slots::slot::{HEADER_LEN, SlotHeader, VERSION_1, VERSION_2};
 
 use crate::paths::{self, Arch};
 use crate::task::Task;
@@ -34,24 +34,35 @@ pub(crate) const TASKS: &[Task] = &[
         ],
         run: build,
     },
+    Task {
+        name: "signed-slot-image",
+        help_at: 21,
+        help: &[
+            "signed-slot-image  slot-image as header version 2 (docs/SIGNING.md §1.3), its manifest block left",
+            "              for the signer, and build/<arch>/ferrix-slot.payload, the 4064 bytes it signs",
+        ],
+        run: build,
+    },
 ];
 
-/// Whether images written this run get a slot image beside them.
-static WANTED: AtomicBool = AtomicBool::new(false);
+/// The header version of the slot image written beside every image this
+/// run, or 0 for none.
+static WANTED: AtomicU16 = AtomicU16::new(0);
 
-/// Have every image this run writes get a slot image beside it.
-fn set_wanted(wanted: bool) {
-    WANTED.store(wanted, Ordering::Relaxed);
-}
-
-/// `build`, and with `slot-image` the slot image beside each image.
+/// `build`, and with `slot-image` the slot image beside each image (header
+/// version 1), with `signed-slot-image` a version-2 one to be signed.
 pub(crate) fn build(command: &str, args: &crate::args::Args) -> Result<()> {
-    set_wanted(command == "slot-image");
+    let version = match command {
+        "slot-image" => VERSION_1,
+        "signed-slot-image" => VERSION_2,
+        _ => 0,
+    };
+    WANTED.store(version, Ordering::Relaxed);
     super::build(args)
 }
 
 /// Write the slot image for `arch` beside its `ferrix.img` when
-/// [`set_wanted`] asked for one; the command line is `cmdline`'s words then
+/// `slot-image` or `signed-slot-image` asked for one ([`build`]); the command line is `cmdline`'s words then
 /// `defaults`', as the loader joins the two files.
 pub(crate) fn write_if_wanted(
     arch: Arch,
@@ -60,7 +71,8 @@ pub(crate) fn write_if_wanted(
     cmdline: Option<&str>,
     defaults: Option<&str>,
 ) -> Result<Option<PathBuf>> {
-    if !WANTED.load(Ordering::Relaxed) {
+    let version = WANTED.load(Ordering::Relaxed);
+    if version == 0 {
         return Ok(None);
     }
     let words: Vec<&str> = [cmdline, defaults]
@@ -69,25 +81,36 @@ pub(crate) fn write_if_wanted(
         .flat_map(str::split_whitespace)
         .collect();
     let path = paths::build_dir(arch).join("ferrix-slot.img");
-    write(
+    let header = write(
         &path,
+        version,
         &label(arch),
         kernel,
         initramfs,
         words.join(" ").as_bytes(),
     )?;
+    if version == VERSION_2 {
+        // What a slot manifest signs: header bytes 0..4064, the seal's
+        // input (docs/SIGNING.md §1.2), for the signer's --payload.
+        let payload = paths::build_dir(arch).join("ferrix-slot.payload");
+        let encoded = header.encode();
+        std::fs::write(&payload, encoded.get(..HEADER_LEN - 32).unwrap_or_default())
+            .map_err(|error| Error::new(format!("{}: {error}", payload.display())))?;
+    }
     Ok(Some(path))
 }
 
-/// Write a slot image of these blobs at `path`.
+/// Write a slot image of these blobs at `path`, header `version`; a
+/// version-2 image's manifest block is left zero for the signer.
 pub(crate) fn write(
     path: &Path,
+    version: u16,
     label: &str,
     kernel: &[u8],
     initramfs: &[u8],
     cmdline: &[u8],
-) -> Result<()> {
-    let header = SlotHeader::lay_out(VERSION_1, 0, label, kernel, initramfs, cmdline);
+) -> Result<SlotHeader> {
+    let header = SlotHeader::lay_out(version, 0, label, kernel, initramfs, cmdline);
     let size = usize::try_from(header.needed())
         .map_err(|_| Error::new("a slot image larger than memory"))?;
     let mut bytes = vec![0_u8; size];
@@ -114,7 +137,7 @@ pub(crate) fn write(
         bytes.len() / 1024,
         String::from_utf8_lossy(cmdline)
     );
-    Ok(())
+    Ok(header)
 }
 
 /// `ferrix <arch> <commit>`, or without the commit outside a checkout.
@@ -139,8 +162,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("slot-image-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("slot.img");
-        write(
+        let _ = write(
             &path,
+            VERSION_1,
             "ferrix test",
             &[1; 5000],
             &[2; 9000],
@@ -153,6 +177,20 @@ mod tests {
         let at = usize::try_from(cmdline.offset).unwrap();
         assert_eq!(&bytes[at..at + 17], b"ferrix.root=btrfs");
         assert_eq!(header.label_text(), "ferrix test");
+        // Version 2: the blobs after the manifest block, which stays zero.
+        let signed = write(
+            &path,
+            VERSION_2,
+            "ferrix test",
+            &[1; 5000],
+            &[2; 9000],
+            b"x",
+        )
+        .unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(signed.kernel.offset, 8192);
+        assert!(bytes[4096..8192].iter().all(|&b| b == 0));
+        assert_eq!(SlotHeader::decode(&bytes, bytes.len() as u64), Ok(signed));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

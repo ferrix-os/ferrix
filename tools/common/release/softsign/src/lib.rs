@@ -9,6 +9,7 @@
 //! (D2); and its private keys live outside the repository and every image
 //! (D5). It is a host tool: no image links this crate.
 
+pub mod ci;
 pub mod lms;
 pub mod manifest;
 pub mod token;

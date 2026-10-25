@@ -766,12 +766,193 @@ There are three kinds of image, and they never mix:
 | Development | Development anchors only in development images (profile 0xFF) and the gate's relinked loader (`level=none anchors=development`); a byte comparison outside the anchor section, and a search of shipped images, each with a control | Gates can sign; a shipped image never trusts a development key |
 | Soft signer | `ferrix-softsign`: the PKCS #11 3.1 HSS subset, `q` committed before release, a reuse check against its own log, development keys only, never for a release | The customer's decision; ledger 3731 (D1)-(D5) |
 
-### 6.5 A CI development key
+### 6.5 A CI development key (reviewed, ledger 4005 and 4188; the customer's OK 2026-10-25)
 
-The customer decided on 2026-10-24 that CI signs with a development key
-of its own. Its design, reviewed OK IF (1)-(8) at ledger 4005 and still
-waiting for the customer's own OK, is parked on branch
-`feature/signing-ci-key`. No key or secret exists.
+**The customer's decision (2026-10-24):** S4's gates sign slot images in
+CI with **a CI development key of its own**. It is stored as a GitHub
+Actions secret and is a development key like the soft signer's. It has
+its own anchor id in the development range and its own kind roots, so
+every claimed image refuses it (D1, S3's refusal by its root `T`).
+Nothing is created until the consultant has reviewed this and the
+customer has said yes. Only then is the key generated and the secret
+written, by hand.
+
+**What it is.**
+
+* One key per kind that CI signs. Today that is the slot kind only.
+* Each key is `LMS_SHA256_M24_H20` with `LMOTS_SHA256_N24_W4`, `L = 1`.
+* Anchor ids 0x9000 and up: the development range (0x8000 and up), its
+  own block, apart from nazuna's 0x8000-0x8002. Each key is listed in
+  `signing-anchors.toml` as `[development.ci-<kind>-<n>]`, with `made`
+  naming CI.
+* The secret holds the 24-byte seed and the 16-byte `I`. The public key
+  is in the tree, the private part never is (D5).
+
+**State in CI.** A stateful key must never sign two messages with one
+leaf. GitHub runners run in parallel, start fresh and keep no state, so
+a state file the soft signer advances cannot be shared among them. The
+options:
+
+| Option | How | Reuse risk | Cost |
+|---|---|---|---|
+| (a) One key per runner, its state kept as an artifact | each runner restores its state from the last artifact and uploads the advanced one | **high**: a failed upload, a re-run from an old artifact, or two runs restoring the same artifact reuse leaves | per-runner keys and anchors |
+| (b) Signing in a single serialized job | `concurrency: signing-ci` with `cancel-in-progress: false`, the state in a cache or a branch | the cache is not transactional: a job killed after signing and before saving re-signs from the old state | one job at a time; the state store becomes a single point of failure |
+| **(c) A leaf range per workflow run (recommended)** | the leaf range is a pure function of `github.run_number` and `github.run_attempt`: `q = (run_number × 4 + (run_attempt − 1)) × 16`, 16 leaves per attempt, at most 4 attempts per run; the soft signer gets `--leaf-range start..end` and starts from a fresh, ephemeral state at `start` | none from state: no state is shared or restored. The range is unique while (run_number, run_attempt) is unique in the repository, which GitHub guarantees for one workflow. A fifth attempt is refused | 2^20 / 64 = 16,384 runs per key, then rotation |
+
+Option (c) shares no state, so parallel runners never collide. The soft
+signer's rules hold within the run: `q` is committed before each
+signature leaves (D2), it refuses a leaf outside its range, and it
+refuses a release key (D1). Each run uploads its signature log (`I`, `q`,
+manifest digest) as an artifact, and a check over every log since the
+key was made flags a repeated `(I, q)` (condition 4 below).
+
+Two cases are out of reach of (c): a workflow file renamed (GitHub
+restarts its `run_number`), and a second workflow using the same key.
+Both are refused by a check, not only by rule (condition 7 below). The
+key is used by one named workflow only, and a renamed workflow gets a new
+key, which `signing-anchors.toml`'s entry records.
+
+**What a leaked CI key exposes: development images only.** Every claimed
+image refuses a development anchor at build time, by its root `T` (S3).
+The loader of a claimed profile carries the release table alone. A
+leaked key lets someone sign a slot that only development images and the
+gate's relinked loader accept. Those carry no claim.
+
+**Rotation.**
+
+* After 16,384 runs at the latest, and once a year.
+* At once on a suspected leak: a forked pull request given the secret, a
+  log that printed it, a runner compromised.
+* Rotating means a new key and a new anchor id, the old entry deleted
+  from `[development]` (D5's rule), and the secret replaced. Images
+  already built keep their table, so a leaked key stays trusted only by
+  development images built before the rotation.
+
+**The secret's scope.**
+
+* A GitHub environment, `signing-ci`, whose secrets are given only to
+  jobs on `develop` and `main`, never to pull requests from forks, with
+  no path into the job but those branches' pushes (condition 2 below).
+* Never echoed: the soft signer reads the seed from an environment
+  variable and writes no state outside the runner's temporary directory.
+
+**The consultant's conditions** (OK IF (1)-(8), ledger 4005; the
+customer's own OK is needed as well, and nothing is created before both):
+
+1. **One holder per run attempt.** Exactly one job per run attempt holds
+   the key, and it is the only job in the `signing-ci` environment. A
+   matrix would share the range. If one is ever needed, the range is split
+   by a static job index and the budget restated.
+2. **Who can reach the job.** The environment's branch rule allows
+   `develop` and `main` only. The workflow has no `pull_request_target`,
+   `workflow_run` or `workflow_dispatch` path into the job, and the
+   workflow file is under CODEOWNERS or branch protection naming the
+   customer. **Residual:** anyone who can push to `develop` can read the
+   key, which exposes development images only.
+3. **`--leaf-range` is a code change to the soft signer**, with its own
+   review. Host tests and FIRED controls hold that it refuses a leaf outside
+   the range, a range overlapping a `q` already in its log, and an attempt
+   above 4 before signing, and that `q` is committed before each signature
+   leaves (D2).
+4. **The logs live as long as the key.** Signature logs go to a durable
+   store, or the key rotates no later than the artifacts' retention. The
+   repeated-`(I, q)` check covers every log since the key was made, and a
+   hit means rotating at once. Its control is a planted duplicate, FIRED.
+5. **The seed is never exposed.** It is a step-level environment variable
+   only, masked in the exact form it is passed, with no `set -x` or debug
+   logging. The temporary state is deleted at the end of the step.
+6. **The anchors file is checked.** `check-signing-anchors.py` holds CI ids
+   at or above 0x9000, apart from nazuna's 0x8000-0x8002, with
+   `made = "CI"` and the workflow's path. A claimed build refuses a 0x9000
+   anchor, with its own control.
+7. **A check, not only a rule.** A renamed workflow, a second workflow
+   using the key, and a reset `run_number` are each refused by a check.
+8. **The record.** This section says all this before the key is made, and
+   the key's creation (date, id, who) is recorded here.
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Key | One H20 key per kind in CI, anchor ids 0x9000 and up, a development key | The customer's decision; D1 |
+| State | A leaf range per (run_number, run_attempt), with no shared state | No collision among parallel runners; nothing to restore |
+| Leak | Development images only | Claimed images refuse development roots (S3) |
+| Rotation | 16,384 runs, a year, or at once on a suspected leak | The range's budget; D5 |
+
+**As built (2026-10-25, branch `feature/signing-ci`).**
+
+* **The signer.** `ferrix-softsign` gains `ci-range`, `ci-keygen`,
+  `ci-sign` and `ci-audit` (`tools/common/release/softsign/src/ci.rs`).
+  `ci-sign` computes the run attempt's range itself from
+  `--run-number` and `--run-attempt` and refuses an attempt outside 1..=4.
+  Before anything is signed, it refuses the range when `--prior-logs`
+  (every earlier run's log) holds a leaf of it. That catches a renamed
+  workflow, a second workflow and a reset run number (condition 7). Each
+  leaf is appended to the run's own log and fsynced before its signature
+  is computed (D2). The key arrives only in `FERRIX_CI_SIGNING_KEY`. The
+  signer's `Debug` never shows it, and nothing writes it to disk.
+* **The workflow**, `.github/workflows/signing-ci.yml`.
+  * It runs on pushes to `develop` and `main` only, in one job, `sign`,
+    with the `signing-ci` environment.
+  * It builds the desktop image's slot as header version 2
+    (`cargo xtask signed-slot-image`) and fetches every earlier
+    `signing-ci-log-*` artifact into one log, which it audits.
+  * It signs with anchor 36864 (0x9000), uploads its log (90 days), and
+    audits all the logs again with its own.
+  * `cargo xtask verify-signed-slot` checks that the signing gate's loader
+    (`development-required`, desktop) would start the slot.
+* **The checks.** `check-signing-anchors.py` holds the CI ids at 0x9000
+  and up, `made = "CI"`, the one workflow, and a life of at most 85 days,
+  inside the logs' 90-day retention, refusing an expired key (conditions 4
+  and 6). `ci-sign` reads the anchors file itself: it refuses an expired
+  key on and after its `expires` day, a key that is not the anchor's, and
+  the release keys (D1), and it does not run without the file. It
+  also holds that only that workflow names the key or the environment;
+  that it has no `pull_request`, `pull_request_target`, `workflow_run`,
+  `workflow_dispatch`, `schedule` or other trigger; that it has exactly
+  one job in the environment and no matrix; and that the key is one step's
+  `env` with no tracing (conditions 1, 2, 5 and 7). Each rule has its own
+  self-test.
+* **Claimed images refuse the key** by S3's root check, which reads every
+  `[development]` key, the CI key's included (an xtask test plants its root).
+* **The check is an allowlist** (ledger 4188 (1)-(3)). The workflow's
+  `on:` is exactly a push to `[develop, main]`, and there is no other
+  top-level `on`. There is one `secrets.` reference, the signing step's
+  `env`, and no `toJSON(secrets)` or `secrets[...]`. Every `uses:` is
+  pinned to a commit, and every step runs under `shell: bash`
+  (`-eo pipefail`), so a failed listing, fetch or unzip of the earlier logs
+  fails the job before it signs. The fetch keeps only this repository's
+  runs on `develop` and `main`, and says how many logs it fetched. Each log
+  line carries `I q digest run_number run_attempt workflow`.
+* **The budget belongs to the workflow, not the key** (4188 (7)).
+  `run_number` counts the workflow's runs, so every key shares the
+  workflow's 16,384 runs from its first. Every later key starts where the
+  run number stands, and the range runs past 2^20 at run 16,384, where
+  signing fails closed (`Exhausted`). A new workflow name, with its own key
+  and anchor, starts again, which condition 7's check makes deliberate.
+* **Residual, as condition 2 states it.** Anyone who can push to `develop`
+  can change the workflow and read the key, which exposes development
+  images only. `.github/CODEOWNERS` already names the customer for
+  `.github/`, `tools/common/release/` and `tools/common/data/`, and the
+  `develop` ruleset requires a code owner's approval on every pull request
+  it does not let bypass, which is every outside contribution
+  (`docs/REPO-FLOW.md`). The owner's and the fleet's own pushes bypass it.
+  **A second residual (4188 (viii)):** what runs in the job before `Sign` (the
+  pinned actions, and the build scripts of the crates the job builds) could
+  plant a `PATH` or `LD_PRELOAD` entry the `Sign` step inherits. It is in
+  the same trust as a push to `develop`, and exposes development images
+  only.
+
+**The key's creation (4005 (8); 4188 (10)).** On 2026-10-25, after the
+consultant's OK IF (1)-(10) at ledger 4188 and the customer's OK of the
+same morning, relayed by the product owner, the product-signing agent ran
+`ferrix-softsign ci-keygen` once on nazuna. It wrote the secret to a 0600
+file outside any git tree, and the CI anchor's public key is
+`[development.ci-slot-1]`, anchor 36864 (0x9000), created 2026-10-25,
+expiring 2027-01-18. The environment `signing-ci` was created with a branch
+policy of `develop` and `main`, the secret written once as its
+`FERRIX_CI_SIGNING_KEY`, and the local file shredded (`shred -u`). The
+private key was never printed, logged or committed, and nothing signed with
+it outside CI.
+
 
 ## 7. (P7) Revocation and anti-rollback
 

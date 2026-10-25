@@ -443,7 +443,14 @@ impl<'a> Gate<'a> {
         let kernel_bytes = std::fs::read(&system.elf)?;
         let archive = system.initramfs(&self.initramfs)?;
         let label = "ferrix e2e new";
-        crate::slot_image::write(&image, label, &kernel_bytes, &archive, b"ferrix.root=btrfs")?;
+        let _ = crate::slot_image::write(
+            &image,
+            ferrix_slots::slot::VERSION_1,
+            label,
+            &kernel_bytes,
+            &archive,
+            b"ferrix.root=btrfs",
+        )?;
 
         let mut booted = self.args.clone();
         booted.boot_virtio = true;
@@ -510,7 +517,14 @@ impl<'a> Gate<'a> {
         let kernel_bytes = std::fs::read(&self.kernel.elf)?;
         let archive = self.kernel.initramfs(&self.initramfs)?;
         let label = "ferrix test-install new";
-        crate::slot_image::write(&image, label, &kernel_bytes, &archive, b"ferrix.root=btrfs")?;
+        let _ = crate::slot_image::write(
+            &image,
+            ferrix_slots::slot::VERSION_1,
+            label,
+            &kernel_bytes,
+            &archive,
+            b"ferrix.root=btrfs",
+        )?;
         let fat_image = build.join("ab-fat.img");
         let written = fat::write_image_with(
             Arch::X86_64,

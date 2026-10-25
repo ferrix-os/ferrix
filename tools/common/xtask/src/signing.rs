@@ -580,6 +580,100 @@ pub(crate) fn compare_relinked(shipped: &[u8], gate: &[u8]) -> Result<()> {
     }
 }
 
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[crate::task::Task] = &[crate::task::Task {
+    name: "verify-signed-slot",
+    help_at: 22,
+    help: &[
+        "verify-signed-slot  Decide build/<arch>/ferrix-slot.img as the signing gate's loader would (docs/SIGNING.md §6.5)",
+    ],
+    run: |_, args| verify_signed_slot(args),
+}];
+
+/// `cargo xtask verify-signed-slot`: the slot image `signed-slot-image`
+/// wrote and the signer signed, decided by `ferrix-boot-policy` as a loader
+/// of this run's profile with the gate's `development-required` block, and
+/// its blobs matched. CI's signing job runs it after it signs
+/// (`docs/SIGNING.md` §6.5), so a signature that would not verify fails the
+/// job.
+fn verify_signed_slot(args: &crate::args::Args) -> Result<()> {
+    let arch = *args
+        .arches()?
+        .first()
+        .ok_or_else(|| Error::new("verify-signed-slot: one --arch"))?;
+    let run = crate::flags::this_run()?;
+    let env = loader_env_for(&run.profile, &run.level)?;
+    let build = env
+        .iter()
+        .find(|(key, _)| *key == "FERRIX_SLOT_BUILD")
+        .map(|(_, line)| line.clone())
+        .unwrap_or_default();
+    let field = |name: &str| {
+        build
+            .split_whitespace()
+            .find_map(|word| word.strip_prefix(name))
+            .unwrap_or("")
+            .to_owned()
+    };
+    let profile: u8 = field("profile=")
+        .parse()
+        .map_err(|_| Error::new("no profile byte"))?;
+    let claimed = field("claimed=") == "1";
+    let arch_byte: u8 = match arch {
+        crate::paths::Arch::X86_64 => 1,
+        crate::paths::Arch::AArch64 => 2,
+        crate::paths::Arch::Armv7a => 3,
+    };
+    let families: Vec<u32> = field("families=")
+        .split(',')
+        .filter_map(|id| id.parse().ok())
+        .filter(|id| id >> 8 == u32::from(arch_byte))
+        .collect();
+    let block_path = crate::paths::workspace_root()
+        .join(BLOCKS)
+        .join("development-required.bin");
+    let block = std::fs::read(&block_path)
+        .map_err(|error| Error::new(format!("{}: {error}", block_path.display())))?;
+    let image_path = crate::paths::build_dir(arch).join("ferrix-slot.img");
+    let image = std::fs::read(&image_path)
+        .map_err(|error| Error::new(format!("{}: {error}", image_path.display())))?;
+    let start = ferrix_boot_policy::decide(
+        &block,
+        &ferrix_boot_policy::Build {
+            profile,
+            arch: arch_byte,
+            claimed,
+            families: &families,
+        },
+        ferrix_boot_policy::generic_family(arch_byte),
+        0,
+        image.get(..4096).unwrap_or_default(),
+        image.get(4096..8192),
+        image.len() as u64,
+    )
+    .map_err(|why| Error::new(format!("{}: refused: {why:?}", image_path.display())))?;
+    for blob in start.header.blobs() {
+        let from = usize::try_from(blob.offset).unwrap_or(usize::MAX);
+        let to = from.saturating_add(usize::try_from(blob.length).unwrap_or(usize::MAX));
+        if !blob.matches(image.get(from..to).unwrap_or_default()) {
+            return Err(Error::new(format!(
+                "{}: a blob does not match its digest",
+                image_path.display()
+            )));
+        }
+    }
+    let signed = start
+        .signed
+        .ok_or_else(|| Error::new("the slot image is unsigned"))?;
+    println!(
+        "  {}: starts under the gate's development-required block: anchor {} version {}",
+        image_path.display(),
+        signed.anchor_id,
+        signed.security_version
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,7 +699,7 @@ mod tests {
     #[test]
     fn a_development_key_is_refused_only_in_a_claimed_image() {
         let keys = development_keys(&anchors()).unwrap();
-        assert_eq!(keys.len(), 3);
+        assert_eq!(keys.len(), 4);
         assert!(keys.iter().all(|(_, root)| root.len() == 24));
         let mut image = vec![0u8; 1000];
         assert!(refuse_development_anchors_at("present", "loader", &image, &keys).is_ok());
@@ -769,6 +863,23 @@ mod tests {
         let mut changed = loader.clone();
         changed[3000 + 200] ^= 1;
         assert!(check_loader_policy_as("l", &changed, "release-off", false).is_err());
+    }
+
+    /// The CI development key (anchor 36864) is a development key like
+    /// the others: an image of a claimed profile holding its root is
+    /// refused, a level-none one is not (ledger 4005 (6)).
+    #[test]
+    fn the_ci_key_is_refused_in_a_claimed_image() {
+        let keys = development_keys(&anchors()).unwrap();
+        let (_, root) = keys
+            .iter()
+            .find(|(name, _)| name == "ci-slot-1")
+            .expect("the CI key is in the anchors file");
+        let mut image = vec![0u8; 777];
+        image.extend_from_slice(root);
+        assert!(refuse_development_anchors_at("present", "loader", &image, &keys).is_err());
+        assert!(refuse_development_anchors_at("sc2", "initramfs", &image, &keys).is_err());
+        assert!(refuse_development_anchors_at("none", "loader", &image, &keys).is_ok());
     }
 
     /// The image check refuses a planted root in either part at this run's
