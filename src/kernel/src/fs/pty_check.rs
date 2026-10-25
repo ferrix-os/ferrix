@@ -157,6 +157,30 @@ pub(crate) fn check_a_pty_keeps_its_speeds_as_numbers(
     if cflag & CBAUD != B9600 || (input, output) != (9600, 9600) {
         return Err("a pseudoterminal set to B9600 did not read back 9600");
     }
+
+    // (C5) A TCSETS naming BOTHER with no TCSETS2 before it: the speed the
+    // pair has, as Linux keeps c_ospeed, never 0.
+    let fresh = self::pair()?;
+    let coded = Termios {
+        cflag: (Termios::DEFAULT.cflag & !(CBAUD | (CBAUD << IBSHIFT))) | B9600,
+        ..Termios::DEFAULT
+    };
+    for set in [coded, base] {
+        stage(process, page, &set.to_bytes())?;
+        answered(
+            tty::slave_ioctl(process, &fresh.slave, TCSETS, page),
+            "TCSETS on a pseudoterminal was refused",
+        )?;
+    }
+    stage(process, page, &[0_u8; TERMIOS2_BYTES])?;
+    answered(
+        tty::slave_ioctl(process, &fresh.slave, TCGETS2, page),
+        "TCGETS2 on a pseudoterminal was refused",
+    )?;
+    let got: [u8; TERMIOS2_BYTES] = read_back(process, page)?;
+    if reported(&got) != (base.cflag, 9600, 9600) {
+        return Err("a TCSETS naming BOTHER after B9600 did not keep 9600");
+    }
     Ok(())
 }
 
@@ -310,6 +334,146 @@ pub(crate) fn check_flow_control_acts_on_a_pty() -> Result<(), &'static str> {
     while pair.slave.read_stream(&mut drain, true).unwrap_or(0) > 0 {}
     if pair.master.read_stream(&mut said, true) != Ok(1) || said.first() != Some(&START) {
         return Err("IXOFF did not send the start character as the input emptied");
+    }
+    Ok(())
+}
+
+/// The slave's output, `OUTPUT_LIMIT` bytes as the pair holds them.
+const OUTPUT: usize = 8192;
+
+/// Fill a pair's input with `IXOFF` set until it throttles, and take the
+/// stop character it sends the master.
+fn throttle(pair: &Pair) -> Result<(), &'static str> {
+    use ferrix_vfs::Inode as _;
+    let _ = pair.master.write_stream(&[b'f'; QUEUE - 100], true);
+    let mut said = [0_u8; 8];
+    if pair.master.read_stream(&mut said, true) != Ok(1) || said.first() != Some(&STOP) {
+        return Err("IXOFF did not send the stop character as the input filled");
+    }
+    Ok(())
+}
+
+/// Whether the master's next read is `IXOFF`'s start character alone.
+fn started(pair: &Pair) -> bool {
+    use ferrix_vfs::Inode as _;
+    let mut said = [0_u8; 8];
+    pair.master.read_stream(&mut said, true) == Ok(1) && said.first() == Some(&START)
+}
+
+/// **serial-3**, continued (F1, C1, C2): flow control through a flush, a
+/// full input and a full output.
+///
+/// - (F1) A throttled pair's input flushed -- `TCFLSH` `TCIFLUSH`, a
+///   `TCSETSF` -- sends the master the start character; so do new settings
+///   that drop `IXOFF`. No read is left to do it.
+/// - (C1) With no room in the input the master's stop and start characters
+///   still act: taken alone, and looked ahead at behind a byte not taken.
+/// - (C2) `IXOFF`'s character reaches the master ahead of output the slave
+///   wrote before it, and a full output does not keep it back or grow.
+pub(crate) fn check_flow_control_through_a_flush_and_full_queues(
+    process: &Process,
+    page: u64,
+) -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::{TCFLSH, TCIFLUSH, TCSETSF};
+    use ferrix_vfs::Inode as _;
+
+    // (F1) TCFLSH, TCSETSF, and IXOFF dropped.
+    let pair = pair()?;
+    let mut throttled = raw();
+    throttled.iflag |= IXOFF;
+    pair.master.pty.set_termios(throttled, true);
+    throttle(&pair)?;
+    answered(
+        tty::slave_ioctl(process, &pair.slave, TCFLSH, TCIFLUSH),
+        "TCFLSH TCIFLUSH on a pseudoterminal was refused",
+    )?;
+    if !started(&pair) {
+        return Err("a throttled pseudoterminal's input flushed sent no start character");
+    }
+    throttle(&pair)?;
+    stage(process, page, &throttled.to_bytes())?;
+    answered(
+        tty::slave_ioctl(process, &pair.slave, TCSETSF, page),
+        "TCSETSF on a pseudoterminal was refused",
+    )?;
+    if !started(&pair) {
+        return Err("a throttled pseudoterminal's TCSETSF sent no start character");
+    }
+    throttle(&pair)?;
+    pair.master.pty.set_termios(raw(), false);
+    if !started(&pair) {
+        return Err("a throttled pseudoterminal's IXOFF dropped sent no start character");
+    }
+
+    // (C2) Ahead of the output, and outside its limit.
+    pair.master.pty.set_termios(throttled, true);
+    if pair.slave.write_stream(b"abc", true) != Ok(3) {
+        return Err("a slave write to an empty output was not taken");
+    }
+    let _ = pair.master.write_stream(&[b'f'; QUEUE - 100], true);
+    let mut said = [0_u8; 8];
+    if pair.master.read_stream(&mut said, true) != Ok(4)
+        || said.get(..4) != Some(&[STOP, b'a', b'b', b'c'][..])
+    {
+        return Err("IXOFF's stop character did not go ahead of the slave's output");
+    }
+    pair.master.pty.set_termios(throttled, true);
+    let mut filled = 0;
+    while let Ok(n @ 1..) = pair.slave.write_stream(&[b'o'; 512], true) {
+        filled += n;
+    }
+    if filled != OUTPUT {
+        return Err("a slave's output did not take OUTPUT_LIMIT bytes");
+    }
+    let _ = pair.master.write_stream(&[b'f'; QUEUE - 100], true);
+    if pair.master.pty.master_available() != OUTPUT + 1 {
+        return Err("IXOFF's stop character was held back or counted in a full output");
+    }
+    let mut one = [0_u8; 1];
+    if pair.master.read_stream(&mut one, true) != Ok(1) || one != [STOP] {
+        return Err("IXOFF's stop character did not go ahead of a full output");
+    }
+    let mut drain = [0_u8; 512];
+    let mut rest = 0;
+    while let Ok(n @ 1..) = pair.master.read_stream(&mut drain, true) {
+        if drain
+            .get(..n)
+            .is_none_or(|got| got.iter().any(|&byte| byte != b'o'))
+        {
+            return Err("a full output did not read back as written");
+        }
+        rest += n;
+    }
+    if rest != OUTPUT {
+        return Err("a full output did not read back as written");
+    }
+
+    // (C1) No room: the two characters act all the same.
+    let pair = self::pair()?;
+    let mut flow = raw();
+    flow.iflag |= IXON;
+    pair.master.pty.set_termios(flow, true);
+    if pair.master.write_stream(&[b'q'; QUEUE], true) != Ok(QUEUE) {
+        return Err("an empty input did not take its queue's worth");
+    }
+    if pair.master.write_stream(&[STOP], true) != Ok(1)
+        || pair.slave.write_stream(b"x", true) != Err(Errno::EAGAIN)
+    {
+        return Err("IXON's stop character did not act on a full input");
+    }
+    if pair.master.write_stream(&[START], true) != Ok(1)
+        || pair.slave.write_stream(b"x", true) != Ok(1)
+    {
+        return Err("IXON's start character did not act on a full input");
+    }
+    if pair.master.write_stream(&[b'q', STOP], true) != Err(Errno::EAGAIN)
+        || pair.slave.write_stream(b"x", true) != Err(Errno::EAGAIN)
+    {
+        return Err("IXON's stop character behind a byte not taken was not looked ahead at");
+    }
+    let _ = pair.master.write_stream(&[START], true);
+    if pair.slave.write_stream(b"x", true) != Ok(1) {
+        return Err("IXON's start character did not act on a full input");
     }
     Ok(())
 }

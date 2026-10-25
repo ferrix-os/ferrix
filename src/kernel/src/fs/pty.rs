@@ -138,10 +138,16 @@ struct State {
     /// `TIOCSPTLCK`: a slave may not be opened while this is set, which is
     /// how it starts.
     locked: bool,
-    /// The input and output speeds as numbers, as the last `TCSETS2` gave
-    /// them: what `TCGETS2` reports for a speed `c_cflag` names `BOTHER`
-    /// (K3). The console has no such numbers and keeps its own speed.
+    /// The input and output speeds as numbers, as Linux keeps `c_ispeed`
+    /// and `c_ospeed`: recomputed by every settings change, a `B` code's
+    /// own rate, and for `BOTHER` the number the last `TCSETS2` gave (or
+    /// the one kept before it), which is what `TCGETS2` reports (K3, C5).
+    /// The console has no such numbers and keeps its own speed.
     speeds: (u32, u32),
+    /// `IXOFF`'s stop or start character on its way to the master, ahead
+    /// of the output and outside its limit, as Linux's `send_xchar` puts it
+    /// in the port's `x_char` (C2): a later one replaces it.
+    xchar: Option<u8>,
     /// `IXON`: the slave's output is stopped, by the stop character the
     /// master sent, until the start character (or any, with `IXANY`).
     stopped: bool,
@@ -253,7 +259,8 @@ pub(crate) fn open_master() -> VfsResult<Arc<MasterFile>> {
             master: true,
             slaves: 0,
             locked: true,
-            speeds: (0, 0),
+            speeds: speeds_of(&Termios::DEFAULT, (0, 0)),
+            xchar: None,
             stopped: false,
             throttled: false,
             slave_seen: false,
@@ -296,32 +303,22 @@ impl Pty {
 
     /// Change the settings.
     pub(crate) fn set_termios(&self, termios: Termios, flush: bool) {
-        let mut state = self.state.lock();
-        if flush {
-            state.discipline.flush_input();
+        {
+            let mut state = self.state.lock();
+            let speeds = state.speeds;
+            state.change(termios, speeds, flush);
         }
-        state.discipline.set_termios(termios);
+        self.changed.wake_all();
     }
 
     /// The settings as `TCGETS2` reports them: `struct termios`, then the
-    /// input and output speeds as numbers. A speed `c_cflag` names by a
-    /// `B` code is that code's; one it names `BOTHER` is the number the
-    /// last `TCSETS2` gave, kept as given, as Linux keeps `c_ospeed` (K3);
-    /// an input speed of zero bits is the output speed.
+    /// input and output speeds as numbers, as the pair keeps them (K3,
+    /// C5): a `B` code's own rate, for `BOTHER` the number given, and for
+    /// an input speed of zero bits the output speed.
     pub(crate) fn termios2(&self) -> [u8; TERMIOS2_BYTES] {
         let (termios, (input, output)) = {
             let state = self.state.lock();
             (state.discipline.termios(), state.speeds)
-        };
-        let output = if termios.cflag & CBAUD == BOTHER {
-            output
-        } else {
-            termios.output_speed()
-        };
-        let input = match (termios.cflag >> IBSHIFT) & CBAUD {
-            0 => output,
-            BOTHER => input,
-            _ => termios.input_speed(),
         };
         let mut bytes = [0_u8; TERMIOS2_BYTES];
         let all = termios
@@ -346,12 +343,8 @@ impl Pty {
         let input = word(speeds.first_chunk::<4>());
         let output = word(speeds.last_chunk::<4>());
         let termios = Termios::from_bytes(head);
-        let mut state = self.state.lock();
-        if flush {
-            state.discipline.flush_input();
-        }
-        state.discipline.set_termios(termios);
-        state.speeds = (input, output);
+        self.state.lock().change(termios, (input, output), flush);
+        self.changed.wake_all();
     }
 
     /// The size the terminal says it is.
@@ -405,7 +398,8 @@ impl Pty {
 
     /// How many bytes the master could read without waiting.
     pub(crate) fn master_available(&self) -> usize {
-        self.state.lock().output.len()
+        let state = self.state.lock();
+        state.output.len() + usize::from(state.xchar.is_some())
     }
 
     /// Whether the slave's output has room for another byte, and is not
@@ -429,8 +423,15 @@ impl Pty {
     }
 
     /// Throw away what has been typed and not read.
+    /// Throttled before, the pair unthrottles (F1).
     pub(crate) fn flush_input(&self) {
-        self.state.lock().discipline.flush_input();
+        {
+            let mut state = self.state.lock();
+            state.discipline.flush_input();
+            let termios = state.discipline.termios();
+            state.rethrottle(&termios);
+        }
+        self.changed.wake_all();
     }
 
     /// Throw away what the slave wrote and the master has not read, which
@@ -471,8 +472,12 @@ impl Pty {
             let mut state = self.state.lock();
             let mut echo = Vec::new();
             let termios = state.discipline.termios();
-            for &byte in bytes {
-                if state.discipline.room() == 0 {
+            for (at, &byte) in bytes.iter().enumerate() {
+                // With no room the stop and start characters still act
+                // (C1): they take none, as Linux's lookahead acts on them
+                // in input it has not taken yet.
+                if state.discipline.room() == 0 && !is_flow_character(&termios, byte) {
+                    look_ahead(&mut state, &termios, bytes.get(at..).unwrap_or_default());
                     break;
                 }
                 taken += 1;
@@ -496,7 +501,7 @@ impl Pty {
                 if termios.iflag & IXOFF != 0
                     && let Some(&stop) = termios.cc.get(VSTOP)
                 {
-                    state.output.push_back(stop);
+                    state.xchar = Some(stop);
                 }
             }
         }
@@ -508,15 +513,8 @@ impl Pty {
     /// [`UNTHROTTLE_HELD`], sending `IXOFF`'s start character.
     fn unthrottle(&self) {
         let mut state = self.state.lock();
-        if state.throttled && state.discipline.held() < UNTHROTTLE_HELD {
-            state.throttled = false;
-            let termios = state.discipline.termios();
-            if termios.iflag & IXOFF != 0
-                && let Some(&start) = termios.cc.get(VSTART)
-            {
-                state.output.push_back(start);
-            }
-        }
+        let termios = state.discipline.termios();
+        state.rethrottle(&termios);
     }
 
     /// One look by the slave's read, as [`Discipline::read_step`] decides:
@@ -568,6 +566,12 @@ impl Pty {
         let mut taken = 0;
         {
             let mut state = self.state.lock();
+            // `IXOFF`'s character first, ahead of the output (C2).
+            if let (Some(slot), Some(xchar)) = (buf.first_mut(), state.xchar) {
+                *slot = xchar;
+                state.xchar = None;
+                taken = 1;
+            }
             while taken < buf.len() {
                 let Some(byte) = state.output.pop_front() else {
                     break;
@@ -628,6 +632,83 @@ impl Pty {
     }
 }
 
+impl State {
+    /// New settings, with the speeds `numbers` gave for `BOTHER`: the
+    /// input flushed first when `flush`, the speeds recomputed as Linux's
+    /// `tty_set_termios` recomputes `c_ispeed` and `c_ospeed` (C5), and the
+    /// throttle looked at again (F1).
+    fn change(&mut self, termios: Termios, numbers: (u32, u32), flush: bool) {
+        let before = self.discipline.termios();
+        if flush {
+            self.discipline.flush_input();
+        }
+        self.discipline.set_termios(termios);
+        self.speeds = speeds_of(&termios, numbers);
+        self.rethrottle(&before);
+    }
+
+    /// Look at the throttle again, after a slave read, a flush of the
+    /// input or new settings (`before` the ones it was throttled under)
+    /// (F1). A throttled pair whose input holds fewer than
+    /// [`UNTHROTTLE_HELD`] bytes, or whose settings dropped `IXOFF`,
+    /// unthrottles, and under `IXOFF` the far end gets the start
+    /// character. Without this a flushed input, which no read takes from,
+    /// would leave the far end stopped for good.
+    fn rethrottle(&mut self, before: &Termios) {
+        if !self.throttled {
+            return;
+        }
+        let now = self.discipline.termios();
+        let dropped = before.iflag & IXOFF != 0 && now.iflag & IXOFF == 0;
+        if self.discipline.held() >= UNTHROTTLE_HELD && !dropped {
+            return;
+        }
+        self.throttled = false;
+        let sender = if now.iflag & IXOFF != 0 { now } else { *before };
+        if sender.iflag & IXOFF != 0
+            && let Some(&start) = sender.cc.get(VSTART)
+        {
+            self.xchar = Some(start);
+        }
+    }
+}
+
+/// The speeds as numbers that `termios` names, as Linux's
+/// `tty_termios_baud_rate` and `tty_termios_input_baud_rate` give them
+/// (K3, C5): a `B` code's own rate; for `BOTHER` the number in `numbers`;
+/// an input speed of zero bits is the output speed.
+fn speeds_of(termios: &Termios, (input, output): (u32, u32)) -> (u32, u32) {
+    let output = if termios.cflag & CBAUD == BOTHER {
+        output
+    } else {
+        termios.output_speed()
+    };
+    let input = match (termios.cflag >> IBSHIFT) & CBAUD {
+        0 => output,
+        BOTHER => input,
+        _ => termios.input_speed(),
+    };
+    (input, output)
+}
+
+/// Whether `byte` is `IXON`'s stop or start character under `termios`.
+fn is_flow_character(termios: &Termios, byte: u8) -> bool {
+    let is = |index| termios.cc.get(index).is_some_and(|&c| c != 0 && c == byte);
+    termios.iflag & IXON != 0 && (is(VSTOP) || is(VSTART))
+}
+
+/// With no room for `rest`, the stop and start characters in it act now,
+/// in order, as Linux's `n_tty_lookahead_flow_ctrl` acts on input it has
+/// not taken (C1). The bytes stay untaken; taken later, they act again,
+/// and the last one decides, as it did here.
+fn look_ahead(state: &mut State, termios: &Termios, rest: &[u8]) {
+    for &byte in rest {
+        if is_flow_character(termios, byte) {
+            state.stopped = termios.cc.get(VSTOP) == Some(&byte);
+        }
+    }
+}
+
 /// `IXON`'s stop and start characters, as `n_tty` takes them (K1): the
 /// stop character stops the slave's output, the start character starts it,
 /// and with `IXANY` any character does. Whether `byte` was one of the two,
@@ -677,6 +758,7 @@ impl Drop for MasterFile {
             let mut state = self.pty.state.lock();
             state.master = false;
             state.output.clear();
+            state.xchar = None;
             state.stopped = false;
             let session = state.session;
             state.session = 0;

@@ -139,7 +139,9 @@ run from `syscall::check`'s handler checks on every `test-boot`.
    speed as the number `TCSETS2` gave -- 250000 reads back 250000 both ways
    from slave and master with `CBAUD` still `BOTHER`; `TCSETS` naming
    `BOTHER` keeps the numbers; split speeds stay split; a `B` code is its
-   own speed. The console keeps its own speed (its path untouched, held by
+   own speed, and the speed kept: a `TCSETS` naming `BOTHER` after `B9600`,
+   with no `TCSETS2`, reads back 9600, not 0, as Linux keeps `c_ospeed`
+   (C5). The console keeps its own speed (its path untouched, held by
    `check_the_console_answers_as_a_terminal`). Check:
    `check_a_pty_keeps_its_speeds_as_numbers`. Control: `TCGETS2` reporting
    the old code-only speeds, FIRED at "did not read back 250000 both ways".
@@ -154,8 +156,14 @@ run from `syscall::check`'s handler checks on every `test-boot`.
 3. **serial-3** (K1, flow control): on a pty `IXON` stops the slave's
    output at `VSTOP` and starts it at `VSTART`, which go no further;
    `IXANY` restarts at any character; `IXOFF` sends `VSTOP` below 128 bytes
-   of room and `VSTART` below 128 held. Check:
-   `check_flow_control_acts_on_a_pty`.
+   of room and `VSTART` below 128 held. A throttled pair's input flushed
+   (`TCFLSH` `TCIFLUSH` or `TCIOFLUSH`, `TCSETSF`, `TCSETSF2`), or its
+   settings dropping `IXOFF`, unthrottles it and sends `VSTART` (F1). With
+   no room in the input `VSTOP` and `VSTART` still act, as Linux's
+   lookahead acts on them (C1); `IXOFF`'s character goes to the master
+   ahead of pending output and outside its 8 KiB, as `send_xchar` does
+   (C2). Checks: `check_flow_control_acts_on_a_pty`,
+   `check_flow_control_through_a_flush_and_full_queues`.
 4. **serial-4** (K1, canonical): a full canonical line with no terminator
    does not block the master; further bytes are taken and dropped, and a
    newline still ends the line. Check:
