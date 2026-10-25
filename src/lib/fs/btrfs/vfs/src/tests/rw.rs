@@ -1128,3 +1128,79 @@ fn an_unlinked_kept_file_goes_with_its_last_user() {
         "the unlinked file outlived its last user"
     );
 }
+
+/// The disk as it stands, as a machine whose power went now would leave it:
+/// a copy of every block, which nothing written later reaches.
+fn power_cut(disk: &Disk) -> Disk {
+    let blocks = disk
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    Disk(Arc::new(Mutex::new(blocks)))
+}
+
+/// The volume a power cut at this moment leaves, mounted: what a crash after
+/// a rename over `target` finds there.
+fn target_after_a_cut(disk: &Disk) -> Vec<u8> {
+    let fs = mount(&power_cut(disk));
+    read_all(&fs.root().lookup(b"target").unwrap())
+}
+
+/// `target` holding `old`, committed, and `target.tmp` written with `new`
+/// and renamed over it, never synced: what `mv -f` of a fresh copy does.
+fn replaced_without_fsync(old: &[u8], new: &[u8]) -> (Disk, Arc<RwBtrfs<Disk>>) {
+    let disk = Disk::new(BLANK);
+    let fs = mount(&disk);
+    let root = fs.root();
+    drop(make_file(&root, b"target", old));
+    fs.sync().unwrap();
+    drop(make_file(&root, b"target.tmp", new));
+    root.rename(b"target.tmp", &root, b"target", true).unwrap();
+    (disk, fs)
+}
+
+#[test]
+fn a_file_renamed_over_another_is_committed_with_its_bytes() {
+    // An `fsync` of another file after the rename commits the tree's shape,
+    // and with it the rename; the renamed file was never synced. The power
+    // cut must find the new file whole, never the name on an empty file
+    // (N150 box, 2026-10-25: Wine's ntdll.so at 0 bytes).
+    let old = vec![b'o'; 40_000];
+    let new = vec![b'n'; 60_000];
+    let (disk, fs) = replaced_without_fsync(&old, &new);
+    let other = make_file(&fs.root(), b"journal", b"a line");
+    other.fsync(false).unwrap();
+    let found = target_after_a_cut(&disk);
+    assert!(
+        found == new,
+        "after the commit an fsync made, target is {} bytes, not the new {}",
+        found.len(),
+        new.len()
+    );
+}
+
+#[test]
+fn a_rename_over_a_file_not_yet_committed_leaves_the_old_file() {
+    // No commit after the rename: the cut finds the old file whole.
+    let old = vec![b'o'; 40_000];
+    let new = vec![b'n'; 60_000];
+    let (disk, _fs) = replaced_without_fsync(&old, &new);
+    assert_eq!(target_after_a_cut(&disk), old);
+}
+
+#[test]
+fn a_file_renamed_over_another_is_whole_after_a_sync_and_reads_back_meanwhile() {
+    // Written back at the rename, the file still reads its bytes before the
+    // commit, and a write after the rename is kept as well.
+    let old = vec![b'o'; 40_000];
+    let new = vec![b'n'; 60_000];
+    let (disk, fs) = replaced_without_fsync(&old, &new);
+    let target = fs.root().lookup(b"target").unwrap();
+    assert_eq!(read_all(&target), new);
+    assert_eq!(target.write_at(60_000, b"tail", false).unwrap().0, 4);
+    fs.sync().unwrap();
+    let mut want = new;
+    want.extend_from_slice(b"tail");
+    assert_eq!(target_after_a_cut(&disk), want);
+}

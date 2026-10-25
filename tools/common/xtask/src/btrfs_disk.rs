@@ -259,6 +259,21 @@ pub(crate) fn ensure_test_root(arch: Arch) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Whether the next boots attach the test root as the last one left it.
+static KEEP_TEST_ROOT: AtomicBool = AtomicBool::new(false);
+
+/// Attach the test root as the last boot left it (`true`), or fresh from the
+/// fixture (`false`, the default), from now on: `test-rename-crash`'s boots
+/// after a power cut read what the cut left.
+pub(crate) fn keep_test_root(keep: bool) {
+    KEEP_TEST_ROOT.store(keep, Ordering::Relaxed);
+}
+
+/// Whether [`keep_test_root`] asked for the test root as it was left.
+pub(crate) fn test_root_kept() -> bool {
+    KEEP_TEST_ROOT.load(Ordering::Relaxed)
+}
+
 /// Where [`ensure_test_root`] puts `arch`'s, without writing it.
 pub(crate) fn test_root_path(arch: Arch) -> PathBuf {
     paths::build_dir(arch).join(TEST_ROOT_FILE_NAME)

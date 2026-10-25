@@ -178,6 +178,7 @@ mod procfs;
 mod pty;
 mod qemu;
 mod remote;
+mod rename_crash;
 mod restart;
 mod rows_bench;
 mod rustc;
@@ -593,6 +594,7 @@ const TASKS: &[&[Task]] = &[
     powerfail::TASKS,
     pty::TASKS,
     remote::TASKS,
+    rename_crash::TASKS,
     restart::TASKS,
     rows_bench::TASKS,
     rustc::TASKS,

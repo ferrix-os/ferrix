@@ -73,6 +73,25 @@
 //! take it ahead of a woken waiter. Only the last slice and the commit
 //! itself are done under one hold, as before.
 //!
+//! # A file renamed over another takes its bytes along
+//!
+//! Writing a file under a new name and renaming it over the old one is how
+//! programs replace a file whole, and most of them never `fsync` it. A
+//! commit that carried the rename without the new file's bytes would leave
+//! the name on an empty file after a crash: neither the old content nor the
+//! new. Any commit can do that, not only the next periodic one: an `fsync`
+//! of any file after the rename commits the tree's shape, and writes back
+//! only that file. So `rename` writes back the moved file's dirty pages into
+//! the running transaction, under the same hold of the lock, before it moves
+//! the name, whenever the name it takes was a regular file's: whatever
+//! commit carries the rename carries those bytes, and a crash finds the old
+//! file or the new one whole. Linux's btrfs starts the same writeback in
+//! `btrfs_rename` (`filemap_flush` when the rename replaces a file), as
+//! ext4's `auto_da_alloc` does; here it is in the transaction itself rather
+//! than only started. A writeback the volume has no room for keeps its pages
+//! dirty and the rename goes ahead, as before (N150 box, 2026-10-25: Wine's
+//! `ntdll.so`, replaced by `mv -f`, was 0 bytes after a power cycle).
+//!
 //! # Room is taken at the write
 //!
 //! Since a write's extents are made at the commit, a volume that has run
@@ -1358,19 +1377,38 @@ impl<D: WriteHandle> Inode for Node<D> {
             .downcast::<Node<D>>()
             .map_err(|_| Errno::EXDEV)?;
         let (from, to, now) = (self.ino, parent.ino, self.shared.now());
-        let moved = self.shared.with(|volume| {
-            let (_, kind) = volume.lookup(from, old)?.ok_or(WriteError::NotFound)?;
+        let mut volume = self.shared.lock();
+        self.shared.evict_queued(&mut volume)?;
+        let (moved, replaces_file) = (|| {
+            let (moved, kind) = volume.lookup(from, old)?.ok_or(WriteError::NotFound)?;
+            let mut replaces_file = false;
             if let Some((victim, victim_kind)) = volume.lookup(to, new)? {
                 if !replace {
                     return Err(WriteError::Exists);
                 }
-                check_replaceable(volume, kind, victim, victim_kind)?;
+                check_replaceable(&mut volume, kind, victim, victim_kind)?;
+                replaces_file = kind == ferrix_btrfs::items::FT_REG_FILE
+                    && victim_kind == ferrix_btrfs::items::FT_REG_FILE
+                    && victim != moved;
             }
-            let moved = volume.lookup(from, old)?.map(|(ino, _)| ino);
-            volume.rename(from, old, to, new, now)?;
-            Ok(moved)
-        })?;
-        let mut volume = self.shared.lock();
+            Ok((moved, replaces_file))
+        })()
+        .map_err(errno)?;
+        // A file renamed over another goes into the transaction with its
+        // bytes: see "A file renamed over another takes its bytes along".
+        if replaces_file {
+            let live = self.shared.nodes.lock().get(&moved).and_then(Weak::upgrade);
+            if let Some(node) = live {
+                match node.write_back(&mut volume) {
+                    // The pages stay dirty for the next commit, as before;
+                    // a rename is not refused for want of room for them.
+                    Ok(()) | Err(Errno::ENOSPC) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        volume.rename(from, old, to, new, now).map_err(errno)?;
+        let moved = Some(moved);
         self.refresh(&mut volume)?;
         parent.refresh(&mut volume)?;
         // Whatever was replaced, and whatever moved, may be open somewhere.
