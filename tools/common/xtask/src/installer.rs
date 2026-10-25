@@ -67,6 +67,14 @@ pub(crate) const TASKS: &[Task] = &[
         ],
         run,
     },
+    Task {
+        name: "test-ab-boot-signed",
+        help_at: 511,
+        help: &[
+            "test-ab-boot-signed  Signed slots under OVMF: the relinked loader's byte comparison, and each refusal of docs/SIGNING.md §10.6 (x86_64, nazuna's development key)",
+        ],
+        run,
+    },
 ];
 
 /// Where the installer goes in the initramfs.
@@ -170,6 +178,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     match command {
         "live" => live(args),
         "test-ab-boot" => crate::ab_boot::test_ab_boot(args),
+        "test-ab-boot-signed" => crate::ab_boot::test_ab_boot_signed(args),
         _ => test_install(args),
     }
 }

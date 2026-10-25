@@ -23,7 +23,12 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-CRATES = ["src/lib/crypto/sigverify", "src/lib/crypto/sha256"]
+CRATES = [
+    "src/lib/crypto/sigverify",
+    "src/lib/crypto/sha256",
+    "src/lib/proto/boot-policy",
+    "src/lib/proto/slots",
+]
 TEST_FILES = {"tests.rs", "vectors.rs"}
 PATTERN = re.compile(r"cfg(?:_attr)?!?\s*\([^)]*\btarget_")
 

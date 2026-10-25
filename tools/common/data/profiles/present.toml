@@ -12,7 +12,9 @@ claim = "EAL5+, DO-178C DAL C, IEC 62304 Class C, EN 50716 SIL 2 (ledger 869), u
 # rows are development rows, until an SMMU is driven on ARMv7-A.
 claim_architectures = ["x86_64", "aarch64"]
 buildable_from = "today"
-image = { driver_updates = "absent", settings_writer = "present" }
+image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off" }
+# The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
+slot_families = ["x86_64-uefi-pc", "aarch64-uefi-virt", "armv7a-uefi-virt"]
 
 # Below-level values this profile uses by a dated exception (BF1, ledger
 # 914): today's item keeps its claim with the Linux layer and btrfs in ring 0

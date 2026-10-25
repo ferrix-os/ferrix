@@ -25,13 +25,16 @@ pub(crate) fn build_loader(arch: Arch, release: bool) -> Result<PathBuf> {
         "ferrix-boot.efi"
     };
     let made = output(arch.loader_target(), release, name);
-    build("ferrix-boot", arch.loader_target(), release)?
-        .output(&made)
-        .run()?;
+    let mut loader = build("ferrix-boot", arch.loader_target(), release)?;
+    for (key, value) in crate::signing::loader_env()? {
+        loader = loader.env(key, value);
+    }
+    loader.output(&made).run()?;
     let made = artifact(made)?;
     let loader = std::fs::read(&made)
         .map_err(|error| Error::new(format!("reading {}: {error}", made.display())))?;
     crate::signing::refuse_development_anchors("the UEFI loader", &loader)?;
+    crate::signing::check_loader_policy(arch, "the UEFI loader", &loader)?;
     if !arch.loader_is_elf() {
         return Ok(made);
     }
@@ -394,8 +397,12 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
                 .iter()
                 .map(|program| (program.package, &kernels)),
         );
+    let loader_env = crate::signing::loader_env()?;
     for (package, targets) in packages {
         let mut command = ahead(package, targets);
+        if package == "ferrix-boot" {
+            let _ = command.envs(loader_env.iter().map(|(key, value)| (*key, value)));
+        }
         if release {
             let _ = command.arg("--release");
         }

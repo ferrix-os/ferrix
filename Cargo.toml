@@ -28,6 +28,7 @@ members = [
     "src/lib/drivers/power/x86-power",
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
+    "src/lib/proto/boot-policy",
     "src/lib/proto/slots",
     "src/lib/proto/eventlog",
     "src/lib/platform/description",
@@ -182,6 +183,7 @@ ferrix-lode-capture = { path = "src/lib/proto/lode-capture" }
 ferrix-audit = { path = "src/lib/proto/audit" }
 ferrix-bootinfo = { path = "src/lib/proto/bootinfo" }
 ferrix-slots = { path = "src/lib/proto/slots" }
+ferrix-boot-policy = { path = "src/lib/proto/boot-policy" }
 ferrix-eventlog = { path = "src/lib/proto/eventlog" }
 ferrix-description = { path = "src/lib/platform/description" }
 ferrix-elf = { path = "src/lib/platform/elf" }

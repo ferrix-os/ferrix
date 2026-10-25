@@ -1981,6 +1981,15 @@ about 3.15 M cycles, 4.85 ms**, a margin of 10× against the 50 ms bound
 (about 9.7 ms and 5× for L = 2). The S2 figures above stay as the record
 of the landed S1 code.
 
+**On x86-64 (slice S4, the signed A/B gate).** The loader prints each
+signed start's decision in counter ticks: header decode, policy block
+parse and one H15 manifest verify, under KVM on nazuna's Ryzen 9 9900X,
+whose invariant TSC runs at its 4.4 GHz base clock. Eight starts of
+`test-ab-boot-signed` took 1.73 to 2.59 M ticks, about 0.39 to 0.59 ms
+(`~/.local/share/ferrix/signing-bench/s4-signed-local7.log`; the landing's
+gate row repeats it). That is a development build of the loader on a
+development H15 key; the bound above, from the DK1, stays the worst case.
+
 **Slot hashing in the loader** is then about 2.3 s per 32 MiB of kernel
 and initramfs on the DK1, still not AB-BOOT §4's "well under a second".
 What closes the rest:

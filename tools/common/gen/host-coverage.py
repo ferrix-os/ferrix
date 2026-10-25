@@ -54,8 +54,10 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 EVIDENCE = ROOT / "docs/certification/host-coverage.json"
 CRATES = {
+    "ferrix-boot-policy": "src/lib/proto/boot-policy",
     "ferrix-sha256": "src/lib/crypto/sha256",
     "ferrix-sigverify": "src/lib/crypto/sigverify",
+    "ferrix-slots": "src/lib/proto/slots",
 }
 TEST_FILES = {"tests.rs", "vectors.rs"}
 TOOLCHAIN = "nightly"

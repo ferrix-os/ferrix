@@ -12,6 +12,7 @@ name = "ferrix-boot"
 path = "src/main.rs"
 
 [dependencies]
+ferrix-boot-policy.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-elf.workspace = true
 ferrix-eventlog.workspace = true

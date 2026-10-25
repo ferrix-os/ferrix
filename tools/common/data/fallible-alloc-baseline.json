@@ -29,6 +29,11 @@
       "count": 0,
       "by_file": {}
     },
+    "ferrix-boot-policy": {
+      "//": "Held at 0 from the start (docs/SIGNING.md 10.6, slice S4): no_std without alloc.",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-sha256": {
       "//": "Target zero. Nobody is named as converting it yet.",
       "count": 0,
@@ -36,6 +41,11 @@
     },
     "ferrix-sigverify": {
       "//": "Target zero. Nobody is named as converting it yet.",
+      "count": 0,
+      "by_file": {}
+    },
+    "ferrix-slots": {
+      "//": "Held at 0 from the start of its item classification (slice S4): no_std without alloc.",
       "count": 0,
       "by_file": {}
     },

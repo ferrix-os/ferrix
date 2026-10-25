@@ -259,6 +259,16 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-signing-anchors.py", "--self-test"],
         ],
     ),
+    // The loader's trust-policy blocks are what gen-anchors.py writes from
+    // the anchors file, and the profiles' slot keys hold (docs/SIGNING.md
+    // §10.6; ledger 4016).
+    (
+        "trust-policy blocks",
+        &[
+            &["tools/common/gen/gen-anchors.py", "--check"],
+            &["tools/common/gen/gen-anchors.py", "--self-test"],
+        ],
+    ),
     // The host measurement stands for every target only while their
     // product code has no target-dependent part (ledger 3803 (4)).
     (
@@ -1324,9 +1334,18 @@ fn cross_target_clippy() -> Result<()> {
         "clippy (kernel, every architecture: each buildable profile, checks=off, mitigations=off, linux_abi=off)",
         kernel_clippy_every_build,
     )?;
+    step(
+        "the loader refuses a build without its trust policy (SIGNING §10.6)",
+        loader_needs_its_build_inputs,
+    )?;
     for arch in Arch::ALL {
         step(&format!("clippy (loader, {arch})"), || {
-            clippy(&["-p", "ferrix-boot", "--target", arch.loader_target()])
+            let env = crate::signing::loader_env()?;
+            let env: Vec<(&str, String)> = env.into_iter().collect();
+            clippy_with(
+                &["-p", "ferrix-boot", "--target", arch.loader_target()],
+                &env,
+            )
         })?;
         step(
             &format!("clippy (native runtime and programs, {arch})"),
@@ -2630,6 +2649,38 @@ fn clippy_captured(arguments: &[&str], flags: &[(&str, String)]) -> Result<()> {
     print!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
     cargo::finished(output.status, "cargo clippy, mitigations=off")
+}
+
+/// The UEFI loader's `build.rs` refuses a build that names no trust-policy
+/// block, rather than taking a default (`docs/SIGNING.md` §10.6; ledger
+/// 4016 (4), 4082 (3) k-env): `cargo check` of the loader without
+/// `FERRIX_ANCHORS` must fail, and say why.
+fn loader_needs_its_build_inputs() -> Result<()> {
+    let output = Command::new(cargo_binary())
+        .current_dir(paths::workspace_root())
+        .args([
+            "check",
+            "-q",
+            "-p",
+            "ferrix-boot",
+            "--target",
+            Arch::X86_64.loader_target(),
+        ])
+        .env_remove("FERRIX_ANCHORS")
+        .env("FERRIX_SLOT_BUILD", "profile=3 claimed=1 families=257")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| Error::new(format!("could not run cargo check: {error}")))?;
+    let said = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() && said.contains("FERRIX_ANCHORS is not set") {
+        println!("  the loader without FERRIX_ANCHORS: refused, as it must be");
+        Ok(())
+    } else {
+        Err(Error::new(
+            "the UEFI loader built without FERRIX_ANCHORS: its build.rs must refuse a build \
+             that names no trust-policy block (docs/SIGNING.md 10.6)",
+        ))
+    }
 }
 
 /// [`clippy`], with the kernel's flags in its environment.

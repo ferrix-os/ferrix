@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use ferrix_slots::slot::SlotHeader;
+use ferrix_slots::slot::{SlotHeader, VERSION_1};
 
 use crate::paths::{self, Arch};
 use crate::task::Task;
@@ -87,7 +87,7 @@ pub(crate) fn write(
     initramfs: &[u8],
     cmdline: &[u8],
 ) -> Result<()> {
-    let header = SlotHeader::lay_out(0, label, kernel, initramfs, cmdline);
+    let header = SlotHeader::lay_out(VERSION_1, 0, label, kernel, initramfs, cmdline);
     let size = usize::try_from(header.needed())
         .map_err(|_| Error::new("a slot image larger than memory"))?;
     let mut bytes = vec![0_u8; size];

@@ -24,6 +24,7 @@ mod events;
 mod kaslr;
 mod load;
 mod netreport;
+mod policy;
 mod pstore;
 mod report_url;
 mod services;

@@ -4,14 +4,27 @@
 //! initramfs and the command line, each on a 4096-byte boundary. The header
 //! names each blob's place, length and SHA-256, and seals itself with a
 //! SHA-256 of its own bytes.
+//!
+//! Header version 2 (`docs/SIGNING.md` §1.3) adds a signed manifest block
+//! at bytes 4096..8192, puts every blob at or after 8192, and holds
+//! `generation` at zero, so that the seal the manifest signs is the same on
+//! every device the release is written to (§1.2).
 
 use crate::sha256::digest;
 use crate::{le16, le32, le64, put};
 
 /// What every slot header begins with.
 pub const MAGIC: [u8; 8] = *b"FXSLOTHD";
-/// The format this crate writes and reads.
-pub const VERSION: u16 = 1;
+/// The unsigned format: the header, then the blobs.
+pub const VERSION_1: u16 = 1;
+/// The signed format: the header, the manifest block, then the blobs.
+pub const VERSION_2: u16 = 2;
+/// Where a version-2 slot's manifest block starts.
+pub const MANIFEST_AT: u64 = 4096;
+/// The manifest block's length.
+pub const MANIFEST_LEN: usize = 4096;
+/// Where a version-2 slot's first blob may start.
+const BLOBS_FROM_2: u64 = 8192;
 /// Bytes in the header, and the alignment of every blob.
 pub const HEADER_LEN: usize = 4096;
 /// The longest command line a slot may carry.
@@ -66,7 +79,10 @@ impl Blob {
 /// A slot's header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SlotHeader {
-    /// The record sequence `bootctl` armed the slot under; informational.
+    /// [`VERSION_1`] or [`VERSION_2`].
+    pub version: u16,
+    /// The record sequence `bootctl` armed the slot under; informational,
+    /// and zero in version 2.
     pub generation: u64,
     /// What is in it, NUL padded; informational.
     pub label: [u8; 32],
@@ -96,13 +112,17 @@ pub enum SlotError {
     Placement,
     /// No kernel, or a command line longer than [`MAX_CMDLINE`].
     Length,
+    /// A version-2 header whose `generation` is not zero.
+    Generation,
 }
 
 impl SlotHeader {
     /// The header for these three blobs laid out one after the other, each
-    /// on a 4096-byte boundary after the header.
+    /// on a 4096-byte boundary after the header (version 1) or after the
+    /// manifest block (version 2, whose `generation` is then zero).
     #[must_use]
     pub fn lay_out(
+        version: u16,
         generation: u64,
         label: &str,
         kernel: &[u8],
@@ -110,7 +130,9 @@ impl SlotHeader {
         cmdline: &[u8],
     ) -> SlotHeader {
         let next = |after: u64| after.div_ceil(ALIGN).saturating_mul(ALIGN);
-        let kernel = Blob::of(ALIGN, kernel);
+        let signed = version == VERSION_2;
+        let first = if signed { BLOBS_FROM_2 } else { ALIGN };
+        let kernel = Blob::of(first, kernel);
         let initrd = Blob::of(next(kernel.end().unwrap_or(u64::MAX)), initrd);
         let cmdline = Blob::of(next(initrd.end().unwrap_or(u64::MAX)), cmdline);
         let mut name = [0u8; 32];
@@ -118,7 +140,8 @@ impl SlotHeader {
             *to = from;
         }
         SlotHeader {
-            generation,
+            version: if signed { VERSION_2 } else { VERSION_1 },
+            generation: if signed { 0 } else { generation },
             label: name,
             kernel,
             initrd,
@@ -147,7 +170,7 @@ impl SlotHeader {
     pub fn encode(&self) -> [u8; HEADER_LEN] {
         let mut out = [0u8; HEADER_LEN];
         put(&mut out, 0, &MAGIC);
-        put(&mut out, 8, &VERSION.to_le_bytes());
+        put(&mut out, 8, &self.version.to_le_bytes());
         put(&mut out, 10, &(HEADER_LEN as u16).to_le_bytes());
         put(&mut out, 12, &BLOBS.to_le_bytes());
         put(&mut out, 16, &self.generation.to_le_bytes());
@@ -174,7 +197,8 @@ impl SlotHeader {
         if bytes.get(..8) != Some(&MAGIC[..]) {
             return Err(SlotError::Magic);
         }
-        if le16(bytes, 8) != Some(VERSION)
+        let version = le16(bytes, 8).ok_or(SlotError::Short)?;
+        if !(version == VERSION_1 || version == VERSION_2)
             || le16(bytes, 10) != Some(HEADER_LEN as u16)
             || le32(bytes, 12) != Some(BLOBS)
         {
@@ -206,8 +230,13 @@ impl SlotHeader {
             .get(24..56)
             .and_then(|raw| <[u8; 32]>::try_from(raw).ok())
             .ok_or(SlotError::Short)?;
+        let generation = le64(bytes, 16).ok_or(SlotError::Short)?;
+        if version == VERSION_2 && generation != 0 {
+            return Err(SlotError::Generation);
+        }
         let header = SlotHeader {
-            generation: le64(bytes, 16).ok_or(SlotError::Short)?,
+            version,
+            generation,
             label,
             kernel: blob(0)?,
             initrd: blob(1)?,
@@ -220,12 +249,30 @@ impl SlotHeader {
         Ok(header)
     }
 
-    /// Every blob aligned, after the header, inside the slot, and apart.
+    /// The seal: the SHA-256 of header bytes 0..4064, which a version-2
+    /// slot's manifest signs as its payload digest (`docs/SIGNING.md` §1.2).
+    #[must_use]
+    pub fn seal(&self) -> [u8; 32] {
+        let bytes = self.encode();
+        let mut seal = [0u8; 32];
+        for (to, from) in seal.iter_mut().zip(bytes.iter().skip(SEAL_AT)) {
+            *to = *from;
+        }
+        seal
+    }
+
+    /// Every blob aligned, after the header (and the manifest block in
+    /// version 2), inside the slot, and apart.
     fn check_placement(&self, slot_bytes: u64) -> Result<(), SlotError> {
         let blobs = self.blobs();
+        let first = if self.version == VERSION_2 {
+            BLOBS_FROM_2
+        } else {
+            ALIGN
+        };
         for (index, blob) in blobs.iter().enumerate() {
             let end = blob.end().ok_or(SlotError::Placement)?;
-            if blob.offset < ALIGN || blob.offset % ALIGN != 0 || end > slot_bytes {
+            if blob.offset < first || blob.offset % ALIGN != 0 || end > slot_bytes {
                 return Err(SlotError::Placement);
             }
             let overlaps = blobs.iter().skip(index + 1).any(|other| {

@@ -64,6 +64,12 @@ byte 0     slot header, 4096 bytes (all little-endian)
 byte 4096+ the blobs, each starting on a 4096-byte boundary
 ```
 
+**Header version 2** (`docs/SIGNING.md` §1.3, slice S4) is the same header
+with `version` 2 and `generation` zero, refused otherwise; bytes 4096..8192
+are its signed manifest block, and every blob starts at or after 8192. The
+manifest's payload is header bytes 0..4064, whose SHA-256 is the seal, so a
+verified manifest authenticates the three blobs through their digests.
+
 A header **verifies** when: magic, version, `header_len`, `blobs` match; the
 seal matches; bytes 200..4064 are zero; every blob starts at or after 4096 on
 a 4096 boundary, ends inside the partition, and no two overlap; the kernel's
@@ -149,6 +155,11 @@ the record's states.
                                       fallback; the ESP's rescue comes first)
       no trial                        good, other as FALLBACK
 5. For each attempt: read the slot header and blobs into memory, verify (§2);
+   since SIGNING.md's S4, `ferrix-boot-policy` decides first whether the
+   header may start at all: version 1 only while the build's
+   `slot_signing` is `off`, version 2 only when its manifest verifies
+   under the loader's compiled anchors (`SIGNING.md` §10.6), refusing with
+   a `  sign     refused slot ...` line;
    a slot whose command line with the loader's words does not fit the boot
    info's command-line area does not verify (no truncation).
    Not verified -> say why, free, next attempt. A TRIAL attempt that
@@ -158,7 +169,8 @@ the record's states.
 6. No attempt verified -> step 7.
 7. Today's path: FERRIX/KERNEL.ELF, INITRD.IMG, CMDLINE.TXT, DEFAULTS.TXT
    from the ESP (the rescue path on an installed disk, the only path
-   elsewhere). Absent -> FERRIX-PANIC loader: no slot verifies and the ESP
+   elsewhere). With `slot_signing = required`, only FERRIX/RESCUE.SLT, a
+   slot image decided as a slot is, and the unsigned files are not read. Absent -> FERRIX-PANIC loader: no slot verifies and the ESP
    holds no kernel.
 ```
 
@@ -201,7 +213,7 @@ words first -- the kernel takes the first word with a key, so a slot's own
 command line cannot forge them -- then the slot's:
 
 ```
-ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> ferrix.slot.disk=<disk GUID> <the slot's command line>
+ferrix.slot=a|b ferrix.slot.boot=trial|good|fallback ferrix.slot.seq=<sequence> ferrix.slot.disk=<disk GUID> ferrix.slot.sig=<anchor id>|none <the slot's command line>
 ```
 
 `ferrix.slot.disk` is the boot disk's GPT disk GUID, lowercase in its usual

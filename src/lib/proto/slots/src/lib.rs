@@ -9,7 +9,8 @@
 //!   partition table by their Ferrix type GUIDs.
 //! * [`plan`]: what the loader tries, in which order, and the command-line
 //!   words it puts first (§4).
-//! * [`crc`] and [`sha256`]: the checksums the formats use.
+//! * [`crc`]: the CRCs the formats use; [`sha256`] is `ferrix-sha256`,
+//!   the one SHA-256 of the item (`docs/SIGNING.md` §5.3).
 //!
 //! Pure functions of bytes, with no allocation and no `unsafe`, so the
 //! loader can run them before it has anything but firmware's pages, and the
@@ -22,8 +23,10 @@ pub mod crc;
 pub mod gpt;
 pub mod plan;
 pub mod record;
-pub mod sha256;
 pub mod slot;
+
+/// The SHA-256 the slot header uses, re-exported so its callers keep one path.
+pub use ferrix_sha256 as sha256;
 
 #[cfg(test)]
 mod tests;

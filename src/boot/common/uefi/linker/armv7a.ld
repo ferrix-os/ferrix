@@ -42,6 +42,9 @@ SECTIONS
     } :rodata
     /* Read by the converter, not by firmware: it is copied into the image
      * because it is inside a segment, and costs a few hundred bytes. */
+    /* The trust-policy block (docs/SIGNING.md §10.6), a section of its
+     * own in the ELF, read-only; xtask finds it there by name. */
+    .fxanch : ALIGN(16) { KEEP(*(.fxanch)) } :rodata
     .rel.dyn  : { *(.rel.dyn) }  :rodata
     .dynsym   : { *(.dynsym) }   :rodata
     .dynstr   : { *(.dynstr) }   :rodata

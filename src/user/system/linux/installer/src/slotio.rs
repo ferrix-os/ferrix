@@ -7,7 +7,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use ferrix_slots::slot::{HEADER_LEN, MAGIC, MAX_CMDLINE, SlotHeader};
+use ferrix_slots::slot::{HEADER_LEN, MAGIC, MAX_CMDLINE, SlotHeader, VERSION_1};
 
 use crate::disk;
 use crate::fat::Fat;
@@ -25,7 +25,14 @@ impl Image {
     /// The header for these blobs.
     #[must_use]
     pub fn header(&self, generation: u64, label: &str) -> SlotHeader {
-        SlotHeader::lay_out(generation, label, &self.kernel, &self.initrd, &self.cmdline)
+        SlotHeader::lay_out(
+            VERSION_1,
+            generation,
+            label,
+            &self.kernel,
+            &self.initrd,
+            &self.cmdline,
+        )
     }
 }
 

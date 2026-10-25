@@ -122,7 +122,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 147 packages, 7740 elements, 218 relations. Model digest `ee098624db663243`.
+27 files, 149 packages, 7886 elements, 218 relations. Model digest `6a40ff70e32b770e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4965,6 +4965,7 @@ flowchart LR
 | `H.SIGN.4` | `revokedKeysRefused` | — | — | — |
 | `H.SIGN.5` | `everythingElseRefusedByName` | — | — | — |
 | `H.SIGN.6` | `boundedTimeAndMemory` | — | — | — |
+| `H.SIGN.7` | `loaderStartsOnlyWhatThePolicyAllows` | — | — | — |
 | `L.sigverify.1` | `manifestStructure` | — | — | — |
 | `L.sigverify.2` | `onlyTheProductTypeCodes` | — | — | — |
 | `L.sigverify.3` | `lmsVerifiedAsRfc8554` | — | — | — |
@@ -4982,6 +4983,34 @@ flowchart LR
 | `L.sha256.1` | `sha256AsFips180` | — | — | — |
 | `L.sha256.2` | `sha256InAnyPieces` | — | — | — |
 | `L.sha256.3` | `sha256Truncated192` | — | — | — |
+| `L.bootpolicy.1` | `policyBlockFailsClosed` | — | — | — |
+| `L.bootpolicy.2` | `version1OnlyUnderOff` | — | — | — |
+| `L.bootpolicy.3` | `version2GenerationZero` | — | — | — |
+| `L.bootpolicy.4` | `version2VerifiedAgainstTheBlock` | — | — | — |
+| `L.bootpolicy.5` | `version2NeverUnverified` | — | — | — |
+| `L.bootpolicy.6` | `manifestCoversThisHeader` | — | — | — |
+| `L.bootpolicy.7` | `profileAndArchBound` | — | — | — |
+| `L.bootpolicy.8` | `familiesFollowTheClaim` | — | — | — |
+| `L.bootpolicy.9` | `floorIsTheCallers` | — | — | — |
+| `L.bootpolicy.10` | `rescueFollowsTheMode` | — | — | — |
+| `L.bootpolicy.11` | `startNamesTheSignature` | — | — | — |
+| `L.bootpolicy.12` | `everyInputAnswers` | — | — | — |
+| `L.slots.1` | `crcCheckValues` | — | — | — |
+| `L.slots.2` | `recordRoundTripsAndRefuses` | — | — | — |
+| `L.slots.3` | `newerValidCopyIsCurrent` | — | — | — |
+| `L.slots.4` | `recordTransitions` | — | — | — |
+| `L.slots.5` | `recordWriteCountsOnlyReadBack` | — | — | — |
+| `L.slots.6` | `planFollowsTheRecord` | — | — | — |
+| `L.slots.7` | `recordBlocksInside` | — | — | — |
+| `L.slots.8` | `loaderWordsFirstMatch` | — | — | — |
+| `L.slots.9` | `commandLineWholeOrNot` | — | — | — |
+| `L.slots.10` | `headerRoundTrips` | — | — | — |
+| `L.slots.11` | `headerRefuses` | — | — | — |
+| `L.slots.12` | `version2Header` | — | — | — |
+| `L.slots.13` | `gptFindsByType` | — | — | — |
+| `L.slots.14` | `gptTrustsNothing` | — | — | — |
+| `L.slots.15` | `guidText` | — | — | — |
+| `L.slots.16` | `slotsAndFields` | — | — | — |
 
 A design rule is upheld by a gate rather than allocated to a part, so the P and N families are expected to be verified but untraced. A goal requirement is traced by the dependency the stage that discharges it draws.
 

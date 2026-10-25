@@ -14,19 +14,19 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 146 | 93 | 53 |
-| Low (`L.*`) | 1061 | 796 | 265 |
+| High (`H.*`) | 147 | 94 | 53 |
+| Low (`L.*`) | 1089 | 824 | 265 |
 
-2341 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2398 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2343 |
-| Accessors, covered by the requirement they serve | 1059 |
+| Named by a low-level requirement | 2400 |
+| Accessors, covered by the requirement they serve | 1069 |
 | Check code in a product file | 83 |
 | Named by none | 938 |
 
-Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_sha256`, `ferrix_sigverify`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
+Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
 ### Check code in product files
 
@@ -130,7 +130,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | ASR-4 | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | ASR-5 | `H.MEM.6` |
 | ASR-6 | `H.DEV.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
-| ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5`, `H.SIGN.1`, `H.SIGN.2`, `H.SIGN.3`, `H.SIGN.4`, `H.SIGN.5`, `H.SIGN.6` |
+| ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5`, `H.SIGN.1`, `H.SIGN.2`, `H.SIGN.3`, `H.SIGN.4`, `H.SIGN.5`, `H.SIGN.6`, `H.SIGN.7` |
 | ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13`, `H.SCHED.16` |
 | ASR-9 | `H.STORE.2`, `H.STORE.3`, `H.STORE.4`, `H.STORE.5`, `H.STORE.6`, `H.STORE.7`, `H.STORE.8` |
 | G.1 | `H.SCHED.1`, `H.SCHED.4`, `H.SCHED.5`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.SCHED.13`, `H.SCHED.14`, `H.SCHED.15` |
@@ -379,6 +379,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.SIGN.4` | The verifier shall refuse a manifest signed through a tree the caller holds as revoked, and a revocation that lists its own signing key. | A revoked key's manifest, a revocation by a revoked key, and a revocation of its own key are each refused. | ASR-7 | `src/lib/crypto/sigverify/src/tests.rs::a_revoked_key_is_refused` | host test | host test | host test |
 | `H.SIGN.5` | The verifier shall answer every input with either a verified manifest or one named refusal, with no path that accepts by default and no panic. | Every byte of a good block changed is refused; every structural field is refused by its name; every truncation answers; the fuzz target finds no panic. | ASR-7 | `src/lib/crypto/sigverify/src/tests.rs::every_byte_of_the_block_changed_is_refused` | host test | host test | host test |
 | `H.SIGN.6` | One verification shall allocate nothing and finish within the bound docs/certification/MEMORY-AND-TIMING.md states for the slowest target, the DK1's Cortex-A7 at 650 MHz. | Slice S2's measurement of the worst-case signature on the DK1 within the bound, and the stack report. | ASR-7 | *baselined* | — | — | — |
+| `H.SIGN.7` | The UEFI loader shall start a slot only when ferrix-boot-policy returned Start for it and every blob matched its signed digest on the copy it starts. | Host: decide's tests; boot: test-ab-boot-signed's S1-S3, S10, N1-N3 and R1, each with a control. | ASR-7 | `src/lib/proto/boot-policy/src/tests.rs::version_2_is_verified_against_the_blocks_anchors` | host test | host test | host test |
 
 ## Low-level requirements
 
@@ -1889,9 +1890,47 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
-| `L.sha256.1` | digest shall return the SHA-256 of FIPS 180-4 for every message. | Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files. | H.SIGN.1 | `ferrix_sha256::digest`, `ferrix_sha256::Sha256::finish`, `ferrix_sha256::compress`, `ferrix_sha256::rounds_0_to_31`, `ferrix_sha256::rounds_32_to_63` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_short_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_long_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_monte_carlo` | host test | host test | host test |
+| `L.sha256.1` | digest shall return the SHA-256 of FIPS 180-4 for every message. | Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files. | H.SIGN.1 | `ferrix_sha256::digest`, `ferrix_sha256::Sha256::finish`, `ferrix_sha256::compress`, `ferrix_sha256::rounds_0_to_31`, `ferrix_sha256::rounds_32_to_63` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_short_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_long_messages`, `src/lib/crypto/sha256/src/tests.rs::nist_cavp_monte_carlo`, `src/lib/proto/slots/src/tests.rs::sha256_matches_fips_180_4` | host test | host test | host test |
 | `L.sha256.2` | A message given to update in any pieces shall hash as the whole message does. | Host tests: every length from 0 to 130 bytes byte by byte, and a million bytes in pieces of 997. | H.SIGN.1 | `ferrix_sha256::Sha256::update` | `src/lib/crypto/sha256/src/tests.rs::sha256_matches_fips_180_4`, `src/lib/crypto/sha256/src/tests.rs::every_short_length_hashes_the_same_whole_and_bytewise`, `src/lib/crypto/sha256/src/tests.rs::the_default_hash_is_the_empty_hash` | host test | host test | host test |
 | `L.sha256.3` | finish_192 and digest_192 shall return the first 24 bytes of the SHA-256 digest (RFC 9858 section 2.1). | Host test: RFC 9858's SHA-256/192 of abc, whole and in pieces. | H.SIGN.1 | `ferrix_sha256::finish_192`, `ferrix_sha256::digest_192` | `src/lib/crypto/sha256/src/tests.rs::sha256_192_matches_rfc_9858` | host test | host test | host test |
+
+### BootPolicy
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.bootpolicy.1` | parse_block shall refuse every slot, by its own refusal, for a trust-policy block shorter than 512 bytes, of another magic or version, of an unknown mode, with more than eight anchors, with an anchor of a kind other than the slot kind, or with a non-zero reserved byte, unused entry or tail; encode_block shall lay a block out as parse_block reads it. | Host tests: one per case, each with a control (a_short_block_refuses_every_slot, an_unknown_block_version_or_mode_refuses_every_slot, a_count_above_eight_refuses_every_slot, non_zero_block_padding_refuses_every_slot, a_non_slot_anchor_kind_refuses_every_slot); the four generated blocks parse as named. | H.SIGN.7 | `ferrix_boot_policy::parse_block`, `ferrix_boot_policy::anchor_entries`, `ferrix_boot_policy::encode_block`, `ferrix_boot_policy::put` | `src/lib/proto/boot-policy/src/tests.rs::a_short_block_refuses_every_slot`, `src/lib/proto/boot-policy/src/tests.rs::an_unknown_block_version_or_mode_refuses_every_slot`, `src/lib/proto/boot-policy/src/tests.rs::a_count_above_eight_refuses_every_slot`, `src/lib/proto/boot-policy/src/tests.rs::non_zero_block_padding_refuses_every_slot`, `src/lib/proto/boot-policy/src/tests.rs::a_non_slot_anchor_kind_refuses_every_slot`, `src/lib/proto/boot-policy/src/tests.rs::the_generated_blocks_parse_as_named` | host test | host test | host test |
+| `L.bootpolicy.2` | decide shall start a version-1 slot on its hashes, unsigned, under mode off, and refuse it as Unsigned under mode required. | Host test: both modes. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::version_1_starts_unsigned_under_off_and_is_refused_under_required` | host test | host test | host test |
+| `L.bootpolicy.3` | decide shall refuse a version-2 header whose generation is not zero. | Host test: generation 9 refused as Header(Generation). | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::version_2_with_a_generation_is_refused` | host test | host test | host test |
+| `L.bootpolicy.4` | decide shall verify a version-2 slot's manifest with ferrix-sigverify against the block's anchors with the slot kind expected, and return any refusal. | Host tests: a good slot starts under both modes; another key, an empty table, another key as the anchor and a configuration manifest are refused. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::version_2_is_verified_against_the_blocks_anchors` | host test | host test | host test |
+| `L.bootpolicy.5` | decide shall never start a version-2 slot unverified under either mode. | Host tests: a missing, short or zero manifest block, and every fifth byte of the signed body changed, under off. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::version_2_is_never_started_unverified` | host test | host test | host test |
+| `L.bootpolicy.6` | decide shall start a version-2 slot only when its manifest's payload is the header's seal over its 4064 sealed bytes. | Host tests: a good manifest on another header, and the right digest with length 4096, are refused as PayloadMismatch. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::the_manifest_must_cover_this_header` | host test | host test | host test |
+| `L.bootpolicy.7` | A manifest whose profile or arch differs from the build's shall be refused, by its own refusal. | Host tests: another profile WrongProfile, another arch WrongArch. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::another_profile_or_arch_is_refused` | host test | host test | host test |
+| `L.bootpolicy.8` | The families decide accepts shall be the build's families that are the machine's own and, without a claim, its arch's generic one; with a claim, exactly the machine's own. | Host tests: an N150 manifest with and without a claim on an N150 and on a generic machine; an empty family list. | H.SIGN.7 | `ferrix_boot_policy::accepted`, `ferrix_boot_policy::generic_family` | `src/lib/proto/boot-policy/src/tests.rs::families_follow_the_claim` | host test | host test | host test |
+| `L.bootpolicy.9` | decide shall refuse a manifest whose security version is below the floor its caller passes. | Host test: floors 0 and 3 start, 4 is refused as BelowFloor. | H.SIGN.7 | `ferrix_boot_policy::decide` | `src/lib/proto/boot-policy/src/tests.rs::the_floor_is_the_callers` | host test | host test | host test |
+| `L.bootpolicy.10` | rescue shall offer the ESP's unsigned files only under mode off, and only the rescue slot image under mode required. | Host test: both modes; a malformed block offers nothing. | H.SIGN.7 | `ferrix_boot_policy::rescue` | `src/lib/proto/boot-policy/src/tests.rs::the_rescue_path_follows_the_mode` | host test | host test | host test |
+| `L.bootpolicy.11` | Start shall carry the header to match and the verified anchor id and security version. | Host test: the anchor and version of a good slot. | H.SIGN.7 | `ferrix_boot_policy::decide`, `ferrix_boot_policy::Policy::anchors` | `src/lib/proto/boot-policy/src/tests.rs::start_names_the_anchor_and_version` | host test | host test | host test |
+| `L.bootpolicy.12` | decide shall answer every input with Start or one Refusal, and never panic. | Host test: 300 randomly damaged slot heads, whole and truncated; the panic audit. | H.SIGN.7 | `ferrix_boot_policy::decide`, `ferrix_boot_policy::byte`, `ferrix_boot_policy::le16` | `src/lib/proto/boot-policy/src/tests.rs::every_input_gives_an_answer` | host test | host test | host test |
+
+### Slots
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.slots.1` | crc32 and crc32c shall give the standard check values. | Host test: both over 123456789. | H.SIGN.7 | `ferrix_slots::crc::reflected` | `src/lib/proto/slots/src/tests.rs::checksums_match_their_check_values` | host test | host test | host test |
+| `L.slots.2` | Record::decode shall return what Record::encode wrote, and refuse a copy whose magic, version, length, CRC, reserved bytes or fields are wrong or inconsistent. | Host tests: a round trip; every bad field refused. | H.SIGN.7 | `ferrix_slots::record::Record::encode`, `ferrix_slots::record::Record::decode`, `ferrix_slots::record::Record::is_consistent` | `src/lib/proto/slots/src/tests.rs::a_record_round_trips`, `src/lib/proto/slots/src/tests.rs::a_record_refuses_every_bad_field` | host test | host test | host test |
+| `L.slots.3` | select shall take the valid copy with the higher sequence, copy 0 on a tie, and write_copy the copy that does not hold it, so that a torn write leaves the old record or the new. | Host tests: every pair of valid, torn and zero copies; a write torn at every byte. | H.SIGN.7 | `ferrix_slots::record::select`, `ferrix_slots::record::write_copy` | `src/lib/proto/slots/src/tests.rs::the_newer_valid_copy_is_current`, `src/lib/proto/slots/src/tests.rs::a_write_torn_anywhere_leaves_the_old_record_or_the_new` | host test | host test | host test |
+| `L.slots.4` | after_try, armed, disarmed and marked_good shall make the records AB-BOOT section 3 names, and refuse the transitions it does not. | Host test: each transition and its refusals. | H.SIGN.7 | `ferrix_slots::record::Record::after_try`, `ferrix_slots::record::Record::armed`, `ferrix_slots::record::Record::disarmed`, `ferrix_slots::record::Record::marked_good` | `src/lib/proto/slots/src/tests.rs::the_record_transitions` | host test | host test | host test |
+| `L.slots.5` | write_record shall count a record written only once it is flushed and read back equal, and read_current shall read both copies in whole usable blocks. | Host test: a device that fails each step. | H.SIGN.7 | `ferrix_slots::record::write_record`, `ferrix_slots::record::read_current`, `ferrix_slots::record::usable_block` | `src/lib/proto/slots/src/tests.rs::a_record_write_counts_only_when_read_back`, `src/lib/proto/slots/src/tests.rs::record_reads_and_blocks_refuse_what_they_must`, `src/lib/proto/slots/src/tests.rs::an_inconsistent_record_is_never_written` | host test | host test | host test |
+| `L.slots.6` | plan shall give AB-BOOT section 4's attempts for every record state. | Host test: exhaustively over the record's states. | H.SIGN.7 | `ferrix_slots::plan::plan`, `ferrix_slots::plan::Kind::from_word`, `ferrix_slots::plan::Kind::word` | `src/lib/proto/slots/src/tests.rs::the_plan_follows_the_record` | host test | host test | host test |
+| `L.slots.7` | record_block shall name only blocks inside the control partition, or none. | Host test: every copy and block size, and one past the end. | H.SIGN.7 | `ferrix_slots::plan::record_block` | `src/lib/proto/slots/src/tests.rs::record_blocks_stay_in_the_control_partition`, `src/lib/proto/slots/src/tests.rs::record_reads_and_blocks_refuse_what_they_must` | host test | host test | host test |
+| `L.slots.8` | The loader's words shall be written whole or not at all, and parse_words shall read them back first-match, a missing ferrix.slot.sig as none and a malformed one as no words. | Host tests: written, refused for want of room, read back, forged after the loader's. | H.SIGN.7 | `ferrix_slots::plan::LoaderWords::fmt`, `ferrix_slots::plan::parse_words`, `ferrix_slots::plan::write_words`, `ferrix_slots::plan::Cursor::write_str` | `src/lib/proto/slots/src/tests.rs::loader_words_are_written_or_refused`, `src/lib/proto/slots/src/tests.rs::loader_words_read_back_first_match_and_whole` | host test | host test | host test |
+| `L.slots.9` | compose shall write the loader's words then the slot's trimmed line, or nothing when it is not UTF-8 or does not fit. | Host tests: exact room, one byte short, not UTF-8; the longest line fits the boot info. | H.SIGN.7 | `ferrix_slots::plan::compose` | `src/lib/proto/slots/src/tests.rs::a_slot_command_line_is_composed_whole_or_not_at_all`, `src/lib/proto/slots/src/tests.rs::the_longest_slot_command_line_fits_the_boot_info` | host test | host test | host test |
+| `L.slots.10` | SlotHeader::decode shall return the header SlotHeader::encode wrote for lay_out's blobs, and Blob::matches shall hold only for a blob's own bytes. | Host test: a slot round trips and verifies; a flipped or short blob does not match. | H.SIGN.7 | `ferrix_slots::slot::SlotHeader::lay_out`, `ferrix_slots::slot::SlotHeader::encode`, `ferrix_slots::slot::Blob::matches`, `ferrix_slots::slot::SlotHeader::label_text` | `src/lib/proto/slots/src/tests.rs::a_slot_round_trips_and_verifies`, `src/lib/proto/slots/src/tests.rs::blobs_apart_in_any_order_decode` | host test | host test | host test |
+| `L.slots.11` | SlotHeader::decode shall refuse a short page, another magic, version, length or count, a broken seal, non-zero reserved bytes, a misplaced, overlapping or outside blob, no kernel and a command line past 2048 bytes. | Host test: each, and every seventh bit of the header. | H.SIGN.7 | `ferrix_slots::slot::SlotHeader::decode`, `ferrix_slots::slot::SlotHeader::check_placement` | `src/lib/proto/slots/src/tests.rs::a_slot_header_refuses_what_it_must`, `src/lib/proto/slots/src/tests.rs::a_version_2_header_refuses_a_generation_and_a_blob_in_the_manifest`, `src/lib/proto/slots/src/tests.rs::a_reserved_header_byte_is_refused` | host test | host test | host test |
+| `L.slots.12` | A version-2 header shall hold its blobs at or after 8192 and a zero generation, refused otherwise, and seal shall return the SHA-256 of its bytes 0..4064. | Host tests: a version-2 layout, its seal, a generation and a blob in the manifest block refused. | H.SIGN.7 | `ferrix_slots::slot::SlotHeader::seal` | `src/lib/proto/slots/src/tests.rs::a_version_2_header_puts_blobs_after_the_manifest_and_zeroes_the_generation`, `src/lib/proto/slots/src/tests.rs::a_version_2_header_refuses_a_generation_and_a_blob_in_the_manifest` | host test | host test | host test |
+| `L.slots.13` | find shall locate exactly one control partition and two slots by type GUID, A the lower entry, and the event-log partition alone. | Host tests: the layout found by type; the event log found alone and checked. | H.SIGN.7 | `ferrix_slots::gpt::find`, `ferrix_slots::gpt::find_one`, `ferrix_slots::gpt::entry_part`, `ferrix_slots::gpt::Layout::slot`, `ferrix_slots::gpt::guid` | `src/lib/proto/slots/src/tests.rs::the_gpt_scan_finds_the_layout_by_type`, `src/lib/proto/slots/src/tests.rs::the_event_log_is_found_alone_and_checked`, `src/lib/proto/slots/src/tests.rs::blobs_apart_in_any_order_decode` | host test | host test | host test |
+| `L.slots.14` | parse_header and find shall refuse a header or array whose signature, CRC, sizes or counts are wrong, and a Ferrix partition outside the usable blocks or overlapping another entry. | Host tests: hostile tables; outside the usable blocks; a damaged array. | H.SIGN.7 | `ferrix_slots::gpt::parse_header` | `src/lib/proto/slots/src/tests.rs::the_gpt_scan_trusts_nothing`, `src/lib/proto/slots/src/tests.rs::the_gpt_scan_refuses_hostile_tables`, `src/lib/proto/slots/src/tests.rs::a_ferrix_partition_outside_the_usable_blocks_is_refused`, `src/lib/proto/slots/src/tests.rs::the_event_log_lookup_refuses_a_damaged_array`, `src/lib/proto/slots/src/tests.rs::each_header_field_is_refused_alone`, `src/lib/proto/slots/src/tests.rs::each_entry_range_condition_is_refused_alone` | host test | host test | host test |
+| `L.slots.15` | parse_guid and GuidText shall read and write a GUID in its usual text form, either case read. | Host test: a disk GUID read back in upper and lower case. | H.SIGN.7 | `ferrix_slots::gpt::parse_guid`, `ferrix_slots::gpt::GuidText::fmt` | `src/lib/proto/slots/src/tests.rs::loader_words_read_back_first_match_and_whole` | host test | host test | host test |
+| `L.slots.16` | A slot's code and letter shall map both ways, and the little-endian field readers and writer shall read and write the bytes the formats name. | Host tests: through the record and header round trips. | H.SIGN.7 | `ferrix_slots::Slot::code`, `ferrix_slots::Slot::from_code`, `ferrix_slots::Slot::other`, `ferrix_slots::Slot::letter`, `ferrix_slots::Slot::from_letter`, `ferrix_slots::le16`, `ferrix_slots::le32`, `ferrix_slots::le64`, `ferrix_slots::put` | `src/lib/proto/slots/src/tests.rs::a_record_round_trips`, `src/lib/proto/slots/src/tests.rs::a_slot_round_trips_and_verifies` | host test | host test | host test |
 
 ## Checks and what they verify
 
@@ -2710,6 +2749,24 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/platform/smbios/src/tests.rs::unterminated_strings_are_not_decoded` | host | L.discovery.3 |
 | `src/lib/platform/smbios/src/tests.rs::with_a_count_the_walk_goes_past_type_127_as_linux_does` | host | L.discovery.3 |
 | `src/lib/proto/audit/src/tests.rs::a_record_is_its_sixty_four_bytes_in_order_little_endian` | host | H.AUD.13 |
+| `src/lib/proto/boot-policy/src/tests.rs::a_count_above_eight_refuses_every_slot` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::a_non_slot_anchor_kind_refuses_every_slot` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::a_short_block_refuses_every_slot` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::an_unknown_block_version_or_mode_refuses_every_slot` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::another_profile_or_arch_is_refused` | host | L.bootpolicy.7 |
+| `src/lib/proto/boot-policy/src/tests.rs::every_input_gives_an_answer` | host | L.bootpolicy.12 |
+| `src/lib/proto/boot-policy/src/tests.rs::families_follow_the_claim` | host | L.bootpolicy.8 |
+| `src/lib/proto/boot-policy/src/tests.rs::non_zero_block_padding_refuses_every_slot` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::start_names_the_anchor_and_version` | host | L.bootpolicy.11 |
+| `src/lib/proto/boot-policy/src/tests.rs::the_floor_is_the_callers` | host | L.bootpolicy.9 |
+| `src/lib/proto/boot-policy/src/tests.rs::the_generated_blocks_parse_as_named` | host | L.bootpolicy.1 |
+| `src/lib/proto/boot-policy/src/tests.rs::the_manifest_must_cover_this_header` | host | L.bootpolicy.6 |
+| `src/lib/proto/boot-policy/src/tests.rs::the_rescue_path_follows_the_mode` | host | L.bootpolicy.10 |
+| `src/lib/proto/boot-policy/src/tests.rs::version_1_starts_unsigned_under_off_and_is_refused_under_required` | host | L.bootpolicy.2 |
+| `src/lib/proto/boot-policy/src/tests.rs::version_2_is_never_started_unverified` | host | L.bootpolicy.5 |
+| `src/lib/proto/boot-policy/src/tests.rs::version_2_is_verified_against_the_blocks_anchors` | host | H.SIGN.7 |
+| `src/lib/proto/boot-policy/src/tests.rs::version_2_is_verified_against_the_blocks_anchors` | host | L.bootpolicy.4 |
+| `src/lib/proto/boot-policy/src/tests.rs::version_2_with_a_generation_is_refused` | host | L.bootpolicy.3 |
 | `src/lib/proto/bootinfo/src/pstore/tests.rs::a_changed_bit_is_damaged` | host | L.console.48 |
 | `src/lib/proto/bootinfo/src/pstore/tests.rs::an_unassigned_code_is_a_newer_kernels` | host | L.console.48 |
 | `src/lib/proto/bootinfo/src/pstore/tests.rs::capacities_outside_the_bounds_are_refused` | host | L.console.43 |
@@ -2727,6 +2784,36 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/proto/devmgr-proto/src/isolation_tests.rs::the_refusal_names_the_device_and_the_mark` | host | L.device.27 |
 | `src/lib/proto/devmgr-proto/src/tests.rs::the_unisolated_flag_round_trips_and_an_unknown_bit_gives_no_opt_out` | host | L.device.58 |
 | `src/lib/proto/native/src/tests.rs::a_device_reports_an_aperture_whole_and_reaches_its_configuration_window` | host | L.device.24 |
+| `src/lib/proto/slots/src/tests.rs::a_ferrix_partition_outside_the_usable_blocks_is_refused` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::a_record_refuses_every_bad_field` | host | L.slots.2 |
+| `src/lib/proto/slots/src/tests.rs::a_record_round_trips` | host | L.slots.2, L.slots.16 |
+| `src/lib/proto/slots/src/tests.rs::a_record_write_counts_only_when_read_back` | host | L.slots.5 |
+| `src/lib/proto/slots/src/tests.rs::a_reserved_header_byte_is_refused` | host | L.slots.11 |
+| `src/lib/proto/slots/src/tests.rs::a_slot_command_line_is_composed_whole_or_not_at_all` | host | L.slots.9 |
+| `src/lib/proto/slots/src/tests.rs::a_slot_header_refuses_what_it_must` | host | L.slots.11 |
+| `src/lib/proto/slots/src/tests.rs::a_slot_round_trips_and_verifies` | host | L.slots.10, L.slots.16 |
+| `src/lib/proto/slots/src/tests.rs::a_version_2_header_puts_blobs_after_the_manifest_and_zeroes_the_generation` | host | L.slots.12 |
+| `src/lib/proto/slots/src/tests.rs::a_version_2_header_refuses_a_generation_and_a_blob_in_the_manifest` | host | L.slots.12, L.slots.11 |
+| `src/lib/proto/slots/src/tests.rs::a_write_torn_anywhere_leaves_the_old_record_or_the_new` | host | L.slots.3 |
+| `src/lib/proto/slots/src/tests.rs::an_inconsistent_record_is_never_written` | host | L.slots.5 |
+| `src/lib/proto/slots/src/tests.rs::blobs_apart_in_any_order_decode` | host | L.slots.10, L.slots.13 |
+| `src/lib/proto/slots/src/tests.rs::checksums_match_their_check_values` | host | L.slots.1 |
+| `src/lib/proto/slots/src/tests.rs::each_entry_range_condition_is_refused_alone` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::each_header_field_is_refused_alone` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::loader_words_are_written_or_refused` | host | L.slots.8 |
+| `src/lib/proto/slots/src/tests.rs::loader_words_read_back_first_match_and_whole` | host | L.slots.8, L.slots.15 |
+| `src/lib/proto/slots/src/tests.rs::record_blocks_stay_in_the_control_partition` | host | L.slots.7 |
+| `src/lib/proto/slots/src/tests.rs::record_reads_and_blocks_refuse_what_they_must` | host | L.slots.5, L.slots.7 |
+| `src/lib/proto/slots/src/tests.rs::sha256_matches_fips_180_4` | host | L.sha256.1 |
+| `src/lib/proto/slots/src/tests.rs::the_event_log_is_found_alone_and_checked` | host | L.slots.13 |
+| `src/lib/proto/slots/src/tests.rs::the_event_log_lookup_refuses_a_damaged_array` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::the_gpt_scan_finds_the_layout_by_type` | host | L.slots.13 |
+| `src/lib/proto/slots/src/tests.rs::the_gpt_scan_refuses_hostile_tables` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::the_gpt_scan_trusts_nothing` | host | L.slots.14 |
+| `src/lib/proto/slots/src/tests.rs::the_longest_slot_command_line_fits_the_boot_info` | host | L.slots.9 |
+| `src/lib/proto/slots/src/tests.rs::the_newer_valid_copy_is_current` | host | L.slots.3 |
+| `src/lib/proto/slots/src/tests.rs::the_plan_follows_the_record` | host | L.slots.6 |
+| `src/lib/proto/slots/src/tests.rs::the_record_transitions` | host | L.slots.4 |
 | `tools/common/xtask/src/check.rs::item_crates_allocate_fallibly` | gate | L.btrfs.22 |
 | `tools/common/xtask/src/check.rs::loom` | gate | L.sched.51 |
 | `tools/common/xtask/src/dma_faults.rs::amdvi_faults_are_counted_by_page` | gate | L.iommu.90 |

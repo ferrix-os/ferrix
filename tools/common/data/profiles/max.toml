@@ -13,7 +13,9 @@ level = "sc4"
 claim = "IEC 61508-3 SC 4 / ISO 26262 ASIL D, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
-image = { driver_updates = "absent", settings_writer = "absent" }
+image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "off" }
+# The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
+slot_families = []
 exceptions = []
 
 [flags]

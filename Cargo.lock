@@ -143,6 +143,7 @@ version = "0.1.0"
 name = "ferrix-boot"
 version = "0.1.0"
 dependencies = [
+ "ferrix-boot-policy",
  "ferrix-bootinfo",
  "ferrix-elf",
  "ferrix-eventlog",
@@ -159,6 +160,15 @@ dependencies = [
  "ferrix-elf",
  "ferrix-fdt",
  "ferrix-paging",
+]
+
+[[package]]
+name = "ferrix-boot-policy"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sigverify",
+ "ferrix-slots",
+ "ferrix-softsign",
 ]
 
 [[package]]
@@ -859,6 +869,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-partition",
+ "ferrix-sha256",
 ]
 
 [[package]]

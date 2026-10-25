@@ -1535,7 +1535,7 @@ consultant's ruling on a peripheral in the trust path.
 | L.bootpolicy.3 | A version-2 header with a non-zero `generation` is refused | host |
 | L.bootpolicy.4 | A version-2 header's manifest is verified against the block's anchors with the slot kind expected, and any refusal is returned | host |
 | L.bootpolicy.5 | A version-2 header is never started unverified, under either mode | host |
-| L.bootpolicy.6 | The manifest's payload is the header's seal and length, or the slot is refused `PayloadMismatch` | host |
+| L.bootpolicy.6 | The manifest's payload is the header's seal over its 4064 sealed bytes (`payload_len` 4064), or the slot is refused `PayloadMismatch` | host |
 | L.bootpolicy.7 | A manifest whose profile or arch differs from the build's is refused, by its own refusal | host |
 | L.bootpolicy.8 | The family is the registry's rule over the SMBIOS strings; missing or bad strings give the generic family; a claimed profile accepts exactly its families | host |
 | L.bootpolicy.9 | The floors passed are the caller's (all zero while `rollback = absent`) | host |
@@ -1877,3 +1877,59 @@ ledger line 3843, folded in before landing.
 * **S2**, conditions (9)-(13): the figures tied to their run, the worst
   case stated as a computed bound, AB-BOOT's ARMv7-A hashing cost, and
   `L.sigverify.11` left in the baseline, with a backlog row.
+
+**Slice S4, as built (2026-10-24, branch `feature/signing-s4-code`).**
+This follows §10.6 and its conditions (ledger 4016, 4032), with these
+departures, each for the consultant's code review:
+
+* **The gate's image is built at level none.** `test-ab-boot-signed`
+  runs as `--kernel-profile desktop` (level none, no claim) and stops at
+  any claimed level. So the gate's image is §6.4's
+  `level=none anchors=development` as it stands, and S3's refusal of
+  development anchors in a claimed image is unchanged: no exception is
+  needed in `ITEM.md`. The cost is that the gate exercises desktop's
+  family rule (its own family, then the generic one), not a claimed
+  profile's exact list. The host tests of `L.bootpolicy.8` hold the
+  claimed rule. "Claimed" is the loader's code, fixed by its build's
+  level, not part of `.fxanch`, so no signed boot shows a claimed loader;
+  an xtask test holds what each profile's loader is built as, and a
+  backlog row owes S6 a signed boot at a claimed level (ledger 4082 (2)).
+* **A slot manifest's payload is header bytes 0..4064** (`payload_len`
+  4064), the bytes the seal hashes, so the soft signer's `--payload` is
+  the header's sealed part as written.
+* **The relink comparison skips what a reproducible link derives.** The
+  UEFI loaders link with `/Brepro`. Besides `.fxanch` and the checksum,
+  the comparison skips the COFF timestamp and each debug directory's
+  timestamp and `CodeView` signature, which that link computes from its
+  inputs. A third build of the same block is equal outside those same
+  fields.
+* **The scan counts whole blocks.** A loader must hold its table's
+  512-byte block exactly once, in a read-only 512-byte `.fxanch` on a
+  rustc PE, and no other table's block. The block's magic alone also sits
+  in the parser's code. The block is emitted as an array literal, because
+  `include_bytes!` kept a second copy in a debug build.
+* **`bootctl try`'s advisory check is not built.** `bootctl` builds its
+  slot from a kernel, an initramfs and a command line under its own header
+  (version 1). A signed slot is the release's slot image, byte for byte,
+  so checking one needs `bootctl try` to write a `.SLT` file as it is.
+  That is S5's, with `bootctl sync`.
+* **`L.uefisig.1-5` stay reserved and unwritten.** The loader is in no
+  ring, and the model's low-level requirements name units of the item. Its
+  behaviour is held by `H.SIGN.7` and the gate cases.
+* **No specific family is recognised yet.** The SOYO M4 Pro's SMBIOS
+  strings are not recorded, and the DK1 has no slot path. Every machine is
+  its arch's generic family.
+
+Evidence on the branch:
+
+* `ferrix-boot-policy`'s 17 host tests; `ferrix-slots`' 30.
+* Host coverage of the four signing crates: 1,284 of 1,296 lines and 322
+  of 326 branch outcomes. The 16 not reached are argued: const evaluation,
+  and defensive arms the fixed layouts never take.
+* `test-ab-boot-signed`, run locally: the relink, S1-S3, S10, N1-N4 and R1
+  held (`~/.local/share/ferrix/signing-bench/s4-signed-local6.log`).
+* `gen-anchors.py --check` and `--self-test` in `check`.
+* The release-image scan's host test.
+
+Owed before landing: the controls of 4016 (7) on the landing hash, the
+rows of (12), and the transcripts of (9).

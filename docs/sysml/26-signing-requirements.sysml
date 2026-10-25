@@ -87,6 +87,14 @@ package FerrixSigningRequirements {
                 signature on the DK1 within the bound, and the stack report.";
             attribute :>> parent = "ASR-7";
         }
+        requirement <'H.SIGN.7'> loaderStartsOnlyWhatThePolicyAllows : ItemHighLevel {
+            attribute :>> statement = "The UEFI loader shall start a slot only when
+                ferrix-boot-policy returned Start for it and every blob matched its
+                signed digest on the copy it starts.";
+            attribute :>> criterion = "Host: decide's tests; boot: test-ab-boot-signed's
+                S1-S3, S10, N1-N3 and R1, each with a control.";
+            attribute :>> parent = "ASR-7";
+        }
     }
 
     package SigVerify {
@@ -283,6 +291,223 @@ package FerrixSigningRequirements {
                 whole and in pieces.";
             attribute :>> parent = "H.SIGN.1";
             attribute :>> unit = ("ferrix_sha256::finish_192", "ferrix_sha256::digest_192");
+        }
+    }
+
+    package BootPolicy {
+        doc /* ferrix-boot-policy: whether the UEFI loader may start a slot
+             * (docs/SIGNING.md section 10.6; ledger 4016, 4032). */
+
+        requirement <'L.bootpolicy.1'> policyBlockFailsClosed : ItemLowLevel {
+            attribute :>> statement = "parse_block shall refuse every slot, by its own refusal, for a trust-policy block shorter than 512 bytes, of another magic or version, of an unknown mode, with more than eight anchors, with an anchor of a kind other than the slot kind, or with a non-zero reserved byte, unused entry or tail; encode_block shall lay a block out as parse_block reads it.";
+            attribute :>> criterion = "Host tests: one per case, each with a control (a_short_block_refuses_every_slot, an_unknown_block_version_or_mode_refuses_every_slot, a_count_above_eight_refuses_every_slot, non_zero_block_padding_refuses_every_slot, a_non_slot_anchor_kind_refuses_every_slot); the four generated blocks parse as named.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_boot_policy::parse_block",
+                "ferrix_boot_policy::anchor_entries",
+                "ferrix_boot_policy::encode_block",
+                "ferrix_boot_policy::put");
+        }
+        requirement <'L.bootpolicy.2'> version1OnlyUnderOff : ItemLowLevel {
+            attribute :>> statement = "decide shall start a version-1 slot on its hashes, unsigned, under mode off, and refuse it as Unsigned under mode required.";
+            attribute :>> criterion = "Host test: both modes.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.3'> version2GenerationZero : ItemLowLevel {
+            attribute :>> statement = "decide shall refuse a version-2 header whose generation is not zero.";
+            attribute :>> criterion = "Host test: generation 9 refused as Header(Generation).";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.4'> version2VerifiedAgainstTheBlock : ItemLowLevel {
+            attribute :>> statement = "decide shall verify a version-2 slot's manifest with ferrix-sigverify against the block's anchors with the slot kind expected, and return any refusal.";
+            attribute :>> criterion = "Host tests: a good slot starts under both modes; another key, an empty table, another key as the anchor and a configuration manifest are refused.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.5'> version2NeverUnverified : ItemLowLevel {
+            attribute :>> statement = "decide shall never start a version-2 slot unverified under either mode.";
+            attribute :>> criterion = "Host tests: a missing, short or zero manifest block, and every fifth byte of the signed body changed, under off.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.6'> manifestCoversThisHeader : ItemLowLevel {
+            attribute :>> statement = "decide shall start a version-2 slot only when its manifest's payload is the header's seal over its 4064 sealed bytes.";
+            attribute :>> criterion = "Host tests: a good manifest on another header, and the right digest with length 4096, are refused as PayloadMismatch.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.7'> profileAndArchBound : ItemLowLevel {
+            attribute :>> statement = "A manifest whose profile or arch differs from the build's shall be refused, by its own refusal.";
+            attribute :>> criterion = "Host tests: another profile WrongProfile, another arch WrongArch.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.8'> familiesFollowTheClaim : ItemLowLevel {
+            attribute :>> statement = "The families decide accepts shall be the build's families that are the machine's own and, without a claim, its arch's generic one; with a claim, exactly the machine's own.";
+            attribute :>> criterion = "Host tests: an N150 manifest with and without a claim on an N150 and on a generic machine; an empty family list.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_boot_policy::accepted",
+                "ferrix_boot_policy::generic_family");
+        }
+        requirement <'L.bootpolicy.9'> floorIsTheCallers : ItemLowLevel {
+            attribute :>> statement = "decide shall refuse a manifest whose security version is below the floor its caller passes.";
+            attribute :>> criterion = "Host test: floors 0 and 3 start, 4 is refused as BelowFloor.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::decide";
+        }
+        requirement <'L.bootpolicy.10'> rescueFollowsTheMode : ItemLowLevel {
+            attribute :>> statement = "rescue shall offer the ESP's unsigned files only under mode off, and only the rescue slot image under mode required.";
+            attribute :>> criterion = "Host test: both modes; a malformed block offers nothing.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_boot_policy::rescue";
+        }
+        requirement <'L.bootpolicy.11'> startNamesTheSignature : ItemLowLevel {
+            attribute :>> statement = "Start shall carry the header to match and the verified anchor id and security version.";
+            attribute :>> criterion = "Host test: the anchor and version of a good slot.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_boot_policy::decide",
+                "ferrix_boot_policy::Policy::anchors");
+        }
+        requirement <'L.bootpolicy.12'> everyInputAnswers : ItemLowLevel {
+            attribute :>> statement = "decide shall answer every input with Start or one Refusal, and never panic.";
+            attribute :>> criterion = "Host test: 300 randomly damaged slot heads, whole and truncated; the panic audit.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_boot_policy::decide",
+                "ferrix_boot_policy::byte",
+                "ferrix_boot_policy::le16");
+        }
+    }
+
+    package Slots {
+        doc /* ferrix-slots, in the item since slice S4 (docs/AB-BOOT.md
+             * sections 2-4; docs/SIGNING.md section 5.3). */
+
+        requirement <'L.slots.1'> crcCheckValues : ItemLowLevel {
+            attribute :>> statement = "crc32 and crc32c shall give the standard check values.";
+            attribute :>> criterion = "Host test: both over 123456789.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_slots::crc::reflected";
+        }
+        requirement <'L.slots.2'> recordRoundTripsAndRefuses : ItemLowLevel {
+            attribute :>> statement = "Record::decode shall return what Record::encode wrote, and refuse a copy whose magic, version, length, CRC, reserved bytes or fields are wrong or inconsistent.";
+            attribute :>> criterion = "Host tests: a round trip; every bad field refused.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::record::Record::encode",
+                "ferrix_slots::record::Record::decode",
+                "ferrix_slots::record::Record::is_consistent");
+        }
+        requirement <'L.slots.3'> newerValidCopyIsCurrent : ItemLowLevel {
+            attribute :>> statement = "select shall take the valid copy with the higher sequence, copy 0 on a tie, and write_copy the copy that does not hold it, so that a torn write leaves the old record or the new.";
+            attribute :>> criterion = "Host tests: every pair of valid, torn and zero copies; a write torn at every byte.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::record::select",
+                "ferrix_slots::record::write_copy");
+        }
+        requirement <'L.slots.4'> recordTransitions : ItemLowLevel {
+            attribute :>> statement = "after_try, armed, disarmed and marked_good shall make the records AB-BOOT section 3 names, and refuse the transitions it does not.";
+            attribute :>> criterion = "Host test: each transition and its refusals.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::record::Record::after_try",
+                "ferrix_slots::record::Record::armed",
+                "ferrix_slots::record::Record::disarmed",
+                "ferrix_slots::record::Record::marked_good");
+        }
+        requirement <'L.slots.5'> recordWriteCountsOnlyReadBack : ItemLowLevel {
+            attribute :>> statement = "write_record shall count a record written only once it is flushed and read back equal, and read_current shall read both copies in whole usable blocks.";
+            attribute :>> criterion = "Host test: a device that fails each step.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::record::write_record",
+                "ferrix_slots::record::read_current",
+                "ferrix_slots::record::usable_block");
+        }
+        requirement <'L.slots.6'> planFollowsTheRecord : ItemLowLevel {
+            attribute :>> statement = "plan shall give AB-BOOT section 4's attempts for every record state.";
+            attribute :>> criterion = "Host test: exhaustively over the record's states.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::plan::plan",
+                "ferrix_slots::plan::Kind::from_word",
+                "ferrix_slots::plan::Kind::word");
+        }
+        requirement <'L.slots.7'> recordBlocksInside : ItemLowLevel {
+            attribute :>> statement = "record_block shall name only blocks inside the control partition, or none.";
+            attribute :>> criterion = "Host test: every copy and block size, and one past the end.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_slots::plan::record_block";
+        }
+        requirement <'L.slots.8'> loaderWordsFirstMatch : ItemLowLevel {
+            attribute :>> statement = "The loader's words shall be written whole or not at all, and parse_words shall read them back first-match, a missing ferrix.slot.sig as none and a malformed one as no words.";
+            attribute :>> criterion = "Host tests: written, refused for want of room, read back, forged after the loader's.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::plan::LoaderWords::fmt",
+                "ferrix_slots::plan::parse_words",
+                "ferrix_slots::plan::write_words",
+                "ferrix_slots::plan::Cursor::write_str");
+        }
+        requirement <'L.slots.9'> commandLineWholeOrNot : ItemLowLevel {
+            attribute :>> statement = "compose shall write the loader's words then the slot's trimmed line, or nothing when it is not UTF-8 or does not fit.";
+            attribute :>> criterion = "Host tests: exact room, one byte short, not UTF-8; the longest line fits the boot info.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_slots::plan::compose";
+        }
+        requirement <'L.slots.10'> headerRoundTrips : ItemLowLevel {
+            attribute :>> statement = "SlotHeader::decode shall return the header SlotHeader::encode wrote for lay_out's blobs, and Blob::matches shall hold only for a blob's own bytes.";
+            attribute :>> criterion = "Host test: a slot round trips and verifies; a flipped or short blob does not match.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::slot::SlotHeader::lay_out",
+                "ferrix_slots::slot::SlotHeader::encode",
+                "ferrix_slots::slot::Blob::matches",
+                "ferrix_slots::slot::SlotHeader::label_text");
+        }
+        requirement <'L.slots.11'> headerRefuses : ItemLowLevel {
+            attribute :>> statement = "SlotHeader::decode shall refuse a short page, another magic, version, length or count, a broken seal, non-zero reserved bytes, a misplaced, overlapping or outside blob, no kernel and a command line past 2048 bytes.";
+            attribute :>> criterion = "Host test: each, and every seventh bit of the header.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::slot::SlotHeader::decode",
+                "ferrix_slots::slot::SlotHeader::check_placement");
+        }
+        requirement <'L.slots.12'> version2Header : ItemLowLevel {
+            attribute :>> statement = "A version-2 header shall hold its blobs at or after 8192 and a zero generation, refused otherwise, and seal shall return the SHA-256 of its bytes 0..4064.";
+            attribute :>> criterion = "Host tests: a version-2 layout, its seal, a generation and a blob in the manifest block refused.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_slots::slot::SlotHeader::seal";
+        }
+        requirement <'L.slots.13'> gptFindsByType : ItemLowLevel {
+            attribute :>> statement = "find shall locate exactly one control partition and two slots by type GUID, A the lower entry, and the event-log partition alone.";
+            attribute :>> criterion = "Host tests: the layout found by type; the event log found alone and checked.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::gpt::find",
+                "ferrix_slots::gpt::find_one",
+                "ferrix_slots::gpt::entry_part",
+                "ferrix_slots::gpt::Layout::slot",
+                "ferrix_slots::gpt::guid");
+        }
+        requirement <'L.slots.14'> gptTrustsNothing : ItemLowLevel {
+            attribute :>> statement = "parse_header and find shall refuse a header or array whose signature, CRC, sizes or counts are wrong, and a Ferrix partition outside the usable blocks or overlapping another entry.";
+            attribute :>> criterion = "Host tests: hostile tables; outside the usable blocks; a damaged array.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = "ferrix_slots::gpt::parse_header";
+        }
+        requirement <'L.slots.15'> guidText : ItemLowLevel {
+            attribute :>> statement = "parse_guid and GuidText shall read and write a GUID in its usual text form, either case read.";
+            attribute :>> criterion = "Host test: a disk GUID read back in upper and lower case.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::gpt::parse_guid",
+                "ferrix_slots::gpt::GuidText::fmt");
+        }
+        requirement <'L.slots.16'> slotsAndFields : ItemLowLevel {
+            attribute :>> statement = "A slot's code and letter shall map both ways, and the little-endian field readers and writer shall read and write the bytes the formats name.";
+            attribute :>> criterion = "Host tests: through the record and header round trips.";
+            attribute :>> parent = "H.SIGN.7";
+            attribute :>> unit = ("ferrix_slots::Slot::code",
+                "ferrix_slots::Slot::from_code",
+                "ferrix_slots::Slot::other",
+                "ferrix_slots::Slot::letter",
+                "ferrix_slots::Slot::from_letter",
+                "ferrix_slots::le16",
+                "ferrix_slots::le32",
+                "ferrix_slots::le64",
+                "ferrix_slots::put");
         }
     }
 }

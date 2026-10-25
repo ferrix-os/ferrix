@@ -283,6 +283,7 @@ pub(crate) fn run(arch: Arch, files: &BoardFiles, args: &Args) -> Result<()> {
     let loader_bytes = std::fs::read(loader)
         .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;
     crate::signing::refuse_in_image(&loader_bytes, &initramfs)?;
+    crate::signing::check_loader_policy(arch, "the card's UEFI loader", &loader_bytes)?;
     let initramfs_target = target.join(INITRD_PATH);
     std::fs::write(&initramfs_target, &initramfs)
         .map_err(|error| Error::new(format!("writing {}: {error}", initramfs_target.display())))?;

@@ -456,13 +456,25 @@
         "ring": "item",
         "path": "src/lib/crypto/sha256",
         "below": "byte slices its caller lends; no trait, no allocation, no dependency",
-        "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify (docs/SIGNING.md section 5.1); ferrix-slots moves onto it in slice S4"
+        "above": "Sha256 (new, update, finish), digest, finish_192 and digest_192: SHA-256 (FIPS 180-4) and SHA-256/192 (RFC 9858), called by ferrix-sigverify and ferrix-slots (docs/SIGNING.md section 5.1)"
+    },
+    "ferrix-boot-policy": {
+        "ring": "item",
+        "path": "src/lib/proto/boot-policy",
+        "below": "ferrix-sigverify and ferrix-slots, and byte slices its caller lends: the trust-policy block, the slot's header page and manifest block; no trait, no allocation",
+        "above": "decide, rescue, parse_block, encode_block and generic_family: whether the UEFI loader may start a slot (docs/SIGNING.md section 10.6), called by src/boot/common/uefi/src/slots.rs, which starts only on Start with every blob matched (H.SIGN.7)"
     },
     "ferrix-sigverify": {
         "ring": "item",
         "path": "src/lib/crypto/sigverify",
         "below": "ferrix-sha256, and byte slices its caller lends: the 4 KiB manifest block, the anchors and the revoked trees; no trait, no allocation",
         "above": "manifest::verify, Verified::check_payload and Verified::revoked, and lms::hss_verify: verify-only LMS/HSS (RFC 8554, RFC 9858, SP 800-208) and the signed manifest of docs/SIGNING.md, for the UEFI loader, init's configuration verifier and devmgr; no profile links it into ring 0 (SIGNING.md section 5.2)"
+    },
+    "ferrix-slots": {
+        "ring": "item",
+        "path": "src/lib/proto/slots",
+        "below": "ferrix-sha256, and byte slices its caller lends; the ControlDisk trait for the record's one write, implemented by the loader's Disk and bootctl's device; no allocation",
+        "above": "the slot header (versions 1 and 2, its seal), the boot control record, the GPT scan, the loader's plan and command-line words (docs/AB-BOOT.md sections 2-4), called by src/boot/common/uefi, bootctl and ferrix-boot-policy; in the item since slice S4 because the seal a slot manifest signs passes through it (docs/SIGNING.md section 5.3)"
     },
     "ferrix-smbios": {
         "ring": "item",

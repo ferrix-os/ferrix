@@ -240,6 +240,14 @@ the assumption it replaces with an argument, and the work becomes orders in
    is the job, not the namespace.
 6. F-43 (W^X claimed, not enforced for a program's own pages), waiting on the
    customer, and F-52 (no CC version named).
+7. Signed updates (`docs/SIGNING.md`). From slice S4 the UEFI loader
+   verifies a version-2 slot's signed manifest, but every profile buildable
+   today, `present` included, has `slot_signing = "off"`: an unsigned
+   version-1 slot still boots on `present`, so no document claims signed
+   slots for it. `present` becomes `required` as a dated change in S6,
+   once a release key exists in an HSM and its releases write signed
+   slots (ledger 4016 (10)). The product owner told the customer on
+   2026-10-24 at 22:11 CEST.
 
 ### What the process lacks
 

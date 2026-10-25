@@ -5,7 +5,24 @@
     "and its limits). `argued` holds each unreached line or branch outcome with why;",
     "the gate (--check) fails a stale file or an unargued gap."
   ],
-  "argued": {},
+  "argued": {
+    "src/lib/proto/boot-policy/src/lib.rs:257:24:false": "accepted takes at most MAX_FAMILIES of the build's families, so n never reaches the end of the MAX_FAMILIES-long out and get_mut never returns None",
+    "src/lib/proto/boot-policy/src/lib.rs:329": "SlotHeader::decode returns only headers of version 1 or 2 (L.slots.11; a_version_2_header_refuses_a_generation_and_a_blob_in_the_manifest refuses 0 and 3), so decide's other arm is never taken; it refuses rather than starts",
+    "src/lib/proto/slots/src/gpt.rs:165:12:false": "region is copy[..size] with size checked to be at least 92 on line 158, so bytes 16..20 always exist and get_mut never returns None; the defensive form is the crate's no-indexing rule",
+    "src/lib/proto/slots/src/gpt.rs:167": "region is copy[..size] with size checked to be at least 92 on line 158, so bytes 16..20 always exist and get_mut never returns None; the defensive form is the crate's no-indexing rule",
+    "src/lib/proto/slots/src/gpt.rs:20": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:21": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:22": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:23": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:24": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:25": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:26": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:27": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/gpt.rs:30": "guid is a const fn evaluated at compile time for the type GUIDs (SLOT_TYPE, CONTROL_TYPE, EVENTS_TYPE) and the tests' DISK, so no run reaches its body; its results are checked by value: the GPT scan finds each partition by the GUID ferrix-partition writes (the_gpt_scan_finds_the_layout_by_type) and GuidText prints DISK as written",
+    "src/lib/proto/slots/src/lib.rs:116:12:false": "put's callers write fixed fields inside fixed-size buffers (the header, the record, the words), so the slice always fits and the nothing-written arm is never taken; the round-trip tests show every field lands where it is read",
+    "src/lib/proto/slots/src/lib.rs:117:16:false": "put's callers write fixed fields inside fixed-size buffers (the header, the record, the words), so the slice always fits and the nothing-written arm is never taken; the round-trip tests show every field lands where it is read",
+    "src/lib/proto/slots/src/lib.rs:120": "put's callers write fixed fields inside fixed-size buffers (the header, the record, the words), so the slice always fits and the nothing-written arm is never taken; the round-trip tests show every field lands where it is read"
+  },
   "files": {
     "src/lib/crypto/sha256/src/lib.rs": {
       "branch_outcomes": 6,
@@ -42,6 +59,91 @@
       "sha256": "f2815aae798068df7094493710565f203e3bd728c3c6644cf9f7e76ba2a2f38e",
       "unreached_branches": [],
       "unreached_lines": []
+    },
+    "src/lib/proto/boot-policy/src/lib.rs": {
+      "branch_outcomes": 24,
+      "branch_outcomes_hit": 23,
+      "lines": 122,
+      "lines_hit": 121,
+      "sha256": "efc10e78eea3cb72b44d0e3282dbc57e802c088179278d2e1c1eda0787d28d83",
+      "unreached_branches": [
+        "257:24:false"
+      ],
+      "unreached_lines": [
+        329
+      ]
+    },
+    "src/lib/proto/slots/src/crc.rs": {
+      "branch_outcomes": 0,
+      "branch_outcomes_hit": 0,
+      "lines": 15,
+      "lines_hit": 15,
+      "sha256": "68790d933c163e17e700bf7f794ea0dc5057c0049cd3af7c7369caf9f9ee5b38",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/proto/slots/src/gpt.rs": {
+      "branch_outcomes": 110,
+      "branch_outcomes_hit": 109,
+      "lines": 201,
+      "lines_hit": 191,
+      "sha256": "7ac5ef33bb5574ab4bf0cccfee1b3bcfec08cde4463bfe629d6e791dc1fd3eed",
+      "unreached_branches": [
+        "165:12:false"
+      ],
+      "unreached_lines": [
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        30,
+        167
+      ]
+    },
+    "src/lib/proto/slots/src/lib.rs": {
+      "branch_outcomes": 4,
+      "branch_outcomes_hit": 2,
+      "lines": 46,
+      "lines_hit": 45,
+      "sha256": "c5a1190416c5ca0d20d63fb46237d51c78c79e7b4d4ae59720430adc5efb087b",
+      "unreached_branches": [
+        "116:12:false",
+        "117:16:false"
+      ],
+      "unreached_lines": [
+        120
+      ]
+    },
+    "src/lib/proto/slots/src/plan.rs": {
+      "branch_outcomes": 8,
+      "branch_outcomes_hit": 8,
+      "lines": 90,
+      "lines_hit": 90,
+      "sha256": "eb1a42e1dae5277b9e9522e8e4e93c26bb4c4c14d232758bacd51d7010b9ce14",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/proto/slots/src/record.rs": {
+      "branch_outcomes": 34,
+      "branch_outcomes_hit": 34,
+      "lines": 136,
+      "lines_hit": 136,
+      "sha256": "74517a428fde9cb93177135f0bf4faeae80a6a188eae1a77940dbf1c28232379",
+      "unreached_branches": [],
+      "unreached_lines": []
+    },
+    "src/lib/proto/slots/src/slot.rs": {
+      "branch_outcomes": 46,
+      "branch_outcomes_hit": 46,
+      "lines": 143,
+      "lines_hit": 143,
+      "sha256": "fb01bedd67c40508fc0dee2aa36a3d36acd5ebbffc8947e733650b1eaed1ffa9",
+      "unreached_branches": [],
+      "unreached_lines": []
     }
   },
   "test_inputs": {
@@ -51,6 +153,8 @@
     "src/lib/crypto/sha256/src/tests.rs": "8db0286bd1e576a1d460d6aca9ed35b935c20c943eeed3f6fa6cf27a5aecbf0c",
     "src/lib/crypto/sigverify/src/tests.rs": "e55b4c7693c661f749a2a5437c8ee242af0c26bfa307bb5394777c444922d298",
     "src/lib/crypto/sigverify/src/vectors.rs": "fb9b27c7d898819c8bb7780e51830ba451b306bb917b4fde6ed62a2ac7ac3147",
+    "src/lib/proto/boot-policy/src/tests.rs": "3c9862a14ac0afe560000b0d19a6a8e4b05b9243a1a6112dce66222fe18bf8fd",
+    "src/lib/proto/slots/src/tests.rs": "b1b87d239c120f341a3b8f281f6e2582878d3a062cd687f5c96e268543a2eead",
     "tools/common/release/softsign/src/lib.rs": "6d2cf849d751ea45a4bd4ca1d6e3ddecfbe581175e2dbd879bcb8c93cadbfb64",
     "tools/common/release/softsign/src/lms.rs": "bcaa4788c52a51090991fbe82bde1953b4bfa5ead451b5cbde8f169493c09d3c",
     "tools/common/release/softsign/src/main.rs": "2861f8c1e8f8e2cce61d9ba7c0699d73b709fa80adc249957962ef0111006976",

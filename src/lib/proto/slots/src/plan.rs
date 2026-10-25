@@ -137,18 +137,25 @@ pub struct LoaderWords {
     pub sequence: u64,
     /// The boot disk's GPT disk GUID, so `bootctl` writes only that disk.
     pub disk: crate::gpt::Guid,
+    /// The anchor whose signature let the slot start, or `None` for an
+    /// unsigned slot (`docs/SIGNING.md` §10.6).
+    pub sig: Option<u16>,
 }
 
 impl fmt::Display for LoaderWords {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ferrix.slot={} ferrix.slot.boot={} ferrix.slot.seq={} ferrix.slot.disk={}",
+            "ferrix.slot={} ferrix.slot.boot={} ferrix.slot.seq={} ferrix.slot.disk={} ferrix.slot.sig=",
             self.slot.letter(),
             self.kind.word(),
             self.sequence,
             crate::gpt::GuidText(self.disk)
-        )
+        )?;
+        match self.sig {
+            Some(anchor) => write!(f, "{anchor}"),
+            None => f.write_str("none"),
+        }
     }
 }
 
@@ -156,8 +163,11 @@ impl fmt::Display for LoaderWords {
 /// reads `/proc/cmdline`: the inverse of [`LoaderWords`]' `Display`. For
 /// each key the first word with it counts, as the kernel takes it, so a
 /// slot's own command line after the loader's words cannot override them.
-/// `None` unless all four are there and each is well formed: a boot that
-/// did not come from a slot, or one whose words cannot be trusted.
+/// `None` unless the first four are there and each is well formed: a boot
+/// that did not come from a slot, or one whose words cannot be trusted.
+/// `ferrix.slot.sig` is read when it is there; a loader from before it
+/// (2026-10-24) wrote none, and its slots were unsigned, so a missing word
+/// reads as `none`. A malformed one is `None` for the whole.
 #[must_use]
 pub fn parse_words(cmdline: &str) -> Option<LoaderWords> {
     let first = |key: &str| {
@@ -170,6 +180,10 @@ pub fn parse_words(cmdline: &str) -> Option<LoaderWords> {
         kind: Kind::from_word(first("ferrix.slot.boot=")?)?,
         sequence: first("ferrix.slot.seq=")?.parse().ok()?,
         disk: crate::gpt::parse_guid(first("ferrix.slot.disk=")?)?,
+        sig: match first("ferrix.slot.sig=") {
+            None | Some("none") => None,
+            Some(anchor) => Some(anchor.parse().ok()?),
+        },
     })
 }
 

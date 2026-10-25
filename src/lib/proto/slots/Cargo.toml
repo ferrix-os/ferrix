@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ferrix-sha256.workspace = true
 
 [dev-dependencies]
 ferrix-bootinfo.workspace = true

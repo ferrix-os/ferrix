@@ -30,6 +30,11 @@
 //! Every failure names its case in a line beginning `test-ab-boot:`, which
 //! is what `fleet/gate.sh control --expect-line` matches.
 
+#[path = "ab_boot_signed.rs"]
+mod signed;
+
+pub(crate) use signed::test_ab_boot_signed;
+
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -38,7 +43,7 @@ use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM, Partition, write_table};
 use ferrix_slots::Slot;
 use ferrix_slots::gpt::{CONTROL_TYPE, Part, SLOT_TYPE};
 use ferrix_slots::record::{self, ControlDisk, Current, DeviceError, Record};
-use ferrix_slots::slot::{HEADER_LEN, SlotHeader};
+use ferrix_slots::slot::{HEADER_LEN, SlotHeader, VERSION_1};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
@@ -161,7 +166,7 @@ impl ControlDisk for FileDisk<'_> {
 
 /// A slot's image: the header, then the three blobs where it says.
 fn slot_image(label: &str, kernel: &[u8], initrd: &[u8]) -> Vec<u8> {
-    let header = SlotHeader::lay_out(1, label, kernel, initrd, SLOT_CMDLINE.as_bytes());
+    let header = SlotHeader::lay_out(VERSION_1, 1, label, kernel, initrd, SLOT_CMDLINE.as_bytes());
     let mut image = vec![0_u8; usize::try_from(header.needed()).unwrap_or(0)];
     if let Some(head) = image.get_mut(..HEADER_LEN) {
         head.copy_from_slice(&header.encode());
@@ -430,7 +435,7 @@ fn case_1(bench: &Bench, good: &[u8], panics: &[u8]) -> Result<()> {
         &lines,
         &format!(
             "cmdline  ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 ferrix.slot.disk={} \
-             ferrix.root=tmpfs",
+             ferrix.slot.sig=none ferrix.root=tmpfs",
             ferrix_slots::gpt::GuidText(DISK_GUID.0)
         ),
         "case 1, boot 2: the command line does not begin with the loader's words",

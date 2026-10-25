@@ -178,6 +178,11 @@ why = "whether the image carries drvupdated (DEVMGR.md §4.1)"
 values.absent = { allows = ["sc4", "present", "sc2", "none"] }
 values.test = { allows = ["none"] }
 
+[image_keys.slot_signing]
+why = "whether the UEFI loader starts unsigned slots: `off` boots header version 1 and the ESP's unsigned files, and verifies every version-2 slot; `required` starts only a version-2 slot whose manifest verifies, and reads only FERRIX/RESCUE.SLT as the rescue path (docs/SIGNING.md §10.6; ledger 4016)"
+values.off = { allows = ["sc4", "present", "sc2", "none"] }
+values.required = { allows = ["sc4", "present", "sc2", "none"] }
+
 [image_keys.settings_writer]
 why = "whether the image carries settingsd, settingsctl, the settings.* authd policies and lode reload's writer (SETTINGS-WRITER.md; ledger 3558 (6), (13), 3595 (C3))"
 values.absent = { allows = ["sc4", "present", "sc2", "none"] }

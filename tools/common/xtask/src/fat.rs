@@ -581,6 +581,8 @@ pub(crate) fn write_image_carrying(
     // Every image's loader and initramfs, as final: no development signing
     // key in a claimed profile's (docs/SIGNING.md 6.4, D1).
     crate::signing::refuse_in_image(&loader_bytes, initramfs)?;
+    // And exactly the trust-policy block this build names (SIGNING §10.6).
+    crate::signing::check_loader_policy(arch, "the image's UEFI loader", &loader_bytes)?;
     let stripped;
     let kernel = if STRIP_KERNEL.load(Ordering::Relaxed) {
         stripped = crate::flash::stripped_kernel(kernel);

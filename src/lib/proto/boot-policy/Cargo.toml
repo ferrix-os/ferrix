@@ -1,0 +1,18 @@
+[package]
+name = "ferrix-boot-policy"
+description = "Whether the UEFI loader may start a slot: the trust-policy block, header versions and the signed manifest (docs/SIGNING.md §10.6)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-sigverify.workspace = true
+ferrix-slots.workspace = true
+
+[dev-dependencies]
+ferrix-softsign = { path = "../../../../tools/common/release/softsign" }
+
+[lints]
+workspace = true

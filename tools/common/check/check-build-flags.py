@@ -229,6 +229,7 @@ NOT_OPTIONS = {
     "ferrix.slot.boot": "as ferrix.slot: the slot booted, written by the loader for bootctl",
     "ferrix.slot.seq": "as ferrix.slot: the boot control record's sequence, written by the loader for bootctl",
     "ferrix.slot.disk": "as ferrix.slot: the disk the slots are on, written by the loader for bootctl",
+    "ferrix.slot.sig": "as ferrix.slot: the anchor whose signature let the slot start, or none, written by the loader after its other words (docs/SIGNING.md §10.6)",
     "ferrix.devmgr.update": "drvupdate-proto's service name, not a command-line option",
     "ferrix.devmgr.events": "devmgr-events-proto's abstract socket name, not a command-line option",
     "ferrix.test": "native-abi's test name, not a command-line option",

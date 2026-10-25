@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "ee098624db6632437e625300194937f87a57897718c427bc86a5ef1d19500f26",
+  "digest": "6a40ff70e32b770e9508f94d7a1b46565d625820c9b471edb6e80c4601e4297b",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -112,8 +112,8 @@
     }
   ],
   "summary": {
-    "packages": 147,
-    "elements": 7740,
+    "packages": 149,
+    "elements": 7886,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -87961,6 +87961,52 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "loaderStartsOnlyWhatThePolicyAllows",
+              "qualifiedName": "FerrixSigningRequirements::Signing::loaderStartsOnlyWhatThePolicyAllows",
+              "kind": "requirement",
+              "shortName": "H.SIGN.7",
+              "type": "ItemHighLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 90
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::loaderStartsOnlyWhatThePolicyAllows",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The UEFI loader shall start a slot only when ferrix-boot-policy returned Start for it and every blob matched its signed digest on the copy it starts.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 93
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::loaderStartsOnlyWhatThePolicyAllows",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host: decide's tests; boot: test-ab-boot-signed's S1-S3, S10, N1-N3 and R1, each with a control.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 95
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Signing::loaderStartsOnlyWhatThePolicyAllows",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"ASR-7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 96
+                  }
+                }
+              ]
             }
           ]
         },
@@ -87971,7 +88017,7 @@
           "doc": "ferrix-sigverify: the manifest and LMS/HSS verification.",
           "source": {
             "file": "docs/sysml/26-signing-requirements.sysml",
-            "line": 92
+            "line": 100
           },
           "children": [
             {
@@ -87982,7 +88028,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 95
+                "line": 103
               },
               "children": [
                 {
@@ -87993,7 +88039,7 @@
                   "value": "\"structure shall refuse, naming the field, a block that is not 4,096 bytes, a wrong magic, format or body length, an unknown kind, non-zero flags, an unknown profile or arch, non-zero reserved bytes, a slot's non-zero subject, floors outside a slot manifest, revocation fields outside a revocation, a revocation count past 20 or an entry past its count, non-zero padding, a signature length past 3,532 or the block, and a non-zero byte after the signature.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 103
+                    "line": 111
                   }
                 },
                 {
@@ -88004,7 +88050,7 @@
                   "value": "\"Host tests: each field refused by its name; every byte of a good block changed is refused; sig_len one short and one long is refused.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 106
+                    "line": 114
                   }
                 },
                 {
@@ -88015,7 +88061,7 @@
                   "value": "(\"H.SIGN.5\", \"H.SIGN.1\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 107
+                    "line": 115
                   }
                 },
                 {
@@ -88026,7 +88072,7 @@
                   "value": "(\"ferrix_sigverify::manifest::structure\", \"ferrix_sigverify::manifest::header\", \"ferrix_sigverify::manifest::kind_fields\", \"ferrix_sigverify::manifest::signature_of\", \"ferrix_sigverify::manifest::entry_offset\", \"ferrix_sigverify::manifest::bytes\", \"ferrix_sigverify::manifest::Kind::from_code\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 113
+                    "line": 121
                   }
                 }
               ]
@@ -88039,7 +88085,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 115
+                "line": 123
               },
               "children": [
                 {
@@ -88050,7 +88096,7 @@
                   "value": "\"A key or signature shall be accepted by the public entry points only with LM-OTS type LMOTS_SHA256_N24_W4 and LMS types LMS_SHA256_M24_H10, _H15 or _H20; every other type code shall be refused as a type code.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 119
+                    "line": 127
                   }
                 },
                 {
@@ -88061,7 +88107,7 @@
                   "value": "\"Host tests: every code from 0 to 0x18 and 0xFFFFFFFF, of both types; RFC 9858 A.1 (W8, H5) verifies only in the wide test set; RFC 8554 Test Case 1 is refused.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 122
+                    "line": 130
                   }
                 },
                 {
@@ -88072,7 +88118,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 123
+                    "line": 131
                   }
                 },
                 {
@@ -88083,7 +88129,7 @@
                   "value": "(\"ferrix_sigverify::lms::Allowed::ots\", \"ferrix_sigverify::lms::Allowed::lms\", \"ferrix_sigverify::lms::LmsKey::parse_in\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 125
+                    "line": 133
                   }
                 }
               ]
@@ -88096,7 +88142,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 127
+                "line": 135
               },
               "children": [
                 {
@@ -88107,7 +88153,7 @@
                   "value": "\"lms_verify_in shall accept an LMS signature only when its length is exactly its types', its leaf index is below 2^h, its LM-OTS type is the key's, and the root computed by RFC 8554 Algorithms 4b and 6a over SHA-256/192 equals the key's.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 131
+                    "line": 139
                   }
                 },
                 {
@@ -88118,7 +88164,7 @@
                   "value": "\"Host tests: RFC 9858 A.4 verifies and every single-bit flip of its signature and message is refused; a leaf index of 2^20 is refused as a leaf; every NIST ACVP LMS sigVer sample case gives ACVP's answer.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 135
+                    "line": 143
                   }
                 },
                 {
@@ -88129,7 +88175,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 136
+                    "line": 144
                   }
                 },
                 {
@@ -88140,7 +88186,7 @@
                   "value": "(\"ferrix_sigverify::lms::ots_candidate\", \"ferrix_sigverify::lms::with_checksum\", \"ferrix_sigverify::lms::root_from\", \"ferrix_sigverify::lms::coef\", \"ferrix_sigverify::lms::chain_step\", \"ferrix_sigverify::lms::lms_verify_in\", \"ferrix_sigverify::lms::signature_len_for\", \"ferrix_sigverify::lms::Reader::take\", \"ferrix_sigverify::lms::Reader::array\", \"ferrix_sigverify::lms::Reader::u32\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 143
+                    "line": 151
                   }
                 }
               ]
@@ -88153,7 +88199,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 145
+                "line": 153
               },
               "children": [
                 {
@@ -88164,7 +88210,7 @@
                   "value": "\"hss_verify_in shall accept an HSS signature only when the key's L is 1 or 2, Nspk + 1 is L, each signed lower key verifies under the key above it, the last LMS signature verifies over the message, and no byte is short or left over; it shall return the trees it went through, top first.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 150
+                    "line": 158
                   }
                 },
                 {
@@ -88175,7 +88221,7 @@
                   "value": "\"Host tests: A.4 verifies with its I; L of 0, 3 and 8 and Nspk one off are refused; A.4 cut or extended by a byte and with each key byte changed is refused.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 153
+                    "line": 161
                   }
                 },
                 {
@@ -88186,7 +88232,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 154
+                    "line": 162
                   }
                 },
                 {
@@ -88197,7 +88243,7 @@
                   "value": "(\"ferrix_sigverify::lms::hss_verify_in\", \"ferrix_sigverify::lms::lower_key\", \"ferrix_sigverify::lms::parse_hss_key_in\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 156
+                    "line": 164
                   }
                 }
               ]
@@ -88210,7 +88256,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 158
+                "line": 166
               },
               "children": [
                 {
@@ -88221,7 +88267,7 @@
                   "value": "\"verify shall take the anchor from those of the caller's expected kind (a revocation's: its target kind's) with the manifest's signed anchor id, and refuse a manifest with no such anchor.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 162
+                    "line": 170
                   }
                 },
                 {
@@ -88232,7 +88278,7 @@
                   "value": "\"Host tests: a slot manifest checked against only a configuration anchor, against a renumbered anchor, and against the right id with another key, each refused.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 165
+                    "line": 173
                   }
                 },
                 {
@@ -88243,7 +88289,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 166
+                    "line": 174
                   }
                 },
                 {
@@ -88254,7 +88300,7 @@
                   "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::anchor_for\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 168
+                    "line": 176
                   }
                 }
               ]
@@ -88267,7 +88313,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 170
+                "line": 178
               },
               "children": [
                 {
@@ -88278,7 +88324,7 @@
                   "value": "\"verify shall refuse a manifest whose kind, profile, arch, family or subject is not what the caller expects, the kind before the signature is checked and the rest after, and a configuration or driver manifest whose caller names no subject.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 174
+                    "line": 182
                   }
                 },
                 {
@@ -88289,7 +88335,7 @@
                   "value": "\"Host tests: each bound field one off refused by its name; a driver manifest binds its subject; a slot manifest presented as a revocation, and a revocation presented as a slot, refused by the signed kind.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 178
+                    "line": 186
                   }
                 },
                 {
@@ -88300,7 +88346,7 @@
                   "value": "\"H.SIGN.2\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 179
+                    "line": 187
                   }
                 },
                 {
@@ -88311,7 +88357,7 @@
                   "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::bindings\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 181
+                    "line": 189
                   }
                 }
               ]
@@ -88324,7 +88370,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 183
+                "line": 191
               },
               "children": [
                 {
@@ -88335,7 +88381,7 @@
                   "value": "\"verify shall refuse a manifest whose security version is below the caller's floor.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 185
+                    "line": 193
                   }
                 },
                 {
@@ -88346,7 +88392,7 @@
                   "value": "\"Host tests: a manifest one below the floor refused; one at the floor, and one above a zero floor, accepted.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 187
+                    "line": 195
                   }
                 },
                 {
@@ -88357,7 +88403,7 @@
                   "value": "\"H.SIGN.3\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 188
+                    "line": 196
                   }
                 },
                 {
@@ -88368,7 +88414,7 @@
                   "value": "\"ferrix_sigverify::manifest::verify\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 189
+                    "line": 197
                   }
                 }
               ]
@@ -88381,7 +88427,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 191
+                "line": 199
               },
               "children": [
                 {
@@ -88392,7 +88438,7 @@
                   "value": "\"verify shall refuse a manifest signed through a tree the caller holds as revoked, a revocation among them.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 193
+                    "line": 201
                   }
                 },
                 {
@@ -88403,7 +88449,7 @@
                   "value": "\"Host tests: a revoked key's manifest and a revocation by a revoked key are refused; another key's revocation leaves a manifest alone.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 196
+                    "line": 204
                   }
                 },
                 {
@@ -88414,7 +88460,7 @@
                   "value": "\"H.SIGN.4\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 197
+                    "line": 205
                   }
                 },
                 {
@@ -88425,7 +88471,7 @@
                   "value": "(\"ferrix_sigverify::manifest::verify\", \"ferrix_sigverify::manifest::revocations\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 199
+                    "line": 207
                   }
                 }
               ]
@@ -88438,7 +88484,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 201
+                "line": 209
               },
               "children": [
                 {
@@ -88449,7 +88495,7 @@
                   "value": "\"verify shall refuse a revocation that lists a tree its own signature went through.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 203
+                    "line": 211
                   }
                 },
                 {
@@ -88460,7 +88506,7 @@
                   "value": "\"Host test: a revocation of its own key is refused as revoking itself.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 205
+                    "line": 213
                   }
                 },
                 {
@@ -88471,7 +88517,7 @@
                   "value": "\"H.SIGN.4\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 206
+                    "line": 214
                   }
                 },
                 {
@@ -88482,7 +88528,7 @@
                   "value": "(\"ferrix_sigverify::manifest::revocations\", \"ferrix_sigverify::manifest::revocation_of\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 208
+                    "line": 216
                   }
                 }
               ]
@@ -88495,7 +88541,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 210
+                "line": 218
               },
               "children": [
                 {
@@ -88506,7 +88552,7 @@
                   "value": "\"revoked shall return a verified revocation's target kind and exactly the trees it lists, and nothing for any other kind.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 213
+                    "line": 221
                   }
                 },
                 {
@@ -88517,7 +88563,7 @@
                   "value": "\"Host tests: a verified revocation returns its one tree and its target; a verified slot manifest returns nothing.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 216
+                    "line": 224
                   }
                 },
                 {
@@ -88528,7 +88574,7 @@
                   "value": "\"H.SIGN.4\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 217
+                    "line": 225
                   }
                 },
                 {
@@ -88539,7 +88585,7 @@
                   "value": "(\"ferrix_sigverify::manifest::Verified::revoked\", \"ferrix_sigverify::manifest::revocation_of\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 219
+                    "line": 227
                   }
                 }
               ]
@@ -88552,7 +88598,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 221
+                "line": 229
               },
               "children": [
                 {
@@ -88563,7 +88609,7 @@
                   "value": "\"check_payload shall confirm a payload only when its length and SHA-256 equal the verified manifest's.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 223
+                    "line": 231
                   }
                 },
                 {
@@ -88574,7 +88620,7 @@
                   "value": "\"Host tests: the manifest's own length and digest confirmed; one byte short, one long, and another digest refused.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 226
+                    "line": 234
                   }
                 },
                 {
@@ -88585,7 +88631,7 @@
                   "value": "\"H.SIGN.2\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 227
+                    "line": 235
                   }
                 },
                 {
@@ -88596,7 +88642,7 @@
                   "value": "\"ferrix_sigverify::manifest::Verified::check_payload\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 228
+                    "line": 236
                   }
                 }
               ]
@@ -88609,7 +88655,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 230
+                "line": 238
               },
               "children": [
                 {
@@ -88620,7 +88666,7 @@
                   "value": "\"Every failure of LMS/HSS verification shall reach the caller as one of the manifest's named refusals, and no input shall reach a panic.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 233
+                    "line": 241
                   }
                 },
                 {
@@ -88631,7 +88677,7 @@
                   "value": "\"Host tests: every truncation of a good block and of A.4's signature answers; the sigverify_manifest fuzz target runs bounded with no crash.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 236
+                    "line": 244
                   }
                 },
                 {
@@ -88642,7 +88688,7 @@
                   "value": "\"H.SIGN.5\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 237
+                    "line": 245
                   }
                 },
                 {
@@ -88653,7 +88699,7 @@
                   "value": "\"ferrix_sigverify::manifest::Refusal::from\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 238
+                    "line": 246
                   }
                 }
               ]
@@ -88666,7 +88712,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 240
+                "line": 248
               },
               "children": [
                 {
@@ -88677,7 +88723,7 @@
                   "value": "\"One hss_verify of a product-set signature shall finish within 50 ms on the DK1's Cortex-A7 at 650 MHz.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 242
+                    "line": 250
                   }
                 },
                 {
@@ -88688,7 +88734,7 @@
                   "value": "\"Slice S2: the worst-case signature measured on the DK1 (the estimate is SIGNING.md section 2.3's).\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 244
+                    "line": 252
                   }
                 },
                 {
@@ -88699,7 +88745,7 @@
                   "value": "\"H.SIGN.6\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 245
+                    "line": 253
                   }
                 },
                 {
@@ -88710,7 +88756,7 @@
                   "value": "\"ferrix_sigverify::lms::hss_verify_in\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 246
+                    "line": 254
                   }
                 }
               ]
@@ -88723,7 +88769,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 248
+                "line": 256
               },
               "children": [
                 {
@@ -88734,7 +88780,7 @@
                   "value": "\"One verify shall allocate nothing and use at most the stack MEMORY-AND-TIMING.md states.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 250
+                    "line": 258
                   }
                 },
                 {
@@ -88745,7 +88791,7 @@
                   "value": "\"The crate has no allocator and no alloc crate; the stack report of the loader's build (S4).\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 252
+                    "line": 260
                   }
                 },
                 {
@@ -88756,7 +88802,7 @@
                   "value": "\"H.SIGN.6\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 253
+                    "line": 261
                   }
                 },
                 {
@@ -88767,7 +88813,7 @@
                   "value": "\"ferrix_sigverify::manifest::verify\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 254
+                    "line": 262
                   }
                 }
               ]
@@ -88781,7 +88827,7 @@
           "doc": "ferrix-sha256: the one hash under the verifier.",
           "source": {
             "file": "docs/sysml/26-signing-requirements.sysml",
-            "line": 258
+            "line": 266
           },
           "children": [
             {
@@ -88792,7 +88838,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 261
+                "line": 269
               },
               "children": [
                 {
@@ -88803,7 +88849,7 @@
                   "value": "\"digest shall return the SHA-256 of FIPS 180-4 for every message.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 263
+                    "line": 271
                   }
                 },
                 {
@@ -88814,7 +88860,7 @@
                   "value": "\"Host tests: FIPS 180-4's examples and the NIST CAVP SHA256ShortMsg, SHA256LongMsg and SHA256Monte files.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 265
+                    "line": 273
                   }
                 },
                 {
@@ -88825,7 +88871,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 266
+                    "line": 274
                   }
                 },
                 {
@@ -88836,7 +88882,7 @@
                   "value": "(\"ferrix_sha256::digest\", \"ferrix_sha256::Sha256::finish\", \"ferrix_sha256::compress\", \"ferrix_sha256::rounds_0_to_31\", \"ferrix_sha256::rounds_32_to_63\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 269
+                    "line": 277
                   }
                 }
               ]
@@ -88849,7 +88895,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 271
+                "line": 279
               },
               "children": [
                 {
@@ -88860,7 +88906,7 @@
                   "value": "\"A message given to update in any pieces shall hash as the whole message does.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 273
+                    "line": 281
                   }
                 },
                 {
@@ -88871,7 +88917,7 @@
                   "value": "\"Host tests: every length from 0 to 130 bytes byte by byte, and a million bytes in pieces of 997.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 275
+                    "line": 283
                   }
                 },
                 {
@@ -88882,7 +88928,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 276
+                    "line": 284
                   }
                 },
                 {
@@ -88893,7 +88939,7 @@
                   "value": "\"ferrix_sha256::Sha256::update\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 277
+                    "line": 285
                   }
                 }
               ]
@@ -88906,7 +88952,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/26-signing-requirements.sysml",
-                "line": 279
+                "line": 287
               },
               "children": [
                 {
@@ -88917,7 +88963,7 @@
                   "value": "\"finish_192 and digest_192 shall return the first 24 bytes of the SHA-256 digest (RFC 9858 section 2.1).\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 281
+                    "line": 289
                   }
                 },
                 {
@@ -88928,7 +88974,7 @@
                   "value": "\"Host test: RFC 9858's SHA-256/192 of abc, whole and in pieces.\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 283
+                    "line": 291
                   }
                 },
                 {
@@ -88939,7 +88985,7 @@
                   "value": "\"H.SIGN.1\"",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 284
+                    "line": 292
                   }
                 },
                 {
@@ -88950,7 +88996,1627 @@
                   "value": "(\"ferrix_sha256::finish_192\", \"ferrix_sha256::digest_192\")",
                   "source": {
                     "file": "docs/sysml/26-signing-requirements.sysml",
-                    "line": 285
+                    "line": 293
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "BootPolicy",
+          "qualifiedName": "FerrixSigningRequirements::BootPolicy",
+          "kind": "package",
+          "doc": "ferrix-boot-policy: whether the UEFI loader may start a slot (docs/SIGNING.md section 10.6; ledger 4016, 4032).",
+          "source": {
+            "file": "docs/sysml/26-signing-requirements.sysml",
+            "line": 297
+          },
+          "children": [
+            {
+              "name": "policyBlockFailsClosed",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::policyBlockFailsClosed",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 301
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::policyBlockFailsClosed",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"parse_block shall refuse every slot, by its own refusal, for a trust-policy block shorter than 512 bytes, of another magic or version, of an unknown mode, with more than eight anchors, with an anchor of a kind other than the slot kind, or with a non-zero reserved byte, unused entry or tail; encode_block shall lay a block out as parse_block reads it.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 302
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::policyBlockFailsClosed",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: one per case, each with a control (a_short_block_refuses_every_slot, an_unknown_block_version_or_mode_refuses_every_slot, a_count_above_eight_refuses_every_slot, non_zero_block_padding_refuses_every_slot, a_non_slot_anchor_kind_refuses_every_slot); the four generated blocks parse as named.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 303
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::policyBlockFailsClosed",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 304
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::policyBlockFailsClosed",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_boot_policy::parse_block\", \"ferrix_boot_policy::anchor_entries\", \"ferrix_boot_policy::encode_block\", \"ferrix_boot_policy::put\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 308
+                  }
+                }
+              ]
+            },
+            {
+              "name": "version1OnlyUnderOff",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::version1OnlyUnderOff",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 310
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version1OnlyUnderOff",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall start a version-1 slot on its hashes, unsigned, under mode off, and refuse it as Unsigned under mode required.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 311
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version1OnlyUnderOff",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: both modes.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 312
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version1OnlyUnderOff",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 313
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version1OnlyUnderOff",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 314
+                  }
+                }
+              ]
+            },
+            {
+              "name": "version2GenerationZero",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2GenerationZero",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 316
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2GenerationZero",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall refuse a version-2 header whose generation is not zero.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 317
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2GenerationZero",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: generation 9 refused as Header(Generation).\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 318
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2GenerationZero",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 319
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2GenerationZero",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 320
+                  }
+                }
+              ]
+            },
+            {
+              "name": "version2VerifiedAgainstTheBlock",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2VerifiedAgainstTheBlock",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 322
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2VerifiedAgainstTheBlock",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall verify a version-2 slot's manifest with ferrix-sigverify against the block's anchors with the slot kind expected, and return any refusal.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 323
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2VerifiedAgainstTheBlock",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a good slot starts under both modes; another key, an empty table, another key as the anchor and a configuration manifest are refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 324
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2VerifiedAgainstTheBlock",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 325
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2VerifiedAgainstTheBlock",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 326
+                  }
+                }
+              ]
+            },
+            {
+              "name": "version2NeverUnverified",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2NeverUnverified",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.5",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 328
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2NeverUnverified",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall never start a version-2 slot unverified under either mode.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 329
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2NeverUnverified",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a missing, short or zero manifest block, and every fifth byte of the signed body changed, under off.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 330
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2NeverUnverified",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 331
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::version2NeverUnverified",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 332
+                  }
+                }
+              ]
+            },
+            {
+              "name": "manifestCoversThisHeader",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::manifestCoversThisHeader",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.6",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 334
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::manifestCoversThisHeader",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall start a version-2 slot only when its manifest's payload is the header's seal over its 4064 sealed bytes.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 335
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::manifestCoversThisHeader",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a good manifest on another header, and the right digest with length 4096, are refused as PayloadMismatch.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 336
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::manifestCoversThisHeader",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 337
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::manifestCoversThisHeader",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 338
+                  }
+                }
+              ]
+            },
+            {
+              "name": "profileAndArchBound",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::profileAndArchBound",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.7",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 340
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::profileAndArchBound",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A manifest whose profile or arch differs from the build's shall be refused, by its own refusal.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 341
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::profileAndArchBound",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: another profile WrongProfile, another arch WrongArch.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 342
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::profileAndArchBound",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 343
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::profileAndArchBound",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 344
+                  }
+                }
+              ]
+            },
+            {
+              "name": "familiesFollowTheClaim",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::familiesFollowTheClaim",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.8",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 346
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::familiesFollowTheClaim",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The families decide accepts shall be the build's families that are the machine's own and, without a claim, its arch's generic one; with a claim, exactly the machine's own.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 347
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::familiesFollowTheClaim",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: an N150 manifest with and without a claim on an N150 and on a generic machine; an empty family list.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 348
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::familiesFollowTheClaim",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 349
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::familiesFollowTheClaim",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_boot_policy::accepted\", \"ferrix_boot_policy::generic_family\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 351
+                  }
+                }
+              ]
+            },
+            {
+              "name": "floorIsTheCallers",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::floorIsTheCallers",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.9",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 353
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::floorIsTheCallers",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall refuse a manifest whose security version is below the floor its caller passes.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 354
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::floorIsTheCallers",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: floors 0 and 3 start, 4 is refused as BelowFloor.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 355
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::floorIsTheCallers",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 356
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::floorIsTheCallers",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::decide\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 357
+                  }
+                }
+              ]
+            },
+            {
+              "name": "rescueFollowsTheMode",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::rescueFollowsTheMode",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.10",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 359
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::rescueFollowsTheMode",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"rescue shall offer the ESP's unsigned files only under mode off, and only the rescue slot image under mode required.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 360
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::rescueFollowsTheMode",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: both modes; a malformed block offers nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 361
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::rescueFollowsTheMode",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 362
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::rescueFollowsTheMode",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_boot_policy::rescue\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 363
+                  }
+                }
+              ]
+            },
+            {
+              "name": "startNamesTheSignature",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::startNamesTheSignature",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.11",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 365
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::startNamesTheSignature",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Start shall carry the header to match and the verified anchor id and security version.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 366
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::startNamesTheSignature",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: the anchor and version of a good slot.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 367
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::startNamesTheSignature",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 368
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::startNamesTheSignature",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_boot_policy::decide\", \"ferrix_boot_policy::Policy::anchors\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 370
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyInputAnswers",
+              "qualifiedName": "FerrixSigningRequirements::BootPolicy::everyInputAnswers",
+              "kind": "requirement",
+              "shortName": "L.bootpolicy.12",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 372
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::everyInputAnswers",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"decide shall answer every input with Start or one Refusal, and never panic.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 373
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::everyInputAnswers",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: 300 randomly damaged slot heads, whole and truncated; the panic audit.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 374
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::everyInputAnswers",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 375
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::BootPolicy::everyInputAnswers",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_boot_policy::decide\", \"ferrix_boot_policy::byte\", \"ferrix_boot_policy::le16\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 378
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Slots",
+          "qualifiedName": "FerrixSigningRequirements::Slots",
+          "kind": "package",
+          "doc": "ferrix-slots, in the item since slice S4 (docs/AB-BOOT.md sections 2-4; docs/SIGNING.md section 5.3).",
+          "source": {
+            "file": "docs/sysml/26-signing-requirements.sysml",
+            "line": 382
+          },
+          "children": [
+            {
+              "name": "crcCheckValues",
+              "qualifiedName": "FerrixSigningRequirements::Slots::crcCheckValues",
+              "kind": "requirement",
+              "shortName": "L.slots.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 386
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::crcCheckValues",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"crc32 and crc32c shall give the standard check values.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 387
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::crcCheckValues",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: both over 123456789.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 388
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::crcCheckValues",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 389
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::crcCheckValues",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_slots::crc::reflected\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 390
+                  }
+                }
+              ]
+            },
+            {
+              "name": "recordRoundTripsAndRefuses",
+              "qualifiedName": "FerrixSigningRequirements::Slots::recordRoundTripsAndRefuses",
+              "kind": "requirement",
+              "shortName": "L.slots.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 392
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordRoundTripsAndRefuses",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Record::decode shall return what Record::encode wrote, and refuse a copy whose magic, version, length, CRC, reserved bytes or fields are wrong or inconsistent.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 393
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordRoundTripsAndRefuses",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a round trip; every bad field refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 394
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordRoundTripsAndRefuses",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 395
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordRoundTripsAndRefuses",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::record::Record::encode\", \"ferrix_slots::record::Record::decode\", \"ferrix_slots::record::Record::is_consistent\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 398
+                  }
+                }
+              ]
+            },
+            {
+              "name": "newerValidCopyIsCurrent",
+              "qualifiedName": "FerrixSigningRequirements::Slots::newerValidCopyIsCurrent",
+              "kind": "requirement",
+              "shortName": "L.slots.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 400
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::newerValidCopyIsCurrent",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"select shall take the valid copy with the higher sequence, copy 0 on a tie, and write_copy the copy that does not hold it, so that a torn write leaves the old record or the new.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 401
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::newerValidCopyIsCurrent",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: every pair of valid, torn and zero copies; a write torn at every byte.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 402
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::newerValidCopyIsCurrent",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 403
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::newerValidCopyIsCurrent",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::record::select\", \"ferrix_slots::record::write_copy\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 405
+                  }
+                }
+              ]
+            },
+            {
+              "name": "recordTransitions",
+              "qualifiedName": "FerrixSigningRequirements::Slots::recordTransitions",
+              "kind": "requirement",
+              "shortName": "L.slots.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 407
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordTransitions",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"after_try, armed, disarmed and marked_good shall make the records AB-BOOT section 3 names, and refuse the transitions it does not.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 408
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordTransitions",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: each transition and its refusals.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 409
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordTransitions",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 410
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordTransitions",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::record::Record::after_try\", \"ferrix_slots::record::Record::armed\", \"ferrix_slots::record::Record::disarmed\", \"ferrix_slots::record::Record::marked_good\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 414
+                  }
+                }
+              ]
+            },
+            {
+              "name": "recordWriteCountsOnlyReadBack",
+              "qualifiedName": "FerrixSigningRequirements::Slots::recordWriteCountsOnlyReadBack",
+              "kind": "requirement",
+              "shortName": "L.slots.5",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 416
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordWriteCountsOnlyReadBack",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"write_record shall count a record written only once it is flushed and read back equal, and read_current shall read both copies in whole usable blocks.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 417
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordWriteCountsOnlyReadBack",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: a device that fails each step.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 418
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordWriteCountsOnlyReadBack",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 419
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordWriteCountsOnlyReadBack",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::record::write_record\", \"ferrix_slots::record::read_current\", \"ferrix_slots::record::usable_block\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 422
+                  }
+                }
+              ]
+            },
+            {
+              "name": "planFollowsTheRecord",
+              "qualifiedName": "FerrixSigningRequirements::Slots::planFollowsTheRecord",
+              "kind": "requirement",
+              "shortName": "L.slots.6",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 424
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::planFollowsTheRecord",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"plan shall give AB-BOOT section 4's attempts for every record state.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 425
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::planFollowsTheRecord",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: exhaustively over the record's states.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 426
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::planFollowsTheRecord",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 427
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::planFollowsTheRecord",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::plan::plan\", \"ferrix_slots::plan::Kind::from_word\", \"ferrix_slots::plan::Kind::word\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 430
+                  }
+                }
+              ]
+            },
+            {
+              "name": "recordBlocksInside",
+              "qualifiedName": "FerrixSigningRequirements::Slots::recordBlocksInside",
+              "kind": "requirement",
+              "shortName": "L.slots.7",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 432
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordBlocksInside",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"record_block shall name only blocks inside the control partition, or none.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 433
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordBlocksInside",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: every copy and block size, and one past the end.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 434
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordBlocksInside",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 435
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::recordBlocksInside",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_slots::plan::record_block\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 436
+                  }
+                }
+              ]
+            },
+            {
+              "name": "loaderWordsFirstMatch",
+              "qualifiedName": "FerrixSigningRequirements::Slots::loaderWordsFirstMatch",
+              "kind": "requirement",
+              "shortName": "L.slots.8",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 438
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::loaderWordsFirstMatch",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The loader's words shall be written whole or not at all, and parse_words shall read them back first-match, a missing ferrix.slot.sig as none and a malformed one as no words.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 439
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::loaderWordsFirstMatch",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: written, refused for want of room, read back, forged after the loader's.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 440
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::loaderWordsFirstMatch",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 441
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::loaderWordsFirstMatch",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::plan::LoaderWords::fmt\", \"ferrix_slots::plan::parse_words\", \"ferrix_slots::plan::write_words\", \"ferrix_slots::plan::Cursor::write_str\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 445
+                  }
+                }
+              ]
+            },
+            {
+              "name": "commandLineWholeOrNot",
+              "qualifiedName": "FerrixSigningRequirements::Slots::commandLineWholeOrNot",
+              "kind": "requirement",
+              "shortName": "L.slots.9",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 447
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::commandLineWholeOrNot",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"compose shall write the loader's words then the slot's trimmed line, or nothing when it is not UTF-8 or does not fit.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 448
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::commandLineWholeOrNot",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: exact room, one byte short, not UTF-8; the longest line fits the boot info.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 449
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::commandLineWholeOrNot",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 450
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::commandLineWholeOrNot",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_slots::plan::compose\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 451
+                  }
+                }
+              ]
+            },
+            {
+              "name": "headerRoundTrips",
+              "qualifiedName": "FerrixSigningRequirements::Slots::headerRoundTrips",
+              "kind": "requirement",
+              "shortName": "L.slots.10",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 453
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRoundTrips",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"SlotHeader::decode shall return the header SlotHeader::encode wrote for lay_out's blobs, and Blob::matches shall hold only for a blob's own bytes.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 454
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRoundTrips",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: a slot round trips and verifies; a flipped or short blob does not match.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 455
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRoundTrips",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 456
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRoundTrips",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::slot::SlotHeader::lay_out\", \"ferrix_slots::slot::SlotHeader::encode\", \"ferrix_slots::slot::Blob::matches\", \"ferrix_slots::slot::SlotHeader::label_text\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 460
+                  }
+                }
+              ]
+            },
+            {
+              "name": "headerRefuses",
+              "qualifiedName": "FerrixSigningRequirements::Slots::headerRefuses",
+              "kind": "requirement",
+              "shortName": "L.slots.11",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 462
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRefuses",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"SlotHeader::decode shall refuse a short page, another magic, version, length or count, a broken seal, non-zero reserved bytes, a misplaced, overlapping or outside blob, no kernel and a command line past 2048 bytes.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 463
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRefuses",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: each, and every seventh bit of the header.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 464
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRefuses",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 465
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::headerRefuses",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::slot::SlotHeader::decode\", \"ferrix_slots::slot::SlotHeader::check_placement\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 467
+                  }
+                }
+              ]
+            },
+            {
+              "name": "version2Header",
+              "qualifiedName": "FerrixSigningRequirements::Slots::version2Header",
+              "kind": "requirement",
+              "shortName": "L.slots.12",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 469
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::version2Header",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A version-2 header shall hold its blobs at or after 8192 and a zero generation, refused otherwise, and seal shall return the SHA-256 of its bytes 0..4064.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 470
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::version2Header",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: a version-2 layout, its seal, a generation and a blob in the manifest block refused.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 471
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::version2Header",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 472
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::version2Header",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_slots::slot::SlotHeader::seal\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 473
+                  }
+                }
+              ]
+            },
+            {
+              "name": "gptFindsByType",
+              "qualifiedName": "FerrixSigningRequirements::Slots::gptFindsByType",
+              "kind": "requirement",
+              "shortName": "L.slots.13",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 475
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptFindsByType",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"find shall locate exactly one control partition and two slots by type GUID, A the lower entry, and the event-log partition alone.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 476
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptFindsByType",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the layout found by type; the event log found alone and checked.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 477
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptFindsByType",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 478
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptFindsByType",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::gpt::find\", \"ferrix_slots::gpt::find_one\", \"ferrix_slots::gpt::entry_part\", \"ferrix_slots::gpt::Layout::slot\", \"ferrix_slots::gpt::guid\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 483
+                  }
+                }
+              ]
+            },
+            {
+              "name": "gptTrustsNothing",
+              "qualifiedName": "FerrixSigningRequirements::Slots::gptTrustsNothing",
+              "kind": "requirement",
+              "shortName": "L.slots.14",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 485
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptTrustsNothing",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"parse_header and find shall refuse a header or array whose signature, CRC, sizes or counts are wrong, and a Ferrix partition outside the usable blocks or overlapping another entry.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 486
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptTrustsNothing",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: hostile tables; outside the usable blocks; a damaged array.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 487
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptTrustsNothing",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 488
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::gptTrustsNothing",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_slots::gpt::parse_header\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 489
+                  }
+                }
+              ]
+            },
+            {
+              "name": "guidText",
+              "qualifiedName": "FerrixSigningRequirements::Slots::guidText",
+              "kind": "requirement",
+              "shortName": "L.slots.15",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 491
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::guidText",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"parse_guid and GuidText shall read and write a GUID in its usual text form, either case read.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 492
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::guidText",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: a disk GUID read back in upper and lower case.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 493
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::guidText",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 494
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::guidText",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::gpt::parse_guid\", \"ferrix_slots::gpt::GuidText::fmt\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 496
+                  }
+                }
+              ]
+            },
+            {
+              "name": "slotsAndFields",
+              "qualifiedName": "FerrixSigningRequirements::Slots::slotsAndFields",
+              "kind": "requirement",
+              "shortName": "L.slots.16",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/26-signing-requirements.sysml",
+                "line": 498
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::slotsAndFields",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A slot's code and letter shall map both ways, and the little-endian field readers and writer shall read and write the bytes the formats name.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 499
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::slotsAndFields",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: through the record and header round trips.\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 500
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::slotsAndFields",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SIGN.7\"",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 501
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSigningRequirements::Slots::slotsAndFields",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_slots::Slot::code\", \"ferrix_slots::Slot::from_code\", \"ferrix_slots::Slot::other\", \"ferrix_slots::Slot::letter\", \"ferrix_slots::Slot::from_letter\", \"ferrix_slots::le16\", \"ferrix_slots::le32\", \"ferrix_slots::le64\", \"ferrix_slots::put\")",
+                  "source": {
+                    "file": "docs/sysml/26-signing-requirements.sysml",
+                    "line": 510
                   }
                 }
               ]

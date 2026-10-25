@@ -14,7 +14,7 @@ use crate::record::{
     COPY_OFFSETS, Current, MAX_TRIES, RECORD_LEN, Record, RecordError, select, write_copy,
 };
 use crate::sha256::{Sha256, digest};
-use crate::slot::{HEADER_LEN, SlotError, SlotHeader};
+use crate::slot::{HEADER_LEN, SlotError, SlotHeader, VERSION_1, VERSION_2};
 
 fn hex(bytes: &[u8]) -> std::string::String {
     bytes
@@ -23,6 +23,7 @@ fn hex(bytes: &[u8]) -> std::string::String {
         .collect()
 }
 
+/// Verifies: L.slots.1
 #[test]
 fn checksums_match_their_check_values() {
     // The standard check value of each CRC over "123456789".
@@ -30,6 +31,7 @@ fn checksums_match_their_check_values() {
     assert_eq!(crc32c(b"123456789"), 0xE306_9283);
 }
 
+/// Verifies: L.sha256.1
 #[test]
 fn sha256_matches_fips_180_4() {
     assert_eq!(
@@ -68,6 +70,7 @@ fn record(sequence: u64, good: Slot, trial: Option<Slot>, tries: u8) -> Record {
     }
 }
 
+/// Verifies: L.slots.2, L.slots.16
 #[test]
 fn a_record_round_trips() {
     for good in Slot::BOTH {
@@ -78,6 +81,7 @@ fn a_record_round_trips() {
     }
 }
 
+/// Verifies: L.slots.2
 #[test]
 fn a_record_refuses_every_bad_field() {
     let good = record(5, Slot::A, Some(Slot::B), 1).encode();
@@ -116,6 +120,7 @@ fn a_record_refuses_every_bad_field() {
     }
 }
 
+/// Verifies: L.slots.3
 #[test]
 fn the_newer_valid_copy_is_current() {
     let old = record(7, Slot::A, Some(Slot::B), 1).encode();
@@ -140,6 +145,7 @@ fn the_newer_valid_copy_is_current() {
     assert_eq!(select(&torn, &zero), Current::Uninitialised);
 }
 
+/// Verifies: L.slots.3
 #[test]
 fn a_write_torn_anywhere_leaves_the_old_record_or_the_new() {
     // Copy 1 holds the current record, so the write goes to copy 0, which
@@ -169,6 +175,7 @@ fn a_write_torn_anywhere_leaves_the_old_record_or_the_new() {
     }
 }
 
+/// Verifies: L.slots.4
 #[test]
 fn the_record_transitions() {
     let armed = record(3, Slot::A, Some(Slot::B), 2);
@@ -198,6 +205,7 @@ fn the_record_transitions() {
     );
 }
 
+/// Verifies: L.slots.6
 #[test]
 fn the_plan_follows_the_record() {
     let attempts = |current: Current| plan(&current).attempts().collect::<Vec<_>>();
@@ -228,6 +236,7 @@ fn the_plan_follows_the_record() {
     }
 }
 
+/// Verifies: L.slots.7
 #[test]
 fn record_blocks_stay_in_the_control_partition() {
     let control = gpt::Part {
@@ -249,6 +258,7 @@ fn record_blocks_stay_in_the_control_partition() {
     assert_eq!(COPY_OFFSETS, [0, 65536]);
 }
 
+/// Verifies: L.slots.8
 #[test]
 fn loader_words_are_written_or_refused() {
     let words = LoaderWords {
@@ -256,38 +266,45 @@ fn loader_words_are_written_or_refused() {
         kind: Kind::Trial,
         sequence: 12,
         disk: DISK,
+        sig: Some(0x8000),
     };
-    let mut out = [0u8; 128];
+    let mut out = [0u8; 160];
     let Some(len) = write_words(&words, &mut out) else {
         panic!("room enough");
     };
     assert_eq!(
         &out[..len],
         b"ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=12 \
-          ferrix.slot.disk=12345678-9abc-def0-1122-334455667788"
+          ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.slot.sig=32768"
     );
+    let unsigned = LoaderWords { sig: None, ..words };
+    let len = write_words(&unsigned, &mut out).unwrap();
+    assert!(out[..len].ends_with(b" ferrix.slot.sig=none"));
     assert_eq!(write_words(&words, &mut [0u8; 20]), None);
 }
 
+/// Verifies: L.slots.8, L.slots.15
 #[test]
 fn loader_words_read_back_first_match_and_whole() {
-    for (slot, kind, sequence) in [
-        (Slot::A, Kind::Good, 1),
-        (Slot::B, Kind::Trial, u64::MAX),
-        (Slot::A, Kind::Fallback, 7),
+    for (slot, kind, sequence, sig) in [
+        (Slot::A, Kind::Good, 1, None),
+        (Slot::B, Kind::Trial, u64::MAX, Some(0x8000)),
+        (Slot::A, Kind::Fallback, 7, Some(1)),
     ] {
         let words = LoaderWords {
             slot,
             kind,
             sequence,
             disk: DISK,
+            sig,
         };
         let line = words.to_string();
         assert_eq!(parse_words(&line), Some(words));
         // A slot's own line after the loader's cannot override them.
         let forged = std::format!(
             "{line} ferrix.slot=b ferrix.slot.boot=trial ferrix.slot.seq=99 \
-             ferrix.slot.disk=00000000-0000-0000-0000-000000000000 ferrix.root=btrfs"
+             ferrix.slot.disk=00000000-0000-0000-0000-000000000000 ferrix.slot.sig=0 \
+             ferrix.root=btrfs"
         );
         assert_eq!(parse_words(&forged), Some(words));
         assert_eq!(
@@ -298,8 +315,15 @@ fn loader_words_read_back_first_match_and_whole() {
     // Any of the four missing or malformed: not a slot boot.
     let whole = "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 \
                  ferrix.slot.disk=12345678-9abc-def0-1122-334455667788";
-    assert!(parse_words(whole).is_some());
+    // A loader from before `ferrix.slot.sig` wrote none: unsigned.
+    assert_eq!(parse_words(whole).map(|w| w.sig), Some(None));
+    assert_eq!(
+        parse_words(&std::format!("{whole} ferrix.slot.sig=32768")).map(|w| w.sig),
+        Some(Some(0x8000))
+    );
     for broken in [
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.slot.sig=x",
+        "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.slot.sig=65536",
         "ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=1",
         "ferrix.slot=c ferrix.slot.boot=good ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788",
         "ferrix.slot=a ferrix.slot.boot=best ferrix.slot.seq=1 ferrix.slot.disk=12345678-9abc-def0-1122-334455667788",
@@ -313,7 +337,7 @@ fn loader_words_read_back_first_match_and_whole() {
 }
 
 fn slot_image(kernel: &[u8], initrd: &[u8], cmdline: &[u8]) -> (SlotHeader, Vec<u8>) {
-    let header = SlotHeader::lay_out(3, "ferrix test", kernel, initrd, cmdline);
+    let header = SlotHeader::lay_out(VERSION_1, 3, "ferrix test", kernel, initrd, cmdline);
     let mut image = vec![0u8; header.needed() as usize];
     image[..HEADER_LEN].copy_from_slice(&header.encode());
     for (blob, bytes) in header.blobs().iter().zip([kernel, initrd, cmdline]) {
@@ -323,6 +347,7 @@ fn slot_image(kernel: &[u8], initrd: &[u8], cmdline: &[u8]) -> (SlotHeader, Vec<
     (header, image)
 }
 
+/// Verifies: L.slots.10, L.slots.16
 #[test]
 fn a_slot_round_trips_and_verifies() {
     let kernel = vec![0x7F; 10_000];
@@ -351,6 +376,7 @@ fn a_slot_round_trips_and_verifies() {
     assert_eq!(SlotHeader::decode(&image, 1 << 20), Ok(bare));
 }
 
+/// Verifies: L.slots.11
 #[test]
 fn a_slot_header_refuses_what_it_must() {
     let (header, image) = slot_image(&[1; 5000], &[2; 5000], b"x");
@@ -395,6 +421,57 @@ fn a_slot_header_refuses_what_it_must() {
     assert_eq!(encode(&|h| h.cmdline.length = 2049), Err(SlotError::Length));
 }
 
+/// A version-2 header and its slot image, the manifest block left zero.
+fn signed_slot_image(kernel: &[u8], initrd: &[u8], cmdline: &[u8]) -> (SlotHeader, Vec<u8>) {
+    let header = SlotHeader::lay_out(VERSION_2, 7, "ferrix signed", kernel, initrd, cmdline);
+    let mut image = vec![0u8; header.needed() as usize];
+    image[..HEADER_LEN].copy_from_slice(&header.encode());
+    for (blob, bytes) in header.blobs().iter().zip([kernel, initrd, cmdline]) {
+        let at = blob.offset as usize;
+        image[at..at + bytes.len()].copy_from_slice(bytes);
+    }
+    (header, image)
+}
+
+/// Verifies: L.slots.12
+#[test]
+fn a_version_2_header_puts_blobs_after_the_manifest_and_zeroes_the_generation() {
+    let (header, image) = signed_slot_image(&[1; 5000], &[2; 5000], b"x");
+    assert_eq!(header.version, VERSION_2);
+    // The generation asked for is not written: version 2's is zero.
+    assert_eq!(header.generation, 0);
+    assert_eq!(header.kernel.offset, 8192);
+    assert_eq!(SlotHeader::decode(&image, 1 << 20), Ok(header));
+    // The seal is the header's last 32 bytes, as written.
+    assert_eq!(header.seal()[..], image[4064..4096]);
+    // Version 1 of the same blobs starts them at 4096, and seals otherwise.
+    let (old, _) = slot_image(&[1; 5000], &[2; 5000], b"x");
+    assert_eq!(old.version, VERSION_1);
+    assert_eq!(old.kernel.offset, 4096);
+    assert_ne!(old.seal(), header.seal());
+}
+
+/// Verifies: L.slots.12, L.slots.11
+#[test]
+fn a_version_2_header_refuses_a_generation_and_a_blob_in_the_manifest() {
+    let (header, _) = signed_slot_image(&[1; 5000], &[2; 5000], b"x");
+    let encode = |edit: &dyn Fn(&mut SlotHeader)| {
+        let mut changed = header;
+        edit(&mut changed);
+        SlotHeader::decode(&changed.encode(), 1 << 20)
+    };
+    // SIGNING §1.2: a version-2 header with a non-zero generation.
+    assert_eq!(encode(&|h| h.generation = 1), Err(SlotError::Generation));
+    // A blob inside the manifest block, 4096..8192.
+    assert_eq!(
+        encode(&|h| h.kernel.offset = 4096),
+        Err(SlotError::Placement)
+    );
+    // Neither version 0 nor 3 is a header.
+    assert_eq!(encode(&|h| h.version = 3), Err(SlotError::Version));
+    assert_eq!(encode(&|h| h.version = 0), Err(SlotError::Version));
+}
+
 const DISK_BLOCKS: u64 = 1 << 16;
 
 /// A disk GUID whose text is easy to read.
@@ -437,6 +514,7 @@ fn find(parts: &[(ferrix_partition::Guid, u64, u64)]) -> Result<gpt::Layout, Gpt
     gpt::find(&header, &array, DISK_BLOCKS, 512)
 }
 
+/// Verifies: L.slots.13
 #[test]
 fn the_gpt_scan_finds_the_layout_by_type() {
     let swap =
@@ -494,6 +572,7 @@ fn the_gpt_scan_finds_the_layout_by_type() {
     );
 }
 
+/// Verifies: L.slots.14
 #[test]
 fn the_gpt_scan_trusts_nothing() {
     let slot = ferrix_partition::Guid(SLOT_TYPE);
@@ -555,6 +634,7 @@ fn set_lba(array: &mut [u8], entry: usize, field: usize, value: u64) {
     array[at..at + 8].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Verifies: L.slots.14
 #[test]
 fn the_gpt_scan_refuses_hostile_tables() {
     let slot = ferrix_partition::Guid(SLOT_TYPE);
@@ -617,6 +697,8 @@ struct MemDisk {
     size: u32,
     bytes: Vec<u8>,
     drop_writes: bool,
+    /// Every read fails, as an unreadable device's would.
+    fail_reads: bool,
     writes: Vec<u64>,
 }
 
@@ -626,6 +708,7 @@ impl MemDisk {
             size,
             bytes: vec![0; (u64::from(size) * blocks) as usize],
             drop_writes: false,
+            fail_reads: false,
             writes: Vec::new(),
         }
     }
@@ -654,12 +737,16 @@ impl crate::record::ControlDisk for MemDisk {
         Ok(())
     }
     fn read_block(&mut self, lba: u64, bytes: &mut [u8]) -> Result<(), crate::record::DeviceError> {
+        if self.fail_reads {
+            return Err(crate::record::DeviceError);
+        }
         let range = self.range(lba);
         bytes.copy_from_slice(self.bytes.get(range).ok_or(crate::record::DeviceError)?);
         Ok(())
     }
 }
 
+/// Verifies: L.slots.5
 #[test]
 fn a_record_write_counts_only_when_read_back() {
     use crate::record::{WriteError, read_current, write_record};
@@ -744,6 +831,7 @@ fn a_record_write_counts_only_when_read_back() {
     assert!(disk.writes.is_empty());
 }
 
+/// Verifies: L.slots.9
 #[test]
 fn a_slot_command_line_is_composed_whole_or_not_at_all() {
     use crate::plan::compose;
@@ -752,9 +840,10 @@ fn a_slot_command_line_is_composed_whole_or_not_at_all() {
         kind: Kind::Good,
         sequence: 3,
         disk: DISK,
+        sig: None,
     };
     let full: &[u8] = b"ferrix.slot=a ferrix.slot.boot=good ferrix.slot.seq=3 \
-        ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.root=tmpfs";
+        ferrix.slot.disk=12345678-9abc-def0-1122-334455667788 ferrix.slot.sig=none ferrix.root=tmpfs";
     let mut out = [0u8; 200];
     let len = compose(&words, b"  ferrix.root=tmpfs\n", &mut out);
     assert_eq!(len.map(|len| &out[..len]), Some(full));
@@ -770,6 +859,7 @@ fn a_slot_command_line_is_composed_whole_or_not_at_all() {
     assert_eq!(compose(&words, &[0xFF, 0xFE], &mut out), None);
 }
 
+/// Verifies: L.slots.9
 #[test]
 fn the_longest_slot_command_line_fits_the_boot_info() {
     use crate::plan::compose;
@@ -783,6 +873,7 @@ fn the_longest_slot_command_line_fits_the_boot_info() {
         kind: Kind::Fallback,
         sequence: u64::MAX,
         disk: [0xFF; 16],
+        sig: Some(u16::MAX),
     };
     let line = vec![b'x'; MAX_CMDLINE as usize];
     let mut out = vec![0u8; capacity];
@@ -792,6 +883,7 @@ fn the_longest_slot_command_line_fits_the_boot_info() {
     );
 }
 
+/// Verifies: L.slots.14
 #[test]
 fn a_ferrix_partition_outside_the_usable_blocks_is_refused() {
     let slot = ferrix_partition::Guid(SLOT_TYPE);
@@ -828,6 +920,7 @@ fn find_events(parts: &[(ferrix_partition::Guid, u64, u64)]) -> Result<gpt::Part
     gpt::find_one(&header, &array, DISK_BLOCKS, gpt::EVENTS_TYPE)
 }
 
+/// Verifies: L.slots.13
 #[test]
 fn the_event_log_is_found_alone_and_checked() {
     let events = ferrix_partition::Guid(gpt::EVENTS_TYPE);
@@ -860,6 +953,7 @@ fn the_event_log_is_found_alone_and_checked() {
     );
 }
 
+/// Verifies: L.slots.14
 #[test]
 fn the_event_log_lookup_refuses_a_damaged_array() {
     let events = ferrix_partition::Guid(gpt::EVENTS_TYPE);
@@ -870,4 +964,220 @@ fn the_event_log_lookup_refuses_a_damaged_array() {
         gpt::find_one(&header, &array, DISK_BLOCKS, gpt::EVENTS_TYPE),
         Err(gpt::Lookup::Table(GptError::Entries))
     );
+}
+
+/// A valid primary header, edited at `at` to `value`, its CRC made right
+/// again, so that only the edit is wrong.
+fn header_with(at: usize, value: &[u8]) -> Vec<u8> {
+    let slot = ferrix_partition::Guid(SLOT_TYPE);
+    let control = ferrix_partition::Guid(CONTROL_TYPE);
+    let (mut header, _) = table(&[
+        (control, 4096, 8191),
+        (slot, 8192, 12287),
+        (slot, 12288, 16383),
+    ]);
+    header[at..at + value.len()].copy_from_slice(value);
+    let size = u32::from_le_bytes(header[12..16].try_into().unwrap_or_default()) as usize;
+    header[16..20].fill(0);
+    let crc = crc32(&header[..size.clamp(92, 512)]);
+    header[16..20].copy_from_slice(&crc.to_le_bytes());
+    header
+}
+
+/// Verifies: L.slots.14
+/// Each condition of the header's checks, alone.
+#[test]
+fn each_header_field_is_refused_alone() {
+    let bad =
+        |at: usize, value: &[u8]| gpt::parse_header(&header_with(at, value), DISK_BLOCKS, 512);
+    assert!(bad(0, b"EFI PART").is_ok());
+    // The header's own size: below 92, above 512, past the sector given,
+    // past the block size.
+    assert_eq!(bad(12, &91u32.to_le_bytes()), Err(GptError::Header));
+    assert_eq!(bad(12, &513u32.to_le_bytes()), Err(GptError::Header));
+    let header = header_with(12, &200u32.to_le_bytes());
+    assert_eq!(
+        gpt::parse_header(&header[..150], DISK_BLOCKS, 512),
+        Err(GptError::Header)
+    );
+    assert_eq!(
+        gpt::parse_header(&header, DISK_BLOCKS, 128),
+        Err(GptError::Header)
+    );
+    // MyLBA not 1.
+    assert_eq!(bad(24, &2u64.to_le_bytes()), Err(GptError::Header));
+    // An entry size of 128 times a power of two but not a multiple of 128
+    // cannot be; one that is a multiple but not a power of two times 128,
+    // and one past the array's bound.
+    assert_eq!(bad(84, &192u32.to_le_bytes()), Err(GptError::Header));
+    let mut big = header_with(84, &1024u32.to_le_bytes());
+    big[80..84].copy_from_slice(&128u32.to_le_bytes());
+    big[16..20].fill(0);
+    let crc = crc32(&big[..92]);
+    big[16..20].copy_from_slice(&crc.to_le_bytes());
+    assert_eq!(
+        gpt::parse_header(&big, DISK_BLOCKS, 512),
+        Err(GptError::Header)
+    );
+    // The array before LBA 2 or past the disk; the usable range past the
+    // disk, before LBA 2, or backwards.
+    assert_eq!(bad(72, &1u64.to_le_bytes()), Err(GptError::Header));
+    assert_eq!(bad(72, &DISK_BLOCKS.to_le_bytes()), Err(GptError::Header));
+    assert_eq!(bad(48, &DISK_BLOCKS.to_le_bytes()), Err(GptError::Header));
+    assert_eq!(bad(40, &1u64.to_le_bytes()), Err(GptError::Header));
+    assert_eq!(
+        bad(40, &(DISK_BLOCKS - 1).to_le_bytes()),
+        Err(GptError::Header)
+    );
+}
+
+/// Verifies: L.slots.14
+/// Each condition of an entry's range, alone: in the layout's scan and in
+/// the event log's lookup; and each of the three partitions too small.
+#[test]
+fn each_entry_range_condition_is_refused_alone() {
+    let slot = ferrix_partition::Guid(SLOT_TYPE);
+    let control = ferrix_partition::Guid(CONTROL_TYPE);
+    let parts = [
+        (control, 4096, 8191),
+        (slot, 8192, 12287),
+        (slot, 12288, 16383),
+    ];
+    assert_eq!(
+        edited(&parts, &|_, array| set_lba(array, 0, 32, 0)),
+        Err(GptError::Range)
+    );
+    // Slots of 8191 bytes' worth of blocks: too small for a version-2
+    // header and its manifest, A and then B.
+    let small_a = [
+        (control, 4096, 8191),
+        (slot, 8192, 8192 + 14),
+        (slot, 12288, 16383),
+    ];
+    assert_eq!(edited(&small_a, &|_, _| {}), Err(GptError::TooSmall));
+    let small_b = [
+        (control, 4096, 8191),
+        (slot, 8192, 12287),
+        (slot, 12288, 12288 + 14),
+    ];
+    assert_eq!(edited(&small_b, &|_, _| {}), Err(GptError::TooSmall));
+
+    let events = ferrix_partition::Guid(gpt::EVENTS_TYPE);
+    let esp = ferrix_partition::ESP;
+    let lookup = |entry_first: u64, entry_last: u64, blocks: u64| {
+        let (mut header, mut array) = table(&[(esp, 2048, 4095), (events, 40, 2047)]);
+        set_lba(&mut array, 1, 32, entry_first);
+        set_lba(&mut array, 1, 40, entry_last);
+        let entries = u32::from_le_bytes(header[80..84].try_into().unwrap_or_default()) as usize;
+        let crc = crc32(&array[..entries * 128]);
+        header[88..92].copy_from_slice(&crc.to_le_bytes());
+        header[16..20].fill(0);
+        let crc = crc32(&header[..92]);
+        header[16..20].copy_from_slice(&crc.to_le_bytes());
+        let header =
+            gpt::parse_header(&header, DISK_BLOCKS, 512).unwrap_or_else(|e| panic!("{e:?}"));
+        gpt::find_one(&header, &array, blocks, gpt::EVENTS_TYPE)
+    };
+    let range = Err(gpt::Lookup::Table(GptError::Range));
+    assert_eq!(lookup(0, 2047, DISK_BLOCKS), range);
+    assert_eq!(lookup(2000, 1000, DISK_BLOCKS), range);
+    assert_eq!(lookup(40, 2047, 2000), range);
+    assert_eq!(lookup(30, 2047, DISK_BLOCKS), range);
+    assert_eq!(
+        lookup(DISK_BLOCKS - 40, DISK_BLOCKS - 2, DISK_BLOCKS),
+        range
+    );
+}
+
+/// Verifies: L.slots.5, L.slots.7
+/// A block size the record cannot be written in, a copy offset that is no
+/// whole block, and an unreadable copy read as zeroes.
+#[test]
+fn record_reads_and_blocks_refuse_what_they_must() {
+    let control = gpt::Part {
+        index: 0,
+        unique: [0; 16],
+        first_lba: 100,
+        last_lba: 100 + 255,
+    };
+    // 1536 is no power of two: 65536 is not a whole number of its blocks.
+    assert_eq!(record_block(&control, 1, 1536), None);
+    let mut odd = MemDisk::new(1536, 512);
+    assert_eq!(
+        crate::record::read_current(&mut odd, &control),
+        Err(crate::record::WriteError::Range)
+    );
+    let mut small = MemDisk::new(256, 512);
+    assert_eq!(
+        crate::record::read_current(&mut small, &control),
+        Err(crate::record::WriteError::Range)
+    );
+    let mut failing = MemDisk::new(512, 512);
+    failing.fail_reads = true;
+    assert_eq!(
+        crate::record::read_current(&mut failing, &control),
+        Ok(Current::Uninitialised)
+    );
+}
+
+/// Verifies: L.slots.11
+/// A reserved byte of the header set, the seal made right again.
+#[test]
+fn a_reserved_header_byte_is_refused() {
+    let (header, _) = slot_image(&[1; 5000], &[2; 5000], b"x");
+    let mut bytes = header.encode();
+    bytes[300] = 1;
+    let seal = digest(&bytes[..4064]);
+    bytes[4064..].copy_from_slice(&seal);
+    assert_eq!(
+        SlotHeader::decode(&bytes, 1 << 20),
+        Err(SlotError::Reserved)
+    );
+}
+
+/// Verifies: L.slots.5
+/// A record that breaks its own rules is never written.
+#[test]
+fn an_inconsistent_record_is_never_written() {
+    let control = gpt::Part {
+        index: 0,
+        unique: [0; 16],
+        first_lba: 100,
+        last_lba: 100 + 255,
+    };
+    let mut disk = MemDisk::new(512, 512);
+    let bad = Record {
+        trial: Some(Slot::A),
+        ..record(1, Slot::A, None, 0)
+    };
+    assert_eq!(
+        crate::record::write_record(&mut disk, &control, &Current::Uninitialised, &bad),
+        Err(crate::record::WriteError::Record)
+    );
+    assert!(disk.writes.is_empty());
+}
+
+/// Verifies: L.slots.10, L.slots.13
+/// Blobs in another order than `lay_out`'s still decode when they are apart,
+/// and a layout names each slot's partition.
+#[test]
+fn blobs_apart_in_any_order_decode() {
+    let (header, _) = slot_image(&[1; 5000], &[2; 5000], b"x");
+    let mut moved = header;
+    moved.kernel.offset = 4096 * 64;
+    assert_eq!(SlotHeader::decode(&moved.encode(), 1 << 20), Ok(moved));
+    let slot = ferrix_partition::Guid(SLOT_TYPE);
+    let control = ferrix_partition::Guid(CONTROL_TYPE);
+    let Ok(layout) = edited(
+        &[
+            (control, 4096, 8191),
+            (slot, 8192, 12287),
+            (slot, 12288, 16383),
+        ],
+        &|_, _| {},
+    ) else {
+        panic!("layout");
+    };
+    assert_eq!(layout.slot(Slot::A), layout.a);
+    assert_eq!(layout.slot(Slot::B), layout.b);
 }
