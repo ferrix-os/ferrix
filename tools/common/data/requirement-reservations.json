@@ -185,6 +185,13 @@
       "branch": "feature/signing-s4",
       "date": "2026-10-24",
       "purpose": "docs/SIGNING.md §10.6, slice S4 (ledger 4016 (1), 4032 (1)): L.uefisig.1-5, the loader's own behaviour checked by boots (§8.1's sig-loader-* rows). Not written yet: the loader is in no ring, so its requirements need a requirement kind the model does not have; H.SIGN.7 and test-ab-boot-signed hold the behaviour meanwhile. H.SIGN.7, L.bootpolicy.1-12 and L.slots.1-16 were written in S4; L.slots.17-20 are released"
+    },
+    {
+      "ids": ["L.discovery.7"],
+      "owner": "chardev-design",
+      "branch": "chardev-design",
+      "date": "2026-10-25",
+      "purpose": "docs/CHARDEV.md step 1, character devices served from ring 3 (customer, 2026-10-25; consultant OK IF, ledger 4352 (G1)): the root chardev grant carried to devmgr in DEVICES through a hook the load ring registers"
     }
   ]
 }
