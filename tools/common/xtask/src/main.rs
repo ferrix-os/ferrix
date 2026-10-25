@@ -213,6 +213,7 @@ mod test_disk;
 mod test_runs;
 mod threads;
 mod uboot_env;
+mod usb_serial;
 mod uefi_vars;
 mod uutils;
 mod uvm;
@@ -611,6 +612,7 @@ const TASKS: &[&[Task]] = &[
     steamcmd::TASKS,
     symbolize::TASKS,
     sysfs::TASKS,
+    usb_serial::TASKS,
     uutils::TASKS,
     wallpaper::TASKS,
     wine_dispatch::TASKS,

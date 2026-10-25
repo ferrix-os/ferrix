@@ -3092,6 +3092,7 @@ fn attach_asked_for(command: &mut Command, arch: Arch, args: &Args, binary: &Pat
     attach_clipboard(command, arch, args);
     attach_audio(command, arch, args, binary);
     attach_usb(command, arch, args);
+    attach_usb_serial(command, arch, args);
 }
 
 /// A virtio-snd card (`docs/AUDIO.md` §4), when `--audio` names a backend,
@@ -3446,6 +3447,47 @@ fn attach_usb(command: &mut Command, arch: Arch, args: &Args) {
         "-device",
         &format!("usb-storage,bus={USB_BUS}.0,port=3,drive=usbstick,id=usbdisk"),
     ]);
+}
+
+/// `test-usb-serial`'s bus: QEMU's `usb-serial`, an emulated FT232BM,
+/// behind `test-usb`'s controller or one of its own, its line a Unix socket
+/// the gate connects to, and QEMU's trace of the rates it is set to in a
+/// file beside it. Emulated only: no host serial adapter is ever attached.
+fn attach_usb_serial(command: &mut Command, arch: Arch, args: &Args) {
+    let Some(socket) = &args.usb_serial else {
+        return;
+    };
+    println!(
+        "  {arch}: QEMU's usb-serial (an FT232BM) on qemu-xhci, its line the socket {}",
+        display(socket)
+    );
+    if args.usb.is_none() {
+        let _ = command.args(["-device", &format!("qemu-xhci,id={USB_BUS}")]);
+    }
+    let _ = command.args([
+        "-chardev",
+        &format!("socket,id=ftdi0,path={},server=on,wait=off", display(socket)),
+    ]);
+    // Plugged in from the start: otherwise QEMU attaches the device only
+    // once something has connected to the socket, which is the gate, after
+    // the guest is up.
+    let _ = command.args([
+        "-device",
+        &format!("usb-serial,bus={USB_BUS}.0,chardev=ftdi0,id=ftdi,always-plugged=on"),
+    ]);
+    // The trace's `file=` is the simple backend's; the log backend, which
+    // the host's QEMU is built with, writes to `-D`'s file.
+    let trace = usb_serial_trace(socket);
+    let _ = command.args([
+        "-trace",
+        &format!("enable=usb_serial_set_*,file={}", display(&trace)),
+    ]);
+    let _ = command.args(["-D", &display(&trace)]);
+}
+
+/// Where QEMU traces the rates the emulated FT232BM is set to.
+pub(crate) fn usb_serial_trace(socket: &Path) -> PathBuf {
+    socket.with_extension("trace")
 }
 
 /// The xHCI controller's id on QEMU's command line.
