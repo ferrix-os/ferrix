@@ -28,7 +28,7 @@ use crate::{Error, Result};
 /// Every dispatcher named here is one `src/user/system/linux/compositor/layout` has. `SUPER+P`
 /// starts a `src/user/system/linux/compositor/pattern` client, which is how the tiling a gate boot
 /// shows is reached from a configuration that starts none.
-const RUN_CONFIG: &str = "# Written into the initramfs by `cargo xtask run-compositor`.
+pub(super) const RUN_CONFIG: &str = "# Written into the initramfs by `cargo xtask run-compositor`.
 # `--config <PATH>` carries a real `hyprland.conf` instead of this one.
 # A terminal first, because a screen somebody is watching is one they want to
 # type into: `/bin/term` runs a program on a pseudoterminal and `/bin/zinc`

@@ -686,6 +686,47 @@ group's usage understated by a node) made `btrfs check` fail.
 `mkfs.btrfs` as a program of its own (`/sbin/mkfs.btrfs`) is not built: the
 installer is its only user so far.
 
-Left for later, in §9's order: `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
+**The live ISO, I6b and I11 for the first public release (2026-10-25,
+branch feature/live-iso).** [TRY-FERRIX.md](TRY-FERRIX.md) is the user's
+page.
+
+* `cargo xtask iso` writes `build/x86_64/ferrix-live.iso`: the release
+  desktop (Yoru, the default apps) as a live session from memory
+  (`ferrix.root=tmpfs ferrix.live`), logged in as uid 1000 `ferrix` with no
+  password (§10 decision 2), in a hybrid ISO written in Rust
+  (`tools/common/xtask/src/iso.rs`): El Torito's EFI entry and a GUID
+  partition table over one EFI system partition named `FERRIX-LIVE`, sized
+  to what it holds (196 MiB). The MBR is the protective one; there is no
+  legacy BIOS boot. The build runs `licences.py` over the image and refuses
+  it on an unaccounted part; the inventory goes into the ISO's root and the
+  ESP.
+* The graphical installer is `ferrix-installer`, an app on tole in
+  Nocturne (the apps repository's `installer`), which the live session
+  starts at login. It asks root's `ferrix-installd.service`
+  (`ferrix-install --serve`, only under `ferrix.live`, peers of uid 0 or
+  1000) over `/run/ferrix-installer.sock` for the disks and the install.
+  The engine (`installer/src/engine.rs`) erases a disk or installs into a
+  free range or one partition of a GUID partition table, in empty entries,
+  so every other partition keeps its number and bytes.
+* The person's answers travel in `FERRIX/SETUP.TXT`, a placeholder the
+  installer fills in on the installed ESP, the password as an Argon2id PHC
+  string; `ferrix-setup.service` (`ferrix-install --apply`) applies them at
+  every boot before the session: uid 1000 renamed, the seed for `authd`,
+  hostname, keyboard, time zone, and the session starting behind hyprlock,
+  which is its login. `sessiond --user 1000` names the account by uid.
+* An unattended install, as Ubuntu's autoinstall: a GUID partition named
+  `FERRIX-ANSWERS` holding `ferrix-answers 1` and the install's `key=value`
+  lines.
+* Gates: `cargo xtask test-iso` (the ISO as a CD and as a USB stick under
+  OVMF; the session, the daemon, the installer's window and a drawn screen)
+  and `cargo xtask test-iso-install` (unattended onto a blank virtio disk,
+  then that disk alone: answers applied, the session `kira`'s and locked,
+  her password opens it).
+* Not yet: installing from a CD or from a USB stick on a PC (the medium
+  must be a disk Ferrix drives; the in-memory source needs the kernel to
+  expose its kept initramfs, a change to the certified item), a firmware
+  boot entry (I9), the boot menu (I8), Secure Boot (I13), shrinking.
+
+Left for later, in §9's order: `BLKRRPART`, `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),
 shrinking (S1–S6) and real PCs (H0–H7).

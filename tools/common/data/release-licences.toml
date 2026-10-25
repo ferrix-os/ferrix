@@ -37,6 +37,7 @@ permissive = [
     "Bitstream-Vera",
     "OFL-1.1",
     "LicenseRef-Zsh",
+    "LicenseRef-Public-Domain",
 ]
 
 # Licences that oblige the release to offer the corresponding source. A
@@ -102,7 +103,19 @@ paths = ["usr/share/zsh/functions/**"]
 licence = "OFL-1.1"
 upstream = "https://github.com/rsms/inter"
 note = "Inter 4.1, fontconfig's sans-serif on an image with Chrome"
-paths = ["usr/share/ferrix/fonts/inter/*"]
+paths = ["usr/share/ferrix/fonts/inter/*", "usr/share/fonts/inter/*"]
+
+[components.tzdata]
+licence = "LicenseRef-Public-Domain"
+upstream = "https://www.iana.org/time-zones"
+note = "the IANA time zone database's compiled zones, which the installer offers (in the public domain)"
+paths = ["usr/share/zoneinfo/**"]
+
+[components.phosphor]
+licence = "MIT"
+upstream = "https://github.com/phosphor-icons/web"
+note = "Phosphor icons 2.1.1 as a font, the Yoru desktop's icons (assets/fonts/README.md)"
+paths = ["usr/share/fonts/phosphor/*"]
 
 [components.liberation]
 licence = "OFL-1.1"
@@ -137,6 +150,10 @@ paths = [
     "usr/share/udhcpc/default.script",
     "usr/share/applications/*",
     "usr/share/backgrounds/ferrix/*",
+    # Yoru's own (docs/DESKTOP.md §6): hyprix's themes and the Nocturne
+    # wallpaper, a gradient of our own drawn as an SVG.
+    "usr/share/hyprix/themes/*",
+    "usr/share/backgrounds/yoru/*",
     # What xtask writes beside Chrome (chrome.rs, start_page.rs): the
     # fontconfig file naming the fonts below, the xdg-open that opens a
     # link in Chrome, and Chrome's start page.
@@ -171,6 +188,9 @@ paths = [
     "bin/authctl",
     "bin/login",
     "bin/su",
+    "bin/dmesg",
+    "bin/settingsctl",
+    "bin/lode-upload",
 ]
 
 # Third-party material inside Ferrix's own sources, built into its programs.

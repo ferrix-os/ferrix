@@ -82,6 +82,7 @@ mod hyprlock;
 mod idle;
 mod kept_settings;
 mod lane;
+mod live;
 mod latency;
 mod layout;
 mod locked;
@@ -152,6 +153,32 @@ pub(crate) const TASKS: &[Task] = &[
             "run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show",
         ],
         run: |_, args| run_compositor(args),
+    },
+    Task {
+        name: "iso",
+        help_at: 126,
+        help: &[
+            "iso           Write build/x86_64/ferrix-live.iso: the release desktop as a live session from memory, with the",
+            "              installer, in a hybrid ISO that boots as a CD and, written with dd, as a USB stick (UEFI)",
+        ],
+        run: |_, args| live::iso(args),
+    },
+    Task {
+        name: "test-iso",
+        help_at: 527,
+        help: &[
+            "test-iso      Boot the live ISO under OVMF as a CD and as a USB stick; the live desktop must come up (x86_64)",
+        ],
+        run: |_, args| live::test_iso(args),
+    },
+    Task {
+        name: "test-iso-install",
+        help_at: 528,
+        help: &[
+            "test-iso-install  Install from the live ISO onto a blank disk with unattended answers, then boot that disk alone:",
+            "              the person's account, its session locked, their password opens it (x86_64)",
+        ],
+        run: |_, args| live::test_iso_install(args),
     },
     Task {
         name: "release-image",

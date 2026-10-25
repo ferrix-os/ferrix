@@ -143,6 +143,7 @@ mod init_file;
 mod initramfs;
 mod input;
 mod installer;
+mod iso;
 mod intel_uapi;
 mod ipc;
 mod jobs;

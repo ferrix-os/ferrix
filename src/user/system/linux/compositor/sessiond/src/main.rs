@@ -194,21 +194,35 @@ struct Account {
 }
 
 /// Find `name` in the text of `/etc/passwd` and `/etc/group`.
+///
+/// A `name` of digits alone is a uid, and the account is the one with it:
+/// the live medium's image names its session `--user 1000`, so the account
+/// an installed system's first boot renames (`ferrix-install --apply`,
+/// docs/INSTALLER.md) is the one its session starts as, whatever name the
+/// person chose. An account's own name is never digits alone.
 fn account(name: &str, passwd: &str, group: &str) -> Option<Account> {
-    let (uid, gid, home, shell) = passwd.lines().find_map(|line| {
+    let by_uid = name.parse::<u32>().ok().filter(|_| !name.is_empty());
+    let (name, uid, gid, home, shell) = passwd.lines().find_map(|line| {
         let fields: Vec<&str> = line.split(':').collect();
         let [user, _, uid, gid, _, home, shell, ..] = fields.as_slice() else {
             return None;
         };
-        (*user == name).then(|| {
+        let uid = uid.parse::<u32>().ok()?;
+        let wanted = match by_uid {
+            Some(wanted) => uid == wanted,
+            None => *user == name,
+        };
+        wanted.then(|| {
             Some((
-                uid.parse::<u32>().ok()?,
+                (*user).to_owned(),
+                uid,
                 gid.parse::<u32>().ok()?,
                 (*home).to_owned(),
                 (*shell).to_owned(),
             ))
         })?
     })?;
+    let name = name.as_str();
     let mut groups = vec![gid];
     for line in group.lines() {
         let fields: Vec<&str> = line.split(':').collect();
@@ -1040,6 +1054,18 @@ mod tests {
     const PASSWD: &str =
         "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/home/ferrix:/bin/zsh\n";
     const GROUP: &str = "root:x:0:\nferrix:x:1000:\naudio:x:29:ferrix,other\nvideo:x:44:other\n";
+
+    #[test]
+    fn a_uid_names_the_account_that_has_it() {
+        let renamed = "root:x:0:0:root:/:/bin/sh\nkira:x:1000:1000:Kira:/home/kira:/bin/zsh\n";
+        let group = "root:x:0:\nkira:x:1000:\nwheel:x:10:kira\n";
+        let found = account("1000", renamed, group).expect("uid 1000");
+        assert_eq!(found.name, "kira");
+        assert_eq!(found.home, "/home/kira");
+        assert_eq!(found.groups, vec![1000, 10]);
+        assert!(account("1001", renamed, group).is_none());
+        assert_eq!(account("ferrix", PASSWD, GROUP).map(|a| a.uid), Some(1000));
+    }
 
     #[test]
     fn headless_options_are_split_off_before_the_program() {

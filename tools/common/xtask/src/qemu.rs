@@ -2840,7 +2840,28 @@ fn qemu_command(
             //
             // which is harmless and the kind of noise that trains people to
             // skim the boot log.
-            if !args.boot_virtio && !args.boot_nvme && !args.boot_sata {
+            if args.boot_cdrom {
+                println!("  {arch}: {} as a CD on the AHCI port, booted from", display(image));
+                let _ = command.args([
+                    "-drive",
+                    &format!(
+                        "format=raw,file={},if=none,id=disk,media=cdrom,readonly=on",
+                        display(image)
+                    ),
+                    "-device",
+                    "ide-cd,drive=disk,bus=ide.0,bootindex=0",
+                ]);
+            } else if args.boot_usb {
+                println!("  {arch}: {} as a USB stick, booted from", display(image));
+                let _ = command.args([
+                    "-device",
+                    "qemu-xhci,id=livexhci",
+                    "-drive",
+                    &format!("format=raw,file={},if=none,id=disk", display(image)),
+                    "-device",
+                    "usb-storage,bus=livexhci.0,drive=disk,bootindex=0,removable=on",
+                ]);
+            } else if !args.boot_virtio && !args.boot_nvme && !args.boot_sata {
                 let _ = command.args([
                     "-drive",
                     &format!("format=raw,file={},if=none,id=disk", display(image)),

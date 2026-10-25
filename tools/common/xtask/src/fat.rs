@@ -565,33 +565,8 @@ pub(crate) fn write_image_carrying(
     defaults: Option<&str>,
 ) -> Result<PathBuf> {
     let mut fs = Fat32::new(IMAGE_BYTES)?;
-    let mut carried = kernel.initramfs(initramfs)?;
-    // Under `--strip-kernel` the programs too, as `flash` gives them to a
-    // card: the release profile's full DWARF made them 38 of a 128 MiB
-    // machine's MiB (lode alone 19), which the loader holds and the kernel
-    // keeps while it unpacks them, and the 128 MiB boot ran out of memory.
-    if STRIP_KERNEL.load(Ordering::Relaxed) {
-        carried = crate::flash::card_initramfs(arch, &carried)?;
-    }
+    let (loader_bytes, kernel_bytes, carried) = checked_parts(arch, loader, kernel, initramfs)?;
     let initramfs = carried.as_slice();
-    let kernel: &Path = kernel;
-
-    let loader_bytes = std::fs::read(loader)
-        .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;
-    // Every image's loader and initramfs, as final: no development signing
-    // key in a claimed profile's (docs/SIGNING.md 6.4, D1).
-    crate::signing::refuse_in_image(&loader_bytes, initramfs)?;
-    // And exactly the trust-policy block this build names (SIGNING §10.6).
-    crate::signing::check_loader_policy(arch, "the image's UEFI loader", &loader_bytes)?;
-    let stripped;
-    let kernel = if STRIP_KERNEL.load(Ordering::Relaxed) {
-        stripped = crate::flash::stripped_kernel(kernel);
-        stripped.as_path()
-    } else {
-        kernel
-    };
-    let kernel_bytes = std::fs::read(kernel)
-        .map_err(|error| Error::new(format!("reading {}: {error}", kernel.display())))?;
 
     // The removable-media path, so the image boots with no firmware boot entry.
     fs.add_file(
@@ -637,6 +612,99 @@ pub(crate) fn write_image_carrying(
         written.bytes.div_ceil(1024)
     );
     Ok(image)
+}
+
+/// The live medium's volume (`crate::compositor` `iso`): the files
+/// [`write_image_carrying`] writes, `extras` beside them, in a volume sized
+/// to what it holds rather than [`IMAGE_BYTES`] -- the medium is downloaded
+/// -- with a margin and a whole MiB. Written to `out`. The parts are
+/// [`live_parts`]'s.
+pub(crate) fn write_live_volume(
+    arch: Arch,
+    (loader_bytes, kernel_bytes, carried): (&[u8], &[u8], &[u8]),
+    (cmdline, defaults): (&str, Option<&str>),
+    extras: &[(&str, Vec<u8>)],
+    out: &Path,
+) -> Result<()> {
+    let held = loader_bytes.len()
+        + kernel_bytes.len()
+        + carried.len()
+        + extras.iter().map(|(_, data)| data.len()).sum::<usize>();
+    // A sixteenth more for the tables and the clusters' tails, and 48 MiB,
+    // which keeps FAT32 above its smallest cluster count.
+    let size = (held + held / 16 + (48 << 20)).next_multiple_of(1 << 20);
+    let mut fs = Fat32::new(size)?;
+    fs.add_file(
+        &format!("EFI/BOOT/{}", arch.removable_boot_name()),
+        loader_bytes,
+    )?;
+    fs.add_file("FERRIX/KERNEL.ELF", kernel_bytes)?;
+    fs.add_file("FERRIX/INITRD.IMG", carried)?;
+    fs.add_file("FERRIX/CMDLINE.TXT", cmdline.as_bytes())?;
+    if let Some(defaults) = defaults {
+        fs.add_file(DEFAULTS_PATH, defaults.as_bytes())?;
+    }
+    for (path, data) in extras {
+        fs.add_file(path, data)?;
+    }
+    std::fs::write(out, fs.finish())
+        .map_err(|error| Error::new(format!("writing {}: {error}", out.display())))?;
+    println!(
+        "  live volume {} ({} MiB: {} KiB loader, {} KiB kernel, {} KiB initramfs)",
+        out.display(),
+        size >> 20,
+        loader_bytes.len() / 1024,
+        kernel_bytes.len() / 1024,
+        carried.len().div_ceil(1024)
+    );
+    Ok(())
+}
+
+/// [`checked_parts`], for the live medium, which writes its own volume.
+pub(crate) fn live_parts(
+    arch: Arch,
+    loader: &Path,
+    kernel: &crate::cargo::Kernel,
+    initramfs: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    checked_parts(arch, loader, kernel, initramfs)
+}
+
+/// The loader's, the kernel's and the initramfs's bytes as an image carries
+/// them, after the signing checks every image passes.
+fn checked_parts(
+    arch: Arch,
+    loader: &Path,
+    kernel: &crate::cargo::Kernel,
+    initramfs: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    let mut carried = kernel.initramfs(initramfs)?;
+    // Under `--strip-kernel` the programs too, as `flash` gives them to a
+    // card: the release profile's full DWARF made them 38 of a 128 MiB
+    // machine's MiB (lode alone 19), which the loader holds and the kernel
+    // keeps while it unpacks them, and the 128 MiB boot ran out of memory.
+    if STRIP_KERNEL.load(Ordering::Relaxed) {
+        carried = crate::flash::card_initramfs(arch, &carried)?;
+    }
+    let kernel: &Path = kernel;
+
+    let loader_bytes = std::fs::read(loader)
+        .map_err(|error| Error::new(format!("reading {}: {error}", loader.display())))?;
+    // Every image's loader and initramfs, as final: no development signing
+    // key in a claimed profile's (docs/SIGNING.md 6.4, D1).
+    crate::signing::refuse_in_image(&loader_bytes, &carried)?;
+    // And exactly the trust-policy block this build names (SIGNING §10.6).
+    crate::signing::check_loader_policy(arch, "the image's UEFI loader", &loader_bytes)?;
+    let stripped;
+    let kernel = if STRIP_KERNEL.load(Ordering::Relaxed) {
+        stripped = crate::flash::stripped_kernel(kernel);
+        stripped.as_path()
+    } else {
+        kernel
+    };
+    let kernel_bytes = std::fs::read(kernel)
+        .map_err(|error| Error::new(format!("reading {}: {error}", kernel.display())))?;
+    Ok((loader_bytes, kernel_bytes, carried))
 }
 
 #[cfg(test)]

@@ -86,7 +86,7 @@ const TARGET_BYTES: u64 = 2 << 30;
 
 /// The live medium's EFI system partition's name, by which `ferrix-install`
 /// knows the live system's disk (`docs/INSTALLER.md` §3.1).
-const LIVE_NAME: &str = "FERRIX-LIVE";
+pub(crate) const LIVE_NAME: &str = "FERRIX-LIVE";
 /// The live session's command line: `/` in memory, so that booting the
 /// medium never installs onto, or mounts, a disk the machine already has.
 /// `ferrix-install` rewrites it on the disk it installs (§4.2 step 5).
@@ -99,9 +99,9 @@ const SECTOR: u64 = 512;
 /// The medium's disk and partition GUIDs. Fixed, so that two builds of one
 /// tree write the same image, as release media of one version all carry
 /// the same ones; an installed disk gets random ones.
-const LIVE_DISK_GUID: Guid =
+pub(crate) const LIVE_DISK_GUID: Guid =
     Guid::from_fields(0x7a3d_6f52, 0x2c1e, 0x4d0b, 0x9e41, 0x4652_5249_584c);
-const LIVE_PART_GUID: Guid =
+pub(crate) const LIVE_PART_GUID: Guid =
     Guid::from_fields(0x7a3d_6f52, 0x2c1e, 0x4d0b, 0x9e42, 0x4652_5249_584c);
 
 /// What the install boot's shell runs: first an install onto the disk the

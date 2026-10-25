@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "ferrix-argon2"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-btrfs"
 version = "0.1.0"
 
@@ -33,6 +37,7 @@ dependencies = [
 name = "ferrix-install"
 version = "0.1.0"
 dependencies = [
+ "ferrix-argon2",
  "ferrix-btrfs-mkfs",
  "ferrix-partition",
  "ferrix-slots",

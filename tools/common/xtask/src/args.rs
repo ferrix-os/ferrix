@@ -508,6 +508,14 @@ pub(crate) struct Args {
     /// controller, first in the firmware's boot order: an N150 box whose
     /// one disk is SATA (`test-n150-sata`). Never a flag of its own.
     pub(crate) boot_sata: bool,
+    /// Boot the image as a CD on the first port of q35's AHCI controller,
+    /// first in the firmware's boot order: the live ISO as a CD
+    /// (`test-iso`). Never a flag of its own.
+    pub(crate) boot_cdrom: bool,
+    /// Boot the image as a USB stick on an xHCI controller, first in the
+    /// firmware's boot order: the live ISO written to a stick
+    /// (`test-iso`). Never a flag of its own.
+    pub(crate) boot_usb: bool,
     /// `--plan <DIR>`: a plan of builds `FERRIX_BUILDS=record:` wrote, which
     /// `test-selfhost` has Ferrix carry out and `builds-execute` carries out
     /// (see `crate::builds`).

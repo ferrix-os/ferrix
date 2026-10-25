@@ -29,6 +29,10 @@ on:
       ref:
         description: The commit or branch a dry run builds (default the tag, else the branch run from)
         required: false
+      draft:
+        description: Make the release a draft, for the owner to publish (a new release only)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -48,6 +52,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRAFT: ${{ inputs.draft }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -z "$INPUT_TAG" ]; then
             echo "a release needs a tag; to build the assets without one, run with dry_run" >&2
@@ -58,7 +63,9 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$TAG" --verify-tag --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
+            draft=
+            [ "$INPUT_DRAFT" = true ] && draft=--draft
+            gh release create "$TAG" --verify-tag $draft --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
   # The Pixel 7 app's desktop, in two editions as a distribution has them:
@@ -253,6 +260,83 @@ jobs:
         with:
           name: desktop-x86_64
           path: ${{ runner.temp }}/assets/*
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  # The live ISO (docs/TRY-FERRIX.md): the release desktop as a live session
+  # with the installer, in a hybrid ISO that boots as a CD and as a USB
+  # stick, `cargo xtask iso` writes; its licence inventory, which the build
+  # itself refuses an unaccounted part of the image in; and SHA256SUMS over
+  # both. A development preview: the `present` profile, slot signing off.
+  iso:
+    name: x86-64 live ISO
+    needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || (inputs.dry_run && needs.release.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: llvm-tools
+          targets: x86_64-unknown-none, x86_64-unknown-uefi, x86_64-unknown-linux-musl, x86_64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-x86_64
+
+      - name: Install the apps' build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool pkg-config cmake meson ninja-build \
+            bison flex gperf python3-mako libwayland-bin
+
+      - name: Build busybox and the ports
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo xtask busybox --arch x86_64
+          cargo xtask ports --arch x86_64
+
+      - name: Fetch the shell trees
+        run: |
+          eval "$(tools/common/fetch/fetch-shell-trees.sh "$RUNNER_TEMP/shell")"
+          echo "FERRIX_OMZ=$FERRIX_OMZ" >> "$GITHUB_ENV"
+          echo "FERRIX_ZSH_FUNCTIONS=$FERRIX_ZSH_FUNCTIONS" >> "$GITHUB_ENV"
+          echo "FERRIX_SHELL_TREES=$RUNNER_TEMP/shell" >> "$GITHUB_ENV"
+
+      - name: Build the ISO
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: cargo xtask iso --arch x86_64
+
+      - name: Gather the assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/iso"
+          cp build/x86_64/ferrix-live.iso "$RUNNER_TEMP/iso/ferrix-$TAG-x86_64.iso"
+          cp build/x86_64/live-licences/THIRD-PARTY-LICENSES.md \
+            "$RUNNER_TEMP/iso/ferrix-$TAG-x86_64-iso-THIRD-PARTY-LICENSES.md"
+          (cd "$RUNNER_TEMP/iso" && sha256sum ferrix-*.iso ferrix-*-iso-THIRD-PARTY-LICENSES.md > SHA256SUMS)
+          cat "$RUNNER_TEMP/iso/SHA256SUMS"
+
+      - name: Attach it to the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --clobber "$RUNNER_TEMP"/iso/*
+
+      - name: Keep it as the dry run's artifact
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-x86_64
+          path: ${{ runner.temp }}/iso/*
           compression-level: 0
           retention-days: 7
           if-no-files-found: error

@@ -25,40 +25,56 @@
 //! disk has a live partition. Either way it must be the only one. A target that is the live disk, or holds the live
 //! partition, is refused. Without `--yes` it asks before it erases anything.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
 use ferrix_install::fat::Fat;
 
+mod engine;
+mod fat_in_place;
+mod serve;
+mod setup;
 mod slots;
 use ferrix_partition::{
-    ESP, Guid, LINUX_FILESYSTEM, Partition, parse_entries, parse_header, usable, write_table,
+    ESP, Guid, Partition, parse_entries, parse_header,
 };
 
 /// The live medium's EFI system partition's name (`tools/common/xtask/src/installer.rs`).
-const LIVE_NAME: &str = "FERRIX-LIVE";
+pub(crate) const LIVE_NAME: &str = "FERRIX-LIVE";
 /// The live session's root option, and what the installed system's says in
 /// its place: the same length, so the file is rewritten in place.
 const LIVE_ROOT: &[u8] = b"ferrix.root=tmpfs";
 const INSTALLED_ROOT: &[u8] = b"ferrix.root=btrfs";
+/// The live session's own word, which starts the installer's daemon and
+/// its window; blanked on the installed disk, the same length.
+const LIVE_WORD: &[u8] = b"ferrix.live";
 
 /// The root volume's label, which is how the kernel finds it.
 const ROOT_LABEL: &[u8] = b"ferrix-root";
 /// The smallest root partition: the system unpacked, with room to work.
 const ROOT_BYTES: u64 = 1 << 30;
 /// Bytes in a sector: virtio's unit.
-const SECTOR: u64 = 512;
+pub(crate) const SECTOR: u64 = 512;
 /// Partitions start on MiB boundaries, as every tool puts them.
-const ALIGN: u64 = 2048;
+pub(crate) const ALIGN: u64 = 2048;
 /// What is wiped at each end of the disk, so no old table or superblock
 /// survives outside the new partitions.
-const WIPE: u64 = 1 << 20;
+pub(crate) const WIPE: u64 = 1 << 20;
 /// Bytes copied at a time.
-const CHUNK: usize = 1 << 20;
+pub(crate) const CHUNK: usize = 1 << 20;
 
 fn main() -> ExitCode {
-    match run() {
+    let first = std::env::args().nth(1);
+    let result = match first.as_deref() {
+        // The live session's daemon, and the installed system's first-boot
+        // setup (`serve.rs`, `setup.rs`).
+        Some("--serve") => serve::serve(),
+        Some("--apply") => setup::apply(),
+        _ => run(),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
             eprintln!("ferrix-install: {why}");
@@ -70,6 +86,9 @@ fn main() -> ExitCode {
 /// What the command line asked.
 struct Asked {
     yes: bool,
+    /// `--answers FILE`: the person's answers, `key=value` lines as the
+    /// daemon takes them, for the installed system's first boot.
+    answers: Option<String>,
     from: Option<String>,
     target: String,
     /// `--slots`: the A/B layout (`slots.rs`), with its sizes.
@@ -78,6 +97,7 @@ struct Asked {
 
 fn parse() -> Result<Asked, String> {
     let mut yes = false;
+    let mut answers = None;
     let mut from = None;
     let mut target = None;
     let mut slots: Option<slots::Sizes> = None;
@@ -94,6 +114,7 @@ fn parse() -> Result<Asked, String> {
             "--esp-mib" => slots.get_or_insert_default().esp_mib = mib(&mut args, &arg)?,
             "--slot-mib" => slots.get_or_insert_default().slot_mib = mib(&mut args, &arg)?,
             "--yes" | "-y" => yes = true,
+            "--answers" => answers = Some(args.next().ok_or("--answers needs a file")?),
             "--from" => from = Some(args.next().ok_or("--from needs a disk")?),
             "--help" | "-h" => {
                 return Err(
@@ -109,6 +130,7 @@ fn parse() -> Result<Asked, String> {
     let target = target.ok_or("name the disk to install on, as /dev/vdY")?;
     Ok(Asked {
         yes,
+        answers,
         from,
         target,
         slots,
@@ -139,96 +161,63 @@ fn run() -> Result<(), String> {
     if let Some(sizes) = asked.slots {
         return slots::install(&asked, &sizes, &live, &mut source, esp_bytes);
     }
-    let mut disk = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&asked.target)
-        .map_err(|e| format!("{}: {e}", asked.target))?;
-    let size = disk
-        .seek(SeekFrom::End(0))
-        .map_err(|e| format!("{}: {e}", asked.target))?;
-    let sectors = size / SECTOR;
-    let (_, last_usable) = usable(sectors, SECTOR as u32).map_err(|e| e.to_string())?;
-    let esp_first = ALIGN;
-    let esp_last = esp_first + esp_bytes.div_ceil(SECTOR).next_multiple_of(ALIGN) - 1;
-    let root_first = esp_last + 1;
-    let root_last = (last_usable + 1) / ALIGN * ALIGN - 1;
-    if root_last < root_first || (root_last - root_first + 1) * SECTOR < ROOT_BYTES {
-        return Err(format!(
-            "{} is {} MiB; it needs {} MiB",
-            asked.target,
-            size >> 20,
-            (root_first * SECTOR + ROOT_BYTES + WIPE) >> 20
-        ));
-    }
+    drop(source);
+    let answers = match &asked.answers {
+        Some(path) => Some(answers_file(path)?),
+        None => None,
+    };
+    let plan = engine::Plan {
+        target: asked.target.clone(),
+        space: engine::Space::Erase,
+        answers,
+    };
     println!(
-        "ferrix-install: {} ({} MiB) will be erased: EFI system partition of {} MiB from {live}, \
-         root of {} MiB",
+        "ferrix-install: {} ({} MiB) will be erased; the system comes from {live}",
         asked.target,
-        size >> 20,
-        ((esp_last - esp_first + 1) * SECTOR) >> 20,
-        ((root_last - root_first + 1) * SECTOR) >> 20
+        File::open(&asked.target)
+            .and_then(|mut disk| disk.seek(SeekFrom::End(0)))
+            .map_or(0, |size| size >> 20)
     );
     if !asked.yes && !confirm()? {
         return Err("nothing was written".into());
     }
+    engine::install(&plan, &live, &mut |event| match event {
+        engine::Event::Log(text) => println!("{text}"),
+        engine::Event::Step(..) | engine::Event::Progress(_) => {}
+    })
+}
 
-    let partitions = [
-        Partition::new(
-            ESP,
-            random_guid()?,
-            esp_first,
-            esp_last,
-            "EFI system partition",
-        ),
-        Partition::new(
-            LINUX_FILESYSTEM,
-            random_guid()?,
-            root_first,
-            root_last,
-            "ferrix-root",
-        ),
-    ];
-    let table = write_table(sectors, SECTOR as u32, random_guid()?, &partitions)
-        .map_err(|e| e.to_string())?;
+/// An answers file: the `key=value` lines the daemon takes.
+fn answers_file(path: &str) -> Result<setup::Answers, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut answers = setup::Answers::default();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let slot = match key.trim() {
+            "user" => &mut answers.user,
+            "fullname" => &mut answers.fullname,
+            "password" => &mut answers.password,
+            "hostname" => &mut answers.hostname,
+            "keyboard" => &mut answers.keyboard,
+            "variant" => &mut answers.variant,
+            "timezone" => &mut answers.timezone,
+            "language" => &mut answers.language,
+            _ => continue,
+        };
+        value.clone_into(slot);
+    }
+    answers.check()?;
+    Ok(answers)
+}
 
-    step("wiping the old table", || {
-        let zeros = vec![0_u8; WIPE as usize];
-        write_at(&mut disk, 0, &zeros)?;
-        write_at(&mut disk, size - WIPE, &zeros)
-    })?;
-    step("copying the EFI system partition", || {
-        copy_esp(&mut source, &mut disk, esp_bytes, esp_first)
-    })?;
-    step("setting the installed system's command line", || {
-        if installed_cmdline(&mut disk, esp_first * SECTOR)? {
-            println!(
-                "ferrix-install: FERRIX/CMDLINE.TXT on {} says {} instead of {}",
-                asked.target,
-                String::from_utf8_lossy(INSTALLED_ROOT),
-                String::from_utf8_lossy(LIVE_ROOT)
-            );
-        }
-        Ok(())
-    })?;
-    step("making the root volume", || {
-        write_root(
-            &mut disk,
-            root_first * SECTOR,
-            (root_last - root_first + 1) * SECTOR,
-        )
-    })?;
-    step("writing the partition table", || {
-        table
-            .iter()
-            .try_for_each(|(lba, bytes)| write_at(&mut disk, lba * SECTOR, bytes))
-    })?;
-    step("flushing", || disk.sync_all())?;
-    println!(
-        "ferrix-install: done. Remove the live disk and start the machine from {}.",
-        asked.target
-    );
-    Ok(())
+/// The disk the live system is on: the whole disk of [`find_live`]'s
+/// partition, or the disk itself for a bare image.
+pub(crate) fn live_disk() -> Option<String> {
+    let live = find_live().ok()?;
+    let disk = live.trim_end_matches(|c: char| c.is_ascii_digit());
+    Some(if Path::new(disk).exists() { disk.to_owned() } else { live })
 }
 
 /// Run a step, saying what it is and what went wrong.
@@ -246,7 +235,7 @@ fn step(what: &str, work: impl FnOnce() -> io::Result<()>) -> Result<(), String>
 /// a machine may have booted from without being a medium to install: since
 /// the AHCI driver serves q35's SATA disk, `test-install`'s scripted boot
 /// image is one beside the medium it installs from.
-fn find_live() -> Result<String, String> {
+pub(crate) fn find_live() -> Result<String, String> {
     let mut partitions = Vec::new();
     let mut whole = Vec::new();
     for letter in b'a'..=b'z' {
@@ -325,7 +314,7 @@ fn holds(target: &str, live: &str) -> bool {
 /// A reader of `xtask`'s volumes only: 512-byte sectors and 8.3 names, which
 /// is all `xtask`'s FAT writer makes. `docs/INSTALLER.md` §5.4's FAT library
 /// takes its place.
-fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
+pub(crate) fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
     let volume = Fat::read(disk, at)?;
     let Some(directory) = volume.find(disk, volume.root, b"FERRIX     ")? else {
         return Ok(false);
@@ -348,12 +337,18 @@ fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
         return Ok(false);
     };
     text[position..position + INSTALLED_ROOT.len()].copy_from_slice(INSTALLED_ROOT);
+    if let Some(at) = text
+        .windows(LIVE_WORD.len())
+        .position(|window| window == LIVE_WORD)
+    {
+        text[at..at + LIVE_WORD.len()].fill(b' ');
+    }
     write_at(disk, offset, &text)?;
     Ok(true)
 }
 
 /// Whether anything is mounted from `disk` or one of its partitions.
-fn mounted(disk: &str) -> Result<bool, String> {
+pub(crate) fn mounted(disk: &str) -> Result<bool, String> {
     let mounts =
         std::fs::read_to_string("/proc/mounts").map_err(|e| format!("/proc/mounts: {e}"))?;
     Ok(mounts.lines().any(|line| {
@@ -366,7 +361,7 @@ fn mounted(disk: &str) -> Result<bool, String> {
 }
 
 /// The FAT volume's size, from its boot sector.
-fn fat_volume_bytes(disk: &mut File) -> io::Result<u64> {
+pub(crate) fn fat_volume_bytes(disk: &mut File) -> io::Result<u64> {
     let mut sector = [0_u8; 512];
     disk.seek(SeekFrom::Start(0))?;
     disk.read_exact(&mut sector)?;
@@ -411,7 +406,7 @@ fn copy_esp(source: &mut File, disk: &mut File, bytes: u64, first: u64) -> io::R
 /// Make an empty btrfs volume labelled [`ROOT_LABEL`] of `bytes` at byte
 /// `at` of `disk`: the whole root partition (`ferrix-btrfs-mkfs`). The
 /// kernel unpacks the system onto it at the installed disk's first boot.
-fn write_root(disk: &mut File, at: u64, bytes: u64) -> io::Result<()> {
+pub(crate) fn write_root(disk: &mut File, at: u64, bytes: u64) -> io::Result<()> {
     let mut random = [[0_u8; 16]; 4];
     let mut urandom = File::open("/dev/urandom")?;
     for uuid in &mut random {
@@ -448,12 +443,12 @@ impl ferrix_btrfs_mkfs::Target for Volume<'_> {
     }
 }
 
-fn write_at(disk: &mut File, at: u64, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_at(disk: &mut File, at: u64, bytes: &[u8]) -> io::Result<()> {
     disk.seek(SeekFrom::Start(at))?;
     disk.write_all(bytes)
 }
 
-fn random_guid() -> Result<Guid, String> {
+pub(crate) fn random_guid() -> Result<Guid, String> {
     let mut bytes = [0_u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut random| random.read_exact(&mut bytes))
