@@ -124,6 +124,7 @@ use ferrix_linux_abi::types::{
 
 use crate::object::process::{Host, Process};
 use crate::sched::{self, Task, WaitQueue};
+use crate::syscall::signal::RestartBlock;
 use crate::syscall::time::TimeWidth;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
@@ -310,7 +311,8 @@ static SLEEP: WaitQueue = WaitQueue::new();
 ///
 /// `EAGAIN` if a wait's or a compare-requeue's word no longer holds the value
 /// given; `ETIMEDOUT` if a wait's timeout passes; `EINTR` if the caller is
-/// ended while it waits; `EINVAL` for a misaligned word, a zero bitset, a
+/// ended while it waits, or if a handler interrupts a wait with a timeout
+/// (whatever `SA_RESTART` says, as on Linux); `EINVAL` for a misaligned word, a zero bitset, a
 /// negative count or a malformed timeout; `EFAULT` for a word or timeout that
 /// cannot be read; `ENOSYS` for an operation not implemented here, the
 /// priority-inheritance ones and `FUTEX_WAKE_OP` among them, and for
@@ -575,7 +577,55 @@ fn wait(
         key,
         bitset,
     });
-    wait_on(process, &words, deadline).map(|_| 0)
+    match wait_on(process, &words, deadline) {
+        Ok(_) => Ok(0),
+        // With a timeout, a signal leaves a restart block, as Linux's
+        // `futex_wait` does: a handler makes the call `EINTR` whatever
+        // `SA_RESTART` says, and a stop or an ignored signal resumes it
+        // through `restart_syscall` to the same deadline. Restarted from the
+        // start, a relative `FUTEX_WAIT` waited its whole timeout again
+        // after every handler, and a caller polling with short timeouts
+        // under a stream of signals could wait for ever.
+        Err(Errno::ERESTARTSYS) => match (deadline, crate::syscall::thread::current()) {
+            (Some(deadline), Some(thread)) => {
+                thread.with_own_signals(|signals| {
+                    signals.set_restart_block(RestartBlock::Futex {
+                        address,
+                        shared,
+                        expected,
+                        bitset,
+                        deadline,
+                    });
+                });
+                Err(Errno::ERESTART_RESTARTBLOCK)
+            }
+            _ => Err(Errno::ERESTARTSYS),
+        },
+        Err(error) => Err(error),
+    }
+}
+
+/// `restart_syscall` for a timed futex wait a signal interrupted with no
+/// handler run: the same wait, to the same absolute deadline.
+pub(crate) fn resume_wait(
+    thread: &crate::syscall::thread::Thread,
+    address: u64,
+    shared: bool,
+    expected: u32,
+    bitset: u32,
+    deadline: u64,
+) -> Result<usize, Errno> {
+    if crate::timer::now_nanos() >= deadline {
+        return Err(Errno::ETIMEDOUT);
+    }
+    wait(
+        &**thread.process(),
+        address,
+        shared,
+        expected,
+        bitset,
+        Some(deadline),
+    )
 }
 
 /// Sleep on every one of `words` that still holds its value, until a wake

@@ -460,7 +460,7 @@ fn sleep_until(thread: &Thread, deadline: u64, rem: u64, width: TimeWidth) -> Re
                 write_pair(process, rem, left / NANOS, left % NANOS, width)?;
             }
             thread.with_own_signals(|signals| {
-                signals.set_restart_block(RestartBlock {
+                signals.set_restart_block(RestartBlock::Sleep {
                     deadline,
                     rem,
                     width,
@@ -477,17 +477,28 @@ fn sleep_until(thread: &Thread, deadline: u64, rem: u64, width: TimeWidth) -> Re
     }
 }
 
-/// `restart_syscall`: resume the sleep a `restart_block` left behind, waiting
-/// out the time that was left rather than a fresh duration. The kernel points
-/// an interrupted `nanosleep` or `clock_nanosleep` at this call when no handler
-/// ran; no program issues it. With nothing to resume it is `EINTR`, as Linux's
+/// `restart_syscall`: resume the sleep or timed futex wait a
+/// `restart_block` left behind, waiting out the time that was left rather
+/// than a fresh duration. The kernel points an interrupted `nanosleep`,
+/// `clock_nanosleep` or timed `FUTEX_WAIT` at this call when no handler ran;
+/// no program issues it. With nothing to resume it is `EINTR`, as Linux's
 /// `do_no_restart_syscall` answers.
 pub(crate) fn sys_restart_syscall(thread: &Thread) -> Result<usize, Errno> {
-    let Some(block) = thread.with_own_signals(super::signal::ThreadSignals::take_restart_block)
-    else {
-        return Err(Errno::EINTR);
-    };
-    sleep_until(thread, block.deadline, block.rem, block.width)
+    match thread.with_own_signals(super::signal::ThreadSignals::take_restart_block) {
+        None => Err(Errno::EINTR),
+        Some(RestartBlock::Sleep {
+            deadline,
+            rem,
+            width,
+        }) => sleep_until(thread, deadline, rem, width),
+        Some(RestartBlock::Futex {
+            address,
+            shared,
+            expected,
+            bitset,
+            deadline,
+        }) => super::futex::resume_wait(thread, address, shared, expected, bitset, deadline),
+    }
 }
 
 /// `nanosleep`: a relative sleep, in a native-width `timespec` (ARMv7-A has no

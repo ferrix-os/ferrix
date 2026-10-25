@@ -28,12 +28,18 @@
 //!   channel, root's `setuid(1000)` goes through musl's broadcast to both
 //!   threads, leaves both uid and euid 1000, and `setuid(0)` is then `EPERM`
 //!   (see [`setuid`] for why per-process credentials make this the check).
+//! * **futex-signal**: a timed `FUTEX_WAIT` a handled `SIGUSR1` interrupts
+//!   ends `EINTR` at once, under `SA_RESTART` too, as on Linux
+//!   ([`futex_signal`]);
+//! * **futex-stop**: one stopped and continued, with no handler, resumes to
+//!   its own deadline and ends `ETIMEDOUT`.
 
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
 
+mod futex_signal;
 mod setuid;
 
 /// Threads the program spawns besides its main one.
@@ -225,6 +231,14 @@ fn main() {
     println!("threads: setuid");
     setuid::check_setuid(fail);
     println!("threads: setuid ok");
+
+    println!("threads: futex-signal");
+    futex_signal::check_futex_signal(fail);
+    println!("threads: futex-signal ok");
+
+    println!("threads: futex-stop");
+    futex_signal::check_futex_stop(fail);
+    println!("threads: futex-stop ok");
 
     println!("threads: all ok");
     std::process::exit(0)

@@ -34,16 +34,18 @@
 //!
 //! The rule, per code:
 //!
-//! * `ERESTARTSYS` (a read, write, `wait4`, pipe or futex wait): the call
+//! * `ERESTARTSYS` (a read, write, `wait4`, pipe, an untimed futex wait or
+//!   `futex_waitv`): the call
 //!   restarts if a handler with `SA_RESTART` runs, or if no handler runs at
 //!   all; otherwise `EINTR`.
 //! * `ERESTARTNOHAND` (`poll`, `select`, `pselect6`): `EINTR` if a handler
 //!   runs, restart if none does. So a handler -- the usual interrupter --
 //!   always sees `EINTR` from these.
 //! * `ERESTARTNOINTR`: always restarts.
-//! * `ERESTART_RESTARTBLOCK` (`nanosleep`, `clock_nanosleep`): `EINTR` if a
-//!   handler runs; otherwise the call is re-entered as `restart_syscall`,
-//!   which waits out the time left rather than the whole sleep again.
+//! * `ERESTART_RESTARTBLOCK` (`nanosleep`, `clock_nanosleep`, a timed
+//!   `FUTEX_WAIT` or `FUTEX_WAIT_BITSET`): `EINTR` if a handler runs;
+//!   otherwise the call is re-entered as `restart_syscall`, which waits out
+//!   the time left rather than the whole sleep or wait again.
 //!
 //! Restarting means rewinding the saved program counter to the call's own
 //! instruction and putting back the argument register the return value

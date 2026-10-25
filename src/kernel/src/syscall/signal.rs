@@ -390,19 +390,38 @@ pub(crate) struct Restart {
     pub(crate) arg0: u64,
 }
 
-/// A sleep to resume through `restart_syscall`: what `nanosleep` and
-/// `clock_nanosleep` leave behind when a signal interrupts them with time
-/// still to run, so the resume waits out the time left rather than starting
-/// the whole sleep again. Linux keeps this in `current->restart_block`.
+/// A call to resume through `restart_syscall`, so the resume waits out the
+/// time left rather than starting again. Linux keeps this in
+/// `current->restart_block`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RestartBlock {
-    /// The absolute deadline on the counter the sleep runs to.
-    pub(crate) deadline: u64,
-    /// Where the time left is written if the resume is interrupted again, or
-    /// zero for an absolute sleep, which never reports a remainder.
-    pub(crate) rem: u64,
-    /// The width of the `timespec` at `rem`.
-    pub(crate) width: TimeWidth,
+pub(crate) enum RestartBlock {
+    /// What `nanosleep` and `clock_nanosleep` leave behind when a signal
+    /// interrupts them with time still to run.
+    Sleep {
+        /// The absolute deadline on the counter the sleep runs to.
+        deadline: u64,
+        /// Where the time left is written if the resume is interrupted
+        /// again, or zero for an absolute sleep, which never reports a
+        /// remainder.
+        rem: u64,
+        /// The width of the `timespec` at `rem`.
+        width: TimeWidth,
+    },
+    /// What a `FUTEX_WAIT` or `FUTEX_WAIT_BITSET` with a timeout leaves
+    /// behind, as Linux's `futex_wait_restart`: the same word, value and
+    /// bitset, to the same absolute deadline.
+    Futex {
+        /// The word's address.
+        address: u64,
+        /// Whether the call left out `FUTEX_PRIVATE_FLAG`.
+        shared: bool,
+        /// The value it waits while the word holds.
+        expected: u32,
+        /// Which wakes rouse it.
+        bitset: u32,
+        /// The absolute deadline on the counter.
+        deadline: u64,
+    },
 }
 
 /// A signal taken off a pending set, with everything delivery needs.

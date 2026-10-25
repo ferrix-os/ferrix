@@ -11,7 +11,10 @@
 //! the call on every thread after the first has already changed the ids. The
 //! program calls `setuid(1000)` as root with a second thread alive, and that
 //! survives only while setting an id to a current one is permitted; a refused
-//! repeat makes musl kill the process, which the program names.
+//! repeat makes musl kill the process, which the program names. After it, a
+//! timed `FUTEX_WAIT` that a handled `SIGUSR1` interrupts must end `EINTR`
+//! at once, under `SA_RESTART` too, as Linux's `futex_wait` answers, and one
+//! stopped and continued must resume to its own deadline.
 //!
 //! Then the negative control: the same program built to expect one thread more
 //! under `/proc/self` than it has must fail, on the `/proc` step and for that
@@ -50,6 +53,8 @@ const STEPS: &[&str] = &[
     "threads: mutex ok",
     "threads: copy ok",
     "threads: setuid ok",
+    "threads: futex-signal ok",
+    "threads: futex-stop ok",
     "threads: all ok",
 ];
 
@@ -154,7 +159,8 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
         }
         println!(
             "  {arch}: std::thread, Mutex and mpsc ran, /proc/self counted every thread, \
-             two threads survived musl's setuid(1000) broadcast, exit 0"
+             two threads survived musl's setuid(1000) broadcast, a handled signal ended a \
+             timed futex wait EINTR, exit 0"
         );
 
         let lines = boot(arch, &negative, args)?;
