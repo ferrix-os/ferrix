@@ -953,6 +953,16 @@ policy of `develop` and `main`, the secret written once as its
 private key was never printed, logged or committed, and nothing signed with
 it outside CI.
 
+**The first runs (4188 (9)).** Runs 1 and 2 of Signing CI (40182380860 and
+the push after it) stopped before the signer opened, on a command-line
+bug that fdf8e326a fixed: no leaf was used. Run 3, attempt 1
+(40183148130, on fdf8e326a), signed with leaf 192 of its range 192..208:
+"fetched 0 earlier signature log(s)", "0 signature(s), no (I, q) twice"
+before signing and "1 signature(s), no (I, q) twice" after, and
+verify-signed-slot printed "starts under the gate's development-required
+block: anchor 36864 version 1". The key's text appears nowhere in the
+run's log.
+
 
 ## 7. (P7) Revocation and anti-rollback
 
