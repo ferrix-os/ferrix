@@ -449,6 +449,48 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
     status::OK
 }
 
+/// The monitor on the card's connector changed (`os/glue/kms.c`'s watch):
+/// tell the core its EDID, its mode list and its preferred mode now, as at
+/// READY, then `MODES` in HELLO's place, so the compositor takes the new size
+/// as it takes a resized window's. `NV_OK`, or why not, said.
+///
+/// # Safety
+///
+/// `described` points at a `struct nvos_display_hello`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nvos_display_changed(described: *const CHello) -> NvStatus {
+    if described.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    // SAFETY: the caller vouches for it.
+    let described = unsafe { &*described };
+    let Some(channel) = control() else {
+        return status::INVALID_STATE;
+    };
+    if let Err(why) = channel.write(Message::Edid(edid(described)).encode().as_bytes()) {
+        say!("display: the new monitor's EDID not written: {why:?}");
+        return status::INVALID_STATE;
+    }
+    for page in mode_pages(described) {
+        if let Err(why) = channel.write(page.encode().as_bytes()) {
+            say!("display: the new monitor's mode list not written: {why:?}");
+            return status::INVALID_STATE;
+        }
+    }
+    let modes = hello(described).modes;
+    if let Err(why) = channel.write(Message::Modes { modes }.encode().as_bytes()) {
+        say!("display: the new monitor's mode not written: {why:?}");
+        return status::INVALID_STATE;
+    }
+    say!(
+        "display: the monitor changed: {}x{} now, {} modes listed",
+        described.width,
+        described.height,
+        described.count
+    );
+    status::OK
+}
+
 fn rect_into(event: &mut Event, rect: Rect) {
     event.x = i32::try_from(rect.x).unwrap_or(i32::MAX);
     event.y = i32::try_from(rect.y).unwrap_or(i32::MAX);

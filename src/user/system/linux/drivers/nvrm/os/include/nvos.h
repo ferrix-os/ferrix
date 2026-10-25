@@ -188,6 +188,8 @@ struct nvos_display_event {
 #define NVOS_DISPLAY_OK       0
 #define NVOS_DISPLAY_INVALID  4
 NV_STATUS nvos_display_start(const struct nvos_display_hello *hello);
+/* The monitor changed: its EDID, modes and preferred mode to the core again. */
+NV_STATUS nvos_display_changed(const struct nvos_display_hello *hello);
 NV_STATUS nvos_display_next(struct nvos_display_event *out);
 void nvos_display_attached(NvU32 buffer, NvU32 status);
 void nvos_display_flipped(NvU64 sequence, NvU32 status);

@@ -53,9 +53,18 @@ static void kms_gpu_found(const struct NvKmsKapiGpuInfo *info)
         kms_gpus[kms_gpu_count++] = info->gpuInfo;
 }
 
+/* NVKMS's display events since boot: a monitor connected, unplugged or
+ * changed. Counted here, in NVKMS's context, and acted on by the watch
+ * (kms_watch), which looks again when the count moves. */
+static NvU32 kms_display_events;
+
 static void kms_event(const struct NvKmsKapiEvent *event)
 {
-    kms_say("event %d\n", (int)event->type);
+    if (event->type == NVKMS_EVENT_TYPE_DPY_CHANGED ||
+        event->type == NVKMS_EVENT_TYPE_DYNAMIC_DPY_CONNECTED)
+        __atomic_fetch_add(&kms_display_events, 1, __ATOMIC_SEQ_CST);
+    else
+        kms_say("event %d\n", (int)event->type);
 }
 
 /* The monitor's name from an EDID's display descriptors, or "". */
@@ -576,6 +585,12 @@ static int kms_show_gpu(NvU32 index)
         kms_say("grabOwnership failed\n");
         return -EBUSY;
     }
+    /* As nvidia-drm asks: a monitor plugged, unplugged or swapped is told,
+     * so the head follows it (kms_recheck). The watch looks every two
+     * seconds as well, so a refusal here costs only the wait. */
+    if (!kapi.declareEventInterest(lit->device, (1u << NVKMS_EVENT_TYPE_DPY_CHANGED) |
+                                                    (1u << NVKMS_EVENT_TYPE_DYNAMIC_DPY_CONNECTED)))
+        kms_say("display events refused; the watch looks every 2 s alone\n");
 
     res = calloc(1, sizeof(*res));
     dyn = calloc(1, sizeof(*dyn));
@@ -849,11 +864,12 @@ static void kms_serve(void *argument)
 }
 
 /* Offer the lit head to the display core and serve it on a thread. */
-static int kms_card_start(struct kms_head *lit)
+/* What the core is told of the lit head: its mode, connector, EDID and
+ * every mode listed, at HELLO and again when the monitor changes. */
+static void kms_hello_of(const struct kms_head *lit, struct nvos_display_hello *out)
 {
     struct nvos_display_hello hello;
     const struct NvKmsKapiDisplayModeTimings *t = &lit->mode.timings;
-    NV_STATUS status;
 
     memset(&hello, 0, sizeof(hello));
     hello.width = t->hVisible;
@@ -881,6 +897,15 @@ static int kms_card_start(struct kms_head *lit)
         hello.count = i + 1;
     }
     hello.preferred = lit->preferred;
+    *out = hello;
+}
+
+static int kms_card_start(struct kms_head *lit)
+{
+    struct nvos_display_hello hello;
+    NV_STATUS status;
+
+    kms_hello_of(lit, &hello);
 
     status = nvos_display_start(&hello);
     if (status != NV_OK)
@@ -900,10 +925,79 @@ static int kms_card_start(struct kms_head *lit)
 }
 
 /*
- * A GPU none of whose displays was connected at start: look again every
- * two seconds, for a monitor switched on or plugged in later -- a TV in
- * standby drops its hot-plug line -- and offer it as the card once one is
- * lit.
+ * The lit display looked at again, under kms_lock: when its monitor
+ * changed -- another EDID, or one connected again after none -- the head is
+ * lit at that monitor's preferred mode, its modes are listed again, and the
+ * core is told (nvos_display_changed), so the compositor follows. A monitor
+ * unplugged leaves the head as it is until one is connected. `connected`
+ * is what the last look found. 1 when the head changed, 0 when not, or why
+ * it could not.
+ */
+static int kms_recheck(struct kms_head *lit, struct NvKmsKapiDynamicDisplayParams *dyn,
+                       NvBool *connected)
+{
+    struct NvKmsKapiDisplayMode mode;
+    struct nvos_display_hello hello;
+    char name[16];
+    NvU32 bytes;
+    NvBool same;
+    int ret;
+
+    memset(dyn, 0, sizeof(*dyn));
+    dyn->handle = lit->display;
+    if (!kapi.getDynamicDisplayInfo(lit->device, dyn))
+        return -EIO;
+    if (!dyn->connected)
+    {
+        if (*connected)
+            kms_say("display %x: its monitor is gone; the head stays as it is until one "
+                    "is connected\n", lit->display);
+        *connected = NV_FALSE;
+        return 0;
+    }
+    bytes = dyn->edid.bufferSize <= sizeof(lit->edid) ? dyn->edid.bufferSize : 0;
+    same = *connected && bytes == lit->edid_bytes && memcmp(lit->edid, dyn->edid.buffer, bytes) == 0;
+    *connected = NV_TRUE;
+    if (same)
+        return 0;
+    if (!kms_preferred_mode(lit->device, lit->display, &mode))
+    {
+        kms_say("display %x: the monitor connected has no valid mode\n", lit->display);
+        return -EINVAL;
+    }
+    kms_edid_name(dyn->edid.buffer, dyn->edid.bufferSize, name, sizeof(name));
+    kms_say("display %x: a monitor connected%s%s: %ux%u preferred, the head was %ux%u\n",
+            lit->display, name[0] ? ", " : "", name, mode.timings.hVisible,
+            mode.timings.vVisible, lit->mode.timings.hVisible, lit->mode.timings.vVisible);
+    /* Lit again even at the same mode: after an unplug the head is the
+     * new monitor's only once a mode set has been made for it. */
+    ret = kms_relight(lit, &mode);
+    if (ret != 0)
+        return ret;
+    lit->edid_bytes = bytes;
+    memcpy(lit->edid, dyn->edid.buffer, bytes);
+    kms_list_modes(lit);
+    if (kms_card.lit == lit)
+    {
+        kms_hello_of(lit, &hello);
+        if (nvos_display_changed(&hello) != NV_OK)
+            kms_say("the core was not told of the new monitor\n");
+    }
+    return 1;
+}
+
+/* How often the watch wakes to see whether NVKMS told of a display, and
+ * after how many wakes it looks anyway: every 2 s. */
+#define KMS_WATCH_TICK_US 250000
+#define KMS_WATCH_LOOK_TICKS 8
+
+/*
+ * The first GPU's displays, watched for as long as nvrm serves: while none
+ * is lit, look every two seconds for a monitor switched on or plugged in
+ * later -- a TV in standby drops its hot-plug line -- and offer it as the
+ * card once one is lit; once lit, look again at the lit display whenever
+ * NVKMS tells of a display event, and every two seconds, and follow a
+ * monitor that changed (kms_recheck).
  */
 static void kms_watch(void *argument)
 {
@@ -912,10 +1006,13 @@ static void kms_watch(void *argument)
     struct NvKmsKapiDynamicDisplayParams *dyn = calloc(1, sizeof(*dyn));
     NvKmsKapiDisplay displays[NVKMS_KAPI_MAX_CONNECTORS * 4];
     NvU32 count = NV_ARRAY_ELEMENTS(displays);
-    int status = -ENODEV;
+    NvU32 seen = __atomic_load_n(&kms_display_events, __ATOMIC_SEQ_CST);
+    NvBool connected = NV_TRUE;
+    int status;
     NvBool ok;
 
     nvos_mutex_lock(&kms_lock);
+    status = lit->surface != NULL ? 0 : -ENODEV;
     ok = res != NULL && dyn != NULL && !kms_stopped &&
          kapi.getDeviceResourcesInfo(lit->device, res) &&
          kapi.getDisplays(lit->device, &count, displays);
@@ -925,23 +1022,35 @@ static void kms_watch(void *argument)
         kms_say("cannot watch for a display\n");
         goto out;
     }
-    kms_say("watching for a display to be connected\n");
-    for (NvU32 looks = 1; status == -ENODEV; looks++)
+    if (status != 0)
+        kms_say("watching for a display to be connected\n");
+    for (NvU32 looks = 1;; looks++)
     {
-        nvkms_usleep(2000000);
+        NvU32 events;
+
+        nvkms_usleep(KMS_WATCH_TICK_US);
+        events = __atomic_load_n(&kms_display_events, __ATOMIC_SEQ_CST);
+        if (events == seen && looks % KMS_WATCH_LOOK_TICKS != 0)
+            continue;
+        seen = events;
         nvos_mutex_lock(&kms_lock);
         if (kms_stopped)
         {
             nvos_mutex_unlock(&kms_lock);
             goto out;
         }
-        status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
-        if (status == 0 && kms_card.lit == NULL)
-            (void)kms_card_start(lit);
+        if (status != 0)
+        {
+            status = kms_scan(lit, res, dyn, displays, count, NV_FALSE);
+            if (status == 0 && kms_card.lit == NULL)
+                (void)kms_card_start(lit);
+        }
+        else
+            (void)kms_recheck(lit, dyn, &connected);
         nvos_mutex_unlock(&kms_lock);
         /* A line a minute, so a wait is told from a hang. */
-        if (status == -ENODEV && looks % 30 == 0)
-            kms_say("still no display connected after %u s\n", looks * 2);
+        if (status == -ENODEV && looks % (KMS_WATCH_LOOK_TICKS * 30) == 0)
+            kms_say("still no display connected after %u s\n", looks / 4);
     }
 out:
     free(res);
@@ -986,7 +1095,8 @@ int nvrm_kms_show(void)
         /* The first lit head becomes the card; one is all the core needs. */
         if (shown == 0 && kms_card.lit == NULL)
             status = kms_card_start(&kms_lit[i]);
-        else if (shown == -ENODEV && kms_lit[i].device != NULL && i == 0)
+        /* The first GPU's displays are watched, lit or not (kms_watch). */
+        if ((shown == 0 || shown == -ENODEV) && kms_lit[i].device != NULL && i == 0)
             (void)nvos_thread_spawn(kms_watch, &kms_lit[i]);
     }
     return status;
