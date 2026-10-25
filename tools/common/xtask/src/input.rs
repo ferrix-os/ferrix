@@ -117,7 +117,7 @@ fn button(name: &str, down: bool) -> String {
 }
 
 /// The same for an absolute axis.
-fn absolute(axis: &str, value: i32) -> String {
+pub(crate) fn absolute(axis: &str, value: i32) -> String {
     format!(
         "{{\"type\":\"abs\",\"data\":{{\"axis\":{},\"value\":{value}}}}}",
         json_string(axis)

@@ -947,6 +947,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
  "ferrix-inputctl",
+ "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-rt",
  "ferrix-usb-host",

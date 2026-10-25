@@ -362,7 +362,65 @@ PC. All of that is as built. Where this differs:
 
 ## 12. Where it stands
 
+2026-10-25: absolute pointers and the report watch (§13) on branch
+`feature/usbhid-abs`.
+
 2026-10-10: built and gated under QEMU on branch `xhci-driver`, not landed.
 Next, in order: the first run on the PC (§9, after H0); the disk served to
 the block core (§6, a design review first); SuperSpeed hubs; the kernel's
 answer for a function firmware left with decoding off, if the PC shows it.
+
+## 13. Absolute pointers, and watching a device's reports
+
+**Absolute pointers** (2026-10-25, for the JetKVM on the N150 box). A tablet
+-- QEMU's `usb-tablet`, a KVM switch such as the JetKVM (1d6b:0104, its
+interface 1, report 1: five buttons, X and Y from 0 to 32767) -- says where
+the pointer is, not how far it moved. `hid::map` makes a Generic Desktop X,
+Y and wheel that are not relative, inside a mouse or pointer application,
+`ABS_X`, `ABS_Y` and `ABS_WHEEL`, and the HELLO gives each axis its field's
+logical minimum and maximum, no fuzz, flat or resolution, as
+`hidinput_configure_usage` does for a pointer. A joystick's or gamepad's
+axes stay unmapped: hyprix would read them as a pointer and move the cursor
+with the stick. A value outside the logical range is dropped (Linux drops
+one only from a field with a null state; no pointer here sends one), an
+axis whose range is empty is not declared, so the core still takes the
+HELLO, and a position repeated is not sent again. hyprix makes an absolute
+axis a fraction of its range and the seat scales it to the output, as for
+QEMU's virtio tablet; yserver has the pointer from hyprix. `test-usb`
+attaches a `usb-tablet` behind the hub, chooses each pointer with the human
+monitor's `mouse_set` before its events (unchosen, QEMU gives buttons to
+whichever pointer the guest started reading last) and requires two places
+as `ABS_X` and `ABS_Y` on the tablet's node; the second is sent only after
+the first arrived, since QEMU's tablet keeps one position.
+
+**Watching a device's reports** (`ferrix_usb_host::watch`). The boot word
+`ferrix.usbhid.reports` (alone or `=all`; `=off`; `=vvvv:pppp`, one device;
+`=keyboard`, `mouse`, `media`, `system` or `input`, one kind; or
+`=vvvv:pppp/keyboard`), or the file `/run/usbhid-reports` holding such a
+value (empty: all), which the driver reads at every port poll and which
+wins while it is there, makes usbhid say each interrupt report of the
+functions named, at debug:
+
+```
+usbhid: report 1d6b:0104 function 4 at 812.004113 s (+48012 us): 00 00 1a 00 00 00 00 00
+usbhid: function 4 made 1:17=1 0:0=0
+```
+
+the bytes as they came off the pipe, the time the driver took them (one
+time for every report one service took), the time since that function's
+last, the reports dropped before it for want of room, and the events the
+report made as `type:code=value`. Off by default; it costs a file read per
+port poll. `echo 1d6b:0104/keyboard > /run/usbhid-reports`, then
+`lode -t usbhid -p debug -f`, shows what a KVM sends while a key is held.
+
+**Held keys letting go through the JetKVM** are, as far as the source
+shows, the JetKVM's own release. Its firmware (jetkvm/kvm 8f6c3001b,
+`internal/usbgadget/hid_keyboard.go`) starts a 100 ms auto-release timer
+when a key goes down; the browser sends a keepalive every 50 ms
+(`ui/src/hooks/useKeyboard.ts`), and `hidrpc.go` drops a keepalive more
+than 50 ms late and lets the timer fire, which writes a report without the
+key. The decoder lets a key go only when a report leaves it out, as Linux
+does: an idle-rate repeat and an unknown key beside it change nothing
+(`a_held_key_lets_go_only_when_a_report_leaves_it_out_and_watched_reports_come_out_raw`).
+The capture on the box, with the watch on, is still owed.
+

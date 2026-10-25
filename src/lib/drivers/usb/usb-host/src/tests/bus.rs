@@ -7,15 +7,16 @@ use std::vec::Vec;
 use ferrix_inputctl::message::{Events, Hello, Message, PORT_RIGHTS, RawEvent, bit};
 use ferrix_inputctl::session::Session;
 use ferrix_linux_abi::input::{
-    BTN_LEFT, BTN_RIGHT, BUS_USB, EV_KEY, EV_LED, EV_REL, EV_SYN, LED_CAPSL, LED_NUML, REL_HWHEEL,
-    REL_WHEEL, REL_X, REL_Y, SYN_REPORT,
+    ABS_X, ABS_Y, BTN_LEFT, BTN_RIGHT, BUS_USB, EV_ABS, EV_KEY, EV_LED, EV_REL, EV_SYN, LED_CAPSL,
+    LED_NUML, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT,
 };
 use ferrix_native_abi::types::DEVICE_NOT_PCI;
 
-use super::model::{Memory, Regs, Shared, Time, dk_board};
+use super::model::{Memory, Regs, Shared, Time, dk_board, jetkvm};
 use crate::bus::{Bus, Note, Output, Parent};
 use crate::hid::Kind;
 use crate::usb::Speed;
+use crate::watch::Watch;
 use crate::{MILLISECOND, Parts};
 
 type TestBus = Bus<crate::ehci::Controller<Regs, Memory, Time>>;
@@ -630,4 +631,133 @@ fn memory_whose_pages_the_controller_cannot_reach_is_refused() {
     };
     let refused = Bus::start(parts).map(drop).map_err(|(error, _)| error);
     assert_eq!(refused, Err(crate::ehci::Error::Memory));
+}
+
+// ---------------------------------------------------------------------------
+// The JetKVM: an absolute pointer, and its reports watched
+// ---------------------------------------------------------------------------
+
+const KVM_KEYS: &[u8] = b"JetKVM USB Emulation Device Keyboard";
+const KVM_POINTER: &[u8] = b"JetKVM USB Emulation Device Mouse";
+const KEY_W: u16 = 17;
+
+/// The board with the `JetKVM` on the hub's third port: the model, the bus,
+/// the `JetKVM`'s device index, and its keyboard, absolute pointer and
+/// relative mouse functions -- the two pointers named alike, as Linux
+/// names them, and told apart by their axes.
+fn kvm_board() -> (Shared, TestBus, usize, usize, usize, usize) {
+    let (model, hub, _, _) = dk_board();
+    let kvm = model.borrow_mut().add(jetkvm());
+    model.borrow_mut().plug(hub, 3, kvm);
+    let mut bus = started(&model);
+    bus.poll();
+    let found = attached(&outputs(&mut bus));
+    assert_eq!(found.len(), 7, "the board's four, and the JetKVM's three");
+    let keys = named(&bus, &found, KVM_KEYS);
+    let pointers: Vec<usize> = found
+        .iter()
+        .copied()
+        .filter(|&function| hello(&bus, function).name.as_bytes() == KVM_POINTER)
+        .collect();
+    let [one, other] = pointers[..] else {
+        panic!("two JetKVM pointers, found {pointers:?}");
+    };
+    let (pointer, relative) = if hello(&bus, one).bits.has_type(EV_ABS) {
+        (one, other)
+    } else {
+        (other, one)
+    };
+    (model, bus, kvm, keys, pointer, relative)
+}
+
+fn send(model: &Shared, bus: &mut TestBus, device: usize, endpoint: u8, report: &[u8]) {
+    model.borrow_mut().report(device, endpoint, report);
+    frames(model, bus, 2);
+}
+
+/// The descriptor read off the device gives the HELLO its axes, and the
+/// core takes the positions it reports.
+#[test]
+fn the_jetkvms_pointer_is_introduced_with_its_axes_and_reports_positions() {
+    let (model, mut bus, kvm, _, pointer, relative) = kvm_board();
+    let introduced = hello(&bus, pointer);
+    assert!(introduced.bits.has_code(EV_ABS, ABS_X) && introduced.bits.has_code(EV_ABS, ABS_Y));
+    assert_eq!(
+        (introduced.axes[0].minimum, introduced.axes[0].maximum),
+        (0, 32767)
+    );
+    assert_eq!(introduced.axes[1].maximum, 32767);
+    assert_eq!(bus.kind(pointer), Some(Kind::Mouse));
+    send(&model, &mut bus, kvm, 2, &[1, 0x01, 0x00, 0x40, 0x00, 0x20]);
+    send(&model, &mut bus, kvm, 2, &[1, 0x00, 0x00, 0x40, 0x00, 0x20]);
+    let got = events(&outputs(&mut bus), pointer);
+    let abs = |code, value| RawEvent::new(EV_ABS, code, value);
+    assert_eq!(
+        got,
+        [
+            vec![
+                key(BTN_LEFT, true),
+                abs(ABS_X, 0x4000),
+                abs(ABS_Y, 0x2000),
+                syn()
+            ],
+            vec![key(BTN_LEFT, false), syn()],
+        ]
+    );
+    judge(&bus, pointer, &got);
+    // The relative mouse, the one the UI's relMouseReport drives, moves.
+    assert!(!hello(&bus, relative).bits.has_type(EV_ABS));
+    send(&model, &mut bus, kvm, 3, &[0x00, 0x05, 0xFD, 0x00, 0x00]);
+    let moved = events(&outputs(&mut bus), relative);
+    assert_eq!(moved, [vec![rel(REL_X, 5), rel(REL_Y, -3), syn()]]);
+    judge(&bus, relative, &moved);
+    let session = Session::accept(&introduced, &[PORT_RIGHTS]).expect("the HELLO");
+    let info = session.abs_info(ABS_X).expect("an axis");
+    assert_eq!((info.minimum, info.maximum), (0, 32767));
+}
+
+/// W held: the same report again (an idle-rate repeat) and an unknown key
+/// beside it change nothing; only a report without W lets it go. With the
+/// `JetKVM`'s keyboard watched, each report comes out raw, in order, with the
+/// device's IDs, and the pointer's do not.
+#[test]
+fn a_held_key_lets_go_only_when_a_report_leaves_it_out_and_watched_reports_come_out_raw() {
+    let (model, mut bus, kvm, keys, _, _) = kvm_board();
+    bus.watch(Watch::parse(b"1d6b:0104/keyboard").expect("a value"));
+    let held = [0, 0, 0x1A, 0, 0, 0, 0, 0];
+    let beside = [0, 0, 0x1A, 0x70, 0, 0, 0, 0];
+    let released = [0_u8; 8];
+    for report in [&held, &held, &beside, &held, &released] {
+        send(&model, &mut bus, kvm, 1, report);
+    }
+    send(&model, &mut bus, kvm, 2, &[1, 0, 1, 0, 1, 0]);
+    let got = events(&outputs(&mut bus), keys);
+    assert_eq!(
+        got,
+        [
+            vec![key(KEY_W, true), syn()],
+            vec![key(KEY_W, false), syn()]
+        ]
+    );
+    let mut watched = Vec::new();
+    while let Some(report) = bus.next_watched() {
+        assert_eq!(
+            (report.function, report.vendor, report.product),
+            (keys, 0x1D6B, 0x0104)
+        );
+        assert_eq!((report.lost, report.unsaid), (0, 0));
+        watched.push((report.at, report.as_bytes().to_vec()));
+    }
+    let bytes: Vec<&[u8]> = watched.iter().map(|(_, bytes)| bytes.as_slice()).collect();
+    assert_eq!(bytes, [&held[..], &held, &beside, &held, &released]);
+    assert!(
+        watched.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "stamped in order"
+    );
+
+    // Off again, nothing more comes out.
+    bus.watch(Watch::OFF);
+    send(&model, &mut bus, kvm, 1, &held);
+    let _ = outputs(&mut bus);
+    assert_eq!(bus.next_watched(), None);
 }

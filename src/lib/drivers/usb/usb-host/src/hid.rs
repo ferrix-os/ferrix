@@ -11,15 +11,32 @@
 //! Usages become codes by the tables of Linux's `drivers/hid/hid-input.c`,
 //! as far as keyboards, mice and their media keys need them: the keyboard
 //! page by `hid_keyboard`, buttons from `BTN_MOUSE` in a mouse and
-//! `BTN_MISC` elsewhere, the relative desktop axes, the system controls, and
-//! the consumer page's media and application keys. Events come in the
-//! report's field order, an array's keys let go before the ones pressed, and
-//! a report ends in `SYN_REPORT`, as there.
+//! `BTN_MISC` elsewhere, the relative desktop axes, a pointer's absolute
+//! ones, the system controls, and the consumer page's media and application
+//! keys. Events come in the report's field order, an array's keys let go
+//! before the ones pressed, and a report ends in `SYN_REPORT`, as there.
+//!
+//! # Absolute pointers
+//!
+//! A tablet -- QEMU's `usb-tablet`, a KVM switch such as the `JetKVM` --
+//! reports X and Y as where the pointer is, in its field's logical range
+//! (0 to 32767 for both of those), rather than as how far it moved. Those
+//! are `ABS_X` and `ABS_Y`, an absolute wheel `ABS_WHEEL`, with the logical
+//! minimum and maximum as the axis's range in the HELLO, which is what
+//! `EVIOCGABS` answers and what a compositor scales to its output by;
+//! `hidinput_configure_usage` sets the same range, and no fuzz or flat for
+//! anything but a joystick or gamepad. Only inside a mouse or pointer
+//! application: a joystick's axes are not a pointer, and a compositor that
+//! read them as one would move the cursor with the stick. A value outside
+//! the logical range is no position and is dropped, as Linux drops one from
+//! a field with a null state; one that repeats the last is not sent again.
 
-use ferrix_inputctl::message::{Bitmaps, DeviceId, Hello, MAX_EVENTS, RawEvent, Text, VERSION};
+use ferrix_inputctl::message::{
+    AXES, AxisRange, Bitmaps, DeviceId, Hello, MAX_EVENTS, RawEvent, Text, VERSION,
+};
 use ferrix_linux_abi::input::{
-    BTN_MISC, BTN_MOUSE, BUS_USB, EV_KEY, EV_LED, EV_REL, EV_SYN, KEY_CNT, REL_HWHEEL, REL_WHEEL,
-    REL_X, REL_Y, SYN_REPORT,
+    ABS_WHEEL, ABS_X, ABS_Y, BTN_MISC, BTN_MOUSE, BUS_USB, EV_ABS, EV_KEY, EV_LED, EV_REL, EV_SYN,
+    KEY_CNT, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT,
 };
 
 use crate::report::{
@@ -123,7 +140,8 @@ pub const BOOT_MOUSE: [u8; 52] = [
 ];
 
 /// The event a usage in `application` makes: a key or button, or with
-/// `relative` an axis. `None` for what is not mapped.
+/// `relative` an axis; a pointer's absolute X, Y and wheel without it.
+/// `None` for what is not mapped.
 #[must_use]
 pub fn map(usage: Usage, application: Usage, relative: bool) -> Option<(u16, u16)> {
     let (page, id) = split(usage);
@@ -143,6 +161,19 @@ pub fn map(usage: Usage, application: Usage, relative: bool) -> Option<(u16, u16
             0x38 => Some((EV_REL, REL_WHEEL)),
             _ => None,
         },
+        PAGE_DESKTOP
+            if matches!(application, APPLICATION_MOUSE | APPLICATION_POINTER)
+                && matches!(id, 0x30 | 0x31 | 0x38) =>
+        {
+            Some((
+                EV_ABS,
+                match id {
+                    0x30 => ABS_X,
+                    0x31 => ABS_Y,
+                    _ => ABS_WHEEL,
+                },
+            ))
+        }
         PAGE_DESKTOP => SYSTEM_CODES
             .iter()
             .find(|(usage, _)| *usage == id)
@@ -273,7 +304,12 @@ pub struct Interpreter {
     held_at: [u8; report::MAX_FIELDS],
     /// LEDs lit, a bit per LED code.
     leds: u16,
+    /// Each absolute axis's last value, `None` until a report gave one.
+    at: [Option<i32>; ABS_TRACKED],
 }
+
+/// The absolute axes a value is kept for: `ABS_X` to `ABS_WHEEL`.
+const ABS_TRACKED: usize = ABS_WHEEL as usize + 1;
 
 impl Interpreter {
     /// A reader of reports `descriptor` describes, nothing pressed.
@@ -294,6 +330,7 @@ impl Interpreter {
             held: [0; MAX_HELD],
             held_at,
             leds: 0,
+            at: [None; ABS_TRACKED],
         }
     }
 
@@ -346,6 +383,12 @@ impl Interpreter {
                 let Some((kind, code)) = mapped else {
                     continue;
                 };
+                // An axis whose range is empty is not declared: the core
+                // refuses a HELLO whose axis has its minimum past its
+                // maximum. Nor is one in an array, which never reports it.
+                if kind == EV_ABS && (!field.variable || axis_range(field).is_none()) {
+                    continue;
+                }
                 set(&mut bits.types, kind);
                 if let Some(codes) = bits.codes_mut(kind) {
                     set(codes, code);
@@ -358,11 +401,41 @@ impl Interpreter {
         bits
     }
 
+    /// Each absolute axis's range, from its field's logical minimum and
+    /// maximum; the default for every axis not declared. Where two fields
+    /// give the same axis, the first one's.
+    #[must_use]
+    pub fn axes(&self) -> [AxisRange; AXES] {
+        let mut axes = [AxisRange::default(); AXES];
+        let mut given = [false; AXES];
+        for field in self.descriptor.fields().iter().filter(|field| {
+            field.direction == Direction::Input && field.variable && !field.constant
+        }) {
+            let Some(range) = axis_range(field) else {
+                continue;
+            };
+            for usage in self.descriptor.all_usages(field) {
+                let Some((EV_ABS, code)) = map(usage, field.application, field.relative) else {
+                    continue;
+                };
+                if let (Some(slot), Some(done)) = (
+                    axes.get_mut(usize::from(code)),
+                    given.get_mut(usize::from(code)),
+                ) && !*done
+                {
+                    *slot = range;
+                    *done = true;
+                }
+            }
+        }
+        axes
+    }
+
     /// Whether anything is declared at all.
     #[must_use]
     pub fn maps_anything(&self) -> bool {
         let bits = self.bits();
-        bits.has_type(EV_KEY) || bits.has_type(EV_REL)
+        bits.has_type(EV_KEY) || bits.has_type(EV_REL) || bits.has_type(EV_ABS)
     }
 
     /// The events `report` makes, given what came before it. `report` is
@@ -400,6 +473,9 @@ impl Interpreter {
             };
             match map(usage, field.application, field.relative) {
                 Some((EV_REL, code)) if value != 0 => out.push(EV_REL, code, value),
+                Some((EV_ABS, code)) if (field.minimum..=field.maximum).contains(&value) => {
+                    self.absolute(code, value, out);
+                }
                 Some((EV_KEY, code)) if !field.relative => self.key(code, value != 0, out),
                 _ => {}
             }
@@ -455,6 +531,17 @@ impl Interpreter {
         }
         if let Some(held) = self.held.get_mut(start..start + count) {
             held.copy_from_slice(now);
+        }
+    }
+
+    /// An absolute event if axis `code` moved, or has not been said yet.
+    fn absolute(&mut self, code: u16, value: i32, out: &mut EventBuf) {
+        let Some(last) = self.at.get_mut(usize::from(code)) else {
+            return;
+        };
+        if *last != Some(value) {
+            *last = Some(value);
+            out.push(EV_ABS, code, value);
         }
     }
 
@@ -569,7 +656,19 @@ pub fn hello(interpreter: &Interpreter, identity: &Identity, location: u32) -> H
     };
     hello.name = identity.name;
     hello.bits = interpreter.bits();
+    hello.axes = interpreter.axes();
     hello
+}
+
+/// An absolute field's range: its logical minimum and maximum, no fuzz, no
+/// flat and no resolution, as `hidinput_configure_usage` gives a pointer's.
+/// `None` for an empty range.
+fn axis_range(field: &Field) -> Option<AxisRange> {
+    (field.minimum <= field.maximum).then_some(AxisRange {
+        minimum: field.minimum,
+        maximum: field.maximum,
+        ..AxisRange::default()
+    })
 }
 
 fn set(bits: &mut [u8], code: u16) {

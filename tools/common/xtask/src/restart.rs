@@ -78,7 +78,7 @@ pub(crate) const TASKS: &[Task] = &[
         name: "test-usb",
         help_at: 480,
         help: &[
-            "test-usb      Boot a shell beside a qemu-xhci with a hub, a keyboard, a mouse and a stick: type, point, unplug",
+            "test-usb      Boot a shell beside a qemu-xhci with a hub, a keyboard, a tablet, a mouse and a stick: type, point, unplug",
             "              and plug in again over QMP, read the stick, kill the driver twice; then a negative control (x86_64)",
         ],
         run,

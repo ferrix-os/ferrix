@@ -41,6 +41,7 @@ use crate::usb::{
     LANGUAGE_US, PROTOCOL_KEYBOARD, PROTOCOL_MOUSE, STRING, SUBCLASS_BOOT, Setup, Speed,
     first_language, is_control_packet, string_ascii,
 };
+use crate::watch::Watch;
 use crate::{Clock, Dma, MILLISECOND, Parts, Registers};
 
 /// The largest packet a `SuperSpeed` control endpoint takes, which its device
@@ -106,6 +107,8 @@ const NAME_BYTES: usize = 64;
 const PENDING: usize = 64;
 /// Notes held at once; older ones are dropped.
 const NOTES: usize = 16;
+/// Watched reports held at once; older ones are dropped, and counted.
+const WATCHED: usize = 32;
 
 /// Why a device could not be set up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -253,8 +256,43 @@ enum Pending {
         function: usize,
         bytes: [u8; PIPE_BYTES],
         len: usize,
+        /// When the controller's events were taken, on the clock's time.
+        at: u64,
     },
     Detached(usize),
+}
+
+/// A watched function's report as it came off its pipe ([`Bus::watch`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Watched {
+    /// The function.
+    pub function: usize,
+    /// Its device's `idVendor` and `idProduct`.
+    pub vendor: u16,
+    /// See `vendor`.
+    pub product: u16,
+    /// When the driver took it from the controller, on the clock's time:
+    /// every report one service took has the same.
+    pub at: u64,
+    /// The report, of which `len` bytes came, the ID byte first where the
+    /// descriptor numbers reports.
+    pub bytes: [u8; PIPE_BYTES],
+    /// See `bytes`.
+    pub len: usize,
+    /// Reports of every function dropped since the last one handed on,
+    /// because the driver had not read them before 64 others waited.
+    pub lost: u32,
+    /// Watched reports dropped since the last one handed on, because the
+    /// driver had not taken them before 32 others waited.
+    pub unsaid: u32,
+}
+
+impl Watched {
+    /// The bytes that came.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.bytes.get(..self.len).unwrap_or(&[])
+    }
 }
 
 /// A disk and the device it is on.
@@ -359,6 +397,13 @@ pub struct Bus<H> {
     /// Root ports whose device failed or was handed on, bit by port.
     root_failed: u32,
     next_poll: u64,
+    /// Whose reports are handed on raw, and those not yet taken.
+    watch: Watch,
+    watched: Ring<Watched, WATCHED>,
+    /// Reports dropped for want of room in `pending`, and watched ones for
+    /// want of it in `watched`, since the last watched report was taken.
+    lost: u32,
+    unsaid: u32,
 }
 
 impl<R: Registers, D: Dma, C: Clock> Bus<ehci::Controller<R, D, C>> {
@@ -388,7 +433,39 @@ impl<H: Host> Bus<H> {
             notes: Ring::new(),
             root_failed: 0,
             next_poll: 0,
+            watch: Watch::OFF,
+            watched: Ring::new(),
+            lost: 0,
+            unsaid: 0,
         }
+    }
+
+    /// Hand on the raw reports of the functions `watch` covers, from now on,
+    /// for [`Bus::next_watched`].
+    pub fn watch(&mut self, watch: Watch) {
+        self.watch = watch;
+    }
+
+    /// What is watched.
+    #[must_use]
+    pub const fn watching(&self) -> Watch {
+        self.watch
+    }
+
+    /// Keep a watched report for the driver, with what was dropped before
+    /// it.
+    fn keep_watched(&mut self, mut report: Watched) {
+        if self.watched.len == WATCHED {
+            self.unsaid = self.unsaid.saturating_add(1);
+        }
+        report.lost = core::mem::take(&mut self.lost);
+        report.unsaid = core::mem::take(&mut self.unsaid);
+        self.watched.push_over(report);
+    }
+
+    /// The next watched report, in the order the reports were read.
+    pub fn next_watched(&mut self) -> Option<Watched> {
+        self.watched.pop()
     }
 
     /// Stop the controller.
@@ -433,18 +510,24 @@ impl<H: Host> Bus<H> {
             hc,
             functions,
             pending,
+            lost,
             ..
         } = self;
+        let at = hc.clock().now_nanos();
         let serviced = hc.service(|packet| {
             let owner = functions
                 .iter()
                 .position(|function| function.is_some_and(|f| f.pipe == packet.pipe && !f.gone));
             if let Some(function) = owner {
-                let _ = pending.push(Pending::Report {
+                let kept = pending.push(Pending::Report {
                     function,
                     bytes: packet.bytes,
                     len: packet.len,
+                    at,
                 });
+                if !kept {
+                    *lost = lost.saturating_add(1);
+                }
             }
         });
         for (index, slot) in self.functions.iter_mut().enumerate() {
@@ -486,7 +569,24 @@ impl<H: Host> Bus<H> {
                     function,
                     bytes,
                     len,
+                    at,
                 } => {
+                    let Some(Some(state)) = self.functions.get_mut(function) else {
+                        continue;
+                    };
+                    let (identity, kind) = (state.identity, state.kind);
+                    if self.watch.covers(identity.vendor, identity.product, kind) {
+                        self.keep_watched(Watched {
+                            function,
+                            vendor: identity.vendor,
+                            product: identity.product,
+                            at,
+                            bytes,
+                            len,
+                            lost: 0,
+                            unsaid: 0,
+                        });
+                    }
                     let Some(Some(state)) = self.functions.get_mut(function) else {
                         continue;
                     };

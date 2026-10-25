@@ -1,7 +1,8 @@
 //! `test-usb`: a PC's USB bus, as far as QEMU has one.
 //!
 //! `docs/XHCI.md` §7. The boot has a `qemu-xhci` controller with a hub on
-//! its first port, a keyboard behind the hub, a mouse on its second port and
+//! its first port, a keyboard and a tablet behind the hub, a mouse on its
+//! second port and
 //! a memory stick on its first USB 3 port -- emulated devices all, never the
 //! host's. Before `test-restart`'s two kills of the driver, the gate
 //! requires:
@@ -9,8 +10,10 @@
 //! 1. the driver's own lines for the controller, the hub and the stick, the
 //!    stick's with its size and a sum of its first block that the gate
 //!    worked out from the image it attached;
-//! 2. a key pressed and the mouse moved and clicked through QMP, arriving at
-//!    the nodes `evecho` found the keyboard and the mouse on;
+//! 2. a key pressed, the mouse moved and clicked and the tablet put at two
+//!    places through QMP, arriving at the nodes `evecho` found the keyboard,
+//!    the mouse and the tablet on -- the tablet's as `ABS_X` and `ABS_Y`, its
+//!    absolute axes, at the values QMP gave;
 //! 3. the keyboard unplugged through QMP gone from the input core, and one
 //!    plugged in again found and typing.
 //!
@@ -36,16 +39,23 @@ use crate::{Error, Result, qemu};
 /// product strings.
 pub(super) const KEYBOARD: &str = "QEMU USB Keyboard";
 const MOUSE: &str = "QEMU USB Mouse";
+/// QEMU's `usb-tablet`, named as a mouse is, after its application.
+const TABLET: &str = "QEMU USB Tablet Mouse";
+/// The tablet's name in QEMU's `info mice`, which is not its product string.
+const QEMU_TABLET: &str = "QEMU HID Tablet";
+/// The mouse's.
+const QEMU_MOUSE: &str = "QEMU HID Mouse";
 
 /// Where the control's `evecho` is carried.
 pub(super) const EVECHO_CONTROL: &str = "/bin/evecho-control";
 
 /// What the driver says once each thing on the bus is found: what a boot,
 /// and each restart, must show.
-pub(super) const FOUND: [&str; 4] = [
+pub(super) const FOUND: [&str; 5] = [
     "usbhid: xHCI running",
     "USB Keyboard is event",
     "USB Mouse is event",
+    "USB Tablet Mouse is event",
     "usbhid: disk 0 ",
 ];
 
@@ -172,8 +182,9 @@ fn types_and_points(
     arrive(watching, port, before, evecho)
 }
 
-/// Press `a`, move the mouse and click it, and require each on the node the
-/// `evecho` that started after line `before` found its device on.
+/// Press `a`, move the mouse and click it, put the tablet at two places, and
+/// require each on the node the `evecho` that started after line `before`
+/// found its device on.
 fn arrive(
     watching: &mut qemu::Watching<'_>,
     port: u16,
@@ -186,9 +197,15 @@ fn arrive(
         .ok_or_else(|| format!("{evecho} opened no `{KEYBOARD}`"))?;
     let mouse = crate::input::node_of(&opened, MOUSE)
         .ok_or_else(|| format!("{evecho} opened no `{MOUSE}`"))?;
+    let tablet = crate::input::node_of(&opened, TABLET)
+        .ok_or_else(|| format!("{evecho} opened no `{TABLET}`"))?;
+    let absolute = crate::input::absolute;
 
     let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10)).map_err(io)?;
     press(&mut qmp).map_err(io)?;
+    // Each pointer is chosen before its events: unchosen, QEMU gives the
+    // buttons to whichever pointer the guest last started reading.
+    qmp.choose_pointer(QEMU_MOUSE).map_err(io)?;
     for events in [
         vec![relative("x", 7), relative("y", -3)],
         vec![button(true)],
@@ -196,15 +213,48 @@ fn arrive(
     ] {
         qmp.input_send_event(&events).map_err(io)?;
     }
-    let wanted = [
-        format!("evecho: {keyboard} EV_KEY KEY_A 1"),
-        format!("evecho: {keyboard} EV_KEY KEY_A 0"),
-        format!("evecho: {keyboard} EV_SYN SYN_REPORT 0"),
-        format!("evecho: {mouse} EV_REL REL_X 7"),
-        format!("evecho: {mouse} EV_REL REL_Y -3"),
-        format!("evecho: {mouse} EV_KEY BTN_LEFT 1"),
-        format!("evecho: {mouse} EV_KEY BTN_LEFT 0"),
-    ];
+    qmp.choose_pointer(QEMU_TABLET).map_err(io)?;
+    qmp.input_send_event(&[absolute("x", 8000), absolute("y", 24000)])
+        .map_err(io)?;
+    require(
+        watching,
+        before,
+        &[
+            format!("evecho: {keyboard} EV_KEY KEY_A 1"),
+            format!("evecho: {keyboard} EV_KEY KEY_A 0"),
+            format!("evecho: {keyboard} EV_SYN SYN_REPORT 0"),
+            format!("evecho: {mouse} EV_REL REL_X 7"),
+            format!("evecho: {mouse} EV_REL REL_Y -3"),
+            format!("evecho: {mouse} EV_KEY BTN_LEFT 1"),
+            format!("evecho: {mouse} EV_KEY BTN_LEFT 0"),
+            format!("evecho: {tablet} EV_ABS ABS_X 8000"),
+            format!("evecho: {tablet} EV_ABS ABS_Y 24000"),
+        ],
+        &format!("{keyboard}, {mouse} and {tablet}"),
+    )?;
+    // The second place only once the first arrived: QEMU's tablet keeps one
+    // position, and a second sent before the guest read the first replaces
+    // it. Y stays where it was, and is not said again.
+    let before = watching.after().len();
+    qmp.input_send_event(&[absolute("x", 30000), absolute("y", 24000)])
+        .map_err(io)?;
+    require(
+        watching,
+        before,
+        &[format!("evecho: {tablet} EV_ABS ABS_X 30000")],
+        &tablet,
+    )
+}
+
+/// Wait for every line of `wanted` after line `before`, and say which did not
+/// come to `whom`.
+fn require(
+    watching: &mut qemu::Watching<'_>,
+    before: usize,
+    wanted: &[String],
+    whom: &str,
+) -> std::result::Result<(), String> {
+    let io = |error: Error| error.to_string();
     let missing = |lines: &[String]| -> Vec<String> {
         let lines = lines.get(before..).unwrap_or_default();
         wanted
@@ -221,8 +271,7 @@ fn arrive(
         Ok(())
     } else {
         Err(format!(
-            "{} of {} events put in through QMP never reached {keyboard} and {mouse}; the \
-             first missing: `{}`",
+            "{} of {} events put in through QMP never reached {whom}; the first missing: `{}`",
             lost.len(),
             wanted.len(),
             lost.first().map_or("", String::as_str)

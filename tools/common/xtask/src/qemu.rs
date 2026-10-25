@@ -3273,15 +3273,15 @@ fn report_network(network: &Network) {
 /// so firmware that looks at the disk finds nothing to boot and goes on to the
 /// image.
 /// `test-usb`'s bus: a `qemu-xhci` controller, a hub on its first port with a
-/// keyboard behind it, a mouse on its second, and a memory stick on its
-/// third. Emulated devices only: nothing of the host's is ever
+/// keyboard and a tablet behind it, a mouse on its second, and a memory stick
+/// on its third. Emulated devices only: nothing of the host's is ever
 /// attached.
 fn attach_usb(command: &mut Command, arch: Arch, args: &Args) {
     let Some(stick) = &args.usb else {
         return;
     };
     println!(
-        "  {arch}: qemu-xhci with a hub, a keyboard behind it, a mouse, and {} as a stick",
+        "  {arch}: qemu-xhci with a hub, a keyboard and a tablet behind it, a mouse, and {} as a stick",
         display(stick)
     );
     // Each of the controller's four sockets is a USB 3 root port (1 to 4)
@@ -3294,6 +3294,11 @@ fn attach_usb(command: &mut Command, arch: Arch, args: &Args) {
         &format!("usb-hub,bus={USB_BUS}.0,port=1,id=usbhub"),
     ]);
     let _ = command.args(["-device", &usb_keyboard(USB_KEYBOARD_ID)]);
+    // An absolute pointer, as a KVM switch's is: X and Y from 0 to 32767.
+    let _ = command.args([
+        "-device",
+        &format!("usb-tablet,bus={USB_BUS}.0,port=1.2,id=usbtablet"),
+    ]);
     let _ = command.args([
         "-device",
         &format!("usb-mouse,bus={USB_BUS}.0,port=2,id=usbmouse"),

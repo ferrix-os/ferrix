@@ -361,6 +361,9 @@ pub const REL_CNT: u16 = REL_MAX + 1;
 pub const ABS_X: u16 = 0x00;
 /// `ABS_Y`: its vertical position.
 pub const ABS_Y: u16 = 0x01;
+/// `ABS_WHEEL`: an absolute wheel's position, which Linux's HID driver makes
+/// of a Generic Desktop wheel that is not relative.
+pub const ABS_WHEEL: u16 = 0x08;
 /// `ABS_MT_SLOT`: the first multi-touch axis, which the input iteration
 /// leaves out with every axis after it.
 pub const ABS_MT_SLOT: u16 = 0x2f;

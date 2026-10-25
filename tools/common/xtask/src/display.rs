@@ -370,6 +370,38 @@ impl Qmp {
         self.execute("input-send-event", Some(&arguments)).map(drop)
     }
 
+    /// Make the pointer QEMU names `name` the one its pointer events go to,
+    /// as the human monitor's `mouse_set` does with the index `info mice`
+    /// gives it: unchosen, they go to the one that last became active.
+    ///
+    /// # Errors
+    ///
+    /// Whatever QMP said, or no pointer of that name.
+    pub(crate) fn choose_pointer(&mut self, name: &str) -> Result<()> {
+        let mice = self.execute(
+            "human-monitor-command",
+            Some("{\"command-line\":\"info mice\"}"),
+        )?;
+        let index = mice
+            .replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .lines()
+            .find(|line| line.contains(name))
+            .and_then(|line| {
+                let at = line.find("Mouse #")? + "Mouse #".len();
+                let digits: String = line
+                    .get(at..)?
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
+                digits.parse::<u32>().ok()
+            })
+            .ok_or_else(|| Error::new(format!("QEMU has no pointer `{name}`: {}", mice.trim())))?;
+        let arguments = format!("{{\"command-line\":\"mouse_set {index}\"}}");
+        self.execute("human-monitor-command", Some(&arguments))
+            .map(drop)
+    }
+
     /// Unplug the device with `id`.
     ///
     /// # Errors

@@ -14,7 +14,7 @@ administrator or developer, belongs in an advanced page or nowhere;
 **test-only** = used by gates, never in Settings.
 
 **In numbers**: 27 kernel and loader boot words, plus the four slot words
-the loader writes and nobody sets (§1); 17 boot words read by ring-3
+the loader writes and nobody sets (§1); 18 boot words read by ring-3
 programs, plus any word through `ConditionKernelCommandLine=` (§2); 32
 configuration files or file families (§3); 18 live-control tools and 11
 writable kernel files or calls, among them 17 writable cgroup files (§4.1,
@@ -132,7 +132,8 @@ Read from `/proc/cmdline`, once, when the program starts. None of these is
 in the kernel's registry: a library names no boot option, the program that
 reads it does (`check-build-flags.py`). No program in the compositor
 stack, auth, lode, tole or the apps reads `/proc/cmdline`; `devmgr` and
-the net, input, disk, sound and display drivers read no boot word either.
+the net, input, disk, sound and display drivers read no boot word either;
+the USB host driver reads one.
 
 | Word | Reader | Values | Default | Effect | Class |
 |---|---|---|---|---|---|
@@ -142,6 +143,7 @@ the net, input, disk, sound and display drivers read no boot word either.
 | `ferrix.statd.interval` | the statd app (its `src/main.rs:221`, apps component) | ms | 500, at least 100 | sampling interval; `--interval` wins | test-only (Pixel 7 stat runs) |
 | `ferrix.statd.seconds` | statd (`:225`) | seconds | 0 = forever | run length; `--seconds` wins | test-only |
 | `ferrix.slot`, `.boot`, `.seq`, `.disk` | `bootctl` (`installer/src/bootctl.rs`, `ferrix_slots::plan::parse_words`) | as §1.2 | — | which slot this system runs; refuses to act when record and line disagree | read-only |
+| `ferrix.usbhid.reports` | usbhid (`native/drivers/usb/usbhid/src/main.rs`, parsed in `src/lib/drivers/usb/usb-host/src/watch.rs`) | alone or `all`; `off`; `vvvv:pppp`; a kind (`keyboard`, `mouse`, `media`, `system`, `input`); `vvvv:pppp/kind` | off | say every interrupt report of the functions named, raw, stamped, at debug; `/run/usbhid-reports` with the same value overrides it live while it exists (`docs/XHCI.md` §13) | developer |
 | `ferrix.intelgpu.modeset` | intel driver (`native/drivers/gpu/intel/src/display/modeset.rs`) | `dry`, `on` | nothing | `dry` prints the second scanout's modeset plan, `on` carries it out | test-only (N150 bring-up) |
 | `ferrix.intelgpu.stop` | intel driver (`steps.rs`, parsed in `src/lib/drivers/gpu/intel-xelp/src/options.rs`) | step number ≥ 1 (non-number = 1) | none | stop before step N and touch nothing more | test-only |
 | `ferrix.intelgpu.trace` | intel driver | flag | off | say every register access | developer |

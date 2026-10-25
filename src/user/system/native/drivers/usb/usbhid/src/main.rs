@@ -26,6 +26,11 @@
 //!
 //! What it finds is said on standard error, which is the console.
 //!
+//! With the debug switch `ferrix.usbhid.reports` on the kernel command line,
+//! or the file `/run/usbhid-reports` there, every interrupt report of the
+//! functions it names is said raw at debug, with the time it was taken and
+//! the events it made (`ferrix_usb_host::watch`, `docs/XHCI.md` §13).
+//!
 //! The exit status names the step that failed ([`Step`]).
 
 #![no_std]
@@ -53,11 +58,12 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 use ferrix_usb_host::bus::{
-    Bus, DiskChange, MAX_FUNCTIONS, Note, Output, SERVICE_POLL, SERVICE_POLL_IDLE_MAX,
+    Bus, DiskChange, MAX_FUNCTIONS, Note, Output, SERVICE_POLL, SERVICE_POLL_IDLE_MAX, Watched,
     next_service_poll,
 };
 use ferrix_usb_host::hid::Kind;
 use ferrix_usb_host::host::{self, Host as Controller};
+use ferrix_usb_host::watch::{self, Watch};
 use ferrix_usb_host::{Clock, Dma, MILLISECOND, Parts, Registers, ehci, xhci};
 
 ferrix_rt::entry!(main);
@@ -500,8 +506,13 @@ where
         }
     };
     ferrix_rt::info!("usbhid: {name} running");
+    let booted = boot_watch();
+    let mut bus = Bus::with(controller);
+    bus.watch(booted);
     let mut driver = Driver {
-        bus: Bus::with(controller),
+        bus,
+        booted,
+        last_report: [0; MAX_FUNCTIONS],
         device,
         port,
         interrupt,
@@ -531,6 +542,11 @@ struct Driver<H> {
     location: u32,
     /// Each function's input control channel, once the core took it.
     channels: [Option<Channel<Kernel>>; MAX_FUNCTIONS],
+    /// What the boot word asked to be watched, which holds while
+    /// `/run/usbhid-reports` is not there.
+    booted: Watch,
+    /// When each function's last watched report was taken.
+    last_report: [u64; MAX_FUNCTIONS],
 }
 
 impl<H: Controller<Clock = Time>> Driver<H> {
@@ -547,7 +563,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                 .saturating_add(settle);
             let _ = self.port.wait(Deadline::At(until));
         }
-        self.bus.poll();
+        self.poll();
         let _ = self.forward();
         let _ = boot.write(SETTLED);
         // Until the controller's interrupt has been seen to arrive, its
@@ -595,7 +611,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     // if this service found anything.
                     service_every = next_service_poll(service_every, false);
                     if ferrix_rt::linux::monotonic_nanos().unwrap_or(0) >= next_poll {
-                        self.bus.poll();
+                        self.poll();
                     }
                 }
                 Ok(packet) if packet.kind == PACKET_SIGNAL && packet.key >= KEY_FIRST_CONTROL => {
@@ -604,10 +620,61 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     self.take_control(function);
                 }
                 Ok(_) => {}
-                Err(Error::TimedOut) => self.bus.poll(),
+                Err(Error::TimedOut) => self.poll(),
                 Err(_) => return Err(Step::Events),
             }
         }
+    }
+
+    /// Poll the ports, and take what `/run/usbhid-reports` says should be
+    /// watched now.
+    fn poll(&mut self) {
+        self.bus.poll();
+        let now = file_watch().unwrap_or(self.booted);
+        if now != self.bus.watching() {
+            ferrix_rt::notice!("usbhid: watching reports: {now}");
+            self.bus.watch(now);
+        }
+    }
+
+    /// Say a watched report: its bytes, the time it was taken and since its
+    /// function's last, and what was lost before it.
+    fn say_watched(&mut self, report: &Watched) {
+        let Some(last) = self.last_report.get_mut(report.function) else {
+            return;
+        };
+        let since = report.at.saturating_sub(*last);
+        let first = *last == 0;
+        *last = report.at;
+        let mut hex = Hex::default();
+        for byte in report.as_bytes() {
+            hex.push(*byte);
+        }
+        let micros = report.at / 1_000;
+        ferrix_rt::debug!(
+            "usbhid: report {:04x}:{:04x} function {} at {}.{:06} s (+{} us){}: {}{}",
+            report.vendor,
+            report.product,
+            report.function,
+            micros / 1_000_000,
+            micros % 1_000_000,
+            if first { 0 } else { since / 1_000 },
+            if first { ", its first" } else { "" },
+            hex.as_str(),
+            Lost(report.lost, report.unsaid),
+        );
+    }
+
+    /// Say the events the watched report before them made.
+    fn say_events(&self, function: usize) {
+        let mut text = Text::default();
+        for event in self.bus.events() {
+            let _ = fmt::Write::write_fmt(
+                &mut text,
+                format_args!(" {}:{}={}", event.kind, event.code, event.value),
+            );
+        }
+        ferrix_rt::debug!("usbhid: function {function} made{}", text.as_str());
     }
 
     /// Hand on everything the bus has, and say what it found. Answers
@@ -624,6 +691,16 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         }
         while let Some(output) = self.bus.next_output() {
             moved = true;
+            let mut said_report = None;
+            while let Some(report) = self.bus.next_watched() {
+                said_report = Some(report.function);
+                self.say_watched(&report);
+            }
+            if let Output::Events(function) = output
+                && said_report == Some(function)
+            {
+                self.say_events(function);
+            }
             match output {
                 Output::Attached(function) => self.introduce(function),
                 Output::Events(function) => {
@@ -641,6 +718,10 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     ferrix_rt::info!("usbhid: function {function} unplugged");
                 }
             }
+        }
+        // Reports that made no events come out after the last output.
+        while let Some(report) = self.bus.next_watched() {
+            self.say_watched(&report);
         }
         moved
     }
@@ -771,6 +852,162 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         if !armed && let Some(slot) = self.channels.get_mut(function) {
             *slot = None;
         }
+    }
+}
+
+/// The debug switch's boot word (`ferrix_usb_host::watch`).
+const WATCH_WORD: &[u8] = b"ferrix.usbhid.reports";
+
+/// What the boot word asks to be watched: off when `/proc/cmdline` cannot
+/// be read, which is said.
+fn boot_watch() -> Watch {
+    let mut line = [0_u8; 2048];
+    match read_file(b"/proc/cmdline\0", &mut line) {
+        Ok(len) => {
+            let watch = Watch::from_command_line(line.get(..len).unwrap_or_default(), WATCH_WORD);
+            if watch.is_on() {
+                ferrix_rt::notice!("usbhid: ferrix.usbhid.reports: watching reports: {watch}");
+            }
+            watch
+        }
+        Err(errno) => {
+            ferrix_rt::warn!(
+                "usbhid: /proc/cmdline unreadable ({errno:?}): ferrix.usbhid.reports is off"
+            );
+            Watch::OFF
+        }
+    }
+}
+
+/// What `/run/usbhid-reports` asks to be watched, while it is there; a
+/// value it cannot read watches nothing.
+fn file_watch() -> Option<Watch> {
+    let mut bytes = [0_u8; 64];
+    let len = read_file(watch::FILE, &mut bytes).ok()?;
+    Some(Watch::parse(bytes.get(..len).unwrap_or_default()).unwrap_or(Watch::OFF))
+}
+
+/// A small file from its start into `buf` (`path` NUL-terminated): its
+/// length.
+fn read_file(path: &[u8], buf: &mut [u8]) -> Result<usize, ferrix_linux_abi::errno::Errno> {
+    use ferrix_rt::linux::{self, numbers};
+    const AT_FDCWD: usize = (-100_isize).cast_unsigned();
+    const O_RDONLY: usize = 0;
+    const O_CLOEXEC: usize = 0o2_000_000;
+    if path.last() != Some(&0) {
+        return Err(ferrix_linux_abi::errno::Errno::EINVAL);
+    }
+    // SAFETY: `path` is NUL-terminated and borrowed for the call.
+    let fd = unsafe {
+        linux::call(
+            numbers::OPENAT,
+            [
+                AT_FDCWD,
+                path.as_ptr().addr(),
+                O_RDONLY | O_CLOEXEC,
+                0,
+                0,
+                0,
+            ],
+        )
+    }?;
+    let mut len = 0;
+    while let Some(rest) = buf.get_mut(len..) {
+        if rest.is_empty() {
+            break;
+        }
+        match linux::read(fd, rest) {
+            Ok(0) => break,
+            Ok(got) => len += got,
+            Err(errno) => {
+                let _ = linux::close(fd);
+                return Err(errno);
+            }
+        }
+    }
+    let _ = linux::close(fd);
+    Ok(len)
+}
+
+/// A report's bytes in hex, a space between each.
+struct Hex {
+    bytes: [u8; 3 * host::PIPE_BYTES],
+    len: usize,
+}
+
+impl Default for Hex {
+    fn default() -> Self {
+        Hex {
+            bytes: [0; 3 * host::PIPE_BYTES],
+            len: 0,
+        }
+    }
+}
+
+impl Hex {
+    fn push(&mut self, byte: u8) {
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+        let high = DIGITS.get(usize::from(byte >> 4)).copied().unwrap_or(b'?');
+        let low = DIGITS.get(usize::from(byte & 0xF)).copied().unwrap_or(b'?');
+        let space = (self.len > 0).then_some(b' ');
+        for digit in space.into_iter().chain([high, low]) {
+            if let Some(slot) = self.bytes.get_mut(self.len) {
+                *slot = digit;
+                self.len += 1;
+            }
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.len).unwrap_or_default()).unwrap_or("?")
+    }
+}
+
+/// Up to a line of text, cut at its end.
+struct Text {
+    bytes: [u8; 400],
+    len: usize,
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Text {
+            bytes: [0; 400],
+            len: 0,
+        }
+    }
+}
+
+impl Text {
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.len).unwrap_or_default()).unwrap_or("?")
+    }
+}
+
+impl fmt::Write for Text {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        for &byte in text.as_bytes() {
+            if let Some(slot) = self.bytes.get_mut(self.len) {
+                *slot = byte;
+                self.len += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What was dropped before a watched report, if anything.
+struct Lost(u32, u32);
+
+impl fmt::Display for Lost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0 > 0 {
+            write!(f, " ({} reports of any function dropped before it)", self.0)?;
+        }
+        if self.1 > 0 {
+            write!(f, " ({} watched reports not said)", self.1)?;
+        }
+        Ok(())
     }
 }
 

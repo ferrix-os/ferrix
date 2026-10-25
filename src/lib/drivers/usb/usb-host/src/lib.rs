@@ -22,7 +22,8 @@
 //! * [`usb`]: the standard requests and descriptors;
 //! * [`hub`]: the hub class's requests and port status;
 //! * [`hid`]: the boot protocol's reports, and the events and HELLO they make;
-//! * [`bus`]: enumeration, hot plugging, and what the driver hands the core.
+//! * [`bus`]: enumeration, hot plugging, and what the driver hands the core;
+//! * [`watch`]: which functions' raw reports the driver says, when asked.
 //!
 //! # What is not here
 //!
@@ -51,6 +52,7 @@ pub mod hub;
 pub mod report;
 pub mod storage;
 pub mod usb;
+pub mod watch;
 pub mod xhci;
 
 #[cfg(test)]
