@@ -64,8 +64,8 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
 use ferrix_usb_host::bus::{
-    Bus, DiskChange, MAX_FUNCTIONS, MAX_SERIALS, Note, Output, SERVICE_POLL,
-    SERVICE_POLL_IDLE_MAX, Watched, next_service_poll,
+    Bus, DiskChange, MAX_FUNCTIONS, MAX_SERIALS, Note, Output, SERVICE_POLL, SERVICE_POLL_IDLE_MAX,
+    Watched, next_service_poll,
 };
 use ferrix_usb_host::hid::Kind;
 use ferrix_usb_host::host::{self, Host as Controller};
@@ -1155,9 +1155,8 @@ fn tell(note: Note) {
         Note::Handed { port } => ferrix_rt::info!(
             "usbhid: root port {port} has a full- or low-speed device, which EHCI hands to its companion"
         ),
-        Note::SerialFailed { role, error } => ferrix_rt::err!(
-            "usbhid: a {} would not be set up: {error:?}",
-            role.word()
-        ),
+        Note::SerialFailed { role, error } => {
+            ferrix_rt::err!("usbhid: a {} would not be set up: {error:?}", role.word())
+        }
     }
 }

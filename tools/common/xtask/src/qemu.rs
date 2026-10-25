@@ -3466,7 +3466,10 @@ fn attach_usb_serial(command: &mut Command, arch: Arch, args: &Args) {
     }
     let _ = command.args([
         "-chardev",
-        &format!("socket,id=ftdi0,path={},server=on,wait=off", display(socket)),
+        &format!(
+            "socket,id=ftdi0,path={},server=on,wait=off",
+            display(socket)
+        ),
     ]);
     // Plugged in from the start: otherwise QEMU attaches the device only
     // once something has connected to the socket, which is the gate, after

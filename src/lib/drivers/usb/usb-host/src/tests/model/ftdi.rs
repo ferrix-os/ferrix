@@ -170,7 +170,11 @@ pub(in crate::tests) struct Tap {
 }
 
 impl Tap {
-    pub(in crate::tests) fn new(ir_length: usize, idcode_instruction: u64, idcode: Option<u32>) -> Tap {
+    pub(in crate::tests) fn new(
+        ir_length: usize,
+        idcode_instruction: u64,
+        idcode: Option<u32>,
+    ) -> Tap {
         Tap {
             state: State::Reset,
             ir_length,
@@ -206,18 +210,16 @@ impl Tap {
                     self.bypass()
                 };
             }
-            State::CaptureDr => {
-                match self.idcode {
-                    Some(idcode) if self.instruction == self.idcode_instruction => {
-                        self.shift = u64::from(idcode);
-                        self.length = 32;
-                    }
-                    _ => {
-                        self.shift = 0;
-                        self.length = 1;
-                    }
+            State::CaptureDr => match self.idcode {
+                Some(idcode) if self.instruction == self.idcode_instruction => {
+                    self.shift = u64::from(idcode);
+                    self.length = 32;
                 }
-            }
+                _ => {
+                    self.shift = 0;
+                    self.length = 1;
+                }
+            },
             State::CaptureIr => {
                 self.shift = 0b01;
                 self.length = self.ir_length;

@@ -1776,6 +1776,7 @@ impl<H: Host> blaster::Link for Cable<'_, H> {
     }
 
     fn read(&mut self, into: &mut [u8]) -> Result<(), Error> {
-        self.bus.serial_read_exact(self.serial, into, CABLE_PATIENCE)
+        self.bus
+            .serial_read_exact(self.serial, into, CABLE_PATIENCE)
     }
 }

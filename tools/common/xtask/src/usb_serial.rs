@@ -96,7 +96,9 @@ fn busybox(arch: Arch, args: &Args) -> Result<PathBuf> {
     if let Some(built) = crate::busybox::installed_program(arch) {
         return Ok(built);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     let alpine = home
         .join(".local/share/ferrix/busybox")
         .join(arch.name())
@@ -123,13 +125,18 @@ fn exchange(
         match UnixStream::connect(socket) {
             Ok(stream) => break stream,
             Err(error) if Instant::now() >= deadline => {
-                return Err(format!("the socket {} did not connect: {error}", socket.display()));
+                return Err(format!(
+                    "the socket {} did not connect: {error}",
+                    socket.display()
+                ));
             }
             Err(_) => std::thread::sleep(Duration::from_millis(100)),
         }
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-    stream.write_all(GO).map_err(|error| format!("sending go: {error}"))?;
+    stream
+        .write_all(GO)
+        .map_err(|error| format!("sending go: {error}"))?;
     let wanted = format!("{from_guest}\n");
     let mut heard = Vec::new();
     while !String::from_utf8_lossy(&heard).contains(&wanted) {
@@ -166,7 +173,8 @@ fn exchange(
     } else {
         Err(format!(
             "the guest did not read {to_guest:?} from /tmp/ttyUSB0; it said {:?}",
-            said.filter(|line| line.contains("serial-gate")).collect::<Vec<_>>()
+            said.filter(|line| line.contains("serial-gate"))
+                .collect::<Vec<_>>()
         ))
     }
 }
@@ -198,7 +206,10 @@ pub(crate) fn test(args: &Args) -> Result<()> {
     let from_guest = format!("ferrix-to-host-{seed:016x}");
     let to_guest = format!("host-to-ferrix-{:016x}", seed.rotate_left(17) ^ 0x5A5A);
     let shell = busybox(arch, args)?;
-    println!("  {arch}: busybox {} as init, with the gate's script", shell.display());
+    println!(
+        "  {arch}: busybox {} as init, with the gate's script",
+        shell.display()
+    );
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel = crate::cargo::build_kernel_with_init(
         arch,
@@ -215,7 +226,8 @@ pub(crate) fn test(args: &Args) -> Result<()> {
     // A Unix socket's path is at most 107 bytes, which a worktree's build
     // directory is past: the socket and its trace go in the temporary
     // directory, named for this process.
-    let socket = std::env::temp_dir().join(format!("ferrix-usb-serial-{}.sock", std::process::id()));
+    let socket =
+        std::env::temp_dir().join(format!("ferrix-usb-serial-{}.sock", std::process::id()));
     let trace = crate::qemu::usb_serial_trace(&socket);
     for stale in [&socket, &trace] {
         if stale.exists() {

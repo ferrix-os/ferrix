@@ -267,7 +267,9 @@ impl<'a, L: Link> Jtag<'a, L> {
         let mut answers = [0_u8; 8];
         for bit in 0..rest {
             let index = whole * 8 + bit;
-            self.tdi = tdi.get(index / 8).is_some_and(|byte| byte >> (index % 8) & 1 != 0);
+            self.tdi = tdi
+                .get(index / 8)
+                .is_some_and(|byte| byte >> (index % 8) & 1 != 0);
             let last = bit + 1 == rest;
             if last {
                 self.tms = true;
@@ -306,7 +308,10 @@ impl<'a, L: Link> Jtag<'a, L> {
         let ones = [0xFF_u8; BITS / 8];
         let mut out = [0_u8; BITS / 8];
         self.scan(false, BITS, &ones, &mut out)?;
-        let bit = |at: usize| out.get(at / 8).is_some_and(|byte| byte >> (at % 8) & 1 != 0);
+        let bit = |at: usize| {
+            out.get(at / 8)
+                .is_some_and(|byte| byte >> (at % 8) & 1 != 0)
+        };
         let word = |at: usize| (0..32).fold(0_u32, |word, n| word | (u32::from(bit(at + n)) << n));
         let mut at = 0;
         for (found, slot) in taps.iter_mut().enumerate() {

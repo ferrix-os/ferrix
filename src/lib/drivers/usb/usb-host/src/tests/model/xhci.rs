@@ -1233,7 +1233,11 @@ impl Xhci {
         if (control >> 10) & 0x3F != 1 || control & (1 << 5) == 0 {
             self.violation(format!("a bulk request of {control:#x}"));
         }
-        if let Some(serial) = self.serials.iter().position(|serial| serial.device == device) {
+        if let Some(serial) = self
+            .serials
+            .iter()
+            .position(|serial| serial.device == device)
+        {
             if dci % 2 == 1 {
                 let Some(data) = self.serials[serial].bulk_in(asked) else {
                     return false;

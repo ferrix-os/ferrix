@@ -82,8 +82,15 @@ fn qemu_s_decoding_reads_the_b_family_s_divisor_as_its_rate() {
     // wIndex's bit 0, then 24 MHz over eight times the divisor plus it.
     let subdivisors = [0, 4, 2, 1, 3, 5, 6, 7];
     for baud in [300, 9600, 115_200, 1_000_000] {
-        let [setup, ..] =
-            ftdi::configure(Chip::B, 0, &Line { baud, ..Line::DEFAULT }).expect("setups");
+        let [setup, ..] = ftdi::configure(
+            Chip::B,
+            0,
+            &Line {
+                baud,
+                ..Line::DEFAULT
+            },
+        )
+        .expect("setups");
         let value = u32::from(setup.value);
         let index = u32::from(setup.index);
         let sub = subdivisors[(((value & 0xC000) >> 14) | ((index & 1) << 2)) as usize];
@@ -211,7 +218,11 @@ fn started(model: &Shared) -> TestBus {
 
 /// The model with one chip on root port `port` (0 and 1 are USB 2), its
 /// far side `serial`, and the bus once it found it.
-fn board(device: super::model::Device, port: usize, cable: Option<Cable>) -> (Shared, TestBus, usize) {
+fn board(
+    device: super::model::Device,
+    port: usize,
+    cable: Option<Cable>,
+) -> (Shared, TestBus, usize) {
     let model = Xhci::new();
     let index = {
         let mut m = model.borrow_mut();
@@ -285,7 +296,10 @@ fn an_ft232h_is_set_up_as_a_uart_at_9600_8n1() {
     );
     assert_eq!(bus.next_serial_change(), Some(SerialChange::Attached(0)));
     let serial = *bus.serial(0).expect("the port");
-    assert_eq!((serial.chip, serial.role, serial.max_packet), (Chip::H, Role::Uart, 512));
+    assert_eq!(
+        (serial.chip, serial.role, serial.max_packet),
+        (Chip::H, Role::Uart, 512)
+    );
     assert_eq!(serial.line, Line::DEFAULT);
     // Every request names port A, interface 0's, as 1; the H divisor for
     // 9600 has bit 17, so 2 in wIndex's high byte.
@@ -335,10 +349,16 @@ fn bytes_go_out_and_come_in_without_the_status_bytes() {
 
 #[test]
 fn a_reader_with_little_room_loses_nothing() {
-    let (model, mut bus, _) = board(chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400), 0, None);
+    let (model, mut bus, _) = board(
+        chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400),
+        0,
+        None,
+    );
     let _ = bus.next_serial_change();
     let incoming: Vec<u8> = (0..4000).map(|at| (at % 241) as u8).collect();
-    model.borrow_mut().serials[0].to_host.extend(incoming.iter().copied());
+    model.borrow_mut().serials[0]
+        .to_host
+        .extend(incoming.iter().copied());
     // A buffer of one request's size takes a chunk at a time.
     assert_eq!(drain(&model, &mut bus, 0, 512), incoming);
     // One too small takes nothing, rather than part of a chunk.
@@ -350,7 +370,11 @@ fn a_reader_with_little_room_loses_nothing() {
 
 #[test]
 fn a_line_error_is_kept_until_it_is_asked_for() {
-    let (model, mut bus, _) = board(chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400), 0, None);
+    let (model, mut bus, _) = board(
+        chip(Speed::Full, VENDOR_FTDI, PRODUCT_FT232, 0x400),
+        0,
+        None,
+    );
     let _ = bus.next_serial_change();
     {
         let mut m = model.borrow_mut();
@@ -381,20 +405,30 @@ fn a_new_line_is_sent_as_the_chip_s_three_requests() {
     bus.serial_configure(0, &line).expect("configured");
     assert_eq!(
         vendor_requests(&model, device)[before..],
-        [(3, 0x0004, 0x0201), (4, 7 | (2 << 8) | (2 << 11), 1), (2, 0, 0x0101)]
+        [
+            (3, 0x0004, 0x0201),
+            (4, 7 | (2 << 8) | (2 << 11), 1),
+            (2, 0, 0x0101)
+        ]
     );
     assert_eq!(bus.serial(0).expect("the port").line, line);
     // A rate the chip cannot have leaves the line as it was.
     assert!(bus.serial_configure(0, &Line { baud: 50, ..line }).is_err());
     assert_eq!(bus.serial(0).expect("the port").line, line);
     bus.serial_modem(0, false, true).expect("the modem lines");
-    assert_eq!(vendor_requests(&model, device).last(), Some(&(1, 0x0302, 1)));
+    assert_eq!(
+        vendor_requests(&model, device).last(),
+        Some(&(1, 0x0302, 1))
+    );
 }
 
 #[test]
 fn an_unplugged_adapter_goes_and_gives_its_slot_back() {
-    let (model, mut bus, device) =
-        board(chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900), 0, None);
+    let (model, mut bus, device) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
     let _ = bus.next_serial_change();
     model.borrow_mut().unplug_root(0);
     bus.poll();
@@ -452,17 +486,21 @@ fn ir_and_dr_scans_read_what_the_tap_captured() {
     jtag.reset().expect("reset");
     // IR captures 0b01 in its lowest bits.
     let mut tdo = [0_u8; 2];
-    jtag.scan(true, MAX10_IR, &[0x06, 0x00], &mut tdo).expect("the IR scan");
+    jtag.scan(true, MAX10_IR, &[0x06, 0x00], &mut tdo)
+        .expect("the IR scan");
     assert_eq!(u16::from_le_bytes(tdo) & 0x3FF, 0b01);
     // IDCODE selected, DR is it.
     let mut idcode = [0_u8; 4];
-    jtag.scan(false, 32, &[0; 4], &mut idcode).expect("the DR scan");
+    jtag.scan(false, 32, &[0; 4], &mut idcode)
+        .expect("the DR scan");
     assert_eq!(u32::from_le_bytes(idcode), MAX10_IDCODE);
     // BYPASS selected, DR is one zero, then what goes in comes out a bit
     // later.
-    jtag.scan(true, MAX10_IR, &[0xFF, 0x03], &mut tdo).expect("BYPASS");
+    jtag.scan(true, MAX10_IR, &[0xFF, 0x03], &mut tdo)
+        .expect("BYPASS");
     let mut out = [0_u8; 2];
-    jtag.scan(false, 16, &[0xA5, 0x5A], &mut out).expect("through BYPASS");
+    jtag.scan(false, 16, &[0xA5, 0x5A], &mut out)
+        .expect("through BYPASS");
     assert_eq!(u16::from_le_bytes(out), 0x5AA5 << 1);
     let m = model.borrow();
     let cable = m.serials[0].cable.as_ref().expect("the cable");
@@ -514,7 +552,11 @@ fn no_chain_reads_as_no_taps_and_a_tdo_held_low_as_a_fault() {
 
 #[test]
 fn a_uart_is_no_jtag_cable() {
-    let (_, mut bus, _) = board(chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900), 0, None);
+    let (_, mut bus, _) = board(
+        chip(Speed::High, VENDOR_FTDI, PRODUCT_FT232H, 0x900),
+        0,
+        None,
+    );
     let _ = bus.next_serial_change();
     assert!(bus.blaster(0).is_none());
 }
@@ -532,7 +574,10 @@ fn a_terminal_s_lines_read_as_commands() {
         panic!("a scan");
     };
     assert_eq!((ir, bits), (false, 32));
-    assert_eq!(u32::from_le_bytes(tdi[..4].try_into().expect("four")), MAX10_IDCODE);
+    assert_eq!(
+        u32::from_le_bytes(tdi[..4].try_into().expect("four")),
+        MAX10_IDCODE
+    );
     assert_eq!(Command::parse(b"ir 10 0x7ff"), Err(Refused::Value));
     assert_eq!(Command::parse(b"ir 10 0xg"), Err(Refused::Value));
     assert_eq!(Command::parse(b"dr 0 1"), Err(Refused::Bits));

@@ -73,7 +73,10 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     if let Some(slot) = self.ttys.get_mut(index)
                         && let Some(tty) = slot.take()
                     {
-                        ferrix_rt::info!("usbhid: serial {index} unplugged: {} hung up", tty.link());
+                        ferrix_rt::info!(
+                            "usbhid: serial {index} unplugged: {} hung up",
+                            tty.link()
+                        );
                     }
                 }
             }
@@ -134,7 +137,10 @@ impl<H: Controller<Clock = Time>> Driver<H> {
             return false;
         };
         if let Some((termios, hang_up)) = tty.changed() {
-            let current = self.bus.serial(index).map_or(9600, |serial| serial.line.baud);
+            let current = self
+                .bus
+                .serial(index)
+                .map_or(9600, |serial| serial.line.baud);
             let line = termios.line(current);
             if let Err(error) = self.bus.serial_modem(index, !hang_up, !hang_up) {
                 ferrix_rt::warn!("usbhid: serial {index}'s DTR and RTS were not set: {error:?}");
@@ -162,7 +168,10 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         let out = tty.read(&mut buffer);
         if out > 0 {
             moved = true;
-            if let Err(error) = self.bus.serial_write(index, buffer.get(..out).unwrap_or_default()) {
+            if let Err(error) = self
+                .bus
+                .serial_write(index, buffer.get(..out).unwrap_or_default())
+            {
                 ferrix_rt::warn!("usbhid: serial {index} dropped {out} bytes: {error:?}");
             }
         }
@@ -208,7 +217,9 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     }
                 }
             }
-            Err(error) => ferrix_rt::warn!("usbhid: jtag {index}: the chain did not read: {error:?}"),
+            Err(error) => {
+                ferrix_rt::warn!("usbhid: jtag {index}: the chain did not read: {error:?}")
+            }
         }
     }
 

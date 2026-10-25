@@ -24,8 +24,8 @@ use core::fmt::Write as _;
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::types::{
-    AT_FDCWD, CBAUD, ECHO, ECHOCTL, ECHOE, ECHOK, ECHOKE, O_CLOEXEC, O_NOCTTY, O_NONBLOCK,
-    O_RDWR, OPOST, TCGETS2, TCSETS2, TERMIOS2_BYTES, TIOCGPTN, TIOCSPTLCK,
+    AT_FDCWD, CBAUD, ECHO, ECHOCTL, ECHOE, ECHOK, ECHOKE, O_CLOEXEC, O_NOCTTY, O_NONBLOCK, O_RDWR,
+    OPOST, TCGETS2, TCSETS2, TERMIOS2_BYTES, TIOCGPTN, TIOCSPTLCK,
 };
 use ferrix_rt::linux;
 use ferrix_usb_host::ftdi::Termios;
@@ -199,9 +199,7 @@ impl Tty {
             )
         };
         if linked.is_err() {
-            ferrix_rt::warn!(
-                "usbhid: /tmp/{name}{index} could not be linked to /dev/pts/{number}"
-            );
+            ferrix_rt::warn!("usbhid: /tmp/{name}{index} could not be linked to /dev/pts/{number}");
         }
         tty.link = link.bytes;
         Some(tty)
