@@ -4,7 +4,13 @@
 `docs/USB-SERIAL.md` §6.2 names, and the certification consultant's K5
 verdict (ledger 4317, B3/B4): "a read/write/poll data path through the
 chardev core is a new interface of the V-10 kind and needs its own design".
-This is that design. It needs the consultant's verdict before any code.
+This is that design.
+
+**Reviewed** (ledger 4352): §1, §2 and §3.7 OK; §3.1-§3.6, §4 and §6 OK IF
+the conditions given in each section, which are binding; §5 corrected;
+§7 steps 1-3 OK IF, each with its own review before `land.sh take`; step 4
+NOT YET until the deferred window of §7 comes back with R3's broker. The
+condition labels (G1, N2, ...) are the ledger entry's.
 
 The goal: any ring-3 driver can serve a character device under `/dev`
 (a UART that is not a tty, a JTAG cable, an I2C or SPI bus, CAN, a sensor,
@@ -93,6 +99,29 @@ interrupts stays a second way in, as today, for GPU drivers.
 This removes the device-handle precondition for USB class drivers and
 software drivers, without giving them anything else.
 
+The grant is a **restricted channel end**, not a new object type (§8 Q3).
+The chardev core keeps the kernel end in a table in the load ring.
+`ChardevControlCreate` spends the driver's end, resolving it the way
+`control_of` resolves a control today, so nothing under `object/**`
+changes. The conditions:
+
+* **(G1)** The root grant reaches devmgr in DEVICES, the kernel's bootstrap
+  message, built in `discovery/devmgr.rs` (item). It comes through a hook
+  the load ring registers, so no reference crosses the item boundary
+  upwards. The change needs `L.discovery.7`, reserved before the code, a
+  stage check, and a gate control that reads `FIRED`.
+* **(G2)** devmgr fixes and validates each grant's node set when it mints
+  the grant. A grant can be spent once. The number outstanding is bounded
+  and charged to devmgr's job.
+* **(G3)** **Tier 2 never comes from a grant.** Whole-memory copies stay
+  with today's device-handle path, so V-10 keeps exactly the drivers it has
+  now.
+* **(G4)** A HELLO below version 3 behaves exactly as today. An empty node
+  set publishes nothing.
+* **(G5)** For `max`, the grant table is image-time data.
+* **(G6)** A driver restarted by T0 gets a fresh grant. A spent grant cannot
+  be replayed.
+
 ### 3.2 Names and numbers: K4''s rule, generalised
 
 Publishing follows the consultant's K4' shape (ledger 4317, (15)-(19)): the
@@ -115,9 +144,26 @@ kernel checks generic rules only, failing closed, in order:
    table.
 
 A cap on published nodes per grant and system-wide is stated (proposed: 256
-per grant, 4,096 in all). NVIDIA's and Intel's fixed names become entries
-in devmgr's table under the same rules; `ferrix_chardevctl::node` keeps
-only the rule, not the names.
+per grant, 4,096 in all). NVIDIA's and Intel's fixed names **stay pinned in
+`ferrix_chardevctl::node` in this work** (§8 Q4). They are the only Tier 2
+drivers, and moving their names gets a later landing with its own review.
+
+The conditions:
+
+* **(N1)** K4' and this section share one devfs checker, which V-17 and V-18
+  both name.
+* **(N2)** Nothing may be published into a directory that devfs fixes or
+  another core publishes into: `pts`, `dri`, `input`, `snd`, `net`, `shm`,
+  `serial`. Otherwise a generic driver could add `input/event9` or
+  `dri/renderD200` for a compositor or Mesa to open.
+* **(N3)** "Kernel-served major" is computed from devfs's own
+  registrations, not from a list.
+* **(N4)** No `x`, `s` or `t` bits. The caps are listed in
+  MEMORY-AND-TIMING.
+* **(N5)** A node is gone before any waiter wakes. Its name is reusable only
+  after every open file has been answered `ENODEV`.
+* **(N6)** The dynamic ranges are Linux's. No stock program is assumed to
+  check majors.
 
 ### 3.3 Operations
 
@@ -136,6 +182,18 @@ by the driver. A READ answer up to 4 KiB rides in the reply, larger ones are
 copied out. Both use the existing chunked copy calls, confined as §3.4
 says. A program never waits on more than one request per thread.
 
+The conditions:
+
+* **(O1)** A READ reply's count is at most the length asked, else `EIO`.
+  The kernel keeps `f_pos`, shared across `dup` and `fork`. `pread` and
+  `pwrite` leave it alone.
+* **(O2)** Inline WRITE data is charged to the caller's job.
+* **(O3)** A FLUSH from a process that is exiting is never waited on, so a
+  stuck driver cannot hold up an exit.
+* **(O4)** `SEEK_DEFAULT` needs no request, and the new offset is checked
+  non-negative.
+* **(O5)** Statuses map through the existing reply-status table.
+
 ### 3.4 Confinement: the driver sees only what the call hands it
 
 This is the part that makes the generic path safe, and the part that goes
@@ -147,9 +205,17 @@ liveness.
 * **Tier 0, the call's own buffers.**
   * READ and WRITE: exactly `[buf, buf + len)`, out or in.
   * IOCTL: the range `_IOC_SIZE(cmd)` at `arg`, in for `_IOC_WRITE`, out
-    for `_IOC_READ`, as the encoding says. An ioctl whose number encodes no
-    size gets an empty window, so only its `arg` value reaches the driver.
-  * This covers most Linux ioctls, since nearly all are `_IOW`/`_IOR`/`_IOWR`.
+    for `_IOC_READ`, as the encoding says.
+  * **The command table (W1/W2).** Some long-standing ioctls encode no
+    size, or encode it wrongly. `I2C_RDWR` (0x0707) and `I2C_SLAVE` (0x0703)
+    encode nothing. `USBDEVFS_REAPURB` is encoded write-only but writes
+    `*arg`. So the driver's HELLO v3 carries a bounded table of commands,
+    each with a direction and a size of at most 16 KiB, and the table wins
+    over the encoding. A command with no size from either source gets an
+    empty window: only its `arg` value reaches the driver. What remains,
+    stated in V-18: a driver may write a range the program meant only as
+    input, but never memory the program did not name.
+  * Most Linux ioctls are `_IOW`/`_IOR`/`_IOWR` and need no table entry.
 * **Tier 1, pointers the program put in its argument.** A driver may widen
   the window only by naming a pointer that lies inside a range it already
   has. It calls `chardev_window_follow(request, at, ptr_width, len_at,
@@ -169,10 +235,20 @@ liveness.
     memory, which it was free to do in the first place. The window only
     ever holds ranges the program named, so no race reaches memory it did
     not offer.
+  * *Limits a program meets:* `I2C_RDWR`'s 42 messages fit. An
+    `SPI_IOC_MESSAGE` of more than about 31 transfers does not, and gets
+    Linux's own refusal, `EMSGSIZE`.
+  * *(W3)* Follow arithmetic is checked for overflow and stays in user
+    space. Pointer and length widths are 4 or 8 bytes, chosen by the
+    caller's personality (i686 programs get 4).
+  * *(W4)* Each chunk checks the window under the request lock, in one walk
+    of at most 64 ranges, with a MEMORY-AND-TIMING row.
+  * *(W6)* Every bound's refusal has a named errno, listed here when built.
+  * *(W7)* Property-based host tests cover the window arithmetic.
 * **Tier 2, undecoded (today's V-10).** Copies anywhere in the program's
-  memory while it waits, for drivers whose grant says so: `nvrm`, and Intel
-  where it needs it. devmgr's table marks the grant; a generic driver never
-  gets it.
+  memory while it waits. Only controls made through the device-handle path
+  (`nvrm`, Intel) have it. **A grant never gives it (G3)**, and Tier 2
+  behaves exactly as before (W8).
 
 The effect: the generic path does not widen V-10, it narrows it. A
 compromised UART or I2C driver reads and writes only the buffers its
@@ -196,7 +272,14 @@ Poll must not cost a channel round trip per `poll()`. So the driver
 * `O_ASYNC`: the mask's rising edges send `SIGIO` to the file's owner, as
   Linux's `kill_fasync`.
 * Driver death sets `EPOLLHUP | EPOLLERR` on every file before waking
-  anyone (§3.6).
+  anyone (§3.6, P5).
+* **(P1)** The initial mask comes in OPEN's reply, default 0.
+* **(P2)** A driver posts readiness only for files of its own control, and
+  only the six bits.
+* **(P3)** The race between a fast-path `EAGAIN` and a post that crosses it
+  has Linux's semantics: the next poll sees the post.
+* **(P4)** `SIGIO` goes only to the `F_SETOWN` owner, under Linux's
+  `sigio_perm` rule, on a rising edge.
 
 ### 3.6 Lifecycle, failure and bounds
 
@@ -220,6 +303,14 @@ Poll must not cost a channel round trip per `poll()`. So the driver
 * **No timeouts in the kernel:** like Linux, a stuck driver holds its
   callers killably. devmgr's restart machinery (T0) is the remedy, and it
   sees a driver whose oldest request is older than its policy says.
+* **(L1)** A cancelled blocking read has exactly one outcome, decided under
+  the request lock, as the chardev-sigrace ruling has it (ledger 4302).
+  CANCEL's room is reserved.
+* **(L2)** No single caller can fill a control: at most 16 requests per file
+  and a cap per caller job. One unprivileged program cannot starve the
+  other users of a 0666 node.
+* **(L3)** If T0 needs a new call to read the oldest request's age, the call
+  gets its own number in §4's table.
 
 ### 3.7 What stays out of the kernel
 
@@ -239,26 +330,25 @@ Poll must not cost a channel round trip per `poll()`. So the driver
 | READ/WRITE/LLSEEK/FLUSH/FSYNC requests, readiness, windows, `follow`, the fast path | `src/kernel/src/interfaces/chardev/` | load |
 | The generic name rule; node set in the grant; HELLO version 3 | `src/lib/proto/chardevctl` | none |
 | Publishing under nested names | `src/kernel/src/fs/devfs.rs` | load |
-| The grant object, `ChardevControlCreate`'s second precondition, `chardev_window_follow`, `chardev_ready` | `native-abi` numbers; dispatch in `syscall/native.rs` | **item** for the dispatch lines |
+| The grant as a restricted channel end; `ChardevControlCreate` spending it; the kernel-end table | `src/kernel/src/interfaces/chardev/` | load |
+| New call numbers (`chardev_window_follow`, `chardev_ready`, a grant mint for devmgr) | appended to `ferrix_native_abi::nr`; their SERVED rows, dispatch arms and audit arm in `syscall/native.rs` | **item**, but no new function, so no L id (ledger 316, B13) |
+| The root grant in DEVICES | `discovery/devmgr.rs`, through a hook the load ring registers | **item**: `L.discovery.7` |
 | devmgr's table, minting grants | `src/user/system/native/devmgr` | ring 3 |
 
-If the dispatch can carry the new calls through the existing
-"answered by the load ring" path without editing `syscall/native.rs`
-(e.g. as flags on `ChardevReply`/`ChardevCopy*`), the design stays out of
-the item. Otherwise those lines need L ids reserved first. That is the
-consultant's call; the proposal prefers new numbers for clarity.
+New numbers, not flags on existing calls (§8 Q1): one call carrying several
+behaviours would hide them from the audit arm.
 
 ## 5. Compared with Linux
 
 | | Linux (in-kernel driver) | Linux CUSE | Ferrix (this design) |
 |---|---|---|---|
 | A driver fault | crashes or corrupts the kernel | kills the server; files `ENODEV` | kills the driver; files `ENODEV`; devmgr restarts it |
-| Memory a driver can reach | everything | caller's whole memory (unrestricted ioctl) | only the call's buffers and what they point to (Tier 0/1) |
+| Memory a driver can reach | everything | the ioctl's declared ranges, or with the server's unrestricted-ioctl option the caller's whole memory | only the call's buffers and what they point to (Tier 0/1) |
 | poll cost | in-kernel | a round trip per poll | none: posted readiness |
 | Nonblocking read with no data | in-kernel | a round trip | none: the kernel answers `EAGAIN` |
 | Naming | driver chooses, udev renames | server chooses | devmgr's table, generic kernel checks |
 | A tty | yes | no | no (K1-K6 cover ttys) |
-| Data copies per read | 1 | 2 (FUSE) | 1 (copy-out from the driver) |
+| Data copies per read | 1 | 2 (FUSE) | 1 above 4 KiB (copy-out from the driver); 2 at or below 4 KiB (via the reply) |
 
 Where Ferrix is still slower: a blocking read is one IPC round trip
 (about 1 µs at today's IPC figure). Bulk paths use mmap, as on Linux.
@@ -282,17 +372,43 @@ Where Ferrix is still slower: a blocking read is one IPC round trip
 * **A stock program, unmodified:** `i2cdetect`/`i2ctransfer` against a
   ring-3 `i2c-dev` driver over the FPGA I2C target on the DK1 (or a model
   of it in QEMU).
-* **Rows `run: PASSED`:** check, test-chardev, the existing NVIDIA and Intel
-  chardev gates (Tier 2 unchanged), and test-boot on all three
-  architectures.
-* **VULNERABILITY-ANALYSIS:** V-10 reworded to Tier 2 only, and a new row
-  (V-18) for what Tier 0/1 leaves: a driver reads and writes what its
-  callers hand it.
+* **More gate controls (E2):**
+  * the fixed-directory refusal;
+  * a second create on a spent grant;
+  * `DUPLICATE` refused on a grant;
+  * a grant-made control confined while a device-path control is not;
+  * a legacy ioctl with no table entry getting an empty window;
+  * a follow that wraps the address space;
+  * a reply count larger than the length;
+  * both outcomes of the CANCEL race;
+  * one caller unable to fill a control;
+  * an exiting process's close not waiting on a stuck driver.
+* **(E3)** `chardev-loop` exercises both a legacy-encoded pointer ioctl
+  (`I2C_RDWR`'s shape, through the command table) and an encoded one
+  (`SPI_IOC_MESSAGE`'s).
+* **(E4)** The QEMU model is the gate. A DK1 run is the product owner's
+  call; if it is not run, it gets a BACKLOG row.
+* **Rows `run: PASSED` on the landing hash:** check, test-chardev,
+  test-nvrm, test-intel-uapi, test-boot x86_64 kvm and tcg, aarch64, and
+  armv7a `--smp 2`.
+* **Certification documents, in the same landing as the windows (step 1):**
+  V-10 reworded to device-path controls only (an evidence document must be
+  true at the hash that changes the behaviour), V-18 for what Tier 0/1
+  leaves, and SECURITY-TARGET and SAFETY-MANUAL updates.
+* Coverage carried after the final rebase, kernel lines reported per file,
+  and the landing message citing ledger 4352 and the `FIRED` lines by hash.
+* **IDs:** `L.discovery.7` is reserved in `requirement-reservations.json` by a
+  docs landing before the code, and released by the code's landing. V-18
+  is held for this design (V-17 is K4''s). No `L.object`, `H.OBJ` or
+  `L.syscall` ids are needed; load code carries `chardev-g-N` statements.
 
 ## 7. Order and first users
 
-1. The grant, the name rule and the window machinery, with `chardev-loop`.
-   Move NVIDIA's and Intel's names into devmgr's table, behaviour unchanged.
+Each step gets its own review before `land.sh take`. K4' and step 1 may
+land in either order; whichever is first brings the shared devfs checker.
+
+1. The grant, the name rule and the window machinery, with `chardev-loop`,
+   plus V-10's rewording.
 2. READ/WRITE/poll, and the FTDI Blaster's `/tmp/jtag0` moved to
    `/dev/jtag0`.
 3. `i2c-dev` and `spidev` drivers for the STM32MP1's I2C5 and SPI5, against
@@ -300,19 +416,28 @@ Where Ferrix is still slower: a blocking read is one IPC round trip
    SPI/I2C device on the DK1).
 4. `usbfs` nodes (`/dev/bus/usb/BBB/DDD`) served by the USB host process
    through the consultant's R3 broker, so libusb, OpenOCD and flashrom run
-   unmodified. **Open:** `USBDEVFS_SUBMITURB`/`REAPURB` are asynchronous,
-   so the buffer must outlive the ioctl. That needs either a persistent
-   window (pinned for the URB's life, bounded per file) or libusb's
-   mmap'd-buffer mode (`USBDEVFS` mmap), which keeps Tier 0/1 intact. The
-   proposal is mmap'd buffers only, with persistent windows refused.
+   unmodified. **NOT YET (B1).** `USBDEVFS_SUBMITURB` is asynchronous, and
+   stock libusb hands it the caller's own buffer: usbfs mmap is used only
+   through `libusb_dev_mem_alloc`, so mmap'd buffers alone would not run
+   OpenOCD, flashrom or dfu-util. Linux's usbfs never pins. It copies OUT
+   data at submit and IN data at reap. The design owed is a **deferred
+   window**:
+   * the buffer range is recorded at SUBMITURB;
+   * it is usable only while the same file's program waits in REAPURB or
+     DISCARDURB;
+   * it is never pinned, and is bounded per file like `usbfs_memory_mb`;
+   * it is dropped at reap, discard and close;
+   * REAPURB's write to `*arg` goes through the command table.
 
-## 8. Questions for the consultant
+   It comes back for review together with R3's broker.
 
-1. New native call numbers (touching `syscall/native.rs`, item), or flags
-   on existing calls (load only)?
-2. Is Tier 1's `follow` acceptable as specified, in particular the time of
-   check argument and the bounds (depth 3, 64 ranges, 4 × `MAX_COPY`)?
-3. Is the grant object a new native object type (`L.object.*` ids), or
-   expressible as a restricted channel end?
-4. Should V-10's NVIDIA/Intel nodes move under devmgr's table in the same
-   landing, or stay pinned in `ferrix_chardevctl::node` until a later one?
+## 8. Questions for the consultant, answered (ledger 4352)
+
+1. **New call numbers or flags?** New numbers. Their item touch stays
+   ledger 316's narrow shape, with no new function and so no L id.
+2. **Is Tier 1's `follow` acceptable?** Yes, as specified, under W1-W8. The
+   time-of-check argument holds and the caps are fine.
+3. **A new object type or a channel end?** A restricted channel end. A new
+   native object type would be a core change, NOT YET without a reason.
+4. **Move NVIDIA/Intel names now?** No. They stay pinned in
+   `ferrix_chardevctl::node` in this work; moving them is a later landing.
