@@ -11,6 +11,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use ferrix_bootinfo::{Arch, PAGE_SIZE};
+use ferrix_fallible::Chunks;
+use ferrix_kmem::Charge;
 use ferrix_net::IpAddress;
 use ferrix_procfs::filesystems::{self, Filesystem};
 use ferrix_procfs::kstat::{self, CpuTimes, Kstat};
@@ -26,7 +28,7 @@ use ferrix_procfs::sysctl;
 use ferrix_vfs::fd::MAX_LIMIT;
 use ferrix_vfs::{Errno, Location, MountFlags, Namespace, OpenFile, Result};
 
-use super::{Kernel, ThreadOf};
+use super::{JobMeter, Kernel, ThreadOf};
 use crate::arch;
 use crate::fs;
 use crate::fs::{block, devfs};
@@ -1055,13 +1057,22 @@ fn located(at: &Location, root: &Location) -> Vec<u8> {
 /// `brk` made, `[stack]` for the one holding the stack pointer it was started
 /// with, and `[vdso]` and `[vvar]` for the vDSO's image and the data page
 /// below it.
-pub(super) fn maps(process: &Process) -> Result<Vec<u8>> {
+///
+/// Every allocation is fallible, and none grows with the file: each line is
+/// formatted into a buffer reserved for its longest form, then appended to
+/// page-sized [`Chunks`]. A process with tens of thousands of regions has a
+/// file of several MiB, more than one heap block can hold, and a single
+/// buffer grown to it stopped the machine (FX-0008); now its open gets the
+/// whole file, or `ENOMEM` when memory or the opener's job limit runs out.
+pub(super) fn maps(process: &Process) -> Result<Chunks<JobMeter>> {
     let heap = process.heap_range();
     let stack = start_stack(process);
     let vdso = process.startup().map_or(0, |startup| startup.vdso);
     let vvar = vdso.saturating_sub(PAGE_SIZE);
     let root = process.fs_context().lock().root.clone();
-    let mut out = Vec::new();
+    let mut out = Chunks::metered(JobMeter::new()?);
+    let mut line = Vec::new();
+    let mut line_charge = Charge::bytes(0).map_err(|_| Errno::ENOMEM)?;
     let regions = process.space().regions().map_err(|_| Errno::ENOMEM)?;
     for region in regions {
         let file = region.file.and_then(|(id, offset)| {
@@ -1105,7 +1116,12 @@ pub(super) fn maps(process: &Process) -> Result<Vec<u8>> {
             inode,
             name,
         };
-        maps::render(&mut out, &mapping, Width::native());
+        line.clear();
+        let longest = maps::longest_line(name.map_or(0, <[u8]>::len));
+        ferrix_kmem::reserve(&mut line, longest, &mut line_charge).map_err(|_| Errno::ENOMEM)?;
+        maps::render(&mut line, &mapping, Width::native()).map_err(|_| Errno::ENOMEM)?;
+        out.try_extend_from_slice(&line)
+            .map_err(|_| Errno::ENOMEM)?;
     }
     Ok(out)
 }

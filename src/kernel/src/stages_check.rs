@@ -1374,6 +1374,11 @@ pub(super) fn check_kernel_memory() {
         "  kmem     and {} time namespaces, each refused at the same limit and given back",
         report.time_namespaces,
     );
+    println!(
+        "  kmem     /proc/<pid>/maps longer than the limit refused the job ENOMEM and nothing left \
+         charged; a sibling read all {} bytes, charged while it held them",
+        report.maps_bytes,
+    );
 }
 
 /// Stage 9: interrupts and I/O mappings, minted from stage 10's device nodes.

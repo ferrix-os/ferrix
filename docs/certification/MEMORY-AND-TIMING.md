@@ -200,6 +200,18 @@ refused, and reports **FX-0007** before the boot completes.
 shares the heap. One that fails after boot stops the machine with **FX-0008**.
 That is an application condition, AoU-5, not a property of the item.
 
+*`/proc/<pid>/maps` no longer stops it* (F-97, closed 2026-10-27). Its text
+was rendered at open into one `Vec<u8>` grown infallibly, and a single
+request past the heap's largest block (4 MiB, order 10) fails however much
+memory is free: an unprivileged program with enough regions, or long
+enough mapped paths, stopped the machine by reading its own maps, and no job
+limit helped, since the snapshot was charged only after the render. Now
+each line is formatted into room reserved for its longest form, and the
+text is kept in page-sized blocks (`ferrix_fallible::Chunks`), each charged
+to the opener's job before it is taken; a refusal answers the open
+`ENOMEM`. mountinfo, mounts, `/proc/net/tcp`, `udp` and `unix`, and the
+cgroupfs listings still render into one buffer (F-97's residual, F-98).
+
 **The kernel's watermark** (`H.QUOTA.13`, L.mm.71 to 74; since 2026-10-13).
 The heap takes its pages from the same frame allocator as a program's
 memory, so a program in a job with no limit could take the last free frame,

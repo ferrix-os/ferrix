@@ -562,3 +562,162 @@ fn a_library_map_insert_runs_in_the_hosts_section_or_not_at_all() {
     );
     assert_eq!(map.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Chunks
+// ---------------------------------------------------------------------------
+
+/// Bytes `0, 1, 2, ...` wrapping at 251, a prime, so no block repeats another.
+fn pattern(len: usize, from: usize) -> Vec<u8> {
+    (from..from + len).map(|n| (n % 251) as u8).collect()
+}
+
+#[test]
+fn chunks_read_back_across_block_edges() {
+    let mut chunks = Chunks::new();
+    let mut written = 0;
+    // Appends of every awkward size: inside a block, to its edge, across one
+    // and across several.
+    for size in [1, BLOCK - 1, 1, BLOCK, 7, 3 * BLOCK + 5, 0, 100] {
+        chunks
+            .try_extend_from_slice(&pattern(size, written))
+            .unwrap();
+        written += size;
+        assert_eq!(chunks.len(), written);
+    }
+    let all = pattern(written, 0);
+    for offset in [
+        0,
+        1,
+        BLOCK - 1,
+        BLOCK,
+        BLOCK + 1,
+        2 * BLOCK - 3,
+        written - 1,
+    ] {
+        for want in [1, 2, BLOCK, 2 * BLOCK + 1, written] {
+            let mut buf = vec![0; want];
+            let got = chunks.read_at(offset, &mut buf);
+            assert_eq!(got, want.min(written - offset));
+            assert_eq!(buf[..got], all[offset..offset + got]);
+        }
+    }
+    assert_eq!(chunks.read_at(written, &mut [0; 8]), 0);
+    assert_eq!(chunks.read_at(written + 1, &mut [0; 8]), 0);
+}
+
+#[test]
+fn chunks_allocate_nothing_bigger_than_a_block_but_the_list() {
+    let mut chunks = Chunks::new();
+    let (_, log) = record(|| {
+        for _ in 0..40 {
+            chunks.try_extend_from_slice(&[b'x'; 1000]).unwrap();
+        }
+    });
+    let blocks = 40_000usize.div_ceil(BLOCK);
+    assert!(
+        log.iter()
+            .all(|&(size, _)| size == BLOCK || size % size_of::<Vec<u8>>() == 0)
+    );
+    assert_eq!(
+        log.iter().filter(|&&(size, _)| size == BLOCK).count(),
+        blocks
+    );
+    assert!(chunks.footprint() >= blocks * BLOCK);
+}
+
+#[test]
+fn chunks_refused_append_leaves_them_as_they_were() {
+    let mut chunks = Chunks::new();
+    chunks
+        .try_extend_from_slice(&pattern(BLOCK + 10, 0))
+        .unwrap();
+    // The list has room for more blocks only after a reserve; refuse the
+    // second block of the three this append needs.
+    chunks.blocks.shrink_to_fit();
+    refuse_in(2);
+    assert_eq!(
+        chunks.try_extend_from_slice(&[1; 3 * BLOCK]),
+        Err(AllocError)
+    );
+    refuse_none();
+    assert_eq!(chunks.len(), BLOCK + 10);
+    assert_eq!(chunks.blocks.len(), 2);
+    let mut buf = vec![0; BLOCK + 10];
+    assert_eq!(chunks.read_at(0, &mut buf), BLOCK + 10);
+    assert_eq!(buf, pattern(BLOCK + 10, 0));
+    // And it still takes appends.
+    chunks.try_extend_from_slice(&[9; 5]).unwrap();
+    assert_eq!(chunks.len(), BLOCK + 15);
+}
+
+/// A meter with a limit, keeping its count where the test can read it.
+struct Limit<'a> {
+    used: &'a Cell<usize>,
+    limit: usize,
+}
+
+impl Meter for Limit<'_> {
+    fn take(&mut self, bytes: usize) -> Result<(), AllocError> {
+        let after = self.used.get() + bytes;
+        if after > self.limit {
+            return Err(AllocError);
+        }
+        self.used.set(after);
+        Ok(())
+    }
+
+    fn give(&mut self, bytes: usize) {
+        self.used.set(self.used.get() - bytes);
+    }
+}
+
+#[test]
+fn chunks_charge_before_they_allocate_and_give_it_all_back() {
+    let used = Cell::new(0);
+    {
+        let mut chunks = Chunks::metered(Limit {
+            used: &used,
+            limit: 3 * BLOCK + 4 * size_of::<Vec<u8>>(),
+        });
+        chunks
+            .try_extend_from_slice(&pattern(2 * BLOCK, 0))
+            .unwrap();
+        assert_eq!(used.get(), chunks.footprint());
+        assert_eq!(used.get(), 2 * BLOCK + 4 * size_of::<Vec<u8>>());
+        // Two blocks more is past the limit: the meter refuses the second, and
+        // nothing is allocated for the refusal, kept, or left charged.
+        let charged = used.get();
+        let (refused, log) = record(|| chunks.try_extend_from_slice(&[7; 2 * BLOCK]));
+        assert_eq!(refused, Err(AllocError));
+        assert_eq!(used.get(), charged);
+        assert_eq!(chunks.len(), 2 * BLOCK);
+        assert_eq!(chunks.blocks.len(), 2);
+        assert_eq!(
+            log.iter().filter(|&&(size, _)| size == BLOCK).count(),
+            1,
+            "the first block, freed"
+        );
+        // One block more fits.
+        chunks.try_extend_from_slice(&[7; BLOCK]).unwrap();
+        assert_eq!(used.get(), 3 * BLOCK + 4 * size_of::<Vec<u8>>());
+    }
+    assert_eq!(
+        used.get(),
+        0,
+        "dropping the chunks gives back every byte taken"
+    );
+}
+
+#[test]
+fn chunks_refused_by_the_meter_allocate_nothing() {
+    let used = Cell::new(0);
+    let mut chunks = Chunks::metered(Limit {
+        used: &used,
+        limit: 50,
+    });
+    let (refused, log) = record(|| chunks.try_extend_from_slice(b"x"));
+    assert_eq!(refused, Err(AllocError));
+    assert!(log.is_empty(), "{log:?}");
+    assert_eq!((used.get(), chunks.len(), chunks.footprint()), (0, 0, 0));
+}

@@ -91,6 +91,9 @@ pub struct Report {
     pub filters: usize,
     /// Time namespaces, each made as `unshare(CLONE_NEWTIME)` makes one.
     pub time_namespaces: usize,
+    /// Bytes of `/proc/<pid>/maps` a sibling job read whole, after a job
+    /// with [`LIMIT`] bytes was refused the open (F-97).
+    pub maps_bytes: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -142,6 +145,7 @@ pub fn run() -> Result<Report, &'static str> {
         report.routes = routes(&tree)?;
         report.filters = filters(&tree)?;
         report.time_namespaces = time_namespaces(&tree)?;
+        report.maps_bytes = maps_open(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -288,6 +292,87 @@ fn files(tree: &Arc<Job>) -> Result<usize, &'static str> {
         },
     )?;
     Ok(made)
+}
+
+/// `/proc/<pid>/maps` of a process with more regions than [`LIMIT`] bytes of
+/// text can describe, opened by a job with that limit and by a sibling with
+/// room (F-97). The text is charged block by block to the job that opens it,
+/// as it is rendered: the limited job's open is refused `ENOMEM` with its
+/// memory never past the limit and the refusal counted, and nothing is left
+/// charged; the sibling opens and reads it whole, charged while it holds it;
+/// and once both are done each job reads zero.
+fn maps_open(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    const BASE: u64 = 0x40_0000;
+    const PAGES: u64 = 4096;
+    let process = crate::syscall::process::new_for_check()
+        .map_err(|_| "kmem: no process whose maps to open")?;
+    let space = process.space();
+    let _ = space
+        .map_anonymous(BASE, PAGES * PAGE_SIZE, VmaFlags::READ_WRITE)
+        .map_err(|_| "kmem: no mapping to split for the maps")?;
+    for page in 0..PAGES / 2 {
+        space
+            .protect(BASE + (2 * page + 1) * PAGE_SIZE, PAGE_SIZE, VmaFlags::READ)
+            .map_err(|_| "kmem: a mapping would not split for the maps")?;
+    }
+    let job = tree
+        .new_child()
+        .map_err(|_| "kmem: a job refused a child")?;
+    let sibling = tree
+        .new_child()
+        .map_err(|_| "kmem: a job refused a child")?;
+    let _ = job.set_limit(Resource::Memory, LIMIT);
+    let _ = sibling.set_limit(Resource::Memory, 64 * LIMIT);
+    let ns = fs::namespace();
+    let path = format!("/proc/{}/maps", process.pid());
+    let read = OpenFlags {
+        read: true,
+        ..OpenFlags::default()
+    };
+    let open = || ns.open(&ns.context(), None, path.as_bytes(), &read, 0);
+    let refused = as_task_of(&job, open).err();
+    if refused != Some(Errno::ENOMEM) {
+        crate::console::println!(
+            "  kmem     maps: a job at {LIMIT} bytes opened them: {refused:?}"
+        );
+        return Err(
+            "kmem: maps longer than a job's limit opened, or were refused other than ENOMEM",
+        );
+    }
+    if job.usage(Resource::Memory).map(|usage| usage.refused) == Some(0) {
+        return Err("kmem: a maps open's refusal was not counted as memory.events counts it");
+    }
+    if used(&job, Resource::Memory) != 0 {
+        return Err("kmem: a refused maps open left its blocks charged");
+    }
+    let mut bytes = 0;
+    {
+        let file =
+            as_task_of(&sibling, open).map_err(|_| "kmem: the sibling could not open the maps")?;
+        if used(&sibling, Resource::Memory) <= LIMIT {
+            return Err(
+                "kmem: maps longer than the limit were not charged to the job that opened them",
+            );
+        }
+        let mut chunk = vec![0_u8; PAGE_SIZE as usize];
+        loop {
+            match file.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(count) => bytes += count,
+                Err(_) => return Err("kmem: the sibling's maps would not read"),
+            }
+        }
+    }
+    if bytes <= LIMIT as usize {
+        return Err("kmem: the maps the sibling read were not longer than the limit");
+    }
+    drop(process);
+    for held in [&job, &sibling] {
+        if used(held, Resource::Memory) != 0 || used(held, Resource::Kernel) != 0 {
+            return Err("kmem: maps closed and their blocks still charged");
+        }
+    }
+    Ok(bytes)
 }
 
 /// User namespaces, made as `unshare(CLONE_NEWUSER)` makes them: each is

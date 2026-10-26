@@ -116,6 +116,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::fmt;
 
+use ferrix_fallible::{AllocError, Chunks, Meter};
 use ferrix_kmem::{Charge, arc_footprint, buffer_footprint};
 use ferrix_vfs::{
     DirEntry, Errno, FIRST_CURSOR, FileSystem, FileType, Inode, Location, Metadata, OpenFile,
@@ -156,6 +157,11 @@ pub(crate) enum Content<T: 'static> {
         /// Take a write, returning how much was consumed.
         write: Option<WriteFn<T>>,
     },
+    /// A regular file nothing may write, rendered when opened into page-sized
+    /// blocks rather than one buffer: a file whose size a program controls,
+    /// such as `/proc/<pid>/maps`, which grows with the program's regions
+    /// past what one heap block holds.
+    Chunked(fn(&T) -> Result<Chunks<JobMeter>>),
     /// A symbolic link, whose target is rendered each time it is read.
     Link(fn(&T) -> Result<Vec<u8>>),
     /// `/proc/<pid>/uid_map`, `gid_map` or `setgroups`: read as the reader's
@@ -265,7 +271,10 @@ impl<T> Entry<T> {
     /// The kind of object this entry is.
     const fn kind(&self) -> FileType {
         match self.content {
-            Content::File { .. } | Content::IdMap(_) | Content::TimeOffsets => FileType::Regular,
+            Content::File { .. }
+            | Content::Chunked(_)
+            | Content::IdMap(_)
+            | Content::TimeOffsets => FileType::Regular,
             Content::Link(_) => FileType::Symlink,
             Content::Descriptors
             | Content::DescriptorInfo
@@ -285,6 +294,15 @@ const fn file<T>(name: &'static [u8], render: fn(&T) -> Result<Vec<u8>>) -> Entr
             render,
             write: None,
         },
+    }
+}
+
+/// A file rendered at open into page-sized blocks, that nothing may write.
+const fn chunked<T>(name: &'static [u8], render: fn(&T) -> Result<Chunks<JobMeter>>) -> Entry<T> {
+    Entry {
+        name,
+        permissions: 0o444,
+        content: Content::Chunked(render),
     }
 }
 
@@ -480,7 +498,7 @@ pub(crate) static PER_PROCESS: [Entry<Process>; 24] = [
     },
     file(b"cmdline", render::cmdline),
     file(b"stat", render::stat),
-    file(b"maps", render::maps),
+    chunked(b"maps", render::maps),
     file(b"mounts", render::process_mounts),
     file(b"mountinfo", render::mountinfo),
     Entry {
@@ -1022,6 +1040,13 @@ impl Node {
                     });
                     Snapshot::new(metadata, bytes, Some(writer), refusal, splices)
                         .map(|snapshot| Some(snapshot.only_at_start()))
+                }
+                Some(Content::Chunked(render)) => {
+                    if let Some(entry) = PER_PROCESS.get(index) {
+                        may_open(pid, entry.name)?;
+                    }
+                    let bytes = render(&*alive(pid)?)?;
+                    Snapshot::new(metadata, bytes, None, refusal, splices).map(Some)
                 }
                 Some(Content::File { render, write }) => {
                     if let Some(entry) = PER_PROCESS.get(index) {
@@ -1855,12 +1880,94 @@ pub(crate) fn snapshot(
     Ok(Arc::new(snapshot))
 }
 
+/// The running task's job, as a [`Meter`] for [`Chunks`]: each block is
+/// charged before it is taken, and all of it given back when they go.
+pub(crate) struct JobMeter(Charge);
+
+impl JobMeter {
+    /// Nothing charged yet, to the running task's job.
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM` if no charge can be made.
+    pub(crate) fn new() -> Result<JobMeter> {
+        Charge::bytes(0).map(JobMeter).map_err(|_| Errno::ENOMEM)
+    }
+}
+
+impl Meter for JobMeter {
+    fn take(&mut self, bytes: usize) -> core::result::Result<(), AllocError> {
+        self.0.grow(bytes).map_err(|_| AllocError)
+    }
+
+    fn give(&mut self, bytes: usize) {
+        self.0.shrink(bytes);
+    }
+}
+
+/// A generated file's contents: one buffer, or page-sized blocks for a file
+/// whose size a program controls ([`Content::Chunked`]).
+enum Contents {
+    /// One buffer.
+    Flat(Vec<u8>),
+    /// Page-sized blocks, no allocation larger than a page but their list,
+    /// each charged to the opener's job as it was taken.
+    Chunked(Chunks<JobMeter>),
+}
+
+impl Contents {
+    /// Bytes held.
+    fn len(&self) -> usize {
+        match self {
+            Contents::Flat(bytes) => bytes.len(),
+            Contents::Chunked(chunks) => chunks.len(),
+        }
+    }
+
+    /// Heap held and not yet charged, in bytes: a buffer's, which the
+    /// snapshot charges. Chunks charged their own as they took it.
+    fn uncharged(&self) -> usize {
+        match self {
+            Contents::Flat(bytes) => buffer_footprint::<u8>(bytes.capacity()),
+            Contents::Chunked(_) => 0,
+        }
+    }
+
+    /// Copy what is at `offset` into `buf`, as much as fits; none past the end.
+    fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
+        match self {
+            Contents::Flat(bytes) => {
+                let rest = bytes.get(offset..).unwrap_or_default();
+                let count = rest.len().min(buf.len());
+                let (Some(to), Some(from)) = (buf.get_mut(..count), rest.get(..count)) else {
+                    return 0;
+                };
+                to.copy_from_slice(from);
+                count
+            }
+            Contents::Chunked(chunks) => chunks.read_at(offset, buf),
+        }
+    }
+}
+
+impl From<Vec<u8>> for Contents {
+    fn from(bytes: Vec<u8>) -> Contents {
+        Contents::Flat(bytes)
+    }
+}
+
+impl From<Chunks<JobMeter>> for Contents {
+    fn from(chunks: Chunks<JobMeter>) -> Contents {
+        Contents::Chunked(chunks)
+    }
+}
+
 /// One open of a generated file: its contents as they were at open.
 struct Snapshot {
     /// What `stat` would report, less the size, which is the snapshot's.
     metadata: Metadata,
     /// The contents.
-    bytes: Vec<u8>,
+    bytes: Contents,
     /// Where writes go, for a file that takes them.
     write: Option<Writer>,
     /// What a write is refused with, for a file that takes none.
@@ -1884,15 +1991,14 @@ impl Snapshot {
     /// `ENOMEM` past the job's memory limit.
     fn new(
         metadata: Metadata,
-        bytes: Vec<u8>,
+        bytes: impl Into<Contents>,
         write: Option<Writer>,
         refusal: Errno,
         splices: bool,
     ) -> Result<Snapshot> {
-        let charge = Charge::bytes(
-            arc_footprint::<Snapshot>().saturating_add(buffer_footprint::<u8>(bytes.capacity())),
-        )
-        .map_err(|_| Errno::ENOMEM)?;
+        let bytes = bytes.into();
+        let charge = Charge::bytes(arc_footprint::<Snapshot>().saturating_add(bytes.uncharged()))
+            .map_err(|_| Errno::ENOMEM)?;
         Ok(Snapshot {
             metadata,
             bytes,
@@ -1937,13 +2043,7 @@ impl Inode for Snapshot {
 
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
-        let rest = self.bytes.get(start..).unwrap_or_default();
-        let count = rest.len().min(buf.len());
-        let (Some(to), Some(from)) = (buf.get_mut(..count), rest.get(..count)) else {
-            return Ok(0);
-        };
-        to.copy_from_slice(from);
-        Ok(count)
+        Ok(self.bytes.read_at(start, buf))
     }
 
     fn write_at(&self, offset: u64, data: &[u8], _append: bool) -> Result<(usize, u64)> {

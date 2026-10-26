@@ -25,6 +25,14 @@ fn rendered(render: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     out
 }
 
+/// A maps line rendered into room reserved for its longest form, as the
+/// kernel renders it.
+fn map_line(mapping: &Mapping<'_>, width: Width) -> Vec<u8> {
+    let mut out = Vec::with_capacity(maps::longest_line(mapping.name.map_or(0, <[u8]>::len)));
+    maps::render(&mut out, mapping, width).expect("a line fits its longest form");
+    out
+}
+
 fn show(bytes: &[u8]) -> alloc::string::String {
     alloc::string::String::from_utf8_lossy(bytes).into_owned()
 }
@@ -121,7 +129,7 @@ const HOST_MAPS: &[(&[u8], Mapping<'static>)] = &[
 #[test]
 fn a_maps_line_is_byte_for_byte_what_linux_printed() {
     for (line, mapping) in HOST_MAPS {
-        let out = rendered(|out| maps::render(out, mapping, Width::Bits64));
+        let out = map_line(mapping, Width::Bits64);
         let mut expected = line.to_vec();
         expected.push(b'\n');
         assert_eq!(show(&out), show(&expected), "rendering {mapping:?}");
@@ -155,7 +163,7 @@ fn a_short_address_on_a_64_bit_kernel_pads_to_the_same_column() {
         inode: 2_884_149,
         name: Some(b"/usr/bin/python3.14"),
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits64));
+    let out = map_line(&mapping, Width::Bits64);
     assert_eq!(
         show(&out),
         "00400000-00422000 r--p 00000000 fc:00 2884149                            /usr/bin/python3.14\n",
@@ -179,7 +187,7 @@ fn a_32_bit_kernel_puts_the_name_at_byte_49() {
         inode: 0,
         name: Some(b"[stack]"),
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits32));
+    let out = map_line(&mapping, Width::Bits32);
     assert_eq!(
         show(&out),
         "00010000-000a1000 r-xp 00000000 00:00 0          [stack]\n",
@@ -198,9 +206,74 @@ fn a_newline_in_a_mapped_file_name_is_escaped_and_nothing_else_is() {
         name: Some(b"/tmp/a b\nc"),
         ..HOST_MAPS[0].1
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits64));
+    let out = map_line(&mapping, Width::Bits64);
     assert!(out.ends_with(b" /tmp/a b\\012c\n"), "{}", show(&out));
     assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 1, "one line");
+}
+
+#[test]
+fn a_maps_line_never_passes_its_longest_line() {
+    // Every number at its widest, and names short, padded, and all newlines.
+    let names: [Option<&[u8]>; 4] = [None, Some(b""), Some(b"[heap]"), Some(b"\n\n\n\n\n\n\n\n")];
+    for name in names {
+        for width in [Width::Bits32, Width::Bits64] {
+            let widest = Mapping {
+                start: u64::MAX,
+                end: u64::MAX,
+                read: true,
+                write: true,
+                execute: true,
+                shared: true,
+                offset: u64::MAX,
+                major: u32::MAX,
+                minor: u32::MAX,
+                inode: u64::MAX,
+                name,
+            };
+            let narrow = Mapping {
+                start: 0,
+                end: 0,
+                offset: 0,
+                major: 0,
+                minor: 0,
+                inode: 0,
+                ..widest
+            };
+            for mapping in [widest, narrow] {
+                let out = map_line(&mapping, width);
+                let bound = maps::longest_line(name.map_or(0, <[u8]>::len));
+                assert!(
+                    out.len() <= bound,
+                    "{} > {bound}: {}",
+                    out.len(),
+                    show(&out)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_maps_line_without_room_is_refused_and_nothing_allocated() {
+    let mapping = HOST_MAPS[0].1;
+    let whole = map_line(&mapping, Width::Bits64);
+    for room in [0, 1, 20, whole.len() - 1] {
+        let mut out = Vec::with_capacity(room);
+        let capacity = out.capacity();
+        assert_eq!(
+            maps::render(&mut out, &mapping, Width::Bits64),
+            Err(maps::Full),
+            "room {room}"
+        );
+        assert_eq!(
+            out.capacity(),
+            capacity,
+            "room {room}: the line grew its buffer"
+        );
+    }
+    let mut out = Vec::with_capacity(whole.len());
+    assert_eq!(maps::render(&mut out, &mapping, Width::Bits64), Ok(()));
+    assert_eq!(out, whole);
 }
 
 #[test]

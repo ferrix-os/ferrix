@@ -3939,3 +3939,53 @@ lost (its journal ends on 2026-10-24, no pstore copy). BACKLOG p1-035,
 a commit that goes on past one file's failure, was built the same day
 (stage 12's `stuck-check`); p1-033 still owes the box's cause.
 A rename over a file on a full volume (above) is the other residual.
+
+### F-97 — opening /proc/<pid>/maps stopped the machine once its text passed the heap's largest block
+**Found 2026-10-27, closed 2026-10-27** (found on the customer's N150 box,
+image main-ab42de2a5, by the session running Endfield, with a probe of its
+own: a program of about 86,000 regions that read its own maps; numbered by
+its certification consultant, ledger 4606; pre-existing since `maps` was
+rendered into one buffer).
+
+*Was:* **Major**, freedom from interference (CLAIM §3; O.QUOTA,
+T.EXHAUST). Opening `/proc/<pid>/maps` rendered the whole file at open into
+one `Vec<u8>` (`render::maps`, through `ferrix_procfs::text::put`), grown
+infallibly. The kernel heap serves at most one buddy block, 4 MiB, per
+request, so once the text passed 4 MiB the next doubling asked for 8 MiB
+and the allocation error handler stopped the machine with FX-0008, however
+much memory was free. The file is private, but every process may read its
+own, so any unprivileged program could do it: on the box, about 86,000
+anonymous regions (≈4.2 MB of text) did. Job limits did not help (outside
+AoU-5's transfer): the snapshot was charged only after the render.
+
+*Now:* each line is formatted into room reserved fallibly for its longest
+form (`maps::longest_line`), by a writer that refuses rather than grows
+(`maps::render` returns `Full`), and appended to `ferrix_fallible::Chunks`:
+page-sized blocks, every one charged to the opener's job through a
+caller-supplied `Meter` before it is taken, all given back when the open
+file goes. A refusal of the charge or of an allocation ends the open with
+`ENOMEM` and no snapshot. Reads fill across block edges; the file's size is
+the sum of the blocks.
+
+*Checked by the build:* the stage-8 mmap check
+(`mmap_check::check_many_regions_and_their_maps`) maps 2,000 anonymous and
+1,400 file pages, the file at a path of nearly 4 KiB, with `MAP_FIXED` into
+`PROT_NONE` reservations one page apart, and reads its maps whole: 6,800
+lines, one per region, 5,321,400 bytes (the boot's `mmap` line). On the
+kernel before the fix the same check stops the boot with
+`memory allocation of 6291456 bytes failed`, FX-0007 rather than FX-0008
+because stage 8 runs before the boot completes (control f97d-k1). The kmem
+check (`H.QUOTA.7`) opens maps of 167,936 bytes in a job limited to 32 KiB,
+which is refused `ENOMEM` with nothing left charged, while a sibling reads
+it whole. Host tests: ferrix-fallible's `chunks_*` (also under Miri) and
+ferrix-procfs's `a_maps_line_never_passes_its_longest_line` and
+`a_maps_line_without_room_is_refused_and_nothing_allocated`.
+
+*Residual:* this closes F-97 for `maps` only. mountinfo and mounts (up to
+`MOUNT_MAX`, 100,000 mounts a namespace, reachable from a user namespace),
+`/proc/net/tcp`, `udp` and `unix` (machine-wide sockets) and the cgroupfs
+listings render into one buffer the same way; they are F-98's, as are the
+region list copied for the render (`AddressSpace::regions`, fallible and
+exact but transient and uncharged) and the region map itself, one
+`Vec<Vma>` of 48-byte entries refused its next region at a capacity of
+c·2^k past 87,381 (4 MiB / 48).
