@@ -928,6 +928,19 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
                 ferrix_cgroupfs::io::render_max(&mut out, device, limits);
             }
         }
+        Kind::IoWeight => {
+            let slot = job.quota_index();
+            ferrix_cgroupfs::io::render_weight(
+                &mut out,
+                super::blkio::default_weight(slot),
+                &super::blkio::weights(slot),
+            );
+        }
+        Kind::IoLatency => {
+            for (device, micros) in super::blkio::latencies(job.quota_index()) {
+                ferrix_cgroupfs::io::render_latency(&mut out, device, Some(micros));
+            }
+        }
         Kind::CpuStat => render_cpu_stat(&mut out, job),
         Kind::MemoryCurrent => render::number(&mut out, usage(job, Resource::Memory).used),
         Kind::MemoryMax => {
@@ -1165,6 +1178,33 @@ fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
     super::blkio::set_limits(slot, (major, minor), limits)
 }
 
+/// A write to `io.weight`: the cgroup's default, or its weight on one disk.
+fn set_io_weight(job: &Job, data: &[u8]) -> Result<()> {
+    use ferrix_cgroupfs::io::WeightWrite;
+    let slot = job.quota_index();
+    match ferrix_cgroupfs::io::parse_weight(data).map_err(errno)? {
+        WeightWrite::Default(weight) => super::blkio::set_default_weight(slot, weight),
+        WeightWrite::Device((major, minor), weight) => {
+            if super::devfs::block_device(ferrix_vfs::initramfs::makedev(major, minor)).is_none() {
+                return Err(Errno::ENODEV);
+            }
+            super::blkio::set_weight(slot, (major, minor), weight)
+        }
+    }
+}
+
+/// A write to `io.latency`: a disk, then its target.
+fn set_io_latency(job: &Job, data: &[u8]) -> Result<()> {
+    let slot = job.quota_index();
+    let ((major, minor), words) = ferrix_cgroupfs::io::parse_device(data).map_err(errno)?;
+    if super::devfs::block_device(ferrix_vfs::initramfs::makedev(major, minor)).is_none() {
+        return Err(Errno::ENODEV);
+    }
+    let held = super::blkio::latency_on(slot, (major, minor));
+    let target = ferrix_cgroupfs::io::parse_latency(words, held).map_err(errno)?;
+    super::blkio::set_latency(slot, (major, minor), target)
+}
+
 /// A write to `cpu.max`.
 fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
     let (_, period) = job.bandwidth();
@@ -1314,6 +1354,8 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         }
         Kind::CpuIdle => set_idle(job, data)?,
         Kind::IoMax => set_io_max(job, data)?,
+        Kind::IoWeight => set_io_weight(job, data)?,
+        Kind::IoLatency => set_io_latency(job, data)?,
         Kind::CpuMax => set_cpu_max(job, data)?,
         Kind::CpuMaxBurst => set_burst(job, data)?,
         Kind::Controllers

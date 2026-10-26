@@ -847,6 +847,26 @@ bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
   carried, so the window lets at most one charge's overrun through -- the same
   bound as the overshoot of any period's last charge -- and never throttles a
   task short of its runtime.
+* `io.weight` and `io.latency` (2026-10-26, load ring, `fs::blkio`) put a
+  disk's requests in a fair queue while any cgroup sets either, one request in
+  flight at a time. With neither set, a request pays one load (`SHAPED`).
+  While set:
+  * under `SHAPES` then `DEFAULTS` (the module's lock order; `TABLE` is never
+    held with either, nor a disk's fair lock with any), a request looks up its
+    weight and target at each level of its job's chain: depth x log(shapes);
+    every `io.weight` or `io.latency` write and every job's end (`forget`)
+    scans every shape under `SHAPES` (`reshape`);
+  * under the disk's fair lock, choosing the next request is O(waiting), and
+    each completion's `wake_all` has every waiter choose again: O(waiting^2)
+    a completion. The waiting list is kernel heap charged to no job, one
+    entry per task waiting on the disk, never shrunk;
+  * the wait is uninterruptible and its length is bounded only by the weights:
+    about 10^4 times a sibling's share at each level against a busy sibling,
+    more when nested, and up to 2 ms more while the disk is held for another
+    group, or behind up to seven urgent requests; a kill is acted on once the
+    request has been served. A hold set after a waiter looked wakes it to take
+    the hold's end as its deadline.
+* `object::oom::throttle` runs
 * `object::oom::throttle` runs after a successful fault and after a read of a
   cached file, and does nothing when the job and its ancestors are under their
   `memory.high`: one walk up. When one is over, it reclaims (a scan of every

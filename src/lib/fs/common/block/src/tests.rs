@@ -984,3 +984,208 @@ mod throttling {
         assert_eq!(limiter.earliest(0), u64::MAX);
     }
 }
+
+mod fair_shares {
+    use super::std::vec;
+    use super::std::vec::Vec;
+
+    use crate::{COST_CEILING, Fair, weighted_cost};
+
+    /// How long a hold lasts in these tests.
+    const HOLD: u64 = 10;
+
+    /// Serve `rounds` requests between groups that each have one request at
+    /// a time and queue the next only after the last is done, a request of
+    /// each costing `costs[group]` and taking one tick, and count how many
+    /// each got. A waiter woken as a request ends goes before the group just
+    /// served queues its next, as in the kernel. With `hold`, the disk is held
+    /// for the group just served when its next request would win.
+    fn serve(
+        costs: &[u64],
+        urgent: &[bool],
+        rounds: usize,
+        hold: bool,
+    ) -> (Vec<usize>, Vec<usize>) {
+        let mut fair = Fair::new();
+        let mut last = vec![0_u128; costs.len()];
+        let mut waiting: Vec<(u64, usize)> = Vec::new();
+        let mut enqueue = |fair: &mut Fair, waiting: &mut Vec<(u64, usize)>, group: usize| {
+            let ticket = fair
+                .enqueue(group as u64, last[group], costs[group], urgent[group])
+                .unwrap();
+            last[group] = ticket.finish;
+            waiting.push((ticket.id, group));
+            ticket.finish
+        };
+        let mut finishes: Vec<u128> = (0..costs.len())
+            .map(|group| enqueue(&mut fair, &mut waiting, group))
+            .collect();
+        let mut served = vec![0; costs.len()];
+        let mut order = Vec::new();
+        let mut taken = None;
+        for now in 0..rounds as u64 {
+            let id = match taken.take() {
+                Some(id) => id,
+                None => {
+                    let id = fair.next(now).unwrap();
+                    assert!(fair.may_go(id, now));
+                    assert!(fair.go(id));
+                    id
+                }
+            };
+            let at = waiting.iter().position(|&(each, _)| each == id).unwrap();
+            let (_, group) = waiting.swap_remove(at);
+            served[group] += 1;
+            order.push(group);
+            let next_finish = finishes[group].saturating_add(u128::from(costs[group]));
+            let wins = urgent[group] || fair.least_finish().is_none_or(|least| next_finish < least);
+            fair.done((hold && wins).then_some((group as u64, now + 1 + HOLD)));
+            taken = fair.next(now + 1);
+            if let Some(id) = taken {
+                assert!(fair.go(id));
+            }
+            finishes[group] = enqueue(&mut fair, &mut waiting, group);
+        }
+        (served, order)
+    }
+
+    #[test]
+    fn groups_share_the_disk_by_weight_when_held() {
+        // Weights 100 and 400: costs 4 and 1 for the same request.
+        assert_eq!(
+            serve(&[400, 100], &[false, false], 1000, true).0,
+            vec![200, 800]
+        );
+        assert_eq!(
+            serve(&[100, 100, 200], &[false, false, false], 1000, true).0,
+            vec![400, 400, 200]
+        );
+    }
+
+    #[test]
+    fn without_a_hold_one_request_at_a_time_alternates() {
+        assert_eq!(
+            serve(&[400, 100], &[false, false], 1000, false).0,
+            vec![500, 500]
+        );
+    }
+
+    #[test]
+    fn an_urgent_group_goes_first_but_starves_nobody() {
+        // Eight urgent requests to one that is not: the first urgent one
+        // after it goes before that group has queued again, with nothing
+        // waiting that it passes, so it does not count toward the run.
+        let (served, order) = serve(&[100, 100], &[true, false], 800, true);
+        assert_eq!(served, vec![711, 89], "{order:?}");
+    }
+
+    #[test]
+    fn a_hold_keeps_others_out_until_it_ends() {
+        let mut fair = Fair::new();
+        let first = fair.enqueue(1, 0, 100, false).unwrap();
+        let other = fair.enqueue(2, 0, 100, false).unwrap();
+        assert!(fair.go(first.id));
+        fair.done(Some((1, 50)));
+        assert_eq!(fair.next(10), None);
+        assert_eq!(fair.held_until(10), Some(50));
+        assert!(!fair.may_go(other.id, 49));
+        assert!(fair.may_go(other.id, 50));
+        assert_eq!(fair.held_until(50), None);
+        // The held group's own next goes at once, and ends the hold.
+        let again = fair.enqueue(1, first.finish, 100, false).unwrap();
+        assert!(fair.may_go(again.id, 10));
+        assert!(fair.go(again.id));
+        fair.done(None);
+        assert!(fair.may_go(other.id, 11));
+        // An urgent request is not held out.
+        let mut fair = Fair::new();
+        let first = fair.enqueue(1, 0, 100, false).unwrap();
+        assert!(fair.go(first.id));
+        fair.done(Some((1, 50)));
+        let urgent = fair.enqueue(2, 0, 100, true).unwrap();
+        assert!(fair.may_go(urgent.id, 10));
+    }
+
+    #[test]
+    fn a_group_back_from_a_pause_starts_at_the_clock() {
+        let mut fair = Fair::new();
+        let mut last = 0;
+        for _ in 0..10 {
+            let ticket = fair.enqueue(1, last, 100, false).unwrap();
+            last = ticket.finish;
+            assert!(fair.go(ticket.id));
+            fair.done(None);
+        }
+        let newcomer = fair.enqueue(2, 0, 100, false).unwrap();
+        assert_eq!(newcomer.start, 900);
+        let busy = fair.enqueue(1, last, 100, false).unwrap();
+        assert_eq!(fair.next(0), Some(newcomer.id));
+        assert!(fair.go(newcomer.id));
+        assert!(!fair.may_go(busy.id, 0));
+        fair.done(None);
+        assert!(fair.may_go(busy.id, 0));
+        assert!(!fair.go(newcomer.id));
+        assert_eq!(fair.waiting(), 1);
+    }
+
+    #[test]
+    fn a_group_at_the_ceiling_does_not_flatten_the_others() {
+        // It waits behind requests that cost a billionth of its own, and the
+        // others keep their four to one.
+        let (served, _) = serve(&[COST_CEILING, 100, 400], &[false; 3], 1000, true);
+        assert_eq!(served, vec![0, 800, 200]);
+        // A million requests at the ceiling leave the clock far from its end.
+        let mut fair = Fair::new();
+        let mut last = 0;
+        for _ in 0..1_000_000 {
+            let ticket = fair.enqueue(1, last, COST_CEILING, false).unwrap();
+            last = ticket.finish;
+            assert!(fair.go(ticket.id));
+            fair.done(None);
+        }
+        assert_eq!(last, 1_000_000 * u128::from(COST_CEILING));
+        // A cost past the ceiling is the ceiling.
+        assert_eq!(
+            fair.enqueue(2, 0, u64::MAX, false).unwrap().finish
+                - fair.enqueue(3, 0, 1, false).unwrap().start,
+            u128::from(COST_CEILING)
+        );
+    }
+
+    #[test]
+    fn a_cost_is_scaled_up_the_tree_and_never_below_the_truth() {
+        assert_eq!(weighted_cost(4096, [100, 100]), 4096);
+        assert_eq!(weighted_cost(4096, [400, 100]), 1024);
+        assert_eq!(weighted_cost(4096, [100, 50]), 8192);
+        // 40.96, rounded up; 0.4096, at least 1.
+        assert_eq!(weighted_cost(4096, [10_000, 100]), 41);
+        assert_eq!(weighted_cost(4096, [10_000, 10_000]), 1);
+        assert_eq!(weighted_cost(4096, [1, 1]), 40_960_000);
+        assert_eq!(
+            weighted_cost(4096, [0, 20_000]),
+            weighted_cost(4096, [1, 10_000])
+        );
+        assert_eq!(weighted_cost(0, []), 1);
+        // Deep at the default weight: exact at any depth.
+        assert_eq!(weighted_cost(4096, [100; 64]), 4096);
+        // Light and deep: the ceiling, and it stays there whatever the levels
+        // above would divide by.
+        assert_eq!(weighted_cost(4096, [1; 8]), COST_CEILING);
+        let mut deep = vec![1; 8];
+        deep.extend([10_000; 8]);
+        assert_eq!(weighted_cost(4096, deep), COST_CEILING);
+        // Never below the true value: thirds rounded up.
+        assert_eq!(weighted_cost(1, [300, 300]), 1);
+        assert_eq!(weighted_cost(10, [300]), 4);
+    }
+
+    #[test]
+    fn ties_go_to_the_first_queued() {
+        let mut fair = Fair::new();
+        let first = fair.enqueue(1, 0, 10, false).unwrap();
+        let second = fair.enqueue(2, 0, 10, false).unwrap();
+        assert_eq!(first.finish, second.finish);
+        assert_eq!(fair.next(0), Some(first.id));
+        assert_eq!(fair.enqueue(3, 0, 0, false).unwrap().finish, 1);
+    }
+}

@@ -14,11 +14,21 @@
 //!   second, and with the limit lifted they take a blink;
 //! * a limit on a parent holds for its child's reads (`riops=4`), and the
 //!   parent's `io.stat` counts them;
+//! * `io.weight` reads `default 100`, takes a default and a disk's own
+//!   weight as `ioc_weight_write` does (`EINVAL` out of 1 to 10,000,
+//!   `ENODEV` for a disk that is not there), and `io.latency` a disk's
+//!   target as `iolatency_set_limit` does;
+//! * on a disk that takes 2 ms a read, a task of a cgroup at `io.weight` 400
+//!   reads more than twice what one beside it at 100 does in the same time,
+//!   and a task of a cgroup missing its `io.latency` target reads more than
+//!   half again what one beside it with none does, which still reads at
+//!   least a twentieth of the reads;
 //! * `io` is listed in `cgroup.controllers`, and once the cgroups and their
 //!   processes are gone every quota slot they held is back.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_vfs::initramfs::makedev;
@@ -169,11 +179,196 @@ fn requests(harness: &mut Harness) -> Checked<u32> {
     let rest = outcome.and_then(|(counted, spaced)| {
         let parent = hierarchy(harness, &disk)?;
         let gone = after_its_job_went(harness, &disk)?;
-        Ok(counted + spaced + parent + gone)
+        shape_files(harness, &job)?;
+        let shared = shares(harness)?;
+        Ok(counted + spaced + parent + gone + shared)
     });
     let _ = job.end(harness);
     let _ = sibling.end(harness);
     rest
+}
+
+/// `io.weight` and `io.latency` in the job: their text and their refusals.
+fn shape_files(harness: &mut Harness, job: &Group) -> Checked<()> {
+    if harness.exists(b"/io.weight") || harness.exists(b"/io.latency") {
+        return Err("io.weight or io.latency is on the root");
+    }
+    if !harness.reads(&job.file("io.weight"), b"default 100\n")
+        || !harness.reads(&job.file("io.latency"), b"")
+    {
+        return Err("a new cgroup's io.weight is not default 100, or it has an io.latency");
+    }
+    job.set(harness, "io.weight", b"250\n")?;
+    job.set(harness, "io.weight", b"251:0 400\n")?;
+    if !harness.reads(&job.file("io.weight"), b"default 250\n251:0 400\n") {
+        return Err("io.weight does not read back a default and a disk's own weight");
+    }
+    job.set(harness, "io.weight", b"251:0 default\n")?;
+    job.set(harness, "io.weight", b"default 100\n")?;
+    if !harness.reads(&job.file("io.weight"), b"default 100\n") {
+        return Err("io.weight did not go back to the default when written so");
+    }
+    for (bad, errno, what) in [
+        (&b"0\n"[..], Errno::EINVAL, "io.weight took 0"),
+        (b"10001\n", Errno::EINVAL, "io.weight took 10001"),
+        (b"9:9 50\n", Errno::ENODEV, "io.weight took a disk that is not there"),
+    ] {
+        let refused = harness.write(&job.file("io.weight"), bad);
+        harness.refused(refused.err(), errno, what)?;
+    }
+    job.set(harness, "io.latency", b"251:0 target=2000\n")?;
+    if !harness.reads(&job.file("io.latency"), b"251:0 target=2000\n") {
+        return Err("io.latency does not read back a target");
+    }
+    let refused = harness.write(&job.file("io.latency"), b"251:0 lots=1\n");
+    harness.refused(refused.err(), Errno::EINVAL, "io.latency took a word it has no key for")?;
+    job.set(harness, "io.latency", b"251:0 target=max\n")?;
+    if !harness.reads(&job.file("io.latency"), b"") {
+        return Err("io.latency's target=max did not take the target away");
+    }
+    Ok(())
+}
+
+/// The slow disk's minor.
+const SLOW_MINOR: u32 = 1;
+/// How long the slow disk takes a read.
+const SLOW_NANOS: u64 = 2_000_000;
+/// How long the two readers read for.
+const SHARE_WINDOW: u64 = 600_000_000;
+
+/// A disk in memory that takes [`SLOW_NANOS`] a read, as a disk with one
+/// request in flight at a time would.
+#[derive(Debug)]
+struct SlowDisk;
+
+impl BlockDevice for SlowDisk {
+    fn read(&self, _sector: u64, buf: &mut [u8]) -> Result<(), Errno> {
+        crate::sched::sleep_for(SLOW_NANOS);
+        buf.fill(0x5a);
+        Ok(())
+    }
+
+    fn sectors(&self) -> u64 {
+        SECTORS
+    }
+
+    fn sector_size(&self) -> u32 {
+        512
+    }
+
+    fn read_only(&self) -> bool {
+        true
+    }
+
+    fn write(&self, _sector: u64, _buf: &[u8]) -> Result<(), Errno> {
+        Err(Errno::EROFS)
+    }
+}
+
+/// Reads each reader made, by its argument.
+static READ: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+/// Whether the readers are to stop.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// A reader of the slow disk, counting into `READ[which]` until told to stop.
+fn reader(which: usize) {
+    let Some(disk) = devfs::block_device(makedev(MAJOR, SLOW_MINOR)) else {
+        return;
+    };
+    let mut buf = [0_u8; PIECE];
+    while !STOP.load(Ordering::Acquire) {
+        if disk.read(0, &mut buf).is_err() {
+            return;
+        }
+        if let Some(count) = READ.get(which) {
+            let _ = count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Two readers of the slow disk, one in each of `a` and `b`, for
+/// [`SHARE_WINDOW`]: what each read.
+fn race(a: &Group, b: &Group) -> Checked<(u64, u64)> {
+    STOP.store(false, Ordering::Release);
+    for count in &READ {
+        count.store(0, Ordering::Relaxed);
+    }
+    let first = crate::sched::spawn_in_group("io-share-a", reader, 0, 0, a.slot())?;
+    let second = crate::sched::spawn_in_group("io-share-b", reader, 1, 0, b.slot());
+    if second.is_ok() {
+        crate::sched::sleep_for(SHARE_WINDOW);
+    }
+    STOP.store(true, Ordering::Release);
+    let first_gone = crate::sched::wait_until_gone(&first, 5_000_000_000);
+    let second_gone = second.and_then(|task| crate::sched::wait_until_gone(&task, 5_000_000_000));
+    first_gone?;
+    second_gone?;
+    Ok((
+        READ[0].load(Ordering::Relaxed),
+        READ[1].load(Ordering::Relaxed),
+    ))
+}
+
+/// `io.weight` and `io.latency` at work, on the slow disk; and with their
+/// cgroups gone, no disk keeps a fair queue.
+fn shares(harness: &mut Harness) -> Checked<u32> {
+    let registration = devfs::register_block_from(
+        b"iochk1",
+        MAJOR,
+        SLOW_MINOR,
+        blkio::account_disk(Arc::new(SlowDisk), MAJOR, SLOW_MINOR),
+        Origin::default(),
+    )
+    .map_err(|_| "io check: the slow disk would not register")?;
+    let light = Group::make(harness, b"/check-iwa")?;
+    let heavy = Group::make(harness, b"/check-iwb")?;
+    let outcome = shares_in(harness, &light, &heavy);
+    let _ = light.end(harness);
+    let _ = heavy.end(harness);
+    drop(registration);
+    let shares = outcome?;
+    // `/check-i` set and took back its own; with these two gone, nobody has a
+    // weight or a target, and the rest of the boot is served unqueued.
+    let deadline = crate::timer::now_nanos().saturating_add(5_000_000_000);
+    while blkio::shaped() {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("a disk kept its fair queue once no cgroup had an io.weight or io.latency");
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    Ok(shares)
+}
+
+/// [`shares`]' races, in its two cgroups.
+fn shares_in(harness: &mut Harness, light: &Group, heavy: &Group) -> Checked<u32> {
+    heavy.set(harness, "io.weight", b"400\n")?;
+    let (low, high) = race(light, heavy)?;
+    crate::console::println!(
+        "  io       io.weight 100 and 400 read {low} and {high} times from a disk of 2 ms a read"
+    );
+    if low == 0 || high < 2 * low {
+        return Err("a cgroup at io.weight 400 did not read twice what one at 100 did beside it");
+    }
+    heavy.set(harness, "io.weight", b"100\n")?;
+    // A target no read of this disk can meet: the cgroup is always missing
+    // it, and is served first.
+    light.set(harness, "io.latency", b"251:1 target=1000\n")?;
+    let (protected, other) = race(light, heavy)?;
+    light.set(harness, "io.latency", b"251:1 target=max\n")?;
+    crate::console::println!(
+        "  io       a cgroup missing its io.latency target read {protected} times, one beside \
+         it with none {other}"
+    );
+    if protected <= other.saturating_mul(3) / 2 {
+        return Err("a cgroup missing its io.latency target was not served before one beside it");
+    }
+    // At most seven urgent requests in a row while it waits: about one read
+    // in nine is its own (27 of about 230 on every architecture), against two
+    // in all with no cap. A twentieth is the line between them.
+    if other.saturating_mul(20) < protected.saturating_add(other) {
+        return Err("a cgroup beside one missing its io.latency target was starved");
+    }
+    Ok(2)
 }
 
 /// `io.stat` in the job, its sibling and the root.

@@ -774,8 +774,9 @@ pub(super) fn check_cgroupfs() {
     println!(
         "  io       {} requests to a disk charged to the cgroup that made them and every one above, \
          io.stat counting them per disk in Linux's format, a sibling's untouched, and io.max \
-         spacing a cgroup's reads out to its rate, in it and beneath it; cpu io memory pids \
-         listed as the controllers built",
+         spacing a cgroup's reads out to its rate, in it and beneath it; io.weight sharing a \
+         slow disk by weight and io.latency serving first a cgroup missing its target; cpu io \
+         memory pids listed as the controllers built",
         checked.disk_requests,
     );
 }

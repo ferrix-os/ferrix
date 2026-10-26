@@ -139,6 +139,7 @@
 extern crate alloc;
 
 mod epoch;
+mod fair;
 mod limits;
 mod queue;
 mod request;
@@ -152,6 +153,7 @@ pub mod model;
 #[cfg(test)]
 mod tests;
 
+pub use fair::{COST_CEILING, Fair, Ticket, URGENT_RUN, WEIGHT_DEFAULT, weighted_cost};
 pub use limits::{Config, Limits, LimitsError, MAX_BLOCK_SIZE, MIN_BLOCK_SIZE};
 pub use queue::{Completion, Dispatch, Queue, SubmitError, Token, TokenError};
 pub use request::{Flags, Op, Part, Request, RequestId};

@@ -1,9 +1,12 @@
-//! The `io` controller's files: `io.max` and `io.stat`.
+//! The `io` controller's files: `io.max`, `io.stat`, `io.weight` and
+//! `io.latency`.
 //!
 //! Parsed and printed as Linux's `block/blk-throttle.c` (`tg_set_limit`,
-//! `tg_prfill_limit`) and `block/blk-cgroup.c` (`blkg_conf_prep`,
-//! `blkcg_print_stat`) do, against a 7.0 host's files. A line is a device,
-//! `MAJ:MIN`, and its `key=value` words.
+//! `tg_prfill_limit`), `block/blk-cgroup.c` (`blkg_conf_prep`,
+//! `blkcg_print_stat`), `block/blk-iocost.c` (`ioc_weight_write`,
+//! `ioc_weight_show`) and `block/blk-iolatency.c` (`iolatency_set_limit`,
+//! `iolatency_prfill_limit`) do, against a 7.0 host's files. A line is a
+//! device, `MAJ:MIN`, and its `key=value` words.
 
 use alloc::vec::Vec;
 use core::fmt::Write as _;
@@ -200,4 +203,108 @@ pub fn render_stat(out: &mut Vec<u8>, device: (u32, u32), stat: Stat) {
         stat.dbytes,
         stat.dios
     );
+}
+
+/// `io.weight`'s least, default and greatest weight: `CGROUP_WEIGHT_MIN`,
+/// `_DFL` and `_MAX`.
+pub const WEIGHT_MIN: u32 = 1;
+/// The default.
+pub const WEIGHT_DEFAULT: u32 = 100;
+/// The greatest.
+pub const WEIGHT_MAX: u32 = 10_000;
+
+/// What a write to `io.weight` asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeightWrite {
+    /// The cgroup's weight on every disk without one of its own.
+    Default(u32),
+    /// Its weight on one disk, or `None` to go back to its default there.
+    Device((u32, u32), Option<u32>),
+}
+
+/// `%u` as `sscanf` reads it at the start of `text`: decimal digits after
+/// any white space, saturating.
+fn scan_u32(text: &[u8]) -> Option<u32> {
+    let text = text
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .and_then(|at| text.get(at..))?;
+    number(text).map(|(value, _)| value)
+}
+
+/// Parse a write to `io.weight`, as `ioc_weight_write` takes it: with no
+/// `:`, `default N` or `N`, the cgroup's default; else `MAJ:MIN N` or
+/// `MAJ:MIN default`.
+///
+/// # Errors
+///
+/// [`Refusal::Invalid`] for a line it cannot read and for a weight outside
+/// 1 to 10,000.
+pub fn parse_weight(text: &[u8]) -> Result<WeightWrite, Refusal> {
+    let in_range = |weight: u32| {
+        (WEIGHT_MIN..=WEIGHT_MAX)
+            .contains(&weight)
+            .then_some(weight)
+            .ok_or(Refusal::Invalid)
+    };
+    if !text.contains(&b':') {
+        let body = text.strip_prefix(b"default ").unwrap_or(text);
+        let weight = scan_u32(body).ok_or(Refusal::Invalid)?;
+        return Ok(WeightWrite::Default(in_range(weight)?));
+    }
+    let (device, body) = parse_device(text)?;
+    if body.starts_with(b"default") {
+        return Ok(WeightWrite::Device(device, None));
+    }
+    let weight = scan_u32(body).ok_or(Refusal::Invalid)?;
+    Ok(WeightWrite::Device(device, Some(in_range(weight)?)))
+}
+
+/// Append `io.weight`: `default N`, then each disk with a weight of its own.
+pub fn render_weight(out: &mut Vec<u8>, default: u32, devices: &[((u32, u32), u32)]) {
+    let _ = writeln!(Out(out), "default {default}");
+    for &((major, minor), weight) in devices {
+        let _ = writeln!(Out(out), "{major}:{minor} {weight}");
+    }
+}
+
+/// Parse the words after the device of a write to `io.latency`, as
+/// `iolatency_set_limit` takes them: `target=` microseconds, or `max` for
+/// none. Answers the target in microseconds, `None` for none; a line with
+/// no word changes nothing and answers `held`.
+///
+/// # Errors
+///
+/// [`Refusal::Invalid`] for a word that is not `target=`, and for a value
+/// that is neither digits nor `max`.
+pub fn parse_latency(text: &[u8], held: Option<u64>) -> Result<Option<u64>, Refusal> {
+    let mut target = held;
+    for word in text
+        .split(u8::is_ascii_whitespace)
+        .filter(|word| !word.is_empty())
+    {
+        let value = word.strip_prefix(b"target=").ok_or(Refusal::Invalid)?;
+        target = if value == b"max" {
+            None
+        } else {
+            if value.is_empty() || !value.iter().all(u8::is_ascii_digit) {
+                return Err(Refusal::Invalid);
+            }
+            let micros = value.iter().fold(0_u64, |micros, &byte| {
+                micros
+                    .saturating_mul(10)
+                    .saturating_add(u64::from(byte - b'0'))
+            });
+            // A target of 0 is none, as Linux's is.
+            (micros != 0).then_some(micros)
+        };
+    }
+    Ok(target)
+}
+
+/// Append a disk's line of `io.latency`: nothing if it has no target.
+pub fn render_latency(out: &mut Vec<u8>, device: (u32, u32), target: Option<u64>) {
+    if let Some(micros) = target {
+        let _ = writeln!(Out(out), "{}:{} target={micros}", device.0, device.1);
+    }
 }
