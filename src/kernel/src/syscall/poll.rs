@@ -29,12 +29,12 @@
 //!
 //! [`OpenFile::poll`]: ferrix_vfs::OpenFile::poll
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_vfs::Readiness;
 
+use crate::fallible;
 use crate::fs::wake::Sources;
 use crate::syscall::fd;
 use crate::syscall::process::Process;
@@ -410,24 +410,34 @@ fn wait(process: &Process, fds: u64, nfds: u64, deadline: Option<u64>) -> Result
         return Err(Errno::EINVAL);
     }
     let count = usize::try_from(nfds).map_err(|_| Errno::EINVAL)?;
-    let mut entries = vec![0_u8; count.checked_mul(POLLFD_BYTES).ok_or(Errno::EINVAL)?];
+    // Up to `RLIMIT_NOFILE`'s ceiling of 2^20 entries: 8 MiB, past the
+    // heap's largest block, so asked for fallibly.
+    let mut entries = zeroed(count.checked_mul(POLLFD_BYTES).ok_or(Errno::EINVAL)?)?;
     if !entries.is_empty() {
         uaccess::copy_from_user(process.space(), fds, &mut entries).map_err(|_| Errno::EFAULT)?;
     }
-    let watched: Vec<i32> = entries
-        .chunks_exact(POLLFD_BYTES)
-        .filter_map(|entry| {
-            entry
-                .first_chunk::<4>()
-                .map(|bytes| i32::from_le_bytes(*bytes))
-        })
-        .filter(|&fd| fd >= 0)
-        .collect();
+    let watched: Vec<i32> = fallible::try_collect(
+        entries
+            .chunks_exact(POLLFD_BYTES)
+            .filter_map(|entry| {
+                entry
+                    .first_chunk::<4>()
+                    .map(|bytes| i32::from_le_bytes(*bytes))
+            })
+            .filter(|&fd| fd >= 0),
+    )
+    .map_err(|_| Errno::ENOMEM)?;
     let ready = wait_for(process, deadline, &watched, || scan(process, &mut entries))?;
     if !entries.is_empty() {
         uaccess::copy_to_user(process.space(), fds, &entries).map_err(|_| Errno::EFAULT)?;
     }
     Ok(ready)
+}
+
+/// `bytes` zeroed bytes of kernel memory, or `ENOMEM`: a program chooses how
+/// many, so running out answers it rather than stopping the kernel.
+fn zeroed(bytes: usize) -> Result<Vec<u8>, Errno> {
+    fallible::try_filled(0_u8, bytes).map_err(|_| Errno::ENOMEM)
 }
 
 /// Fill in every entry's `revents` and count the entries that got one.
@@ -533,7 +543,7 @@ fn select(
         if at == 0 {
             continue;
         }
-        let mut set = vec![0_u8; bytes];
+        let mut set = zeroed(bytes)?;
         if bytes > 0 {
             uaccess::copy_from_user(process.space(), at, &mut set).map_err(|_| Errno::EFAULT)?;
         }
@@ -548,11 +558,13 @@ fn select(
         }
     }
 
-    let mut answer = [vec![0_u8; bytes], vec![0_u8; bytes], vec![0_u8; bytes]];
-    let fds: Vec<i32> = (0..count)
-        .filter(|&number| wanted.iter().flatten().any(|set| bit(set, number)))
-        .filter_map(|number| i32::try_from(number).ok())
-        .collect();
+    let mut answer = [zeroed(bytes)?, zeroed(bytes)?, zeroed(bytes)?];
+    let fds: Vec<i32> = fallible::try_collect(
+        (0..count)
+            .filter(|&number| wanted.iter().flatten().any(|set| bit(set, number)))
+            .filter_map(|number| i32::try_from(number).ok()),
+    )
+    .map_err(|_| Errno::ENOMEM)?;
     let ready = wait_for(process, deadline, &fds, || {
         scan_sets(process, count, &wanted, &mut answer)
     })?;

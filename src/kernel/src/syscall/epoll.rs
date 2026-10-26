@@ -14,7 +14,6 @@
 //! even under `SA_RESTART`.
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::types::{
@@ -262,8 +261,7 @@ fn deliver(
         }
         written += 1;
     }
-    let sent: Vec<Event> = ready.iter().take(written).copied().collect();
-    set.delivered(&sent);
+    set.delivered(ready.get(..written).unwrap_or(ready));
     if written == 0 {
         return Err(Errno::EFAULT);
     }

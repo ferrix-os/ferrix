@@ -322,7 +322,7 @@ pub(crate) fn sys_sched_getaffinity(
     }
     let _target = subject(process, pid)?;
     let size = len.min(mask_bytes());
-    let mut mask = vec![0_u8; size];
+    let mut mask = crate::fallible::try_filled(0_u8, size).map_err(|_| Errno::ENOMEM)?;
     for cpu in online_cpus() {
         if let Some(byte) = mask.get_mut(cpu / 8) {
             *byte |= 1 << (cpu % 8);
@@ -347,7 +347,7 @@ pub(crate) fn sys_sched_setaffinity(
     at: u64,
 ) -> Result<usize, Errno> {
     let size = mask_bytes();
-    let mut mask = vec![0_u8; size];
+    let mut mask = crate::fallible::try_filled(0_u8, size).map_err(|_| Errno::ENOMEM)?;
     let take = usize::try_from(len).unwrap_or(usize::MAX).min(size);
     let wanted = mask.get_mut(..take).ok_or(Errno::EINVAL)?;
     uaccess::copy_from_user(process.space(), at, wanted).map_err(|_| Errno::EFAULT)?;

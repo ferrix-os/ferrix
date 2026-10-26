@@ -42,7 +42,6 @@
 //! that large is larger than any socket buffer and refused regardless.
 
 use alloc::sync::Arc;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_bootinfo::is_user_address;
@@ -1598,7 +1597,7 @@ fn write_control(
         let whole = cmsg_len(message.data.len(), width);
         let length = whole.min(left);
         cut |= length < whole;
-        let mut bytes = vec![0_u8; length];
+        let mut bytes = zeroed(length)?;
         CmsgHdr {
             len: length as u64,
             level: message.level,

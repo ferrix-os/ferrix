@@ -289,7 +289,8 @@ pub(crate) fn sys_openat2(
     let mut raw = [0_u8; OPEN_HOW_SIZE];
     uaccess::copy_from_user(process.space(), how, &mut raw).map_err(|_| Errno::EFAULT)?;
     if size > OPEN_HOW_SIZE {
-        let mut rest = alloc::vec![0_u8; size - OPEN_HOW_SIZE];
+        let mut rest = crate::fallible::try_filled(0_u8, size - OPEN_HOW_SIZE)
+            .map_err(|_| Errno::ENOMEM)?;
         let past = how.checked_add(OPEN_HOW_SIZE as u64).ok_or(Errno::EFAULT)?;
         uaccess::copy_from_user(process.space(), past, &mut rest).map_err(|_| Errno::EFAULT)?;
         if rest.iter().any(|&byte| byte != 0) {

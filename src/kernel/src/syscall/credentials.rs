@@ -697,15 +697,16 @@ fn read_groups(process: &Process, size: u32, list: u64) -> Result<Vec<u32>, Errn
     if count == 0 {
         return Ok(Vec::new());
     }
-    let mut bytes = alloc::vec![0_u8; count * 4];
+    // Up to `NGROUPS_MAX` (65,536) groups: 256 KiB, a program's to choose.
+    let mut bytes = crate::fallible::try_filled(0_u8, count * 4).map_err(|_| Errno::ENOMEM)?;
     uaccess::copy_from_user(process.space(), list, &mut bytes).map_err(|_| Errno::EFAULT)?;
-    let groups: Vec<u32> = bytes
-        .chunks_exact(4)
-        .filter_map(|word| match *word {
+    let groups: Vec<u32> = crate::fallible::try_collect(bytes.chunks_exact(4).filter_map(
+        |word| match *word {
             [a, b, c, d] => Some(u32::from_le_bytes([a, b, c, d])),
             _ => None,
-        })
-        .collect();
+        },
+    ))
+    .map_err(|_| Errno::ENOMEM)?;
     if groups.contains(&UNCHANGED) {
         return Err(Errno::EINVAL);
     }

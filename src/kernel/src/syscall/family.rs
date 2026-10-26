@@ -34,7 +34,6 @@
 
 use alloc::sync::Arc;
 
-use alloc::vec;
 
 use ferrix_bootinfo::{Arch, PAGE_SIZE, is_user_address};
 use ferrix_linux_abi::errno::Errno;
@@ -274,7 +273,7 @@ fn clone3_request(parent: &Process, at: u64, size: u64) -> Result<CloneRequest, 
         .checked_sub(CLONE_ARGS_KNOWN)
         .filter(|&extra| extra > 0)
     {
-        let mut rest = vec![0_u8; extra];
+        let mut rest = crate::fallible::try_filled(0_u8, extra).map_err(|_| Errno::ENOMEM)?;
         let from = at
             .checked_add(CLONE_ARGS_KNOWN as u64)
             .ok_or(Errno::EFAULT)?;
