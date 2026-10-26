@@ -102,11 +102,19 @@ pub fn pids_events(out: &mut Vec<u8>, max: u64) {
 /// Linux's order, and a reader looks a key up by its name.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MemoryStat {
+    /// Bytes of what the cgroup holds that is not a file's page, a memory
+    /// filesystem's, kernel heap or a page table: its programs' own pages,
+    /// System V shared memory and shared anonymous mappings (which Linux
+    /// counts as `shmem`), and frames pinned for a device.
+    pub anon: u64,
     /// Bytes of the cgroup's pages in the page cache of files on a disk.
     pub file: u64,
     /// Bytes of kernel memory held for the cgroup's programs: the heap part
     /// of `memory.current`.
     pub kernel: u64,
+    /// Bytes of its programs' page tables, each address space's root table
+    /// left out, which is never charged.
+    pub pagetables: u64,
     /// Bytes of the cgroup's pages in a memory filesystem's files (tmpfs,
     /// `memfd`).
     pub shmem: u64,
@@ -125,16 +133,20 @@ pub struct MemoryStat {
 pub fn memory_stat(out: &mut Vec<u8>, stat: MemoryStat) {
     let _ = write!(
         Out(out),
-        "file {}
+        "anon {}
+file {}
 kernel {}
+pagetables {}
 shmem {}
 pgscan {}
 pgsteal {}
 pgfault {}
 pgmajfault {}
 ",
+        stat.anon,
         stat.file,
         stat.kernel,
+        stat.pagetables,
         stat.shmem,
         stat.pgscan,
         stat.pgsteal,

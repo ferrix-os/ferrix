@@ -643,9 +643,22 @@ out of every mapping, a shootdown, then the frame and its charge).
   a byte count or `max`, rounded down to a page; there is no `memory.swap.*`.
   `memory.events` counts `high` (the mark was hit and reclaimed from, in the
   job whose mark it was and above). `memory.stat` prints `file`, `kernel`,
-  `shmem`, `pgscan`, `pgsteal`, `pgfault` and `pgmajfault`; `anon` is left
-  out, because page tables are charged as frames and cannot be told from
-  anonymous pages, and so are the forty keys with no source.
+  `shmem`, `pgscan`, `pgsteal`, `pgfault` and `pgmajfault`, and since
+  2026-10-26 `anon` and `pagetables` (L.object.182): a program's page table is
+  charged as memory and counted again as `Resource::Tables`, its frame record
+  marked (`mm::TABLE_OWNER`) so that whoever frees it takes back a table's
+  charge, and `anon` is what is left of `memory.current` once `file`,
+  `shmem`, `kernel` and `pagetables` are counted -- its programs' own pages,
+  System V shared memory and shared anonymous mappings, which are not in the
+  page cache and which Linux counts as `shmem`, and frames pinned for a
+  device. `pagetables` leaves out each address space's root table, which is
+  never charged; Linux counts the pgd. The forty keys with no source are left
+  out. The `reclaim` line checks it on the pgfault
+  program: 4 faulted pages in `anon`, the tables made for them in
+  `pagetables`, the five keys adding to `memory.current`, and an unmap giving
+  both back; its negative controls (tables charged as pages; a table's free
+  taking back a page's charge), run with `test-boot` on AArch64 and owed
+  through `gate.sh control`, stopped the boot with its two messages.
 * **`memory.reclaim` (2026-10-26, L.object.183).** A write of a size, read
   as `memory.max` reads one but with no `max`, gives back that many bytes of
   the cgroup's clean cache, in whole pages: rounds of the same reclaim of at

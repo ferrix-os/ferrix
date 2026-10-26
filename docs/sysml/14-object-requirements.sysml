@@ -1629,9 +1629,28 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
+        // memory.stat's pagetables and anon (docs/CGROUPS.md section 10): the
+        // follow-on of stage 13 L.object.182 was reserved for.
+        requirement <'L.object.182'> tablesAreCountedApart : ItemLowLevel {
+            attribute :>> statement = "ChargedTables::allocate_table shall
+                charge a program's page table as charge_table does, as memory
+                and again as Resource::Tables, and mark its frame record with
+                TABLE_OWNER beside its job's slot; a frame's free shall take back,
+                through uncharge_owner, a table's charge, memory and
+                Resource::Tables, for a frame so marked, and a page's otherwise.";
+            attribute :>> criterion = "A job's program that faults 4 pages of a
+                fresh anonymous mapping has memory.stat's anon at least those 4
+                pages and pagetables at least one page, and anon, file, kernel,
+                pagetables and shmem add to memory.current; unmapping it gives
+                back exactly the 4 pages from anon and some of pagetables (the
+                reclaim line of stage 13 that names pgfault).";
+            attribute :>> parent = ("H.QUOTA.2", "H.QUOTA.4");
+            attribute :>> unit = ("object::quota::charge_table",
+                "object::quota::uncharge_table", "mm::uncharge_owner",
+                "mm::ChargedTables::allocate_table");
+        }
         // memory.reclaim (docs/CGROUPS.md section 10): the follow-on of stage
-        // 13 that L.object.182-183 were reserved for; 182, the page tables
-        // charged apart, stays reserved.
+        // 13 that L.object.182-183 were reserved for.
         requirement <'L.object.183'> memoryReclaimGivesBackWhatIsAsked : ItemLowLevel {
             attribute :>> statement = "reclaim_asked shall give back the pages
                 it is asked for that are charged to the scope or beneath it,

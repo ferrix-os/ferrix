@@ -574,6 +574,16 @@
       ],
       "dropped": "the item's one line it touches: stages_check.rs's io line (its text changed from line 775 on; the anchor at 777 that coverage-x86_64.json reached was carried to its new place by carry-coverage, which dropped none).",
       "what": "stages_check.rs's io println, reached on every test-boot. The rest is load-ring code (fs/blkio.rs's queue, cgroupfs.rs's files, io_check.rs) and ferrix-block's Fair and weighted_cost, host-tested, which the item's coverage does not count."
+    },
+    {
+      "landing": "memory.stat's anon and pagetables, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.182; the consultant's review recorded in the landing's commit)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet, and the lines of mm.rs's deallocate_frames, release_frame, disown_frame and ChargedTables::allocate_table it changed.",
+      "what": "Reached by stage 13's reclaim check on every test-boot: object::quota::charge_table and uncharge_table, mm::uncharge_owner's table and page arms, ChargedTables::allocate_table's marked charge, and reclaim_check.rs's tables_and_pages and faults. Not reached by any boot: allocate_table's two refusal arms, which uncharge a table's charge."
     }
   ]
 }

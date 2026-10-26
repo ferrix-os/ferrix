@@ -419,6 +419,35 @@ fn allocate_program_frames(order: u8) -> Option<Frame> {
     Some(frame)
 }
 
+/// The bit a page table's frame record carries beside its owner's slot, so
+/// that whoever frees the frame takes back a table's charge
+/// (`quota::uncharge_table`) and not a page's: every user table is freed
+/// through [`deallocate_frames`], by a mapper that does not know whose it
+/// was. Slots are numbered below [`quota::SLOT_LIMIT`], far under it.
+/// [`frame_owner`] answers the record as it is: its two callers, both in
+/// `user::cache` (`take_from` for reclaim, `resident` for `memory.stat`'s
+/// `file` and `shmem`), ask only about a cache object's pages, never a
+/// table. A marked value reaching `quota::within` or a slot's lookup would
+/// find no slot, and so fail closed.
+///
+/// [`quota::SLOT_LIMIT`]: crate::object::quota::SLOT_LIMIT
+pub(crate) const TABLE_OWNER: u32 = 1 << 31;
+
+const _: () = assert!(crate::object::quota::SLOT_LIMIT < TABLE_OWNER as u64);
+
+/// Take back the charge of a frame whose record named `owner`: a table's or
+/// a page's, by [`TABLE_OWNER`]; nothing for nobody.
+fn uncharge_owner(owner: u32) {
+    if owner == crate::object::quota::NONE {
+        return;
+    }
+    if owner & TABLE_OWNER != 0 {
+        crate::object::quota::uncharge_table(owner & !TABLE_OWNER);
+    } else {
+        crate::object::quota::uncharge_frame(owner);
+    }
+}
+
 /// Take one frame of a program's memory, charged to the job the running task
 /// is in (`object::quota`, `FRU_RSA.1`): refused, as if memory had run out,
 /// when that job or one above it is at its memory limit.
@@ -549,7 +578,7 @@ pub fn deallocate_frames(frame: Frame, order: u8) {
     // After the allocator's lock: an uncharge is atomics, but nothing needs
     // the two held together.
     if let Some(Some(owner)) = owner {
-        crate::object::quota::uncharge_frame(owner);
+        uncharge_owner(owner);
     }
 }
 
@@ -581,7 +610,7 @@ pub fn release_frame(frame: Frame) -> bool {
         count(Route::Released, 1);
         // The job the frame was charged to, as it goes back: under whatever
         // lock the caller holds, which is why the charge is atomics only.
-        crate::object::quota::uncharge_frame(owner);
+        uncharge_owner(owner);
     }
     freed.is_some()
 }
@@ -602,7 +631,7 @@ pub(crate) fn disown_frame(frame: Frame) {
     .flatten();
     // After the allocator's lock, as `release_frame` does.
     if let Some(owner) = owner {
-        crate::object::quota::uncharge_frame(owner);
+        uncharge_owner(owner);
     }
 }
 
@@ -858,10 +887,12 @@ unsafe impl PhysMem for ChargedTables {
         if self.owner == crate::object::quota::NONE {
             return take();
         }
-        crate::object::quota::charge_frame(self.owner).ok()?;
+        // Charged and tagged as a table, so that `memory.stat` counts it apart
+        // and its free takes back a table's charge ([`TABLE_OWNER`]).
+        crate::object::quota::charge_table(self.owner).ok()?;
         let table = take();
         let owned = table.and_then(|table| {
-            with_frames(|frames| frames.set_owner(table.0 / PAGE_SIZE, self.owner))
+            with_frames(|frames| frames.set_owner(table.0 / PAGE_SIZE, self.owner | TABLE_OWNER))
                 .and_then(Result::ok)
                 .map(|()| table)
         });
@@ -870,11 +901,11 @@ unsafe impl PhysMem for ChargedTables {
             (Some(table), None) => {
                 // Not tagged, so this uncharges nothing; the charge goes below.
                 deallocate_frames(table.0 / PAGE_SIZE, 0);
-                crate::object::quota::uncharge_frame(self.owner);
+                crate::object::quota::uncharge_table(self.owner);
                 None
             }
             (None, None) => {
-                crate::object::quota::uncharge_frame(self.owner);
+                crate::object::quota::uncharge_table(self.owner);
                 None
             }
         }

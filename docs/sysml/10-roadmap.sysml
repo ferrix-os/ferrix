@@ -543,9 +543,9 @@ package FerrixRoadmap {
              * 2026-10-14: it passed on all three architectures, so the exit is
              * met. A writable mount's clean pages are reclaimed since
              * 2026-10-15 (L.object.188-190). The stage is done on that scope;
-             * L.object.182 stays reserved for the follow-ons;
-             * memory.reclaim, cpu.max.burst, cpu.idle, io.weight and
-             * io.latency were built on 2026-10-26 (L.object.183 to 186). */
+             * memory.reclaim, cpu.max.burst, cpu.idle, io.weight,
+             * io.latency and memory.stat's anon and pagetables were built
+             * on 2026-10-26 (L.object.182 to 185). */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {

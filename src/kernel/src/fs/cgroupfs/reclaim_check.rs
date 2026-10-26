@@ -41,7 +41,10 @@
 //!   clean cache is `EAGAIN` with the cache given back and the tmpfs pages
 //!   kept, `max` is `EINVAL`, the sibling loses nothing, and the file reads
 //!   as its source has it again;
-//! * `pgfault` counts the faults of a job's program.
+//! * `pgfault` counts the faults of a job's program, `memory.stat`'s `anon`
+//!   its pages and `pagetables` the tables made to map them, which with
+//!   `file`, `shmem` and `kernel` are `memory.current`, and an unmap gives
+//!   back the pages and the emptied tables.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -703,7 +706,30 @@ fn on_demand_steps(
     Ok(())
 }
 
-/// `pgfault` counts the faults of a job's program.
+/// `memory.stat`'s `anon` and `pagetables` with the pgfault check's pages
+/// faulted: its pages counted in `anon`, the tables made to map them in
+/// `pagetables`, and with `file`, `shmem` and `kernel` all of
+/// `memory.current`.
+///
+/// Verifies: L.object.182
+fn tables_and_pages(harness: &Harness, group: &Group) -> Checked<(u64, u64)> {
+    let number = |key| group.number(harness, "memory.stat", key);
+    let (anon, tables) = (number("anon")?, number("pagetables")?);
+    let rest = number("file")? + number("shmem")? + number("kernel")?;
+    let current = group.number(harness, "memory.current", "")?;
+    if anon < FAULTS * PAGE_SIZE || tables < PAGE_SIZE {
+        crate::console::println!("  reclaim  anon {anon} pagetables {tables} of {FAULTS} pages");
+        return Err("memory.stat's anon or pagetables did not count a program's pages or tables");
+    }
+    if anon + tables + rest != current {
+        return Err("memory.stat's anon, file, kernel, pagetables and shmem are not memory.current");
+    }
+    Ok((anon, tables))
+}
+
+/// `pgfault` counts the faults of a job's program; `anon` and `pagetables`
+/// its pages and the tables that map them, and give both back when the
+/// mapping goes.
 fn faults(harness: &mut Harness) -> Checked<()> {
     let group = Group::make(harness, b"/check-rf")?;
     let process = group.process.as_ref().ok_or("reclaim check: no process")?;
@@ -721,6 +747,26 @@ fn faults(harness: &mut Harness) -> Checked<()> {
     faulted.map_err(|_| "a fault of the pgfault check's program failed")?;
     if group.number(harness, "memory.stat", "pgfault")? != before + FAULTS {
         return Err("memory.stat's pgfault did not count the faults of the cgroup's program");
+    }
+    let tables_and_pages = tables_and_pages(harness, &group)?;
+    let _ = space
+        .unmap(FAULTS_AT, FAULTS * PAGE_SIZE)
+        .map_err(|_| "the pgfault check's mapping would not go")?;
+    let (anon, tables) = tables_and_pages;
+    let after = (
+        group.number(harness, "memory.stat", "anon")?,
+        group.number(harness, "memory.stat", "pagetables")?,
+    );
+    if after.0 + FAULTS * PAGE_SIZE != anon || after.1 >= tables {
+        crate::console::println!(
+            "  reclaim  anon {anon} pagetables {tables} mapped, {} and {} unmapped",
+            after.0,
+            after.1
+        );
+        return Err(
+            "memory.stat's anon and pagetables did not give back a mapping's pages and its \
+             emptied tables",
+        );
     }
     group.end(harness)
 }

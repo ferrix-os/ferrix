@@ -995,9 +995,24 @@ fn memory_stat(job: &Job) -> render::MemoryStat {
         slot => crate::user::cache::resident(slot),
     };
     let bytes = |pages: u64| pages.saturating_mul(ferrix_bootinfo::PAGE_SIZE);
+    let kernel = usage(job, Resource::Kernel).used;
+    let pagetables = usage(job, Resource::Tables).used;
+    // What is left of its memory once the files' pages, the memory
+    // filesystems', the heap and the page tables are counted: its programs'
+    // own pages, System V shared memory and shared anonymous mappings (not in
+    // the page cache; Linux counts them as `shmem`), and frames pinned for a
+    // device. `pagetables` leaves out each space's root table, never charged.
+    let anon = usage(job, Resource::Memory)
+        .used
+        .saturating_sub(bytes(file))
+        .saturating_sub(bytes(shmem))
+        .saturating_sub(kernel)
+        .saturating_sub(pagetables);
     render::MemoryStat {
+        anon,
         file: bytes(file),
-        kernel: usage(job, Resource::Kernel).used,
+        kernel,
+        pagetables,
         shmem: bytes(shmem),
         pgscan: job.counted(Counter::Scanned),
         pgsteal: job.counted(Counter::Stolen),
