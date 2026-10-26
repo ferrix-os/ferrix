@@ -1,0 +1,57 @@
+# Linux v6.12's seccomp_bpf selftest on Ferrix: every test that does not pass.
+#
+# `cargo xtask test-seccomp-selftest` fails on a test that fails or skips and
+# is not listed here as it does, and on a listed test that passes: remove its
+# line when Ferrix grows what it needs. A line is `<arch|all> <fail|skip>
+# <test>  # why`, the why required. The run of 2026-10-26 on x86_64 and
+# aarch64: 51 pass, 1 skip, 46 fail of 98; armv7a the same but for
+# negative_ENOSYS, which skips itself on arm32, as on Linux.
+
+armv7a skip global.negative_ENOSYS  # the test skips itself on arm32: "arm32 does not support calling syscall -1", on Linux as here
+all skip global.kcmp  # Ferrix has no kcmp(2) (Linux: CONFIG_KCMP)
+all fail global.KILL_thread  # musl: pthread_join waits on a word only the thread's own pthread_exit clears, so a sibling a filter killed is never joined; fails the same on Linux 6.18 with this build (2026-10-26)
+all fail global.detect_seccomp_filter_flags  # flag NEW_LISTENER (0x8) is EINVAL: user notification is not built (docs/SECCOMP.md §8.2); TSYNC_ESRCH (0x10) alone, refused here too until 2026-10-26, is accepted
+all fail global.syscall_restart  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail global.get_metadata  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail global.user_notification_basic  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_with_tsync  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_kill_in_middle  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_signal  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_closed_listener  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_child_pid_ns  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_sibling_pid_ns  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_fault_recv  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_continue  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_filter_empty  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_ioctl_notification_filter_empty  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_filter_empty_threaded  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_addfd  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_addfd_rlimit  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_sync  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_fifo  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_wait_killable_pre_notification  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_wait_killable  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail global.user_notification_wait_killable_fatal  # SECCOMP_RET_USER_NOTIF and SECCOMP_FILTER_FLAG_NEW_LISTENER are not built (docs/SECCOMP.md §8.2)
+all fail TRACE_poke.read_has_side_effects  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_poke.getpid_runs_normally  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.negative_ENOSYS  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.syscall_allowed  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.syscall_redirected  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.syscall_errno  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.syscall_faked  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.kill_immediate  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.skip_after  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.ptrace.kill_after  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.negative_ENOSYS  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.syscall_allowed  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.syscall_redirected  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.syscall_errno  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.syscall_faked  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.kill_immediate  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.skip_after  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TRACE_syscall.seccomp.kill_after  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail TSYNC.two_siblings_with_ancestor  # musl: pthread_join waits on a word only the thread's own pthread_exit clears, so a sibling a filter killed is never joined; fails the same on Linux 6.18 with this build (2026-10-26)
+all fail TSYNC.two_siblings_with_no_filter  # musl: pthread_join waits on a word only the thread's own pthread_exit clears, so a sibling a filter killed is never joined; fails the same on Linux 6.18 with this build (2026-10-26)
+all fail TSYNC.two_siblings_not_under_filter  # musl: pthread_join waits on a word only the thread's own pthread_exit clears, so a sibling a filter killed is never joined; fails the same on Linux 6.18 with this build (2026-10-26)
+all fail O_SUSPEND_SECCOMP.setoptions  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)
+all fail O_SUSPEND_SECCOMP.seize  # Ferrix has no ptrace(2), and so no SECCOMP_RET_TRACE tracer or PTRACE_O_SUSPEND_SECCOMP (docs/SECCOMP.md §8.2)

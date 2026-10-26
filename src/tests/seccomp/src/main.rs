@@ -358,6 +358,7 @@ fn probes() -> Step {
         FLAG_TSYNC,
         FLAG_LOG,
         FLAG_SPEC_ALLOW,
+        FLAG_TSYNC_ESRCH,
         FLAG_TSYNC | FLAG_TSYNC_ESRCH,
     ] {
         let (answer, error) = seccomp(SET_MODE_FILTER, flags, std::ptr::null());
@@ -369,7 +370,7 @@ fn probes() -> Step {
     }
     // A flag that is not built or not known is `EINVAL` before the program is
     // read; Chromium trips a DCHECK on anything else.
-    for flags in [FLAG_NEW_LISTENER, FLAG_TSYNC_ESRCH, FLAG_UNKNOWN, 1 << 31] {
+    for flags in [FLAG_NEW_LISTENER, FLAG_UNKNOWN, 1 << 31] {
         let (answer, error) = seccomp(SET_MODE_FILTER, flags, std::ptr::null());
         if answer != -1 || error != libc::EINVAL {
             return Err(format!(

@@ -1255,6 +1255,34 @@ Then two runs of real programs:
   new pass must be removed from the list. It is Linux's own statement of
   seccomp's semantics, so it is the oracle this design's rules are
   checked against.
+
+  **As built (2026-10-26): `cargo xtask test-seccomp-selftest`.**
+  `tools/common/fetch/fetch-seccomp-selftest.sh` fetches the test and the
+  three headers it includes from Linux v6.12, each pinned by its SHA-256,
+  and builds it with `zig cc` (Zig 0.13.0, which carries musl for all three
+  targets) rather than nazuna's cross compilers, so any host builds it.
+  `tools/common/data/seccomp-selftest/` holds what the build adds: musl's
+  answers to two glibc assumptions (`prelude.h`), the four libcap calls the
+  test makes, over `capget` and `capset` (`sys/capability.h`), and `init.c`,
+  which runs the harness with no arguments, since a built-in init is started
+  as `sh -c`. `expected.txt` names every test that does not pass and why; the
+  gate fails on a failure or skip it does not list as it is, and on a listed
+  test that passes. Of 98: 51 pass on x86-64 and AArch64 (50 on ARMv7-A,
+  where `negative_ENOSYS` skips itself as on Linux), kcmp
+  skips (no `kcmp(2)`), and 46 fail as listed: 22 need `ptrace` (the
+  `TRACE_*` fixtures, `O_SUSPEND_SECCOMP`, `syscall_restart`,
+  `get_metadata`), 19 user notification, `detect_seccomp_filter_flags` the
+  unbuilt `NEW_LISTENER` flag, and four (`KILL_thread` and
+  `TSYNC.two_siblings_*`) fail on Linux 6.18 with the same musl build as
+  well -- musl's `pthread_join` waits for the thread's own `pthread_exit`,
+  which a thread its filter killed never runs (the reason the guest program
+  polls `tgkill` instead, §12). The tests that wait on `ptrace` take the
+  harness's 30 seconds each, so a run takes about fifteen minutes under TCG.
+
+  The first run found one difference that was Ferrix's: `TSYNC_ESRCH`
+  without `TSYNC` was `EINVAL`, where Linux accepts it and it changes
+  nothing. Fixed the same day, in `set_filter`, the boot probes and
+  `test-seccomp`.
 * **Chromium, from S7 on:**
   * `cargo xtask test-chrome-window` (and headless) without `--no-sandbox`;
   * chrome://sandbox read from the page: "Seccomp-BPF sandbox: Yes", and
@@ -1856,7 +1884,8 @@ changes), and then the filter is attached to the caller as `attach` does and
 every other thread's chain becomes the caller's new one. The list of threads
 and the room for the chains they give up are made before the lock, and the
 given-up chains are dropped after it, so nothing is allocated or freed under
-it. `TSYNC_ESRCH` without `TSYNC` is `EINVAL`.
+it. `TSYNC_ESRCH` without `TSYNC` changes nothing, as in Linux (it was
+`EINVAL` here until Linux's own selftest showed otherwise, 2026-10-26).
 
 The race SR10 names is closed where the design put it: a thread made by
 `clone(CLONE_THREAD)` copies its creator's chain in
@@ -1876,7 +1905,8 @@ Evidence: the `seccomp` line of FX-1303. On thread objects: a thread made
 before any filter and one made after the first both take the second filter by
 `TSYNC`, the first with the whole chain; a thread with a chain of its own makes
 `TSYNC` answer its id and `TSYNC|TSYNC_ESRCH` answer `ESRCH`, with every
-thread's chain unchanged; `TSYNC_ESRCH` alone is `EINVAL`. With running
+thread's chain unchanged (`TSYNC_ESRCH` alone was `EINVAL` until 2026-10-26,
+and is now among the probes answered `EFAULT`). With running
 threads: eight threads, and a ninth that makes forty more one after another, a
 `TSYNC` from the first thread in the middle of that, and then every thread of
 the process -- 49, the forty included -- refused the call the filter refuses.
@@ -2043,10 +2073,10 @@ its filter never does, so the **kill** step polls `tgkill` for `ESRCH`
 instead of joining; and a blocked `SIGSYS` with a handler is reset to the
 default by the trap, so it is fatal, not handled.
 
-Not in this part, and a BACKLOG row: Linux's own `seccomp_bpf` selftest with
-its expected-failure list (§8.2, §10 risk 5), which needs the C cross build
-and a list the consultant reviews; and R6's reading of libseccomp's and
-Firefox's start-up probes.
+Not in this part, and a BACKLOG row: R6's reading of libseccomp's and
+Firefox's start-up probes. Linux's own `seccomp_bpf` selftest with its
+expected-failure list (§8.2, §10 risk 5) followed on 2026-10-26 as
+`cargo xtask test-seccomp-selftest` (§8.2, "As built").
 
 ## 13. Syscall User Dispatch
 

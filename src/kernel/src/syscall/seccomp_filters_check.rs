@@ -294,7 +294,14 @@ fn probes(report: &mut Report) -> Result<(), &'static str> {
     let env = Env::new()?;
     // A NULL program is `EFAULT` for every flag the kernel builds: Chromium's
     // probe for "seccomp-bpf exists", and for the flags it asks after.
-    for flags in [0, FLAG_LOG, SPEC_ALLOW, TSYNC, TSYNC | TSYNC_ESRCH] {
+    for flags in [
+        0,
+        FLAG_LOG,
+        SPEC_ALLOW,
+        TSYNC,
+        TSYNC_ESRCH,
+        TSYNC | TSYNC_ESRCH,
+    ] {
         if env.seccomp(SET_MODE_FILTER, flags, 0) != Err(Errno::EFAULT) {
             return Err("an unknown seccomp flag was answered EFAULT");
         }
@@ -304,7 +311,6 @@ fn probes(report: &mut Report) -> Result<(), &'static str> {
     // the program is read: `EINVAL`, and never `EFAULT`.
     for flags in [
         NEW_LISTENER,
-        TSYNC_ESRCH,
         WAIT_KILLABLE_RECV,
         UNKNOWN_FLAG,
         1 << 31,
@@ -1505,13 +1511,10 @@ fn tsync_rules(report: &mut Report) -> Result<(), &'static str> {
     if env.seccomp(SET_MODE_FILTER, TSYNC | TSYNC_ESRCH, third) != Err(Errno::ESRCH) {
         return Err("a blocked TSYNC with TSYNC_ESRCH did not answer ESRCH");
     }
-    if env.seccomp(SET_MODE_FILTER, TSYNC_ESRCH, third) != Err(Errno::EINVAL) {
-        return Err("TSYNC_ESRCH without TSYNC was not refused");
-    }
     if before != chains([&env.thread, &early, &late, &foreign]) {
         return Err("a TSYNC that failed changed a thread's chain");
     }
-    report.refusals += 3;
+    report.refusals += 2;
     process::kill(&env.process, 137);
     Ok(())
 }

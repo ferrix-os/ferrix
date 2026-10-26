@@ -188,6 +188,7 @@ mod rustc;
 mod seam;
 mod seat;
 mod seccomp;
+mod seccomp_selftest;
 mod selfhost;
 mod sem;
 mod serial;
