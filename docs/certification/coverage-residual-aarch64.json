@@ -8,7 +8,7 @@
   ],
   "arch": "aarch64",
   "profile": "debug",
-  "unreached": 646,
+  "unreached": 645,
   "files": {
     "iommu/vtd.rs": {
       "ring": "core",
@@ -895,12 +895,6 @@
       "ring": "core",
       "lines": [
         200
-      ]
-    },
-    "object/quota.rs": {
-      "ring": "core",
-      "lines": [
-        1390
       ]
     },
     "panic/screen.rs": {
