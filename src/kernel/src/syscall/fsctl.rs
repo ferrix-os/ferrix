@@ -118,12 +118,12 @@ use ferrix_linux_abi::types::{
 };
 use ferrix_vfs::access::{MAY_EXEC, MAY_WRITE};
 use ferrix_vfs::statfs::StatfsLayout;
-use ferrix_vfs::{FileSystem, FileType, Location, MountFlags, Namespace};
+use ferrix_vfs::{FileSystem, FileType, Location, MountFlags, Namespace, SetAttributes};
 
 use crate::fs;
 use crate::fs::devfs::Devfs;
 use crate::fs::procfs::Procfs;
-use crate::syscall::credentials;
+use crate::syscall::namespace;
 use crate::syscall::path::{self, Target};
 use crate::syscall::process::Process;
 use crate::syscall::{fd, pipe, registry, uaccess};
@@ -572,8 +572,13 @@ pub(crate) fn sys_mount(
     // `path_mount`'s order: a remount (with `MS_BIND`, of the one mount),
     // then a bind, then a propagation change, then a move, then a new
     // mount. Each ignores the flags that name the ones after it.
-    // `may_mount`: `CAP_SYS_ADMIN`, asked before any flag is judged.
-    credentials::require_privilege(process)?;
+    // `may_mount`: `CAP_SYS_ADMIN` over the namespace's owner, asked before
+    // any flag is judged (M1).
+    namespace::may_mount(process)?;
+    // From a user namespace that is not the first, a new mount is `tmpfs`
+    // alone and always `nosuid,nodev`: no filesystem parser sees an image an
+    // unprivileged user chose (M2).
+    let confined = !process.with_credentials(|held| held.user_ns.is_first());
     // The caller's own namespace: a mount of another is `EINVAL` to each
     // of its changes, Linux's `check_mnt`.
     let mounts = path::mount_namespace(process);
@@ -591,6 +596,11 @@ pub(crate) fn sys_mount(
         }
     }
     if remount {
+        // A plain remount changes the filesystem for every mount of it:
+        // only for a caller privileged over the filesystem's owner (N5).
+        if flags & MS_BIND == 0 {
+            namespace::may_remount_filesystem(process, &place.mount)?;
+        }
         return remount_at(&mounts, &place, flags);
     }
     if bind {
@@ -613,8 +623,36 @@ pub(crate) fn sys_mount(
         return Ok(0);
     }
     let read_only = flags & MS_RDONLY != 0;
-    let filesystem = filesystem_named(process, &kind.ok_or(Errno::EINVAL)?, source, read_only)?;
-    let _ = mounts.mount_with(filesystem, &place, mount_flags(flags))?;
+    let kind = kind.ok_or(Errno::EINVAL)?;
+    let mut wanted = mount_flags(flags);
+    if confined {
+        if kind != b"tmpfs" {
+            return Err(Errno::EPERM);
+        }
+        wanted = wanted.union(MountFlags::NOSUID).union(MountFlags::NODEV);
+    }
+    let filesystem = filesystem_named(process, &kind, source, read_only)?;
+    if kind == b"tmpfs" {
+        // Linux's tmpfs root is `1777` and the mounter's: a user's own tmpfs
+        // is one it can make a directory in, which bubblewrap does for its
+        // new root. `mode=`, `uid=` and `gid=` are not read.
+        let (uid, gid) =
+            process.with_credentials(|held| (held.user.filesystem, held.group.filesystem));
+        filesystem.root().set_attributes(&SetAttributes {
+            permissions: Some(0o1777),
+            uid: Some(uid),
+            gid: Some(gid),
+            ..SetAttributes::default()
+        })?;
+    }
+    // Owned by the caller's user namespace when it is not the first: the
+    // filesystem's owner is who may remount it as a whole.
+    let owner = confined.then(|| {
+        process.with_credentials(|held| {
+            Arc::clone(&held.user_ns) as Arc<dyn core::any::Any + Send + Sync>
+        })
+    });
+    let _ = mounts.mount_owned(filesystem, &place, wanted, owner)?;
     Ok(0)
 }
 
@@ -672,7 +710,7 @@ pub(crate) fn sys_umount2(process: &Process, target: u64, flags: u32) -> Result<
         return Err(Errno::EINVAL);
     }
     // `may_mount`, before the target is looked up, as `ksys_umount` does.
-    credentials::require_privilege(process)?;
+    namespace::may_mount(process)?;
     let follow = if flags & UMOUNT_NOFOLLOW != 0 {
         AT_SYMLINK_NOFOLLOW
     } else {
@@ -724,7 +762,7 @@ pub(crate) fn sys_umount2(process: &Process, target: u64, flags: u32) -> Result<
 /// `EPERM` without privilege, before either path is looked up, as
 /// `may_mount` is asked first; then the walks' own, and the pivot's.
 fn sys_pivot_root(process: &Process, new_root: u64, put_old: u64) -> Result<usize, Errno> {
-    credentials::require_privilege(process)?;
+    namespace::may_mount(process)?;
     let new_root = path::target(process, AT_FDCWD, new_root, 0)?
         .location()
         .clone();
