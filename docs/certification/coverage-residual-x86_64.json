@@ -2185,10 +2185,10 @@
     "object/quota.rs": {
       "ring": "core",
       "lines": [
-        970,
-        978,
-        1449,
-        1468
+        817,
+        825,
+        1266,
+        1285
       ]
     },
     "discovery/smbios.rs": {

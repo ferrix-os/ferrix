@@ -17,7 +17,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`iommu`](#iommu) | 100 | - | - | 2 |
 | [`user`](#user) | 73 | - | 1 | 3 |
 | [`main`](#main) | 65 | 6 | 4 | 1 |
-| [`object`](#object) | 51 | 17 | 40 | 8 |
+| [`object`](#object) | 51 | 16 | 39 | 8 |
 | [`console`](#console) | 40 | 6 | 7 | 6 |
 | [`init`](#init) | 24 | 14 | 14 | 1 |
 | [`trap`](#trap) | 13 | - | - | 1 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1265** | **176** | **231** | 78 |
+| **Total** | **1265** | **175** | **230** | 78 |
 
 ---
 
@@ -210,7 +210,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `object/pin.rs` | `core` | 3 | 1 | 23 | 0 | - |
 | `object/process.rs` | `core` | 8 | 3 | 3 | 2 | 186, 221 |
 | `object/oom.rs` | `core` | 1 | 6 | 5 | 0 | - |
-| `object/quota.rs` | `core` | 4 | 1 | 1 | 0 | - |
+| `object/quota.rs` | `core` | 4 | 0 | 0 | 0 | - |
 | `object/interrupt.rs` | `core` | 3 | 0 | 0 | 0 | - |
 | `object/mod.rs` | `core` | 0 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |

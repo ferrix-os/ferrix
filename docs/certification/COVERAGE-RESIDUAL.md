@@ -7,8 +7,8 @@ The statements in the certified item that the measured suite did not reach, on e
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1931 | 402 | 264 | **1265** |
-| aarch64 | debug | 646 | 313 | 157 | **176** |
-| armv7a | debug | 998 | 415 | 352 | **231** |
+| aarch64 | debug | 645 | 313 | 157 | **175** |
+| armv7a | debug | 997 | 415 | 352 | **230** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -363,7 +363,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**646** unreached statements, debug profile.
+**645** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -372,7 +372,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | Reached only when something has already failed | 79 | 12% |
 | Run, and credited to another line | 10 | 2% |
 | Hardware the measured machine does not have | 157 | 24% |
-| Needs a test | 176 | 27% |
+| Needs a test | 175 | 27% |
 
 ### aarch64: Unreachable on the measured architecture — 104 statements
 
@@ -477,7 +477,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `iommu/smmuv3.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### aarch64: Needs a test — 176 statements
+### aarch64: Needs a test — 175 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -502,7 +502,6 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `object/pin.rs` |
-| 1 | `core` | `object/quota.rs` |
 
 ### aarch64: argued line by line — 281 statements
 
@@ -730,7 +729,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**998** unreached statements, debug profile.
+**997** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -739,7 +738,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | Reached only when something has already failed | 66 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 352 | 35% |
-| Needs a test | 231 | 23% |
+| Needs a test | 230 | 23% |
 
 ### armv7a: Unreachable on the measured architecture — 156 statements
 
@@ -841,7 +840,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `discovery/fdt.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### armv7a: Needs a test — 231 statements
+### armv7a: Needs a test — 230 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -871,8 +870,8 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `arch/armv7a/speculation.rs` |
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `irq.rs` |
-| 1 | `core` | `object/quota.rs` |
-| 4 | | *and 4 more files* |
+| 1 | `core` | `sched/task.rs` |
+| 3 | | *and 3 more files* |
 
 ### armv7a: argued line by line — 367 statements
 
