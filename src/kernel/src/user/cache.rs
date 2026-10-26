@@ -200,12 +200,19 @@ pub struct Reclaimed {
     /// Pages looked at.
     pub(crate) scanned: u64,
     /// Pages given back.
-    pub stolen: u64,
+    pub(crate) stolen: u64,
     /// Bytes of kernel heap given back by the shrinker ([`install_shrinker`]).
     pub heap: u64,
 }
 
 impl Reclaimed {
+    /// Pages given back, for the reclaim checks.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn stolen(&self) -> u64 {
+        self.stolen
+    }
+
     /// Whether it gave anything back.
     #[must_use]
     pub fn gave(&self) -> bool {
@@ -450,7 +457,11 @@ pub enum Asked {
 /// Must be called with no spin lock held, as [`reclaim`] must.
 pub fn reclaim_asked(scope: u32, want: u64, interrupted: &dyn Fn() -> bool) -> Asked {
     if scope == quota::NONE {
-        return if want == 0 { Asked::Given } else { Asked::Short };
+        return if want == 0 {
+            Asked::Given
+        } else {
+            Asked::Short
+        };
     }
     // In bytes, since the dentry and inode caches give back heap.
     let want = want.saturating_mul(PAGE_SIZE);

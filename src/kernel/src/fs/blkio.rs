@@ -381,17 +381,15 @@ pub(crate) fn set_default_weight(slot: u32, weight: u32) -> Result<(), Errno> {
             held.0 = weight;
             drop(defaults);
             drop(charge);
-            None
         } else if quota::job_ended(slot) {
             // As `entry_of`: the release hook has run and would not again.
             drop(defaults);
             drop(charge);
-            None
         } else {
             let _ = fallible::insert(&mut defaults, slot, (weight, charge))
                 .map_err(|_| Errno::ENOMEM)?;
-            None
         }
+        None
     };
     drop(gone);
     reshape();
@@ -528,11 +526,7 @@ impl Accounted {
                 .map_or(0, |shape| shape.finish);
             (last, cost, urgent)
         };
-        let Ok(ticket) = self
-            .fair
-            .lock()
-            .enqueue(u64::from(own), last, cost, urgent)
-        else {
+        let Ok(ticket) = self.fair.lock().enqueue(u64::from(own), last, cost, urgent) else {
             return io();
         };
         // Kept where the group's next request finds it: a group with no

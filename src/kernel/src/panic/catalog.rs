@@ -2904,6 +2904,7 @@ pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
 
 /// For `check_time_namespaces` in `stages_check.rs`, when
 /// `fs::timens_check::run` fails.
+// CHECKS-ONLY: for `check_time_namespaces` in `stages_check.rs`.
 pub static STAGE13_TIME_NAMESPACES: Explanation = Explanation {
     code: "FX-0910",
     title: "A time namespace failed its self-check",
@@ -2920,6 +2921,7 @@ pub static STAGE13_TIME_NAMESPACES: Explanation = Explanation {
 
 /// For `check_mount_permissions` in `stages_check.rs`, when
 /// `fs::mountperm_check::run` fails.
+// CHECKS-ONLY: for `check_mount_permissions` in `stages_check.rs`.
 pub static STAGE13_MOUNT_PERMISSIONS: Explanation = Explanation {
     code: "FX-0900",
     title: "Mount permissions failed their self-check",

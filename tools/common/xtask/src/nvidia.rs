@@ -1663,7 +1663,9 @@ nvrm: quiesce: done in 1840 ms
     }
     /// Chrome's tree merged into the NVIDIA volume's adds what the volume
     /// has not and leaves what it has as it was, a symbolic link of
-    /// Chrome's over a file of NVIDIA's included.
+    /// Chrome's over a file of NVIDIA's included. Unix only: the tree is made
+    /// with a symbolic link.
+    #[cfg(unix)]
     #[test]
     fn a_merge_keeps_the_nvidia_volumes_own_files() {
         let base =

@@ -72,5 +72,6 @@ disallowed-methods = [
     { path = "ferrix_kernel_core::iommu::Domain::detach_translation", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::iommu::Domain::id", reason = "checks-only, defined in iommu.rs", allow-invalid = true },
     { path = "ferrix_kernel_core::object::pin::Pin::with_budget", reason = "checks-only, defined in object/pin.rs", allow-invalid = true },
+    { path = "ferrix_kernel_core::user::cache::Reclaimed::stolen", reason = "checks-only, defined in user/cache.rs", allow-invalid = true },
 ]
 # END kernel-interface.py

@@ -373,11 +373,7 @@ pub(crate) fn sys_futex(
                     // In the caller's time namespace (Linux's
                     // `timens_ktime_to_host(CLOCK_MONOTONIC, ..)`).
                     crate::syscall::userns::acting().map_or(absolute, |caller| {
-                        crate::syscall::time::host_from(
-                            &caller,
-                            CLOCK_MONOTONIC,
-                            absolute,
-                        )
+                        crate::syscall::time::host_from(&caller, CLOCK_MONOTONIC, absolute)
                     })
                 })
             };

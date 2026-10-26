@@ -244,7 +244,11 @@ fn unprivileged(tally: &mut Tally<'_>, root_page: &mut Page<'_>) -> Result<(), &
 }
 
 /// `openat(AT_FDCWD, path, flags, 0644)`: the descriptor, or the refusal.
-fn open(page: &mut Page<'_>, path: &[u8], flags: u32) -> Result<Result<usize, Errno>, &'static str> {
+fn open(
+    page: &mut Page<'_>,
+    path: &[u8],
+    flags: u32,
+) -> Result<Result<usize, Errno>, &'static str> {
     page.reset();
     let at = page.put(path)?;
     Ok(by_number(

@@ -1015,8 +1015,8 @@ impl Node {
                     let bytes = namespace.render_offsets();
                     // Who opened it is judged at each write, beside who
                     // writes, as a map file's are.
-                    let opener = userns::acting()
-                        .map(|opener| opener.with_credentials(|held| held.clone()));
+                    let opener =
+                        userns::acting().map(|opener| opener.with_credentials(|held| held.clone()));
                     let writer: Writer = Box::new(move |data| {
                         render::write_time_offsets(&namespace, opener.as_ref(), data)
                     });

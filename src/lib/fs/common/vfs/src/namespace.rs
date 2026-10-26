@@ -1036,7 +1036,7 @@ impl Namespace {
     /// A dentry is taken out of the queue only if the queue holds its only
     /// reference, so no walk, open file or working directory loses one, and
     /// is then let go of as the queue lets go of its oldest
-    /// ([`Namespace::remember`]): kept beside it while its file holds pages in
+    /// (`Namespace::remember`): kept beside it while its file holds pages in
     /// the page cache, dropped otherwise. Its file's inode goes with it unless
     /// something else holds that: a disk filesystem's inodes are held through
     /// their dentries and open files alone. What is counted is what was
@@ -1045,11 +1045,11 @@ impl Namespace {
     /// child went is not counted either.
     ///
     /// Then the dentries kept for their files' pages whose files hold none
-    /// now ([`Namespace::shrink_paged`]): a reclaim of a job's pages comes
+    /// now (`Namespace::shrink_paged`): a reclaim of a job's pages comes
     /// before its shrink, and leaves them keeping nothing.
     ///
     /// `takes` is asked under the cache's lock, and must take no lock. Rounds
-    /// of [`SHRINK_BATCH`], each one look along the queue, until `want` is
+    /// of `SHRINK_BATCH`, each one look along the queue, until `want` is
     /// given or a round finds nothing; the cache's limit bounds the rounds.
     pub fn shrink(&self, takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
         let mut given = 0_u64;
@@ -1063,26 +1063,25 @@ impl Namespace {
             if picked.try_reserve_exact(SHRINK_BATCH).is_err() {
                 break;
             }
+            let mut cache = self.shared.cache.lock();
+            // No more than what is still wanted, in whole dentries.
+            let mut picked_bytes = 0_u64;
+            while at < cache.len()
+                && picked.len() < SHRINK_BATCH
+                && given.saturating_add(picked_bytes) < want
             {
-                let mut cache = self.shared.cache.lock();
-                // No more than what is still wanted, in whole dentries.
-                let mut picked_bytes = 0_u64;
-                while at < cache.len()
-                    && picked.len() < SHRINK_BATCH
-                    && given.saturating_add(picked_bytes) < want
-                {
-                    let unused = cache
-                        .get(at)
-                        .is_some_and(|d| Arc::strong_count(d) == 1 && takes(d.charge().0));
-                    if unused && let Some(taken) = cache.remove(at) {
-                        picked_bytes = picked_bytes.saturating_add(taken.charge().1);
-                        // Within the room had above.
-                        picked.push(taken);
-                    } else {
-                        at += 1;
-                    }
+                let unused = cache
+                    .get(at)
+                    .is_some_and(|d| Arc::strong_count(d) == 1 && takes(d.charge().0));
+                if unused && let Some(taken) = cache.remove(at) {
+                    picked_bytes = picked_bytes.saturating_add(taken.charge().1);
+                    // Within the room had above.
+                    picked.push(taken);
+                } else {
+                    at += 1;
                 }
             }
+            drop(cache);
             if picked.is_empty() {
                 break;
             }
@@ -2719,7 +2718,7 @@ fn reserve_kept(going: &[Arc<Mount>]) -> Result<()> {
         .map_err(|_| Errno::ENOMEM)?;
     keepers.extend(going.iter().filter_map(|mount| kept_by(going, mount)));
     keepers.sort_unstable_by_key(|keeper| Arc::as_ptr(keeper) as usize);
-    for run in keepers.chunk_by(|one, other| Arc::ptr_eq(one, other)) {
+    for run in keepers.chunk_by(Arc::ptr_eq) {
         if let Some(keeper) = run.first() {
             keeper
                 .kept

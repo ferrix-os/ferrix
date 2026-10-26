@@ -151,7 +151,11 @@ fn reclaim_written() -> Result<(u64, u64), &'static str> {
         return Err("Cached does not count a memory filesystem's pages");
     }
 
-    let given = cache::reclaim(crate::object::quota::NONE, before.disk).stolen;
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a raised check: `Reclaimed::stolen` is made pub for the checks alone"
+    )]
+    let given = cache::reclaim(crate::object::quota::NONE, before.disk).stolen();
     let after = cache::totals();
     if given < (PAGES - 1) as u64 || after.disk > before.disk.saturating_sub(PAGES as u64 - 1) {
         return Err("reclaim gave back no clean page of a writable mount");

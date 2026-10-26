@@ -5435,7 +5435,7 @@ fn a_lazy_unmount_keeps_the_locked_mounts_under_it_covering() {
     );
     let inside = Context {
         root: root.clone(),
-        cwd: cwd.clone(),
+        cwd,
         who: ctx.who.clone(),
         ns: Some(Arc::clone(&copy)),
     };
@@ -5451,9 +5451,9 @@ fn a_lazy_unmount_keeps_the_locked_mounts_under_it_covering() {
     let _ = copy.bind(&src, &tgt, true).unwrap();
     let top = copy.resolve(&inside, None, b"/b", true).unwrap();
     let inner = Context {
-        root: root.clone(),
+        root,
         cwd: top.clone(),
-        who: ctx.who.clone(),
+        who: ctx.who,
         ns: Some(Arc::clone(&copy)),
     };
     assert!(
@@ -5496,7 +5496,7 @@ fn a_lazy_unmount_keeps_every_locked_mount_in_room_made_first() {
     );
     let inside = Context {
         root: root.clone(),
-        cwd: cwd.clone(),
+        cwd,
         who: ctx.who.clone(),
         ns: Some(Arc::clone(&copy)),
     };
@@ -5508,7 +5508,7 @@ fn a_lazy_unmount_keeps_every_locked_mount_in_room_made_first() {
     let within = Context {
         root,
         cwd: at_top.clone(),
-        who: ctx.who.clone(),
+        who: ctx.who,
         ns: Some(Arc::clone(&copy)),
     };
     copy.unmount_with(&at_top, true).unwrap();

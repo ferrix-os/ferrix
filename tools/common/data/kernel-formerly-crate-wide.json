@@ -660,10 +660,6 @@
       "before": "pub(crate)"
     },
     {
-      "item": "arch/speculation_check.rs: Report::boot (field)",
-      "before": "pub(crate)"
-    },
-    {
       "item": "arch/speculation_check.rs: Report::differing (field)",
       "before": "pub(crate)"
     },
@@ -1569,10 +1565,6 @@
     },
     {
       "item": "object/process.rs: live (fn)",
-      "before": "pub(crate)"
-    },
-    {
-      "item": "object/quota.rs: DEFAULT_WEIGHT (const)",
       "before": "pub(crate)"
     },
     {

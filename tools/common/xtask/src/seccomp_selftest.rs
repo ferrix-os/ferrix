@@ -107,10 +107,10 @@ fn results(lines: &[String]) -> (BTreeMap<String, Outcome>, bool) {
     let mut totals = false;
     for line in lines {
         totals |= line.contains("# Totals:");
-        let (outcome, rest) = if let Some(at) = line.find("not ok ") {
-            (Outcome::Fail, &line[at + "not ok ".len()..])
-        } else if let Some(at) = line.find("ok ") {
-            (Outcome::Pass, &line[at + "ok ".len()..])
+        let (outcome, rest) = if let Some((_, rest)) = line.split_once("not ok ") {
+            (Outcome::Fail, rest)
+        } else if let Some((_, rest)) = line.split_once("ok ") {
+            (Outcome::Pass, rest)
         } else {
             continue;
         };
