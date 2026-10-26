@@ -26,7 +26,7 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   user namespace with a pid 1 under a memory limit and a seccomp filter,
   passes on all three architectures (2026-10-14). What the stage was first
   written to hold beyond that (time namespaces, unprivileged mounting,
-  `memory.reclaim`, `io.weight`, `cpu.max.burst` and the rest) is not built and
+  `io.weight`, `cpu.max.burst` and the rest) is not built and
   is in the [follow-ons](follow-ons.md).
 
 **In progress**

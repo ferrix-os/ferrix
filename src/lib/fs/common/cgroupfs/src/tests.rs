@@ -405,6 +405,35 @@ fn memory_max_reads_sizes_as_memparse_does() {
 }
 
 #[test]
+fn memory_reclaim_reads_a_size_and_never_max() {
+    assert_eq!(write::parse_reclaim(b"1M\n"), Ok(Some(1 << 20)));
+    assert_eq!(write::parse_reclaim(b" 4096 "), Ok(Some(4096)));
+    assert_eq!(write::parse_reclaim(b"0"), Ok(Some(0)));
+    assert_eq!(write::parse_reclaim(b"0x2000"), Ok(Some(0x2000)));
+    // `page_counter_memparse(buf, "", …)`: the empty text is its "max".
+    assert_eq!(write::parse_reclaim(b"\n"), Ok(None));
+    assert_eq!(write::parse_reclaim(b"max"), Err(Refusal::Invalid));
+    assert_eq!(write::parse_reclaim(b"plenty"), Err(Refusal::Invalid));
+    assert_eq!(write::parse_reclaim(b"-4096"), Err(Refusal::Invalid));
+    // No swap, so no `swappiness=` to take after the size.
+    assert_eq!(
+        write::parse_reclaim(b"1M swappiness=0"),
+        Err(Refusal::Invalid)
+    );
+}
+
+#[test]
+fn memory_reclaim_is_write_only() {
+    let memory = Set::EMPTY.with(Controller::Memory);
+    assert_eq!(
+        files::named(b"memory.reclaim", false, memory).map(|file| (file.kind, file.mode())),
+        Some((Kind::MemoryReclaim, 0o200))
+    );
+    assert_eq!(files::named(b"memory.reclaim", true, memory), None);
+    assert_eq!(files::named(b"memory.reclaim", false, Set::EMPTY), None);
+}
+
+#[test]
 fn cpu_max_is_read_as_cpu_max_write_reads_it() {
     use crate::cpu::{self, Max};
     let current = cpu::PERIOD_DEFAULT_US;

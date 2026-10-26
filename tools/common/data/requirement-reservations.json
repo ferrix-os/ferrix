@@ -82,11 +82,11 @@
       "purpose": "Time namespaces: AddressSpace::replace_shared_code and map_shared_code_near, the vDSO view swapped in place for a space entering a time namespace, split from L.user.76 (consultant's T1, ledger 2026-10-14 line 966)"
     },
     {
-      "ids": ["L.object.182-183"],
+      "ids": ["L.object.182"],
       "owner": "s13f-memcg",
       "branch": "s13f/memcg",
       "date": "2026-10-14",
-      "purpose": "Stage 13's memory controller: a program's page tables charged apart from its pages, for memory.stat's pagetables and anon; memory.reclaim's proactive reclaim, EAGAIN when short (docs/CGROUPS.md section 10)"
+      "purpose": "Stage 13's memory controller: a program's page tables charged apart from its pages, for memory.stat's pagetables and anon (docs/CGROUPS.md section 10); L.object.183, memory.reclaim, is written"
     },
     {
       "ids": ["L.object.184-187"],

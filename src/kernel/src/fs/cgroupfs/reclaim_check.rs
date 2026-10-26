@@ -35,6 +35,12 @@
 //!   reclaim that always began at the first file took the hot one back for
 //!   every read, the livelock of Endfield's install8 boot (`user::cache`,
 //!   "Where a reclaim starts");
+//! * `/check-rr` reads 64 pages and holds 4 of a tmpfs file, with
+//!   `/check-rq` beside it holding 8 pages: a write of 32 pages' bytes to
+//!   `memory.reclaim` gives back at least that, a write of more than the
+//!   clean cache is `EAGAIN` with the cache given back and the tmpfs pages
+//!   kept, `max` is `EINVAL`, the sibling loses nothing, and the file reads
+//!   as its source has it again;
 //! * `pgfault` counts the faults of a job's program.
 
 use alloc::boxed::Box;
@@ -275,8 +281,9 @@ fn all(harness: &mut Harness) -> Checked<u64> {
     let hot_and_cold = hot_and_cold(harness)?;
     let protected = protection(harness)?;
     tmpfs_read_throttled(harness)?;
+    let asked = on_demand(harness)?;
     faults(harness)?;
-    Ok(stolen + at_max + hot_and_cold + protected)
+    Ok(stolen + at_max + hot_and_cold + protected + asked)
 }
 
 /// `memory.high`, `.low` and `.min` read and write as Linux's do, and
@@ -591,6 +598,109 @@ fn protection(harness: &mut Harness) -> Checked<u64> {
     child.end(harness)?;
     parent.end(harness)?;
     Ok(stolen)
+}
+
+/// Pages `/check-rr`'s first `memory.reclaim` write asks for.
+const ASKED_PAGES: u64 = 32;
+
+/// `/check-rr` gives back what a write to its `memory.reclaim` asks, from its
+/// own clean cache and nobody else's. Answers the pages it gave back.
+///
+/// Verifies: L.object.183
+fn on_demand(harness: &mut Harness) -> Checked<u64> {
+    let sibling = Group::make(harness, b"/check-rq")?;
+    let group = Group::make(harness, b"/check-rr")?;
+    let (beside, _) = file(SIBLING_PAGES)?;
+    let (cached, _) = file(PAGES)?;
+    let memory = VmoStorage
+        .allocate()
+        .map_err(|_| "reclaim check: no tmpfs store")?;
+    let outcome = on_demand_steps(harness, &group, &*cached, &*memory, &sibling, &*beside);
+    let stolen = group.number(harness, "memory.stat", "pgsteal")?;
+    drop((beside, cached, memory));
+    group.end(harness)?;
+    sibling.end(harness)?;
+    outcome?;
+    crate::console::println!("  reclaim  memory.reclaim gave back {stolen} pages when asked");
+    Ok(stolen)
+}
+
+/// [`on_demand`]'s reads, writes and the counts they leave.
+fn on_demand_steps(
+    harness: &mut Harness,
+    group: &Group,
+    cached: &dyn Pages,
+    memory: &dyn Pages,
+    sibling: &Group,
+    beside: &dyn Pages,
+) -> Checked<()> {
+    if !sibling.read_all(beside, SIBLING_PAGES)? || !group.read_all(cached, PAGES)? {
+        return Err("a file read before memory.reclaim did not read as its source has it");
+    }
+    let wrote = group.as_task(|| {
+        (0..SHMEM_PAGES)
+            .try_for_each(|index| memory.write(index * PAGE_SIZE, &[9; PAGE_SIZE as usize]))
+    });
+    wrote.map_err(|_| "a tmpfs file would not take its pages")?;
+    if group.number(harness, "memory.stat", "file")? != PAGES * PAGE_SIZE {
+        return Err("a cgroup with no limit did not hold the cache it read");
+    }
+
+    group.set(harness, "memory.reclaim", b"0\n")?;
+    if group.number(harness, "memory.stat", "pgsteal")? != 0 {
+        return Err("a memory.reclaim of 0 bytes gave pages back");
+    }
+    let asked = alloc::format!("{}\n", ASKED_PAGES * PAGE_SIZE);
+    group.set(harness, "memory.reclaim", asked.as_bytes())?;
+    let held = group.number(harness, "memory.stat", "file")?;
+    if held > (PAGES - ASKED_PAGES) * PAGE_SIZE
+        || group.number(harness, "memory.stat", "pgsteal")? < ASKED_PAGES
+    {
+        crate::console::println!("  reclaim  memory.reclaim of {ASKED_PAGES} pages left {held} bytes");
+        return Err("a memory.reclaim write did not give back what it asked for");
+    }
+
+    let short = harness.write(&group.file("memory.reclaim"), b"1G\n");
+    harness.refused(
+        short.err(),
+        Errno::EAGAIN,
+        "a memory.reclaim of more than a cgroup's clean cache was not EAGAIN",
+    )?;
+    if group.number(harness, "memory.stat", "file")? != 0
+        || group.number(harness, "memory.stat", "shmem")? != SHMEM_PAGES * PAGE_SIZE
+    {
+        return Err("a memory.reclaim short of its size did not give back all the clean cache, \
+             and only it");
+    }
+    // Asked to stop before a round, nothing is taken; at no scope, nothing
+    // may be asked for.
+    use crate::user::cache::{Asked, reclaim_asked};
+    let refilled = group.read_all(cached, PAGES)?;
+    let before = group.number(harness, "memory.stat", "pgsteal")?;
+    if !refilled
+        || reclaim_asked(group.slot(), ASKED_PAGES, &|| true) != Asked::Interrupted
+        || group.number(harness, "memory.stat", "pgsteal")? != before
+    {
+        return Err("a reclaim asked for and interrupted before its first round took pages");
+    }
+    if reclaim_asked(crate::object::quota::NONE, 1, &|| false) != Asked::Short
+        || reclaim_asked(crate::object::quota::NONE, 0, &|| false) != Asked::Given
+    {
+        return Err("a reclaim asked for at no scope was not Short, or of nothing not Given");
+    }
+    let bad = harness.write(&group.file("memory.reclaim"), b"max\n");
+    harness.refused(bad.err(), Errno::EINVAL, "a memory.reclaim of `max` was not EINVAL")?;
+
+    if sibling.number(harness, "memory.stat", "file")? != SIBLING_PAGES * PAGE_SIZE
+        || sibling.number(harness, "memory.stat", "pgsteal")? != 0
+        || beside.committed_bytes() != SIBLING_PAGES * PAGE_SIZE
+    {
+        return Err("a memory.reclaim took a sibling cgroup's pages");
+    }
+    if !group.read_all(cached, PAGES)? {
+        return Err("pages memory.reclaim took did not read back as the source has them");
+    }
+    Ok(())
 }
 
 /// `pgfault` counts the faults of a job's program.

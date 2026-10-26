@@ -284,6 +284,26 @@ pub fn parse_memory_max(text: &[u8]) -> Result<Option<u64>, Refusal> {
     ))
 }
 
+/// Parse a write to `memory.reclaim`, as `memory_reclaim` does through
+/// `page_counter_memparse(buf, "", …)`: a size in bytes as `memparse` reads
+/// it, which [`parse_memory_max`] reads too, but with no `max`. What the
+/// stripped text matches is `""`, Linux's name for "max" in that call, so a
+/// write of only whitespace asks for everything. `None` is that.
+///
+/// # Errors
+///
+/// [`Refusal::Invalid`] for `max` and for anything else that is not a size.
+pub fn parse_reclaim(text: &[u8]) -> Result<Option<u64>, Refusal> {
+    let text = strip(text);
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text == b"max" {
+        return Err(Refusal::Invalid);
+    }
+    parse_memory_max(text)
+}
+
 /// `cpu.weight`'s least value, Linux's `CGROUP_WEIGHT_MIN`.
 pub const WEIGHT_MIN: u64 = 1;
 /// `cpu.weight`'s default, `CGROUP_WEIGHT_DFL`.
