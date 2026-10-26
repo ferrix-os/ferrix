@@ -708,7 +708,8 @@ by whoever looks first. A task alone on a processor gets no tick, so
 `cpu.weight` through Linux's table. `cpu.stat` prints `usage_usec`,
 `user_usec` and `system_usec` in every cgroup and the root (the machine's),
 and `nr_periods`, `nr_throttled` and `throttled_usec` where `cpu` is enabled;
-`nice_usec`, `core_sched.force_idle_usec` and the burst keys have no source.
+`nice_usec` and `core_sched.force_idle_usec` have no source; the burst keys
+are `cpu.max.burst`'s, below.
 The limit is in the audit trail as a cgroup limit (`resource::CPU_MAX`).
 A throttled task sleeps to its period's end, woken before then only by a wake
 of the task itself, which every kill, signal and stop is posted with; it then
@@ -718,7 +719,43 @@ end of that period. Until 2026-10-16 it slept in slices of a millisecond and
 asked at each, and those looks were charged to the job whose quota they were
 waiting out, a throttled job using a quarter more than its quota on an idle
 host (F-78). `cpu.max` throttles a
-native task too, a ring-3 driver included. `cpu.idle` and `cpu.max.burst` are not built.
+native task too, a ring-3 driver included. `cpu.idle` is not built.
+
+**`cpu.max.burst` (2026-10-26, L.object.184).** A job may carry the runtime a
+period left unused into the next, up to its burst, as Linux's
+`__refill_cfs_bandwidth_runtime` refills: at a period's end the next one's
+runtime is the quota and what the last left of its own runtime, at most the
+burst (`quota::carry`), and throttling, the timer for a lone task and the
+throttle's wait all reckon with that runtime (`quota::allowance`). However
+many periods passed with nothing running, one refill is made, as Linux's
+period timer makes one when it starts again. A period that used more than its
+quota counts in `cpu.stat`'s `nr_bursts` and `burst_usec`, up to its runtime:
+the last charge's overshoot past it is no burst, as Linux's pool never goes
+below zero. Every cgroup with the `cpu` controller prints the two keys after
+`throttled_usec`.
+
+The period's starter stores the most that can be carried before it clears the
+use, and what is carried after (`carry_bound`, then `carry`): a charger in
+between may get one charge through that should have been throttled, as any
+period's last charge overshoots, and is never throttled short of its runtime.
+The file takes microseconds as `kstrtoull` reads them; a burst over the quota
+is `EINVAL`, and so is a `cpu.max` quota under the burst
+(`tg_set_cfs_bandwidth`); under `max` any burst whose nanoseconds fit stands,
+and does nothing until a quota is set. Linux serialises the two files' writes
+with `cfs_constraints_mutex`; Ferrix does not, and fails closed instead: a
+carry never grants more than the quota (`carry_cap`), so two writers racing
+past each other's check leave a job with no more than a burst that fits.
+Writing either file drops what was carried. The `cpu` line of stage 13 checks
+the files, and, on a slot of its own charged at instants it chooses, the carry
+exactly (`quota::check_burst_carry`); the files' refusals have no requirement
+of their own yet, since a new id is reserved on `develop` first. Negative
+controls, run with `test-boot` here and owed through `gate.sh control` on a
+claimed architecture: a period carrying nothing stopped the boot with
+"cpu.max.burst did not carry a period's unused quota into the next";
+`charge_bandwidth` reckoning with the quota alone, with "a charge within what
+cpu.max.burst carried throttled its period"; and a burst counted past the
+runtime, with "cpu.stat's nr_bursts and burst_usec did not count the burst a
+period used, up to what was carried".
 
 **The charge kept back (po11-cpumax, 2026-10-08).** Walking the job's slots
 with a locked add a level on every charge cost the IPC round trip about 125

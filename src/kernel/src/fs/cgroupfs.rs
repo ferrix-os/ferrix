@@ -874,6 +874,8 @@ fn render_cpu_stat(out: &mut Vec<u8>, job: &Arc<Job>) {
             periods: job.counted(Counter::Periods),
             throttled: job.counted(Counter::Throttled),
             throttled_us: job.counted(Counter::ThrottledNs) / 1000,
+            bursts: job.counted(Counter::Bursts),
+            burst_us: job.counted(Counter::BurstNs) / 1000,
         },
         offered(job).contains(Controller::Cpu),
     );
@@ -914,6 +916,7 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
                 },
             );
         }
+        Kind::CpuMaxBurst => render::number(&mut out, job.burst() / 1000),
         Kind::IoStat => {
             for (device, stat) in super::blkio::stats(job.quota_index()) {
                 ferrix_cgroupfs::io::render_stat(&mut out, device, stat);
@@ -1165,6 +1168,9 @@ fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
 fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
     let (_, period) = job.bandwidth();
     let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
+    if !ferrix_cgroupfs::cpu::burst_fits(max.quota, job.burst() / 1000) {
+        return Err(Errno::EINVAL);
+    }
     let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
     if job.set_bandwidth(runtime, max.period * 1000) {
         // Tasks of the job already running alone on a processor are cut by
@@ -1178,6 +1184,19 @@ fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
             max.quota.unwrap_or(u64::MAX),
         );
     }
+    Ok(())
+}
+
+/// A write to `cpu.max.burst`: microseconds, no more than `cpu.max`'s quota
+/// when there is one (`docs/CGROUPS.md` §12).
+fn set_burst(job: &Job, data: &[u8]) -> Result<()> {
+    let burst = ferrix_cgroupfs::cpu::parse_burst(data).map_err(errno)?;
+    let (quota, _) = job.bandwidth();
+    let quota = (quota != quota::UNLIMITED).then_some(quota / 1000);
+    if !ferrix_cgroupfs::cpu::burst_fits(quota, burst) {
+        return Err(Errno::EINVAL);
+    }
+    let _ = job.set_burst(burst * 1000);
     Ok(())
 }
 
@@ -1256,6 +1275,7 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         }
         Kind::IoMax => set_io_max(job, data)?,
         Kind::CpuMax => set_cpu_max(job, data)?,
+        Kind::CpuMaxBurst => set_burst(job, data)?,
         Kind::Controllers
         | Kind::Events
         | Kind::Stat

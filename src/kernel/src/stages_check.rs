@@ -766,7 +766,8 @@ pub(super) fn check_cgroupfs() {
         "  cpu      cpu.max read and written as Linux does, cpu.weight.nice turned into cpu.weight and \
          back, and a program of two counting threads held to about a fifth of a processor by cpu.max \
          20000 100000 in its cgroup and beneath one ({} periods throttled), cpu.stat counting its \
-         usage and its throttling, and free again at max",
+         usage and its throttling, and free again at max; cpu.max.burst bounded by the quota and \
+         carrying a period's unused runtime into the next, its bursts counted",
         checked.throttled,
     );
     println!(

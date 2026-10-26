@@ -16,6 +16,11 @@
 //! counts, and the threads still count, a little. The same program in a
 //! cgroup beneath one with that limit is held to it too, and with `max` back
 //! the program takes more than half a processor again.
+//!
+//! `cpu.max.burst` reads 0, takes no more than the quota, and keeps
+//! `cpu.max` from going under it; and a quota slot charged at instants the
+//! check chooses carries the runtime a period left unused, up to the burst,
+//! into the next, and counts the burst a period used.
 
 use alloc::vec::Vec;
 
@@ -59,6 +64,7 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u64> {
     harness.report.made += 1;
     let outcome = pending()
         .and_then(|()| files(harness))
+        .and_then(|()| burst(harness))
         .and_then(|()| throttling(harness));
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
     let removed = harness.rmdir(b"/check-c");
@@ -177,11 +183,11 @@ fn files(harness: &mut Harness) -> Checked<()> {
         return Err("cpu.weight 100 does not read as cpu.weight.nice 0");
     }
 
-    if lines(harness, b"/check-c/cpu.stat")? != 6 {
-        return Err("cpu.stat with the cpu controller on does not have its six keys");
+    if lines(harness, b"/check-c/cpu.stat")? != 8 {
+        return Err("cpu.stat with the cpu controller on does not have its eight keys");
     }
-    if lines(harness, b"/cpu.stat")? != 6 || number(harness, b"/cpu.stat", "usage_usec")? == 0 {
-        return Err("the root's cpu.stat does not have its six keys and the machine's usage");
+    if lines(harness, b"/cpu.stat")? != 8 || number(harness, b"/cpu.stat", "usage_usec")? == 0 {
+        return Err("the root's cpu.stat does not have its eight keys and the machine's usage");
     }
     harness
         .mkdir(b"/check-c/d")
@@ -194,6 +200,65 @@ fn files(harness: &mut Harness) -> Checked<()> {
     }
     removed.map_err(|_| "cpu check: the nested cgroup did not go")?;
     Ok(())
+}
+
+/// `cpu.max.burst`'s file on `/check-c`, left at 0 and `cpu.max` at `max`,
+/// and the carry it makes.
+fn burst(harness: &mut Harness) -> Checked<()> {
+    let outcome = burst_files(harness).and_then(|()| burst_carried());
+    let _ = harness.write(b"/check-c/cpu.max.burst", b"0");
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    outcome
+}
+
+/// `cpu.max.burst` reads and writes as `cpu_cfs_burst_write_u64` and
+/// `tg_set_cfs_bandwidth` have it. No requirement names this yet: its own id
+/// is to be reserved on `develop` first (the consultant's condition 5 for
+/// `cpu.max.burst`, 2026-10-26); the parse and the fit are host-tested in
+/// `ferrix-cgroupfs`.
+fn burst_files(harness: &mut Harness) -> Checked<()> {
+    if !harness.reads(b"/check-c/cpu.max.burst", b"0\n") {
+        return Err("a new cgroup's cpu.max.burst does not read 0");
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max.burst", b"500000\n")
+        .map_err(|_| "cpu.max.burst refused a burst under no quota")?;
+    let over = harness.write(b"/check-c/cpu.max", b"20000 100000\n");
+    harness.refused(
+        over.err(),
+        Errno::EINVAL,
+        "cpu.max took a quota under its cpu.max.burst",
+    )?;
+    let _ = harness
+        .write(b"/check-c/cpu.max.burst", b"20000")
+        .map_err(|_| "cpu.max.burst refused 20000")?;
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"20000 100000\n")
+        .map_err(|_| "cpu.max refused a quota its cpu.max.burst fits")?;
+    let refused = harness.write(b"/check-c/cpu.max.burst", b"20001");
+    harness.refused(
+        refused.err(),
+        Errno::EINVAL,
+        "cpu.max.burst took a burst over its cpu.max quota",
+    )?;
+    let refused = harness.write(b"/check-c/cpu.max.burst", b"lots");
+    harness.refused(
+        refused.err(),
+        Errno::EINVAL,
+        "cpu.max.burst took what is no number",
+    )?;
+    if !harness.reads(b"/check-c/cpu.max.burst", b"20000\n") {
+        return Err("cpu.max.burst does not read back 20000");
+    }
+    Ok(())
+}
+
+/// The carry each period makes under `cpu.max.burst`, on a quota slot of
+/// the item's own check (`object::quota::check_burst_carry`).
+///
+/// Verifies: L.object.184
+fn burst_carried() -> Checked<()> {
+    crate::object::quota::check_burst_carry(crate::timer::now_nanos())
 }
 
 /// Microseconds of processor time `path`'s cpu.stat says its cgroup used.

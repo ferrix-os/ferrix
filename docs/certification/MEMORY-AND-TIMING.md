@@ -839,6 +839,14 @@ bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
   depth, and nothing bounds that but what a program makes (cgroupfs has no
   `cgroup.max.depth`). A deployment that relies on a bound on the scheduler's
   tick should bound the depth of the cgroups it runs programs in.
+  `cpu.max.burst` (2026-10-26, L.object.184) adds a constant per slot to each
+  of the three walks (one load of what was carried, in `allowance`) and a
+  constant to the one caller that starts a period (`carry_bound` and
+  `carry`); the depth bound is unchanged. Between `carry_bound`'s store and
+  `carry`'s, a charger compares the new period's use with the most that can be
+  carried, so the window lets at most one charge's overrun through -- the same
+  bound as the overshoot of any period's last charge -- and never throttles a
+  task short of its runtime.
 * `object::oom::throttle` runs after a successful fault and after a read of a
   cached file, and does nothing when the job and its ancestors are under their
   `memory.high`: one walk up. When one is over, it reclaims (a scan of every
@@ -849,9 +857,10 @@ bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
   under its filesystem's lock, which on a shared writable volume is mount-wide.
 * `settle_frozen` lists the live processes and walks the job's ancestors on
   every park, leave and move of a frozen process: O(processes x depth).
-* A throttled task sleeps in slices of a millisecond, asking at each whether
-  the way back to user mode has anything to do: a task throttled for a second
-  wakes a thousand times.
+* A throttled task sleeps to its period's end, woken before then only by a
+  wake of the task itself, which every kill, signal and stop is posted with
+  (since F-78, 2026-10-16; until then it slept in slices of a millisecond,
+  asking at each whether the way back to user mode had anything to do).
 * `sched::charge_running` is reachable at will by any program, not only
   through a read of `cpu.stat`: `CLOCK_PROCESS_CPUTIME_ID`, `times()`,
   `getrusage(RUSAGE_SELF)` and a read of `/proc/<pid>/stat` or

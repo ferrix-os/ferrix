@@ -654,6 +654,20 @@ impl Job {
             .is_some()
     }
 
+    /// Its `cpu.max.burst`, in nanoseconds.
+    pub fn burst(&self) -> u64 {
+        self.quota.as_ref().map_or(0, Quota::burst)
+    }
+
+    /// Set its `cpu.max.burst`. Whether it could be: the tree's root takes
+    /// none.
+    pub fn set_burst(&self, burst: u64) -> bool {
+        self.quota
+            .as_ref()
+            .map(|slot| slot.set_burst(burst))
+            .is_some()
+    }
+
     /// Nanoseconds its tasks, and those of the jobs beneath it, have used
     /// the processor in user mode and in kernel mode; the whole machine's for
     /// the tree's root.

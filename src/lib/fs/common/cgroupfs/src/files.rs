@@ -61,6 +61,8 @@ pub enum Kind {
     CpuWeightNice,
     /// `cpu.max`.
     CpuMax,
+    /// `cpu.max.burst`: unused quota a period may carry to the next.
+    CpuMaxBurst,
     /// `memory.current`.
     MemoryCurrent,
     /// `memory.max`.
@@ -114,6 +116,7 @@ pub const FILES: &[File] = &[
         true,
     ),
     controlled("cpu.max", Kind::CpuMax, Controller::Cpu, true),
+    controlled("cpu.max.burst", Kind::CpuMaxBurst, Controller::Cpu, true),
     controlled(
         "memory.current",
         Kind::MemoryCurrent,
@@ -131,7 +134,12 @@ pub const FILES: &[File] = &[
         false,
     ),
     controlled("memory.stat", Kind::MemoryStat, Controller::Memory, false),
-    controlled("memory.reclaim", Kind::MemoryReclaim, Controller::Memory, true),
+    controlled(
+        "memory.reclaim",
+        Kind::MemoryReclaim,
+        Controller::Memory,
+        true,
+    ),
     on_root_too("io.stat", Kind::IoStat, Controller::Io, false),
     controlled("io.max", Kind::IoMax, Controller::Io, true),
     controlled("pids.current", Kind::PidsCurrent, Controller::Pids, false),

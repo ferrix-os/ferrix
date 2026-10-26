@@ -1,8 +1,10 @@
-//! The `cpu` controller's files: `cpu.max`, `cpu.weight.nice` and `cpu.stat`.
+//! The `cpu` controller's files: `cpu.max`, `cpu.max.burst`,
+//! `cpu.weight.nice` and `cpu.stat`.
 //!
 //! Parsed and printed as Linux's `kernel/sched/core.c` does (`cpu_max_write`,
-//! `cpu_period_quota_parse`, `tg_set_cfs_bandwidth`, `cpu_weight_nice_read_s64`
-//! and `cpu_extra_stat_show`), checked against a 7.0 host's files.
+//! `cpu_period_quota_parse`, `cpu_cfs_burst_write_u64`, `tg_set_cfs_bandwidth`,
+//! `cpu_weight_nice_read_s64` and `cpu_extra_stat_show`), checked against a 7.0
+//! host's files.
 
 use alloc::vec::Vec;
 use core::fmt::Write as _;
@@ -88,6 +90,35 @@ pub fn parse_max(text: &[u8], current_period: u64) -> Result<Max, Refusal> {
     Ok(Max {
         quota: quota.map(|quota| quota / 1000),
         period: period_ns / 1000,
+    })
+}
+
+/// Parse a write to `cpu.max.burst`, as `cpu_cfs_burst_write_u64` takes it:
+/// a number of microseconds read by `kstrtoull` with base 0. Answers it in
+/// microseconds; whether it fits the quota is [`burst_fits`]'s to say.
+///
+/// # Errors
+///
+/// What `kstrtoull` refuses, as it refuses it, and [`Refusal::Invalid`] for
+/// a burst whose nanoseconds a `u64` cannot hold. A burst past what the
+/// scheduler can count beside a quota is [`burst_fits`]'s to refuse; under
+/// `max` Linux takes it, and so does this.
+pub fn parse_burst(text: &[u8]) -> Result<u64, Refusal> {
+    let burst = crate::write::kstrtoull(strip(text))?;
+    if burst > u64::MAX / 1000 {
+        return Err(Refusal::Invalid);
+    }
+    Ok(burst)
+}
+
+/// Whether a burst of `burst` microseconds may stand beside a `cpu.max`
+/// quota of `quota` (`None` for `max`), as `tg_set_cfs_bandwidth` asks of
+/// either file's write: no more than the quota, and the two together no
+/// more than the scheduler can count. With no quota any burst stands, and
+/// does nothing until one is set.
+pub fn burst_fits(quota: Option<u64>, burst: u64) -> bool {
+    quota.is_none_or(|quota| {
+        burst <= quota && quota.saturating_add(burst).saturating_mul(1000) <= MAX_QUOTA_NS
     })
 }
 
@@ -181,6 +212,10 @@ pub struct Stat {
     pub throttled: u64,
     /// Microseconds it spent throttled.
     pub throttled_us: u64,
+    /// Periods in which it used more than its quota, out of a burst.
+    pub bursts: u64,
+    /// Microseconds it used beyond its quota in those periods.
+    pub burst_us: u64,
 }
 
 /// Append `cpu.stat`, the keys Ferrix has a source for in Linux's order.
@@ -197,10 +232,12 @@ pub fn render_stat(out: &mut Vec<u8>, stat: Stat, controlled: bool) {
     if controlled {
         let _ = write!(
             Out(out),
-            "nr_periods {}\nnr_throttled {}\nthrottled_usec {}\n",
+            "nr_periods {}\nnr_throttled {}\nthrottled_usec {}\nnr_bursts {}\nburst_usec {}\n",
             stat.periods,
             stat.throttled,
-            stat.throttled_us
+            stat.throttled_us,
+            stat.bursts,
+            stat.burst_us
         );
     }
 }
