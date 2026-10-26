@@ -18,8 +18,11 @@ pub struct Plan {
     pub amps: [u32; MAX_STEPS],
     /// How many steps, 1 to [`MAX_STEPS`].
     pub count: usize,
-    /// Seconds between steps, 1 to [`MAX_SECONDS`].
+    /// Seconds between steps, 1 to [`MAX_SECONDS`]; unused when adaptive.
     pub seconds: u32,
+    /// `auto:LO-HI`: the steps are a range the policy moves within by
+    /// temperature, not a climb by the clock (`crate::policy`).
+    pub adaptive: bool,
 }
 
 /// Why a plan word did not parse.
@@ -58,6 +61,7 @@ impl Plan {
             amps: [0; MAX_STEPS],
             count: 0,
             seconds: self.seconds,
+            adaptive: self.adaptive,
         };
         for &amps in self.amps.iter().take(self.count) {
             if amps <= ceiling
@@ -78,6 +82,9 @@ impl Plan {
 /// [`PlanError::Malformed`] for anything not of the form, and
 /// [`PlanError::Descending`] for a step below the one before it.
 pub fn parse(value: &[u8]) -> Result<Plan, PlanError> {
+    if let Some(range) = value.strip_prefix(b"auto") {
+        return adaptive(range);
+    }
     let at = value
         .iter()
         .position(|&byte| byte == b'@')
@@ -93,6 +100,7 @@ pub fn parse(value: &[u8]) -> Result<Plan, PlanError> {
         amps: [0; MAX_STEPS],
         count: 0,
         seconds,
+        adaptive: false,
     };
     for step in value
         .get(..at)
@@ -109,6 +117,53 @@ pub fn parse(value: &[u8]) -> Result<Plan, PlanError> {
         let slot = plan.amps.get_mut(plan.count).ok_or(PlanError::Malformed)?;
         *slot = amps;
         plan.count += 1;
+    }
+    Ok(plan)
+}
+
+/// The range an adaptive plan moves within without one named: the N150's
+/// firmware value and a little above it, to the 44 A its box runs took.
+pub const AUTO_RANGE: (u32, u32) = (30, 44);
+
+/// `auto` or `auto:LO-HI`: [`MAX_STEPS`] steps spread evenly from LO to HI,
+/// whole amperes, ascending; fewer when the range is narrower than that.
+fn adaptive(range: &[u8]) -> Result<Plan, PlanError> {
+    let (low, high) = if range.is_empty() {
+        AUTO_RANGE
+    } else {
+        let range = range.strip_prefix(b":").ok_or(PlanError::Malformed)?;
+        let dash = range
+            .iter()
+            .position(|&byte| byte == b'-')
+            .ok_or(PlanError::Malformed)?;
+        let low = decimal(range.get(..dash).unwrap_or_default(), 2).ok_or(PlanError::Malformed)?;
+        let high =
+            decimal(range.get(dash + 1..).unwrap_or_default(), 2).ok_or(PlanError::Malformed)?;
+        (low, high)
+    };
+    if low == 0 {
+        return Err(PlanError::Malformed);
+    }
+    if high < low {
+        return Err(PlanError::Descending);
+    }
+    let mut plan = Plan {
+        amps: [0; MAX_STEPS],
+        count: 0,
+        seconds: 1,
+        adaptive: true,
+    };
+    let span = high - low;
+    let last = u32::try_from(MAX_STEPS - 1).unwrap_or(1);
+    for index in 0..=last {
+        let amps = low + span * index / last;
+        if plan.count > 0 && plan.step(plan.count - 1) == amps {
+            continue;
+        }
+        if let Some(slot) = plan.amps.get_mut(plan.count) {
+            *slot = amps;
+            plan.count += 1;
+        }
     }
     Ok(plan)
 }

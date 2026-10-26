@@ -23,13 +23,14 @@ fn parse(line: &[u8]) -> options::Options {
     options::parse(line, &WORDS)
 }
 use crate::plan::{self, MAX_STEPS, Plan, PlanError};
-use crate::policy::{Action, COOL_SECONDS, Policy, Why};
+use crate::policy::{ADAPT_NEAR, Action, COOL_SECONDS, Policy, Why};
 
 fn plan_of(amps: &[u32], seconds: u32) -> Plan {
     let mut plan = Plan {
         amps: [0; MAX_STEPS],
         count: 0,
         seconds,
+        adaptive: false,
     };
     for (slot, &value) in plan.amps.iter_mut().zip(amps) {
         *slot = value;
@@ -430,4 +431,80 @@ fn a_cool_spell_lifts_a_back_off_one_step_at_a_time() {
         policy.step(17 + 3 * COOL_SECONDS, &reading(78, 78)),
         Action::Hold
     );
+}
+
+#[test]
+fn an_auto_plan_spreads_its_range_over_the_steps() {
+    let plan = plan::parse(b"auto:30-44").expect("a range");
+    assert!(plan.adaptive);
+    assert_eq!(&plan.amps[..plan.count], &[30, 32, 34, 36, 38, 40, 42, 44]);
+    assert_eq!(plan::parse(b"auto"), plan::parse(b"auto:30-44"));
+    let narrow = plan::parse(b"auto:30-33").expect("a narrow range");
+    assert_eq!(&narrow.amps[..narrow.count], &[30, 31, 32, 33]);
+    assert_eq!(plan::parse(b"auto:44-30"), Err(PlanError::Descending));
+    assert_eq!(plan::parse(b"auto:0-30"), Err(PlanError::Malformed));
+    assert_eq!(plan::parse(b"auto30-44"), Err(PlanError::Malformed));
+}
+
+/// A package that settles at `30 + 1.4 C a ampere`, a tenth of the way
+/// there each second: 44 A is 91.6 C, past the kernel's backstop, and 34 A
+/// 77.6 C, as the N150 ran Endfield on 2026-10-25.
+fn settle(celsius: f64, amps: u32) -> f64 {
+    let settled = 30.0 + 1.4 * f64::from(amps);
+    celsius + (settled - celsius) / 10.0
+}
+
+#[test]
+fn an_auto_plan_finds_the_step_the_cooling_holds_and_never_reaches_the_limit() {
+    let plan = plan::parse(b"auto:30-44").expect("a range");
+    let mut policy = Policy::new(plan, 85);
+    let mut celsius = 60.0;
+    let mut amps = 25;
+    let mut hottest = 0.0f64;
+    for second in 0..3600 {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a model's degrees, read as the sensor reads them"
+        )]
+        let now = celsius as i64;
+        if let Action::Set { amps: set, .. } = policy.step(second, &reading(now, now)) {
+            amps = set;
+        }
+        celsius = settle(celsius, amps);
+        if second > 60 {
+            hottest = hottest.max(celsius);
+        }
+    }
+    assert!(hottest < 85.0, "reached {hottest} C");
+    // It climbs past firmware's 25 A to a step the cooling holds, and not
+    // to one it does not.
+    assert!((32..=38).contains(&amps), "settled at {amps} A");
+}
+
+#[test]
+fn an_auto_plan_steps_down_on_the_trend_before_the_limit() {
+    let plan = plan::parse(b"auto:30-44").expect("a range");
+    let mut policy = Policy::new(plan, 85);
+    let _ = policy.step(0, &reading(60, 60));
+    for at in 1..200 {
+        let _ = policy.step(at, &reading(60, 60));
+    }
+    let high = policy.current().expect("a step");
+    assert!(high > 0);
+    // Rising 1 C a second from 60 C: the trend steps down before the
+    // reading itself is within ADAPT_NEAR of the limit.
+    let mut first = None;
+    for (at, celsius) in (200..).zip(60..85) {
+        if let Action::Set {
+            why: Why::BackOff { celsius },
+            ..
+        } = policy.step(at, &reading(celsius, celsius))
+        {
+            first = Some(celsius);
+            break;
+        }
+    }
+    let first = first.expect("a back-off");
+    assert!(first < 85 - ADAPT_NEAR, "first back-off at {first} C");
+    assert_eq!(policy.current(), Some(high - 1));
 }

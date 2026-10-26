@@ -11,6 +11,12 @@
 //! the lowest step, gives up: firmware's value back, and nothing more is
 //! asked until the driver starts again.
 //!
+//! An adaptive plan (`auto:LO-HI`, [`Plan::adaptive`]) has no clock: it
+//! starts at its lowest step and moves by temperature, reading the hottest
+//! sensor's trend [`ADAPT_LOOKAHEAD_SECONDS`] ahead, so it finds the
+//! highest step the cooling holds without the soft limit being reached
+//! (`Policy::adapt`).
+//!
 //! When the kernel ends a claim on its lease and the driver claims again,
 //! firmware's value is back in force: [`Policy::restart`] climbs the plan
 //! again from its first step, one step a period as at the start, and keeps
@@ -28,6 +34,23 @@ pub const COOL_MARGIN: i64 = 5;
 pub const COOL_SECONDS: u64 = 30;
 /// Back-offs without a cool spell between that give up.
 pub const GIVE_UP_AFTER: u32 = 3;
+
+/// An adaptive plan's headroom: it climbs only while the hottest reading,
+/// now and as its trend says it will be, is this far below the soft limit.
+pub const ADAPT_HEADROOM: i64 = 6;
+/// Within this many degrees of the soft limit, now or as the trend says,
+/// an adaptive plan steps down one step.
+pub const ADAPT_NEAR: i64 = 3;
+/// How far ahead the trend is read, in seconds: about how long the
+/// package takes to answer a step.
+pub const ADAPT_LOOKAHEAD_SECONDS: i64 = 10;
+/// The least time between two climbs, in seconds.
+pub const ADAPT_CLIMB_SECONDS: u64 = 15;
+/// The least time between two steps down, in seconds.
+pub const ADAPT_DROP_SECONDS: u64 = 3;
+/// How long the step that got too hot stays the ceiling before the policy
+/// tries above it again, in seconds: the room warms, the load changes.
+pub const ADAPT_PROBE_SECONDS: u64 = 180;
 
 /// What to ask the kernel this second.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +103,22 @@ pub struct Policy {
     /// The second the plan's clock counts from: 0, or when the claim was
     /// last regained.
     origin: u64,
+    /// An adaptive plan's state.
+    adapt: Adapt,
+}
+
+/// What an adaptive plan keeps from one second to the next.
+#[derive(Clone, Copy, Debug)]
+struct Adapt {
+    /// The last second's hottest reading and when it was.
+    last: Option<(u64, i64)>,
+    /// The trend, in thousandths of a degree a second, smoothed.
+    slope: i64,
+    /// When the step last changed.
+    changed: Option<u64>,
+    /// The highest step allowed, and since when: the one below the step
+    /// that last got too hot.
+    ceiling: Option<(usize, u64)>,
 }
 
 impl Policy {
@@ -96,6 +135,12 @@ impl Policy {
             cool_since: None,
             done: false,
             origin: 0,
+            adapt: Adapt {
+                last: None,
+                slope: 0,
+                changed: None,
+                ceiling: None,
+            },
         }
     }
 
@@ -117,6 +162,9 @@ impl Policy {
     pub fn step(&mut self, elapsed: u64, reading: &Reading) -> Action {
         if self.done {
             return Action::Hold;
+        }
+        if self.plan.adaptive {
+            return self.adapt(elapsed, reading);
         }
         let hottest = reading.hottest();
         if let Some(celsius) = hottest.filter(|&celsius| celsius >= self.hot) {
@@ -170,6 +218,74 @@ impl Policy {
         Action::Set {
             amps: self.plan.step(target),
             why: Why::Plan,
+        }
+    }
+
+    /// An adaptive plan's second: from the lowest step, one step up at a
+    /// time while the hottest reading and its trend leave
+    /// [`ADAPT_HEADROOM`], one down as soon as either comes within
+    /// [`ADAPT_NEAR`] of the soft limit, two at or above it. The step that
+    /// got too hot caps the climb for [`ADAPT_PROBE_SECONDS`]; then one
+    /// more is tried. It never gives up: the lowest step is the floor, and
+    /// the kernel's backstop is still there above it.
+    fn adapt(&mut self, elapsed: u64, reading: &Reading) -> Action {
+        let Some(hottest) = reading.hottest() else {
+            return Action::Hold;
+        };
+        if let Some((then, was)) = self.adapt.last
+            && elapsed > then
+        {
+            let seconds = i64::try_from(elapsed - then).unwrap_or(i64::MAX);
+            let now = (hottest - was).saturating_mul(1000) / seconds;
+            self.adapt.slope = (self.adapt.slope * 2 + now) / 3;
+        }
+        self.adapt.last = Some((elapsed, hottest));
+        let ahead = hottest + self.adapt.slope * ADAPT_LOOKAHEAD_SECONDS / 1000;
+        let top = self.plan.count.saturating_sub(1);
+        let Some(current) = self.current else {
+            return self.adapt_to(0, elapsed, Why::Plan);
+        };
+        let since = |at: Option<u64>| at.map_or(u64::MAX, |at| elapsed.saturating_sub(at));
+        let quiet = since(self.adapt.changed);
+        if hottest >= self.hot {
+            if current == 0 || quiet < ADAPT_DROP_SECONDS {
+                return Action::Hold;
+            }
+            let lower = current.saturating_sub(2);
+            self.adapt.ceiling = Some((lower, elapsed));
+            return self.adapt_to(lower, elapsed, Why::BackOff { celsius: hottest });
+        }
+        if hottest.max(ahead) >= self.hot - ADAPT_NEAR {
+            if current == 0 || quiet < ADAPT_DROP_SECONDS {
+                return Action::Hold;
+            }
+            let lower = current - 1;
+            self.adapt.ceiling = Some((lower, elapsed));
+            return self.adapt_to(lower, elapsed, Why::BackOff { celsius: hottest });
+        }
+        let room = hottest.max(ahead) <= self.hot - ADAPT_HEADROOM;
+        if !room || current >= top || quiet < ADAPT_CLIMB_SECONDS {
+            return Action::Hold;
+        }
+        match self.adapt.ceiling {
+            Some((ceiling, set)) if current >= ceiling => {
+                if since(Some(set)) < ADAPT_PROBE_SECONDS {
+                    return Action::Hold;
+                }
+                self.adapt.ceiling = Some((current + 1, elapsed));
+            }
+            _ => {}
+        }
+        self.adapt_to(current + 1, elapsed, Why::Plan)
+    }
+
+    /// Step `index` from second `elapsed`, as an adaptive plan moves.
+    fn adapt_to(&mut self, index: usize, elapsed: u64, why: Why) -> Action {
+        self.current = Some(index);
+        self.adapt.changed = Some(elapsed);
+        Action::Set {
+            amps: self.plan.step(index),
+            why,
         }
     }
 

@@ -271,6 +271,15 @@ outside the item. It reads its words from `/proc/cmdline`:
 * `ferrix.power.vr=A1,...,An@S`: the plan, one to eight ascending steps of
   whole amperes; steps above the kernel's ceiling are dropped and said.
   Without it the driver writes nothing and only reports.
+* `ferrix.power.vr=auto:LO-HI` (`auto` alone is 30-44): the adaptive
+  plan. Eight steps spread evenly from LO to HI A and no clock: the driver
+  starts at LO and moves by temperature, reading the hottest sensor's trend
+  ten seconds ahead. It climbs one step at most every 15 s while both the
+  reading and the trend are 6 C under the soft limit, steps down one as soon
+  as either is within 3 C of it (two at or above it), and keeps the step
+  below the one that got too hot as its ceiling for three minutes before it
+  tries higher. It finds the highest current the cooling holds, and never
+  gives up: LO is its floor, the kernel's backstop still above it.
 * `ferrix.power.hot=C`: the soft limit, 50 to 99, 85 without it. At or
   above it on either sensor the driver steps down one step, at most once in
   5 s, and holds until the hottest reads 5 C below it for 30 s, each such
