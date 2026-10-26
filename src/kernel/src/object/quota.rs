@@ -80,6 +80,10 @@ pub enum Resource {
     /// `memory.stat`'s `kernel`. Charged only with memory, by
     /// [`charge_kernel`], and never limited on its own.
     Kernel,
+    /// The part of [`Resource::Memory`] that is its programs' page tables,
+    /// in bytes: `memory.stat`'s `pagetables`. Charged only with memory, by
+    /// [`charge_table`], and never limited on its own.
+    Tables,
 }
 
 impl Resource {
@@ -89,6 +93,7 @@ impl Resource {
         Resource::Objects,
         Resource::Tasks,
         Resource::Kernel,
+        Resource::Tables,
     ];
 
     /// Where the slot keeps it.
@@ -98,12 +103,13 @@ impl Resource {
             Resource::Objects => 1,
             Resource::Tasks => 2,
             Resource::Kernel => 3,
+            Resource::Tables => 4,
         }
     }
 }
 
 /// How many resources a slot counts.
-const RESOURCES: usize = 4;
+const RESOURCES: usize = 5;
 
 /// What a slot counts that no limit governs: events, for `memory.events` and
 /// `memory.stat`. Each is counted in the job it happened in and in every job
@@ -906,6 +912,37 @@ pub(crate) fn uncharge_frame(index: u32) {
     uncharge(index, Resource::Memory, FRAME_BYTES);
     release(index);
 }
+
+/// Charge one frame of a program's page table to `index`, which the frame
+/// then holds: memory, against the memory limit, and counted again as
+/// [`Resource::Tables`] so `memory.stat` can say how much of it is page
+/// tables. Nothing for [`NONE`].
+///
+/// # Errors
+///
+/// [`Exceeded`], with nothing charged anywhere.
+pub(crate) fn charge_table(index: u32) -> Result<(), Exceeded> {
+    if index == NONE {
+        return Ok(());
+    }
+    charge(index, Resource::Memory, FRAME_BYTES)?;
+    charge_regardless(index, Resource::Tables, FRAME_BYTES);
+    hold(index);
+    Ok(())
+}
+
+/// Take back a frame [`charge_table`] charged, as it is freed.
+pub(crate) fn uncharge_table(index: u32) {
+    if index == NONE {
+        return;
+    }
+    uncharge(index, Resource::Tables, FRAME_BYTES);
+    uncharge(index, Resource::Memory, FRAME_BYTES);
+    release(index);
+}
+
+/// The most slots there can be: every slot's index is below it.
+pub(crate) const SLOT_LIMIT: u64 = (CHUNK * CHUNKS) as u64;
 
 /// Charge `bytes` of kernel heap to `index` and every slot above it: memory,
 /// against the memory limit, and counted again as [`Resource::Kernel`] so

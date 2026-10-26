@@ -653,6 +653,8 @@ pub fn resource_number(resource: Resource) -> u64 {
         Resource::Objects => ferrix_audit::resource::OBJECTS,
         Resource::Tasks => ferrix_audit::resource::TASKS,
         Resource::Kernel => ferrix_audit::resource::KERNEL,
+        // Never limited on its own: a table's charge is refused as memory.
+        Resource::Tables => ferrix_audit::resource::MEMORY,
     }
 }
 

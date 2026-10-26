@@ -412,6 +412,12 @@ even for an instant, and a refused charge takes nothing.
   `deallocate_frames` take the charge back wherever the frame is freed, with
   no lookup and no lock -- the deferred page-table frees of F-36 included. A
   refusal is an allocation failure, which §1.2 made an answer everywhere.
+  Since 2026-10-26 (L.object.182) a program's page table is charged as
+  memory and again as `Resource::Tables`, and its frame record carries
+  `mm::TABLE_OWNER` beside the slot: its free takes back both, two walks of
+  the job chain where a page's free makes one, still with no lookup and no
+  lock, under whatever lock the freer holds, F-36's deferred frees
+  included.
 * **Kernel heap** the Linux personality and its libraries hold for a
   program is charged as memory too, against the same limit, as cgroup v2
   folds `kmem` into `memory.max` (F-37). A token from `src/lib/kernel/kmem` is made

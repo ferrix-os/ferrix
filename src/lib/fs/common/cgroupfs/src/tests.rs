@@ -614,8 +614,10 @@ fn the_controller_files_print_as_linux_prints_them() {
         rendered(|out| render::memory_stat(
             out,
             render::MemoryStat {
+                anon: 16384,
                 file: 4096,
                 kernel: 8192,
+                pagetables: 4096,
                 shmem: 12288,
                 pgscan: 5,
                 pgsteal: 4,
@@ -623,7 +625,7 @@ fn the_controller_files_print_as_linux_prints_them() {
                 pgmajfault: 7,
             }
         )),
-        b"file 4096\nkernel 8192\nshmem 12288\npgscan 5\npgsteal 4\npgfault 99\npgmajfault 7\n"
+        b"anon 16384\nfile 4096\nkernel 8192\npagetables 4096\nshmem 12288\npgscan 5\npgsteal 4\npgfault 99\npgmajfault 7\n"
     );
     assert_eq!(
         rendered(|out| render::memory_events(

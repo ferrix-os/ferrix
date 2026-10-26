@@ -105,6 +105,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | cpu.max.burst, stage 13's follow-on (docs/CGROUPS.md section 12, L.object.184; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of refresh_period, charge_bandwidth, runtime_left and throttled_until it changed. | Reached by stage 13's cpu check on every test-boot: object::quota::carry (no burst, a carry under the burst, a burst counted up to the runtime and an overshoot counted as none), carry_bound, carry_cap, allowance, set_burst_at, Quota::burst and set_burst, check_burst_carry and burst_cases, cgroupfs.rs's set_burst (a fitting and an unfitting burst, a parse refusal) and set_cpu_max's refusal of a quota under the burst, and cpu_check.rs's burst, burst_files and burst_carried. Not reached by any boot: carry_cap's clamp of a burst left over a quota it no longer fits, which only two racing writers make. |
 | cpu.idle, stage 13's follow-on (docs/CGROUPS.md section 12, L.object.185; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of Slot::entity_weight and Quota::set_weight it changed. | Reached by stage 13's cpu check on every test-boot: object::quota::Slot::entity_weight's idle arm, Slot::reweigh, set_idle_at, Quota::idle and set_idle, Job::cpu_idle and set_cpu_idle, check_idle_weight and idle_cases, cgroupfs.rs's set_idle (a change, the same value, a refusal), shown_weight and set_weight's refusal while idle, and cpu_check.rs's idle, idle_files and idle_weight. |
 | io.weight and io.latency, stage 13's follow-on (docs/CGROUPS.md section 13; load-ring code and ferrix-block, no requirement; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | the item's one line it touches: stages_check.rs's io line (its text changed from line 775 on; the anchor at 777 that coverage-x86_64.json reached was carried to its new place by carry-coverage, which dropped none). | stages_check.rs's io println, reached on every test-boot. The rest is load-ring code (fs/blkio.rs's queue, cgroupfs.rs's files, io_check.rs) and ferrix-block's Fair and weighted_cost, host-tested, which the item's coverage does not count. |
+| memory.stat's anon and pagetables, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.182; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of mm.rs's deallocate_frames, release_frame, disown_frame and ChargedTables::allocate_table it changed. | Reached by stage 13's reclaim check on every test-boot: object::quota::charge_table and uncharge_table, mm::uncharge_owner's table and page arms, ChargedTables::allocate_table's marked charge, and reclaim_check.rs's tables_and_pages and faults. Not reached by any boot: allocate_table's two refusal arms, which uncharge a table's charge. |
 
 ---
 
@@ -259,7 +260,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 872 |
+| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 903 |
 
 ---
 
