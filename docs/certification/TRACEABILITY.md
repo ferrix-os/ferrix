@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 147 | 94 | 53 |
-| Low (`L.*`) | 1096 | 831 | 265 |
+| Low (`L.*`) | 1097 | 832 | 265 |
 
-2424 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2425 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2426 |
+| Named by a low-level requirement | 2427 |
 | Accessors, covered by the requirement they serve | 1076 |
 | Check code in a product file | 87 |
-| Named by none | 937 |
+| Named by none | 936 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -525,6 +525,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.61` | Job::set_cpu_weight shall make the job's weight the value written. | cpu.weight written 300 through cgroupfs reads back 300 from the job. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::job::Job::set_cpu_weight`, `object::job::Job::cpu_weight` | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | reached | reached | reached |
 | `L.object.62` | Quota::set_weight shall clamp the weight to 1 to 10000, and change a busy job's contribution to its parent's load at once. | A weight of 0 is stored as 1 and one of 20000 as 10000; setting a busy job's weight changes its parent's load by the difference of the scaled weights. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::quota::Slot::reweigh` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
 | `L.object.185` | A job with cpu.idle set shall have the entity weight 3, Linux's WEIGHT_IDLEPRIO, whatever its cpu.weight, and its cpu.weight's again once let off; setting or clearing it shall change a busy job's contribution to its parent's load at once. | Two busy jobs of one task of weight 1024 each, beneath one parent, run at 512 each; with one at cpu.weight 10000 and then set idle, the parent's load is 1027 at once, the idle job's task runs at no more than 3 and its sibling's at more than 1000; let off, the parent's load and both tasks' weights are what they were at cpu.weight 10000 (the cpu line of stage 13, object::quota::check_idle_weight). | H.SCHED.3 | `object::quota::Slot::entity_weight`, `object::quota::Slot::reweigh`, `object::quota::set_idle_at`, `object::quota::Quota::set_idle`, `object::quota::Quota::idle`, `object::job::Job::set_cpu_idle`, `object::job::Job::cpu_idle` | `src/kernel/src/fs/cgroupfs/cpu_check.rs::idle_weight` | not reached | not built | not built |
+| `L.object.187` | job_set_limit shall refuse a JOB_CPU_WEIGHT within 1 to 10,000 with BAD_STATE while the job has cpu.idle set, leaving its weight as it was, and shall take it once the job is let off. | On a job at weight 250 set idle by Job::set_cpu_idle, job_set_limit of JOB_CPU_WEIGHT 400 answers BAD_STATE and job_get_quota reads 0, 250 and 0; let off, the same call answers 0 and job_get_quota reads 0, 400 and 0 (the native line's an_idle_job_refuses_a_weight). | H.SCHED.3 | `syscall::native::job_set_limit`, `object::job::Job::cpu_idle`, `object::job::Job::set_cpu_idle` | `src/kernel/src/syscall/native_check.rs::an_idle_job_refuses_a_weight` | not reached | not reached | not reached |
 | `L.object.160` | quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load. | ferrix-sched's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one. | H.SCHED.3 | `object::quota::effective` | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host test | host test | host test |
 | `L.object.161` | Every entity weight a job can be given, its cpu.weight clamped to 1 to 10000 and scaled to task units, shall be below 2^32, as every task's weight, a u32, is. | The kernel's build asserts that 10000 scaled to task units fits a u32; the quota check sets cpu.weight to 20000, reads 10000 back, and finds it scaled below 2^32. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::quota::Slot::entity_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
 
@@ -2398,6 +2399,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/syscall/native_check.rs::a_full_table_refuses_and_loses_nothing` | kernel | L.object.82, L.object.92, H.OBJ.7 |
 | `src/kernel/src/syscall/native_check.rs::a_log_reader_its_binding_does_not_allow_is_refused` | kernel | L.device.12 |
 | `src/kernel/src/syscall/native_check.rs::a_send_that_would_walk_too_far_is_refused` | kernel | L.object.26 |
+| `src/kernel/src/syscall/native_check.rs::an_idle_job_refuses_a_weight` | kernel | L.object.187 |
 | `src/kernel/src/syscall/native_check.rs::the_audit_record_is_read_by_its_handle_alone` | kernel | H.AUD.9 |
 | `src/kernel/src/syscall/seccomp_check.rs::run` | kernel | H.TRAP.16, L.trap.7, L.trap.8, L.x86_64.124, L.x86_64.125, L.aarch64.51, L.armv7a.1, L.armv7a.2 |
 | `src/kernel/src/syscall/sem_check.rs::per_job` | kernel | H.QUOTA.7 |

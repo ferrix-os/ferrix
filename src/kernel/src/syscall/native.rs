@@ -1807,7 +1807,8 @@ fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Resu
     Ok(0)
 }
 
-/// `job_get_quota`.
+/// `job_get_quota`. A job with `cpu.idle` set reads the weight it keeps for
+/// when it is let off, where its `cpu.weight` file reads 1.
 fn job_get_quota(process: &Process, job: Handle, resource: u64, out: u64) -> Result<usize, Errno> {
     let job = job_in(process, job, Rights::WAIT)?;
     let [used, limit, refused] = match limited(resource)? {

@@ -226,10 +226,10 @@ fn idle(harness: &mut Harness) -> Checked<()> {
 
 /// `cpu.idle` reads and writes as `cpu_idle_write_s64` and
 /// `sched_group_set_idle` have it, and `cpu.weight` beside it as
-/// `sched_group_set_shares` and `cpu_weight_read_u64` do. No requirement
-/// names this yet: its own id is to be reserved on `develop` first (the
-/// consultant's condition 3 for `cpu.idle`, 2026-10-26; the follow-ons
-/// page's row); the parse is host-tested in `ferrix-cgroupfs`.
+/// `sched_group_set_shares` and `cpu_weight_read_u64` do. Load-ring
+/// behaviour the item does not claim, so it verifies no requirement (the
+/// consultant's ruling, 2026-10-26, ledger line 10); the parse is host-tested
+/// in `ferrix-cgroupfs`, and the native refusal is L.object.187's.
 fn idle_files(harness: &mut Harness) -> Checked<()> {
     if !harness.reads(b"/check-c/cpu.idle", b"0\n") {
         return Err("a new cgroup's cpu.idle does not read 0");
@@ -273,9 +273,9 @@ fn idle_weight() -> Checked<()> {
 }
 
 /// `cpu.max.burst` reads and writes as `cpu_cfs_burst_write_u64` and
-/// `tg_set_cfs_bandwidth` have it. No requirement names this yet: its own id
-/// is to be reserved on `develop` first (the consultant's condition 5 for
-/// `cpu.max.burst`, 2026-10-26); the parse and the fit are host-tested in
+/// `tg_set_cfs_bandwidth` have it. Load-ring behaviour the item does not
+/// claim, so it verifies no requirement (the consultant's ruling,
+/// 2026-10-26, ledger line 10); the parse and the fit are host-tested in
 /// `ferrix-cgroupfs`.
 fn burst_files(harness: &mut Harness) -> Checked<()> {
     if !harness.reads(b"/check-c/cpu.max.burst", b"0\n") {

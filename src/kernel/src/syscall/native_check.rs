@@ -107,6 +107,7 @@ fn checks(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     a_table_that_cannot_grow_refuses_for_memory(report)?;
     a_bootstrap_without_transfer_is_refused(side, report)?;
     a_job_reads_back_its_limits(side, report)?;
+    an_idle_job_refuses_a_weight(side, report)?;
     a_bootstrap_without_memory_is_kept(report)?;
     a_delivery_without_memory_is_kept(side, report)?;
     a_write_without_memory_keeps_its_handles(side, report)?;
@@ -724,6 +725,43 @@ fn a_job_reads_back_its_limits(side: &Side, report: &mut Report) -> Result<(), &
             .call(nr::HANDLE_CLOSE, &[reg(handle)])
             .map_err(|_| "could not close a job handle")?;
     }
+    Ok(())
+}
+
+/// A job with `cpu.idle` set refuses a processor weight with `BAD_STATE` and
+/// keeps the one it had; let off, it takes one (`docs/CGROUPS.md` §12).
+///
+/// Verifies: L.object.187
+fn an_idle_job_refuses_a_weight(side: &Side, report: &mut Report) -> Result<(), &'static str> {
+    let made = Job::new_root().map_err(|_| "no memory for a job")?;
+    let idle = Arc::clone(&made);
+    let job = side
+        .process
+        .with_handles(|table| table.insert(Object::Job(made), Rights::JOB))
+        .map_err(|_| "no room for a job")?;
+    let _ = set_limit(side, job, JOB_CPU_WEIGHT, 250)
+        .map_err(|_| "job_set_limit refused a processor weight")?;
+    if !idle.set_cpu_idle(true) {
+        return Err("a job's cpu.idle could not be set");
+    }
+    refused(
+        set_limit(side, job, JOB_CPU_WEIGHT, 400),
+        status::BAD_STATE,
+        "an idle job took a processor weight",
+        report,
+    )?;
+    if quota(side, job, JOB_CPU_WEIGHT)? != [0, 250, 0] {
+        return Err("a weight refused to an idle job changed the one it had");
+    }
+    let _ = idle.set_cpu_idle(false);
+    let _ = set_limit(side, job, JOB_CPU_WEIGHT, 400)
+        .map_err(|_| "a job let off cpu.idle refused a processor weight")?;
+    if quota(side, job, JOB_CPU_WEIGHT)? != [0, 400, 0] {
+        return Err("a job let off cpu.idle did not take a processor weight");
+    }
+    let _ = side
+        .call(nr::HANDLE_CLOSE, &[reg(job)])
+        .map_err(|_| "could not close a job handle")?;
     Ok(())
 }
 
