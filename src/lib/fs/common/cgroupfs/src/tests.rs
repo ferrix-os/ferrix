@@ -528,14 +528,46 @@ fn cpu_stat_prints_the_keys_it_has_a_source_for() {
         periods: 7,
         throttled: 4,
         throttled_us: 900,
+        bursts: 2,
+        burst_us: 1500,
     };
     assert_eq!(
         text(|out| cpu::render_stat(out, stat, true)),
-        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\nnr_periods 7\nnr_throttled 4\nthrottled_usec 900\n"
+        b"usage_usec 3\nuser_usec 2\nsystem_usec 1\nnr_periods 7\nnr_throttled 4\nthrottled_usec 900\nnr_bursts 2\nburst_usec 1500\n"
     );
     assert_eq!(
         text(|out| cpu::render_stat(out, stat, false)),
         b"usage_usec 3\nuser_usec 2\nsystem_usec 1\n"
+    );
+}
+
+#[test]
+fn cpu_max_burst_is_read_as_cpu_cfs_burst_write_u64_reads_it() {
+    use crate::cpu;
+    assert_eq!(cpu::parse_burst(b"20000\n"), Ok(20_000));
+    assert_eq!(cpu::parse_burst(b"0"), Ok(0));
+    assert_eq!(cpu::parse_burst(b"0x10"), Ok(16));
+    assert_eq!(cpu::parse_burst(b"max"), Err(Refusal::Invalid));
+    assert_eq!(cpu::parse_burst(b"-1"), Err(Refusal::Invalid));
+    // Past `max_cfs_runtime` is taken, as under `max` Linux takes it; past
+    // what microseconds to nanoseconds can hold is not.
+    assert_eq!(cpu::parse_burst(b"17592186044416"), Ok(1 << 44));
+    assert!(!cpu::burst_fits(Some(1000), 1 << 44));
+    assert_eq!(
+        cpu::parse_burst(b"18446744073709551615"),
+        Err(Refusal::Invalid)
+    );
+    // `tg_set_cfs_bandwidth`: no more than the quota, any with none.
+    assert!(cpu::burst_fits(Some(50_000), 50_000));
+    assert!(!cpu::burst_fits(Some(50_000), 50_001));
+    assert!(cpu::burst_fits(None, 1_000_000));
+    assert!(!cpu::burst_fits(Some((1 << 44) - 1), (1 << 44) - 1));
+    let all = controllers::ALL
+        .iter()
+        .fold(Set::EMPTY, |set, c| set.with(*c));
+    assert_eq!(
+        files::named(b"cpu.max.burst", false, all).map(|file| (file.kind, file.mode())),
+        Some((Kind::CpuMaxBurst, 0o644))
     );
 }
 

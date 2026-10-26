@@ -127,6 +127,12 @@ pub enum Counter {
     Throttled,
     /// Nanoseconds it spent throttled (`throttled_usec`). Its own.
     ThrottledNs,
+    /// Periods in which it used more than its `cpu.max` quota, out of what
+    /// `cpu.max.burst` carried (`nr_bursts`). Its own.
+    Bursts,
+    /// Nanoseconds it used beyond its quota in those periods, up to what was
+    /// carried (`burst_usec`). Its own.
+    BurstNs,
 }
 
 impl Counter {
@@ -141,12 +147,14 @@ impl Counter {
             Counter::Periods => 5,
             Counter::Throttled => 6,
             Counter::ThrottledNs => 7,
+            Counter::Bursts => 8,
+            Counter::BurstNs => 9,
         }
     }
 }
 
 /// How many counters a slot has.
-const COUNTERS: usize = 8;
+const COUNTERS: usize = 10;
 
 /// `cpu.max`'s default period, 100 ms, in nanoseconds.
 pub(crate) const DEFAULT_PERIOD_NS: u64 = 100_000_000;
@@ -232,6 +240,12 @@ struct Slot {
     bw_end: AtomicU64,
     /// When it ran out of this period's quota, or zero if it has not.
     bw_throttled_at: AtomicU64,
+    /// `cpu.max.burst`: how much unused quota a period may carry to the
+    /// next, in nanoseconds; zero for none.
+    bw_burst: AtomicU64,
+    /// What the last period carried into this one, beyond the quota: this
+    /// period's runtime is the quota and this.
+    bw_extra: AtomicU64,
     /// `cpu.weight`.
     weight: AtomicU32,
     /// The weight of its runnable tasks and busy children, in task units.
@@ -267,6 +281,8 @@ impl Slot {
             bw_used: AtomicU64::new(0),
             bw_end: AtomicU64::new(0),
             bw_throttled_at: AtomicU64::new(0),
+            bw_burst: AtomicU64::new(0),
+            bw_extra: AtomicU64::new(0),
             weight: AtomicU32::new(DEFAULT_WEIGHT),
             load: AtomicI64::new(0),
             contributed: AtomicI64::new(0),
@@ -366,6 +382,8 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
     taken.bw_used.store(0, Ordering::Relaxed);
     taken.bw_end.store(0, Ordering::Relaxed);
     taken.bw_throttled_at.store(0, Ordering::Relaxed);
+    taken.bw_burst.store(0, Ordering::Relaxed);
+    taken.bw_extra.store(0, Ordering::Relaxed);
     taken.weight.store(DEFAULT_WEIGHT, Ordering::Relaxed);
     taken.load.store(0, Ordering::Relaxed);
     taken.job.store(0, Ordering::Relaxed);
@@ -564,7 +582,10 @@ fn refresh_period(slot: &Slot, now: u64) {
     {
         return;
     }
-    let _ = slot.bw_used.swap(0, Ordering::AcqRel);
+    let quota = slot.bw_quota.load(Ordering::Acquire);
+    let ended = carry_bound(slot, quota);
+    let used = slot.bw_used.swap(0, Ordering::AcqRel);
+    carry(slot, used, ended);
     let throttled_at = slot.bw_throttled_at.swap(0, Ordering::AcqRel);
     // Counted as it starts, as Linux's period timer does, so that
     // `nr_periods` is never behind `nr_throttled`.
@@ -572,6 +593,69 @@ fn refresh_period(slot: &Slot, now: u64) {
     if throttled_at != 0 {
         bump(slot, Counter::ThrottledNs, end.saturating_sub(throttled_at));
     }
+}
+
+/// Set slot `index`'s `cpu.max.burst` and drop what was carried, as Linux's
+/// `tg_set_cfs_bandwidth` starts the runtime again at the quota.
+fn set_burst_at(index: u32, burst: u64) {
+    if let Some(slot) = slot(index) {
+        slot.bw_burst.store(burst, Ordering::Release);
+        slot.bw_extra.store(0, Ordering::Release);
+    }
+}
+
+/// The most a carry may grant under `cpu.max.burst`: the burst, but never
+/// more than the quota, so that a burst left over a quota it no longer fits
+/// (two writers of `cpu.max` and `cpu.max.burst` racing past each other's
+/// check) grants no more than a burst that fits could.
+fn carry_cap(slot: &Slot, quota: u64) -> u64 {
+    let burst = slot.bw_burst.load(Ordering::Acquire);
+    if quota == UNLIMITED { 0 } else { burst.min(quota) }
+}
+
+/// Before a new period's use is cleared: the most it can be carried, so that
+/// until [`carry`] stores what it is, a charger compares the new period's
+/// use with a runtime no smaller than its own. The window between the two
+/// stores may let one charge through that should have been throttled, as
+/// the last charge of any period overshoots; it never throttles one that
+/// should not be. Answers the runtime the period that ended had.
+fn carry_bound(slot: &Slot, quota: u64) -> u64 {
+    let ended = allowance(slot, quota);
+    let bound = ended.min(carry_cap(slot, quota));
+    slot.bw_extra.store(bound, Ordering::Release);
+    ended
+}
+
+/// What a period that used `used` of its runtime `ended` carries into the
+/// next under `cpu.max.burst`, as Linux's `__refill_cfs_bandwidth_runtime`
+/// refills: the runtime it left unused, up to the burst (and the quota,
+/// [`carry_cap`]), the next period's runtime being the quota and that. A
+/// period that used more than its quota under a burst used one, counted in
+/// `nr_bursts` and `burst_usec` up to its runtime only: what the last charge
+/// overshot by was no burst's, as Linux's pool never goes below zero. However
+/// many periods passed with nothing running, one refill is made, as Linux
+/// makes one when its period timer starts again. By the one caller that
+/// starts the period, after [`carry_bound`].
+fn carry(slot: &Slot, used: u64, ended: u64) {
+    let quota = slot.bw_quota.load(Ordering::Acquire);
+    let cap = carry_cap(slot, quota);
+    if cap == 0 {
+        slot.bw_extra.store(0, Ordering::Release);
+        return;
+    }
+    let beyond = used.min(ended).saturating_sub(quota);
+    if beyond > 0 {
+        bump(slot, Counter::Bursts, 1);
+        bump(slot, Counter::BurstNs, beyond);
+    }
+    slot.bw_extra
+        .store(ended.saturating_sub(used).min(cap), Ordering::Release);
+}
+
+/// A slot's runtime in this period under a `cpu.max` quota of `quota`: the
+/// quota, and what `cpu.max.burst` carried from the last period.
+fn allowance(slot: &Slot, quota: u64) -> u64 {
+    quota.saturating_add(slot.bw_extra.load(Ordering::Acquire))
 }
 
 /// Count `amount` of `counter` in `slot` alone.
@@ -613,7 +697,7 @@ fn charge_bandwidth(index: u32, now: u64, delta: u64) {
                 .bw_used
                 .fetch_add(delta, Ordering::AcqRel)
                 .saturating_add(delta);
-            if used >= quota
+            if used >= allowance(slot, quota)
                 && slot
                     .bw_throttled_at
                     .compare_exchange(0, now.max(1), Ordering::AcqRel, Ordering::Acquire)
@@ -638,7 +722,8 @@ pub(crate) fn runtime_left(index: u32, now: u64) -> Option<u64> {
         let quota = slot.bw_quota.load(Ordering::Acquire);
         if quota != UNLIMITED {
             refresh_period(slot, now);
-            let remaining = quota.saturating_sub(slot.bw_used.load(Ordering::Acquire));
+            let remaining =
+                allowance(slot, quota).saturating_sub(slot.bw_used.load(Ordering::Acquire));
             left = Some(left.map_or(remaining, |least| least.min(remaining)));
         }
         at = slot.parent.load(Ordering::Acquire);
@@ -653,9 +738,10 @@ pub(crate) fn throttled_until(index: u32, now: u64) -> Option<u64> {
     let mut until = None;
     let mut at = index;
     while let Some(slot) = slot(at) {
-        if slot.bw_quota.load(Ordering::Acquire) != UNLIMITED {
+        let quota = slot.bw_quota.load(Ordering::Acquire);
+        if quota != UNLIMITED {
             refresh_period(slot, now);
-            if slot.bw_used.load(Ordering::Acquire) >= slot.bw_quota.load(Ordering::Acquire) {
+            if slot.bw_used.load(Ordering::Acquire) >= allowance(slot, quota) {
                 let end = slot.bw_end.load(Ordering::Acquire);
                 until = until.max(Some(end));
             }
@@ -1026,6 +1112,7 @@ impl Quota {
         slot.bw_used.store(0, Ordering::Release);
         slot.bw_end.store(0, Ordering::Release);
         slot.bw_throttled_at.store(0, Ordering::Release);
+        slot.bw_extra.store(0, Ordering::Release);
         slot.bw_quota.store(quota, Ordering::Release);
         match (before == UNLIMITED, quota == UNLIMITED) {
             (true, false) => {
@@ -1036,6 +1123,17 @@ impl Quota {
             }
             _ => {}
         }
+    }
+
+    /// Its `cpu.max.burst`, in nanoseconds.
+    pub(crate) fn burst(&self) -> u64 {
+        slot(self.index).map_or(0, |slot| slot.bw_burst.load(Ordering::Acquire))
+    }
+
+    /// Set its `cpu.max.burst`. What was carried is dropped, as Linux's
+    /// `tg_set_cfs_bandwidth` starts the runtime again at the quota.
+    pub(crate) fn set_burst(&self, burst: u64) {
+        set_burst_at(self.index, burst);
     }
 
     /// Nanoseconds its tasks used the processor in user mode and in kernel
@@ -1377,6 +1475,95 @@ fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
     if (holds(child), holds(parent)) != (child_holds, parent_holds) {
         return Err("a flush did not let go of the slot the pending charge held");
     }
+    Ok(())
+}
+
+/// Stage 13's check of `cpu.max.burst`'s carry, on a slot claimed for it
+/// and charged at instants chosen from `now` on, so that what each period
+/// leaves is known exactly. Under a quota of 20 ms a 100 ms period and a
+/// burst of 20 ms: a period that used 5 ms leaves the next 35 ms, in which
+/// 30 ms of use is not throttled and 36 ms is, counted as one burst of 15 ms
+/// (what the period had beyond its quota, not the last charge's overshoot);
+/// the next period has its quota alone, and 21 ms of use there counts no
+/// burst; and with the burst at 0, a period that used 5 ms carries
+/// nothing.
+///
+/// # Errors
+///
+/// The first thing that was not so, by name.
+pub fn check_burst_carry(now: u64) -> Result<(), &'static str> {
+    let index = claim(NONE).map_err(|_| "burst check: no slot to claim")?;
+    let outcome = burst_cases(index, now);
+    release(index);
+    outcome
+}
+
+/// The cases of [`check_burst_carry`].
+fn burst_cases(index: u32, start: u64) -> Result<(), &'static str> {
+    const MS: u64 = 1_000_000;
+    let held = slot(index).ok_or("burst check: a claimed slot is not there")?;
+    let period = 100 * MS;
+    held.bw_period.store(period, Ordering::Release);
+    held.bw_quota.store(20 * MS, Ordering::Release);
+    set_burst_at(index, 20 * MS);
+    let counted = |counter: Counter| {
+        held.counters
+            .get(counter.at())
+            .map_or(u64::MAX, |value| value.load(Ordering::Acquire))
+    };
+
+    charge_bandwidth(index, start, 5 * MS);
+    if runtime_left(index, start + 1) != Some(15 * MS) {
+        return Err("a period under cpu.max did not leave its quota less what it used");
+    }
+    let next = start + period;
+    if runtime_left(index, next) != Some(35 * MS) {
+        return Err("cpu.max.burst did not carry a period's unused quota into the next");
+    }
+    // Written again, the burst drops what was carried; then the period is
+    // started over with its carry, as before.
+    set_burst_at(index, 20 * MS);
+    if runtime_left(index, next) != Some(20 * MS) {
+        return Err("a cpu.max.burst written again kept what was carried");
+    }
+    held.bw_extra.store(15 * MS, Ordering::Release);
+    charge_bandwidth(index, next + 1, 30 * MS);
+    if counted(Counter::Throttled) != 0 {
+        return Err("a charge within what cpu.max.burst carried throttled its period");
+    }
+    if throttled_until(index, next + 2).is_some() {
+        return Err("a period running on what cpu.max.burst carried was throttled at its quota");
+    }
+    charge_bandwidth(index, next + 3, 6 * MS);
+    if throttled_until(index, next + 4) != Some(next + period) || counted(Counter::Throttled) != 1
+    {
+        return Err("a period past its quota and its carried burst was not throttled");
+    }
+    let after = next + period;
+    if runtime_left(index, after) != Some(20 * MS) {
+        return Err("a period that used its burst carried something into the next");
+    }
+    if (counted(Counter::Bursts), counted(Counter::BurstNs)) != (1, 15 * MS) {
+        return Err(
+            "cpu.stat's nr_bursts and burst_usec did not count the burst a period used, up to \
+             what was carried",
+        );
+    }
+    // Nothing was carried into this period: 21 ms overshoots its quota by
+    // the last charge, and that is no burst.
+    charge_bandwidth(index, after + 1, 21 * MS);
+    if runtime_left(index, after + period) != Some(20 * MS)
+        || (counted(Counter::Bursts), counted(Counter::BurstNs)) != (1, 15 * MS)
+    {
+        return Err("a period that overshot its quota with nothing carried counted a burst");
+    }
+    let after = after + period;
+    set_burst_at(index, 0);
+    charge_bandwidth(index, after + 1, 5 * MS);
+    if runtime_left(index, after + period) != Some(20 * MS) {
+        return Err("a period with cpu.max.burst 0 carried unused quota into the next");
+    }
+    held.bw_quota.store(UNLIMITED, Ordering::Release);
     Ok(())
 }
 

@@ -1481,8 +1481,8 @@ package FerrixObjectRequirements {
                 their cpu.stat by the time cpu.stat is read, as user time when the
                 tick that ended the slice interrupted user mode and as system time
                 otherwise, and throttled_until shall report a job whose subtree has
-                used its cpu.max quota this period as throttled until the period
-                ends.";
+                used its cpu.max quota and what cpu.max.burst carried into this
+                period (L.object.184), as throttled until the period ends.";
             attribute :>> criterion = "A program of two counting threads in a job
                 with cpu.max 20000 100000 is held to between a twelfth and two
                 thirds of a processor, its cpu.stat counts at least 3 throttled
@@ -1493,6 +1493,37 @@ package FerrixObjectRequirements {
                 "object::quota::throttled_until", "object::quota::refresh_period",
                 "object::quota::runtime_left", "object::quota::Quota::set_bandwidth",
                 "object::quota::charge_bandwidth");
+        }
+        // cpu.max.burst (docs/CGROUPS.md section 12): the first of the
+        // follow-ons L.object.184-187 were reserved for; 185-187 (cpu.idle and
+        // io.weight) stay reserved.
+        requirement <'L.object.184'> burstCarriesUnusedQuota : ItemLowLevel {
+            attribute :>> statement = "When a period under a cpu.max quota ends,
+                refresh_period shall carry into the next the runtime the period
+                left unused, its quota and what it carried less what it used, up
+                to the lesser of the job's cpu.max.burst and its quota, and
+                nothing with no burst, first storing the most that can be
+                carried so that a charger in between is never throttled short
+                of its runtime; a job's runtime in a period shall be its quota
+                and what was carried, for charge_bandwidth, throttled_until and
+                runtime_left; and a period that used more than its quota under
+                a burst shall count one in nr_bursts and in burst_usec what it
+                used beyond the quota, up to its runtime. set_burst shall store
+                the job's burst and drop what was carried.";
+            attribute :>> criterion = "On a slot under a quota of 20 ms a 100
+                ms period with a burst of 20 ms, charged at chosen instants: a
+                period that used 5 ms leaves the next 35 ms (20 ms once the
+                burst is written again, the carry then put back); 30 ms of use
+                there
+                neither throttles nor counts a throttle, and 36 ms throttles
+                until that period's end; the period after has 20 ms, with one
+                burst of 15 ms counted, and 21 ms of use there counts no burst;
+                and with the burst at 0 a period that used 5 ms carries nothing
+                (the cpu line of stage 13, object::quota::check_burst_carry).";
+            attribute :>> parent = "H.QUOTA.10";
+            attribute :>> unit = ("object::quota::carry", "object::quota::carry_bound",
+                "object::quota::carry_cap", "object::quota::allowance",
+                "object::quota::Quota::set_burst", "object::quota::set_burst_at");
         }
         requirement <'L.object.107'> aFrozenProcessParks : ItemLowLevel {
             attribute :>> statement = "sync_freeze shall set a process frozen when

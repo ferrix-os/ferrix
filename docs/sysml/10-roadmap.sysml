@@ -493,7 +493,7 @@ package FerrixRoadmap {
              * src/lib/, and Syscall User Dispatch. The customer set this
              * scope on 2026-10-21 to what main holds; time namespaces,
              * unprivileged mounting, io.weight, io.latency,
-             * cpu.max.burst, cpu.idle, the dentry and inode caches' reclaim
+             * cpu.idle, the dentry and inode caches' reclaim
              * and Linux's seccomp_bpf selftest are follow-ons, not built
              * (docs/roadmap/follow-ons.md). Exit: an unprivileged user namespace runs
              * pid 1 under a memory limit that triggers scoped reclaim and a
@@ -544,8 +544,9 @@ package FerrixRoadmap {
              * 2026-10-14: it passed on all three architectures, so the exit is
              * met. A writable mount's clean pages are reclaimed since
              * 2026-10-15 (L.object.188-190). The stage is done on that scope;
-             * L.object.182 and 184-187 stay reserved for the follow-ons;
-             * memory.reclaim was built on 2026-10-26 (L.object.183). */
+             * L.object.182 and 185-187 stay reserved for the follow-ons;
+             * memory.reclaim and cpu.max.burst were built on 2026-10-26
+             * (L.object.183 and 184). */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {
