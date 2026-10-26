@@ -959,8 +959,8 @@ package FerrixObjectRequirements {
                 "object::quota::Slot::reweigh");
         }
         // cpu.idle (docs/CGROUPS.md section 12): of the follow-ons
-        // L.object.184-187 were reserved for; 186-187 (io.weight) stay
-        // reserved.
+        // L.object.184-187 were reserved for; 186-187 were released unused,
+        // since io.weight is the load ring's (fs::blkio) and claims nothing.
         requirement <'L.object.185'> anIdleJobHasTheIdleWeight : ItemLowLevel {
             attribute :>> statement = "A job with cpu.idle set shall have the
                 entity weight 3, Linux's WEIGHT_IDLEPRIO, whatever its

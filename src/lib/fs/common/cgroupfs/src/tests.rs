@@ -698,6 +698,69 @@ fn io_max_is_read_as_tg_set_limit_reads_it() {
 }
 
 #[test]
+fn io_weight_is_read_as_ioc_weight_write_reads_it() {
+    use crate::io::{self, WeightWrite};
+    assert_eq!(io::parse_weight(b"250\n"), Ok(WeightWrite::Default(250)));
+    assert_eq!(
+        io::parse_weight(b"default 300\n"),
+        Ok(WeightWrite::Default(300))
+    );
+    assert_eq!(
+        io::parse_weight(b"8:0 400\n"),
+        Ok(WeightWrite::Device((8, 0), Some(400)))
+    );
+    assert_eq!(
+        io::parse_weight(b"8:0 default\n"),
+        Ok(WeightWrite::Device((8, 0), None))
+    );
+    for bad in [
+        &b"0"[..],
+        b"10001",
+        b"lots",
+        b"8:0 0",
+        b"8:0 lots",
+        b"8:x 5",
+    ] {
+        assert_eq!(io::parse_weight(bad), Err(Refusal::Invalid), "{bad:?}");
+    }
+    let mut out = Vec::new();
+    io::render_weight(&mut out, 100, &[((8, 0), 400), ((251, 1), 50)]);
+    assert_eq!(out, b"default 100\n8:0 400\n251:1 50\n");
+}
+
+#[test]
+fn io_latency_is_read_as_iolatency_set_limit_reads_it() {
+    use crate::io;
+    assert_eq!(io::parse_latency(b"target=2000\n", None), Ok(Some(2000)));
+    assert_eq!(io::parse_latency(b"target=max", Some(5)), Ok(None));
+    assert_eq!(io::parse_latency(b"target=0", Some(5)), Ok(None));
+    assert_eq!(io::parse_latency(b"", Some(5)), Ok(Some(5)));
+    for bad in [&b"lots=1"[..], b"target=", b"target=1x", b"target"] {
+        assert_eq!(
+            io::parse_latency(bad, None),
+            Err(Refusal::Invalid),
+            "{bad:?}"
+        );
+    }
+    let mut out = Vec::new();
+    io::render_latency(&mut out, (8, 0), Some(2000));
+    io::render_latency(&mut out, (8, 1), None);
+    assert_eq!(out, b"8:0 target=2000\n");
+    let io_on = Set::EMPTY.with(Controller::Io);
+    for (name, kind) in [
+        ("io.weight", Kind::IoWeight),
+        ("io.latency", Kind::IoLatency),
+    ] {
+        assert_eq!(
+            files::named(name.as_bytes(), false, io_on).map(|file| (file.kind, file.mode())),
+            Some((kind, 0o644)),
+            "{name}"
+        );
+        assert_eq!(files::named(name.as_bytes(), true, io_on), None, "{name}");
+    }
+}
+
+#[test]
 fn io_files_print_as_linux_prints_them() {
     use crate::io::{self, Limits, Stat};
     assert_eq!(text(|out| io::render_max(out, (8, 0), Limits::NONE)), b"");

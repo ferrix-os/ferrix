@@ -827,10 +827,48 @@ are one table keyed by its quota slot and dropped as the job goes
 block core's queue (`ferrix_block::Queue`) is not where this sits: a throttled
 request has not been queued, so no barrier can wait for it.
 
-`io.weight` and `io.latency` are not built: a weight needs a scheduler with
-more than one request in flight to divide, and both would accept a value and do
-nothing. With `io` built, `cgroup.controllers` at the root lists
-`cpu io memory pids`, and the no-internal-process rule reaches `io`.
+With `io` built, `cgroup.controllers` at the root lists `cpu io memory pids`,
+and the no-internal-process rule reaches `io`.
+
+**`io.weight` and `io.latency` (2026-10-26).** While any cgroup has a weight
+other than the default or a latency target, each disk serves one request at a
+time from a fair queue (`ferrix_block::Fair`, host-tested): start-time fair
+queueing in 128-bit virtual time, a request's cost its bytes times, at each
+level from its job up, 100 over that job's weight, rounded up at each level and
+at most 2^40 (`ferrix_block::weighted_cost`; a deep or light job never gains by
+its depth). The flag is the machine's, so one cgroup's write queues every disk
+(`docs/backlog/stage13.md`; VULNERABILITY-ANALYSIS.md, T.EXHAUST 6). The
+product is not Linux's per-level `blk-iocost` tree: siblings share by their weights and a
+parent scales all its children alike, but jobs busy alone in different
+subtrees share as their weights' products. A task waits for its own request,
+so a group often has one at a time, and the disk would alternate between
+groups whatever their weights; as BFQ idles, the disk is held for up to 2 ms
+for the group just served when its next request would win anyway (the host
+test shows 500:500 without the hold and 200:800 with it at 100 and 400). A
+request of a cgroup missing its `io.latency` target (a moving average, an
+eighth a request, of queue-to-completion time), or under one, goes before any
+that is not, but never more than seven in a row while another waits, as
+Linux's `blk-iolatency` cuts a sibling to one request in flight and not to
+none. With nothing set, requests go to the disk as before, with no queue.
+
+The files are Linux's: `io.weight` reads `default N` and a line a disk with
+its own weight, takes `N`, `default N`, `MAJ:MIN N` and `MAJ:MIN default`
+(`ioc_weight_write`; `EINVAL` outside 1 to 10,000, `ENODEV` for a disk that is
+not there); `io.latency` takes `MAJ:MIN target=<us>` or `target=max`
+(`iolatency_set_limit`). Neither is on the root. The `io` line of stage 13
+checks the files and, on a disk of 2 ms a read, two kernel tasks: at weights
+100 and 400 they read about 1:4 (48 and 188 on AArch64), and one missing a
+1 ms target reads about eight times what its neighbour does (210 and 27),
+which still reads. Negative controls, run with `test-boot` on AArch64 and
+owed through `gate.sh control`: the weights ignored ("a cgroup at io.weight
+400 did not read twice what one at 100 did beside it"), the hold dropped (the
+same message), the urgency dropped ("a cgroup missing its io.latency target was
+not served before one beside it") and the run's cap removed ("a cgroup beside
+one missing its io.latency target was starved"). With its cgroups gone the
+check requires that no disk keeps its queue. It is all load-ring and library
+code, and names no requirement: the item's L.object.186-187, reserved for it,
+were released unused (the consultant's review found no high-level requirement
+for disk shares, and the cost's arithmetic belongs beside the queue).
 
 ## 14. Where the controllers stand (2026-10-01)
 

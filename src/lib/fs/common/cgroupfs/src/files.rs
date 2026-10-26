@@ -88,6 +88,10 @@ pub enum Kind {
     IoStat,
     /// `io.max`.
     IoMax,
+    /// `io.weight`: the cgroup's share of a disk it contends for.
+    IoWeight,
+    /// `io.latency`: a disk's latency target, served first when missed.
+    IoLatency,
     /// `pids.current`.
     PidsCurrent,
     /// `pids.max`.
@@ -145,6 +149,8 @@ pub const FILES: &[File] = &[
     ),
     on_root_too("io.stat", Kind::IoStat, Controller::Io, false),
     controlled("io.max", Kind::IoMax, Controller::Io, true),
+    controlled("io.weight", Kind::IoWeight, Controller::Io, true),
+    controlled("io.latency", Kind::IoLatency, Controller::Io, true),
     controlled("pids.current", Kind::PidsCurrent, Controller::Pids, false),
     controlled("pids.max", Kind::PidsMax, Controller::Pids, true),
     controlled("pids.events", Kind::PidsEvents, Controller::Pids, false),

@@ -564,6 +564,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet, and the lines of Slot::entity_weight and Quota::set_weight it changed.",
       "what": "Reached by stage 13's cpu check on every test-boot: object::quota::Slot::entity_weight's idle arm, Slot::reweigh, set_idle_at, Quota::idle and set_idle, Job::cpu_idle and set_cpu_idle, check_idle_weight and idle_cases, cgroupfs.rs's set_idle (a change, the same value, a refusal), shown_weight and set_weight's refusal while idle, and cpu_check.rs's idle, idle_files and idle_weight."
+    },
+    {
+      "landing": "io.weight and io.latency, stage 13's follow-on (docs/CGROUPS.md section 13; load-ring code and ferrix-block, no requirement; the consultant's review recorded in the landing's commit)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "the item's one line it touches: stages_check.rs's io line (its text changed from line 775 on; the anchor at 777 that coverage-x86_64.json reached was carried to its new place by carry-coverage, which dropped none).",
+      "what": "stages_check.rs's io println, reached on every test-boot. The rest is load-ring code (fs/blkio.rs's queue, cgroupfs.rs's files, io_check.rs) and ferrix-block's Fair and weighted_cost, host-tested, which the item's coverage does not count."
     }
   ]
 }
