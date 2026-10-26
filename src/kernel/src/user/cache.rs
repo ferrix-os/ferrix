@@ -350,10 +350,14 @@ fn take_from(
     (done, Some(from))
 }
 
-/// Pages one round of [`reclaim_asked`] asks for, Linux's `SWAP_CLUSTER_MAX`.
+/// The most pages one round of [`reclaim_asked`] asks for. Linux's 32,
+/// `SWAP_CLUSTER_MAX`, is the least a round of its `memory_reclaim` asks;
+/// here it is the most, so that each round is one bounded [`reclaim`]
+/// (`docs/certification/MEMORY-AND-TIMING.md`).
 const ASKED_BATCH: u64 = 32;
-/// Rounds of [`reclaim_asked`] in a row that may give back nothing, Linux's
-/// `MAX_RECLAIM_RETRIES`.
+/// Rounds of [`reclaim_asked`] that may give back nothing, in all, before it
+/// is [`Asked::Short`]: Linux's `MAX_RECLAIM_RETRIES`, which its
+/// `memory_reclaim` counts down and never resets.
 const ASKED_RETRIES: u32 = 16;
 
 /// How a [`reclaim_asked`] ended.
@@ -361,8 +365,8 @@ const ASKED_RETRIES: u32 = 16;
 pub enum Asked {
     /// It gave back at least what it was asked for.
     Given,
-    /// [`ASKED_RETRIES`] rounds in a row past the first gave back nothing,
-    /// short of what it was asked for: `EAGAIN` to a `memory.reclaim` write.
+    /// More than [`ASKED_RETRIES`] rounds, in all, gave back nothing, short of
+    /// what it was asked for: `EAGAIN` to a `memory.reclaim` write.
     Short,
     /// `interrupted` said so between rounds: `EINTR`.
     Interrupted,
@@ -371,7 +375,7 @@ pub enum Asked {
 /// Give back `want` pages charged to slot `scope` or beneath it, because
 /// someone asked (`memory.reclaim`, Linux's `memory_reclaim`): rounds of
 /// [`reclaim`] of at most [`ASKED_BATCH`] pages, until they have given
-/// `want`, or more than [`ASKED_RETRIES`] rounds in a row gave back
+/// `want`, or more than [`ASKED_RETRIES`] rounds in all gave back
 /// nothing, or `interrupted` answers yes before a round. What was given back
 /// before it stopped stays given. A scope of [`quota::NONE`] holds nothing
 /// that may be asked for: it would be the whole machine, sparing nobody's

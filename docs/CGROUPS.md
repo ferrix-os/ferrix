@@ -649,15 +649,18 @@ out of every mapping, a shootdown, then the frame and its charge).
 * **`memory.reclaim` (2026-10-26, L.object.183).** A write of a size, read
   as `memory.max` reads one but with no `max`, gives back that many bytes of
   the cgroup's clean cache, in whole pages: rounds of the same reclaim of at
-  most 32 pages (`user::cache::reclaim_asked`), so it is scoped and spares
-  `memory.min` as the mark's does. More than 16 rounds in a row that give
-  back nothing are `EAGAIN`, a signal between rounds is `EINTR`, and what
-  was given stays given, as in Linux's `memory_reclaim`. The file is
+  most 32 pages (`user::cache::reclaim_asked`; Linux's rounds are at least
+  32), so it is scoped and spares `memory.min` as the mark's does. More than
+  16 rounds, in all, that give back nothing are `EAGAIN`, a signal between
+  rounds is `EINTR`, and what was given stays given, as in Linux's
+  `memory_reclaim`, which never resets its count of retries either. The file is
   write-only (0200) and the root has none: Linux's root has one, but a
   reclaim of the whole machine here would spare nobody's `memory.min`. No
   `swappiness=`, since there is no swap. The `reclaim` line of stage 13
-  checks it on every architecture; its negative control (a write that
-  gives back nothing) stopped the ARMv7-A boot with the check's message.
+  checks it on every architecture, and calls `reclaim_asked` itself for
+  its interrupted and no-scope answers; no boot check sends the writer a
+  signal, so cgroupfs's mapping of a pending signal to `EINTR` is shown by
+  inspection only.
 * **Not built.** `memory.low` events, proportional
   protection, the dentry and inode caches as reclaimable (M1's note that
   dentries stay charged stands), `workingset_*`, and an audit record for the

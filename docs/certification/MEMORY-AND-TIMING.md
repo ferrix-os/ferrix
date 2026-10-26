@@ -240,6 +240,16 @@ frames always took: clean cache reclaimed first, then the fault fails
   `docs/DISPLAY.md` §9.3); and every frame the kernel takes for itself, by `allocate_frames`.
 * `/proc/meminfo`'s `MemAvailable` still counts the watermark's frames as
   available, where Linux leaves out its reserve (`totalreserve_pages`).
+* **`memory.reclaim`'s rounds** (`user::cache::reclaim_asked`, 2026-10-26,
+  L.object.183): each round is one `reclaim` of at most 32 pages, so its
+  scan is bounded as every reclaim's is (two passes round the list of file
+  objects), and no lock is held across rounds, each `Walk` dropped before
+  the next. The rounds end at the count asked for, or after 17 rounds in all
+  that gave nothing; a write of 1G is about 8192 rounds. An empty write asks
+  for everything (`u64::MAX` pages) and, in a cgroup whose tasks keep
+  filling cache again, ends only on a signal to the writer, which is looked
+  for before every round: preemptible, and paid for by the writer, since
+  the file is 0200 and the root has none.
 * **The kernel's own users of the program routes**, which the watermark
   now refuses earlier than an empty allocator would, and why each is
   handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
