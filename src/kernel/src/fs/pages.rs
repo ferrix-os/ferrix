@@ -204,7 +204,7 @@ fn allocate_reclaiming() -> Option<Frame> {
         let group = crate::sched::running_group();
         let scope =
             quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE).unwrap_or(quota::NONE);
-        if crate::user::cache::reclaim(scope, reclaim_want(scope)).stolen == 0 {
+        if !crate::user::cache::reclaim(scope, reclaim_want(scope)).gave() {
             // Nothing to give back; another task may still have let a frame
             // go since the first try.
             return mm::allocate_user_frame();
@@ -234,7 +234,7 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
                 let group = crate::sched::running_group();
                 let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
                     .unwrap_or(quota::NONE);
-                if crate::user::cache::reclaim(scope, reclaim_want(scope)).stolen == 0 {
+                if !crate::user::cache::reclaim(scope, reclaim_want(scope)).gave() {
                     return Err(Errno::ENOSPC);
                 }
             }

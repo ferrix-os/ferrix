@@ -173,6 +173,13 @@ impl Dentry {
         }))
     }
 
+    /// The job its heap is charged to (`ferrix_kmem::NOBODY` for none), and
+    /// how many bytes: what a reclaim of that job's cached dentries asks of
+    /// it ([`crate::Namespace::shrink`]).
+    pub(crate) fn charge(&self) -> (u32, u64) {
+        (self._charge.owner(), self._charge.charged())
+    }
+
     /// Unique identifier.
     pub(crate) fn id(&self) -> u64 {
         self.id

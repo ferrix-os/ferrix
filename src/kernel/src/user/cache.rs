@@ -62,6 +62,17 @@
 //! does not know which pages are in use, so a hot page is still taken once
 //! a lap and faulted in again.
 //!
+//! # The dentry and inode caches
+//!
+//! A reclaim that gave back fewer pages than it was asked for asks the
+//! filesystem for the rest in kernel heap: the dentries the cache keeps that
+//! nothing else holds, charged to a job the reclaim may take from, and the
+//! inodes only they held ([`install_shrinker`], `docs/CGROUPS.md` §10). That
+//! heap is charged to `memory.current` as the pages are (F-37), so it is what
+//! the limit needs back as much as a page is; Linux's `shrink_slab` runs
+//! beside its page reclaim the same way. The filesystem is above the item,
+//! and registers its shrinker at boot; before it has, there is none.
+//!
 //! # What `/proc/meminfo` reads
 //!
 //! [`totals`] counts every cached file's pages, whoever they are charged to:
@@ -74,6 +85,8 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use super::vmo::Vmo;
+use ferrix_bootinfo::PAGE_SIZE;
+
 use crate::fallible;
 use crate::mm;
 use crate::object::quota::{self, Counter};
@@ -188,6 +201,48 @@ pub struct Reclaimed {
     pub(crate) scanned: u64,
     /// Pages given back.
     pub stolen: u64,
+    /// Bytes of kernel heap given back by the shrinker ([`install_shrinker`]).
+    pub heap: u64,
+}
+
+impl Reclaimed {
+    /// Whether it gave anything back.
+    #[must_use]
+    pub fn gave(&self) -> bool {
+        self.stolen > 0 || self.heap > 0
+    }
+
+    /// What it gave back, in bytes.
+    #[must_use]
+    pub fn bytes(&self) -> u64 {
+        self.stolen
+            .saturating_mul(PAGE_SIZE)
+            .saturating_add(self.heap)
+    }
+}
+
+/// What gives back the kernel heap of the dentry and inode caches: asked
+/// which jobs' charges it may take (a test that takes no lock) and how many
+/// bytes, it answers how many it gave back.
+pub type Shrinker = fn(&dyn Fn(u32) -> bool, u64) -> u64;
+
+/// The filesystem's [`Shrinker`], once it has registered one.
+static SHRINKER: SpinLock<Option<Shrinker>> = SpinLock::new(None);
+
+/// Register the filesystem's [`Shrinker`], which every [`reclaim`] that
+/// falls short of its pages calls afterwards; a second replaces the first.
+pub fn install_shrinker(shrinker: Shrinker) {
+    *SHRINKER.lock() = Some(shrinker);
+}
+
+/// Ask the [`Shrinker`] for `want` bytes charged to `scope` or beneath it,
+/// sparing `memory.min` as the pages' second pass does. Called with no lock
+/// held: the shrinker drops what it gives back.
+fn shrink(scope: u32, want: u64) -> u64 {
+    let shrinker = *SHRINKER.lock();
+    shrinker.map_or(0, |shrinker| {
+        shrinker(&|owner| takes(owner, scope, false), want)
+    })
 }
 
 /// Where the next [`reclaim`] starts looking: the place in [`CACHE`] the last
@@ -219,7 +274,9 @@ fn object_at(at: usize) -> Option<Arc<Vmo>> {
 
 /// Give back up to `want` clean cache pages charged to slot `scope` or
 /// beneath it, or, for [`quota::NONE`], to anyone (the machine out of
-/// frames). Counts `pgscan` and `pgsteal` in `scope` and above.
+/// frames), and, if that is fewer than `want`, the rest in the heap of the
+/// dentry and inode caches ([`install_shrinker`]). Counts `pgscan` and
+/// `pgsteal` in `scope` and above.
 ///
 /// It starts where the last reclaim stopped ([`HAND`]) and goes round the
 /// list from there, so that a page is not taken again before the rest of
@@ -236,6 +293,15 @@ fn object_at(at: usize) -> Option<Arc<Vmo>> {
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
 pub fn reclaim(scope: u32, want: u64) -> Reclaimed {
+    let mut done = reclaim_pages(scope, want);
+    if done.stolen < want {
+        done.heap = shrink(scope, (want - done.stolen).saturating_mul(PAGE_SIZE));
+    }
+    done
+}
+
+/// [`reclaim`]'s pages: the walk of the list.
+fn reclaim_pages(scope: u32, want: u64) -> Reclaimed {
     let mut done = Reclaimed::default();
     let walk = Walk::begin();
     let count = walk.count;
@@ -386,20 +452,23 @@ pub fn reclaim_asked(scope: u32, want: u64, interrupted: &dyn Fn() -> bool) -> A
     if scope == quota::NONE {
         return if want == 0 { Asked::Given } else { Asked::Short };
     }
+    // In bytes, since the dentry and inode caches give back heap.
+    let want = want.saturating_mul(PAGE_SIZE);
     let mut given = 0_u64;
     let mut retries = ASKED_RETRIES;
     while given < want {
         if interrupted() {
             return Asked::Interrupted;
         }
-        let stolen = reclaim(scope, (want - given).min(ASKED_BATCH)).stolen;
-        if stolen == 0 {
+        let round = (want - given).div_ceil(PAGE_SIZE).min(ASKED_BATCH);
+        let done = reclaim(scope, round);
+        if !done.gave() {
             if retries == 0 {
                 return Asked::Short;
             }
             retries -= 1;
         }
-        given = given.saturating_add(stolen);
+        given = given.saturating_add(done.bytes());
     }
     Asked::Given
 }

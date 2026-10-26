@@ -44,7 +44,13 @@
 //! * `pgfault` counts the faults of a job's program, `memory.stat`'s `anon`
 //!   its pages and `pagetables` the tables made to map them, which with
 //!   `file`, `shmem` and `kernel` are `memory.current`, and an unmap gives
-//!   back the pages and the emptied tables.
+//!   back the pages and the emptied tables;
+//! * `/check-rd` looks up 64 names that are not there, as `/check-rc` beside
+//!   it does: the negative dentries are charged to it as kernel heap, a write
+//!   of `1G` to its `memory.reclaim`, with no cache to give, is `EAGAIN` and
+//!   gives them back, and the sibling's stay charged; a write of 8192 bytes
+//!   after more misses succeeds on the dentries alone; a `reclaim` of one page
+//!   at a scope holding no pages and more misses gives back heap alone.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -285,6 +291,7 @@ fn all(harness: &mut Harness) -> Checked<u64> {
     let protected = protection(harness)?;
     tmpfs_read_throttled(harness)?;
     let asked = on_demand(harness)?;
+    dentries(harness)?;
     faults(harness)?;
     Ok(stolen + at_max + hot_and_cold + protected + asked)
 }
@@ -704,6 +711,79 @@ fn on_demand_steps(
         return Err("pages memory.reclaim took did not read back as the source has them");
     }
     Ok(())
+}
+
+/// Names each of `/check-rd` and `/check-rc` looks up and does not find.
+const MISSES: u64 = 64;
+/// The least a dentry holds of the heap: what each miss must give back.
+const DENTRY_BYTES: u64 = 64;
+
+/// The cached dentries `/check-rd`'s lookups made are given back by its
+/// reclaim, and its sibling's are not; a `memory.reclaim` its dentries alone
+/// can meet succeeds.
+///
+/// Verifies: L.object.186
+/// Verifies: L.object.183
+fn dentries(harness: &mut Harness) -> Checked<()> {
+    let sibling = Group::make(harness, b"/check-rc")?;
+    let group = Group::make(harness, b"/check-rd")?;
+    let outcome = dentries_steps(harness, &group, &sibling);
+    group.end(harness)?;
+    sibling.end(harness)?;
+    let given = outcome?;
+    crate::console::println!(
+        "  reclaim  memory.reclaim gave back {given} bytes of {MISSES} cached dentries, a sibling's kept"
+    );
+    Ok(())
+}
+
+/// `MISSES` lookups of names that are not there, as a task of `group`.
+fn misses(group: &Group, round: u32) {
+    let ns = crate::fs::namespace();
+    let ctx = ns.context();
+    group.as_task(|| {
+        for at in 0..MISSES {
+            let name = alloc::format!("/check-rd-{}-{round}-{at}", group.slot());
+            let _ = ns.resolve(&ctx, None, name.as_bytes(), true);
+        }
+    });
+}
+
+/// [`dentries`]'s lookups and reclaims; the bytes the write gave back.
+fn dentries_steps(harness: &mut Harness, group: &Group, sibling: &Group) -> Checked<u64> {
+    let kernel = |harness: &Harness, group: &Group| group.number(harness, "memory.stat", "kernel");
+    let (before, theirs_before) = (kernel(harness, group)?, kernel(harness, sibling)?);
+    misses(sibling, 0);
+    misses(group, 0);
+    let (cached, theirs) = (kernel(harness, group)?, kernel(harness, sibling)?);
+    if cached < before + MISSES * DENTRY_BYTES || theirs < theirs_before + MISSES * DENTRY_BYTES {
+        return Err("lookups that missed did not charge their dentries to the cgroup");
+    }
+    let short = harness.write(&group.file("memory.reclaim"), b"1G\n");
+    harness.refused(
+        short.err(),
+        Errno::EAGAIN,
+        "a memory.reclaim of more than a cgroup's cache and dentries was not EAGAIN",
+    )?;
+    let after = kernel(harness, group)?;
+    if after.saturating_add(MISSES * DENTRY_BYTES) > cached {
+        crate::console::println!("  reclaim  kernel {cached} before memory.reclaim, {after} after");
+        return Err("a memory.reclaim did not give back a cgroup's cached dentries");
+    }
+    if kernel(harness, sibling)? != theirs {
+        return Err("a memory.reclaim gave back a sibling cgroup's cached dentries");
+    }
+    // What is asked for is bytes, and the heap counts towards them.
+    misses(group, 2);
+    group
+        .set(harness, "memory.reclaim", b"8192\n")
+        .map_err(|_| "a memory.reclaim its cached dentries could meet was refused")?;
+    misses(group, 1);
+    let done = crate::user::cache::reclaim(group.slot(), 1);
+    if done.stolen != 0 || done.heap < DENTRY_BYTES {
+        return Err("a reclaim at a cgroup with no pages and cached dentries gave back no heap");
+    }
+    Ok(cached - after)
 }
 
 /// `memory.stat`'s `anon` and `pagetables` with the pgfault check's pages

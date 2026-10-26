@@ -711,12 +711,12 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        222,
-        230,
-        254,
-        258,
+        225,
+        233,
+        257,
         261,
-        266
+        264,
+        269
       ]
     },
     "arch/arm_common/gicv2.rs": {

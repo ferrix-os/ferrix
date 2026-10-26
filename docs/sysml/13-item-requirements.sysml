@@ -1347,7 +1347,9 @@ package FerrixItemRequirements {
                 and a program over its memory.high, shall first take back clean
                 file cache charged to that job or beneath it, never a sibling's
                 and never a child's at or under its memory.min, and read back as
-                its source has it, before anything is killed.";
+                its source has it, and then the heap of the cached names and
+                files nothing else holds charged to that job or beneath it,
+                before anything is killed.";
             attribute :>> criterion = "A cgroup reading a file twice its
                 memory.high is brought back to it, its sibling's cache untouched,
                 every page read back as the source has it, and a read at

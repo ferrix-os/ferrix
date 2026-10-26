@@ -2304,7 +2304,7 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        230
+        233
       ]
     },
     "object/job.rs": {
@@ -2328,7 +2328,7 @@
     "user/cache.rs": {
       "ring": "core",
       "lines": [
-        109
+        122
       ]
     },
     "arch/x86_64/gdt.rs": {

@@ -107,6 +107,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | io.weight and io.latency, stage 13's follow-on (docs/CGROUPS.md section 13; load-ring code and ferrix-block, no requirement; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | the item's one line it touches: stages_check.rs's io line (its text changed from line 775 on; the anchor at 777 that coverage-x86_64.json reached was carried to its new place by carry-coverage, which dropped none). | stages_check.rs's io println, reached on every test-boot. The rest is load-ring code (fs/blkio.rs's queue, cgroupfs.rs's files, io_check.rs) and ferrix-block's Fair and weighted_cost, host-tested, which the item's coverage does not count. |
 | memory.stat's anon and pagetables, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.182; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of mm.rs's deallocate_frames, release_frame, disown_frame and ChargedTables::allocate_table it changed. | Reached by stage 13's reclaim check on every test-boot: object::quota::charge_table and uncharge_table, mm::uncharge_owner's table and page arms, ChargedTables::allocate_table's marked charge, and reclaim_check.rs's tables_and_pages and faults. Not reached by any boot: allocate_table's two refusal arms, which uncharge a table's charge. |
 | time namespaces, stage 13's follow-on ported from park/stage13-timens (docs/NAMESPACES.md section 12.1, L.user.130; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and user/space.rs's map_shared_code (now map_shared_code_near's caller) and the syscall and procfs sites it changed. | Reached by stage 13's timens line on every test-boot: user::space::AddressSpace::replace_shared_code and map_shared_code_near (and vdso::retarget's swap, load ring). Not reached: retarget's refusal when the variant cannot be made, which a boot cannot provoke but its negative control showed. |
+| the dentry and inode caches' reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.186; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed. | Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing. |
 
 ---
 
@@ -193,7 +194,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `user/vmo.rs` | `core` | 49 | 0 | 1 | 0 | - |
 | `user/space.rs` | `core` | 23 | 0 | 0 | 0 | - |
-| `user/cache.rs` | `core` | 1 | - | - | 1 | 109 |
+| `user/cache.rs` | `core` | 1 | - | - | 1 | 122 |
 
 ---
 
