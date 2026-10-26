@@ -131,7 +131,7 @@ may one day need the relaxation.
 
 | Item | Owner | Stage |
 |---|---|---|
-| Seccomp, S6's second part: Linux's `seccomp_bpf` selftest (`docs/SECCOMP.md` §8.2), built static against musl with nazuna's cross compilers and run as init, with a committed list of expected skips and failures (ptrace, `USER_NOTIF`, `TRACE` stops) that the consultant reviews; and R6, reading libseccomp's (`src/system.c`) and Firefox's start-up probes into §1.3. `test-seccomp` covers the cases the design names without it | open | 13 |
+| Seccomp: R6, reading libseccomp's (`src/system.c`) and Firefox's start-up probes into `docs/SECCOMP.md` §1.3. (S6's second part, Linux's `seccomp_bpf` selftest, is `cargo xtask test-seccomp-selftest` since 2026-10-26, with its list of the 46 tests that fail and why in `tools/common/data/seccomp-selftest/expected.txt`: `ptrace`, user notification, and four that musl's `pthread_join` fails on Linux too) | open | 13 |
 
 ### s13-009
 

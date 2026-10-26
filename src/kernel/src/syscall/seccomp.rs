@@ -1008,11 +1008,9 @@ fn set_filter(
     if flags & !flag::BUILT != 0 {
         return Err(Errno::EINVAL);
     }
-    // Linux: `TSYNC_ESRCH` is a way of reporting `TSYNC`'s failure, not a flag
-    // of its own.
-    if flags & flag::TSYNC_ESRCH != 0 && flags & flag::TSYNC == 0 {
-        return Err(Errno::EINVAL);
-    }
+    // `TSYNC_ESRCH` changes how `TSYNC` reports its failure, and without
+    // `TSYNC` changes nothing: Linux accepts it alone, as its selftest's
+    // `detect_seccomp_filter_flags` requires (2026-10-26; Ferrix refused it).
     let (length, pointer) = read_header(process, uargs, abi)?;
     if length == 0 || length > MAX_INSNS {
         return Err(Errno::EINVAL);

@@ -80,6 +80,15 @@ pub(crate) const TASKS: &[Task] = &[
         run,
     },
     Task {
+        name: "test-seccomp-selftest",
+        help_at: 586,
+        help: &[
+            "test-seccomp-selftest  Boot Linux v6.12's seccomp_bpf selftest as init (tools/common/fetch/fetch-seccomp-selftest.sh builds it)",
+            "              and require every test to pass but those tools/common/data/seccomp-selftest/expected.txt names, as it names them",
+        ],
+        run,
+    },
+    Task {
         name: "test-sud",
         help_at: 587,
         help: &[
@@ -253,7 +262,8 @@ fn starts(line: &str, want: &str) -> bool {
     line.contains(want)
 }
 
-/// `test-sem`, and `test-threads`, `test-shm`, `test-container`, `test-seccomp`, `test-sud` and
+/// `test-sem`, and `test-threads`, `test-shm`, `test-container`, `test-seccomp`,
+/// `test-seccomp-selftest`, `test-sud` and
 /// `test-procfs`, the other musl programs booted as init, and `test-uvm`, `test-nvrm` and
 /// `test-nvrm-link`, booted the
 /// same way, which share its arm of `main`'s dispatch.
@@ -264,6 +274,7 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-container" => crate::container::run(args),
         "test-pipewait" => crate::pipe_bench::test_pipewait(args),
         "test-seccomp" => crate::seccomp::test_seccomp(args),
+        "test-seccomp-selftest" => crate::seccomp_selftest::run(args),
         "test-sud" => crate::sud::test_sud(args),
         "test-procfs" => crate::procfs::test_procfs(args),
         "test-uvm" => crate::uvm::test_uvm(args),

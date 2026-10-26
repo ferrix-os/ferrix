@@ -161,7 +161,7 @@ pub(crate) fn test_seccomp(args: &Args) -> Result<()> {
 
 /// Boot `program` as init, with the image carrying it at [`CARRIED_AT`] as
 /// well, and return the serial lines from the kernel's success marker on.
-fn boot(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
+pub(crate) fn boot(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
     let bytes = std::fs::read(program)
         .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
     let loader = cargo::build_loader(arch, args.release)?;
