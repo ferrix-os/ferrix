@@ -91,11 +91,23 @@ pub(crate) fn sys_timerfd_settime(
     if flags & !(TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET) != 0 {
         return Err(Errno::EINVAL);
     }
-    let setting = Setting {
+    let mut setting = Setting {
         interval: time::nanos_of(interval.0, interval.1)?,
         value: time::nanos_of(value.0, value.1)?,
     };
     let timer = timer_of(process, fd)?;
+    // An absolute time on a clock a time namespace shifts is given in the
+    // caller's namespace: the timer keeps the host's (`docs/NAMESPACES.md`
+    // §12.1). A result of zero would disarm it, and it means a time already
+    // past, so it is one nanosecond.
+    if flags & TFD_TIMER_ABSTIME != 0 && setting.value != 0 {
+        let clock = match timer.clock() {
+            Clock::Monotonic => CLOCK_MONOTONIC,
+            Clock::Boottime => CLOCK_BOOTTIME,
+            Clock::Realtime => CLOCK_REALTIME,
+        };
+        setting.value = time::host_from(process, clock, setting.value).max(1);
+    }
     let flags = SetFlags {
         absolute: flags & TFD_TIMER_ABSTIME != 0,
         cancel_on_set: flags & TFD_TIMER_CANCEL_ON_SET != 0,

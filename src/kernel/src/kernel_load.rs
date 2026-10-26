@@ -261,6 +261,8 @@ pub mod syscall {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod time;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod timens;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod timerfd;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod tty;

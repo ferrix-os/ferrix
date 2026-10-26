@@ -803,7 +803,7 @@ fn native_child_stays(
     );
     // The creator first leaves the first UTS, IPC and cgroup namespaces, so that
     // a child left in them would show (`docs/NAMESPACES.md` §12).
-    let kinds: [&[u8]; 4] = [b"uts", b"ipc", b"cgroup", b"net"];
+    let kinds: [&[u8]; 5] = [b"uts", b"ipc", b"cgroup", b"net", b"time_for_children"];
     let mut before = Vec::new();
     for kind in kinds {
         before.push(ns_link(page, creator.pid(), kind)?);
@@ -820,6 +820,12 @@ fn native_child_stays(
     creator.set_net_ns(crate::net::namespace::create(Arc::clone(&owner)).map_err(
         |_| "the creator of a native child could not leave the first network namespace",
     )?);
+    // The time namespace is for its children: the creator's own clocks stay,
+    // and a child is born in the one made here.
+    let time = creator
+        .with_credentials(|held| crate::syscall::timens::create(held, None))
+        .map_err(|_| "the creator of a native child could not make a time namespace")?;
+    creator.set_time_namespace_for_children(time);
     for (kind, old) in kinds.into_iter().zip(&before) {
         if &ns_link(page, creator.pid(), kind)? == old {
             return Err("a creator's new small namespace was not named apart");
@@ -844,6 +850,20 @@ fn native_child_stays(
     }
     let same_pids =
         ns_link(page, child.pid(), b"pid")? == ns_link(page, creator.pid(), b"pid_for_children")?;
+    // A child in a namespace that shifts a clock must not map the vDSO that
+    // reads the first namespace's clocks: it is how a child would leave.
+    let unshifted_vdso = crate::syscall::vdso::mapped_views(child.space())[0].is_some();
+    // Born in its creator's namespace for children: that is its own. Both
+    // links read `time:[N]`, as on Linux; the numbers are compared.
+    let number = |link: Vec<u8>| {
+        let at = link
+            .iter()
+            .position(|&byte| byte == b'[')
+            .unwrap_or(link.len());
+        link[at..].to_vec()
+    };
+    same_small &= number(ns_link(page, child.pid(), b"time")?)
+        == number(ns_link(page, creator.pid(), b"time_for_children")?);
     tally.report.calls += 1;
     process::kill(&child, 137);
     drop((child, context));
@@ -853,8 +873,13 @@ fn native_child_stays(
     if !same {
         return Err("a native child's /proc/<pid>/ns/mnt was not its creator's");
     }
+    if unshifted_vdso {
+        return Err("a native child in a shifted time namespace mapped the vDSO of the first");
+    }
     if !same_small {
-        return Err("a native child's UTS, IPC, cgroup or network namespace was not its creator's");
+        return Err(
+            "a native child's UTS, IPC, cgroup, network or time namespace was not its creator's",
+        );
     }
     if !same_pids {
         return Err("a native child's pid namespace was not the one its creator's children go in");

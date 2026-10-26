@@ -370,7 +370,15 @@ pub(crate) fn sys_futex(
                         i128::from(absolute) - i128::from(crate::syscall::time::realtime_offset());
                     u64::try_from(counter.max(0)).unwrap_or(u64::MAX)
                 } else {
-                    absolute
+                    // In the caller's time namespace (Linux's
+                    // `timens_ktime_to_host(CLOCK_MONOTONIC, ..)`).
+                    crate::syscall::userns::acting().map_or(absolute, |caller| {
+                        crate::syscall::time::host_from(
+                            &caller,
+                            CLOCK_MONOTONIC,
+                            absolute,
+                        )
+                    })
                 })
             };
             wait(process, address, shared, value, value3, deadline)
@@ -452,7 +460,13 @@ pub(crate) fn sys_futex_waitv(
                 i128::from(absolute) - i128::from(crate::syscall::time::realtime_offset());
             u64::try_from(counter.max(0)).unwrap_or(u64::MAX)
         } else {
-            absolute
+            // In the caller's time namespace, as `FUTEX_WAIT_BITSET`'s: Linux
+            // v6.12's `futex2_setup_timeout` goes through
+            // `futex_init_timeout(FUTEX_WAIT_BITSET, ..)`, which takes it to the
+            // host with `timens_ktime_to_host` (`kernel/futex/syscalls.c`).
+            crate::syscall::userns::acting().map_or(absolute, |caller| {
+                crate::syscall::time::host_from(&caller, CLOCK_MONOTONIC, absolute)
+            })
         })
     };
     let compat = width == TimeWidth::CompatWide;

@@ -103,6 +103,7 @@ Causes are listed most likely first.
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
+| [FX-0910](#fx-0910) | A time namespace failed its self-check |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2536,6 +2537,45 @@ none it should.
 
 See: src/kernel/src/discovery/smbios.rs;
 src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
+
+<a id="fx-0910"></a>
+
+## FX-0910 — A time namespace failed its self-check
+
+`fs::timens_check::run` has a root process `unshare(CLONE_NEWTIME)`, write the
+namespace's offsets and fork a child into it. The caller must stay in the first
+namespace (`ns/time`) and name a new one in `ns/time_for_children`;
+`timens_offsets` must read in Linux's layout, refuse garbage, a fourth field, a
+third line, a clock other than monotonic and boottime and nanoseconds past a
+second (EINVAL), an offset that makes a clock negative or passes KTIME_SEC_MAX
+(ERANGE), and every write once a process is made in the namespace or for the
+first namespace (EACCES). The child must read CLOCK_MONOTONIC,
+CLOCK_MONOTONIC_RAW, CLOCK_MONOTONIC_COARSE and CLOCK_BOOTTIME shifted by their
+offsets, CLOCK_REALTIME not at all, and `times`, `sysinfo` and /proc/uptime must
+count the boot-time offset; an absolute clock_nanosleep, timerfd_settime and
+FUTEX_WAIT_BITSET deadline given in the child's clock must be converted to the
+host's counter. Creating a namespace needs CAP_SYS_ADMIN, writing its offsets
+CAP_SYS_TIME over its owner by opener and writer; a namespace made with a user
+namespace is owned by it; fake root there is not privileged to set the clock. A
+child forked into another time namespace must map the vDSO variant whose data
+page says system call, at its parent's address, and leave its parent's mapping
+alone (docs/NAMESPACES.md §12.1).
+
+1. `Held::for_fork` does not freeze the namespace, or gives the child the
+   parent's own namespace rather than its `time_for_children`.
+2. `TimeNamespace::shown` or `host` is skipped, or given the wrong sign, at
+   `sys_clock_gettime`, `sys_clock_nanosleep`, `sys_timerfd_settime`, the futex
+   wait, `sys_times`, `sys_sysinfo` or `/proc/uptime`.
+3. `timens::write_offsets` judges only the opener or only the writer, drops the
+   range test or accepts text Linux refuses.
+4. `sys_unshare` moves the caller's own clocks, or makes a namespace without
+   CAP_SYS_ADMIN.
+5. `family::retarget_vdso` does not swap the view, or swaps a space the child
+   shares.
+
+See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
+src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
+src/kernel/src/syscall/namespace.rs.
 
 <a id="fx-1001"></a>
 

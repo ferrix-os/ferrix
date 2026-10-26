@@ -594,6 +594,14 @@ boot check that tries the attack and must be refused (§8).
   exists to write. `capable_over` is unchanged, so neither capability reaches
   a file, a process or the first namespace's tables.
 
+  **And by one for time namespaces (2026-10-01):** `CAP_SYS_TIME` joins
+  `userns::HONOURED`, and its one site is `timens::write_offsets`, which asks
+  `capable_over` against the owner of the time namespace whose offsets are
+  written, for the opener and for the writer. Setting the clock
+  (`settimeofday`, `clock_settime`, `adjtimex`) still needs `privileged()`,
+  root of the first namespace, so fake root shifts its own namespace's
+  monotonic and boot-time clocks and never the machine's.
+
   **U7 and U8 are deliberate** (the customer, 2026-09-28, subject to the
   certification consultant's view): each refuses less than Linux allows,
   and nothing Steam, pressure-vessel or bwrap runs needs what they refuse.
@@ -708,6 +716,7 @@ of the task whose call makes it, kept inside what it pays for:
 |---|---|---|
 | user namespace, with its two maps | `CLONE_NEWUSER` | at creation; the maps are inline, written once |
 | mount namespace | `CLONE_NEWNS` | at creation |
+| time namespace, with its two offsets | `CLONE_NEWTIME` | at creation; the offsets are inline (§12.1) |
 | a copied mount | `CLONE_NEWNS` copying the tree | each, as `mount` already charges one |
 | a bind mount, and each copy `MS_REC` makes | `mount(MS_BIND)` | each (the existing mount charge) |
 | a map file's opener record | `open` of `uid_map`/`gid_map` | with the open's rendered snapshot, already charged |
@@ -1525,3 +1534,168 @@ a caller whose filesystem id is the target's, which it refuses; c08
 read, since either one alone refuses. The small-namespace check's processes set `PR_SET_DUMPABLE` after
 they drop their ids, since the owner's opening of their namespace links is
 now judged as Linux judges it.
+
+### 12.1 The time namespace (2026-09-30, branch `stage13-timens`; ported 2026-10-26)
+
+The eighth namespace, `CLONE_NEWTIME` (0x80), after `time_namespaces(7)`. It
+shifts two clocks, `CLOCK_MONOTONIC` and `CLOCK_BOOTTIME`, by an offset each,
+for the processes in it. Nothing else moves: `CLOCK_REALTIME`, `CLOCK_TAI` and
+the CPU-time clocks read as they do outside.
+
+**The object.** `syscall/timens.rs`: a `TimeNamespace` holds its owning user
+namespace (the creator's, for `CAP_SYS_TIME` over it), an id for
+`/proc/<pid>/ns/time` (Linux's `0xEFFFFFFA` for the first), two signed
+nanosecond offsets behind one spin lock, a `frozen` flag, and a `Charge` (F-37,
+§5). The first namespace has zero offsets, is frozen, and is never charged.
+Each `Process` holds two references, `time` (the namespace it is in) and
+`time_for_children`, under one lock of its own, taken alone. Both start as the
+first's; `fork` and `clone` give the child the parent's `time_for_children`
+for both, and freeze it (Linux's `timens_on_fork`); `exec` changes nothing,
+where Linux's `exec` moves a process into its namespace for children
+(`exec_task_namespaces`, since 6.0), so `unshare --time cmd` works there with
+no fork (a difference, `docs/backlog/stage13.md`).
+
+**Reaching it.** `CLONE_NEWTIME` lies inside `CSIGNAL`, so `clone` reads it as
+an exit signal, as Linux does; `clone3` refuses `CSIGNAL`, and here that
+includes `CLONE_NEWTIME`, where Linux's `clone3_args_valid` masks it out of the
+test and accepts it (a difference). Only `unshare` can make one here;
+`setns` cannot join one (not wired).
+`unshare(CLONE_NEWTIME)` needs `CAP_SYS_ADMIN` in the caller's user namespace
+(`EPERM`), creates a namespace owned by it, and sets `time_for_children` only:
+the caller stays where it was, `ns/time` unchanged and `ns/time_for_children`
+new. With `CLONE_NEWUSER` the user namespace is made and entered first, so the
+time namespace is owned by it and its creator holds the capability there.
+`setns` into a time namespace is not built: it would set
+`time_for_children` after `capable_over(creds, ns.owner, CAP_SYS_ADMIN)` and
+over the caller's own user namespace, through an nsfs arm that does not exist
+yet. Both `ns/time` and `ns/time_for_children` read `time:[N]`, as Linux's
+`timens_for_children_operations` names its namespace `time`.
+
+**The offsets file.** `/proc/<pid>/timens_offsets` reads and writes the
+namespace the process makes *children* in (`time_for_children`), as Linux's
+`proc_timens_set_offset` does, in Linux's order: parse
+(`monotonic|boottime <secs> <nsecs>`, at most two lines, `nsecs` below 10^9,
+`EINVAL`), `CAP_SYS_TIME` over the owner by the opener and by the writer
+(`EPERM`; Linux judges the opener alone, `file_ns_capable`, so this is stricter
+than Linux and deliberate), range (`ERANGE`: seconds within +-9223372036 and the clock plus its
+offset within 0 to half that), then `EACCES` once frozen. The brief for this
+work says `EPERM` after the first process; Linux says `EACCES` and this follows
+Linux. The first namespace is frozen, so it is always `EACCES`.
+
+**Where each clock read applies them**, found by `grep now_nanos
+realtime_nanos Clock:: CLOCK_MONOTONIC CLOCK_BOOTTIME TIMER_ABSTIME` over
+`src/kernel/src`; every other `now_nanos` is the kernel's own deadline on the
+host clock and stays unshifted:
+
+| Site | Shift |
+|---|---|
+| `time::sys_clock_gettime` | add, for MONOTONIC, MONOTONIC_RAW, MONOTONIC_COARSE (monotonic offset) and BOOTTIME (boottime offset) |
+| `time::sys_clock_nanosleep`, `TIMER_ABSTIME` | subtract, same four (the two sleepable ones); relative sleeps are unshifted |
+| `syscall/timerfd.rs` `timerfd_settime`, `TFD_TIMER_ABSTIME` | subtract by the caller's offsets; the timer keeps host deadlines; `gettime` reports time left and is unshifted |
+| `futex` `FUTEX_WAIT_BITSET` without `FUTEX_CLOCK_REALTIME` | subtract the monotonic offset (Linux's `timens_ktime_to_host(CLOCK_MONOTONIC)`) |
+| `futex_waitv` on `CLOCK_MONOTONIC` | the same: Linux v6.12's `kernel/futex/syscalls.c`, `futex2_setup_timeout` calls `futex_init_timeout(FUTEX_WAIT_BITSET, ...)` (lines 249-253), which converts a deadline not on `FUTEX_CLOCK_REALTIME` with `timens_ktime_to_host(CLOCK_MONOTONIC, ...)` (lines 155-156); added 2026-10-26 |
+| `procfs::render::uptime`, `system::sys_sysinfo` | add the boottime offset |
+| `time::sys_times` | add the boottime offset (Linux does not; a program reading `times` beside `/proc/uptime` should agree) |
+| `/proc/stat` `btime`, `/proc/<pid>/stat` `starttime` | subtract / add the boottime offset, as Linux's `timens_sub_boottime` |
+| `clock_getres` | none (a resolution) |
+| `timer_create`, `mq_timedreceive` | not implemented here; nothing to shift |
+
+An offset is added by the caller's own namespace, read once per call (the
+process's `time`, not `time_for_children`). A result below zero reads zero.
+
+**The vDSO.** The fast path reads the kernel's time page, which is one page
+shared by all processes, so a process in a shifted namespace must not map it.
+Linux gives such a process its own vvar page. Here the simplest correct choice:
+a second object, built on first need, whose data page says `MODE_SYSCALL` (the
+mode the image already has for a counter the code cannot read) over the same
+image; every function in it makes its system call, where the shift applies.
+Only processes in a non-first time namespace pay for the system call; nothing
+in the image changes, so the certified code page is untouched. `exec` maps the
+variant when the process's namespace is not the first. A `fork` whose child's
+namespace differs from its parent's (the usual `unshare; fork` with no `exec`
+between) replaces the child's copy of the mapping at the same address before it
+can run, in `Process::forked_into`, which every fork path goes through
+(`AddressSpace::replace_shared_code`, which unmaps and maps again; L.user.130).
+Where the variant cannot be had the fork is refused, never left with the
+first's view (`vdso::retarget`, fail closed). A `CLONE_VFORK` child here
+gets a copy of its parent's space, as every fork does (`fork_memory`), so it
+is swapped like any other child; on Linux the same child shares its parent's
+space and `nsproxy` until its `exec`, and reads the parent's clocks until
+then (a difference that only a vfork child that reads a clock before its
+`exec` could see). The skip for a child sharing its parent's space never
+applies on today's fork paths. On AArch64 the image holds the signal
+trampoline, so the variant is built and swapped there too, though it has no
+clock function to bypass; ARMv7-A maps no vDSO. An i386 program maps no vDSO
+(`docs/I386.md` §2) and always enters the kernel, where the shift is applied
+at the width of its call.
+
+**F-37.** One `Charge::arc::<TimeNamespace>()` at creation, to the job of the
+task asking, `ENOMEM` past the limit; the `kmem` line gains a fill.
+
+**Checks.** The `timens` boot line (FX-0910, `fs/timens_check.rs`), through
+the system-call layer: a shifted `clock_gettime` per clock, unshifted REALTIME,
+the file's every refusal, the frozen rule, a forked child in the namespace,
+the two `ns` links, absolute `clock_nanosleep` and `timerfd_settime`,
+`/proc/uptime` and `sysinfo`, and the vDSO variant's mode word. Each with a
+negative control, listed in the commit that adds it.
+
+**Where it stands (2026-10-26).** Ported from the parked branch
+`park/stage13-timens` (ead8586b) onto `develop` by a 3-way apply, ten
+conflicts resolved by hand (the crate split's visibility, today's vDSO
+placement below `VDSO_END`, `procfs`'s 24 entries). The `timens` line
+(FX-0910) passes on x86_64 (TCG), AArch64 and ARMv7-A: 54 calls, 14
+refusals (49 on ARMv7-A, which maps no vDSO). The consultant's review
+(certification-consultant subagents of this session, 2026-10-26: NOT YET,
+then OK IF (1) to (6) on re-review; no ledger line in the container that ran
+it, the line text is in the landing's commit, to record on the gate host):
+the vDSO swap moved from `clone_with` into
+`Process::forked_into`, so the check's fork exercises the real one;
+`futex_waitv`'s monotonic deadline converted; `ns/time_for_children` reads
+`time:[N]`; `replace_shared_code` unmaps a view that landed elsewhere.
+
+Negative controls run with `test-boot` on AArch64, each stopping the boot
+with the check's own message (owed through `gate.sh control --expect`): the
+range test off ("an offset that makes a clock negative was accepted");
+`for_fork` not freezing ("offsets stayed writable after a process was made in
+the namespace"); the offset not added ("CLOCK_MONOTONIC was not shifted by the
+monotonic offset"); the fork's swap removed ("a child forked into a time
+namespace kept the unshifted vDSO, or moved it"); no variant to swap to ("could
+not fork the time check's child into its namespace"); `futex_waitv` not
+converted ("an absolute futex_waitv returned at once: the deadline was not
+converted"); a native child not inheriting ("a native child's UTS, IPC, cgroup,
+network or time namespace was not its creator's"). The first namespace made
+unfrozen does not fire: every fork in it freezes it again, so that flag is
+defence in depth.
+
+Owed: the other controls the branch wrote and never ran (`CLOCK_BOOTTIME`
+taking the monotonic offset; `CLOCK_MONOTONIC_RAW` unshifted;
+`CLOCK_REALTIME` shifted; `times`, `sysinfo` and `/proc/uptime` each
+unshifted; `clock_nanosleep`, `timerfd_settime` and `FUTEX_WAIT_BITSET` each
+not converted; `CAP_SYS_TIME` not honoured; the opener and the writer each
+dropped; `CAP_SYS_ADMIN` not needed to create; the variant's mode not
+`MODE_SYSCALL`; the charge dropped; the native child's swap dropped), all of
+them through `gate.sh`; `cargo xtask check` and `test-init` on the landing
+hash (`test-init` could not run here: busybox's source is refused by this
+container's network), and the KVM row.
+
+Not built, and differences from Linux:
+
+* No real program proof. busybox's `unshare` has no `--time`, so no
+  `test-vfs` row could make a namespace; the exec path's choice of vDSO
+  (`vdso::map_into` with `is_shifted`) has no check at all.
+* `timer_create` and `mq_timedreceive` do not exist here, so nothing is
+  shifted for them. `setns` is the small-namespaces landing's.
+* `EACCES`, not `EPERM`, for a write after a process is in the namespace
+  (Linux's `frozen_offsets`; the brief said `EPERM`).
+* `times` is shifted by the boot-time offset; Linux does not shift it.
+* A multi-threaded process's `unshare(CLONE_NEWTIME)` moves the whole
+  process's children, not one thread's; threads share a `Process` here.
+* A `CLONE_VFORK` child is in its new namespace from the fork, where Linux's
+  stays in its parent's until `exec` (above).
+* `CAP_SYS_TIME` joins `userns::HONOURED` (a change to a rule of §4 U8's
+  list), for the offsets of a namespace its user namespace owns and nothing
+  else; the consultant's review of 2026-10-26 checked it is used at that one
+  site.
+* `clone3` refuses `CLONE_NEWTIME` and `exec` does not enter the namespace
+  for children, both where Linux does (above).
+

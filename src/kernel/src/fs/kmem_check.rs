@@ -89,6 +89,8 @@ pub struct Report {
     /// seccomp filters of two instructions, each charged to the job that
     /// installed it (`docs/SECCOMP.md` §6, SR12).
     pub filters: usize,
+    /// Time namespaces, each made as `unshare(CLONE_NEWTIME)` makes one.
+    pub time_namespaces: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
@@ -139,6 +141,7 @@ pub fn run() -> Result<Report, &'static str> {
         report.veth_pairs = veth_pairs(&tree)?;
         report.routes = routes(&tree)?;
         report.filters = filters(&tree)?;
+        report.time_namespaces = time_namespaces(&tree)?;
         if Resource::ALL
             .iter()
             .any(|&resource| tree.usage(resource).is_none_or(|usage| usage.used != 0))
@@ -396,6 +399,16 @@ fn routes(tree: &Arc<Job>) -> Result<usize, &'static str> {
         }
         added?;
         Ok(socket)
+    })
+}
+
+/// Time namespaces, made as `unshare(CLONE_NEWTIME)` makes them: each is
+/// charged to the job asking, refused `ENOMEM` at its limit, and gives its
+/// heap back when it ends (`docs/NAMESPACES.md` §12.1).
+fn time_namespaces(tree: &Arc<Job>) -> Result<usize, &'static str> {
+    let creator = crate::syscall::credentials::Credentials::root();
+    kind(tree, "time namespaces", |_| {
+        crate::syscall::timens::create(&creator, None)
     })
 }
 

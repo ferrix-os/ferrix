@@ -1,4 +1,5 @@
-//! `unshare` and `setns`: mount, user, UTS, IPC and cgroup namespaces.
+//! `unshare` and `setns`: mount, user, UTS, IPC, cgroup, network and time
+//! namespaces.
 //!
 //! A user namespace (`docs/NAMESPACES.md` §2.2) is made first when asked for
 //! with a mount namespace, and owns it. The caller ends up in it holding every
@@ -34,6 +35,7 @@ use crate::syscall::fd;
 use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS};
 use crate::syscall::pidns::{self, CLONE_NEWPID};
 use crate::syscall::process::Process;
+use crate::syscall::timens::{self, CLONE_NEWTIME};
 use crate::syscall::userns::{self, CAP_SYS_ADMIN};
 
 /// Give the process a mount namespace of its own.
@@ -60,6 +62,9 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// share theirs -- and otherwise needs privilege (`EPERM`), and then copies
 /// the namespace into the context ([`copy_namespace`]).
 ///
+/// `CLONE_NEWTIME` needs `CAP_SYS_ADMIN` too, and moves only the caller's
+/// children ([`timens`]).
+///
 /// Every other flag names a namespace, or asks to leave a thread group or an
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
@@ -71,6 +76,7 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
             | CLONE_NEWUSER
             | CLONE_NEWPID
             | CLONE_NEWNET
+            | CLONE_NEWTIME
             | SMALL)
         != 0
     {
@@ -105,6 +111,14 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     // is owned by the user namespace it will be in.
     let net = if flags & CLONE_NEWNET != 0 {
         Some(make_net_namespace(process, fresh.as_ref())?)
+    } else {
+        None
+    };
+    // A time namespace is for the caller's children: its clocks stay as they
+    // are (`docs/NAMESPACES.md` §12.1). Owned by the user namespace made in
+    // the same call, if there is one; made here so a refusal changes nothing.
+    let time = if flags & CLONE_NEWTIME != 0 {
+        Some(process.with_credentials(|held| timens::create(held, fresh.as_ref()))?)
     } else {
         None
     };
@@ -145,6 +159,9 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     }
     if let Some(net) = net {
         process.set_net_ns(net);
+    }
+    if let Some(time) = time {
+        process.set_time_namespace_for_children(time);
     }
     Ok(0)
 }
