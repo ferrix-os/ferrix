@@ -12,7 +12,6 @@ counted in the sized scope.
 
 | Item | What `main` shows | Where the work is |
 |---|---|---|
-| Time namespaces | `CLONE_NEWTIME` is refused | branch `stage13-timens` (6 of 9 commits not on `main`) |
 | Unprivileged mounting (N5), `test-bwrap` as uid 1000 | `may_mount` asks `CAP_SYS_ADMIN` only | branches `stage13-n5` (15 commits), `stage13-bwrap-user` (16); Steam's N5 to N7 (stage 22) stand on it |
 | Requirements for the files of `cpu.max.burst` and `cpu.idle` | built and checked by stage 13's `cpu` line (`burst_files`, `idle_files`) and host tests, named by no requirement | an id to reserve on `develop` (the consultant's conditions, 2026-10-26) |
 | Reclaim of the dentry and inode caches | not built | `docs/CGROUPS.md` §7 |

@@ -3103,6 +3103,11 @@ impl AddressSpace {
     ///
     /// A VMO that is not two pages, no room below `end`, or no memory.
     pub fn map_shared_code(&self, vmo: Arc<Vmo>, end: u64) -> Result<u64, SpaceError> {
+        self.map_shared_code_near(vmo, end.checked_sub(2 * PAGE_SIZE))
+    }
+
+    /// [`AddressSpace::map_shared_code`] at `hint` if the room is free there.
+    fn map_shared_code_near(&self, vmo: Arc<Vmo>, hint: Option<u64>) -> Result<u64, SpaceError> {
         let len = 2 * PAGE_SIZE;
         if vmo.len_bytes() != len {
             return Err(SpaceError::BadRange);
@@ -3110,7 +3115,7 @@ impl AddressSpace {
         let mut inner = self.inner.lock();
         let at = inner
             .map
-            .find_free(len, PAGE_SIZE, end.checked_sub(len))
+            .find_free(len, PAGE_SIZE, hint)
             .ok_or(SpaceError::OutOfMemory)?;
         if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
             return Err(SpaceError::NotUserRange(at));
@@ -3156,6 +3161,33 @@ impl AddressSpace {
             return Err(SpaceError::OutOfMemory);
         }
         Ok(at + PAGE_SIZE)
+    }
+
+    /// Give the space another view of the kernel's two-page code object that
+    /// it maps at `at` (as [`AddressSpace::shared_code_at`] says): unmapped,
+    /// and `vmo` mapped again at the same place. How a fork whose child is in
+    /// another time namespace than its parent swaps the vDSO's data page for
+    /// the one that makes every clock a system call, at the address its
+    /// auxiliary vector already named (`docs/NAMESPACES.md` §12.1).
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_shared_code`], and [`SpaceError::BadRange`] if
+    /// the object did not land where the old one was, which is unmapped again
+    /// then. The space is without the view on any error, and the caller must
+    /// not run it.
+    ///
+    /// For a space no thread runs yet: a fork's child or a native process
+    /// being loaded, both of which are abandoned on an error.
+    pub fn replace_shared_code(&self, at: u64, vmo: Arc<Vmo>) -> Result<(), SpaceError> {
+        let _layout = self.layout();
+        self.unmap(at, 2 * PAGE_SIZE)?;
+        let code = self.map_shared_code_near(vmo, Some(at))?;
+        if code != at + PAGE_SIZE {
+            let _ = self.unmap(code - PAGE_SIZE, 2 * PAGE_SIZE);
+            return Err(SpaceError::BadRange);
+        }
+        Ok(())
     }
 
     /// Map `len` bytes of `vmo`, a file's object, from byte `offset` of it.

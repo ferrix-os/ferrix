@@ -143,6 +143,16 @@ pub(crate) fn load_native(
         // a native process can make Linux calls, so a child that did not keep
         // its creator's filter would be one call out of the sandbox.
         crate::syscall::seccomp::inherit_native(creator, &child);
+        // And the time namespace its creator's children are born in, as a
+        // fork's child has (`docs/NAMESPACES.md` §12.1): a vDSO that reads the
+        // first namespace's clocks would be a way out of the namespace.
+        child.inherit_time(creator);
+        if super::vdso::is_shifted(&child.time_namespace())
+            && super::vdso::retarget(child.space(), true).is_err()
+        {
+            process::kill(&child, 137);
+            return Err(status::NO_MEMORY);
+        }
     }
     let process: Arc<dyn Host> = child;
     Ok(process)

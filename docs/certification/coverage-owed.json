@@ -584,6 +584,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet, and the lines of mm.rs's deallocate_frames, release_frame, disown_frame and ChargedTables::allocate_table it changed.",
       "what": "Reached by stage 13's reclaim check on every test-boot: object::quota::charge_table and uncharge_table, mm::uncharge_owner's table and page arms, ChargedTables::allocate_table's marked charge, and reclaim_check.rs's tables_and_pages and faults. Not reached by any boot: allocate_table's two refusal arms, which uncharge a table's charge."
+    },
+    {
+      "landing": "time namespaces, stage 13's follow-on ported from park/stage13-timens (docs/NAMESPACES.md section 12.1, L.user.130; the consultant's review recorded in the landing's commit)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet, and user/space.rs's map_shared_code (now map_shared_code_near's caller) and the syscall and procfs sites it changed.",
+      "what": "Reached by stage 13's timens line on every test-boot: user::space::AddressSpace::replace_shared_code and map_shared_code_near (and vdso::retarget's swap, load ring). Not reached: retarget's refusal when the variant cannot be made, which a boot cannot provoke but its negative control showed."
     }
   ]
 }

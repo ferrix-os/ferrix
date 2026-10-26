@@ -2094,9 +2094,28 @@ package FerrixMemoryRequirements {
                 are each refused on both pages, 4 of 4.";
             attribute :>> parent = "H.MEM.18";
             attribute :>> unit = ("user::space::AddressSpace::map_shared_code",
+                "user::space::AddressSpace::map_shared_code_near",
                 "user::space::AddressSpace::add_region",
                 "user::space::AddressSpace::with_page", "user::space::permits",
                 "user::space::AddressSpace::protect");
+        }
+        // Split from L.user.76 (the consultant's T1, ledger 2026-10-14 line
+        // 966): the vDSO view swapped in place for a space entering a time
+        // namespace (docs/NAMESPACES.md section 12.1).
+        requirement <'L.user.130'> aSharedCodeViewIsReplacedInPlace : ItemLowLevel {
+            attribute :>> statement = "replace_shared_code shall give a space
+                another two-page shared code object at the place the space maps
+                the first, the first unmapped and the new one mapped as
+                map_shared_code maps one, leaving every other space's view
+                alone.";
+            attribute :>> criterion = "A space forked into a time namespace
+                that shifts a clock has the shifted object mapped at the first
+                one's place and the first unmapped, the parent's mapping
+                unchanged, and a grandchild in its parent's namespace keeps its
+                parent's view (the `timens` line).";
+            attribute :>> parent = "H.MEM.18";
+            attribute :>> unit = ("user::space::AddressSpace::replace_shared_code",
+                "user::space::AddressSpace::map_shared_code_near");
         }
         requirement <'L.user.131'> theVdsoIsClearOfWinesRange : ItemLowLevel {
             attribute :>> statement = "map_shared_code shall map a two-page object to
@@ -2110,7 +2129,8 @@ package FerrixMemoryRequirements {
                 image at exec::VDSO_END less a page, outside Wine's range, with the
                 stack's guard the next region above it (the `vdso` line).";
             attribute :>> parent = "H.SCHED.9";
-            attribute :>> unit = "user::space::AddressSpace::map_shared_code";
+            attribute :>> unit = ("user::space::AddressSpace::map_shared_code",
+                "user::space::AddressSpace::map_shared_code_near");
         }
         requirement <'L.user.77'> aSpaceFindsItsTrampoline : ItemLowLevel {
             attribute :>> statement = "shared_code_at shall answer where

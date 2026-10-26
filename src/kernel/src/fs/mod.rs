@@ -74,6 +74,7 @@ pub(crate) mod socket;
 pub(crate) mod sockname;
 pub mod sysfs;
 pub(crate) mod terminal;
+pub mod timens_check;
 pub mod timerfd;
 pub mod timerfd_check;
 pub mod userns_check;
