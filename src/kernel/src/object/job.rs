@@ -732,6 +732,19 @@ impl Job {
             .map_or(quota::DEFAULT_WEIGHT, Quota::weight)
     }
 
+    /// Its `cpu.idle`.
+    pub fn cpu_idle(&self) -> bool {
+        self.quota.as_ref().is_some_and(Quota::idle)
+    }
+
+    /// Set its `cpu.idle`. Whether it could be: the tree's root has none.
+    pub fn set_cpu_idle(&self, idle: bool) -> bool {
+        self.quota
+            .as_ref()
+            .map(|quota| quota.set_idle(idle))
+            .is_some()
+    }
+
     /// Set its `cpu.weight`. Whether it could be: the tree's root has none.
     pub fn set_cpu_weight(&self, weight: u32) -> bool {
         self.quota

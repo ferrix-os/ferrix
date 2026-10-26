@@ -59,6 +59,8 @@ pub enum Kind {
     CpuWeight,
     /// `cpu.weight.nice`.
     CpuWeightNice,
+    /// `cpu.idle`: whether the cgroup runs at the idle weight.
+    CpuIdle,
     /// `cpu.max`.
     CpuMax,
     /// `cpu.max.burst`: unused quota a period may carry to the next.
@@ -115,6 +117,7 @@ pub const FILES: &[File] = &[
         Controller::Cpu,
         true,
     ),
+    controlled("cpu.idle", Kind::CpuIdle, Controller::Cpu, true),
     controlled("cpu.max", Kind::CpuMax, Controller::Cpu, true),
     controlled("cpu.max.burst", Kind::CpuMaxBurst, Controller::Cpu, true),
     controlled(

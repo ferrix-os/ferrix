@@ -1785,6 +1785,12 @@ fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Resu
                 .ok()
                 .filter(|weight| (quota::MIN_WEIGHT..=quota::MAX_WEIGHT).contains(weight))
                 .ok_or(status::INVALID_ARGS)?;
+            // As cgroupfs refuses `cpu.weight` while `cpu.idle` is set
+            // (`docs/CGROUPS.md` §12): a weight set now would be lost when
+            // the job is let off, which puts it at 100.
+            if job.cpu_idle() {
+                return Err(status::BAD_STATE);
+            }
             job.set_cpu_weight(weight)
         }
     };

@@ -198,6 +198,10 @@ pub const MIN_WEIGHT: u32 = 1;
 /// The most `cpu.weight` takes.
 pub const MAX_WEIGHT: u32 = 10_000;
 
+/// The entity weight of a job with `cpu.idle` set, in task units: Linux's
+/// `WEIGHT_IDLEPRIO`, against 1024 for a task at nice 0.
+pub const IDLE_ENTITY_WEIGHT: i64 = 3;
+
 /// The least effective weight a task is given, however many share its job:
 /// Linux's `MIN_SHARES`. Zero would be refused by the run queue.
 const MIN_EFFECTIVE: u64 = 2;
@@ -248,6 +252,9 @@ struct Slot {
     bw_extra: AtomicU64,
     /// `cpu.weight`.
     weight: AtomicU32,
+    /// `cpu.idle`: whether it runs at [`IDLE_ENTITY_WEIGHT`] whatever its
+    /// `cpu.weight`.
+    idle: AtomicBool,
     /// The weight of its runnable tasks and busy children, in task units.
     load: AtomicI64,
     /// What it adds to its parent's `load` while it is busy.
@@ -284,6 +291,7 @@ impl Slot {
             bw_burst: AtomicU64::new(0),
             bw_extra: AtomicU64::new(0),
             weight: AtomicU32::new(DEFAULT_WEIGHT),
+            idle: AtomicBool::new(false),
             load: AtomicI64::new(0),
             contributed: AtomicI64::new(0),
             job: AtomicU64::new(0),
@@ -307,10 +315,35 @@ impl Slot {
     }
 
     /// Its weight as the scheduler counts it: `cpu.weight` 100 is one task
-    /// at nice 0.
+    /// at nice 0, and a job with `cpu.idle` set is [`IDLE_ENTITY_WEIGHT`].
     fn entity_weight(&self) -> i64 {
+        if self.idle.load(Ordering::Relaxed) {
+            return IDLE_ENTITY_WEIGHT;
+        }
         i64::from(self.weight.load(Ordering::Relaxed)) * i64::from(NICE_0_WEIGHT)
             / i64::from(DEFAULT_WEIGHT)
+    }
+
+    /// Make what it adds to its parent's load its entity weight now, if it
+    /// adds anything: a busy job's parent is told of a new weight at once,
+    /// and an idle job's next turn busy reads it. Every change is a swap or a
+    /// `fetch_update` that moves the parent's load by the exact difference,
+    /// so the load stays the sum of what the children add in every
+    /// interleaving. One window is stale, and was `set_weight`'s before
+    /// `cpu.idle` shared this: a reweigh between [`adjust`]'s read of the
+    /// entity weight as the job turns busy and its swap finds nothing added
+    /// and does nothing, and the job adds its old weight until its next
+    /// turn busy.
+    fn reweigh(&self) {
+        let fresh = self.entity_weight();
+        let swapped = self
+            .contributed
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                (old != 0).then_some(fresh)
+            });
+        if let Ok(old) = swapped {
+            adjust(self.parent.load(Ordering::Acquire), fresh - old);
+        }
     }
 }
 
@@ -385,6 +418,7 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
     taken.bw_burst.store(0, Ordering::Relaxed);
     taken.bw_extra.store(0, Ordering::Relaxed);
     taken.weight.store(DEFAULT_WEIGHT, Ordering::Relaxed);
+    taken.idle.store(false, Ordering::Relaxed);
     taken.load.store(0, Ordering::Relaxed);
     taken.job.store(0, Ordering::Relaxed);
     taken.budget.store(0, Ordering::Relaxed);
@@ -1161,17 +1195,17 @@ impl Quota {
         };
         slot.weight
             .store(weight.clamp(MIN_WEIGHT, MAX_WEIGHT), Ordering::Relaxed);
-        let fresh = slot.entity_weight();
-        // Only while it contributes: an idle job's next turn busy reads the
-        // new weight.
-        let swapped = slot
-            .contributed
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
-                (old != 0).then_some(fresh)
-            });
-        if let Ok(old) = swapped {
-            adjust(slot.parent.load(Ordering::Acquire), fresh - old);
-        }
+        slot.reweigh();
+    }
+
+    /// Its `cpu.idle`.
+    pub(crate) fn idle(&self) -> bool {
+        slot(self.index).is_some_and(|slot| slot.idle.load(Ordering::Relaxed))
+    }
+
+    /// Set its `cpu.idle`.
+    pub(crate) fn set_idle(&self, idle: bool) {
+        set_idle_at(self.index, idle);
     }
 }
 
@@ -1565,6 +1599,98 @@ fn burst_cases(index: u32, start: u64) -> Result<(), &'static str> {
     }
     held.bw_quota.store(UNLIMITED, Ordering::Release);
     Ok(())
+}
+
+/// Set slot `index`'s `cpu.idle`, as Linux's `sched_group_set_idle` does
+/// with weights: an idle job's entity weight is [`IDLE_ENTITY_WEIGHT`], and
+/// a busy job's parent is told at once.
+fn set_idle_at(index: u32, idle: bool) {
+    if let Some(slot) = slot(index) {
+        slot.idle.store(idle, Ordering::Relaxed);
+        slot.reweigh();
+    }
+}
+
+/// Stage 13's check of `cpu.idle`, on a job and two children claimed for it,
+/// each child holding one runnable task of weight 1024 so that both are busy
+/// and share the parent evenly, 512 a task. With one child at `cpu.weight`
+/// 10000 and then set idle, the parent's load is 1024 and 3 at once, the idle
+/// child's task runs at no more than 3 and its sibling's at more than 1000;
+/// set back, the parent's load and both tasks' weights are what they were at
+/// 10000.
+///
+/// # Errors
+///
+/// The first thing that was not so, by name.
+pub fn check_idle_weight() -> Result<(), &'static str> {
+    let parent = claim(NONE).map_err(|_| "idle check: no slot to claim")?;
+    let outcome = match (claim(parent), claim(parent)) {
+        (Ok(idle), Ok(busy)) => {
+            let outcome = idle_cases(parent, idle, busy);
+            release(idle);
+            release(busy);
+            outcome
+        }
+        (Ok(one), Err(_)) | (Err(_), Ok(one)) => {
+            release(one);
+            Err("idle check: no slot to claim")
+        }
+        (Err(_), Err(_)) => Err("idle check: no slot to claim"),
+    };
+    release(parent);
+    outcome
+}
+
+/// The cases of [`check_idle_weight`].
+fn idle_cases(parent: u32, idle: u32, busy: u32) -> Result<(), &'static str> {
+    let nice_0 = i64::from(NICE_0_WEIGHT);
+    let load = |index: u32| slot(index).map_or(i64::MIN, |slot| slot.load.load(Ordering::Acquire));
+    let even = NICE_0_WEIGHT / 2;
+    adjust(idle, nice_0);
+    adjust(busy, nice_0);
+    let outcome = (|| {
+        if (effective(idle, NICE_0_WEIGHT), effective(busy, NICE_0_WEIGHT)) != (even, even) {
+            return Err("idle check: two busy jobs' tasks did not share their parent evenly");
+        }
+        // At the most weight, so that the idle weight is shown to be the
+        // idle weight whatever the job's, and letting it off to restore its
+        // own.
+        let heavy = slot(idle).ok_or("idle check: a claimed slot is not there")?;
+        heavy.weight.store(MAX_WEIGHT, Ordering::Relaxed);
+        heavy.reweigh();
+        let own = heavy.entity_weight();
+        let before = (
+            load(parent),
+            effective(idle, NICE_0_WEIGHT),
+            effective(busy, NICE_0_WEIGHT),
+        );
+        if before.0 != own + nice_0 {
+            return Err("idle check: a busy job's weight did not reach its parent's load");
+        }
+        set_idle_at(idle, true);
+        if load(parent) != nice_0 + IDLE_ENTITY_WEIGHT {
+            return Err("a busy job set to cpu.idle did not give its parent the idle weight");
+        }
+        if effective(idle, NICE_0_WEIGHT) > 3 || effective(busy, NICE_0_WEIGHT) <= 1000 {
+            return Err(
+                "a task of a job with cpu.idle set did not run at the idle weight beside a busy \
+                 sibling",
+            );
+        }
+        set_idle_at(idle, false);
+        let after = (
+            load(parent),
+            effective(idle, NICE_0_WEIGHT),
+            effective(busy, NICE_0_WEIGHT),
+        );
+        if after != before {
+            return Err("a job let off cpu.idle did not run at its cpu.weight again");
+        }
+        Ok(())
+    })();
+    adjust(idle, -nice_0);
+    adjust(busy, -nice_0);
+    outcome
 }
 
 /// What `index` adds to its parent's load: its own weight while it is busy,
