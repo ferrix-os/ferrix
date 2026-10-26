@@ -51,6 +51,7 @@ pub(crate) mod kmsg;
 pub mod memfd_check;
 pub mod mmap_check;
 pub mod mount_check;
+pub mod mountperm_check;
 pub mod namespace_check;
 pub mod netns_check;
 pub(crate) mod nsfs;

@@ -1048,7 +1048,7 @@ it:
   findable with default attributes. Either create the attributes with the
   entry, or show that no `ptrace_may_access` can run in that window
   (the review of 5df02c3b; a BACKLOG row).
-* **Before N5.** A namespace's end writes out each filesystem whose last
+* **Still open after N5 (its port left it out, 2026-10-26).** A namespace's end writes out each filesystem whose last
   mount it drops, as a final unmount does on Linux. `Namespace`'s `Drop`
   disconnects its mounts and writes nothing, and btrfs commits on its own
   only `/`, `/data` and `/home`, so a disk mounted inside a namespace alone loses
@@ -1056,7 +1056,8 @@ it:
   class, as N2's B2 was). Not reachable today: only root mounts a disk, and
   every path that does -- bubblewrap's binds, the stage 12 disk -- shares
   its superblock with the first namespace, which `sync` and the periodic
-  commit reach. The check: `vdc` mounted inside a namespace alone, written,
+  commit reach; N5 lets a user namespace mount `tmpfs` alone, so it still
+  is not. The check: `vdc` mounted inside a namespace alone, written,
   the namespace ended, and a read-only mount reading it back. It also
   closes the gap `sync` leaves above.
 * **N5.** "A mount point counts in every namespace" is stricter for the
@@ -1699,3 +1700,98 @@ Not built, and differences from Linux:
 * `clone3` refuses `CLONE_NEWTIME` and `exec` does not enter the namespace
   for children, both where Linux does (above).
 
+**N5 (2026-10-01, os-7c; ported onto develop 2026-10-26).** Unprivileged mounting. `namespace::may_mount`
+is Linux's: `CAP_SYS_ADMIN` over the user namespace that owns the caller's
+mount namespace (M1), asked by `mount`, `umount2` and `pivot_root` before any
+flag. From a child user namespace a new mount is `tmpfs` alone and always
+`nosuid,nodev` (M2). A plain remount, which changes the filesystem under every
+mount of it, needs `CAP_SYS_ADMIN` over the user namespace that owns the
+filesystem (Linux's `s_user_ns`): the confined caller's for a `tmpfs` it
+mounted, the first for every other, recorded on the superblock at mount time,
+so a namespace's copy of a host filesystem stays the host's even after every
+host mount of it is gone. A copy of a mount namespace into one
+owned by a user namespace that did not own the original locks every mount's
+`ro`, `nosuid`, `nodev`, `noexec` and access-time mode, the bottom's too, and
+locks every mount but the bottom to its parent (M3, M4): a remount clearing a locked flag is `EPERM`,
+an unmount or detach of a locked mount alone `EINVAL`, a bind without
+`MS_REC` of a place a locked mount is on `EINVAL` (Linux's
+`has_locked_children`, which looks at the mounts on the source alone),
+`pivot_root` to a locked mount `EINVAL`, and a pivot moves the old root's
+lock to the new root. Removing or renaming a name another
+namespace has a mount on takes that mount off, as Linux does since 3.18, so
+an unprivileged mount pins nothing against its owner: a mount of the caller's
+own tree there is `EBUSY` (`Namespace::busy`), and one only another namespace
+has is taken off once the removal has succeeded -- for a rename, off what it
+replaced, the source's moving with it -- by `detach_elsewhere`, which holds
+each other namespace's change lock while it edits that table (the lock lives
+in the shared `Tree` for that), with the rename lock let go first.
+A namespace's end does **not** write out a filesystem whose last mount it
+held: N5's branch did, in `Namespace`'s `Drop`, which its review found runs
+in the reaper with preemption off and misses a filesystem two binds of the
+namespace hold; the port left it out. A user namespace mounts `tmpfs` alone,
+which has nothing to write out, so a disk is still root's to mount, and the
+row in the vulnerability analysis stays open.
+A new `tmpfs` is `1777` and owned by the mounter's filesystem ids, as Linux's
+is (landing `stage13-bwrap-user`), which is what lets bubblewrap make its new
+root as uid 1000; `mode=`, `uid=` and `gid=` are not read.
+`/proc/sys/user/max_user_namespaces` reads the limit, 4096 alive at once,
+and the next is `ENOSPC`. The `mountperm` line
+(FX-0900) drives every rule as uid 1000 and as the owner of a user namespace,
+makes user namespaces until one is `ENOSPC` and one again once they are let go,
+and the `mounts` line now also shows a bind of a `ro,nosuid,nodev,noexec`
+mount keeping and enforcing each flag (§8's "N2 repeats them on a bind").
+`max_user_namespaces` is read-only; writing it is not supported.
+
+**N5's review (consultant subagent of po6-bwrap, 2026-10-05, on 58dce8be1):
+not yet** (ledger line 378). Met from the pre-review: the plain remount by
+the superblock's owner, the bottom's flags locked, no new per-process state,
+no requirement ids owed. Owed before landing: `busy_or_detach` detaches
+another namespace's mounts before `rename`, `rmdir` or `unlink` is allowed
+and done, and for `rename`'s source too, where Linux detaches after success
+and only the replaced target; the namespace's write-out runs where its last
+reference goes, in the reaper with preemption off, not in `release` as said
+above, and `may_park` is a debug assertion only; a namespace holding two
+binds of a filesystem never writes it out (a host test with a counting
+filesystem and a control); `detach_elsewhere` edits another namespace's table
+without that namespace's change lock; the vulnerability analysis's N5 rows.
+Gated on 58dce8be1: `check` (`po6-bwrap-n5d-check`) and x86_64 under KVM
+(`po6-bwrap-n5d-x86`) passed.
+
+**N5's port (2026-10-26).** Ported three-way from `park/po6/n5` and
+`park/po6/bwrap-user` onto develop, answering the review's items: the
+detach after success and the replaced target alone (host test
+`another_namespaces_mount_comes_off_only_what_a_removal_or_rename_took`),
+the change lock taken (above), the namespace-end write-out taken out (above;
+its two items fall with it), and the vulnerability analysis's two rows.
+Its own review (a certification-consultant subagent of this session,
+2026-10-26): NOT YET, then answered here. B1, a hole the review of
+2026-10-05 missed: a lazy unmount took the locked mounts under an unlocked
+top off with it, so `MS_REC`-binding a locked tree under a top of one's own,
+`cd`-ing in and `umount -l`-ing the top showed what the locked mounts
+cover. Fixed as Linux's `disconnect_mount` (ce07d891): a locked mount whose
+parent goes too stays on it (`Mount::kept`, crossed by `mounted_on`, held by
+the parent alone, so no cycle, and let go of iteratively), in both detach
+paths; the review's probe is the host test
+`a_lazy_unmount_keeps_the_locked_mounts_under_it_covering`, the `mountperm`
+line has the step, and its negative control fired with `test-boot`. C3,
+`detach_elsewhere` lets go of the detached mounts' cached dentries and lists
+what it takes off with no spin lock held, fallibly; C5, the pinning step
+reads the child's `mountinfo`; C1 (one count of user namespaces for the
+machine) and C2 (a mount on a removed directory) are open residual rows in
+the vulnerability analysis. Owed on the gate host: B2, a `gate.sh control
+--expect` for each rule the `mountperm` line checks (M1, M2, M3, M4, the
+filesystem owner's remount, the pinning detach, B1), and the rows on the
+landing hash -- `check`, the three boots, and `test-bwrap` as uid 1000,
+which this container cannot run (bubblewrap's packages are fetched from
+deb.debian.org, which it cannot reach).
+Re-review the same day: **OK IF** -- B1's fix checked, with the
+consultant's own probes of both detach paths and of nine locked children
+under one top; one new flaw, met here: `reserve_kept` made room one child at
+a time, which `Vec::try_reserve` does not add up, so a fifth kept child
+would have grown its parent's list under the table's spin lock; it now
+counts each parent's children and makes room for them all at once (host
+test `a_lazy_unmount_keeps_every_locked_mount_in_room_made_first`, which
+fails with room made one at a time). The rest are the conditions owed on
+the gate host above: the controls through `gate.sh` (M1, M2, M3, M4, the
+filesystem owner's remount, the pinning detach, `kept_cover`), the rows on
+the landing hash, and `test-bwrap` as uid 1000.

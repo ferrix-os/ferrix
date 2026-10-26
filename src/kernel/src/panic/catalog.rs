@@ -2918,6 +2918,21 @@ pub static STAGE13_TIME_NAMESPACES: Explanation = Explanation {
     see: "src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs; src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs; src/kernel/src/syscall/namespace.rs",
 };
 
+/// For `check_mount_permissions` in `stages_check.rs`, when
+/// `fs::mountperm_check::run` fails.
+pub static STAGE13_MOUNT_PERMISSIONS: Explanation = Explanation {
+    code: "FX-0900",
+    title: "Mount permissions failed their self-check",
+    meaning: "`fs::mountperm_check::run` makes a process of uid 1000. Sharing the first namespace's mounts, or in a user namespace of its own that did not copy them, it must be refused mount (EPERM). After unshare(CLONE_NEWUSER | CLONE_NEWNS) it may mount a tmpfs, which comes out nosuid,nodev, and must be refused proc, devtmpfs, sysfs, cgroup2 and btrfs. A mount the first namespace made ro,nosuid,nodev and this copy holds may not have ro or nosuid cleared (EPERM), may be unmounted or detached by no one alone (EINVAL), and a bind of / without MS_REC over it is EINVAL. A plain MS_REMOUNT of the host's filesystem is EPERM and of its own tmpfs is allowed. A directory it mounted over in its own namespace can be removed by the first namespace.",
+    causes: &[
+        "`namespace::may_mount` answers true for a process that does not hold `CAP_SYS_ADMIN` over the mount namespace's owner.",
+        "`fsctl::sys_mount` lets a confined process mount a filesystem other than tmpfs, or leaves out nosuid,nodev.",
+        "`Namespace::copy_as` is called without `lock` for a copy its owner does not own, or `Namespace::remount`, `unmount_with`, `bind` or `pivot_root` ignore a lock.",
+        "`Namespace::busy` counts a mount of another namespace as a pin, or `detach_elsewhere` leaves it on a name that is gone.",
+    ],
+    see: "src/kernel/src/fs/mountperm_check.rs; src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/namespace.rs; src/lib/fs/common/vfs/src/namespace.rs",
+};
+
 /// For `check_semaphores` in `stages_check.rs`, when `syscall::sem_check::run`
 /// fails.
 pub static STAGE7_SEMAPHORES: Explanation = Explanation {
@@ -3544,6 +3559,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_NETWORK_NAMESPACES,
     &STAGE13_PROC_ACCESS,
     &STAGE8_CRASH_HOLD,
+    &STAGE13_MOUNT_PERMISSIONS,
     &STAGE9_OBJECTS,
     &STAGE9_ALLOCATION,
     &STAGE9_REFUSALS,

@@ -244,10 +244,14 @@ pub(crate) fn copy_namespace(
             fs::namespace_of(&context),
         )
     };
-    let copy = from.copy(&mut [&mut root, &mut cwd])?;
+    // A copy owned by a user namespace that does not own the one it is made
+    // from has every mount's flags locked and every mount locked to its
+    // parent (M3, M4): what the owner of the original did cannot be undone,
+    // or seen under.
+    let lock = !Arc::ptr_eq(&owner_of(&from), owner);
+    let owned: Arc<dyn core::any::Any + Send + Sync> = owner.clone();
+    let copy = from.copy_as(&mut [&mut root, &mut cwd], Some(owned), lock)?;
     let copy = fallible::try_arc(copy).map_err(|_| Errno::ENOMEM)?;
-    let owner: Arc<dyn core::any::Any + Send + Sync> = owner.clone();
-    copy.set_owner(owner);
     let displaced = {
         let mut context = context.lock();
         (
@@ -258,6 +262,63 @@ pub(crate) fn copy_namespace(
     };
     drop((displaced, from));
     Ok(())
+}
+
+/// The user namespace that owns the mount namespace `namespace`: the one that
+/// was current when it was made, the first for the kernel's own.
+pub(crate) fn owner_of(namespace: &Namespace) -> Arc<userns::UserNamespace> {
+    namespace
+        .owner()
+        .and_then(|held| held.downcast::<userns::UserNamespace>().ok())
+        .unwrap_or_else(|| Arc::clone(userns::first()))
+}
+
+/// The user namespace that owns the filesystem `mount` is of, Linux's
+/// `s_user_ns`: the confined caller's that mounted it, the first for every
+/// other.
+pub(crate) fn filesystem_owner_of(mount: &ferrix_vfs::Mount) -> Arc<userns::UserNamespace> {
+    mount
+        .filesystem_owner()
+        .and_then(|held| held.downcast::<userns::UserNamespace>().ok())
+        .unwrap_or_else(|| Arc::clone(userns::first()))
+}
+
+/// Linux's `do_remount` test for a plain remount, which changes the
+/// filesystem under every mount of it: `CAP_SYS_ADMIN` over the user
+/// namespace that owns the filesystem (N5). A namespace's copy of a host
+/// mount stays the host's filesystem however many of the host's own mounts
+/// of it are gone.
+///
+/// # Errors
+///
+/// `EPERM`.
+pub(crate) fn may_remount_filesystem(
+    process: &Process,
+    mount: &ferrix_vfs::Mount,
+) -> Result<(), Errno> {
+    let owner = filesystem_owner_of(mount);
+    if process.with_credentials(|held| userns::capable_over(held, &owner, CAP_SYS_ADMIN)) {
+        Ok(())
+    } else {
+        Err(Errno::EPERM)
+    }
+}
+
+/// Linux's `may_mount`: `CAP_SYS_ADMIN` over the user namespace that owns the
+/// caller's mount namespace. A process that shares the first namespace's
+/// mounts can never change them without being root (M1).
+///
+/// # Errors
+///
+/// `EPERM`.
+pub(crate) fn may_mount(process: &Process) -> Result<(), Errno> {
+    let namespace = fs::namespace_of(&process.fs_context().lock());
+    let owner = owner_of(&namespace);
+    if process.with_credentials(|held| userns::capable_over(held, &owner, CAP_SYS_ADMIN)) {
+        Ok(())
+    } else {
+        Err(Errno::EPERM)
+    }
 }
 
 /// `setns`: join the namespace a descriptor names, as Linux's `setns` does
