@@ -211,7 +211,11 @@ fn shape_files(harness: &mut Harness, job: &Group) -> Checked<()> {
     for (bad, errno, what) in [
         (&b"0\n"[..], Errno::EINVAL, "io.weight took 0"),
         (b"10001\n", Errno::EINVAL, "io.weight took 10001"),
-        (b"9:9 50\n", Errno::ENODEV, "io.weight took a disk that is not there"),
+        (
+            b"9:9 50\n",
+            Errno::ENODEV,
+            "io.weight took a disk that is not there",
+        ),
     ] {
         let refused = harness.write(&job.file("io.weight"), bad);
         harness.refused(refused.err(), errno, what)?;
@@ -221,7 +225,11 @@ fn shape_files(harness: &mut Harness, job: &Group) -> Checked<()> {
         return Err("io.latency does not read back a target");
     }
     let refused = harness.write(&job.file("io.latency"), b"251:0 lots=1\n");
-    harness.refused(refused.err(), Errno::EINVAL, "io.latency took a word it has no key for")?;
+    harness.refused(
+        refused.err(),
+        Errno::EINVAL,
+        "io.latency took a word it has no key for",
+    )?;
     job.set(harness, "io.latency", b"251:0 target=max\n")?;
     if !harness.reads(&job.file("io.latency"), b"") {
         return Err("io.latency's target=max did not take the target away");

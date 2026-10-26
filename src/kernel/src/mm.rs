@@ -433,7 +433,10 @@ fn allocate_program_frames(order: u8) -> Option<Frame> {
 /// [`quota::SLOT_LIMIT`]: crate::object::quota::SLOT_LIMIT
 pub(crate) const TABLE_OWNER: u32 = 1 << 31;
 
-const _: () = assert!(crate::object::quota::SLOT_LIMIT < TABLE_OWNER as u64);
+const _: () = assert!(
+    crate::object::quota::SLOT_LIMIT < TABLE_OWNER as u64,
+    "a quota slot number must never carry the page-table owner mark"
+);
 
 /// Take back the charge of a frame whose record named `owner`: a table's or
 /// a page's, by [`TABLE_OWNER`]; nothing for nobody.

@@ -860,7 +860,7 @@ fn native_child_stays(
             .iter()
             .position(|&byte| byte == b'[')
             .unwrap_or(link.len());
-        link[at..].to_vec()
+        link.get(at..).unwrap_or_default().to_vec()
     };
     same_small &= number(ns_link(page, child.pid(), b"time")?)
         == number(ns_link(page, creator.pid(), b"time_for_children")?);

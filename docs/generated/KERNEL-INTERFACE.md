@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2386 declarations in the core's files, 175 in the item's; 73 checks-only.
+2402 declarations in the core's files, 175 in the item's; 78 checks-only.
 
 ## ferrix-kernel-core
 
@@ -809,7 +809,7 @@ checks above is `pub` for raised checks (F3).
 | `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report` | struct | item, load, bin |  |
 | `Report::barriers` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Report::boot` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::boot` | field | load, bin |  |
 | `Report::differing` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::hardened` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::processors` | field | item, load, bin |  |
@@ -1987,10 +1987,12 @@ checks above is `pub` for raised checks (F3).
 | `Job::admits` | method | load |  |
 | `Job::adopt` | method | load |  |
 | `Job::bandwidth` | method | load |  |
+| `Job::burst` | method | load |  |
 | `Job::change_subtree_control` | method | load |  |
 | `Job::children` | method | load |  |
 | `Job::contains` | method | item, load |  |
 | `Job::counted` | method | load, bin |  |
+| `Job::cpu_idle` | method | item, load |  |
 | `Job::cpu_times` | method | load |  |
 | `Job::cpu_weight` | method | item, load |  |
 | `Job::descendants` | method | load |  |
@@ -2031,6 +2033,8 @@ checks above is `pub` for raised checks (F3).
 | `Job::remove_named_child` | method | load |  |
 | `Job::sealed` | method | load, bin |  |
 | `Job::set_bandwidth` | method | load |  |
+| `Job::set_burst` | method | load |  |
+| `Job::set_cpu_idle` | method | load |  |
 | `Job::set_cpu_weight` | method | item, load |  |
 | `Job::set_freeze` | method | load |  |
 | `Job::set_limit` | method | item, load |  |
@@ -2194,7 +2198,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `DEFAULT_WEIGHT` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `DEFAULT_WEIGHT` | const | load |  |
 | `MAX_WEIGHT` | const | item, load |  |
 | `MIN_WEIGHT` | const | item, load |  |
 | `NONE` | const | load |  |
@@ -2206,6 +2210,8 @@ checks above is `pub` for raised checks (F3).
 | `bandwidth_in_use` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `charge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `charging_nobody` | fn | load |  |
+| `check_burst_carry` | fn | load (checks) | checks-only |
+| `check_idle_weight` | fn | load (checks) | checks-only |
 | `check_pending_charge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `contributed` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `count` | fn | load |  |
@@ -2288,12 +2294,14 @@ checks above is `pub` for raised checks (F3).
 | `STAGE12_WRITE` | static | bin |  |
 | `STAGE13_CGROUPFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_MOUNT_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_MOUNT_PERMISSIONS` | static | bin (checks) | checks-only |
 | `STAGE13_NETWORK_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_PID_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_PROC_ACCESS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_SECCOMP` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_SECCOMP_FILTERS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_SMALL_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_TIME_NAMESPACES` | static | bin (checks) | checks-only |
 | `STAGE13_USER_DISPATCH` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE13_USER_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE1_HANDOFF` | static | bin |  |
@@ -2820,12 +2828,19 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `ENTRY_HEAP` | const | load |  |
+| `Asked` | enum | load |  |
+| `install_shrinker` | fn | load |  |
 | `reclaim` | fn | load |  |
+| `reclaim_asked` | fn | load |  |
 | `resident` | fn | load |  |
 | `totals` | fn | load |  |
 | `Reclaimed` | struct | - |  |
 | `Totals` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Reclaimed::stolen` | field | load |  |
+| `Shrinker` | type | - |  |
+| `Reclaimed::heap` | field | load, bin |  |
+| `Reclaimed::bytes` | method | item, load, bin |  |
+| `Reclaimed::gave` | method | load |  |
+| `Reclaimed::stolen` | method | load (checks) | checks-only |
 | `Totals::dirty` | field | load |  |
 | `Totals::disk` | field | load, bin |  |
 | `Totals::memory` | field | load, bin |  |
@@ -2902,6 +2917,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
+| `AddressSpace::replace_shared_code` | method | load |  |
 | `AddressSpace::resident_pages` | method | load |  |
 | `AddressSpace::root_table` | method | item, load |  |
 | `AddressSpace::set_ceiling` | method | load |  |

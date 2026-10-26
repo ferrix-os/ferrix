@@ -666,7 +666,9 @@ fn on_demand_steps(
     if held > (PAGES - ASKED_PAGES) * PAGE_SIZE
         || group.number(harness, "memory.stat", "pgsteal")? < ASKED_PAGES
     {
-        crate::console::println!("  reclaim  memory.reclaim of {ASKED_PAGES} pages left {held} bytes");
+        crate::console::println!(
+            "  reclaim  memory.reclaim of {ASKED_PAGES} pages left {held} bytes"
+        );
         return Err("a memory.reclaim write did not give back what it asked for");
     }
 
@@ -679,8 +681,10 @@ fn on_demand_steps(
     if group.number(harness, "memory.stat", "file")? != 0
         || group.number(harness, "memory.stat", "shmem")? != SHMEM_PAGES * PAGE_SIZE
     {
-        return Err("a memory.reclaim short of its size did not give back all the clean cache, \
-             and only it");
+        return Err(
+            "a memory.reclaim short of its size did not give back all the clean cache, \
+             and only it",
+        );
     }
     // Asked to stop before a round, nothing is taken; at no scope, nothing
     // may be asked for.
@@ -699,7 +703,11 @@ fn on_demand_steps(
         return Err("a reclaim asked for at no scope was not Short, or of nothing not Given");
     }
     let bad = harness.write(&group.file("memory.reclaim"), b"max\n");
-    harness.refused(bad.err(), Errno::EINVAL, "a memory.reclaim of `max` was not EINVAL")?;
+    harness.refused(
+        bad.err(),
+        Errno::EINVAL,
+        "a memory.reclaim of `max` was not EINVAL",
+    )?;
 
     if sibling.number(harness, "memory.stat", "file")? != SIBLING_PAGES * PAGE_SIZE
         || sibling.number(harness, "memory.stat", "pgsteal")? != 0
@@ -780,7 +788,12 @@ fn dentries_steps(harness: &mut Harness, group: &Group, sibling: &Group) -> Chec
         .map_err(|_| "a memory.reclaim its cached dentries could meet was refused")?;
     misses(group, 1);
     let done = crate::user::cache::reclaim(group.slot(), 1);
-    if done.stolen != 0 || done.heap < DENTRY_BYTES {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a raised check: `Reclaimed::stolen` is made pub for the checks alone"
+    )]
+    let stolen = done.stolen();
+    if stolen != 0 || done.heap < DENTRY_BYTES {
         return Err("a reclaim at a cgroup with no pages and cached dentries gave back no heap");
     }
     Ok(cached - after)
@@ -802,7 +815,9 @@ fn tables_and_pages(harness: &Harness, group: &Group) -> Checked<(u64, u64)> {
         return Err("memory.stat's anon or pagetables did not count a program's pages or tables");
     }
     if anon + tables + rest != current {
-        return Err("memory.stat's anon, file, kernel, pagetables and shmem are not memory.current");
+        return Err(
+            "memory.stat's anon, file, kernel, pagetables and shmem are not memory.current",
+        );
     }
     Ok((anon, tables))
 }
@@ -829,7 +844,7 @@ fn faults(harness: &mut Harness) -> Checked<()> {
         return Err("memory.stat's pgfault did not count the faults of the cgroup's program");
     }
     let tables_and_pages = tables_and_pages(harness, &group)?;
-    let _ = space
+    space
         .unmap(FAULTS_AT, FAULTS * PAGE_SIZE)
         .map_err(|_| "the pgfault check's mapping would not go")?;
     let (anon, tables) = tables_and_pages;

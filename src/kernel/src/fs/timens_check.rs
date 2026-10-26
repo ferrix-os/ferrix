@@ -389,6 +389,10 @@ fn boot_time_views(inside: &mut Page<'_>, tally: &mut Tally<'_>) -> Result<(), &
 /// host's: a sleep, a timerfd and a futex wait each take their time, where a
 /// deadline read as the host's would be long past (the monotonic offset is
 /// negative).
+#[expect(
+    clippy::too_many_lines,
+    reason = "one case after another: the sleep, the timerfd and the futex wait"
+)]
 fn absolute_deadlines(
     inside: &mut Page<'_>,
     child: &Arc<Process>,

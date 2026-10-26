@@ -309,12 +309,7 @@ fn probes(report: &mut Report) -> Result<(), &'static str> {
     }
     // A flag that is not built, or that Linux does not know, is refused before
     // the program is read: `EINVAL`, and never `EFAULT`.
-    for flags in [
-        NEW_LISTENER,
-        WAIT_KILLABLE_RECV,
-        UNKNOWN_FLAG,
-        1 << 31,
-    ] {
+    for flags in [NEW_LISTENER, WAIT_KILLABLE_RECV, UNKNOWN_FLAG, 1 << 31] {
         if env.seccomp(SET_MODE_FILTER, flags, 0) != Err(Errno::EINVAL) {
             return Err("an unknown seccomp flag was answered EFAULT");
         }

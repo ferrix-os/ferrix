@@ -206,7 +206,7 @@ pub const MAX_WEIGHT: u32 = 10_000;
 
 /// The entity weight of a job with `cpu.idle` set, in task units: Linux's
 /// `WEIGHT_IDLEPRIO`, against 1024 for a task at nice 0.
-pub const IDLE_ENTITY_WEIGHT: i64 = 3;
+pub(crate) const IDLE_ENTITY_WEIGHT: i64 = 3;
 
 /// The least effective weight a task is given, however many share its job:
 /// Linux's `MIN_SHARES`. Zero would be refused by the run queue.
@@ -258,7 +258,7 @@ struct Slot {
     bw_extra: AtomicU64,
     /// `cpu.weight`.
     weight: AtomicU32,
-    /// `cpu.idle`: whether it runs at [`IDLE_ENTITY_WEIGHT`] whatever its
+    /// `cpu.idle`: whether it runs at `IDLE_ENTITY_WEIGHT` whatever its
     /// `cpu.weight`.
     idle: AtomicBool,
     /// The weight of its runnable tasks and busy children, in task units.
@@ -321,7 +321,7 @@ impl Slot {
     }
 
     /// Its weight as the scheduler counts it: `cpu.weight` 100 is one task
-    /// at nice 0, and a job with `cpu.idle` set is [`IDLE_ENTITY_WEIGHT`].
+    /// at nice 0, and a job with `cpu.idle` set is `IDLE_ENTITY_WEIGHT`.
     fn entity_weight(&self) -> i64 {
         if self.idle.load(Ordering::Relaxed) {
             return IDLE_ENTITY_WEIGHT;
@@ -650,7 +650,11 @@ fn set_burst_at(index: u32, burst: u64) {
 /// check) grants no more than a burst that fits could.
 fn carry_cap(slot: &Slot, quota: u64) -> u64 {
     let burst = slot.bw_burst.load(Ordering::Acquire);
-    if quota == UNLIMITED { 0 } else { burst.min(quota) }
+    if quota == UNLIMITED {
+        0
+    } else {
+        burst.min(quota)
+    }
 }
 
 /// Before a new period's use is cleared: the most it can be carried, so that
@@ -1562,6 +1566,7 @@ fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
 /// # Errors
 ///
 /// The first thing that was not so, by name.
+// CHECKS-ONLY: fs/cgroupfs/cpu_check.rs
 pub fn check_burst_carry(now: u64) -> Result<(), &'static str> {
     let index = claim(NONE).map_err(|_| "burst check: no slot to claim")?;
     let outcome = burst_cases(index, now);
@@ -1606,8 +1611,7 @@ fn burst_cases(index: u32, start: u64) -> Result<(), &'static str> {
         return Err("a period running on what cpu.max.burst carried was throttled at its quota");
     }
     charge_bandwidth(index, next + 3, 6 * MS);
-    if throttled_until(index, next + 4) != Some(next + period) || counted(Counter::Throttled) != 1
-    {
+    if throttled_until(index, next + 4) != Some(next + period) || counted(Counter::Throttled) != 1 {
         return Err("a period past its quota and its carried burst was not throttled");
     }
     let after = next + period;
@@ -1639,7 +1643,7 @@ fn burst_cases(index: u32, start: u64) -> Result<(), &'static str> {
 }
 
 /// Set slot `index`'s `cpu.idle`, as Linux's `sched_group_set_idle` does
-/// with weights: an idle job's entity weight is [`IDLE_ENTITY_WEIGHT`], and
+/// with weights: an idle job's entity weight is `IDLE_ENTITY_WEIGHT`, and
 /// a busy job's parent is told at once.
 fn set_idle_at(index: u32, idle: bool) {
     if let Some(slot) = slot(index) {
@@ -1659,6 +1663,7 @@ fn set_idle_at(index: u32, idle: bool) {
 /// # Errors
 ///
 /// The first thing that was not so, by name.
+// CHECKS-ONLY: fs/cgroupfs/cpu_check.rs
 pub fn check_idle_weight() -> Result<(), &'static str> {
     let parent = claim(NONE).map_err(|_| "idle check: no slot to claim")?;
     let outcome = match (claim(parent), claim(parent)) {
@@ -1686,7 +1691,11 @@ fn idle_cases(parent: u32, idle: u32, busy: u32) -> Result<(), &'static str> {
     adjust(idle, nice_0);
     adjust(busy, nice_0);
     let outcome = (|| {
-        if (effective(idle, NICE_0_WEIGHT), effective(busy, NICE_0_WEIGHT)) != (even, even) {
+        if (
+            effective(idle, NICE_0_WEIGHT),
+            effective(busy, NICE_0_WEIGHT),
+        ) != (even, even)
+        {
             return Err("idle check: two busy jobs' tasks did not share their parent evenly");
         }
         // At the most weight, so that the idle weight is shown to be the
