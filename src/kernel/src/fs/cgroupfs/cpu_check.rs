@@ -21,6 +21,11 @@
 //! `cpu.max` from going under it; and a quota slot charged at instants the
 //! check chooses carries the runtime a period left unused, up to the burst,
 //! into the next, and counts the burst a period used.
+//!
+//! `cpu.idle` reads 0, takes 0 or 1, shows `cpu.weight` 1 and refuses a
+//! weight while set, and leaves the cgroup at weight 100; and a busy job set
+//! idle gives its parent the idle weight, its task running at that weight
+//! beside a busy sibling.
 
 use alloc::vec::Vec;
 
@@ -65,6 +70,7 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u64> {
     let outcome = pending()
         .and_then(|()| files(harness))
         .and_then(|()| burst(harness))
+        .and_then(|()| idle(harness))
         .and_then(|()| throttling(harness));
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
     let removed = harness.rmdir(b"/check-c");
@@ -209,6 +215,61 @@ fn burst(harness: &mut Harness) -> Checked<()> {
     let _ = harness.write(b"/check-c/cpu.max.burst", b"0");
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     outcome
+}
+
+/// `cpu.idle`'s file on `/check-c`, left at 0, and the weight it gives.
+fn idle(harness: &mut Harness) -> Checked<()> {
+    let outcome = idle_files(harness).and_then(|()| idle_weight());
+    let _ = harness.write(b"/check-c/cpu.idle", b"0");
+    outcome
+}
+
+/// `cpu.idle` reads and writes as `cpu_idle_write_s64` and
+/// `sched_group_set_idle` have it, and `cpu.weight` beside it as
+/// `sched_group_set_shares` and `cpu_weight_read_u64` do. No requirement
+/// names this yet: its own id is to be reserved on `develop` first (the
+/// consultant's condition 3 for `cpu.idle`, 2026-10-26; the follow-ons
+/// page's row); the parse is host-tested in `ferrix-cgroupfs`.
+fn idle_files(harness: &mut Harness) -> Checked<()> {
+    if !harness.reads(b"/check-c/cpu.idle", b"0\n") {
+        return Err("a new cgroup's cpu.idle does not read 0");
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.weight", b"300")
+        .map_err(|_| "cpu.weight refused 300")?;
+    let _ = harness
+        .write(b"/check-c/cpu.idle", b"1\n")
+        .map_err(|_| "cpu.idle refused 1")?;
+    if !harness.reads(b"/check-c/cpu.idle", b"1\n")
+        || !harness.reads(b"/check-c/cpu.weight", b"1\n")
+    {
+        return Err("a cgroup with cpu.idle 1 does not read it back, or cpu.weight 1 beside it");
+    }
+    let refused = harness.write(b"/check-c/cpu.weight", b"200");
+    harness.refused(
+        refused.err(),
+        Errno::EINVAL,
+        "cpu.weight took a weight while cpu.idle was set",
+    )?;
+    let refused = harness.write(b"/check-c/cpu.idle", b"2");
+    harness.refused(refused.err(), Errno::EINVAL, "cpu.idle took 2")?;
+    let _ = harness
+        .write(b"/check-c/cpu.idle", b"0")
+        .map_err(|_| "cpu.idle refused 0")?;
+    if !harness.reads(b"/check-c/cpu.idle", b"0\n")
+        || !harness.reads(b"/check-c/cpu.weight", b"100\n")
+    {
+        return Err("a cgroup let off cpu.idle is not at cpu.weight 100");
+    }
+    Ok(())
+}
+
+/// The weight `cpu.idle` gives, on slots of the item's own check
+/// (`object::quota::check_idle_weight`).
+///
+/// Verifies: L.object.185
+fn idle_weight() -> Checked<()> {
+    crate::object::quota::check_idle_weight()
 }
 
 /// `cpu.max.burst` reads and writes as `cpu_cfs_burst_write_u64` and

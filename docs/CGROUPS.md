@@ -719,7 +719,42 @@ end of that period. Until 2026-10-16 it slept in slices of a millisecond and
 asked at each, and those looks were charged to the job whose quota they were
 waiting out, a throttled job using a quarter more than its quota on an idle
 host (F-78). `cpu.max` throttles a
-native task too, a ring-3 driver included. `cpu.idle` is not built.
+native task too, a ring-3 driver included.
+
+**`cpu.idle` (2026-10-26, L.object.185).** A cgroup with `cpu.idle` 1 runs at
+the entity weight 3, Linux's `WEIGHT_IDLEPRIO`, against 1024 for a task at
+nice 0, whatever its `cpu.weight` (`quota::Slot::entity_weight`), and a busy
+job's parent is told at once (`Slot::reweigh`, which `cpu.weight`'s writes
+share). Its files follow `sched_group_set_idle` and `sched_group_set_shares`:
+`cpu.idle` takes 0 or 1 read by `kstrtoll` and anything else is `EINVAL`;
+while it is set `cpu.weight` reads 1 (the idle weight as a cgroup weight) and
+a write of `cpu.weight` or `cpu.weight.nice` is `EINVAL`; a cgroup let off it
+is at `cpu.weight` 100 again, whatever it had before, and the same value
+written again changes nothing. Linux also keeps an idle cgroup's tasks from
+preempting a busy sibling's on wakeup (`sched_idle` entities); Ferrix's fair
+class has no such rule, so the weight is the whole of it. The `cpu` line of
+stage 13 checks the files and, on slots of its own, the weights at
+`cpu.weight` 10000 (`quota::check_idle_weight`); the files' semantics and
+`cpu.weight` read as 1 have no requirement of their own yet, since a new id is
+reserved on `develop` first (the follow-ons page). `cpu.weight` reads 1 while
+idle as the clamp in Linux's `sched_weight_to_cgroup` gives it (the
+consultant reads that clamp as 6.12's and later; before it the file read 0;
+not checked against the source here). A native `job_set_quota` of the weight
+is `BAD_STATE` while the job is idle, as the file's write is `EINVAL`: a
+weight set then would be lost when the job is let off. Letting a job off is
+audited as the `cpu.weight` write it amounts to (`CGROUP_LIMIT`,
+`CPU_WEIGHT` 100); `cpu.idle` itself is not audited, as `cpu.max.burst` is
+not. The reweigh shares `cpu.weight`'s one stale window (`Slot::reweigh`):
+a change made as the job turns busy is read at its next turn busy.
+
+Negative controls, run with `test-boot` on AArch64 and owed through
+`gate.sh control --expect`: the idle weight ignored and the parent not told
+of the change both stopped the boot with "a busy job set to cpu.idle did not
+give its parent the idle weight"; the parent not told of the job let off
+stopped it with "a job let off cpu.idle did not run at its cpu.weight
+again". **Where it stands (2026-10-26):** the consultant's OK IF 1-9 (a
+certification-consultant subagent; the ledger line is owed on the gate host),
+recorded in the landing's commit.
 
 **`cpu.max.burst` (2026-10-26, L.object.184).** A job may carry the runtime a
 period left unused into the next, up to its burst, as Linux's

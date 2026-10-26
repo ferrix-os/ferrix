@@ -1,4 +1,4 @@
-//! The `cpu` controller's files: `cpu.max`, `cpu.max.burst`,
+//! The `cpu` controller's files: `cpu.max`, `cpu.max.burst`, `cpu.idle`,
 //! `cpu.weight.nice` and `cpu.stat`.
 //!
 //! Parsed and printed as Linux's `kernel/sched/core.c` does (`cpu_max_write`,
@@ -120,6 +120,35 @@ pub fn burst_fits(quota: Option<u64>, burst: u64) -> bool {
     quota.is_none_or(|quota| {
         burst <= quota && quota.saturating_add(burst).saturating_mul(1000) <= MAX_QUOTA_NS
     })
+}
+
+/// Parse a write to `cpu.idle`, as `cpu_idle_write_s64` and
+/// `sched_group_set_idle` take it: a number read by `kstrtoll` with base 0,
+/// 0 or 1.
+///
+/// # Errors
+///
+/// What `kstrtoll` refuses, as it refuses it, and [`Refusal::Invalid`] for
+/// any other number.
+pub fn parse_idle(text: &[u8]) -> Result<bool, Refusal> {
+    let text = strip(text);
+    let (negative, digits) = match text.split_first() {
+        // `kstrtoll`'s negative branch reads the rest with `_kstrtoull`,
+        // which takes no `+`.
+        Some((b'-', [b'+', ..])) => return Err(Refusal::Invalid),
+        Some((b'-', rest)) => (true, rest),
+        _ => (false, text),
+    };
+    let magnitude = crate::write::kstrtoull(digits)?;
+    // Past `i64` is `kstrtoll`'s `ERANGE`.
+    if magnitude > i64::MAX as u64 + u64::from(negative) {
+        return Err(Refusal::Range);
+    }
+    match (negative, magnitude) {
+        (_, 0) => Ok(false),
+        (false, 1) => Ok(true),
+        _ => Err(Refusal::Invalid),
+    }
 }
 
 /// Append `cpu.max`: `max 100000` or `50000 100000`.

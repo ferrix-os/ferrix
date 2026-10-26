@@ -955,7 +955,30 @@ package FerrixObjectRequirements {
                 as 10000; setting a busy job's weight changes its parent's load by
                 the difference of the scaled weights.";
             attribute :>> parent = "H.SCHED.3";
-            attribute :>> unit = "object::quota::Quota::set_weight";
+            attribute :>> unit = ("object::quota::Quota::set_weight",
+                "object::quota::Slot::reweigh");
+        }
+        // cpu.idle (docs/CGROUPS.md section 12): of the follow-ons
+        // L.object.184-187 were reserved for; 186-187 (io.weight) stay
+        // reserved.
+        requirement <'L.object.185'> anIdleJobHasTheIdleWeight : ItemLowLevel {
+            attribute :>> statement = "A job with cpu.idle set shall have the
+                entity weight 3, Linux's WEIGHT_IDLEPRIO, whatever its
+                cpu.weight, and its cpu.weight's again once let off; setting or
+                clearing it shall change a busy job's contribution to its
+                parent's load at once.";
+            attribute :>> criterion = "Two busy jobs of one task of weight 1024
+                each, beneath one parent, run at 512 each; with one at
+                cpu.weight 10000 and then set idle, the parent's load is 1027
+                at once, the idle job's task runs at no more than 3 and its
+                sibling's at more than 1000; let off, the parent's load and
+                both tasks' weights are what they were at cpu.weight 10000
+                (the cpu line of stage 13, object::quota::check_idle_weight).";
+            attribute :>> parent = "H.SCHED.3";
+            attribute :>> unit = ("object::quota::Slot::entity_weight",
+                "object::quota::Slot::reweigh", "object::quota::set_idle_at",
+                "object::quota::Quota::set_idle", "object::quota::Quota::idle",
+                "object::job::Job::set_cpu_idle", "object::job::Job::cpu_idle");
         }
         requirement <'L.object.160'> theCarriedWeightIsTheWideFormula : ItemLowLevel {
             attribute :>> statement = "quota::effective shall carry a task's weight up

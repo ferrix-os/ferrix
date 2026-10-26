@@ -901,9 +901,10 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
             b"0\n"
         }),
         Kind::Kill | Kind::MemoryReclaim => {}
-        Kind::CpuWeight => render::number(&mut out, u64::from(job.cpu_weight())),
+        Kind::CpuWeight => render::number(&mut out, u64::from(shown_weight(job))),
+        Kind::CpuIdle => render::number(&mut out, u64::from(job.cpu_idle())),
         Kind::CpuWeightNice => {
-            let nice = ferrix_cgroupfs::cpu::nice_from_weight(job.cpu_weight());
+            let nice = ferrix_cgroupfs::cpu::nice_from_weight(shown_weight(job));
             out.extend_from_slice(alloc::format!("{nice}\n").as_bytes());
         }
         Kind::CpuMax => {
@@ -1200,8 +1201,45 @@ fn set_burst(job: &Job, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// `job`'s `cpu.weight` as its files show it: with `cpu.idle` set, Linux's
+/// `tg->shares` is the idle weight, which `cpu.weight` reads as 1.
+fn shown_weight(job: &Job) -> u32 {
+    if job.cpu_idle() {
+        quota::MIN_WEIGHT
+    } else {
+        job.cpu_weight()
+    }
+}
+
+/// A write to `cpu.idle`, as `sched_group_set_idle` makes it: the same value
+/// again changes nothing, and a cgroup let off it is at `cpu.weight` 100
+/// again, whatever it had before.
+fn set_idle(job: &Job, data: &[u8]) -> Result<()> {
+    let idle = ferrix_cgroupfs::cpu::parse_idle(data).map_err(errno)?;
+    if idle == job.cpu_idle() {
+        return Ok(());
+    }
+    let _ = job.set_cpu_idle(idle);
+    if !idle && job.set_cpu_weight(quota::DEFAULT_WEIGHT) {
+        // The weight changed as surely as a write of `cpu.weight` changes
+        // it; `cpu.idle` itself is not audited, as `cpu.max.burst` is not.
+        audit::limit_set(
+            audit::CGROUP_LIMIT,
+            writer(),
+            job.id(),
+            ferrix_audit::resource::CPU_WEIGHT,
+            u64::from(quota::DEFAULT_WEIGHT),
+        );
+    }
+    Ok(())
+}
+
 /// Set `job`'s `cpu.weight`, from either file that does, and record it.
-fn set_weight(job: &Job, weight: u32) {
+/// `EINVAL` while its `cpu.idle` is set, as `sched_group_set_shares` refuses.
+fn set_weight(job: &Job, weight: u32) -> Result<()> {
+    if job.cpu_idle() {
+        return Err(Errno::EINVAL);
+    }
     if job.set_cpu_weight(weight) {
         audit::limit_set(
             audit::CGROUP_LIMIT,
@@ -1211,6 +1249,7 @@ fn set_weight(job: &Job, weight: u32) {
             u64::from(weight),
         );
     }
+    Ok(())
 }
 
 /// A write of `data` to a file of `job`, opened by `opener`.
@@ -1269,10 +1308,11 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
         }
         Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => set_mark(job, kind, data)?,
         Kind::MemoryReclaim => reclaim(job, data)?,
-        Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?),
+        Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?)?,
         Kind::CpuWeightNice => {
-            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?);
+            set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?)?;
         }
+        Kind::CpuIdle => set_idle(job, data)?,
         Kind::IoMax => set_io_max(job, data)?,
         Kind::CpuMax => set_cpu_max(job, data)?,
         Kind::CpuMaxBurst => set_burst(job, data)?,

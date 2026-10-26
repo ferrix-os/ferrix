@@ -572,6 +572,27 @@ fn cpu_max_burst_is_read_as_cpu_cfs_burst_write_u64_reads_it() {
 }
 
 #[test]
+fn cpu_idle_takes_zero_or_one() {
+    use crate::cpu;
+    assert_eq!(cpu::parse_idle(b"1\n"), Ok(true));
+    assert_eq!(cpu::parse_idle(b"0"), Ok(false));
+    assert_eq!(cpu::parse_idle(b"0x1"), Ok(true));
+    assert_eq!(cpu::parse_idle(b"2"), Err(Refusal::Invalid));
+    assert_eq!(cpu::parse_idle(b"-1"), Err(Refusal::Invalid));
+    assert_eq!(cpu::parse_idle(b"yes"), Err(Refusal::Invalid));
+    assert_eq!(cpu::parse_idle(b"-0"), Ok(false));
+    assert_eq!(cpu::parse_idle(b"+1"), Ok(true));
+    assert_eq!(cpu::parse_idle(b"-+0"), Err(Refusal::Invalid));
+    assert_eq!(cpu::parse_idle(b"9223372036854775808"), Err(Refusal::Range));
+    let cpu_on = Set::EMPTY.with(Controller::Cpu);
+    assert_eq!(
+        files::named(b"cpu.idle", false, cpu_on).map(|file| (file.kind, file.mode())),
+        Some((Kind::CpuIdle, 0o644))
+    );
+    assert_eq!(files::named(b"cpu.idle", true, cpu_on), None);
+}
+
+#[test]
 fn cpu_weight_takes_one_to_ten_thousand() {
     assert_eq!(write::parse_weight(b"100\n"), Ok(100));
     assert_eq!(write::parse_weight(b"1"), Ok(1));

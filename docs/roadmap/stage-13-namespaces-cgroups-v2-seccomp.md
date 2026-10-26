@@ -301,11 +301,12 @@ a writable mount's clean pages (f0bc9ab2d, 2026-10-15, L.object.188-190); and
 the cgroupfs flakes' fixes (fl-cg, 2026-10-16). **The stage is done (2026-10-21):**
 its scope is what `main` holds, and its exit is met. Time namespaces,
 unprivileged mounting (N5), `io.weight` and `io.latency`,
-`cpu.idle`, the dentry and inode caches' reclaim, `anon`
+the dentry and inode caches' reclaim, `anon`
 and `pagetables` in `memory.stat` and Linux's `seccomp_bpf` selftest are not
 built; they are the [follow-ons](follow-ons.md), with their branches and the
-reserved ids L.object.182 and 185-187. `memory.reclaim` and `cpu.max.burst`,
-the first of them built, followed on 2026-10-26 (L.object.183 and 184).
+reserved ids L.object.182 and 186-187. `memory.reclaim`, `cpu.max.burst` and
+`cpu.idle`, the first of them built, followed on 2026-10-26 (L.object.183 to
+185).
 
 **Where stage 13 stood (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
