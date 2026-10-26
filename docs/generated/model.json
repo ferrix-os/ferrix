@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8f6ad70e6d323553cb86e504b9a2fc61c6c0e0213fef06d674ccd436a0d30492",
+  "digest": "65e9af6e6db5f3db8e3060d3a140d74bb8e7b9ab539b9dfc639af52832dd20c4",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -34133,7 +34133,7 @@
                   "qualifiedName": "FerrixObjectRequirements::OomKill::memoryReclaimGivesBackWhatIsAsked",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"reclaim_asked shall give back the pages it is asked for that are charged to the scope or beneath it, through reclaim at that scope in rounds of at most 32 pages; it shall answer Short once more than 16 rounds in a row gave back nothing short of the count, Interrupted when asked to stop between rounds, and Short for any count but zero at no scope, which would be the whole machine.\"",
+                  "value": "\"reclaim_asked shall give back the pages it is asked for that are charged to the scope or beneath it, through reclaim at that scope in rounds of at most 32 pages; it shall answer Short once more than 16 rounds, in all, gave back nothing short of the count, Interrupted when asked to stop between rounds, and Short for any count but zero at no scope, which would be the whole machine.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1588

@@ -1582,7 +1582,7 @@ package FerrixObjectRequirements {
             attribute :>> statement = "reclaim_asked shall give back the pages
                 it is asked for that are charged to the scope or beneath it,
                 through reclaim at that scope in rounds of at most 32 pages; it
-                shall answer Short once more than 16 rounds in a row gave back
+                shall answer Short once more than 16 rounds, in all, gave back
                 nothing short of the count, Interrupted when asked to stop
                 between rounds, and Short for any count but zero at no scope,
                 which would be the whole machine.";

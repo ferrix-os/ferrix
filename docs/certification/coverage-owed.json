@@ -534,6 +534,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet.",
       "what": "Reached by stage 8's procfs check (fs/procfs/check.rs, check_cpuinfo), which reads /proc/cpuinfo on every boot of every architecture: on x86-64 arch::x86_64::cpuid, cpuid_registers and user_extended_state (cpu::extended_state_components); on AArch64 arch::aarch64::speculation::midr_of's Some path for every online processor in the default (hardened) build; on ARMv7-A arch::armv7a::speculation::midr_of. AArch64 midr_of is also the unit of L.aarch64.67, whose stage check check_midr_records reaches its Some path for every online processor and both None paths (an index past SEEN, a slot nobody recorded) on every default boot; argued, not reached by a default boot: its answer in a --mitigations off build, whose SEEN is never written. The arch/mod.rs stand-ins (cpuid and user_extended_state off x86-64, midr_of on x86-64) cannot run on their own architecture, each a one-expression constant; argued in coverage-argued-<arch>.json once a measured run places them in the residual."
+    },
+    {
+      "landing": "memory.reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.183; the consultant's OK IF of 2026-10-26, recorded in the landing's commit)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "Reached by stage 13's reclaim check on every test-boot: user::cache::reclaim_asked (Given, Short after its zero rounds, Interrupted before the first round, and both answers at quota::NONE), fs/cgroupfs.rs::reclaim's Given and Short arms, and reclaim_check.rs::on_demand and on_demand_steps. Not reached by any boot: cgroupfs::reclaim's Interrupted arm (EINTR), since no check signals the writer."
     }
   ]
 }
