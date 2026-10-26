@@ -42,6 +42,10 @@ pub const DEFAULT_CACHE: usize = 4096;
 /// constant cost per lookup that misses.
 const PAGED_LOOKS: usize = 2;
 
+/// How many dentries one round of [`Namespace::shrink`] takes out of the
+/// cache under its lock, in room had before the lock is taken.
+const SHRINK_BATCH: usize = 32;
+
 /// What one mount allows, apart from what its filesystem does: Linux's
 /// per-mount `MNT_*` flags, which `mount(2)` sets from its `MS_*` flags and
 /// `MS_REMOUNT` changes.
@@ -638,6 +642,17 @@ fn holds_pages(dentry: &Dentry) -> bool {
             .is_some_and(|inode| inode.holds_cached_pages())
 }
 
+/// Let go of `dentry`, with no lock held: the bytes its charge held if this
+/// was its last reference, and so it was freed; nothing otherwise.
+fn freed(dentry: Arc<Dentry>) -> u64 {
+    let bytes = dentry.charge().1;
+    if Arc::into_inner(dentry).is_some() {
+        bytes
+    } else {
+        0
+    }
+}
+
 /// The number the first namespace is given, and the next ones count up from:
 /// Linux's `PROC_DYNAMIC_FIRST`.
 const FIRST_NAMESPACE: u64 = 0xF000_0000;
@@ -941,6 +956,101 @@ impl Namespace {
             drop(looked);
         }
         released
+    }
+
+    /// Give back up to `want` bytes of the kernel heap the cache keeps for
+    /// dentries nothing else holds, charged to a job `takes` names: the
+    /// dentry and inode caches as a cgroup's reclaim sees them, Linux's
+    /// `shrink_dcache` under `memory.max` (`docs/CGROUPS.md` §10). Returns
+    /// the bytes given back.
+    ///
+    /// A dentry is taken out of the queue only if the queue holds its only
+    /// reference, so no walk, open file or working directory loses one, and
+    /// is then let go of as the queue lets go of its oldest
+    /// ([`Namespace::remember`]): kept beside it while its file holds pages in
+    /// the page cache, dropped otherwise. Its file's inode goes with it unless
+    /// something else holds that: a disk filesystem's inodes are held through
+    /// their dentries and open files alone. What is counted is what was
+    /// freed: a dentry another task took hold of in the meantime, or one kept
+    /// for its pages, counts nothing. A parent freed because its last cached
+    /// child went is not counted either.
+    ///
+    /// Then the dentries kept for their files' pages whose files hold none
+    /// now ([`Namespace::shrink_paged`]): a reclaim of a job's pages comes
+    /// before its shrink, and leaves them keeping nothing.
+    ///
+    /// `takes` is asked under the cache's lock, and must take no lock. Rounds
+    /// of [`SHRINK_BATCH`], each one look along the queue, until `want` is
+    /// given or a round finds nothing; the cache's limit bounds the rounds.
+    pub fn shrink(&self, takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
+        let mut given = 0_u64;
+        let mut rounds = self.shared.cache_limit.div_ceil(SHRINK_BATCH);
+        // Where the last round stopped: the dentries before it were looked
+        // at and kept, so one shrink looks along the queue once.
+        let mut at = 0;
+        while given < want && rounds > 0 {
+            rounds -= 1;
+            let mut picked: Vec<Arc<Dentry>> = Vec::new();
+            if picked.try_reserve_exact(SHRINK_BATCH).is_err() {
+                break;
+            }
+            {
+                let mut cache = self.shared.cache.lock();
+                // No more than what is still wanted, in whole dentries.
+                let mut picked_bytes = 0_u64;
+                while at < cache.len()
+                    && picked.len() < SHRINK_BATCH
+                    && given.saturating_add(picked_bytes) < want
+                {
+                    let unused = cache
+                        .get(at)
+                        .is_some_and(|d| Arc::strong_count(d) == 1 && takes(d.charge().0));
+                    if unused && let Some(taken) = cache.remove(at) {
+                        picked_bytes = picked_bytes.saturating_add(taken.charge().1);
+                        // Within the room had above.
+                        picked.push(taken);
+                    } else {
+                        at += 1;
+                    }
+                }
+            }
+            if picked.is_empty() {
+                break;
+            }
+            for dentry in picked {
+                // As an eviction lets go: kept while its file holds pages.
+                if let Some(dentry) = self.keep_for_pages(dentry) {
+                    given = given.saturating_add(freed(dentry));
+                }
+            }
+        }
+        given.saturating_add(self.shrink_paged(takes, want.saturating_sub(given)))
+    }
+
+    /// [`Namespace::shrink`] in the dentries kept for their pages: once round
+    /// the set from its clock's hand, letting go of those whose files hold no
+    /// pages now -- a reclaim has just taken them -- until `want` is given.
+    /// What [`Namespace::remember`]'s clock does two at a lookup that misses,
+    /// so that a job whose lookups only hit still has them given back.
+    fn shrink_paged(&self, takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
+        let mut given = 0_u64;
+        let looks = self.shared.paged.lock().kept.len();
+        for _ in 0..looks {
+            if given >= want {
+                break;
+            }
+            let Some(looked) = self.shared.paged.lock().next() else {
+                break;
+            };
+            if takes(looked.charge().0) && !holds_pages(&looked) {
+                let taken = self.shared.paged.lock().take(&looked);
+                drop(looked);
+                if let Some(taken) = taken {
+                    given = given.saturating_add(freed(taken));
+                }
+            }
+        }
+        given
     }
 
     /// How many dentries are kept for their files' cached pages.

@@ -594,6 +594,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet, and user/space.rs's map_shared_code (now map_shared_code_near's caller) and the syscall and procfs sites it changed.",
       "what": "Reached by stage 13's timens line on every test-boot: user::space::AddressSpace::replace_shared_code and map_shared_code_near (and vdso::retarget's swap, load ring). Not reached: retarget's refusal when the variant cannot be made, which a boot cannot provoke but its negative control showed."
+    },
+    {
+      "landing": "the dentry and inode caches' reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.186; the consultant's review recorded in the landing's commit)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed.",
+      "what": "Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing."
     }
   ]
 }

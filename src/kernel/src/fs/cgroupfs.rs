@@ -1159,7 +1159,8 @@ fn set_mark(job: &Job, kind: Kind, data: &[u8]) -> Result<()> {
 }
 
 /// A write to `memory.reclaim`: give back that many bytes, in whole pages
-/// and rounded down, of the clean cache charged to `job` or beneath it, as
+/// and rounded down, of the clean cache charged to `job` or beneath it, and
+/// of the cached dentries and inodes nothing else holds, as
 /// Linux's `memory_reclaim` does (`docs/CGROUPS.md` §10). The reclaim is the
 /// one `memory.high` makes, so it never takes a sibling's pages and spares
 /// what `memory.min` protects, and `memory.low`'s unless nothing else gives

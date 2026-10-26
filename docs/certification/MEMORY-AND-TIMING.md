@@ -450,11 +450,17 @@ even for an instant, and a refused charge takes nothing.
   grows only with its lock let go, fallibly; a dentry it has no room for is
   dropped as the queue alone dropped it, and counted. Two of them are looked
   at again on each lookup that misses, and those whose pages are gone are let
-  go: a set whose files' pages reclaim took stays charged until lookups go
-  round it, and a workload whose lookups only hit never trims it (F-90's
-  residual; a BACKLOG row owes a release driven by reclaim). No dentry is
-  dropped under the queue's or the set's lock, and the two are never held
-  together. An unmount holds the set's lock for one look at every kept
+  go. A reclaim that gave back fewer pages than asked also lets go of them,
+  and of the queue's dentries nothing else holds, charged to its job or
+  beneath it (`Namespace::shrink`, through the shrinker `user::cache`
+  calls, 2026-10-26, L.object.186): F-90's residual, the release driven by
+  reclaim, is done. One shrink holds the queue's lock at most
+  `ceil(cache_limit / 32)` times, and in all looks along the queue once --
+  up to `cache_limit` (4096) looks, each a walk up the owner's job slots by
+  atomics (`takes`, which takes no lock), and up to 32 removals a hold, each
+  a move of up to `cache_limit` entries; the set's lock is taken once a look,
+  up to the set's size. No dentry is dropped under the queue's or the set's
+  lock, and the two are never held together. An unmount holds the set's lock for one look at every kept
   dentry, each with a walk up its parents (`is_ancestor_of`): the kept
   dentries times their depth, with the room for what it takes out had before
   the hold (in holds of 64 when there is no room for all); a VMO's page list is a few dozen bytes per

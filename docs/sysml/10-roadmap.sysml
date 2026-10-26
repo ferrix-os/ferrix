@@ -545,7 +545,8 @@ package FerrixRoadmap {
              * 2026-10-15 (L.object.188-190). The stage is done on that scope;
              * memory.reclaim, cpu.max.burst, cpu.idle, io.weight,
              * io.latency and memory.stat's anon and pagetables were built
-             * on 2026-10-26 (L.object.182 to 185). */
+             * on 2026-10-26 (L.object.182 to 185), and the dentry and inode
+             * caches' reclaim the same day (L.object.186). */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {

@@ -4823,6 +4823,46 @@ mod charged {
         assert_eq!((job.used(), job.holds()), (0, 0));
     }
 
+    /// The dentries a job's lookups left in the cache are given back to it by
+    /// a shrink that names it, and a sibling's are not; one still held, by
+    /// an open file, stays.
+    #[test]
+    fn a_shrink_gives_back_the_cached_dentries_of_the_jobs_it_names() {
+        let (ns, ctx) = fresh();
+        let sibling = Job::enter(64 * 1024);
+        for at in 0..8 {
+            let _ = ns.resolve(&ctx, None, format!("/sib{at}").as_bytes(), true);
+        }
+        let theirs = sibling.used();
+        drop(sibling);
+        let job = Job::enter(64 * 1024);
+        let held = ns.open(&ctx, None, b"/held", &RW_CREATE, 0o644).unwrap();
+        let with_held = job.used();
+        for at in 0..16 {
+            let _ = ns.resolve(&ctx, None, format!("/miss{at}").as_bytes(), true);
+        }
+        let cached = job.used() - with_held;
+        assert!(cached > 0 && theirs > 0);
+        let me = job.id();
+        // Nothing for a job that holds none.
+        assert_eq!(ns.shrink(&|owner| owner == u32::MAX - 1, u64::MAX), 0);
+        // A part: whole dentries, at least what was asked.
+        let part = ns.shrink(&|owner| owner == me, 1);
+        assert!(part > 0 && part < cached, "gave {part} of {cached}");
+        let rest = ns.shrink(&|owner| owner == me, u64::MAX);
+        assert_eq!(part + rest, cached);
+        assert_eq!(job.used(), with_held, "a held dentry was let go of");
+        assert_eq!(
+            ns.shrink(&|owner| owner == me, u64::MAX),
+            0,
+            "the open file's dentry was given back"
+        );
+        drop(held);
+        job.outside(|| ns.unlink(&ctx, None, b"/held").unwrap());
+        drop(ns);
+        assert_eq!((job.used(), job.holds()), (0, 0));
+    }
+
     /// A pipe's buffer is charged as it grows, to the job that made it, and
     /// refused at its limit with nothing queued.
     #[test]
@@ -5066,6 +5106,40 @@ fn dentries_of_files_with_cached_pages_are_kept_until_the_pages_or_the_name_go()
     for i in 0..64 {
         let _ = ns.resolve(&ctx, None, alloc::format!("/gone-{i}").as_bytes(), true);
     }
+    assert_eq!(ns.kept_for_pages(), 0);
+}
+
+/// A shrink lets go of the dentries kept for their pages once the pages are
+/// gone, with no lookup to move the clock, and keeps them while the pages
+/// are there or the job is not one it names.
+#[test]
+fn a_shrink_lets_go_of_the_dentries_whose_pages_reclaim_took() {
+    use core::sync::atomic::Ordering;
+    let (ns, hooks) = meddling(4);
+    let ctx = ns.context();
+    hooks.pages.store(true, Ordering::Relaxed);
+    for i in 0..24 {
+        let path = alloc::format!("/f{i}");
+        drop(
+            ns.open(&ctx, None, path.as_bytes(), &RW_CREATE, 0o644)
+                .unwrap(),
+        );
+        let _ = ns.resolve(&ctx, None, alloc::format!("/miss-{i}").as_bytes(), true);
+    }
+    let kept = ns.kept_for_pages();
+    assert!(kept >= 20, "only {kept} dentries kept for their pages");
+    // The queue's own files' dentries move into the set, as an eviction's do.
+    let _ = ns.shrink(&|_| true, u64::MAX);
+    assert_eq!(
+        ns.kept_for_pages(),
+        24,
+        "a shrink let go of pages' dentries"
+    );
+    let kept = 24;
+    hooks.pages.store(false, Ordering::Relaxed);
+    assert_eq!(ns.shrink(&|_| false, u64::MAX), 0);
+    assert_eq!(ns.kept_for_pages(), kept);
+    assert!(ns.shrink(&|_| true, u64::MAX) > 0);
     assert_eq!(ns.kept_for_pages(), 0);
 }
 

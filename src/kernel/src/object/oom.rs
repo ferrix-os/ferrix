@@ -170,7 +170,7 @@ pub fn throttle() {
     {
         job.wake_memory_events();
     }
-    if done.stolen < pages {
+    if done.bytes() < excess {
         crate::sched::sleep_for(PAUSE_NANOS);
     }
 }
@@ -180,8 +180,11 @@ pub fn throttle() {
 pub fn out_of_memory(space: &AddressSpace) -> Answer {
     let group = crate::sched::running_group();
     let Some(full) = quota::at_limit(group, Resource::Memory, PAGE_SIZE) else {
-        // No limit full: the machine out of frames. Its clean cache is room.
-        return if cache::reclaim(quota::NONE, RECLAIM_PAGES).stolen > 0 {
+        // No limit full: the machine out of frames. Its clean cache is room,
+        // and so is heap the dentry cache gave back, though it may free no
+        // frame: bounded all the same, since the cache drains and then gives
+        // nothing.
+        return if cache::reclaim(quota::NONE, RECLAIM_PAGES).gave() {
             Answer::Retry
         } else {
             Answer::Refused
@@ -189,7 +192,7 @@ pub fn out_of_memory(space: &AddressSpace) -> Answer {
     };
     // Reclaim inside the job before any kill: its own clean pages, and those
     // of the jobs beneath it, never a sibling's (`user::cache`).
-    if cache::reclaim(full, RECLAIM_PAGES).stolen > 0 {
+    if cache::reclaim(full, RECLAIM_PAGES).gave() {
         return Answer::Retry;
     }
     if CHOOSING.swap(true, Ordering::AcqRel) {

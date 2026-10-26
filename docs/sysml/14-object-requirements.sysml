@@ -959,8 +959,9 @@ package FerrixObjectRequirements {
                 "object::quota::Slot::reweigh");
         }
         // cpu.idle (docs/CGROUPS.md section 12): of the follow-ons
-        // L.object.184-187 were reserved for; 186-187 were released unused,
-        // since io.weight is the load ring's (fs::blkio) and claims nothing.
+        // L.object.184-187 were reserved for; io.weight, the load ring's
+        // (fs::blkio), claims nothing, so 186 went to the dentry and inode
+        // caches' reclaim and 187 is unused.
         requirement <'L.object.185'> anIdleJobHasTheIdleWeight : ItemLowLevel {
             attribute :>> statement = "A job with cpu.idle set shall have the
                 entity weight 3, Linux's WEIGHT_IDLEPRIO, whatever its
@@ -1518,8 +1519,8 @@ package FerrixObjectRequirements {
                 "object::quota::charge_bandwidth");
         }
         // cpu.max.burst (docs/CGROUPS.md section 12): the first of the
-        // follow-ons L.object.184-187 were reserved for; 185-187 (cpu.idle and
-        // io.weight) stay reserved.
+        // follow-ons L.object.184-187 were reserved for; 185 is cpu.idle's,
+        // 186 the dentry and inode caches' reclaim's.
         requirement <'L.object.184'> burstCarriesUnusedQuota : ItemLowLevel {
             attribute :>> statement = "When a period under a cpu.max quota ends,
                 refresh_period shall carry into the next the runtime the period
@@ -1588,7 +1589,8 @@ package FerrixObjectRequirements {
                 cached file untouched, spares a child using no more than its
                 memory.min, and what it took reads back as the source has it.";
             attribute :>> parent = "H.QUOTA.12";
-            attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
+            attribute :>> unit = ("user::cache::reclaim", "user::cache::reclaim_pages",
+                "user::cache::take_from",
                 "user::cache::takes", "object::quota::protected",
                 "user::vmo::Vmo::reclaim_clean", "user::vmo::Vmo::take_clean_range",
                 "object::quota::within",
@@ -1652,13 +1654,14 @@ package FerrixObjectRequirements {
         // memory.reclaim (docs/CGROUPS.md section 10): the follow-on of stage
         // 13 that L.object.182-183 were reserved for.
         requirement <'L.object.183'> memoryReclaimGivesBackWhatIsAsked : ItemLowLevel {
-            attribute :>> statement = "reclaim_asked shall give back the pages
-                it is asked for that are charged to the scope or beneath it,
-                through reclaim at that scope in rounds of at most 32 pages; it
-                shall answer Short once more than 16 rounds, in all, gave back
-                nothing short of the count, Interrupted when asked to stop
-                between rounds, and Short for any count but zero at no scope,
-                which would be the whole machine.";
+            attribute :>> statement = "reclaim_asked shall give back the bytes
+                of the pages it is asked for, charged to the scope or beneath
+                it, as the pages and the heap reclaim at that scope answers
+                (L.object.186), in rounds of at most 32 pages' worth; it shall
+                answer Short once more than 16 rounds, in all, gave back
+                nothing, neither page nor heap, short of the count, Interrupted
+                when asked to stop between rounds, and Short for any count but
+                zero at no scope, which would be the whole machine.";
             attribute :>> criterion = "A cgroup holding 64 pages of a file's
                 cache and 4 of a tmpfs file, beside a sibling holding 8, gives
                 back nothing for a write of 0, at least 32 pages for a write of
@@ -1667,8 +1670,10 @@ package FerrixObjectRequirements {
                 sibling keeps its 8 pages; the file reads as its source has it
                 after; a reclaim of 32 pages interrupted before its first round
                 takes none; and at no scope a count of 1 is Short and of 0 is
-                Given (the `reclaim` line of stage 13 that names
-                memory.reclaim).";
+                Given; and a cgroup with no cache, after 64 misses, gives back a
+                write of 8192 bytes from its cached dentries (the `reclaim`
+                line of stage 13 that names memory.reclaim and cached
+                dentries).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "user::cache::reclaim_asked";
         }
@@ -1692,6 +1697,29 @@ package FerrixObjectRequirements {
                 "user::vmo::reclaim_clean", "user::vmo::Vmo::decommit_clean_range",
                 "user::vmo::Vmo::take_clean_range", "user::vmo::Vmo::take_range_if",
                 "user::vmo::Vmo::unwritten_by_mappings", "user::vmo::Vmo::decommit_in_chunks");
+        }
+        // The dentry and inode caches as reclaimable (docs/CGROUPS.md
+        // section 10): the follow-on of stage 13 M1's note left open, in
+        // the id the io controller's reservation released.
+        requirement <'L.object.186'> reclaimAsksTheShrinkerForTheRest : ItemLowLevel {
+            attribute :>> statement = "reclaim shall, when the pages it gave
+                back are fewer than it was asked for, ask the registered
+                shrinker for the rest in bytes, naming to it only the jobs at
+                the scope or beneath it, and shall answer the bytes the
+                shrinker gave back apart from the pages.";
+            attribute :>> criterion = "A cgroup that looked up 64 names that
+                are not there, beside a sibling that did the same, holds their
+                negative dentries in memory.stat's kernel; a write of 1G to its
+                memory.reclaim, with no cache to give, is EAGAIN and gives back
+                at least 64 dentries' worth of that heap, and the sibling's
+                kernel is unchanged; a reclaim of one page at the cgroup after
+                64 more misses gives back no page and at least one dentry's
+                heap (the `reclaim` line of stage 13 that names cached
+                dentries).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::reclaim", "user::cache::shrink",
+                "user::cache::install_shrinker", "user::cache::Reclaimed::gave",
+                "user::cache::Reclaimed::bytes");
         }
         // The parent is L.object.111's: these are the counts of the cache
         // H.QUOTA.12's reclaim takes, machine-wide rather than per job, and
@@ -1764,7 +1792,8 @@ package FerrixObjectRequirements {
                 has the 8-page file taken back no more than 16 pages (the
                 `reclaim` line of stage 13 that names memory.max).";
             attribute :>> parent = ("H.QUOTA.12", "H.QUOTA.13");
-            attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
+            attribute :>> unit = ("user::cache::reclaim", "user::cache::reclaim_pages",
+                "user::cache::take_from",
                 "user::cache::hand_in", "user::cache::set_hand", "user::cache::object_at",
                 "user::cache::Walk::begin", "user::cache::Walk::drop",
                 "user::cache::List::close_up");

@@ -421,7 +421,8 @@ key Ferrix counts apart, `kernel`: the heap part of `memory.current`. An
 object made in one cgroup stays charged there until it goes, wherever it is
 passed, as Linux's `obj_cgroup` keeps it. Without reclaim, the dentries a
 cgroup's lookups left in the cache stay charged to it until evicted, where
-Linux would reclaim them under pressure -- M2's to fix. `test-vfs` command
+Linux would reclaim them under pressure -- M2's to fix, and fixed
+2026-10-26 (§10, "The dentry and inode caches"). `test-vfs` command
 21 fills `/tmp` from a shell 256 KiB under its `memory.max` and reads the
 three files.
 
@@ -674,10 +675,34 @@ out of every mapping, a shootdown, then the frame and its charge).
   its interrupted and no-scope answers; no boot check sends the writer a
   signal, so cgroupfs's mapping of a pending signal to `EINTR` is shown by
   inspection only.
+* **The dentry and inode caches (2026-10-26, L.object.186).** A reclaim that
+  gave back fewer pages than it was asked for asks the filesystem for the rest
+  in kernel heap (`user::cache::reclaim`, through the shrinker `fs::install`
+  registers): the dentries the cache's queue keeps that nothing else holds,
+  charged to the reclaim's job or one beneath it, let go
+  of as the queue lets go of its oldest (`Namespace::shrink`): kept beside it
+  while the file holds cached pages, dropped otherwise. A disk filesystem's
+  inodes are held through their dentries and open files alone (btrfs's map of
+  them is weak), so they go with the dentries; a tmpfs inode is the file
+  itself and stays. Only what was freed is counted. So `memory.high`,
+  `memory.max`'s reclaim before a kill, a fill at the limit and
+  `memory.reclaim` all give back a cgroup's cached dentries, and M1's note
+  that a cgroup's lookups stay charged to it until the queue evicts them no
+  longer holds. Linux's `shrink_slab` runs beside its page reclaim the same
+  way. A kernel-heap charge refused at `memory.max` (an `open` or a lookup
+  that would make a dentry) is still `ENOMEM` without a reclaim first: the
+  charge is taken where a reclaim may not run. The `reclaim` line of stage 13
+  checks it (`/check-rd` beside `/check-rc`), and that `memory.reclaim`,
+  which counts what it gave in bytes since, meets a write of 8192 bytes from
+  dentries alone. The consultant's review (a certification-consultant
+  subagent of this session, 2026-10-26): OK IF -- L.object.183 amended to
+  bytes, the memory.min claim taken out of 186 (the shrink spares it as the
+  page reclaim's second pass does, but no step shows it), H.QUOTA.12 naming
+  the cached names' heap; the controls through `gate.sh` and the rows on the
+  landing hash owed on the gate host.
 * **Not built.** `memory.low` events, proportional
-  protection, the dentry and inode caches as reclaimable (M1's note that
-  dentries stay charged stands), `workingset_*`, and an audit record for the
-  three marks.
+  protection, a reclaim before a refused kernel-heap charge, `workingset_*`,
+  and an audit record for the three marks.
 
 ## 11. `cgroup.freeze` (F1, 2026-09-30)
 
@@ -880,8 +905,9 @@ not served before one beside it") and the run's cap removed ("a cgroup beside
 one missing its io.latency target was starved"). With its cgroups gone the
 check requires that no disk keeps its queue. It is all load-ring and library
 code, and names no requirement: the item's L.object.186-187, reserved for it,
-were released unused (the consultant's review found no high-level requirement
-for disk shares, and the cost's arithmetic belongs beside the queue).
+were released (the consultant's review found no high-level requirement for
+disk shares, and the cost's arithmetic belongs beside the queue); L.object.186
+went to the reclaim of the dentry and inode caches (§10), and 187 is unused.
 
 ## 14. Where the controllers stand (2026-10-01)
 

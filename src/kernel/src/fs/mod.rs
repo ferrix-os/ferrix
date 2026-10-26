@@ -128,7 +128,8 @@ static HOME_FLUSH: Flush = Flush {
 
 /// Register what the certified item reaches the filesystem through, which it
 /// does without naming it: the commits power makes before the machine stops,
-/// `/` first, how `devmgr` reads its program and drivers, and the native
+/// `/` first, how `devmgr` reads its program and drivers, the reclaim of the
+/// dentry and inode caches, and the native
 /// call that finds a job by its cgroupfs directory.
 ///
 /// Called once from `main.rs`, before anything is mounted to commit and
@@ -144,8 +145,15 @@ pub fn install() -> Result<(), Full> {
     crate::power::register_flush(&DATA_FLUSH)?;
     crate::power::register_flush(&HOME_FLUSH)?;
     crate::discovery::devmgr::register_reader(read_from_root);
+    crate::user::cache::install_shrinker(shrink_dentries);
     cgroupfs::install()?;
     portfd::install()
+}
+
+/// The dentry and inode caches' shrinker, which a reclaim that fell short of
+/// its pages calls (`user::cache`): the cache every namespace shares.
+fn shrink_dentries(takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
+    namespace().shrink(takes, want)
 }
 
 /// Read the file at `path` in the root the initramfs was unpacked into.
