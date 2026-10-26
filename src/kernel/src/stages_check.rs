@@ -750,8 +750,8 @@ pub(super) fn check_cgroupfs() {
         checked.limits_refused,
     );
     println!(
-        "  reclaim  {} pages of files' caches given back inside the cgroup over its memory.high \
-         or at its memory.max, none of a sibling's and none of a child held by memory.min, every \
+        "  reclaim  {} pages of files' caches given back inside the cgroup over its memory.high, \
+         at its memory.max or asked by its memory.reclaim, none of a sibling's and none of a child held by memory.min, every \
          one read again as its source has it, and no process killed where the cache was room",
         checked.reclaimed,
     );

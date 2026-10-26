@@ -75,6 +75,11 @@ pub enum Kind {
     MemoryEvents,
     /// `memory.stat`: the keys Ferrix has a source for.
     MemoryStat,
+    /// `memory.reclaim`: a write of a size asks for that much to be given
+    /// back now. Write-only, as on Linux: mode 0200. Linux's root has it too;
+    /// Ferrix's root has no memory file, and a reclaim of the whole machine
+    /// would not spare what the children's `memory.min` protects.
+    MemoryReclaim,
     /// `io.stat`.
     IoStat,
     /// `io.max`.
@@ -126,6 +131,7 @@ pub const FILES: &[File] = &[
         false,
     ),
     controlled("memory.stat", Kind::MemoryStat, Controller::Memory, false),
+    controlled("memory.reclaim", Kind::MemoryReclaim, Controller::Memory, true),
     on_root_too("io.stat", Kind::IoStat, Controller::Io, false),
     controlled("io.max", Kind::IoMax, Controller::Io, true),
     controlled("pids.current", Kind::PidsCurrent, Controller::Pids, false),
@@ -196,10 +202,11 @@ pub fn named(name: &[u8], root: bool, enabled: Set) -> Option<&'static File> {
 
 impl File {
     /// Its permission bits: Linux's 0644 for a writable file, 0444 for a
-    /// read-only one, and 0200 for `cgroup.kill`, which cannot be read.
+    /// read-only one, and 0200 for `cgroup.kill` and `memory.reclaim`, which
+    /// cannot be read.
     pub fn mode(&self) -> u16 {
         match (self.kind, self.writable) {
-            (Kind::Kill, _) => 0o200,
+            (Kind::Kill | Kind::MemoryReclaim, _) => 0o200,
             (_, true) => 0o644,
             (_, false) => 0o444,
         }

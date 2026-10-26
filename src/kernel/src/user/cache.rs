@@ -350,6 +350,56 @@ fn take_from(
     (done, Some(from))
 }
 
+/// Pages one round of [`reclaim_asked`] asks for, Linux's `SWAP_CLUSTER_MAX`.
+const ASKED_BATCH: u64 = 32;
+/// Rounds of [`reclaim_asked`] in a row that may give back nothing, Linux's
+/// `MAX_RECLAIM_RETRIES`.
+const ASKED_RETRIES: u32 = 16;
+
+/// How a [`reclaim_asked`] ended.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Asked {
+    /// It gave back at least what it was asked for.
+    Given,
+    /// [`ASKED_RETRIES`] rounds in a row past the first gave back nothing,
+    /// short of what it was asked for: `EAGAIN` to a `memory.reclaim` write.
+    Short,
+    /// `interrupted` said so between rounds: `EINTR`.
+    Interrupted,
+}
+
+/// Give back `want` pages charged to slot `scope` or beneath it, because
+/// someone asked (`memory.reclaim`, Linux's `memory_reclaim`): rounds of
+/// [`reclaim`] of at most [`ASKED_BATCH`] pages, until they have given
+/// `want`, or more than [`ASKED_RETRIES`] rounds in a row gave back
+/// nothing, or `interrupted` answers yes before a round. What was given back
+/// before it stopped stays given. A scope of [`quota::NONE`] holds nothing
+/// that may be asked for: it would be the whole machine, sparing nobody's
+/// `memory.min`.
+///
+/// Must be called with no spin lock held, as [`reclaim`] must.
+pub fn reclaim_asked(scope: u32, want: u64, interrupted: &dyn Fn() -> bool) -> Asked {
+    if scope == quota::NONE {
+        return if want == 0 { Asked::Given } else { Asked::Short };
+    }
+    let mut given = 0_u64;
+    let mut retries = ASKED_RETRIES;
+    while given < want {
+        if interrupted() {
+            return Asked::Interrupted;
+        }
+        let stolen = reclaim(scope, (want - given).min(ASKED_BATCH)).stolen;
+        if stolen == 0 {
+            if retries == 0 {
+                return Asked::Short;
+            }
+            retries -= 1;
+        }
+        given = given.saturating_add(stolen);
+    }
+    Asked::Given
+}
+
 /// What slot `scope` and the jobs beneath it hold in files' pages, in pages:
 /// on a disk, and on a memory filesystem.
 pub fn resident(scope: u32) -> (u64, u64) {

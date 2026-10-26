@@ -1575,6 +1575,30 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
         }
+        // memory.reclaim (docs/CGROUPS.md section 10): the follow-on of stage
+        // 13 that L.object.182-183 were reserved for; 182, the page tables
+        // charged apart, stays reserved.
+        requirement <'L.object.183'> memoryReclaimGivesBackWhatIsAsked : ItemLowLevel {
+            attribute :>> statement = "reclaim_asked shall give back the pages
+                it is asked for that are charged to the scope or beneath it,
+                through reclaim at that scope in rounds of at most 32 pages; it
+                shall answer Short once more than 16 rounds in a row gave back
+                nothing short of the count, Interrupted when asked to stop
+                between rounds, and Short for any count but zero at no scope,
+                which would be the whole machine.";
+            attribute :>> criterion = "A cgroup holding 64 pages of a file's
+                cache and 4 of a tmpfs file, beside a sibling holding 8, gives
+                back nothing for a write of 0, at least 32 pages for a write of
+                32 pages' bytes, and all its file cache and none of its tmpfs
+                pages for a write of 1G, which is EAGAIN; max is EINVAL; the
+                sibling keeps its 8 pages; the file reads as its source has it
+                after; a reclaim of 32 pages interrupted before its first round
+                takes none; and at no scope a count of 1 is Short and of 0 is
+                Given (the `reclaim` line of stage 13 that names
+                memory.reclaim).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = "user::cache::reclaim_asked";
+        }
         requirement <'L.object.188'> reclaimTakesOnlyCleanPages : ItemLowLevel {
             attribute :>> statement = "reclaim shall give back a page of a disk
                 file only through reclaim_clean: only the pages the file's source

@@ -898,7 +898,7 @@ fn contents(job: &Arc<Job>, kind: Kind) -> Vec<u8> {
         } else {
             b"0\n"
         }),
-        Kind::Kill => {}
+        Kind::Kill | Kind::MemoryReclaim => {}
         Kind::CpuWeight => render::number(&mut out, u64::from(job.cpu_weight())),
         Kind::CpuWeightNice => {
             let nice = ferrix_cgroupfs::cpu::nice_from_weight(job.cpu_weight());
@@ -1126,6 +1126,29 @@ fn set_mark(job: &Job, kind: Kind, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// A write to `memory.reclaim`: give back that many bytes, in whole pages
+/// and rounded down, of the clean cache charged to `job` or beneath it, as
+/// Linux's `memory_reclaim` does (`docs/CGROUPS.md` §10). The reclaim is the
+/// one `memory.high` makes, so it never takes a sibling's pages and spares
+/// what `memory.min` protects, and `memory.low`'s unless nothing else gives
+/// (`user::cache::reclaim_asked`).
+fn reclaim(job: &Job, data: &[u8]) -> Result<()> {
+    let want = write::parse_reclaim(data)
+        .map_err(errno)?
+        .map_or(u64::MAX, |bytes| bytes / ferrix_bootinfo::PAGE_SIZE);
+    let caller = process::current();
+    let interrupted = || {
+        caller
+            .as_ref()
+            .is_some_and(|process| process.signal_pending())
+    };
+    match crate::user::cache::reclaim_asked(job.quota_index(), want, &interrupted) {
+        crate::user::cache::Asked::Given => Ok(()),
+        crate::user::cache::Asked::Short => Err(Errno::EAGAIN),
+        crate::user::cache::Asked::Interrupted => Err(Errno::EINTR),
+    }
+}
+
 /// A write to `io.max`: a disk, then the limits to change on it.
 fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
     let slot = job.quota_index();
@@ -1226,6 +1249,7 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
             }
         }
         Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => set_mark(job, kind, data)?,
+        Kind::MemoryReclaim => reclaim(job, data)?,
         Kind::CpuWeight => set_weight(job, write::parse_weight(data).map_err(errno)?),
         Kind::CpuWeightNice => {
             set_weight(job, ferrix_cgroupfs::cpu::parse_nice(data).map_err(errno)?);
