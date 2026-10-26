@@ -44,6 +44,11 @@ pub const ADAPT_NEAR: i64 = 3;
 /// How far ahead the trend is read, in seconds: about how long the
 /// package takes to answer a step.
 pub const ADAPT_LOOKAHEAD_SECONDS: i64 = 10;
+/// The trend alone steps down only this close to the soft limit, or
+/// nearer: a package warming fast from cold, as a game loading warms it,
+/// is no reason to give back current (the N150 on 2026-10-26 backed off
+/// from 42 A to 34 A at 68 C on its trend alone).
+pub const ADAPT_TREND_FROM: i64 = 12;
 /// The least time between two climbs, in seconds.
 pub const ADAPT_CLIMB_SECONDS: u64 = 15;
 /// The least time between two steps down, in seconds.
@@ -223,9 +228,10 @@ impl Policy {
 
     /// An adaptive plan's second: from the lowest step, one step up at a
     /// time while the hottest reading and its trend leave
-    /// [`ADAPT_HEADROOM`], one down as soon as either comes within
-    /// [`ADAPT_NEAR`] of the soft limit, two at or above it. The step that
-    /// got too hot caps the climb for [`ADAPT_PROBE_SECONDS`]; then one
+    /// [`ADAPT_HEADROOM`], one down as soon as the reading comes within
+    /// [`ADAPT_NEAR`] of the soft limit, or the trend does once the reading
+    /// is within [`ADAPT_TREND_FROM`], two at or above it. The step whose
+    /// reading got that near caps the climb for [`ADAPT_PROBE_SECONDS`]; then one
     /// more is tried. It never gives up: the lowest step is the floor, and
     /// the kernel's backstop is still there above it.
     fn adapt(&mut self, elapsed: u64, reading: &Reading) -> Action {
@@ -255,12 +261,18 @@ impl Policy {
             self.adapt.ceiling = Some((lower, elapsed));
             return self.adapt_to(lower, elapsed, Why::BackOff { celsius: hottest });
         }
-        if hottest.max(ahead) >= self.hot - ADAPT_NEAR {
+        let near = hottest >= self.hot - ADAPT_NEAR;
+        let trend = ahead >= self.hot - ADAPT_NEAR && hottest >= self.hot - ADAPT_TREND_FROM;
+        if near || trend {
             if current == 0 || quiet < ADAPT_DROP_SECONDS {
                 return Action::Hold;
             }
             let lower = current - 1;
-            self.adapt.ceiling = Some((lower, elapsed));
+            // Only a reading near the limit says where the cooling ends;
+            // the trend's guess caps nothing.
+            if near {
+                self.adapt.ceiling = Some((lower, elapsed));
+            }
             return self.adapt_to(lower, elapsed, Why::BackOff { celsius: hottest });
         }
         let room = hottest.max(ahead) <= self.hot - ADAPT_HEADROOM;

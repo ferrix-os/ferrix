@@ -508,3 +508,19 @@ fn an_auto_plan_steps_down_on_the_trend_before_the_limit() {
     assert!(first < 85 - ADAPT_NEAR, "first back-off at {first} C");
     assert_eq!(policy.current(), Some(high - 1));
 }
+
+#[test]
+fn an_auto_plan_does_not_back_off_on_a_fast_warm_up_far_from_the_limit() {
+    let plan = plan::parse(b"auto:30-44").expect("a range");
+    let mut policy = Policy::new(plan, 85);
+    for at in 0..200 {
+        let _ = policy.step(at, &reading(50, 50));
+    }
+    let high = policy.current().expect("a step");
+    // A game loading: 3 C a second from 50 C to 71 C, ten seconds ahead
+    // past the limit, the reading far under it.
+    for (at, celsius) in (200..).zip((50..=71).step_by(3)) {
+        assert_eq!(policy.step(at, &reading(celsius, celsius)), Action::Hold);
+    }
+    assert_eq!(policy.current(), Some(high));
+}
