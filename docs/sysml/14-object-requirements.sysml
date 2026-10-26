@@ -961,7 +961,7 @@ package FerrixObjectRequirements {
         // cpu.idle (docs/CGROUPS.md section 12): of the follow-ons
         // L.object.184-187 were reserved for; io.weight, the load ring's
         // (fs::blkio), claims nothing, so 186 went to the dentry and inode
-        // caches' reclaim and 187 is unused.
+        // caches' reclaim and 187 to the native weight an idle job refuses.
         requirement <'L.object.185'> anIdleJobHasTheIdleWeight : ItemLowLevel {
             attribute :>> statement = "A job with cpu.idle set shall have the
                 entity weight 3, Linux's WEIGHT_IDLEPRIO, whatever its
@@ -980,6 +980,24 @@ package FerrixObjectRequirements {
                 "object::quota::Slot::reweigh", "object::quota::set_idle_at",
                 "object::quota::Quota::set_idle", "object::quota::Quota::idle",
                 "object::job::Job::set_cpu_idle", "object::job::Job::cpu_idle");
+        }
+        // The item's one refusal of cpu.idle: the native call's, beside
+        // cgroupfs's cpu.weight, whose refusal is the load ring's and claims
+        // nothing (the consultant's ruling, 2026-10-26, ledger line 10 of
+        // this session's ledger).
+        requirement <'L.object.187'> anIdleJobRefusesANativeWeight : ItemLowLevel {
+            attribute :>> statement = "job_set_limit shall refuse a
+                JOB_CPU_WEIGHT within 1 to 10,000 with BAD_STATE while the job
+                has cpu.idle set, leaving its weight as it was, and shall take
+                it once the job is let off.";
+            attribute :>> criterion = "On a job at weight 250 set idle by
+                Job::set_cpu_idle, job_set_limit of JOB_CPU_WEIGHT 400 answers
+                BAD_STATE and job_get_quota reads 0, 250 and 0; let off, the
+                same call answers 0 and job_get_quota reads 0, 400 and 0 (the
+                native line's an_idle_job_refuses_a_weight).";
+            attribute :>> parent = "H.SCHED.3";
+            attribute :>> unit = ("syscall::native::job_set_limit",
+                "object::job::Job::cpu_idle", "object::job::Job::set_cpu_idle");
         }
         requirement <'L.object.160'> theCarriedWeightIsTheWideFormula : ItemLowLevel {
             attribute :>> statement = "quota::effective shall carry a task's weight up
@@ -1520,7 +1538,8 @@ package FerrixObjectRequirements {
         }
         // cpu.max.burst (docs/CGROUPS.md section 12): the first of the
         // follow-ons L.object.184-187 were reserved for; 185 is cpu.idle's,
-        // 186 the dentry and inode caches' reclaim's.
+        // 186 the dentry and inode caches' reclaim's, 187 the native weight
+        // an idle job refuses.
         requirement <'L.object.184'> burstCarriesUnusedQuota : ItemLowLevel {
             attribute :>> statement = "When a period under a cpu.max quota ends,
                 refresh_period shall carry into the next the runtime the period

@@ -773,13 +773,20 @@ preempting a busy sibling's on wakeup (`sched_idle` entities); Ferrix's fair
 class has no such rule, so the weight is the whole of it. The `cpu` line of
 stage 13 checks the files and, on slots of its own, the weights at
 `cpu.weight` 10000 (`quota::check_idle_weight`); the files' semantics and
-`cpu.weight` read as 1 have no requirement of their own yet, since a new id is
-reserved on `develop` first (the follow-ons page). `cpu.weight` reads 1 while
+`cpu.weight` read as 1 are the load ring's (`fs::cgroupfs`) and the
+`ferrix-cgroupfs` library's, which the item does not vouch for, so they claim
+no requirement (the consultant's ruling of 2026-10-26, ledger line 10 of this session's ledger, still to be copied to the gate host's); the item's one refusal, the native
+call's below, is L.object.187. The check that a write of `cpu.weight` is
+refused while idle and the store of the weight are not one step, in either
+path: a weight stored in between is ignored while idle (`entity_weight`)
+and replaced at let-off through cgroupfs, so it fails closed. `cpu.weight` reads 1 while
 idle as the clamp in Linux's `sched_weight_to_cgroup` gives it (the
 consultant reads that clamp as 6.12's and later; before it the file read 0;
 not checked against the source here). A native `job_set_quota` of the weight
 is `BAD_STATE` while the job is idle, as the file's write is `EINVAL`: a
-weight set then would be lost when the job is let off. Letting a job off is
+weight set then would be lost when the job is let off (L.object.187, the
+native line's `an_idle_job_refuses_a_weight`; `job_get_quota` reads the
+weight kept for the let-off, where the file reads 1). Letting a job off is
 audited as the `cpu.weight` write it amounts to (`CGROUP_LIMIT`,
 `CPU_WEIGHT` 100); `cpu.idle` itself is not audited, as `cpu.max.burst` is
 not. The reweigh shares `cpu.weight`'s one stale window (`Slot::reweigh`):
@@ -820,8 +827,9 @@ carry never grants more than the quota (`carry_cap`), so two writers racing
 past each other's check leave a job with no more than a burst that fits.
 Writing either file drops what was carried. The `cpu` line of stage 13 checks
 the files, and, on a slot of its own charged at instants it chooses, the carry
-exactly (`quota::check_burst_carry`); the files' refusals have no requirement
-of their own yet, since a new id is reserved on `develop` first. Negative
+exactly (`quota::check_burst_carry`); the files' refusals are the load
+ring's and the library's and claim no requirement (the consultant's ruling of 2026-10-26, ledger line 10 of this session's ledger, still to be copied to the gate host's): the
+item's own bound on a burst is `carry_cap`, under L.object.184. Negative
 controls, run with `test-boot` here and owed through `gate.sh control` on a
 claimed architecture: a period carrying nothing stopped the boot with
 "cpu.max.burst did not carry a period's unused quota into the next";
@@ -907,7 +915,8 @@ check requires that no disk keeps its queue. It is all load-ring and library
 code, and names no requirement: the item's L.object.186-187, reserved for it,
 were released (the consultant's review found no high-level requirement for
 disk shares, and the cost's arithmetic belongs beside the queue); L.object.186
-went to the reclaim of the dentry and inode caches (§10), and 187 is unused.
+went to the reclaim of the dentry and inode caches (§10), and 187 to the
+native weight an idle job refuses (§12).
 
 ## 14. Where the controllers stand (2026-10-01)
 
