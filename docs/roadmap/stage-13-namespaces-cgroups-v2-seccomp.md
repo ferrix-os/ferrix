@@ -195,8 +195,9 @@ ARMv7-A: Chromium's probes and its `SIGSYS` emulation, Flatpak's filter for two
 architectures, bubblewrap's `prctl` then `execve`, the kill actions with a
 thread killed among several, strict mode, and `TSYNC` while threads are being
 made; two negative controls as features of the program
-(`docs/SECCOMP.md` §12). Linux's own `seccomp_bpf` selftest is the part of S6
-still to do (BACKLOG).
+(`docs/SECCOMP.md` §12). Linux's own `seccomp_bpf` selftest, the rest of
+S6, followed on 2026-10-26 as `cargo xtask test-seccomp-selftest`
+(`docs/SECCOMP.md` §8.2).
 
 **Done -- N1, per-mount flags (2026-09-28, 5 points).** `ro`, `nosuid`,
 `nodev` and `noexec` are a mount's own and enforced -- `EROFS` for every
@@ -301,11 +302,11 @@ a writable mount's clean pages (f0bc9ab2d, 2026-10-15, L.object.188-190); and
 the cgroupfs flakes' fixes (fl-cg, 2026-10-16). **The stage is done (2026-10-21):**
 its scope is what `main` holds, and its exit is met. Time namespaces,
 unprivileged mounting (N5), the dentry and inode caches' reclaim and Linux's
-`seccomp_bpf` selftest are not built; they are the
-[follow-ons](follow-ons.md), with their branches. `memory.reclaim`,
-`cpu.max.burst`, `cpu.idle`, `io.weight`, `io.latency`, and `anon` and
-`pagetables` in `memory.stat`, the first of them built, followed on
-2026-10-26 (L.object.182 to 185).
+`seccomp_bpf` selftest were the [follow-ons](follow-ons.md); with
+`memory.reclaim`, `cpu.max.burst`, `cpu.idle`, `io.weight`, `io.latency`,
+and `anon` and `pagetables` in `memory.stat`, every one of them was built on
+2026-10-26 (L.object.182 to 187) on `claude/ferrix-roadmap-completion-hkxlpp`, and lands once the
+gate host has run what each commit says it owes.
 
 **Where stage 13 stood (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
@@ -423,7 +424,7 @@ running before writing the quota (about one ARMv7-A `--smp 2` boot in
 twenty had stopped there, the waiter never let run), and the freeze check to
 read `cpu.stat` only once every task is switched out.
 
-**Moved to the [follow-ons](follow-ons.md) (not built):** reclaim of the dentry and inode caches, and `memory.reclaim`
+**Moved to the [follow-ons](follow-ons.md), and built there on 2026-10-26:** reclaim of the dentry and inode caches, and `memory.reclaim`
 (a writable btrfs mount's clean pages are reclaimed since 2026-10-15); `io.weight` and `io.latency`;
 `cpu.idle` and `cpu.max.burst`; `anon` and `pagetables` in `memory.stat`.
 `docs/CGROUPS.md` §7.1 says how landings are gated now, and what cost a gate

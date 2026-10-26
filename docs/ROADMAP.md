@@ -90,7 +90,7 @@ Now [`docs/roadmap/claude-code.md`](roadmap/claude-code.md).
 
 Now [`docs/roadmap/stage-13-namespaces-cgroups-v2-seccomp.md`](roadmap/stage-13-namespaces-cgroups-v2-seccomp.md).
 
-## Namespace and cgroup follow-ons  ·  *unsized*
+## Namespace and cgroup follow-ons  ·  *unsized*  ·  built 2026-10-26, landing owed
 
 Now [`docs/roadmap/follow-ons.md`](roadmap/follow-ons.md).
 
