@@ -25,7 +25,9 @@
 //! USB-Blaster are held by `ferrix-usb-host`'s tests against its model
 //! instead (`src/lib/drivers/usb/usb-host/src/tests/serial.rs`).
 
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -174,6 +176,7 @@ pub(crate) fn busybox(arch: Arch, args: &Args) -> Result<PathBuf> {
     }
 }
 
+#[cfg(unix)]
 /// The gate's half, once the guest is ready: connect, send go, read the
 /// guest's line, send ours, and wait for the guest to print it.
 fn connect(socket: &Path) -> std::result::Result<UnixStream, String> {
@@ -194,6 +197,7 @@ fn connect(socket: &Path) -> std::result::Result<UnixStream, String> {
     Ok(stream)
 }
 
+#[cfg(unix)]
 /// The whole run, from the gate's side: both rounds, the kill between
 /// them and the key pressed after it.
 fn exchange(
@@ -270,6 +274,7 @@ fn exchange(
     round(watching, &mut stream, from_third, to_third, GOT_THIRD)
 }
 
+#[cfg(unix)]
 /// One round: go, the guest's line in, the gate's line out and read back.
 fn round(
     watching: &mut Watching<'_>,
@@ -416,6 +421,7 @@ fn judge(lines: &[String], trace: &Path) -> Vec<String> {
 /// # Errors
 ///
 /// A boot that did not carry both lines, or set the rate.
+#[cfg(unix)]
 pub(crate) fn test(args: &Args) -> Result<()> {
     let arch = Arch::X86_64;
     if args.arches()?.iter().any(|&asked| asked != arch) {
@@ -510,4 +516,17 @@ pub(crate) fn test(args: &Args) -> Result<()> {
          exported the interface again, and a new usbserial carried {from_third:?} and {to_third:?}"
     );
     Ok(())
+}
+
+/// `test-usb-serial` away from Unix: the gate reaches QEMU's serial
+/// chardev through a Unix socket, so it runs on the Linux host only.
+///
+/// # Errors
+///
+/// Always.
+#[cfg(not(unix))]
+pub(crate) fn test(_args: &Args) -> Result<()> {
+    Err(Error::new(
+        "test-usb-serial speaks to QEMU's serial port over a Unix socket: run it on the Linux host",
+    ))
 }
