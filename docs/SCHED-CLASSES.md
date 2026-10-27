@@ -582,24 +582,42 @@ met in the split commit, 7 (gate rows on the landing hash) and 8 (S5's
 evidence) owed: the release ELF's IPC-path functions are not identical
 (below).
 
-**What the release ELF says (x86-64, `--release`, symbols with the crate
-names normalised).** The split itself is not byte-for-byte neutral:
-`RunQueue::enqueue` grew 12 bytes, `RunQueue::set_weight` 13, and the fast
-path's `ferrix_fast_write_read` shrank 3 (codegen across the new crate
-boundary; no body changed). A first cut of the core through `Stack` (a
-`Stack` alias in `core/src/sched/stack.rs`, kept as a stash entry
-`stack-wip` and in the next commit's notes, not landed) grows
-`ferrix_fast_write_read` by 113 bytes, about twenty more instructions,
-mostly stack moves of the `(EntityState, Slot)` pair the trait passes as
-one entity: not free. So S5 is not met by that cut. The fix is to make the
-fair queue's own `enqueue` and `hand_over` take its entity as one value, so
-the trait is a pass-through, and then to show the fast path's code
-identical, or measure it under the `optimize-ipc-round-trip` protocol on
-the gate host.
+**The core through `Stack` (2026-10-26, uncommitted cut then landed on
+the branch).** `core/src/sched/stack.rs` names `Stack = Eevdf` once; the
+core's queue is `StackQueue`, and the operations the trait has --
+enqueue, remove, remove the running one, pick, current, the hand-over,
+charge, the remaining slice, the length, the check -- go through
+`Stack::`; the EEVDF-only calls `stack.rs` lists stay on the queue. The
+fair queue's `remove`, `remove_curr`, `detach` and `hand_over` now answer
+the entity as one value, `(EntityState, Slot)`, the trait's shape, so the
+adapter is a pass-through. No flag reads it yet: the selection crate (S2,
+N1) comes with the per-tier flags.
 
-Next, each pushed as it is done so another session can take it up:
-`RunQueue`'s entity as one value; the core through `Stack` (N2 to N7 of
-the code review: the entity in `Task`, the stack's name on the boot line,
-the field-for-field hand-over test on the stack type); then the selection
-crate as S2 has it (N1). Still open for the customer: C3, fair in
+**What the release ELF says (x86-64, `--release`, symbols with the crate
+names normalised).**
+
+| Function | before the split (62388fd0) | the split (b829273f) | the core through `Stack` |
+|---|---|---|---|
+| `RunQueue::enqueue` | 0x4b4 | 0x4c0 | (inlined as before) |
+| `RunQueue::set_weight` | 0x325 | 0x332 | 0x332 |
+| `sched::choose_next` | 0x58c | 0x58c | 0x58c |
+| `ferrix_fast_write_read` | 0x27ac | 0x27a9 | 0x27d4 |
+
+The first cut, with the fair queue's own tuple shapes, made the fast path
+0x281a and `choose_next` 0x5ae, mostly stack moves re-packing
+`(EntityState, Slot)`; answering the entity as one value brought
+`choose_next` back to the same size and the fast path to 43 bytes over
+the split's, about ten instructions, mostly the same moves in another
+order. Two other cuts were measured and dropped: a refusal carrying the
+state (0x2858) and one carrying the whole entity (0x2807). So S5 is still
+owed: the round trip measured before and after under the
+`optimize-ipc-round-trip` protocol on the gate host, or the fast path's
+remaining difference removed.
+
+Next, each pushed as it is done so another session can take it up: the
+rest of N2 to N7 of the code review (the entity in `Task` as
+`<Stack as SchedClass<Arc<Task>>>::Entity` behind L.sched.63's cell, the
+stack's name on the boot line in a commit of its own, the field-for-field
+hand-over test on the stack type, the inventory's list of fair uses kept
+outside `Stack`); then the selection crate as S2 has it (N1). Still open for the customer: C3, fair in
 `max`.

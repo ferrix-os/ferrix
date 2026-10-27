@@ -289,7 +289,7 @@ fn lag_survives_leaving_and_coming_back() {
     let sleeper = (1..=4).find(|id| *id != running).unwrap();
     let lag_before = queue.lag(sleeper).unwrap();
 
-    let (payload, state, _) = queue.remove(sleeper).unwrap();
+    let (payload, (state, _)) = queue.remove(sleeper).unwrap();
     assert_eq!(state.vlag, lag_before, "it leaves with the lag it had");
     check(&queue);
 
@@ -516,7 +516,7 @@ fn removing_the_running_entity_by_name_works_like_remove_curr() {
         .unwrap();
     let _ = queue.pick_next();
     let running = queue.current_id().unwrap();
-    let (payload, _, _) = queue.remove(running).unwrap();
+    let (payload, _) = queue.remove(running).unwrap();
     assert_eq!(payload, running * 10, "the running entity's payload");
     assert_eq!(queue.current(), None, "nothing running now");
     assert_eq!(queue.len(), 1, "one left");
@@ -643,11 +643,11 @@ fn random_operations_keep_every_invariant_and_pick_what_brute_force_picks() {
             }
             3 if queue.queued() > 0 => {
                 let target = queue.latest_where(|_| true).unwrap();
-                let (_, state, _) = queue.remove(target).unwrap();
+                let (_, (state, _)) = queue.remove(target).unwrap();
                 away.push((target, state));
             }
             4 => {
-                if let Some((id, _, state, _)) = queue.remove_curr() {
+                if let Some((id, _, (state, _))) = queue.remove_curr() {
                     away.push((id, state));
                 }
             }
@@ -1033,8 +1033,8 @@ fn hand_over_is_the_general_sequence() {
 
         same_queue(&general, &direct, case);
         assert_eq!(
-            (left_general.0, left_general.1, left_general.2),
-            (left_direct.0, left_direct.1, left_direct.2),
+            (left_general.0, left_general.1, left_general.2.0),
+            (left_direct.0, left_direct.1, left_direct.2.0),
             "case {case}: the leaving entity"
         );
         check(&direct);
@@ -1147,7 +1147,7 @@ fn a_slot_taken_apart_and_put_together_serves_a_queue() {
         .map_err(|_| ())
         .expect("enqueued");
     assert_eq!(queue.pick_next().copied(), Some(10));
-    let (id, payload, _, slot) = queue.remove_curr().expect("it ran");
+    let (id, payload, (_, slot)) = queue.remove_curr().expect("it ran");
     assert_eq!((id, payload), (1, 10));
     let node = slot.into_box();
     assert!(

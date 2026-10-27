@@ -314,7 +314,7 @@ pub struct Refused<T> {
 
 /// A running entity taken off its queue: its identifier, its data, what it
 /// carries away and its slot, as [`RunQueue::remove_curr`] answers it.
-pub type Left<T> = (u64, T, EntityState, Slot<T>);
+pub type Left<T> = (u64, T, FairEntity<T>);
 
 /// One entity, while it is on a queue.
 #[derive(Debug)]
@@ -786,12 +786,14 @@ impl<T> RunQueue<T> {
         Ok(Some((
             left_id,
             payload,
-            EntityState {
-                weight,
-                vlag,
-                sum_exec,
-            },
-            Slot(leaving),
+            (
+                EntityState {
+                    weight,
+                    vlag,
+                    sum_exec,
+                },
+                Slot(leaving),
+            ),
         )))
     }
 
@@ -967,7 +969,7 @@ impl<T> RunQueue<T> {
     /// moving — and hand back what it needs to come back with.
     ///
     /// The slot it came in comes back with it.
-    pub fn remove_curr(&mut self) -> Option<(u64, T, EntityState, Slot<T>)> {
+    pub fn remove_curr(&mut self) -> Option<Left<T>> {
         let node = self.curr.take()?;
         self.detach(node)
     }
@@ -975,16 +977,16 @@ impl<T> RunQueue<T> {
     /// Take entity `id` off the queue, running or waiting, with its slot.
     ///
     /// A waiting entity is found by a walk: see [`RunQueue::contains`].
-    pub fn remove(&mut self, id: u64) -> Option<(T, EntityState, Slot<T>)> {
+    pub fn remove(&mut self, id: u64) -> Option<(T, FairEntity<T>)> {
         if self.curr.as_ref().is_some_and(|curr| curr.entity.id == id) {
             return self
                 .remove_curr()
-                .map(|(_, payload, state, slot)| (payload, state, slot));
+                .map(|(_, payload, entity)| (payload, entity));
         }
         let key = self.tree.find(id)?;
         let node = self.tree.remove(key)?;
-        let (_, payload, state, slot) = self.detach(node)?;
-        Some((payload, state, slot))
+        let (_, payload, entity) = self.detach(node)?;
+        Some((payload, entity))
     }
 
     /// Give entity `id` the weight `weight`, running or waiting, and say
@@ -1078,7 +1080,7 @@ impl<T> RunQueue<T> {
     /// statement about the queue it is leaving.
     ///
     /// `None` only for a node with no payload, which a queue never holds.
-    fn detach(&mut self, mut node: Box<Node<T>>) -> Option<(u64, T, EntityState, Slot<T>)> {
+    fn detach(&mut self, mut node: Box<Node<T>>) -> Option<Left<T>> {
         let entity = &node.entity;
         let limit = self.lag_limit(entity.weight);
         let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
@@ -1090,12 +1092,14 @@ impl<T> RunQueue<T> {
         Some((
             id,
             payload,
-            EntityState {
-                weight,
-                vlag,
-                sum_exec,
-            },
-            Slot(node),
+            (
+                EntityState {
+                    weight,
+                    vlag,
+                    sum_exec,
+                },
+                Slot(node),
+            ),
         ))
     }
 
@@ -1315,17 +1319,13 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
     }
 
     fn remove(queue: &mut RunQueue<T>, id: u64) -> Option<(T, FairEntity<T>)> {
-        queue
-            .remove(id)
-            .map(|(payload, state, slot)| (payload, (state, slot)))
+        queue.remove(id)
     }
 
     fn remove_current(
         queue: &mut RunQueue<T>,
     ) -> Option<ferrix_sched_class::Left<T, FairEntity<T>>> {
-        queue
-            .remove_curr()
-            .map(|(id, payload, state, slot)| (id, payload, (state, slot)))
+        queue.remove_curr()
     }
 
     fn pick(queue: &mut RunQueue<T>) -> Option<&T> {
@@ -1349,7 +1349,6 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
     ) -> ferrix_sched_class::Handed<T, FairEntity<T>> {
         queue
             .hand_over(id, payload, state, slot, slice_after)
-            .map(|left| left.map(|(id, payload, state, slot)| (id, payload, (state, slot))))
             .map_err(|refused| back(refused, state))
     }
 

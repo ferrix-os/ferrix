@@ -27,10 +27,10 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched_class::{CpuLoad, Load};
-use ferrix_sched_fair::{
-    Config, EntityState, JobPlan, RunQueue, Timeline, settle_job_fold, slice_for,
-};
+use ferrix_sched_class::{CpuLoad, Load, SchedClass};
+use ferrix_sched_fair::{Config, EntityState, JobPlan, Timeline, settle_job_fold, slice_for};
+
+use super::stack::{Stack, StackQueue};
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 
@@ -149,7 +149,7 @@ pub(crate) struct CpuQueue {
     /// The fair class. The idle task is not in it: it is what runs when this
     /// is empty, which is what makes it the bottom of the class stack rather
     /// than a task with a very small weight.
-    pub(crate) fair: RunQueue<Arc<Task>>,
+    pub(crate) fair: StackQueue,
     /// What is running, which is the idle task when the fair class is empty.
     pub(crate) current: Option<Arc<Task>>,
     /// This CPU's idle task.
@@ -184,7 +184,7 @@ pub(crate) struct CpuQueue {
 impl CpuQueue {
     /// An empty queue.
     pub(crate) fn new() -> Result<CpuQueue, &'static str> {
-        let fair = RunQueue::new(Config {
+        let fair = Stack::new_queue(Config {
             slice_ns: TARGET_LATENCY_NS,
         })
         .map_err(|_| "the scheduler's slice is not a slice")?;
@@ -312,11 +312,11 @@ impl CpuQueue {
         } else {
             self.stats.idle_ns += delta;
         }
-        let remaining = self.fair.remaining_ns()?;
+        let remaining = Stack::remaining_ns(&self.fair)?;
         if let Some(task) = self.fair.current() {
             task.add_runtime(delta);
         }
-        if self.fair.update_curr(delta) {
+        if Stack::charge(&mut self.fair, delta) {
             let overrun = delta.saturating_sub(remaining);
             self.stats.worst_overrun = self.stats.worst_overrun.max(overrun);
             if self.stats.measuring {
@@ -482,14 +482,16 @@ impl CpuQueue {
         // job's share of it as things stand now.
         task.join_group();
         task.set_weight(task.effective_weight());
-        if let Err(refused) =
-            self.fair
-                .enqueue(task.id, Arc::clone(task), task.entity_state(), slot)
-        {
+        if let Err(refused) = Stack::enqueue(
+            &mut self.fair,
+            task.id,
+            Arc::clone(task),
+            (task.entity_state(), slot),
+        ) {
             // The only refusals are a duplicate identifier and a zero weight,
             // neither of which this kernel can produce; dropping the clone is
             // what keeps the task alive in the table regardless.
-            task.return_run_slot(refused.slot);
+            task.return_run_slot(refused.entity.1);
             drop(refused.payload);
             return;
         }
@@ -519,7 +521,7 @@ impl CpuQueue {
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
-        if let Some((_, task, state, slot)) = self.fair.remove_curr() {
+        if let Some((_, task, (state, slot))) = Stack::remove_current(&mut self.fair) {
             task.return_run_slot(slot);
             task.store_entity_state(state);
             task.set_queued(false);
@@ -528,7 +530,7 @@ impl CpuQueue {
 
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
-        if let Some(task) = self.fair.pick_next() {
+        if let Some(task) = Stack::pick(&mut self.fair) {
             return Some(Arc::clone(task));
         }
         self.idle.clone()
@@ -645,7 +647,7 @@ impl CpuQueue {
         if self.current.is_some() {
             self.account(crate::timer::now_nanos());
         }
-        let (task, state, slot) = self.fair.remove(id)?;
+        let (task, (state, slot)) = Stack::remove(&mut self.fair, id)?;
         task.return_run_slot(slot);
         task.set_queued(false);
         self.rescale_slice();
@@ -741,16 +743,16 @@ impl CpuQueue {
         };
         peer.set_weight(weight);
         // `rescale_slice` as `insert` makes it, with the peer counted.
-        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len() + 1);
+        let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.fair) + 1);
         let (id, state) = (peer.id, peer.entity_state());
         // The peer's own reference goes into the queue, and the caller's
         // comes out of it into `between`: moved, not counted up and down.
-        match self.fair.hand_over(id, peer, state, slot, slice_after) {
+        match Stack::hand_over(&mut self.fair, id, peer, (state, slot), slice_after) {
             Ok(left) => {
-                if let Some(next) = self.fair.current() {
+                if let Some(next) = Stack::current(&self.fair) {
                     next.set_queued(true);
                 }
-                if let Some((_, task, state, slot)) = left {
+                if let Some((_, task, (state, slot))) = left {
                     task.return_run_slot(slot);
                     task.store_entity_state(state);
                     task.set_queued(false);
@@ -770,11 +772,11 @@ impl CpuQueue {
             Err(refused) => {
                 // A duplicate or a weight of zero, neither of which this
                 // kernel makes: as `insert` refuses.
-                refused.payload.return_run_slot(refused.slot);
+                refused.payload.return_run_slot(refused.entity.1);
                 return None;
             }
         }
-        self.fair.current().cloned()
+        Stack::current(&self.fair).cloned()
     }
 
     /// Take `id` out of this processor's sleeper set, if it is in it.
@@ -813,7 +815,7 @@ impl CpuQueue {
 
     /// Check the fair class's own bookkeeping.
     pub(crate) fn check_invariants(&self) -> Result<(), &'static str> {
-        self.fair.check_invariants()?;
+        Stack::check(&self.fair)?;
         let running_is_current = match (self.fair.current(), self.current.as_ref()) {
             (Some(fair), Some(current)) => Arc::ptr_eq(fair, current),
             // Nothing in the fair class: the idle task is what runs.
