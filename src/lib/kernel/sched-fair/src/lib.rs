@@ -1364,6 +1364,9 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
         true
     }
 
+    // Out of line: a present fair class shows in the image as this
+    // (SCHED-CLASSES.md S1).
+    #[inline(never)]
     fn check(queue: &RunQueue<T>) -> Result<(), &'static str> {
         queue.check_invariants()
     }

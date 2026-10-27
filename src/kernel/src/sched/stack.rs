@@ -42,3 +42,7 @@ pub(crate) type StackEntity = <Stack as ferrix_sched_class::SchedClass<Arc<Task>
 /// entity is anything else stops the build here, where `Task`'s keeping of
 /// it has to change with it.
 const _: fn(StackEntity) -> ferrix_sched_fair::FairEntity<Arc<Task>> = |entity| entity;
+
+/// What the boot line calls the class stack (SCHED-CLASSES.md S1): its
+/// classes' names, top tier first.
+pub const NAME: &str = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::NAME;

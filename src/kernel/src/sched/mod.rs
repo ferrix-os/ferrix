@@ -81,6 +81,7 @@ pub(crate) use preempt::{
 };
 pub use preempt::{preempt_disable, preempt_enable};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
+pub use stack::NAME as STACK_NAME;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
 pub use wait::{LastLook, WaitQueue};
