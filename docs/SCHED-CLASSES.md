@@ -590,21 +590,29 @@ EEVDF, the tree, the timeline, the weights, the fold and `slice_for`, and
 implements `SchedClass` as `Eevdf` (one host test holds the interface to
 the queue). The kernel's 70 files re-pointed by path only; booted on
 x86-64, AArch64 and ARMv7-A. Its code review: OK IF 1-10, ledger line 12
-of the container's ledger (to be copied to the gate host's); 1-6 and 9
-met in the split commit, 7 (gate rows on the landing hash) and 8 (S5's
-evidence) owed: the release ELF's IPC-path functions are not identical
+of the container's ledger (to be copied to the gate host's); 1-3, 5, 6, 9
+and 10 met (8062be55), 4 (coverage after the final rebase), 7 (gate rows
+on the landing hash) and 8 (S5's evidence) owed: the release ELF's IPC-path functions are not identical
 (below).
 
-**The core through `Stack` (2026-10-26, uncommitted cut then landed on
-the branch).** `core/src/sched/stack.rs` names `Stack = Eevdf` once; the
+**The core through `Stack` (2026-10-26, 7fd2b9ea; its code review OK IF
+1-6, ledger line 13 of the container's ledger, to be copied to the gate
+host's).** `src/kernel/src/sched/stack.rs` names `Stack = Eevdf` once; the
 core's queue is `StackQueue`, and the operations the trait has --
 enqueue, remove, remove the running one, pick, current, the hand-over,
 charge, the remaining slice, the length, the check -- go through
-`Stack::`; the EEVDF-only calls `stack.rs` lists stay on the queue. The
+`Stack::` (with `current`, `len` and the emptiness test routed too, line
+13's condition 4); the EEVDF-only calls `stack.rs` lists stay on the
+queue. The
 fair queue's `remove`, `remove_curr`, `detach` and `hand_over` now answer
 the entity as one value, `(EntityState, Slot)`, the trait's shape, so the
-adapter is a pass-through. No flag reads it yet: the selection crate (S2,
-N1) comes with the per-tier flags.
+adapter is a pass-through. No flag reads it yet. **The interim, as line 13 accepts it** (N1): (a)
+`src/kernel/src/sched/stack.rs` reads no cfg and is the only file naming
+the class type; (b) no `sched_*` flag or value enters `build-flags.toml`
+or a profile while `Stack` is in the core -- the selection crate as S2
+describes it lands with or before the first one, with check-build-flags'
+arm controls and the check that nothing else reads a scheduler flag; (c)
+this paragraph records it.
 
 **What the release ELF says (x86-64, `--release`, symbols with the crate
 names normalised).**
