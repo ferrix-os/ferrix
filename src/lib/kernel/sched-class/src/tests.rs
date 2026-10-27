@@ -470,3 +470,24 @@ fn a_throttled_upper_tier_does_not_spin() {
     assert_eq!(Stack::pick(&mut q), Some(&"rt"));
     assert!(Stack::check(&q).is_ok());
 }
+
+/// Line 30's B3: a removal routed to one tier finds an entity there and
+/// walks no other: an upper entity asked for in the lower tier, or a lower
+/// one in the upper, is not found, and each is found in its own.
+#[test]
+fn a_removal_is_routed_to_its_tier() {
+    let mut q = Stack::new_queue((10, 10)).unwrap();
+    Stack::enqueue(&mut q, 1, "high", Tier::Upper(())).unwrap();
+    Stack::enqueue(&mut q, 2, "low", Tier::Lower(())).unwrap();
+    assert!(Stack::remove_from(&mut q, 1, false).is_none());
+    assert!(Stack::remove_from(&mut q, 2, true).is_none());
+    assert!(matches!(
+        Stack::remove_from(&mut q, 1, true),
+        Some(("high", Tier::Upper(())))
+    ));
+    assert!(matches!(
+        Stack::remove_from(&mut q, 2, false),
+        Some(("low", Tier::Lower(())))
+    ));
+    assert_eq!(Stack::len(&q), 0);
+}

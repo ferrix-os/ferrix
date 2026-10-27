@@ -2887,6 +2887,29 @@ pub static STAGE5_TASK_VIEW: Explanation = Explanation {
     see: "src/kernel/src/sched/inspect.rs; src/kernel/src/sched/inspect_check.rs; src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md",
 };
 
+/// For `sched::move_onto` and `CpuQueue::pick_next`, when a task a processor
+/// runs is found waiting in a run queue.
+pub(crate) static RUNNING_TASK_QUEUED: Explanation = Explanation {
+    code: "FX-0537",
+    title: "a task a processor runs was found waiting in a run queue",
+    meaning: "A task is marked as on a processor from the moment a switch to it commits \
+              until the switch away from it has saved its context, both under the lock of \
+              the queue that owns it. A run queue holds a running task only as its running \
+              entity, never as a waiting one, at every moment outside a decision; so a \
+              steal, a placement or a pick that finds a waiting task with the mark set has \
+              found one context about to run on two processors, or on one before it was \
+              saved, and the machine is stopped before it does (docs/SCHED-CLASSES.md §9e, \
+              the certification consultant's ledger line 30, B1).",
+    causes: &[
+        "A path enqueued a running task as a waiting one outside a decision: a change of \
+         policy that moved the running task at once, rather than at its processor's next \
+         decision (`CpuQueue::requeue_if_moved`).",
+        "A switch did not set or clear the mark (`switch_chosen`, `finish_switch`).",
+    ],
+    see: "src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next; \
+          src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e",
+};
+
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
 pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
@@ -3531,6 +3554,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &TASK_SLOT_RETURNED_TWICE,
     &ENDPOINT_CLOSED_MASKED,
     &STAGE5_TASK_VIEW,
+    &RUNNING_TASK_QUEUED,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

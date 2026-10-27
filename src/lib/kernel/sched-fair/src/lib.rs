@@ -1500,6 +1500,10 @@ pub trait StackTiers<T>: FairTier<T> {
     /// The stack's configuration, from the fair tier's: the tiers above
     /// fair take none.
     fn stack_config(fair: Config) -> Self::Config;
+    /// [`SchedClass::remove`] from the tier the caller says the entity is
+    /// in: the one above fair with `upper`, fair's otherwise; no other
+    /// tier's queue is walked (line 30, B3).
+    fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)>;
     /// The stack's entity for a fair task.
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity;
     /// The stack's entity for a real-time task.
@@ -1519,6 +1523,12 @@ impl<T> StackTiers<T> for Eevdf {
     }
     fn stack_config(fair: Config) -> Config {
         fair
+    }
+    fn remove_in(queue: &mut RunQueue<T>, id: u64, upper: bool) -> Option<(T, FairEntity<T>)> {
+        if upper {
+            return None;
+        }
+        <Eevdf as ferrix_sched_class::SchedClass<T>>::remove(queue, id)
     }
     fn fair_entity(entity: FairEntity<T>) -> FairEntity<T> {
         entity
@@ -1547,6 +1557,9 @@ impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
     }
     fn stack_config(fair: Config) -> ((), Config) {
         ((), fair)
+    }
+    fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)> {
+        ferrix_sched_class::Over::<U, Eevdf>::remove_from(queue, id, upper)
     }
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity {
         ferrix_sched_class::Tier::Lower(entity)

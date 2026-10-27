@@ -147,6 +147,12 @@ pub struct Task {
     cpu: AtomicU64,
     /// Whether a run queue holds it, as a queued entity or as the running one.
     queued: AtomicBool,
+    /// Whether a processor runs it, or has not yet saved its context: set as
+    /// a switch to it commits (`switch_chosen`), cleared once the switch
+    /// away from it has saved it (`finish_switch`), both under the lock of
+    /// the queue that owns it. A task found waiting in a queue with this set
+    /// stops the machine (FX-0537, docs/SCHED-CLASSES.md §9e, line 30 B1).
+    on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
@@ -560,6 +566,7 @@ impl Task {
             state: AtomicU8::new(RUNNABLE),
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
+            on_cpu: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity,
@@ -616,6 +623,8 @@ impl Task {
             state: AtomicU8::new(RUNNABLE),
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
+            // An adopted context is running as it is made.
+            on_cpu: AtomicBool::new(true),
             in_call: AtomicBool::new(false),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
@@ -736,6 +745,19 @@ impl Task {
     /// processor's next decision moves it.
     pub(crate) fn entity_is_current(&self) -> bool {
         self.entity_rt.load(Ordering::Relaxed) == self.rt_word().tier_bits()
+    }
+
+    /// Whether its run slot is parked: a tier above fair holds it, and
+    /// `run_slot` is lent meanwhile (L.sched.107's check).
+    pub(crate) fn run_slot_parked(&self) -> bool {
+        self.parked.holds() && !self.run_slot.holds()
+    }
+
+    /// Whether the entity its queue holds is the tier above fair's: what a
+    /// removal is routed by (`CpuQueue::release`, line 30, B3). Read under
+    /// that queue's lock, which `entity_with` writes it under.
+    pub(crate) fn queued_upper(&self) -> bool {
+        self.entity_rt.load(Ordering::Relaxed) != 0
     }
 
     /// Whether it owns a node of the tier above fair.
@@ -1081,6 +1103,18 @@ impl Task {
     /// Say whether a run queue holds it. Only under that queue's lock.
     pub(crate) fn set_queued(&self, queued: bool) {
         self.queued.store(queued, Ordering::Release);
+    }
+
+    /// Whether a processor runs it, or has not yet saved its context.
+    pub(crate) fn is_on_cpu(&self) -> bool {
+        self.on_cpu.load(Ordering::Acquire)
+    }
+
+    /// Say whether a processor runs it. Only under its queue's lock, by a
+    /// switch: set as one to it commits, cleared once one away from it has
+    /// saved its context.
+    pub(crate) fn set_on_cpu(&self, on: bool) {
+        self.on_cpu.store(on, Ordering::Release);
     }
 
     /// Whether it holds both its slots: no run queue holds it, and no sleeper

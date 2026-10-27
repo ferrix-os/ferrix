@@ -1235,6 +1235,66 @@ guarantee stated narrowly; the checks split below):
   tasks (the reaper, the network's) for 950 ms of every second; said beside
   the floor.
 
+**A running task is never a waiting entity (the code review's line 30,
+B1).** Outside a decision -- `choose_next` and the direct switch's
+`hand_over`, each under its queue's lock from its first change to its pick
+-- a run queue holds the task its processor runs only as its running
+entity, never as a waiting one. 4b's first build broke this: a change of
+policy on the running task released and re-enqueued it at once, so that
+until its processor's next decision it sat in its new tier as a waiting
+entity while it ran. Moved to fair, it was a steal candidate
+(`steal_candidate` filters on `RUNNABLE`, which a running task is), and an
+idle processor took it and switched to a context never saved: the crash
+`test-rtsched` met in two boots of four on a loaded host. Confirmed: with
+the immediate move restored and no decision asked for, the flips case
+below stops the machine with FX-0537 at a steal in three boots of three.
+The rule is now held twice:
+* by construction: a change of policy moves a running task only at its
+  processor's next decision (`CpuQueue::requeue_if_moved`, before the
+  pick), and a queued task that does not run at once;
+* by a check that fails closed: each task carries an on-processor mark,
+  set as a switch to it commits (`switch_chosen`) and cleared once the
+  switch away from it has saved its context (`finish_switch`), both under
+  the owning queue's lock; `move_onto` (a steal or a placement) and
+  `pick_next` stop the machine (FX-0537) on a task so marked that is not
+  their own processor's running task. Its control is the immediate move
+  restored with no decision asked for, which the boot check `flips` -- an
+  unpinned running task flipped between `SCHED_FIFO` and fair 200 times
+  beside a waiting one, with processors idle to steal -- turns into
+  FX-0537. The control, for the gate host's `gate.sh control --expect
+  FX-0537` (desktop, x86-64), in `CpuQueue::set_policy`:
+
+  ```
+  -        if running {
+  -            return true;
+  -        }
+           if let Some(task) = self.release(task.id, task.queued_upper()) {
+  ```
+  (the move at the call, which then answers `self.should_preempt()` alone
+  and so asks for no decision for the moved running task).
+
+The audit of every other path that enqueues a task, by caller of
+`CpuQueue::insert`:
+* the boot task and a new task (`sched::init`, `enqueue`): no processor
+  runs it yet;
+* a wake at home (`wake_at_home`): only a task no queue holds
+  (`is_queued`); a task part-way into its block is still its queue's
+  running entity, so it is queued and not inserted;
+* a wake onto the waker's processor (`wake_onto`) and a placement on an
+  idle one (`place_on_idle`): only a task asleep at home, neither running
+  nor queued (`asleep_at_home`, `placed_on_wake`), under both queues' locks;
+* a steal (`steal_from`): a waiting entity of fair's tree, which by the
+  rule above is never a running task, under both queues' locks;
+* a sleeper with no sleep slot (`choose_next`): re-queued inside the
+  decision, which picks under the same lock hold;
+* the direct switch (`CpuQueue::hand_over`): the peer is asleep at home
+  (A1), and the caller leaves as the running entity under the lock the
+  switch hands over;
+* a weight or a job's share (`set_weight`, `regroup_current`): changed in
+  place, never re-queued;
+* affinity: `sched_setaffinity` is validated and not applied, so no move.
+None puts a running task in a queue as a waiting one.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
@@ -1552,68 +1612,54 @@ the gate host: the round trip, the controls of rule (e) and condition 1,
 coverage after the final rebase.
 
 **Step 4b built** (for the consultant's code review against ledger line
-29, R1-R15; commits 5af67ba86, 4a123dda1 and the one after them): the
-core half and `ferrix-sched-fifo` selected on `desktop`, whose classes line
-reads `fifo_rr+eevdf` on all three architectures; `present` unchanged.
+29, R1-R15; commits 5af67ba86, 4a123dda1, 229cf6b7e; reviewed at
+229cf6b7e, line 30, NOT YET on B1-B3, answered in 8c9620fd5 and the commit
+after it): the core half and `ferrix-sched-fifo` selected on `desktop`,
+whose classes line reads `fifo_rr+eevdf` on all three architectures;
+`present` unchanged.
 * R1: a task's `FifoSlot` is allocated by `sched::set_policy` before any
   lock (`ENOMEM`, nothing changed), and by `prepare_user` for a real-time
   parent's child; kept on the return to fair (the move check), freed with
   the task. No scheduler path allocates.
-* R2, **not met as written**: `FifoRr::remove` by identifier walks the
-  tree, O(n). The interface's `remove(queue, id)` carries no key, and the
-  task does not hold its node's key while the queue does; the walk serves
-  `sched_setscheduler`'s move of a queued, not running, task alone, never a
-  switch, a wake or the tick (MEMORY-AND-TIMING.md says so). The choice for
-  the review: accept the walk on that path, or a `remove` that takes the
-  entity's key, kept by the task as the queue lends its node. `check()`
-  holds order and balance; the crate's nine host tests cover the rest of
-  R2's list.
-* R3, R4: `ready` and `elapse`, as 4a's line 28 recorded; and one defect
-  the floor's boot check found: `Over::decision_in_ns` asked a throttled
-  upper tier nothing while the lower ran, so no timer was armed for the
-  period's end and a throttled `SCHED_FIFO` task never ran again beside a
-  tickless fair one. It now answers the earlier of the two, with the host
-  test's toy modelling the period's end.
+* R2, as line 30 rules: `FifoRr::remove` of a waiting entity walks the
+  tree, O(n), accepted on its one caller, a change of policy on a queued
+  real-time task that does not run (its doc and MEMORY-AND-TIMING.md say
+  so); `check()` holds order and balance; the crate's nine host tests cover
+  the rest of R2's list.
+* B3: every removal is routed by the task's tier (`StackTiers::remove_in`,
+  `Over::remove_from`, with a host test), so no fair removal walks the
+  real-time tree; a steal releases from fair's alone.
+* R3, R4: `ready` and `elapse`; and `Over::decision_in_ns` arms the timer
+  for a throttled upper tier's period end while the lower runs (the floor
+  check found its absence), accepted, L.sched.103 restated.
 * R5: wake preemption through `Stack::should_preempt` (L.sched.109) and no
   placement, pull or steal of a real-time task (L.sched.110), each with a
   check, the placement's with a fair control.
-* R6: the upper cell (L.sched.107), a weight kept (L.sched.108), N2's
-  consts restated (the innermost entity is `FairEntity`; a fair-only
-  build's entity and cell asserted by size), `move_onto` never given a
-  real-time task, the fold gate in `direct.rs` with L.sched.64-66
-  restated, and the fast path's fifth job case: a fair caller and a
-  `SCHED_FIFO` echo in one job do not fold. One change from the design: a
-  change of policy on a *running* task is applied at its processor's next
-  decision (`CpuQueue::requeue_if_moved`, in `choose_next` before the
-  pick), and only asks for that decision at once. Moving it at the call
-  left the stack holding the running task as a waiting entity until then,
-  and `test-rtsched` crashed in that window in two boots of four
-  (a switch to a context never saved); a queued task that is not running
-  still moves at once.
-* R7: the calls' argument checks with Linux's errnos (L.sched.117);
-  `FUTEX_LOCK_PI` still `ENOSYS`; `present`'s `EINVAL` (L.sched.116),
-  `sched_setattr` and `sched_getattr` added to the ABI tables on all four
-  numberings.
-* R8: `prepare_user` the one maker, `inherit_policy` its one inheritance
-  (L.sched.113); checked by `test-rtsched` (a fork and a thread, a fork
-  under reset-on-fork, with its negative control) and by the native
-  launch's prepared start under a `SCHED_FIFO` maker, with and without
-  reset-on-fork.
-* R9: `make_domain` refuses `SoftRt` as `NotCreatable` (L.sched.115);
-  REALTIME.md states the narrow guarantee.
-* R10: H.SCHED.19-20 and L.sched.107-117 written, the reservation entry
-  released; the ids' reservation on `develop` is still owed (the
-  traceability check says so and nothing else).
+* R6: the upper cell and the parked run slot (L.sched.107; the move check
+  reads both), a weight kept (L.sched.108), N2's consts restated, the fold
+  gate with L.sched.64-66 restated and the fast path's fifth job case; and
+  B1 (§9e): the running task moved at its next decision, the on-processor
+  mark and FX-0537, the flips check and its control, the audit.
+* R7, R8, R9: `present`'s refusal (L.sched.116, now `set_policy`'s
+  `NoTier` and `realtime_built`), inheritance in `prepare_user`
+  (L.sched.113), `SoftRt` refused by name (L.sched.115). The Linux layer's
+  permission rule and argument checks are the load ring's: L.sched.111 and
+  117 are dropped (line 30, B2), and `test-rtsched` shows both.
+* R10: H.SCHED.19-20 and L.sched.107-110 and 112-116 written, the
+  reservation entry released. `check-traceability --check` fails on one
+  thing only: these ids, and 4a's, are not yet reserved on `develop`.
 * R11: the arm, `unclassified_deps` citing line 29, `desktop` taking it.
-  Owed: test-removable's class-crate half on three architectures and S5's
-  ELF table for `present` (the disk here holds one architecture's at a
-  time), the round trip on the landing hash.
 * R12: `sched/rt_check.rs` (order, wakes, placement, FIFO's place, RR and
-  its FIFO control, a yield, the floor, the move), the `cpu.max` cut on a
-  `SCHED_FIFO` program (cpu_check, L.sched.114), `test-rtsched` on
-  `desktop` and on `present`, the native launch's check.
+  its FIFO control, a yield, the floor, flips, the move), the `cpu.max`
+  cut on a `SCHED_FIFO` program (L.sched.114), `test-rtsched` on
+  `desktop` and on `present` with its negative control, the native
+  launch's check.
 * R13, R14, C2: REALTIME.md and `/proc/loadavg`'s documentation.
 * R15: this line.
+* Owed, with line 30's C3: the reservations on `develop`, S5's ELF table
+  for `present`, the class-crate half on three architectures, the round
+  trip, coverage, every control through `gate.sh` (R12's negative
+  controls and B1's), the boots' rows.
 
 **`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
 the three pending values confirmed as intended). Met: (1) `pending` only

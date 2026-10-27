@@ -2501,6 +2501,15 @@ fn placed_on_wake(
 /// (F8, L.sched.110): the fair class alone offers a steal, and a wake's
 /// placement declines one.
 fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
+    // A task a processor runs is never waiting in a queue to be moved: one
+    // that is means two processors would run one context (line 30, B1).
+    if task.is_on_cpu() {
+        crate::panic::fatal!(
+            crate::panic::catalog::RUNNING_TASK_QUEUED,
+            "a task a processor runs was moved to another as if it waited: task {}",
+            task.id
+        );
+    }
     task.set_cpu(to);
     // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
     queue.insert(task);
@@ -3021,6 +3030,9 @@ fn switch_chosen(
     // Moved, not cloned (2f): the outgoing task into `previous`, which
     // `finish_switch` takes, and the pick into `current`. The rest reads both
     // where the queue holds them.
+    // The incoming task runs from here; the outgoing one until its context
+    // is saved, which `finish_switch` marks (FX-0537).
+    next.set_on_cpu(true);
     queue.previous = Some(previous);
     set_current(queue, cpu, next);
     let (Some(previous), Some(next)) = (queue.previous.as_ref(), queue.current.as_ref()) else {
@@ -3195,6 +3207,10 @@ fn finish_switch() {
         borrow::audit(borrow::Site::Switch, queue.current.as_ref());
     }
     let previous = queue.previous.take();
+    // Its context is saved: no processor runs it now (FX-0537).
+    if let Some(previous) = previous.as_ref() {
+        previous.set_on_cpu(false);
+    }
     let dead = previous.as_ref().is_some_and(|task| task.is_dead());
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
@@ -3425,7 +3441,8 @@ fn steal_from(me: usize, victim: usize) -> bool {
     // idle processor's look at the other queues.
     let keeps_its_last = theirs_queue.is_running_idle() && theirs_queue.waiting() <= 1;
     let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
-        Some(id) => match theirs_queue.release(id) {
+        // The candidate is fair's: only fair offers one (F8).
+        Some(id) => match theirs_queue.release(id, false) {
             Some(task) => {
                 move_onto(&task, me, mine_queue);
                 theirs_queue.stats.stolen_out += 1;

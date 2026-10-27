@@ -34,6 +34,10 @@
 //!   from it, and given back to fair shares it again; it keeps its node
 //!   across the return, and a weight set while it was real-time is its fair
 //!   record's.
+//! * **Flips**: an unpinned running task flipped between `SCHED_FIFO` and
+//!   fair 200 times beside a waiting one, with processors idle to steal:
+//!   the running task is moved only at its processor's next decision
+//!   (line 30, B1; its control is the move made at the call, FX-0537).
 //! * **The modes** (L.sched.115, L.sched.116): a `SoftRt` domain is refused
 //!   by name where the tier is built, `ModeUnavailable` where it is not, and
 //!   a real-time policy refused there too.
@@ -170,8 +174,8 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
     match VERDICT.load(Ordering::Acquire) {
         1 => Ok(
             "priority order, preemption on a remote and a local wake, FIFO's place, \
-                 RR's quantum (and FIFO's control), a yield, the 50 ms floor, the move \
-                 between tiers",
+                 RR's quantum (and FIFO's control), a yield, the 50 ms floor, flips of a \
+                 running task, the move between tiers",
         ),
         _ => Err(WHY.get()),
     }
@@ -213,6 +217,7 @@ fn drive(c: usize) {
         .and_then(|()| fifo_keeps_its_place(c))
         .and_then(|()| round_robin(c))
         .and_then(|()| floor(c))
+        .and_then(|()| flips(c))
         .and_then(|()| the_move(c));
     STOP.store(true, Ordering::Release);
     RELEASE.store(true, Ordering::Release);
@@ -504,10 +509,12 @@ fn placement(c: usize) -> Result<(), &'static str> {
     let _busy = super::spawn_on("rt-busy", fair_spinner, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
     started(1)?;
     let fifo = params(RtPolicy::Fifo, 5);
-    let _rt = super::spawn_rt_on("rt-placed", woken_where, 0, c, all, fifo)?;
-    let rt_ran_on = woken_ran_on(2)?;
-    let _fair = super::spawn_on("rt-placed-fair", woken_where, 0, NICE_0_WEIGHT, c, all)?;
-    let fair_ran_on = woken_ran_on(3)?;
+    let rt_ran_on = woken_ran_on(2, || {
+        super::spawn_rt_on("rt-placed", woken_where, 0, c, all, fifo)
+    })?;
+    let fair_ran_on = woken_ran_on(3, || {
+        super::spawn_on("rt-placed-fair", woken_where, 0, NICE_0_WEIGHT, c, all)
+    })?;
     stop();
     if rt_ran_on != c {
         return Err("a woken real-time task was moved off its busy processor");
@@ -518,11 +525,16 @@ fn placement(c: usize) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Wait for the `n`th task of the case to start and wait, wake it from
-/// here, and answer where it ran.
-fn woken_ran_on(n: usize) -> Result<usize, &'static str> {
+/// Start the `n`th task of the case with `spawn`, the condition it waits
+/// for cleared first, wait for it to start and wait, wake it from here, and
+/// answer where it ran.
+fn woken_ran_on(
+    n: usize,
+    spawn: impl FnOnce() -> Result<Arc<Task>, &'static str>,
+) -> Result<usize, &'static str> {
     WOKEN.store(false, Ordering::Release);
     RAN_ON.store(usize::MAX, Ordering::Release);
+    let _task = spawn()?;
     started(n)?;
     super::sleep_for(20_000_000);
     WOKEN.store(true, Ordering::Release);
@@ -685,6 +697,58 @@ fn the_move(c: usize) -> Result<(), &'static str> {
     outcome
 }
 
+/// The running task's move between tiers is made at its processor's next
+/// decision, never while it runs (line 30, B1): an unpinned task spinning
+/// on `c` beside a pinned one, so that `c` has a task waiting for an idle
+/// processor to steal, is flipped between `SCHED_FIFO` and fair 200 times,
+/// 10 ms after each flip to fair,
+/// from here. Moved at the call instead, it sits in fair's tree as a waiting
+/// task while it runs, an idle processor steals it, and `move_onto` stops
+/// the machine (FX-0537): that change is this case's control. Only with
+/// three processors or more, so that one is idle to steal.
+///
+/// Verifies: L.sched.112
+fn flips(c: usize) -> Result<(), &'static str> {
+    let online = super::QUEUES.get().map_or(0, Vec::len);
+    if online < 3 {
+        return Ok(());
+    }
+    let all = CpuSet::first(online).map_err(|_| "no set of every processor")?;
+    reset();
+    let _pinned = super::spawn_on(
+        "rt-flip-pinned",
+        spinner,
+        1,
+        NICE_0_WEIGHT,
+        c,
+        CpuSet::of(c),
+    )?;
+    let flipper = super::spawn_on("rt-flipper", spinner, 0, NICE_0_WEIGHT, c, all)?;
+    started(2)?;
+    let fifo = params(RtPolicy::Fifo, 10);
+    let mut outcome = Ok(());
+    for flip in 0..200 {
+        let policy = (flip % 2 == 0).then_some(fifo);
+        if super::set_policy(&flipper, policy, false).is_err() {
+            outcome = Err("a flip between SCHED_FIFO and fair was refused");
+            break;
+        }
+        // Long enough after a flip to fair for an idle processor to look
+        // for work: the window the control opens.
+        super::sleep_for(if policy.is_none() {
+            10_000_000
+        } else {
+            1_000_000
+        });
+    }
+    stop();
+    outcome?;
+    if !flipper.is_fair() {
+        return Err("a task flipped back to fair kept a real-time policy");
+    }
+    Ok(())
+}
+
 /// [`the_move`]'s steps on `mover`, spinning beside another fair task.
 fn moved(mover: &Arc<Task>, fifo: RtParams) -> Result<(), &'static str> {
     super::set_policy(mover, Some(fifo), false).map_err(|_| "SCHED_FIFO was refused")?;
@@ -695,6 +759,11 @@ fn moved(mover: &Arc<Task>, fifo: RtParams) -> Result<(), &'static str> {
     let weight = 3121;
     super::set_weight(mover, weight);
     super::sleep_for(20_000_000);
+    // Moved at its processor's decision: its run slot is parked while the
+    // tier above fair holds it.
+    if !mover.run_slot_parked() {
+        return Err("a queued SCHED_FIFO task's run slot was not parked");
+    }
     let other = RAN[1].load(Ordering::Acquire);
     super::sleep_for(100_000_000);
     if RAN[1].load(Ordering::Acquire).saturating_sub(other) > FIFO_CONTROL_MOST_NANOS {
@@ -703,6 +772,10 @@ fn moved(mover: &Arc<Task>, fifo: RtParams) -> Result<(), &'static str> {
     super::set_policy(mover, None, false).map_err(|_| "SCHED_OTHER was refused")?;
     if !mover.is_fair() || !mover.owns_upper_node() {
         return Err("a task given back to fair lost its node or kept its policy");
+    }
+    super::sleep_for(20_000_000);
+    if mover.run_slot_parked() {
+        return Err("a task given back to fair left its run slot parked");
     }
     let other = RAN[1].load(Ordering::Acquire);
     super::sleep_for(100_000_000);

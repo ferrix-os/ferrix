@@ -442,6 +442,27 @@ pub struct Stacked<UQ, LQ> {
     running_upper: bool,
 }
 
+impl<U, L> Over<U, L> {
+    /// [`SchedClass::remove`] from the one tier the caller says the entity
+    /// is in, `upper` or not, so that a removal walks no other tier's queue
+    /// (docs/SCHED-CLASSES.md §9e, the review's line 30, B3).
+    pub fn remove_from<T>(
+        queue: &mut <Self as SchedClass<T>>::Queue,
+        id: u64,
+        upper: bool,
+    ) -> Option<(T, <Self as SchedClass<T>>::Entity)>
+    where
+        U: SchedClass<T>,
+        L: SchedClass<T>,
+    {
+        if upper {
+            U::remove(&mut queue.upper, id).map(|(payload, entity)| (payload, Tier::Upper(entity)))
+        } else {
+            L::remove(&mut queue.lower, id).map(|(payload, entity)| (payload, Tier::Lower(entity)))
+        }
+    }
+}
+
 /// The longest name a stack can have, in bytes: a stack whose classes'
 /// names come to more does not compile.
 pub const NAME_CAPACITY: usize = 64;

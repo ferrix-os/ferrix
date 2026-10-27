@@ -549,7 +549,7 @@ impl CpuQueue {
         if running {
             return true;
         }
-        if let Some(task) = self.release(task.id) {
+        if let Some(task) = self.release(task.id, task.queued_upper()) {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
             // or in its node of the tier above fair, given before its policy.
             self.insert(&task);
@@ -564,7 +564,7 @@ impl CpuQueue {
         if !task.is_queued() || task.entity_is_current() {
             return;
         }
-        if let Some(task) = self.release(task.id) {
+        if let Some(task) = self.release(task.id, task.queued_upper()) {
             // NOALLOC: as `set_policy`'s.
             self.insert(&task);
         }
@@ -582,6 +582,19 @@ impl CpuQueue {
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
         if let Some(task) = Stack::pick(&mut self.stack) {
+            // Only this processor's own running task may be picked while a
+            // processor runs it (line 30, B1): any other would be run twice.
+            let here = self
+                .current
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, task));
+            if task.is_on_cpu() && !here {
+                crate::panic::fatal!(
+                    crate::panic::catalog::RUNNING_TASK_QUEUED,
+                    "a task another processor runs was picked to run here: task {}",
+                    task.id
+                );
+            }
             return Some(Arc::clone(task));
         }
         self.idle.clone()
@@ -686,15 +699,18 @@ impl CpuQueue {
         })
     }
 
-    /// Take a queued task off this queue, for another one to run.
-    pub(crate) fn release(&mut self, id: TaskId) -> Option<Arc<Task>> {
+    /// Take a queued task off this queue, for another one to run: from the
+    /// tier above fair with `upper`, from fair's otherwise, walking no other
+    /// tier's queue (line 30, B3).
+    pub(crate) fn release(&mut self, id: TaskId, upper: bool) -> Option<Arc<Task>> {
         // Charged first for the reason `insert` is: the lag the leaving task
         // takes with it is measured against a virtual time that must include
         // everything the running task has had.
         if self.current.is_some() {
             self.account(crate::timer::now_nanos());
         }
-        let (task, entity) = Stack::remove(&mut self.stack, id)?;
+        let (task, entity) =
+            <Stack as StackTiers<Arc<Task>>>::remove_in(&mut self.stack, id, upper)?;
         task.keep_entity(entity);
         task.set_queued(false);
         self.rescale_slice();

@@ -1160,16 +1160,25 @@ package FerrixSchedRequirements {
                 pick, and that decision asked for at once; an unchanged policy
                 moves nothing. Between the call and that decision the task's policy
                 reads as the new one (sched_getscheduler) while it still runs in
-                its old tier.";
+                its old tier. A task a processor runs, until the switch away from
+                it has saved its context, shall never be moved to another
+                processor or picked by one other than its own: move_onto and
+                pick_next stop the machine on one (FX-0537).";
             attribute :>> criterion = "The stage-5 move check on desktop: a fair
                 task made SCHED_FIFO while it spins beside another fair task takes
                 the processor from it, and given back to fair shares it again;
+                the flips check: an unpinned running task flipped between
+                SCHED_FIFO and fair 200 times beside a waiting one, with
+                processors idle to steal, ends fair with no stop; its control,
+                the running task moved at the call with no decision asked for,
+                stops the machine with FX-0537 (three boots of three);
                 test-rtsched's chrt step reads each change back.";
             attribute :>> parent = "H.SCHED.19";
             attribute :>> unit = ("sched::set_policy",
                 "sched::queue::CpuQueue::set_policy",
                 "sched::queue::CpuQueue::requeue_if_moved",
-                "sched::queue::CpuQueue::release");
+                "sched::queue::CpuQueue::release", "sched::queue::CpuQueue::pick_next",
+                "sched::move_onto", "sched::task::Task::set_on_cpu");
         }
         requirement <'L.sched.113'> aPolicyIsInheritedThroughOneFunction : ItemLowLevel {
             attribute :>> statement = "prepare_user, the scheduler's one maker of
