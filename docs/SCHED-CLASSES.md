@@ -811,7 +811,7 @@ personality (C7). The design review is asked to name any other value of
   one literal value; each with a self-test. Which value is barest stays a
   reviewed judgement, recorded in the flag file and the ledger.
 
-## 9d. Step 4a: a stack of two tiers (proposed, for design review)
+## 9d. Step 4a: a stack of two tiers (OK IF F1-F16, 2026-10-27)
 
 Step 4 brings the first class above fair, `ferrix-sched-fifo` (4b). Before
 it can, the core must be able to hold a stack of two tiers. Today it
@@ -900,6 +900,116 @@ from L.sched.103 before 4a's code (S13).
    IPC path want them.
 4. A fixed-priority task's load weight as `NICE_0_WEIGHT`, or its own?
 5. Which ids 4a takes.
+
+**As the review has it** (ledger lines 26 and 27, OK IF F1-F16; the
+answers to the questions above: FairTier accepted on the innermost tier,
+narrowed; the operations required, with no default; the upper cell
+accepted; a fixed-priority task's load weight a constant of its own; the
+ids below):
+
+* **F1, FairTier gives no `&mut RunQueue`.** `FairTier::fair(&Queue) ->
+  &RunQueue<T>` for reading, and two named forwarders for the only fair
+  changes the core makes, `set_weight` and `set_slice_ns`. Every change of
+  membership or of the running entity goes through `Stack`, so `Over`'s
+  `running_upper` cannot be broken behind its back; a check refuses
+  `fair_mut` or a `&mut RunQueue` through FairTier in the core, with a
+  control.
+* **F2, F16, every call mapped**, seventeen (the fifteen above and
+  `arm_timer`'s two), each by core function and file; the table replaces
+  `stack.rs`'s list and no call reaches `RunQueue` but through FairTier or
+  `Stack`:
+
+| # | Call | Core function, file | Through |
+|---|---|---|---|
+| 1-3 | `current_id`, `avg_vruntime`, `for_each` | `note_pick`, `sched/queue.rs` | FairTier::fair |
+| 4 | `set_weight` | `reweight`, `sched/queue.rs` | FairTier::set_weight |
+| 5, 6 | `for_each` | `measure`, `sched/queue.rs` (two) | FairTier::fair |
+| 7 | `set_weight` | `set_weight`, `sched/queue.rs` | FairTier::set_weight |
+| 8 | `load_weight` | `account`'s load, `sched/queue.rs` | Stack::load_weight |
+| 9 | `decision_in_ns` | `arm_timer`, `sched/queue.rs` | Stack::decision_in_ns |
+| 10 | `current` | `arm_timer`'s cpu.max cut, `sched/queue.rs` | Stack::current |
+| 11 | `latest_where` | `steal_candidate`, `sched/queue.rs` | FairTier::fair |
+| 12 | `set_slice_ns` | `rescale_slice`, `sched/queue.rs` | FairTier::set_slice_ns |
+| 13 | `config` | `slice_ns`, `sched/queue.rs` | FairTier::fair |
+| 14 | `should_preempt` | `should_preempt`, `sched/queue.rs` | Stack::should_preempt |
+| 15 | `queued` | `waiting`, `sched/queue.rs` | derived (F3) |
+| 16 | `yield_curr` | `yield_now`, `sched/mod.rs` | Stack::yield_current |
+| 17 | `level` | `open_window`, `sched/mod.rs` | FairTier::fair (levelling is a read-and-reset of fair's lag, a forwarder `FairTier::level`) |
+
+* **F3, `waiting` derived**: `Stack::len` less whether something runs, in
+  one core function; the timer reads `decision_in_ns` (F14), and
+  `waiting` stays for `/proc` and the balancer's snapshot.
+* **F4, preemption consistent.** On the tick `should_preempt` and `charge`
+  cannot disagree (a host test on the toy stack holds them together);
+  preemption on a wake, local and remote, goes through
+  `Stack::should_preempt` too, so a woken FIFO task does not wait for a
+  tick: designed here, its requirement with 4b.
+* **F5, weights never lost.** A weight, nice or `cpu.weight` change on a
+  task in a higher tier goes into its kept fair record and applies when it
+  returns to fair; never dropped, never applied to a queue that does not
+  hold it; a check shows it.
+* **F6, the upper cell**: zero-sized for the fair-only stack, asserted at
+  compile time; taken only by the queue's lock holder, any new `unsafe`
+  traced; the task's tier is kept in the cell and read without the lock
+  only as a hint (by `/proc`), never to decide.
+* **F7, N2's const checkable**: FairTier carries `type Entity =
+  FairEntity<T>`; a stack's entity nests down to it; the fair-only
+  `StackEntity` is exactly `FairEntity`. S5: the release ELF table before
+  and after, and the round trip on the landing hash.
+* **F8, the other N7 rows for a higher-tier task.** The sleepers'
+  `Timeline` and the dead's are data structures keyed by time and
+  arrival, not fair's policy: a task of any tier sleeps and is filed dead
+  in them as today (each carries its own sleep slot and run slot). A
+  steal never takes a higher-tier task (`steal_candidate` reads the fair
+  tier alone). The job fold and the carried weights are fair's and apply
+  only between fair tasks (F10). None needs `Stack` in 4a; 4b restates
+  them if FIFO needs more.
+* **F9, inheritance designed now, built in 4b.** A child made by `fork`
+  or `clone` inherits its parent's tier and policy, unless the parent set
+  `SCHED_RESET_ON_FORK`, when it starts fair at nice 0 (nice raised to 0 if
+  negative), as Linux does; `launch::load_native` makes its process by the
+  same function, so a native launch inherits exactly as a fork does.
+* **F10, rule 7 in the core.** The job fold in `sched/direct.rs` is gated
+  in the core on both tasks being fair, not left to `Over`'s fallback;
+  L.sched.64-66 are restated in place, keeping their ids; a host test
+  shows a cross-tier hand-over does not fold, and a boot check where one
+  can reach it.
+* **F11, the two-tier stack compiles, shown by a build**: the first
+  two-tier stack the core is built with is 4b's `desktop` with
+  `sched_realtime = "fifo_rr"`; until then the trait side is shown by the
+  toy FIFO-over-toy-fair host tests in `ferrix-sched-class` and a compile
+  test there instantiating `Over<Toy, Eevdf>` against every operation the
+  core calls (proposed; for the consultant to accept).
+* **F12, ids**, reserved by a docs landing before code, each unit a core
+  function: L.sched.103 the timer armed for the stack's `decision_in_ns`
+  (`CpuQueue::arm_timer`); L.sched.104 tick preemption through
+  `Stack::should_preempt`; L.sched.105 the processor's load through
+  `Stack::load_weight`; L.sched.106 yield through `Stack::yield_current`;
+  L.sched.107 the upper cell taken only under its queue's lock;
+  L.sched.108 a weight kept for a task outside the fair tier.
+  L.sched.64-66 restated in place. Wake preemption (F4), inheritance (F9)
+  and the cpu.max term (F15) take theirs with 4b.
+* **F13**: the rename landed as 62b1607b5, path-only (its four boots'
+  identical lines owed on the gate host); where it stands names lines 26
+  and 27.
+* **F14, `Over::decision_in_ns`**: the upper tier's answer while it runs
+  (lower tasks waiting cannot displace it); `Some(0)` while the lower runs
+  and the upper has work; else the lower's. A host test: `None` only when
+  no decision can be due, never later than `remaining_ns` when both are
+  `Some`, agreeing with `charge`. In 4b FIFO answers `None` and RR its
+  quantum while a task of its priority waits.
+* **F15, the cpu.max cut, decided in 4b** (recommended yes):
+  `account_in` charges the running task's group whatever its tier, and
+  `arm_timer`'s comment is rewritten so; cpu.max bounds a FIFO task as a
+  safety net, as Linux's `rt_runtime` does; HardRt tasks are governed by
+  their windows or budgets, not cpu.max. Its own requirement and control
+  in 4b.
+* **The load unit** (answer 4): `LOAD_UNIT` in `ferrix-sched-class`, the
+  fair crate asserting at compile time that it equals `NICE_0_WEIGHT`, so a
+  class crate needs no other class crate; what it does to the load
+  average and balancing is stated and reviewed in 4b (C2: the `/proc`
+  load figures change meaning once a higher tier exists, documented
+  then).
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
