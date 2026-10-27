@@ -588,9 +588,13 @@ S7's gates pass, and F-76's count is recounted then.
 
 2026-10-26: designed and reviewed, OK IF S1-S14; the conditions are
 written in above. LAVD is desktop only (the customer: it "does not have to
-be included in max"). Step 2 started: the inventory (§11, S6) written.
-Next, each pushed as it is done so another session can take it up: the
-interface crate `ferrix-sched-class`, alone and host-tested; the split of
+be included in max"). Step 2 started: the inventory (§11, S6) written;
+the interface crate `ferrix-sched-class` built alone
+(`src/lib/kernel/sched-class`: `SchedClass<T>` with the required
+`hand_over`, `put_back` for a stack's lower tier, `steals_work` as a
+function of the queue; `Over`, `Tier`, `Empty`; seven host tests over toy
+classes), named by no kernel crate yet.
+Next, each pushed as it is done so another session can take it up: the split of
 `ferrix-sched` per §11 with no behaviour change; then the selection crate
 and the core through `Stack`, with the IPC round trip measured before and
 after (S5). Still open for the customer: C3, fair in `max`.
