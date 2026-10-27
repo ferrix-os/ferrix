@@ -321,12 +321,16 @@ impl Joined {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "AUDIT: evaluated only in a constant (`Over`'s NAME), where a panic is a compile-time refusal, never a run-time one"
+    )]
     const fn as_str(&'static self) -> &'static str {
         match core::str::from_utf8(self.bytes.split_at(self.len).0) {
             Ok(name) => name,
-            // Two `str`s and a `+` joined at whole characters are UTF-8, so
-            // this is never taken; a name that says so is not a guess.
-            Err(_) => "(not UTF-8)",
+            // Two `str`s and a `+` joined at whole characters are UTF-8; were
+            // it not, the stack would not compile (ledger line 23 (2)).
+            Err(_) => panic!("a stack's name is not UTF-8"),
         }
     }
 }

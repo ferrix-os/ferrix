@@ -603,7 +603,10 @@ tier flag and the value that links it (`present_when`), or
 check-item-boundary holds it beside `removable_problems`, each rule with a
 self-test:
 * (a) every crate under `src/lib/kernel/sched-*` that implements
-  `SchedClass` has an entry, the interface crate `ferrix-sched-class`
+  `SchedClass` has an entry (a class crate elsewhere, or an `impl` whose
+  generic bounds take their own angle brackets, is not seen: class crates
+  live under that path, and a reviewer reads a new one's `impl`; ledger
+  line 23, C1), the interface crate `ferrix-sched-class`
   excepted (it implements it for `Empty` and `Over`), and every entry's
   package exists;
 * (b) an entry's flag and value are declared, and the arms file's arm for
@@ -611,8 +614,8 @@ self-test:
 * (c) of the kernel's crates (core, item, load, binary) only the selection
   crate depends on a class crate, but for the entries of `named_outside`,
   each naming its row of §11's N7 table (today `ferrix-sched-fair` in the
-  core and the item); the list shrinks freely and grows only with a
-  ledger line;
+  core, the item and the load); the list shrinks freely and grows only
+  with a ledger line;
 * (d) no file names a fixture crate.
 
 **The evidence** (G3, G8). `cargo xtask test-removable` gains a
@@ -1002,6 +1005,30 @@ selection crate:
   `class_crates` and the profile's tier values and refuses a boot whose
   line differs, with self-tests for a stack of two tiers and an absent
   one.
+
+**3b reviewed**: ledger line 23, OK IF 1-8; G3's deviation accepted (a
+crate of generics alone has no object of its own in the non-LTO map, so
+its code is read there as its functions monomorphised into another
+crate's member; the ELF marker stays the positive proof). Met on the
+branch: (1) the judge refuses a map that names no demangled path of the
+core (empty, truncated or mangled), with a self-test, and test-removable
+deletes a stale map before its non-LTO link; (2) `Joined::as_str` refuses
+a non-UTF-8 name at compile time again, its panic expected with an audit
+reason; (3) check-build-flags holds Stack's nesting to the flag file's
+tier order, with self-tests; (4) rule (c)'s text names the load; (8) this
+line. Owed: (5) the reservation of H.SCHED.18 and L.sched.102, commit
+25efdb079 on this branch (4287d870 before the rebase, as 8f5f375dd's
+message names it), landed docs-only on develop, the branch rebased and
+traceability --check clean with TRACEABILITY.md regenerated, before
+land.sh take; (6) the controls with gate.sh, each `FIRED`: G6 (i)-(iii),
+L.sched.102's (Eevdf's NAME changed) and condition 1's; (7) the rows on
+the landing hash: G8's class-crate half on all three architectures for
+`present` and `desktop`, the four boots with check-boot-line on both
+lines, coverage after the final rebase (the 7 anchors dropped in the
+rebase: the sched/queue.rs, sched/direct.rs and gs201 watchdog.rs lines
+of line 13's condition 2), and lines 20's and 21's owed items. The
+container's x86_64 run of the class-crate half is development evidence,
+not a row.
 
 Owed on the gate host with line 20's: the controls of D6 and D10 run as
 `gate.sh control` with `FIRED` (a `cfg!(ferrix_sched_fair = ..)` planted
