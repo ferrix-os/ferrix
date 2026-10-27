@@ -1417,6 +1417,68 @@ L.sched.115 restated.
 4. One `SoftRt` domain at a time, `MAX_DOMAINS` four: the table sized for
    `HardRt` later, or exactly two now?
 
+**As the review has it** (ledger line 32, OK IF V1-V16). The answers: (1) the
+authority is a kernel object of its own, made once at boot and put in
+init's handle table, not a right on the root job; (2) queued tasks move at
+their processor's decision, a running one only after the switch away from
+it has saved its context; (3) the exemption is a mark one constructor sets
+on per-processor kernel tasks, every other kernel task in slot 0; (4)
+exactly two slots now. The conditions, which supersede the text above where
+they differ:
+* **V1** the domain authority object: made once at boot, in init's table,
+  transferable and narrowable, nothing else creates one; `domain_create`
+  takes it, and the domain handle it returns carries `MANAGE`, which
+  `domain_admit` needs; no existing object's rights change.
+* **V2** D-1 fails closed in `pick_next`, `move_onto` and the direct switch
+  (`hand_over`, T11); an unknown slot word, the transition value included,
+  is no domain for every task but the exempt; the new FX code catalogued.
+* **V3** a direct switch to a peer in another domain falls back to the
+  ordinary wake; a boot check calls a `SoftRt`-domain server from a
+  boot-domain client, its control the fallback removed.
+* **V4** a running task is moved only once its context is saved
+  (`finish_switch`, or waiting for its `on_cpu` mark); FX-0537 the check.
+* **V5** placement, steal, pull and spawn re-read the slot word under the
+  target queue's lock and refuse a leaving or foreign processor, or the
+  switch synchronises between stopping and quiescing; the partition check
+  covers the window.
+* **V6** the switch waits, bounded, in a task that may sleep, never under a
+  lock or in a handle's drop; past the bound it is abandoned with the
+  processors given back and the refusal named; dissolution likewise; the
+  holder's exit and another process's close each dissolve, each checked.
+* **V7** the exemption set by one constructor, never on a user task, never
+  changed; step 1's refusal skips it; a boot check lists the exempt tasks
+  and requires a slot of every other, its control the mark on an unpinned
+  task refused; housekeeping runs on `SoftRt` processors and is part of
+  their noise, said here.
+* **V8** `MAX_DOMAINS = 2`; one `SoftRt` domain follows from it and is
+  still checked; the slot word has a transition value and fails closed on
+  anything else.
+* **V9** D-3: four processors at least, two left to the boot domain, the
+  boot processor never taken, each refusal with its errno and check, and a
+  domain of no processors refused.
+* **V10** a job in one domain at a time, its descendants and anything made
+  during the admission following it (the domain read under the job's
+  lock); dissolution returns its jobs to slot 0; a job holding an exempt
+  task refused.
+* **V11** a wake whose home is outside the task's domain places it inside;
+  `SoftRt` processors steal nothing; balance and pull never cross; each
+  checked with a control.
+* **V12** ids before code, every unit an item function: H.SCHED.21 the
+  partition, 22 the handle's life and dissolution, 23 the floor; L.sched
+  from 118 for D-1 to D-5, the switch (V4-V6), admission, the exemption,
+  `present`'s refusal; L.sched.115 restated.
+* **V13** the FX code and any `unsafe` traced; MEMORY-AND-TIMING bounds each
+  leaving processor's walk under its lock and the switch's length (F-95 a
+  reference, not a bound claimed here, C2).
+* **V14** S5's ELF table on `desktop` and `present`, three architectures;
+  the round trip, `present` unchanged and `desktop`'s compare measured.
+* **V15** every check above with a `gate.sh` control; the native
+  session-service-shaped program on `desktop`; `domain_create` refused on
+  `present`.
+* **V16** where it stands names line 32, and so does the landing.
+* **C1** until G3 a `SoftRt` domain's processors take every device
+  interrupt, said beside the guarantee in REALTIME.md.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
