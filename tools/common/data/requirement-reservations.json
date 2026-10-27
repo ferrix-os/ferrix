@@ -197,11 +197,11 @@
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
     },
     {
-      "ids": ["L.sched.107-108"],
+      "ids": ["H.SCHED.19-20", "L.sched.107-117"],
       "owner": "sched-classes",
       "branch": "claude/ferrix-roadmap-completion-hkxlpp",
       "date": "2026-10-27",
-      "purpose": "docs/SCHED-CLASSES.md section 9d, step 4a, a stack of two tiers (the consultant's OK IF F1-F16, ledger lines 26-27 of the sched-classes container ledger): 107 the upper cell under its queue's lock, 108 a weight kept for a task outside the fair tier, both written with step 4b's first upper tier; 103-106 written and released"
+      "purpose": "docs/SCHED-CLASSES.md section 9d, step 4a, a stack of two tiers (the consultant's OK IF F1-F16, ledger lines 26-27 of the sched-classes container ledger): 107 the upper cell under its queue's lock, 108 a weight kept for a task outside the fair tier, both written with step 4b's first upper tier; 103-106 written and released. Section 9e, step 4b (OK IF R1-R15, ledger line 29): H.SCHED.19 priority order and preemption, H.SCHED.20 the floor while fair tasks are runnable, L.sched.109 wake preemption, 110 wake placement, 111 the calls' permission, 112 the move between tiers, 113 inheritance, 114 the cpu.max cut on every tier, 115 the SoftRt refusal, 116 present's EINVAL, 117 the calls' argument checks"
     }
   ]
 }
