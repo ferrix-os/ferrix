@@ -237,6 +237,109 @@ pub trait SchedClass<T> {
 /// another to say what a load is (docs/SCHED-CLASSES.md §9d).
 pub const LOAD_UNIT: u64 = 1024;
 
+/// A real-time policy a task asks for (`SCHED_FIFO`, `SCHED_RR`), whichever
+/// real-time class keeps it (docs/SCHED-CLASSES.md §9e).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RtPolicy {
+    /// First in, first out, with no quantum.
+    Fifo,
+    /// Round-robin within a priority, a quantum at a time.
+    Rr,
+}
+
+/// A real-time policy and its priority, 1 to 99, higher first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RtParams {
+    /// The policy.
+    pub policy: RtPolicy,
+    /// The priority.
+    pub priority: u8,
+}
+
+impl RtParams {
+    /// The lowest real-time priority.
+    pub const MIN_PRIORITY: u8 = 1;
+    /// The highest.
+    pub const MAX_PRIORITY: u8 = 99;
+
+    /// Whether the priority is in range.
+    #[must_use]
+    pub const fn valid(self) -> bool {
+        self.priority >= Self::MIN_PRIORITY && self.priority <= Self::MAX_PRIORITY
+    }
+}
+
+/// A class above fair that keeps real-time parameters: what a stack builds
+/// a real-time task's entity with. The task keeps the class's `Slot`, its
+/// node, allocated once, fallibly, outside every scheduler path (R1).
+pub trait RealtimeClass<T>: SchedClass<T> {
+    /// A task's node in the class.
+    type Slot;
+    /// A fresh node, or `None` with no memory for one.
+    fn new_slot() -> Option<Self::Slot>;
+    /// The entity for `params`, in `slot`.
+    fn entity(params: RtParams, slot: Self::Slot) -> Self::Entity;
+    /// The node back out of an entity the queue let go.
+    fn into_slot(entity: Self::Entity) -> Self::Slot;
+}
+
+/// Where a task keeps its node of the tiers above fair while it is off
+/// every queue (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): taken and put
+/// only by its queue's lock holder.
+pub trait UpperCell<X> {
+    /// An empty cell.
+    fn empty() -> Self;
+    /// The node, if the cell holds one; the cell is then empty.
+    fn take(&self) -> Option<X>;
+    /// Keep `node`; a cell that already holds one, or that can hold none,
+    /// hands it back.
+    ///
+    /// # Errors
+    ///
+    /// The node, not kept.
+    fn put(&self, node: X) -> Result<(), X>;
+}
+
+/// The cell of a stack with no tier above fair: zero-sized, never holding
+/// anything, since its node type has no values.
+#[derive(Debug)]
+pub struct NoCell<X>(PhantomData<X>);
+
+impl<X> UpperCell<X> for NoCell<X> {
+    fn empty() -> Self {
+        NoCell(PhantomData)
+    }
+    fn take(&self) -> Option<X> {
+        None
+    }
+    fn put(&self, node: X) -> Result<(), X> {
+        Err(node)
+    }
+}
+
+/// The cell of a stack with a tier above fair: the node behind a spin lock,
+/// which only the task's queue's lock holder takes, so it is never
+/// contended.
+#[derive(Debug)]
+pub struct LockedCell<X>(ferrix_sync::SpinLock<Option<X>>);
+
+impl<X> UpperCell<X> for LockedCell<X> {
+    fn empty() -> Self {
+        LockedCell(ferrix_sync::SpinLock::new(None))
+    }
+    fn take(&self) -> Option<X> {
+        self.0.lock().take()
+    }
+    fn put(&self, node: X) -> Result<(), X> {
+        let mut held = self.0.lock();
+        if held.is_some() {
+            return Err(node);
+        }
+        *held = Some(node);
+        Ok(())
+    }
+}
+
 /// The class with nothing in it: a tier a profile leaves out. It takes no
 /// entity (its entity type has no values), so nothing can be queued on it.
 #[derive(Debug)]

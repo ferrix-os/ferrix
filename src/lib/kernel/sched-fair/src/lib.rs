@@ -1465,6 +1465,89 @@ impl<T, U: ferrix_sched_class::SchedClass<T>, L: FairTier<T>> FairTier<T>
     }
 }
 
+/// What a stack's entity is made of, seen from a task: its fair record and
+/// run slot, or the node of a tier above fair (docs/SCHED-CLASSES.md §9e,
+/// R6: F6, F7).
+#[derive(Debug)]
+pub enum Split<U, T> {
+    /// A real-time task's node.
+    Upper(U),
+    /// A fair task's record and run slot.
+    Fair(FairEntity<T>),
+}
+
+/// The tiers of a class stack as the kernel's task sees them: whether there
+/// is one above fair, the node and the cell a task keeps for it, and how the
+/// stack's entity is built from a task's parts and taken apart again. The
+/// fair entity is the innermost of every stack's (F7): the fair-only stack's
+/// entity is exactly [`FairEntity`], and [`StackTiers::fair_entity`] is the
+/// identity there.
+pub trait StackTiers<T>: FairTier<T> {
+    /// Whether the stack has a tier above fair: whether a task may ask for a
+    /// real-time policy.
+    const REALTIME: bool;
+    /// A task's node in the tier above fair; no values for the fair-only
+    /// stack.
+    type UpperSlot;
+    /// Where a task keeps that node while off every queue; zero-sized for
+    /// the fair-only stack.
+    type Cell: ferrix_sched_class::UpperCell<Self::UpperSlot>;
+    /// A fresh node, `None` with no tier above fair or no memory (R1).
+    fn new_upper_slot() -> Option<Self::UpperSlot>;
+    /// The stack's entity for a fair task.
+    fn fair_entity(entity: FairEntity<T>) -> Self::Entity;
+    /// The stack's entity for a real-time task.
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> Self::Entity;
+    /// A task's parts back out of the stack's entity.
+    fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T>;
+}
+
+impl<T> StackTiers<T> for Eevdf {
+    const REALTIME: bool = false;
+    type UpperSlot = core::convert::Infallible;
+    type Cell = ferrix_sched_class::NoCell<core::convert::Infallible>;
+
+    fn new_upper_slot() -> Option<core::convert::Infallible> {
+        None
+    }
+    fn fair_entity(entity: FairEntity<T>) -> FairEntity<T> {
+        entity
+    }
+    fn upper_entity(
+        _: ferrix_sched_class::RtParams,
+        slot: core::convert::Infallible,
+    ) -> FairEntity<T> {
+        match slot {}
+    }
+    fn split(entity: FairEntity<T>) -> Split<core::convert::Infallible, T> {
+        Split::Fair(entity)
+    }
+}
+
+impl<T, U: ferrix_sched_class::RealtimeClass<T>> StackTiers<T>
+    for ferrix_sched_class::Over<U, Eevdf>
+{
+    const REALTIME: bool = true;
+    type UpperSlot = U::Slot;
+    type Cell = ferrix_sched_class::LockedCell<U::Slot>;
+
+    fn new_upper_slot() -> Option<U::Slot> {
+        U::new_slot()
+    }
+    fn fair_entity(entity: FairEntity<T>) -> Self::Entity {
+        ferrix_sched_class::Tier::Lower(entity)
+    }
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: U::Slot) -> Self::Entity {
+        ferrix_sched_class::Tier::Upper(U::entity(params, slot))
+    }
+    fn split(entity: Self::Entity) -> Split<U::Slot, T> {
+        match entity {
+            ferrix_sched_class::Tier::Upper(entity) => Split::Upper(U::into_slot(entity)),
+            ferrix_sched_class::Tier::Lower(entity) => Split::Fair(entity),
+        }
+    }
+}
+
 /// A refusal as the class interface hands it back, with the state the
 /// entity arrived with (the queue had changed nothing).
 fn back<T>(refused: Refused<T>, state: EntityState) -> ferrix_sched_class::Back<T, FairEntity<T>> {
