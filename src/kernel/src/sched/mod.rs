@@ -1011,7 +1011,7 @@ fn adopt_boot_task() -> Result<(), &'static str> {
         queue.insert(&boot);
         // Make it the running entity rather than one waiting to run: it is
         // already on the processor.
-        let _ = <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::pick(&mut queue.fair);
+        let _ = <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::pick(&mut queue.stack);
         queue.exec_start = crate::timer::now_nanos();
         note_running(0, boot.id, quota::NONE, 0);
         // Whatever kernel time is pending goes to what ran before, and the
@@ -1779,7 +1779,7 @@ pub fn current_runtime() -> u64 {
 pub fn yield_now() {
     let saved = <arch::Irq as IrqControl>::disable();
     if let Some(lock) = this_cpu().and_then(queue_of) {
-        lock.lock().fair.yield_curr();
+        lock.lock().stack.yield_curr();
     }
     <arch::Irq as IrqControl>::restore(saved);
     schedule();
@@ -3429,7 +3429,7 @@ pub(crate) fn open_window(tasks: &[Arc<Task>]) {
         // ahead by before this instant — including a host stall charged to
         // whichever spinner was running while its siblings were still being
         // made — is not the window's to repay. See `RunQueue::level`.
-        queue.fair.level();
+        queue.stack.level();
         queue.stats.measuring = true;
         queue.stats.worst_lag = 0;
         queue.stats.worst_overrun = 0;

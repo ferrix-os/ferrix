@@ -1091,10 +1091,10 @@
     "sched/queue.rs": {
       "ring": "core",
       "lines": [
-        257,
-        269,
+        258,
         270,
-        365
+        271,
+        366
       ]
     },
     "object/oom.rs": {
