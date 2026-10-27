@@ -2588,6 +2588,20 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
+FAMILY_FILE = ROOT / "tools" / "common" / "data" / "hardware-families.toml"
+_FAMILIES: dict | None = None
+
+
+def _family_recorded(name: str) -> bool:
+    """Whether the hardware-family registry records `name`'s recognition
+    rule (`recorded` absent or true; ledger line 26)."""
+    global _FAMILIES
+    if _FAMILIES is None:
+        with FAMILY_FILE.open("rb") as handle:
+            _FAMILIES = tomllib.load(handle).get("family", {})
+    return name in _FAMILIES and _FAMILIES[name].get("recorded", True) is True
+
+
 def claims_more_than_a_target(profile: dict) -> bool:
     """Whether a profile's claim is anything but a target."""
     return not str(profile.get("claim", "")).startswith("target")
@@ -2632,8 +2646,10 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
                             "or no ledger line (the list grows only with one)")
     # Signed slots only and no board named: the image boots nothing, so the
     # profile is not buildable (ledger line 25 (2)).
-    if profile.get("image", {}).get("slot_signing") == "required" and not profile.get("slot_families"):
-        waiting.append("slot_families names no board, and slot_signing=required boots no other slot")
+    recorded = [family for family in profile.get("slot_families", []) if _family_recorded(family)]
+    if profile.get("image", {}).get("slot_signing") == "required" and not recorded:
+        waiting.append("slot_families names no board whose recognition rule is recorded, and "
+                       "slot_signing=required boots no other slot")
     for flag, value in values.items():
         spec = declared.get(flag, {}).get("values", {}).get(value)
         if spec is None:
@@ -3132,6 +3148,12 @@ def _profile_self_test() -> list[str]:
     unbooted = dict(profile("sc2", "b"), image={"slot_signing": "required"}, slot_families=[])
     if not any("names no board" in w for w in profile_problems("p", unbooted, flags)[1]):
         failures.append("signed slots with no board named were reported buildable")
+    unrecorded = dict(unbooted, slot_families=["aarch64-orion-o6"])
+    if not any("names no board" in w for w in profile_problems("p", unrecorded, flags)[1]):
+        failures.append("signed slots naming only an unrecorded family were reported buildable")
+    known = dict(unbooted, slot_families=["aarch64-uefi-virt"])
+    if any("names no board" in w for w in profile_problems("p", known, flags)[1]):
+        failures.append("signed slots naming a recorded family were reported unbuildable")
     del flags["levels"]["sc4_plus"]
     stale = dict(awaiting, flags={"f": "a"})
     if not any("waits on nothing" in p for p in profile_problems("p", stale, flags)[0]):

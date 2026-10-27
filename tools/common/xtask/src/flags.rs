@@ -414,24 +414,37 @@ impl Resolved {
 pub(crate) fn resolve(profile: Option<&str>, sets: &[(String, String)]) -> Result<Resolved> {
     let resolved = resolve_unbuilt(profile, sets)?;
     buildable(&resolved)?;
-    if let Some(why) = unnamed_boards(&Profile::load(&resolved.base)?) {
+    let families = read_toml(&paths::workspace_root().join(FAMILY_FILE))?;
+    let recorded = |name: &str| {
+        families
+            .get("family")
+            .and_then(|table| table.get(name))
+            .and_then(|family| family.get("recorded"))
+            .is_none_or(|value| matches!(value, Value::Bool(true)))
+    };
+    if let Some(why) = unnamed_boards(&Profile::load(&resolved.base)?, recorded) {
         return Err(Error::new(why));
     }
     Ok(resolved)
 }
 
+/// The hardware-family registry (`docs/SIGNING.md` §1.4).
+const FAMILY_FILE: &str = "tools/common/data/hardware-families.toml";
+
 /// Why a profile that boots only signed slots, and names no board family
-/// its loader accepts one for, is not buildable: such an image boots
-/// nothing (docs/SCHED-CLASSES.md §9c; ledger line 25 (2)).
-fn unnamed_boards(profile: &Profile) -> Option<String> {
+/// its loader can recognise (`recorded`), is not buildable: such an image
+/// boots nothing (docs/SCHED-CLASSES.md §9c; ledger lines 25 (2) and 26).
+fn unnamed_boards(profile: &Profile, recorded: impl Fn(&str) -> bool) -> Option<String> {
     let required = profile
         .image
         .iter()
         .any(|(key, value)| key == "slot_signing" && value == "required");
-    (required && profile.slot_families.is_empty()).then(|| {
+    let known = profile.slot_families.iter().any(|family| recorded(family));
+    (required && !known).then(|| {
         format!(
             "profile {} is not yet buildable: it boots only signed slots and names no board \
-             family in slot_families, so its image would boot nothing",
+             family in slot_families whose recognition rule is recorded, so its image would \
+             boot nothing",
             profile.name
         )
     })
@@ -780,10 +793,18 @@ mod tests {
     #[test]
     fn signed_slots_with_no_board_family_are_refused() {
         let mut profile = super::Profile::load("max_plus").unwrap();
-        assert!(super::unnamed_boards(&profile).is_none());
+        assert!(super::unnamed_boards(&profile, |_| true).is_none());
+        assert!(
+            super::unnamed_boards(&profile, |_| false).is_some_and(|why| why.contains("recorded"))
+        );
         profile.slot_families.clear();
-        assert!(super::unnamed_boards(&profile).is_some_and(|why| why.contains("names no board")));
-        assert!(super::unnamed_boards(&super::Profile::load("present").unwrap()).is_none());
+        assert!(
+            super::unnamed_boards(&profile, |_| true)
+                .is_some_and(|why| why.contains("names no board"))
+        );
+        assert!(
+            super::unnamed_boards(&super::Profile::load("present").unwrap(), |_| false).is_none()
+        );
     }
 
     #[test]
