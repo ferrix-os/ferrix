@@ -230,7 +230,8 @@ const _: () = assert!(
 
 /// Whether `mode`'s tiers are compiled in (D9): Throughput needs the fair
 /// tier, SoftRt the realtime and fair tiers, HardRt the deadline tier or the
-/// windows tier, whose crate carries the EDF inside its windows. A domain
+/// windows tier, whose crate schedules by fixed priority inside its windows
+/// (SCHED-CLASSES.md C6). A domain
 /// asked for a mode this answers no for is refused `ModeUnavailable`.
 #[must_use]
 pub const fn mode_available(mode: SchedMode) -> bool {
