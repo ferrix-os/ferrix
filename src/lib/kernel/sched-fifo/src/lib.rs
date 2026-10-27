@@ -418,6 +418,12 @@ impl<T> SchedClass<T> for FifoRr {
         Ok(())
     }
 
+    /// The running entity at once; a waiting one by a walk of the tree,
+    /// O(n) in the processor's real-time tasks, under its queue's lock. Its
+    /// one caller in the kernel is a change of policy on a queued real-time
+    /// task that does not run (`CpuQueue::set_policy` and, at a decision,
+    /// `requeue_if_moved`), routed to this tier alone (`StackTiers::remove_in`,
+    /// the review's line 30, B3), never a switch, a wake or the tick.
     fn remove(queue: &mut FifoQueue<T>, id: u64) -> Option<(T, FifoEntity<T>)> {
         if queue
             .running

@@ -67,7 +67,7 @@ Causes are listed most likely first.
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
-| [FX-0537](#fx-0537) | a task tried to block in an interrupt |
+| [FX-0537](#fx-0537) | a task a processor runs was found waiting in a run queue |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1340,18 +1340,24 @@ src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md.
 
 <a id="fx-0537"></a>
 
-## FX-0537 — a task tried to block in an interrupt
+## FX-0537 — a task a processor runs was found waiting in a run queue
 
-An interrupt handler may not block: there is no task of its own to wait as, and
-the one it interrupted would never get back. A lock held across a block is
-FX-0503.
+A task is marked as on a processor from the moment a switch to it commits until
+the switch away from it has saved its context, both under the lock of the queue
+that owns it. A run queue holds a running task only as its running entity, never
+as a waiting one, at every moment outside a decision; so a steal, a placement or
+a pick that finds a waiting task with the mark set has found one context about
+to run on two processors, or on one before it was saved, and the machine is
+stopped before it does (docs/SCHED-CLASSES.md §9e, the certification
+consultant's ledger line 30, B1).
 
-1. A drop that can reach a sleep ran in an interrupt: a task's last reference is
-   handed to the reaper for that reason (`sched::leftovers`, F-104), and
-   anything else that does as much needs the same.
+1. A path enqueued a running task as a waiting one outside a decision: a change
+   of policy that moved the running task at once, rather than at its processor's
+   next decision (`CpuQueue::requeue_if_moved`).
+2. A switch did not set or clear the mark (`switch_chosen`, `finish_switch`).
 
-See: src/kernel/src/sched/mod.rs require_may_sleep;
-src/kernel/src/sched/leftovers.rs.
+See: src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next;
+src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e.
 
 <a id="fx-0601"></a>
 
