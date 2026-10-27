@@ -2909,7 +2909,8 @@ _IMPLEMENTS = re.compile(r"\bimpl\s*<[^>]*>\s*(?:[\w:]+::)?SchedClass\s*<|\bimpl
 
 
 def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], sources: dict[str, str],
-                         arms: str, flag_values: dict[str, list[str]]) -> list[str]:
+                         arms: str, flag_values: dict[str, list[str]],
+                         unbuilt: frozenset = frozenset()) -> list[str]:
     """Rules (a)-(d) of SCHED-CLASSES.md §9b over the record, the workspace's
     manifests, the Rust `sources` by path and the arms file's text."""
     problems: list[str] = []
@@ -2948,7 +2949,12 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
             problems.append(f"class_crates.{package}: {flag}={value} is not declared")
             continue
         arm = re.compile(rf'#\[cfg\(\s*ferrix_{flag}\s*=\s*"{value}"\s*\)\]\s*pub\s+type\s+[^;]*\b{name}::')
-        if not arm.search(arms_code):
+        if (flag, value) in unbuilt:
+            # Not built yet: its arm is the compile_error! check-build-flags
+            # requires, and no arm may name the crate.
+            if re.search(rf"\b{name}::", arms_code):
+                problems.append(f"{ARMS_FILE}: names {name}, whose value {flag}={value} is not built yet")
+        elif not arm.search(arms_code):
             problems.append(f"{ARMS_FILE}: the arm for {flag}={value} does not name {name}, which class_crates "
                             "says it links")
         # Its `name` is the one its class gives the boot line (L.sched.102).
@@ -3028,9 +3034,9 @@ def _class_crate_self_test() -> list[str]:
     failures = []
     values = {"sched_fair": ["eevdf", "absent"]}
 
-    def run(record=None, packages=None, sources=None, arms=_CLASS_ARMS):
+    def run(record=None, packages=None, sources=None, arms=_CLASS_ARMS, unbuilt=frozenset()):
         return class_crate_problems(record or _CLASS_RECORD, packages or _CLASS_PACKAGES,
-                                    sources or _CLASS_SOURCES, arms, values)
+                                    sources or _CLASS_SOURCES, arms, values, unbuilt)
     found = run()
     if found:
         failures.append(f"class crates: a tree that keeps the rules was refused: {found}")
@@ -3057,6 +3063,8 @@ def _class_crate_self_test() -> list[str]:
         ("(e) a kernel file calling fair_mut",
          {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f() { Stack::fair_mut(q); }\n"}},
          "&mut RunQueue"),
+        ("(b) an arm naming a crate whose value is not built",
+         {"unbuilt": frozenset({("sched_fair", "eevdf")})}, "is not built yet"),
         ("a name the class does not give", {"record": {**_CLASS_RECORD, "ferrix-sched-fair": {
             **_CLASS_RECORD["ferrix-sched-fair"], "name": "cfs"}}}, "is not the NAME"),
         ("(d) a file naming the fixture",
@@ -3082,8 +3090,10 @@ def run_class_crates(manifest: dict) -> list[str]:
     with FLAG_FILE.open("rb") as handle:
         flags = tomllib.load(handle).get("flags", {})
     values = {name: list(flag.get("values", {})) for name, flag in flags.items()}
+    unbuilt = frozenset((name, value) for name, flag in flags.items()
+                        for value, spec in flag.get("values", {}).items() if spec.get("built") == "no")
     arms = (KERNEL_SRC / ARMS_FILE).read_text(encoding="utf-8")
-    return class_crate_problems(record, packages, sources, arms, values)
+    return class_crate_problems(record, packages, sources, arms, values, unbuilt)
 
 
 def profile_rule(manifest: dict) -> tuple[list[str], list[str]]:

@@ -870,6 +870,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-sched-fifo"
+version = "0.1.0"
+dependencies = [
+ "ferrix-fallible",
+ "ferrix-sched-class",
+]
+
+[[package]]
 name = "ferrix-sched-fixture"
 version = "0.1.0"
 dependencies = [

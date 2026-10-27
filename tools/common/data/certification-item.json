@@ -856,6 +856,13 @@
       "rust_name": "ferrix_sched_fixture",
       "fixture": true
     },
+    "ferrix-sched-fifo": {
+      "rust_name": "ferrix_sched_fifo",
+      "flag": "sched_realtime",
+      "present_when": "fifo_rr",
+      "name": "fifo_rr",
+      "marker": "<ferrix_sched_fifo::FifoRr as ferrix_sched_class::SchedClass<"
+    },
     "named_outside": {
       "ferrix-sched-fair": {
         "ferrix-kernel-core": "N7: the NICE_ weights, carried_weight and the job fold, slice_for and Config, the sleepers' and the dead's Timeline, Node, Slot and EntityState, the steal's Option<EntityState>, FairEntity in stack.rs's const",

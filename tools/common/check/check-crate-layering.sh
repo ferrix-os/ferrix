@@ -138,8 +138,11 @@ forbid ferrix-bootinfo "handoff ABI"  "$K|ferrix-boot|ferrix-elf|ferrix-frame"
 forbid ferrix-elf      "ELF64 reader" "$K|ferrix-boot"
 forbid ferrix-frame    "frame allocator" "$K|ferrix-boot"
 forbid ferrix-paging   "page tables"  "$K|ferrix-boot"
-forbid ferrix-sched-class "scheduling-class interface" "$K|ferrix-boot|ferrix-sched-fair"
-forbid ferrix-sched-fair "fair scheduling class" "$K|ferrix-boot"
+forbid ferrix-sched-class "scheduling-class interface" "$K|ferrix-boot|ferrix-sched-fair|ferrix-sched-fifo"
+# No class crate links another (docs/SCHED-CLASSES.md section 9d): a build
+# selecting one class links no other.
+forbid ferrix-sched-fair "fair scheduling class" "$K|ferrix-boot|ferrix-sched-fifo"
+forbid ferrix-sched-fifo "FIFO and round-robin scheduling class" "$K|ferrix-boot|ferrix-sched-fair"
 forbid ferrix-pci      "PCI configuration space" "$K|ferrix-boot"
 forbid ferrix-block    "block core" "$K|ferrix-boot"
 forbid ferrix-btrfs    "btrfs read path" "$K|ferrix-boot"
