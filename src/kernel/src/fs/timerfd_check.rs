@@ -771,7 +771,12 @@ fn wait_out_a_deadline(
         )
     };
     let ended_before = ended();
-    let waiter = crate::sched::spawn("timerfd-waiter", waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "timerfd-waiter",
+        waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
     until_listed(inner, epoll_set);
     if ANSWER.lock().is_some() {
         return Err("a read, poll or epoll_wait on a disarmed timerfd did not wait");

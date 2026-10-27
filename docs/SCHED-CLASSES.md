@@ -87,72 +87,50 @@ none of its evidence. This also retires F-76 for the scheduler (today
 
 ## 4. The trait
 
-One interface, associated types for everything a class keeps, associated
-functions with no `self` where state is passed in (the shape KERNEL-CRATES
-§6.3 chose for `Policy`):
+As built (2026-10-26, `src/lib/kernel/sched-class/src/lib.rs`), with the
+review's S5 and S11 in it. Generic over the payload `T` the kernel queues
+(its `Arc<Task>`), associated functions over a passed-in queue:
 
 ```rust
-pub trait SchedClass: 'static {
-    /// What the boot line and the audit record call it.
+pub trait SchedClass<T> {
     const NAME: &'static str;
-    /// Whether an idle CPU of a domain using it may take its tasks from
-    /// another CPU. False for every real-time class: partitioning is what
-    /// makes admission mean anything.
-    const STEALS_WORK: bool;
+    type Queue;            // what one CPU keeps
+    type Entity;           // what a task carries off every queue
+    type Config: Copy;     // what a queue is made with
 
-    /// What one CPU keeps: fixed capacity, made once at boot.
-    type Queue;
-    /// What one task keeps while it is in this class.
-    type Entity: Default;
-    /// What a task asks for: a weight, a priority, a reservation.
-    type Params: Copy;
-
-    fn new_queue(cpu: CpuId, capacity: usize) -> Self::Queue;
-
-    /// Whether `params` may join `queue` without breaking what it has
-    /// already admitted. Fair answers yes; FIFO checks the priority range
-    /// and the caller's right; EDF runs its utilisation or density test.
-    fn admit(queue: &Self::Queue, params: &Self::Params) -> Result<(), Refused>;
-
-    fn enqueue(queue: &mut Self::Queue, entity: &mut Self::Entity, task: TaskRef, now: Instant);
-    fn dequeue(queue: &mut Self::Queue, entity: &mut Self::Entity, task: TaskRef);
-    /// The task this class would run now, if it has one ready.
-    fn pick(queue: &mut Self::Queue, now: Instant) -> Option<TaskRef>;
-
-    /// Charge the running task what it used. `Throttle` takes it off the
-    /// CPU until its next replenishment (EDF, the fair server).
-    fn charge(queue: &mut Self::Queue, entity: &mut Self::Entity, ran: Nanos, now: Instant) -> Charged;
-    /// Whether a task waking into this class preempts the one running in it.
-    fn preempts(queue: &Self::Queue, waking: &Self::Entity, running: &Self::Entity) -> bool;
-    /// The next instant this class needs the CPU's one-shot timer for:
-    /// a slice end, a replenishment, a deadline.
-    fn next_event(queue: &Self::Queue, now: Instant) -> Option<Instant>;
-
-    /// The class's own invariants, for the boot checks and host tests.
+    fn new_queue(config: Self::Config) -> Result<Self::Queue, Refusal>;
+    fn len(queue: &Self::Queue) -> usize;
+    fn enqueue(queue: &mut Self::Queue, id: u64, payload: T, entity: Self::Entity)
+        -> Result<(), Back<T, Self::Entity>>;
+    fn remove(queue: &mut Self::Queue, id: u64) -> Option<(T, Self::Entity)>;
+    fn remove_current(queue: &mut Self::Queue) -> Option<Left<T, Self::Entity>>;
+    fn pick(queue: &mut Self::Queue) -> Option<&T>;
+    fn put_back(queue: &mut Self::Queue);          // a stack's lower tier, preempted
+    fn current(queue: &Self::Queue) -> Option<&T>;
+    fn hand_over(queue: &mut Self::Queue, id: u64, payload: T, entity: Self::Entity,
+        slice_after: u64) -> Handed<T, Self::Entity>;   // required (S5)
+    fn charge(queue: &mut Self::Queue, ran_ns: u64) -> bool;
+    fn remaining_ns(queue: &Self::Queue) -> Option<u64>;
+    fn steals_work(queue: &Self::Queue) -> bool;   // a function of the queue (S11)
     fn check(queue: &Self::Queue) -> Result<(), &'static str>;
 }
 ```
 
-A **class stack** is a type, built from the compiled classes in priority
-order by the interface crate's combinator, and itself a `SchedClass`:
+`Back` hands a refused entity back whole with a `Refusal` (`Invalid`,
+`Duplicate`, `Unschedulable`, `NoSuchTier`); `Left` is a running entity
+taken off. `Over<U, L>` stacks two classes and is itself one, its entity a
+`Tier<U, L>`; `Empty` is the class with no entities (its entity type is
+`Infallible`). The fair class implements it as `ferrix_sched_fair::Eevdf`,
+forwarding to `RunQueue`.
 
-```rust
-pub struct Over<Upper: SchedClass, Lower: SchedClass>(PhantomData<(Upper, Lower)>);
-// e.g. Over<Edf, Over<Fifo, Fair>>
-```
-
-`Over::pick` asks the upper class first and the lower only if it has
-nothing; its `Queue` is the pair of queues, its `Entity` an enum of the
-two, `next_event` the earlier of the two, `STEALS_WORK` the lower's only
-when the upper has nothing admitted. Monomorphised in the binary, the
-whole stack inlines into one `pick`: no dispatch at run time, and an absent
-class leaves no trace in the generated code.
-
-Inheritance (REALTIME.md §3.4) needs one more operation, with the same
-shape: `fn boost(entity: &mut Self::Entity, donor: &Donor)` and its
-`unboost`, where `Donor` is the interface crate's type for a waiter's
-priority or reservation. It is part of the trait from the start so that
-the owned wait queue does not need to know which classes exist.
+**Still to come**, each with the class that needs it and its own review:
+`admit` (the deadline class's test), the policies a class takes (§6a),
+`boost` and `unboost` for inheritance (defined at the stack level, C2 of the
+design review), and the operations the core still makes on the fair queue
+directly (`core/src/sched/stack.rs` lists them): a task's weight, the
+picture `/proc` reads, the slice, the processor's load, the stealing
+choice. The trait has no provided methods yet, so S11's check of inherited
+defaults applies from the first one.
 
 ## 5. How the kernel reaches it: a selection crate, chosen before the core
 
@@ -598,9 +576,30 @@ load tracking and balancing and `DomainError`; `ferrix-sched-fair` holds
 EEVDF, the tree, the timeline, the weights, the fold and `slice_for`, and
 implements `SchedClass` as `Eevdf` (one host test holds the interface to
 the queue). The kernel's 70 files re-pointed by path only; booted on
-x86-64, AArch64 and ARMv7-A.
-Next, each pushed as it is done so another session can take it up: the
-rest of the split of
-`ferrix-sched` per §11 with no behaviour change; then the selection crate
-and the core through `Stack`, with the IPC round trip measured before and
-after (S5). Still open for the customer: C3, fair in `max`.
+x86-64, AArch64 and ARMv7-A. Its code review: OK IF 1-10, ledger line 12
+of the container's ledger (to be copied to the gate host's); 1-6 and 9
+met in the split commit, 7 (gate rows on the landing hash) and 8 (S5's
+evidence) owed: the release ELF's IPC-path functions are not identical
+(below).
+
+**What the release ELF says (x86-64, `--release`, symbols with the crate
+names normalised).** The split itself is not byte-for-byte neutral:
+`RunQueue::enqueue` grew 12 bytes, `RunQueue::set_weight` 13, and the fast
+path's `ferrix_fast_write_read` shrank 3 (codegen across the new crate
+boundary; no body changed). A first cut of the core through `Stack` (a
+`Stack` alias in `core/src/sched/stack.rs`, kept as a stash entry
+`stack-wip` and in the next commit's notes, not landed) grows
+`ferrix_fast_write_read` by 113 bytes, about twenty more instructions,
+mostly stack moves of the `(EntityState, Slot)` pair the trait passes as
+one entity: not free. So S5 is not met by that cut. The fix is to make the
+fair queue's own `enqueue` and `hand_over` take its entity as one value, so
+the trait is a pass-through, and then to show the fast path's code
+identical, or measure it under the `optimize-ipc-round-trip` protocol on
+the gate host.
+
+Next, each pushed as it is done so another session can take it up:
+`RunQueue`'s entity as one value; the core through `Stack` (N2 to N7 of
+the code review: the entity in `Task`, the stack's name on the boot line,
+the field-for-field hand-over test on the stack type); then the selection
+crate as S2 has it (N1). Still open for the customer: C3, fair in
+`max`.
