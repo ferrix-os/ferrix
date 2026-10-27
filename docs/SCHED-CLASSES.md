@@ -1304,6 +1304,119 @@ The audit of every other path that enqueues a task, by caller of
 * affinity: `sched_setaffinity` is validated and not applied, so no move.
 None puts a running task in a queue as a waiting one.
 
+## 9f. Step 5: a `SoftRt` domain made at run time (design, for review)
+
+GAME-PATH.md's G1, as stage 14's first domain slice (REALTIME.md §3.1,
+§3.7, §4 items 2 and 3): a set of processors taken out of the boot
+`Throughput` domain while a handle to it lives, running only the tasks of
+the jobs admitted to it, with the same class stack (`fifo_rr+eevdf` on
+`desktop`), and given back when the handle closes. No interrupt placement
+(G3), no budgets beyond `cpu.max` (G2's), no `HardRt`, no new class. It
+lifts 4b's `NotCreatable` for `SoftRt` (L.sched.115 restated), on
+`desktop` alone; `present` has no realtime tier and `SoftRt` stays
+`ModeUnavailable` there.
+
+**The domains.** Today one `Domain` in a `Once`. It becomes a table of at
+most four (`MAX_DOMAINS`), slot 0 the boot `Throughput` domain, each a
+`CpuSet` and a mode, written under one lock (`DOMAINS`), and a word per
+processor naming its domain's slot (`DOMAIN_OF`), read without a lock by
+the placement, the steal, the pull and the balance. Each task carries the
+slot of its domain (`Task::domain`, an atomic), set as it is made from its
+job's (a new job inherits its parent's) and when its job is admitted or
+let go. The processors a task may run on are its affinity and its
+domain's processors, both: `may_run_on` reads the two.
+
+**The rules** (each a requirement and a check with a control):
+* **D-1 partition**: a task runs only on a processor of its domain. The
+  pick (`pick_next`) and every move between queues (`move_onto`) stop the
+  machine on a task whose domain is not the processor's (a new FX code), as
+  FX-0537 does for a running task; the per-processor kernel tasks (idle,
+  the boot task) belong to no domain and are exempt by name.
+* **D-2 no stealing across**: a steal, a pull, a placement on an idle
+  processor and the balance consider only processors of the task's domain;
+  a `SoftRt` domain steals nothing (`Mode::steals_work`), so its tasks stay
+  where they were placed in it.
+* **D-3 a floor for the rest**: a `SoftRt` domain is refused on a machine
+  of fewer than four processors, never takes more than all but two of the
+  boot domain's, and only one exists at a time (GAME-PATH §5.4's 2 and 4).
+* **D-4 it ends with its handle**: closing the last handle dissolves the
+  domain, with the switch below, whoever closes it and however (the
+  holder's exit included); no failure of the holder leaves processors
+  fenced off.
+* **D-5 who may make one**: a new right, `Rights::DOMAIN` (bit 8), on a
+  handle to the root job, which init holds and may hand on narrowed to it
+  alone (`handle_duplicate` with `DOMAIN` only), so the session service can
+  make a domain without being able to kill anything. `domain_create(job,
+  count) -> domain` and `domain_admit(domain, job)`, `job` a job handle
+  with `MANAGE`; a job is in one domain at a time, and its descendants
+  follow it.
+
+**The switch** (REALTIME.md §3.7, synchronous, under one writer at a time):
+1. *Prepare*, refusing before anything stops: D-3; the highest-numbered
+   processors of the boot domain, not the boot processor; a new slot.
+2. *Stop admitting*: those processors are marked leaving (`DOMAIN_OF` to a
+   transition value), so no placement, steal, pull or spawn puts a task of
+   the boot domain on them from here.
+3. *Quiesce and re-home*: each leaving processor is asked for a decision
+   (a kick) and, at it (`choose_next`, as `requeue_if_moved` does for a
+   change of policy), moves every queued task of another domain, its own
+   running one included at that decision, to a processor of that task's
+   domain; sleepers filed there wake into their own domain (a wake whose
+   home is not in the task's domain is placed in it). The switch waits
+   until every leaving processor reports its queue holds none but its own
+   kernel tasks, then `smp::synchronize`. A task pinned only to leaving
+   processors refuses the switch at step 1 instead (named in the refusal).
+4. *Swap*: the slot is published and `DOMAIN_OF` set to it, one store a
+   processor, release-ordered.
+5. *Resume*: `domain_admit` may now move jobs in.
+Dissolving is the same switch the other way: the domain's members go back
+to the boot domain (their job's domain reset), its processors to slot 0.
+What holds during a switch: nothing about latency; a task waits at most
+its processor's next decision to be moved. The switch's length is the
+kick's latency plus the queues' walk plus the longest non-preemptible
+section (F-95's, not this step's).
+
+**Admission** (`domain_admit`): the job's tasks are given the domain's slot
+and moved as in step 3, each at its processor's next decision; a task
+running when admitted runs on until then. `sched_setaffinity` stays
+unapplied (its own step, REALTIME.md §4 item 2); affinity inside a domain
+is the domain's processors.
+
+**What it costs**: a load of `DOMAIN_OF` and of `Task::domain` in each
+placement, steal and pick; the fast path's T11 already requires the peer's
+home to be this processor, so its round trip gains one compare at most.
+S5's ELF table for `choose_next` and `ferrix_fast_write_read`, before and
+after, on `desktop` and `present`.
+
+**Checks** (boot, `desktop`; each with a control): the partition (a task of
+the boot domain spinning while a domain is made is moved off its
+processors and never runs there after; control: the re-home skipped, the
+pick's check fires); the domain's members run only inside it (control: the
+admit not narrowing, the pick's check fires); dissolution by closing the
+handle, and by the holder's exit (control: the close not dissolving, the
+check that the processors are back fails); D-3's refusals; a second domain
+refused. A native program (the session service's shape) makes, admits and
+closes. On `present`: `domain_create` refused, `ModeUnavailable`.
+
+**Requirements** (ids to reserve before code): H.SCHED.21 (the partition:
+a task runs only on its domain's processors), H.SCHED.22 (a domain lives
+while its handle does, and leaves the rest at least two processors);
+L.sched ids from 118 for D-1 to D-5, the switch's steps, admission, and
+L.sched.115 restated.
+
+**Questions for the review:**
+1. The authority: a `DOMAIN` right on the root job's handle (above), or a
+   kernel object of its own handed to init at boot, as GAME-PATH §5.4
+   leaves open?
+2. Moving tasks at each processor's decision (as 4b's B1 fix does)
+   rather than migrating them from the switching task under both locks:
+   accepted, given FX-0537's mark?
+3. Per-processor kernel tasks (idle, the boot task) exempt from D-1 by
+   name: enough, or must the reaper and the network's workers, which are
+   spawned unpinned today, be given the boot domain explicitly?
+4. One `SoftRt` domain at a time, `MAX_DOMAINS` four: the table sized for
+   `HardRt` later, or exactly two now?
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
