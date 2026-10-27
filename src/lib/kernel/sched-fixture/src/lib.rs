@@ -206,6 +206,12 @@ impl<T> SchedClass<T> for Fixture {
         }
     }
 
+    fn ready(queue: &Queue<T>, _: bool) -> bool {
+        Self::len(queue) > 0
+    }
+
+    fn elapse(_: &mut Queue<T>, _: u64) {}
+
     fn steals_work(_: &Queue<T>) -> bool {
         false
     }
