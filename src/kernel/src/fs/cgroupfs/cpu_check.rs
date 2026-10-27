@@ -356,7 +356,47 @@ fn throttling(harness: &mut Harness) -> Checked<u64> {
     let killed = killed_throttled(harness)?;
     let late = quota_comes_late(harness)?;
     let beneath = beneath(harness)? + walks_only_under_a_quota(harness)?;
-    Ok(throttled + killed + late + beneath)
+    let realtime = realtime_is_held(harness)?;
+    Ok(throttled + killed + late + beneath + realtime)
+}
+
+/// A program whose threads are made `SCHED_FIFO` is held to its job's
+/// `cpu.max` as a fair one is (`docs/SCHED-CLASSES.md` §9e, F15): the charge
+/// is made to the running task's job whatever its tier. Only where the
+/// realtime tier is built.
+///
+/// Verifies: L.sched.114
+fn realtime_is_held(harness: &mut Harness) -> Checked<u64> {
+    if crate::arch::USER_STOPPED_PROGRAM.is_empty() || !crate::sched::realtime_built() {
+        return Ok(0);
+    }
+    let _ = harness
+        .write(b"/check-c/cpu.max", b"20000 100000\n")
+        .map_err(|_| "cpu.max refused 20000 100000")?;
+    let program = freeze_check::start(harness, b"/check-c")?;
+    let held = freeze_check::wait_running(&program.process).and_then(|()| {
+        let fifo = ferrix_sched_class::RtParams {
+            policy: ferrix_sched_class::RtPolicy::Fifo,
+            priority: 10,
+        };
+        for task in program.process.tasks() {
+            crate::sched::set_policy(&task, Some(fifo), false)
+                .map_err(|_| "a program's thread was refused SCHED_FIFO")?;
+        }
+        held_to_a_fifth(
+            harness,
+            "a SCHED_FIFO program was not held to a fifth of a processor by its cpu.max",
+        )
+    });
+    kill::send(&program.process, SIGKILL, Origin::Kernel);
+    let deadline = crate::timer::now_nanos().saturating_add(10_000_000_000);
+    let _ = program.process.wait_for_exit(deadline);
+    drop(program);
+    let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
+    let emptied = freeze_check::wait_empty(harness, b"/check-c");
+    held?;
+    emptied?;
+    Ok(1)
 }
 
 /// A program already running alone on its processor is cut by a `cpu.max`

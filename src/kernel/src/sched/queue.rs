@@ -522,35 +522,52 @@ impl CpuQueue {
     }
 
     /// Give `task` a new policy (`sched::set_policy`), whether it is running
-    /// here, queued here or on no queue: one queued here, the running one
-    /// included, is taken off its tier and enqueued again at the tail of its
-    /// new place (L.sched.112). Answers whether a decision is due now: the
-    /// running task moved, or something now outranks it.
+    /// here, queued here or on no queue: one queued here and not running is
+    /// taken off its tier and enqueued again at the tail of its new place
+    /// at once (L.sched.112); the running one is moved at this processor's
+    /// next decision ([`CpuQueue::requeue_if_moved`]), so that the stack's
+    /// running entity is the processor's running task at every moment
+    /// outside a decision. Answers whether a decision is due now: the
+    /// running task is to move, or something now outranks it.
     pub(crate) fn set_policy(
         &mut self,
         task: &Arc<Task>,
         params: Option<RtParams>,
         reset_on_fork: bool,
     ) -> bool {
+        task.store_policy(params, reset_on_fork);
+        if !task.is_queued() || task.entity_is_current() {
+            // On no queue, it is enqueued with its new policy next time;
+            // unchanged, nothing moves, as Linux's `__sched_setscheduler`
+            // returns before its requeue.
+            return false;
+        }
         let running = self
             .current
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, task));
-        // Unchanged, nothing moves, as Linux's `__sched_setscheduler` returns
-        // before its requeue.
-        if task.rt_params() == params || !task.is_queued() {
-            task.store_policy(params, reset_on_fork);
-            return false;
+        if running {
+            return true;
         }
-        let Some(task) = self.release(task.id) else {
-            task.store_policy(params, reset_on_fork);
-            return false;
-        };
-        task.store_policy(params, reset_on_fork);
-        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot, or
-        // in its node of the tier above fair, given before its policy was.
-        self.insert(&task);
-        running || self.should_preempt()
+        if let Some(task) = self.release(task.id) {
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
+            // or in its node of the tier above fair, given before its policy.
+            self.insert(&task);
+        }
+        self.should_preempt()
+    }
+
+    /// At a decision (`choose_next`, before its pick): move `task`, the
+    /// running one, still runnable, to the tier and place its policy names,
+    /// if a change of policy left it in its old one (L.sched.112).
+    pub(crate) fn requeue_if_moved(&mut self, task: &Arc<Task>) {
+        if !task.is_queued() || task.entity_is_current() {
+            return;
+        }
+        if let Some(task) = self.release(task.id) {
+            // NOALLOC: as `set_policy`'s.
+            self.insert(&task);
+        }
     }
 
     /// Take the running task out of the fair class, keeping what it needs to

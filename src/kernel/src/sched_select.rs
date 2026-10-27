@@ -246,8 +246,8 @@ const _: () = assert!(
     "the build flags leave every scheduler tier absent"
 );
 
-/// Whether `mode`'s tiers are compiled in (D9): Throughput needs the fair
-/// tier, SoftRt the realtime and fair tiers, HardRt the deadline tier or the
+/// Whether `mode`'s tiers are compiled in (D9): `Throughput` needs the fair
+/// tier, `SoftRt` the realtime and fair tiers, `HardRt` the deadline tier or the
 /// windows tier, whose crate schedules by fixed priority inside its windows
 /// (SCHED-CLASSES.md C6). A domain
 /// asked for a mode this answers no for is refused `ModeUnavailable`.

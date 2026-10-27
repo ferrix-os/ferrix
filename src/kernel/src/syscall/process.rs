@@ -2542,6 +2542,11 @@ pub(crate) struct PreparedStart {
 }
 
 impl PreparedStart {
+    /// Its task, which nothing has run.
+    pub(crate) fn task(&self) -> &Arc<Task> {
+        self.task.task()
+    }
+
     /// Run the process with `argument` in its first argument register.
     ///
     /// The argument is written while the claim is held, so no other start can

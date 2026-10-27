@@ -945,6 +945,13 @@ p50 2,287 ns against 2,427 ns without step 3, the median of five rounds,
 ratio 0.942 (`~/.local/share/ferrix/logs/queue/po7-ipcB-s3r-bench-1.log` on
 nazuna, on step 2f; OPAQUE-KERNEL.md §9.9).
 
+**The realtime tier's walk (step 4b, `desktop` alone).** `FifoRr`'s
+queue is a balanced tree: `pick`, an enqueue and the removal of a known
+node are O(log n) in the processor's real-time tasks; `remove` by
+identifier walks the tree, O(n), and serves only `sched_setscheduler`'s
+move between tiers (L.sched.112), never a switch, a wake or the tick. A
+`present` build has no such tier, and its paths are as below.
+
 Two decisions the round trip's wakes defer are bounded, though no check
 times them (L.sched.7). A wake made inside a system call asks for no timer:
 the decision it wants is made when the call ends (`sched::call_left`), at

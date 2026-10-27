@@ -235,6 +235,11 @@ pub struct Task {
     /// node of the tier above fair, and its reset-on-fork flag. Read without
     /// the queue's lock (`sched_getscheduler`); written only under it.
     rt: AtomicU32,
+    /// The policy and priority bits of [`Task::rt`] its queue's entity was
+    /// built with (`Task::entity_with`): zero for a fair entity. A running
+    /// task whose policy changed differs here until its processor's next
+    /// decision moves it (`CpuQueue::requeue_if_moved`).
+    entity_rt: AtomicU32,
     /// Its node in the tier above fair, while no queue holds it
     /// (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): allocated once, when it
     /// first asks for a real-time policy, and kept when it returns to fair.
@@ -269,7 +274,6 @@ impl RtWord {
         };
         Some(RtParams {
             policy,
-            #[expect(clippy::cast_possible_truncation, reason = "the low byte, masked")]
             priority: (self.0 & 0xff) as u8,
         })
     }
@@ -278,6 +282,11 @@ impl RtWord {
     #[must_use]
     pub const fn resets_on_fork(self) -> bool {
         self.0 & Self::RESET_ON_FORK != 0
+    }
+
+    /// The policy and priority bits alone: what places it in the stack.
+    const fn tier_bits(self) -> u32 {
+        self.0 & (Self::POLICY | 0xff)
     }
 
     /// Whether it owns a node of the tier above fair.
@@ -579,6 +588,7 @@ impl Task {
             sleep_slot: SlotCell::new(sleep_slot),
             parked: SlotCell::empty(),
             rt: AtomicU32::new(0),
+            entity_rt: AtomicU32::new(0),
             upper: UpperCell::empty(),
         })
     }
@@ -640,6 +650,7 @@ impl Task {
             sleep_slot: SlotCell::new(sleep_slot),
             parked: SlotCell::empty(),
             rt: AtomicU32::new(0),
+            entity_rt: AtomicU32::new(0),
             upper: UpperCell::empty(),
         })
     }
@@ -651,12 +662,15 @@ impl Task {
     ///
     /// Under the lock of the queue it goes on, the only taker of its node.
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
-        if let Some(params) = self.rt_params()
+        let word = self.rt_word();
+        if let Some(params) = word.params()
             && let Some(node) = self.upper.take()
         {
             self.parked.put(slot);
+            self.entity_rt.store(word.tier_bits(), Ordering::Relaxed);
             return super::stack::Stack::upper_entity(params, node);
         }
+        self.entity_rt.store(0, Ordering::Relaxed);
         // A real-time policy with no node cannot be: the node is put in its
         // cell before the policy is stored (`sched::set_policy`,
         // `sched::prepare_user`), and only a queue holding the task takes
@@ -717,6 +731,13 @@ impl Task {
         self.rt_params().is_none()
     }
 
+    /// Whether its queue's entity was built with the policy and priority it
+    /// has now: false for a running task whose policy changed, until its
+    /// processor's next decision moves it.
+    pub(crate) fn entity_is_current(&self) -> bool {
+        self.entity_rt.load(Ordering::Relaxed) == self.rt_word().tier_bits()
+    }
+
     /// Whether it owns a node of the tier above fair.
     pub(crate) fn owns_upper_node(&self) -> bool {
         self.rt_word().owns_slot()
@@ -743,9 +764,11 @@ impl Task {
     }
 
     /// Store its policy and reset-on-fork flag: under the lock of its home
-    /// queue, with no queue holding it (`CpuQueue::set_policy` takes it off
-    /// and puts it back), or before any queue has seen it. A real-time
-    /// policy only for a task that owns its node.
+    /// queue (`CpuQueue::set_policy`, which then moves it between tiers, or
+    /// leaves the running task to its processor's next decision), or before
+    /// any queue has seen it. A real-time policy only for a task that owns
+    /// its node. What its queue holds is unchanged: an entity is taken apart
+    /// by its own kind, whatever the word says now.
     pub(crate) fn store_policy(&self, params: Option<RtParams>, reset_on_fork: bool) {
         let word = self.rt_word().with(params, reset_on_fork);
         self.rt.store(word.0, Ordering::Release);

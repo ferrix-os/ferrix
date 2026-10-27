@@ -429,8 +429,9 @@ package FerrixSchedRequirements {
                 classes the build flags compose, outermost first, joined by '+'.";
             attribute :>> criterion = "On every boot, check-boot-line.py compares
                 that line with the name the profile's tier flags compose from
-                certification-item.json's class_crates (eevdf for present and
-                desktop); with Eevdf's NAME changed, it refuses the boot.";
+                certification-item.json's class_crates (eevdf for present,
+                fifo_rr+eevdf for desktop); with Eevdf's NAME changed, it refuses the
+                boot.";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = "sched::init";
         }
@@ -1083,6 +1084,174 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.OBJ.11";
             attribute :>> unit = ("sched::wait::WaitQueue::wait_until_deadline",
                 "sched::wait::WaitQueue::wait_sliced");
+        }
+    }
+
+    package Realtime {
+        doc /* The realtime tier in the core (docs/SCHED-CLASSES.md section 9e,
+             * step 4b; the consultant's OK IF R1-R15, ledger line 29): the task's
+             * upper cell, the move between tiers, wakes, inheritance, the Linux
+             * calls, and the modes. */
+
+        requirement <'L.sched.107'> theUpperCellIsTheQueueHolders : ItemLowLevel {
+            attribute :>> statement = "A task's node of the tier above fair shall be
+                allocated once, when it first asks for a real-time policy or is made
+                by a real-time parent, outside every scheduler path; kept in its
+                upper cell while no queue holds the task, taken and put only under
+                the lock of its home queue or before any queue has seen it; and kept
+                when the task returns to fair. A node given back while its cell
+                holds one stops the machine.";
+            attribute :>> criterion = "The stage-5 move check: a fair task made
+                SCHED_FIFO owns its node and policy, and given back to fair still
+                owns its node; L.sched.112's and H.SCHED.19's checks, which queue
+                every real-time task through its cell; and review of every take and
+                put (Task::entity_with, keep_entity, keep_refused, give_upper_node).";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("sched::task::Task::entity_with",
+                "sched::task::Task::keep_entity", "sched::task::Task::keep_refused",
+                "sched::task::Task::give_upper_node", "sched::set_policy");
+        }
+        requirement <'L.sched.108'> aWeightIsKeptOutsideFair : ItemLowLevel {
+            attribute :>> statement = "A weight set on a task while a tier above fair
+                holds it shall be its fair record's, and the weight it is queued
+                with when it returns to fair.";
+            attribute :>> criterion = "The stage-5 move check: a weight set on a
+                SCHED_FIFO task is its base weight after its return to fair, and its
+                record's weight the one that base gives.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = ("sched::queue::CpuQueue::set_weight",
+                "sched::task::Task::entity_with");
+        }
+        requirement <'L.sched.109'> aWakeAsksTheStack : ItemLowLevel {
+            attribute :>> statement = "A wake, local or remote, shall ask the class
+                stack whether the woken task should preempt the running one
+                (Stack::should_preempt), and a yes shall have the processor decide
+                at once: at its timer armed MIN_ARM_NS away, or on the way out of a
+                system call.";
+            attribute :>> criterion = "The stage-5 order check on desktop: a
+                SCHED_FIFO task woken from another processor, and by a fair task on
+                its own, runs within 20 ms while a fair task spins there tickless.";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("sched::wake_at_home", "sched::kick_after_wake",
+                "sched::queue::CpuQueue::should_preempt");
+        }
+        requirement <'L.sched.110'> aRealTimeTaskIsWokenWhereItIs : ItemLowLevel {
+            attribute :>> statement = "A real-time task shall be woken on the
+                processor it last ran on: never pulled onto its waker's, placed on
+                an idle one, or stolen; so a higher priority waits for its own
+                processor even while another is idle.";
+            attribute :>> criterion = "The stage-5 placement check on desktop, with
+                three processors or more: a SCHED_FIFO task of any affinity woken
+                from another processor while its own runs a fair task and a third
+                is idle runs on its own; a fair task, the control, runs elsewhere.";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("sched::place_on_idle", "sched::wake_onto",
+                "sched::queue::CpuQueue::steal_candidate");
+        }
+        requirement <'L.sched.111'> thePolicyCallsPermissionRule : ItemLowLevel {
+            attribute :>> statement = "sched_setscheduler, sched_setparam and
+                sched_setattr shall allow a change of policy with CAP_SYS_NICE, and
+                otherwise only on a thread the caller owns: a new real-time policy
+                only with a nonzero RLIMIT_RTPRIO, which is 0 unless set, a priority
+                raised only within it, and the reset-on-fork flag never cleared;
+                anything else EPERM.";
+            attribute :>> criterion = "cargo xtask test-rtsched on desktop, on every
+                architecture: uid 1000 with RLIMIT_RTPRIO 0 is refused SCHED_FIFO
+                10 with EPERM; with 20 takes 10 and 20 and is refused 30, and takes
+                SCHED_RR 5 and SCHED_OTHER; under reset-on-fork set as root it is
+                refused clearing it.";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("syscall::limits::may_set_policy",
+                "syscall::limits::limit_of");
+        }
+        requirement <'L.sched.112'> aChangeOfPolicyMovesTheTask : ItemLowLevel {
+            attribute :>> statement = "A change of a task's policy or real-time
+                priority shall, under its home queue's lock, take a task that queue
+                holds, the running one included, off its tier and enqueue it at the
+                tail of its new place, and ask for a decision when the running task
+                moved or something now outranks it; an unchanged policy moves
+                nothing.";
+            attribute :>> criterion = "The stage-5 move check on desktop: a fair
+                task made SCHED_FIFO while it spins beside another fair task takes
+                the processor from it, and given back to fair shares it again;
+                test-rtsched's chrt step reads each change back.";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("sched::set_policy",
+                "sched::queue::CpuQueue::set_policy",
+                "sched::queue::CpuQueue::release");
+        }
+        requirement <'L.sched.113'> aPolicyIsInheritedThroughOneFunction : ItemLowLevel {
+            attribute :>> statement = "Every user task, a fork's child, a clone's
+                thread and a native launch alike, shall be made through
+                prepare_user, which gives it its maker's real-time policy and
+                priority with a node of its own, unless the maker has reset-on-fork
+                set, when it starts SCHED_OTHER and a thread's negative nice value
+                is raised to 0; the new task's reset-on-fork flag starts clear.";
+            attribute :>> criterion = "test-rtsched on desktop: a forked child and a
+                thread of a SCHED_FIFO 10 parent read SCHED_FIFO 10, and with
+                reset-on-fork a forked child reads SCHED_OTHER; its negative
+                control, expecting the reset child to keep SCHED_FIFO, fails on
+                that step. Review: prepare_user is the one maker of user tasks
+                (syscall::process's prepare_thread and start_thread, which
+                launch::load_native reaches through StartClaim::prepare).";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("sched::prepare_user", "sched::inherit_policy",
+                "syscall::process::start_thread");
+        }
+        requirement <'L.sched.114'> cpuMaxCutsEveryTier : ItemLowLevel {
+            attribute :>> statement = "A task's run time shall be charged to its
+                job's cpu.max whatever its tier, and a real-time task held by it as
+                a fair one is.";
+            attribute :>> criterion = "The stage-13 cpu checks on desktop: a program
+                of two spinning threads made SCHED_FIFO in a cgroup with cpu.max
+                20000 100000 is held between a twelfth and two thirds of a
+                processor.";
+            attribute :>> parent = ("H.SCHED.20", "H.QUOTA.4");
+            attribute :>> unit = ("sched::queue::CpuQueue::account_with",
+                "sched::queue::CpuQueue::arm_timer");
+        }
+        requirement <'L.sched.115'> softRtIsRefusedByName : ItemLowLevel {
+            attribute :>> statement = "A scheduling domain shall be made only through
+                make_domain, which refuses a mode whose tiers are not compiled in
+                as ModeUnavailable, and SoftRt where they are as NotCreatable,
+                until its own processors, a fully preemptible kernel and threaded
+                interrupts land.";
+            attribute :>> criterion = "The stage-5 modes check: on desktop a SoftRt
+                domain is refused NotCreatable, and on present ModeUnavailable.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::make_domain", "sched::init");
+        }
+        requirement <'L.sched.116'> withoutTheTierRealTimeIsEinval : ItemLowLevel {
+            attribute :>> statement = "In a build without the realtime tier,
+                sched_setscheduler, sched_setparam and sched_setattr shall refuse
+                SCHED_FIFO and SCHED_RR with EINVAL, and set_policy shall refuse
+                them as NoTier, changing nothing.";
+            attribute :>> criterion = "test-rtsched on present, on every
+                architecture: SCHED_FIFO and SCHED_RR are EINVAL by
+                sched_setscheduler and sched_setattr, and the thread still reads
+                SCHED_OTHER; the stage-5 modes check: set_policy answers NoTier and
+                leaves the task fair.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("syscall::limits::checked_params", "sched::set_policy");
+        }
+        requirement <'L.sched.117'> thePolicyCallsCheckTheirArguments : ItemLowLevel {
+            attribute :>> statement = "The policy calls shall refuse as Linux does:
+                a negative pid, a null parameter, a negative or unknown policy,
+                SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE and SCHED_EXT, a priority
+                outside 1 to 99 for SCHED_FIFO and SCHED_RR or other than 0 for
+                SCHED_OTHER, and nonzero flags with EINVAL; a pid naming no thread
+                with ESRCH; a sched_attr smaller than 48 bytes or larger than a page,
+                or with nonzero bytes past the 56 known, with E2BIG and 56 written
+                back; an unknown sched_flag with EINVAL and a utilisation clamp with
+                EOPNOTSUPP; and sched_getattr a size outside 48 bytes to a page with
+                EINVAL.";
+            attribute :>> criterion = "test-rtsched's errors step on desktop, on
+                every architecture: each refusal above with its errno, and a
+                zeroed tail past 56 bytes taken.";
+            attribute :>> parent = "H.SCHED.19";
+            attribute :>> unit = ("syscall::limits::sys_sched_setscheduler",
+                "syscall::limits::sys_sched_setattr", "syscall::limits::sys_sched_getattr",
+                "syscall::limits::sched_subject");
         }
     }
 }

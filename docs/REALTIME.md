@@ -300,6 +300,36 @@ ARCHITECTURE.md already says:
   maximum controlled priority is the native form: a handle's rights bound
   the priority it can confer.
 
+**As built (step 4b, `desktop`, 2026-10-27; SCHED-CLASSES.md §9e, ledger
+line 29).** `ferrix-sched-fifo` is the tier: a balanced tree of the tasks'
+own nodes keyed by priority and arrival rather than a bitmap of lists (the
+review accepted the class's own tree). Its constants are fixed in the crate,
+never run-time settings (R13): the round-robin quantum is **100 ms**
+(Linux's default `sched_rr_timeslice_ms`), restarted after a yield and after
+a preemption, and the floor is **950 ms of every 1 s period** per processor
+(Linux's default `sched_rt_runtime_us`): while fair tasks are runnable
+there, real-time tasks run at most that, so fair tasks keep at least 50 ms;
+with none runnable the throttle does not bind. The floor is the throttle
+inside the class, not the deferred server above: a server needs an EDF tier
+`desktop` lacks (the review's answer 2). `sched_rr_get_interval` answers
+the quantum.
+
+**The guarantee is narrow.** Real-time tasks run in `desktop`'s boot
+domain, `Throughput`, beside fair ones (the review's answer 3): what holds
+is priority order, preemption on a wake (L.sched.109) and the floor
+(H.SCHED.19, H.SCHED.20), and nothing more: no isolation of processors, no
+bound on the kernel's non-preemptible sections (F-95), no threaded
+interrupts, and no priority inheritance through user locks
+(`FUTEX_LOCK_PI` stays `ENOSYS`). A woken real-time task stays on its own
+processor (L.sched.110): a higher priority waits for that processor even
+while another is idle. A `SoftRt` domain is compiled in and refused by name,
+"compiled, not yet creatable", until those land (L.sched.115).
+
+**C2.** A `SCHED_FIFO` task at priority 99 starves the kernel's own fair
+worker tasks -- the reaper, the network's -- on its processor for 950 ms of
+every second; the floor is what bounds that, and nothing else does.
+`/proc/loadavg` counts real-time tasks as tasks of ordinary weight.
+
 ### 3.4 Inheritance: one owned wait queue, and donation over channels
 
 * An owned wait queue with a single owner, waiters ordered by priority then

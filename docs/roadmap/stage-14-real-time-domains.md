@@ -28,11 +28,18 @@ certification consultant:
   the selection crate that composes the stack from them, the profiles'
   `modes`, and the boot line naming the stack;
 * the evidence that a class crate a build leaves out is not linked
-  (test-removable's class-crate half and a fixture crate).
+  (test-removable's class-crate half and a fixture crate);
+* a stack of two tiers (step 4a), and on it `ferrix-sched-fifo`,
+  `SCHED_FIFO` and `SCHED_RR` above fair on `desktop` (step 4b, in
+  review): priorities 1 to 99, preemption on a wake, RR's 100 ms quantum,
+  the 950-of-1000 ms floor that keeps fair tasks 50 ms a second, Linux's
+  policy calls with `CAP_SYS_NICE` and `RLIMIT_RTPRIO`, reset-on-fork, and
+  boot checks plus `cargo xtask test-rtsched` for each.
 
 `max` has no fair tier, the customer's decision (2026-10-27). Not built
-yet: the FIFO/RR, EDF/CBS and windows classes, threaded interrupts,
-priority inheritance, the mode switch and the exit tests above.
+yet: a `SoftRt` domain of its own (compiled in, refused by name), the
+EDF/CBS and windows classes, threaded interrupts, priority inheritance,
+the mode switch and the exit tests above.
 
 ---
 

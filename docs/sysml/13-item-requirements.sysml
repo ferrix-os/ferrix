@@ -676,6 +676,36 @@ package FerrixItemRequirements {
                 L.sched.102's check on every boot.";
             attribute :>> parent = "ASR-8";
         }
+        requirement <'H.SCHED.19'> aRealTimeTaskRunsFirst : ItemHighLevel {
+            attribute :>> statement = "In a build with the realtime tier, a runnable
+                task of a real-time policy shall run before every task of a lower
+                real-time priority and every fair task on its processor, tasks of one
+                priority in arrival order, a woken one preempting at once; except
+                while the floor (H.SCHED.20) holds the tier back, and with no bound
+                on an inversion through a user lock (FUTEX_LOCK_PI is ENOSYS).";
+            attribute :>> criterion = "The stage-5 real-time checks on desktop, on
+                every architecture (docs/SCHED-CLASSES.md section 9e, R12): behind a
+                priority-99 holder, priorities 10, 20 and 20 run 20, 20, 10 with no
+                fair task between; a task woken from another processor and from its
+                own runs within 20 ms while a fair task spins there; a preempted
+                SCHED_FIFO task keeps the head of its priority; two SCHED_RR tasks
+                share at the quantum and two SCHED_FIFO ones, the control, do not.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.20'> fairTasksKeepAFloor : ItemHighLevel {
+            attribute :>> statement = "While fair tasks are runnable on a processor,
+                its real-time tasks shall run at most 950 ms of every 1 s period
+                there, so that the fair tasks keep at least 50 ms of it; with no
+                fair task runnable, the real-time tasks may use all of it.";
+            attribute :>> criterion = "The stage-5 floor check on desktop, on every
+                architecture: over 2.1 s beside a spinning SCHED_FIFO task, a fair
+                task is given between 60 and 700 ms and the SCHED_FIFO task more
+                than one period's 950 ms, running again after each throttle; and
+                ferrix-sched-fifo's and ferrix-sched-class's host tests of the
+                throttle, its period's end armed, and a throttled tier with nothing
+                below it still running.";
+            attribute :>> parent = "ASR-8";
+        }
     }
 
     package Interrupts {

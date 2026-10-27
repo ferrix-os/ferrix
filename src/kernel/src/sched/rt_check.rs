@@ -16,6 +16,9 @@
 //!   a fair task on its own processor, which then spins on: the wake asks
 //!   that processor for a decision, taken at its timer armed a moment away
 //!   (`resched_here`), or at once on the way out of a system call.
+//! * **Placement** (L.sched.110): a real-time task woken from another
+//!   processor while its own is busy and a third idle runs on its own; a
+//!   fair one, the control, is placed on the idle one.
 //! * **FIFO keeps its place**: a `SCHED_FIFO` task preempted by a higher
 //!   priority runs again before the task of its own priority that arrived
 //!   after it.
@@ -36,6 +39,7 @@
 //!   a real-time policy refused there too.
 
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sched_class::{CpuSet, DomainError, Mode, RtParams, RtPolicy};
@@ -69,12 +73,14 @@ const FLOOR_WINDOW_NANOS: u64 = 2_100_000_000;
 /// periods, less a margin for where the window falls.
 const FLOOR_LEAST_NANOS: u64 = 60_000_000;
 
-/// The most: well short of what a fair share would give.
-const FLOOR_MOST_NANOS: u64 = 400_000_000;
+/// The most: well short of the half a fair share would give. An emulated
+/// processor's timer comes late enough to give it several times the floor
+/// (ARMv7-A under `tcg`: 334 ms, 2026-10-27).
+const FLOOR_MOST_NANOS: u64 = 700_000_000;
 
-/// The least the spinning `SCHED_FIFO` task must be given of it: so it ran
-/// again after each throttle.
-const FLOOR_FIFO_LEAST_NANOS: u64 = 1_500_000_000;
+/// The least the spinning `SCHED_FIFO` task must be given of it: more than
+/// one period's 950 ms, so it ran again after a throttle.
+const FLOOR_FIFO_LEAST_NANOS: u64 = 1_200_000_000;
 
 /// How long a case waits for something before it fails.
 const PATIENCE_NANOS: u64 = 10_000_000_000;
@@ -141,7 +147,7 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
     if !super::realtime_built() {
         return Ok("no tier above fair: SoftRt unavailable and SCHED_FIFO refused, as built");
     }
-    let online = super::QUEUES.get().map_or(0, |queues| queues.len());
+    let online = super::QUEUES.get().map_or(0, Vec::len);
     if online < 2 {
         return Ok("one processor: the real-time cases need two");
     }
@@ -200,6 +206,7 @@ fn modes() -> Result<(), &'static str> {
 /// The driver, pinned to `d`, running every case on `c`, its argument.
 fn drive(c: usize) {
     let verdict = order(c)
+        .and_then(|()| placement(c))
         .and_then(|()| fifo_keeps_its_place(c))
         .and_then(|()| round_robin(c))
         .and_then(|()| floor(c))
@@ -343,11 +350,39 @@ fn order(c: usize) -> Result<(), &'static str> {
     reset();
     let _fair = super::spawn_on("rt-fair", fair_spinner, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
     started(1)?;
-    let _holder = super::spawn_rt_on("rt-holder", holder, 0, c, params(RtPolicy::Fifo, 99))?;
+    let _holder = super::spawn_rt_on(
+        "rt-holder",
+        holder,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 99),
+    )?;
     started(2)?;
-    let _ten = super::spawn_rt_on("rt-10", logger, 1, c, params(RtPolicy::Fifo, 10))?;
-    let _twenty = super::spawn_rt_on("rt-20", logger, 2, c, params(RtPolicy::Fifo, 20))?;
-    let _again = super::spawn_rt_on("rt-20b", logger, 3, c, params(RtPolicy::Rr, 20))?;
+    let _ten = super::spawn_rt_on(
+        "rt-10",
+        logger,
+        1,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
+    let _twenty = super::spawn_rt_on(
+        "rt-20",
+        logger,
+        2,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 20),
+    )?;
+    let _again = super::spawn_rt_on(
+        "rt-20b",
+        logger,
+        3,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Rr, 20),
+    )?;
     super::sleep_for(5_000_000);
     if LOGGED.load(Ordering::Acquire) != 0 {
         stop();
@@ -366,10 +401,25 @@ fn order(c: usize) -> Result<(), &'static str> {
         stop();
         return Err("a fair task ran while real-time tasks waited on its processor");
     }
+    wakes(c)
+}
+
+/// [`order`]'s wakes, with its fair task still spinning on `c`: a remote
+/// one and a local one.
+///
+/// Verifies: L.sched.109
+fn wakes(c: usize) -> Result<(), &'static str> {
     // The remote wake: the fair task spins alone on `c`, tickless.
     WOKEN.store(false, Ordering::Release);
     RAN_AT.store(0, Ordering::Release);
-    let _woken = super::spawn_rt_on("rt-woken", woken, 0, c, params(RtPolicy::Fifo, 5))?;
+    let _woken = super::spawn_rt_on(
+        "rt-woken",
+        woken,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 5),
+    )?;
     started(3)?;
     super::sleep_for(20_000_000);
     WOKEN_AT.store(crate::timer::now_nanos(), Ordering::Release);
@@ -389,7 +439,14 @@ fn order(c: usize) -> Result<(), &'static str> {
     // The local wake: a fair task on `c` wakes it, and spins on.
     WOKEN.store(false, Ordering::Release);
     RAN_AT.store(0, Ordering::Release);
-    let _again = super::spawn_rt_on("rt-woken-here", woken, 0, c, params(RtPolicy::Fifo, 5))?;
+    let _again = super::spawn_rt_on(
+        "rt-woken-here",
+        woken,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 5),
+    )?;
     started(4)?;
     super::sleep_for(20_000_000);
     let _waker = super::spawn_on("rt-waker", local_waker, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
@@ -426,15 +483,95 @@ fn local_waker(_: usize) {
     }
 }
 
+/// The processor each woken task last ran on.
+static RAN_ON: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// A real-time task woken from another processor while its own is busy
+/// stays there, though another is idle; a fair one, the control, does not.
+/// Only with three processors or more, so that one is idle.
+///
+/// Verifies: L.sched.110
+fn placement(c: usize) -> Result<(), &'static str> {
+    let online = super::QUEUES.get().map_or(0, Vec::len);
+    if online < 3 {
+        return Ok(());
+    }
+    let all = CpuSet::first(online).map_err(|_| "no set of every processor")?;
+    reset();
+    let _busy = super::spawn_on("rt-busy", fair_spinner, 0, NICE_0_WEIGHT, c, CpuSet::of(c))?;
+    started(1)?;
+    let fifo = params(RtPolicy::Fifo, 5);
+    let _rt = super::spawn_rt_on("rt-placed", woken_where, 0, c, all, fifo)?;
+    let rt_ran_on = woken_ran_on(2)?;
+    let _fair = super::spawn_on("rt-placed-fair", woken_where, 0, NICE_0_WEIGHT, c, all)?;
+    let fair_ran_on = woken_ran_on(3)?;
+    stop();
+    if rt_ran_on != c {
+        return Err("a woken real-time task was moved off its busy processor");
+    }
+    if fair_ran_on == c {
+        return Err("the control failed: a woken fair task stayed behind a busy processor");
+    }
+    Ok(())
+}
+
+/// Wait for the `n`th task of the case to start and wait, wake it from
+/// here, and answer where it ran.
+fn woken_ran_on(n: usize) -> Result<usize, &'static str> {
+    WOKEN.store(false, Ordering::Release);
+    RAN_ON.store(usize::MAX, Ordering::Release);
+    started(n)?;
+    super::sleep_for(20_000_000);
+    WOKEN.store(true, Ordering::Release);
+    QUEUE.wake_all();
+    wait_until(
+        || RAN_ON.load(Ordering::Acquire) != usize::MAX,
+        "a woken task of the placement case never ran",
+    )?;
+    Ok(RAN_ON.load(Ordering::Acquire))
+}
+
+/// Wait to be woken, then note where it ran.
+fn woken_where(_: usize) {
+    let _ = STARTED.fetch_add(1, Ordering::AcqRel);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    let _ = QUEUE.wait_until_deadline(|| WOKEN.load(Ordering::Acquire), deadline);
+    RAN_ON.store(
+        super::this_cpu().unwrap_or(usize::MAX - 1),
+        Ordering::Release,
+    );
+}
+
 /// A preempted `SCHED_FIFO` task keeps the head of its priority.
 fn fifo_keeps_its_place(c: usize) -> Result<(), &'static str> {
     reset();
     FAIR_AT_RELEASE.store(FAIR_PROGRESS.load(Ordering::Acquire), Ordering::Release);
-    let _first = super::spawn_rt_on("rt-first", first_in, 1, c, params(RtPolicy::Fifo, 10))?;
+    let _first = super::spawn_rt_on(
+        "rt-first",
+        first_in,
+        1,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
     started(1)?;
-    let _second = super::spawn_rt_on("rt-second", logger, 2, c, params(RtPolicy::Fifo, 10))?;
+    let _second = super::spawn_rt_on(
+        "rt-second",
+        logger,
+        2,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
     super::sleep_for(5_000_000);
-    let _higher = super::spawn_rt_on("rt-higher", higher, 3, c, params(RtPolicy::Fifo, 20))?;
+    let _higher = super::spawn_rt_on(
+        "rt-higher",
+        higher,
+        3,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 20),
+    )?;
     let order = logged(3)?;
     stop();
     if order != 3 | (1 << 8) | (2 << 16) {
@@ -464,9 +601,9 @@ fn higher(id: usize) {
 fn round_robin(c: usize) -> Result<(), &'static str> {
     let both = |policy: RtPolicy, what: &'static str, task: fn(usize)| {
         reset();
-        let _a = super::spawn_rt_on(what, task, 0, c, params(policy, 10))?;
+        let _a = super::spawn_rt_on(what, task, 0, c, CpuSet::of(c), params(policy, 10))?;
         started(1)?;
-        let _b = super::spawn_rt_on(what, task, 1, c, params(policy, 10))?;
+        let _b = super::spawn_rt_on(what, task, 1, c, CpuSet::of(c), params(policy, 10))?;
         super::sleep_for(RR_WINDOW_NANOS);
         let ran = [
             RAN[0].load(Ordering::Acquire),
@@ -501,7 +638,14 @@ fn floor(c: usize) -> Result<(), &'static str> {
     reset();
     let _fair = super::spawn_on("rt-floor-fair", spinner, 1, NICE_0_WEIGHT, c, CpuSet::of(c))?;
     started(1)?;
-    let _fifo = super::spawn_rt_on("rt-floor", spinner, 0, c, params(RtPolicy::Fifo, 10))?;
+    let _fifo = super::spawn_rt_on(
+        "rt-floor",
+        spinner,
+        0,
+        c,
+        CpuSet::of(c),
+        params(RtPolicy::Fifo, 10),
+    )?;
     super::sleep_for(FLOOR_WINDOW_NANOS);
     let (fifo, fair) = (
         RAN[0].load(Ordering::Acquire),
