@@ -30,8 +30,9 @@ partition_speculation = "exit"
 ipc_fastpath = "off"
 restricted_fastpath = "off"
 kernel_memory = "retyped"
-# `schedule = "windows"` translated: the EDF is the windows crate's. Fair
-# absent does not decide C3, which stays the customer's.
+# `schedule = "windows"` translated: the EDF is the windows crate's. No
+# fair tier: the customer kept max to the absolute minimum (SCHED-CLASSES.md
+# C3, 2026-10-27).
 # Besides its unbuilt values, fair absent cannot build while the core uses
 # the fair class outside `Stack` (docs/SCHED-CLASSES.md §11's table; D2).
 sched_dispatch = "fixed"

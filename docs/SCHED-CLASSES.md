@@ -284,7 +284,7 @@ policies would be a project of its own, and never in a certified profile.
 
   | Profile | windows | deadline | realtime | fair | ext |
   |---|---|---|---|---|---|
-  | `max` | `arinc` | `edf_cbs` | `absent` | `absent` or `eevdf` (§7) | `absent` |
+  | `max` | `arinc` | `edf_cbs` | `absent` | `absent` (C3, decided) | `absent` |
   | `fast` | `absent` | `edf_cbs` | `fifo_rr` | `eevdf` | `absent` |
   | `desktop` | `absent` | `edf_cbs` | `fifo_rr` | `eevdf` | `absent` |
   | `present` (today) | `absent` | `absent` | `absent` | `eevdf` | `absent` |
@@ -383,7 +383,8 @@ trait, added as above, with its own review.
    means every thread, the kernel's own workers and every server included,
    runs on a reservation. That is the strongest claim and the most work: no
    best-effort task can exist. The alternative keeps fair as the lowest
-   class in every profile, inside EDF's idle time only on `HardRt` CPUs.
+   class in every profile, inside EDF's idle time only on `HardRt` CPUs. **Decided 2026-10-27: no fair in `max`**
+   (§7a, C3).
 3. **Where SoftRt's fair server lives**: in `ferrix-sched-fifo` (it exists
    only to protect fair from fifo) or as a small `ferrix-sched-server`
    crate that EDF could reuse.
@@ -401,10 +402,13 @@ trait, added as above, with its own review.
 * The selection crate over the link-time seam (S2); per-task state in
   `Task` (S4).
 * `fast` stays `fixed`; `switchable` is desktop's alone (S10).
-* Open for the customer: whether fair is optional in `max` (C3: without
-  it, every kernel worker and server needs a reservation, and every user of
-  the `NICE_` constants must be absent too); where the fair server lives is
-  free (C4: a crate of its own only once two classes link it).
+* **C3, decided by the customer (2026-10-27): no fair tier in `max`** --
+  "i would keep max to the absolute minimum, so: no". `max` is the windows
+  tier alone: every kernel worker and server runs on a reservation, and
+  every user of the fair crate outside `Stack` (§11's table, the `NICE_`
+  weights among them, in the core, the item and the load) must go through
+  `Stack` or be absent before `max` can build. Where the fair server lives
+  is free (C4: a crate of its own only once two classes link it).
 
 ## 8. What it costs, and what it would cost with Cargo features
 
@@ -473,8 +477,8 @@ no predecessor starts at `none`.
 | `max` | fixed | arinc | absent | absent | absent | absent |
 
 `max`'s EDF is the one inside its windows, the windows crate's (§3), not a
-deadline tier; its `fair = absent` translates `schedule = "windows"` and
-does not decide C3, which stays the customer's. `max` and `fast` cannot
+deadline tier; its `fair = absent` translates `schedule = "windows"`,
+and is what the customer decided for C3 (§7a). `max` and `fast` cannot
 build, as today, for their unbuilt values and, besides, while the core
 uses fair outside `Stack` (§11's table). `desktop` stays `fixed` until
 step 5; `fifo_rr` and `switchable` enter profiles with their crates.
@@ -771,8 +775,8 @@ whose `fair: RunQueue` becomes the stack's queue in step 2's second half),
 hand-over, S5), `mod.rs`, `preempt.rs`, `wait.rs`, `work.rs`, `borrow.rs`,
 `inspect.rs`, `trip.rs`, `vtime.rs` and their checks. `object/quota.rs`
 keeps `cpu.weight` and the job weights; it names `NICE_0_WEIGHT` from the
-fair crate, which is one of the `NICE_` users C3 would make absent in a
-`max` without fair.
+fair crate, which is one of the `NICE_` users that must be absent in
+`max`, which has no fair tier (C3, §7a).
 
 **Users of the moved names**, re-pointed by path only: the uses of
 `NICE_0_WEIGHT` and `weight_of_nice` the table below counts (attributes,
@@ -782,8 +786,8 @@ core scheduler's own imports in `sched/{mod,queue,task,direct,check}.rs`.
 **What the core keeps of the fair crate outside `Stack`** (the split's
 review, N7, ledger line 19; counted at 1c725245 by `git grep` over
 `src/kernel`, a use being one line naming it). Each
-fixes the fair class in every profile until C3 is decided, or goes through
-`Stack` when a second class needs it:
+fixes the fair class in every profile until it goes through `Stack`; since
+`max` has no fair tier (C3, §7a), every row must before `max` can build:
 
 | Use | Where | Why outside `Stack` today |
 |---|---|---|
@@ -1004,5 +1008,5 @@ Owed on the gate host with line 20's: the controls of D6 and D10 run as
 in a core file, a declared value with no arm, a value with two arms,
 `switchable` planted in `fast.toml`), the four boots as rows with the new
 `build` line and check-boot-line passing, S5's round trip on the landing
-hash. Next: 3b; N4's measurement on the gate host. Still open for the customer: C3, fair in
-`max`.
+hash. Next: 3b; N4's measurement on the gate host. C3 decided by the
+customer on 2026-10-27: no fair tier in `max` (§7a).
