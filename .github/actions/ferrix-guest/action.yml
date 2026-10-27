@@ -1,0 +1,75 @@
+name: Ferrix guest machine
+description: >
+  What a job that boots Ferrix needs on a hosted runner: the Rust toolchain
+  with every target the image and its test programs are built for, the build
+  cache, QEMU and its firmware, btrfs-progs for /data volumes, the patched
+  QEMU x86-64 boots require (built once and cached), and /dev/kvm opened to
+  the user. The same steps ci.yml's boot and rustc jobs spell out, for the
+  stability suite (docs/STABILITY.md) and CI's light checks.
+
+inputs:
+  arch:
+    description: x86_64, aarch64 or armv7a
+    required: true
+  kvm:
+    description: "'true' to open /dev/kvm (x86_64 only: the runners are x86-64)"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.97.1
+      with:
+        targets: x86_64-unknown-none, aarch64-unknown-none-softfloat, armv7a-none-eabi, x86_64-unknown-uefi, aarch64-unknown-uefi, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl, armv7-unknown-linux-musleabi
+        components: llvm-tools
+
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: stability-${{ inputs.arch }}
+
+    - name: Install QEMU, firmware and btrfs-progs
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          qemu-system-x86 qemu-system-arm ovmf qemu-efi-aarch64 u-boot-qemu btrfs-progs
+
+    # x86-64 boots need the QEMU tools/common/fetch/fetch-qemu-linux.sh
+    # builds (docs/NVIDIA.md §12.3); xtask refuses any other. The cache key is
+    # ci.yml's, so the two workflows share one build.
+    - name: Cache the patched QEMU
+      id: qemu-cache
+      if: inputs.arch == 'x86_64'
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/share/ferrix/qemu
+        key: qemu-ferrix-cfi-${{ runner.os }}-${{ hashFiles('tools/common/fetch/fetch-qemu-linux.sh', 'tools/common/data/qemu/**') }}
+
+    - name: Install the patched QEMU's libraries
+      if: inputs.arch == 'x86_64'
+      shell: bash
+      run: |
+        sudo apt-get install -y --no-install-recommends \
+          libglib2.0-dev libpixman-1-dev libgtk-3-dev libepoxy-dev libgbm-dev \
+          libvirglrenderer-dev libspice-protocol-dev libpulse-dev \
+          libpipewire-0.3-dev libasound2-dev libzstd-dev libslirp-dev
+
+    - name: Build the patched QEMU
+      if: inputs.arch == 'x86_64' && steps.qemu-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        sudo apt-get install -y --no-install-recommends \
+          build-essential ninja-build python3-venv flex bison git pkg-config
+        tools/common/fetch/fetch-qemu-linux.sh
+
+    - name: Open /dev/kvm
+      if: inputs.kvm == 'true'
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm

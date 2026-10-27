@@ -1,0 +1,220 @@
+name: Stability
+
+# The nightly stability suite (docs/STABILITY.md): what Linux runs on its
+# kernels night after night -- repeated boots, LTP, kselftest, stress-ng,
+# the fault injectors, the lockup detectors, syzkaller -- run on Ferrix's
+# develop. It never blocks anything: it posts no commit status, no ruleset
+# names it, and CI result does not wait for it. A red night is reported in
+# this run's summary and in one rolling issue labelled `stability`
+# (docs/STABILITY.md §4); nothing is pushed.
+#
+# A scheduled workflow runs from the default branch's copy of this file, so
+# every job checks out develop explicitly (nightly.yml's reason). Twenty
+# minutes after nightly.yml's CI dispatch, so the two start apart.
+
+on:
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch or commit to test
+        required: false
+        default: develop
+
+permissions:
+  contents: read
+
+# One night at a time; a second dispatch waits for the first.
+concurrency:
+  group: stability
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # No RUSTFLAGS, ever: ci.yml's env says why.
+  REF: ${{ inputs.ref || 'develop' }}
+  STABILITY: tools/common/stability/stability.py
+
+jobs:
+  # ----------------------------------------------------------------
+  # F-98's row, full: an unprivileged program pressing on kernel memory
+  # beside a canary that must keep running. Owned by the kmem-class agent;
+  # recorded as skipped until `cargo xtask test-kmem` is on develop.
+  # ----------------------------------------------------------------
+  kmem:
+    name: test-kmem (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, kvm: "true", flags: "--accel kvm" }
+          - { arch: aarch64, kvm: "false", flags: "" }
+          - { arch: armv7a, kvm: "false", flags: "--smp 2" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+      - uses: ./.github/actions/ferrix-guest
+        with:
+          arch: ${{ matrix.arch }}
+          kvm: ${{ matrix.kvm }}
+      - name: test-kmem
+        run: |
+          if grep -rqs '"test-kmem"' tools/common/xtask/src; then
+            python3 "$STABILITY" run --job kmem --arch ${{ matrix.arch }} \
+              --keep build/${{ matrix.arch }}/serial.log -- \
+              cargo xtask test-kmem --arch ${{ matrix.arch }} ${{ matrix.flags }}
+          else
+            python3 "$STABILITY" run --job kmem --arch ${{ matrix.arch }} \
+              --skip "cargo xtask test-kmem is not on this commit yet (F-98's row)"
+          fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stability-record-kmem-${{ matrix.arch }}
+          path: stability/
+          if-no-files-found: ignore
+
+  # ----------------------------------------------------------------
+  # Boots, over and over: KernelCI's boot test, repeated so that a flake
+  # of one boot in ten shows up most nights. Each failed boot's serial log
+  # is kept. armv7a at two processors, the board's count, which the
+  # four-processor default hides failures of.
+  # ----------------------------------------------------------------
+  boots:
+    name: Boots (${{ matrix.arch }} x${{ matrix.repeat }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, kvm: "true", repeat: 20, flags: "--accel kvm" }
+          - { arch: aarch64, kvm: "false", repeat: 6, flags: "" }
+          - { arch: armv7a, kvm: "false", repeat: 6, flags: "--smp 2" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+      - uses: ./.github/actions/ferrix-guest
+        with:
+          arch: ${{ matrix.arch }}
+          kvm: ${{ matrix.kvm }}
+      - name: Build once
+        run: cargo xtask build --arch ${{ matrix.arch }} --release
+      - name: Boot ${{ matrix.repeat }} times
+        run: |
+          python3 "$STABILITY" run --job boots --arch ${{ matrix.arch }} \
+            --repeat ${{ matrix.repeat }} --keep build/${{ matrix.arch }}/serial.log -- \
+            cargo xtask test-boot --arch ${{ matrix.arch }} --release --timeout 300 ${{ matrix.flags }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stability-record-boots-${{ matrix.arch }}
+          path: stability/
+          if-no-files-found: ignore
+
+  # ----------------------------------------------------------------
+  # F-95's row: 10 ms sleepers on every processor beside ring-3 loads that
+  # saturate them. Red only on the phases test-stall asserts; the others are
+  # reported in its log while F-95 is open.
+  # ----------------------------------------------------------------
+  stall:
+    name: test-stall (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+      - uses: ./.github/actions/ferrix-guest
+        with:
+          arch: x86_64
+          kvm: "true"
+      - name: test-stall
+        run: |
+          python3 "$STABILITY" run --job stall --arch x86_64 \
+            --keep build/x86_64/serial.log -- \
+            cargo xtask test-stall --arch x86_64 --release --accel kvm
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stability-record-stall-x86_64
+          path: stability/
+          if-no-files-found: ignore
+
+  # ----------------------------------------------------------------
+  # Every record of the night into one summary, the trend of the last
+  # nights, the history carried forward as an artifact, and the rolling
+  # issue opened, commented on or closed.
+  # ----------------------------------------------------------------
+  report:
+    name: Report
+    if: always()
+    needs: [kmem, boots, stall]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read    # last night's history artifact
+      issues: write    # the rolling issue
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+          sparse-checkout: tools/common/stability
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stability-record-*
+          path: records
+      - name: Last night's history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p previous
+          for id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow stability.yml \
+                        --status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" -n stability-history -D previous 2>/dev/null; then
+              echo "history from run $id"; break
+            fi
+          done
+          [ -f previous/stability-history.json ] || echo '{"nights": []}' > previous/stability-history.json
+      - name: Summary and trend
+        run: |
+          mkdir -p history
+          python3 "$STABILITY" report --records records \
+            --history previous/stability-history.json \
+            --out history/stability-history.json --markdown history/summary.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stability-history
+          path: history/
+          retention-days: 90
+      - name: The rolling issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          python3 "$STABILITY" verdict --history history/stability-history.json > verdict.txt
+          state=$(head -1 verdict.txt)
+          gh label create stability --repo "$GITHUB_REPOSITORY" --color B60205 \
+            --description "The nightly stability suite (docs/STABILITY.md)" 2>/dev/null || true
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --label stability --state open \
+                   --json number --jq '.[0].number // empty')
+          if [ "$state" = red ]; then
+            { echo "Nightly stability is red on \`$REF\` at $(git rev-parse --short HEAD): $RUN_URL"; echo;
+              tail -n +2 verdict.txt; } > body.md
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file body.md
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --label stability \
+                --title "Nightly stability is red" --body-file body.md
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --repo "$GITHUB_REPOSITORY" --comment "Green again: $RUN_URL"
+          fi
