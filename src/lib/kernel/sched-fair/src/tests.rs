@@ -1591,3 +1591,75 @@ fn the_class_interface_is_the_queue() {
     check(&direct);
     Alone::check(&through).unwrap();
 }
+
+/// The class interface hands back what the queue does, field for field:
+/// the leaving entity's whole state through the hand-over and through a
+/// removal, a refusal's reason as the interface names it, and a slice of
+/// zero refused when the queue is made (the code review of the split, C3;
+/// N4's hand-over on the stack type).
+#[test]
+fn the_class_interface_hands_back_what_the_queue_does() {
+    use ferrix_sched_class::{Refusal, SchedClass};
+    assert!(matches!(
+        <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: 0 }),
+        Err(Refusal::Invalid)
+    ));
+    let mut direct = queue();
+    let mut through = <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: SLICE }).unwrap();
+    for id in 1..=3 {
+        let state = EntityState::new(NICE_0_WEIGHT + 100 * id as u32);
+        direct.enqueue(id, id, state, slot()).unwrap();
+        Eevdf::enqueue(&mut through, id, id, (state, slot())).unwrap();
+    }
+    for round in 0..50 {
+        let _ = direct.pick_next();
+        let _ = Eevdf::pick(&mut through);
+        let _ = direct.update_curr(SLICE / 4 + round);
+        let _ = Eevdf::charge(&mut through, SLICE / 4 + round);
+    }
+    // A removal: the same entity, the same state.
+    let (a, (sa, _)) = direct.remove(2).unwrap();
+    let (b, (sb, _)) = Eevdf::remove(&mut through, 2).unwrap();
+    assert_eq!((a, sa), (b, sb));
+    // The hand-over on a queue with something waiting, and then on one
+    // with nothing waiting: the leaving entity's state, field for field.
+    let _ = direct.pick_next();
+    let _ = Eevdf::pick(&mut through);
+    for arriving in [7, 8] {
+        let state = EntityState::new(NICE_0_WEIGHT);
+        let left = direct
+            .hand_over(arriving, arriving, state, slot(), SLICE)
+            .unwrap()
+            .unwrap();
+        let left_through =
+            Eevdf::hand_over(&mut through, arriving, arriving, (state, slot()), SLICE)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            (left.0, left.1, left.2.0),
+            (left_through.0, left_through.1, left_through.2.0)
+        );
+        assert_eq!(direct.current(), Eevdf::current(&through));
+        check(&direct);
+        Eevdf::check(&through).unwrap();
+    }
+    // Refusals, as the interface names them, the entity handed back whole.
+    let zero = EntityState {
+        weight: 0,
+        vlag: 0,
+        sum_exec: 0,
+    };
+    let back = Eevdf::enqueue(&mut through, 40, 40, (zero, slot())).unwrap_err();
+    assert_eq!(
+        (back.payload, back.entity.0, back.reason),
+        (40, zero, Refusal::Invalid)
+    );
+    let state = EntityState::new(NICE_0_WEIGHT);
+    let back = Eevdf::enqueue(&mut through, 8, 70, (state, slot())).unwrap_err();
+    assert_eq!((back.payload, back.reason), (70, Refusal::Duplicate(8)));
+    let back = Eevdf::hand_over(&mut through, 3, 80, (state, slot()), SLICE).unwrap_err();
+    assert_eq!(
+        (back.payload, back.entity.0, back.reason),
+        (80, state, Refusal::Duplicate(3))
+    );
+}
