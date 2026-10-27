@@ -1803,6 +1803,12 @@ whose classes line reads `fifo_rr+eevdf` on all three architectures;
   trip, coverage, every control through `gate.sh` (R12's negative
   controls and B1's), the boots' rows.
 
+**`max+`'s board** (the customer, 2026-10-27): the AMD Kria KV260 (Zynq
+UltraScale+ K26), family `aarch64-kv260` (0x0204), in place of the Radxa
+Orion O6, whose family 0x0203 is retired unrecorded. Its in-order
+Cortex-A53 cores suit the barest build; its IOMMU is an SMMU-500, which
+Ferrix does not drive yet, owed with its recognition rule before it boots.
+
 **`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
 the three pending values confirmed as intended). Met: (1) `pending` only
 at `sc4_plus` on a target-only claim, each entry naming its ledger line,
