@@ -569,7 +569,7 @@ dependencies = [
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
- "ferrix-sched",
+ "ferrix-sched-class",
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-ustack",
@@ -620,9 +620,8 @@ dependencies = [
  "ferrix-paging",
  "ferrix-pci",
  "ferrix-qr",
- "ferrix-sched",
- "ferrix-sched-edf",
- "ferrix-sha256",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-sync",
  "ferrix-vdso",
  "ferrix-vfs",
@@ -648,7 +647,7 @@ dependencies = [
  "ferrix-paging",
  "ferrix-partition-desc",
  "ferrix-pci",
- "ferrix-sched",
+ "ferrix-sched-fair",
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-vfs",
@@ -688,7 +687,8 @@ dependencies = [
  "ferrix-pci",
  "ferrix-procfs",
  "ferrix-renderctl",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-seccomp",
  "ferrix-smbios",
  "ferrix-sndctl",
@@ -1246,15 +1246,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrix-sched"
+name = "ferrix-sched-class"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-sched-fair"
 version = "0.1.0"
 dependencies = [
  "ferrix-fallible",
+ "ferrix-sched-class",
 ]
-
-[[package]]
-name = "ferrix-sched-class"
-version = "0.1.0"
 
 [[package]]
 name = "ferrix-sdmmc"

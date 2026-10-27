@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 
 use ferrix_linux_abi::errno::Errno;
-use ferrix_sched::NICE_0_WEIGHT;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use crate::claim::{Claims, Numbers, StillServed};
 use crate::device::{DeviceNode, Location};

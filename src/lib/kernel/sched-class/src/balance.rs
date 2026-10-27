@@ -17,10 +17,8 @@
 //! * [`place`], which picks the processor a waking or new task should go to.
 //! * [`imbalance`] and [`busiest`], which say whether it is worth moving a
 //!   task that is already somewhere, and from where.
-//! * [`slice_for`], which shares a target latency out among however many
-//!   entities are runnable, instead of giving each of them a fixed slice.
 
-use crate::domain::CpuSet;
+use crate::CpuSet;
 
 // ---------------------------------------------------------------------------
 // Load tracking
@@ -40,7 +38,7 @@ use crate::domain::CpuSet;
 /// Weighted demand keeps counting.
 ///
 /// A power of two so the arithmetic below is shifts, and equal to
-/// [`NICE_0_WEIGHT`](crate::NICE_0_WEIGHT), which is Linux's choice for the
+/// `NICE_0_WEIGHT` (the fair class's), which is Linux's choice for the
 /// same quantity.
 pub const LOAD_SCALE: u64 = 1024;
 
@@ -609,36 +607,3 @@ pub fn quietest(loads: &[CpuLoad], allowed: &CpuSet, me: usize) -> Option<usize>
 // ---------------------------------------------------------------------------
 // Slices
 // ---------------------------------------------------------------------------
-
-/// The slice each of `runnable` entities should ask for, given a target
-/// latency and a floor.
-///
-/// # Why a fixed slice is wrong
-///
-/// A slice is also a latency bound: the last of `n` runnable entities waits
-/// `n` slices before it runs. With a fixed slice that wait grows without limit
-/// — a thousand runnable tasks at a millisecond each is a second before the
-/// last one is looked at, and stage 5's own test ran exactly a thousand.
-///
-/// So the slice is a share of a target *period* instead, which is Linux's
-/// `sched_latency` divided by the number of runnable entities. Every entity
-/// still gets its weighted share of the processor; what changes is that it is
-/// delivered in smaller instalments.
-///
-/// # Why there is a floor
-///
-/// Taken to its conclusion the arithmetic asks for slices of nanoseconds, and
-/// then the machine does nothing but switch. Below `minimum_ns` the period is
-/// allowed to stretch instead — which is Linux's `sched_min_granularity`, and
-/// is the admission that beyond some number of runnable tasks, latency has to
-/// give.
-#[must_use]
-pub const fn slice_for(target_latency_ns: u64, minimum_ns: u64, runnable: usize) -> u64 {
-    let count = if runnable == 0 { 1 } else { runnable as u64 };
-    let share = target_latency_ns / count;
-    if share < minimum_ns {
-        minimum_ns
-    } else {
-        share
-    }
-}

@@ -16,7 +16,7 @@
 //!
 //! # What the nice value does
 //!
-//! It is the scheduler's weight, through [`apply_nice`]: `ferrix_sched`'s
+//! It is the scheduler's weight, through [`apply_nice`]: `ferrix_sched_fair`'s
 //! fair class has carried weights since stage 5 and `weight_of_nice` is
 //! Linux's own table, so a nice value has somewhere to go. Until it was
 //! plumbed through, nothing a program could say made the machine prefer one
@@ -78,7 +78,7 @@ use core::ops::Deref;
 use crate::sync::SpinLock;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
-use ferrix_sched::weight_of_nice;
+use ferrix_sched_fair::weight_of_nice;
 
 use crate::object::process::Host as _;
 use crate::sched::Task;
