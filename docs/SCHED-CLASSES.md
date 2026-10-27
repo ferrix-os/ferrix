@@ -568,6 +568,95 @@ profile, and its requirement from L.sched.102, come with 3b.
 
 **Ids** (D12): none for 3a.
 
+## 9b. Step 3b, as its design review has it (OK IF G1-G10, 2026-10-27)
+
+A design review before code, ledger line 22 of the container's ledger (to
+be copied to the gate host's): S1's absence evidence and S3's record kind.
+
+**Why a fixture** (G1). No buildable profile can leave a class crate out
+before step 4: `sched_fair = "absent"` cannot build while the core uses
+EEVDF outside `Stack` (§11), and a second, present class cannot build
+while the core makes EEVDF-only calls on the queue (`stack.rs`). So the
+absent side is shown with `ferrix-sched-fixture`
+(`src/lib/kernel/sched-fixture`): a minimal FIFO class, `no_std`,
+`#![forbid(unsafe_code)]`, `publish = false`, no `ferrix_` cfg, host
+tested, declaring no flag value. It is a dependency of the selection crate
+alone and named by no file, so rustc never loads it and the linker never
+sees it: S1's claim, on a real build. It stays after step 4 as the
+standing negative case, a crate no value links in any profile (C1), until
+a ledger line retires it.
+
+**The unused dependency** (G2). The workspace warns on
+`unused_crate_dependencies`, and `use ferrix_sched_fixture as _;` would
+load the crate and hand its rlib to the linker, the opposite of the
+point. The arms file carries a crate-level `expect` for that one lint,
+naming the fixture, and rule (d) below guards every other name of it.
+
+**The record** (G4, G5): `class_crates` in `certification-item.json`, one
+entry a class crate: its package, its Rust name (the symbol prefix), its
+tier flag and the value that links it (`present_when`), or
+`fixture: true`; its marker symbol (`<..Eevdf as ..SchedClass<..>>::check`).
+check-item-boundary holds it beside `removable_problems`, each rule with a
+self-test:
+* (a) every crate under `src/lib/kernel/sched-*` that implements
+  `SchedClass` has an entry, the interface crate `ferrix-sched-class`
+  excepted (it implements it for `Empty` and `Over`), and every entry's
+  package exists;
+* (b) an entry's flag and value are declared, and the arms file's arm for
+  that value names the crate's path;
+* (c) of the kernel's crates (core, item, load, binary) only the selection
+  crate depends on a class crate, but for the entries of `named_outside`,
+  each naming its row of §11's N7 table (today `ferrix-sched-fair` in the
+  core and the item); the list shrinks freely and grows only with a
+  ledger line;
+* (d) no file names a fixture crate.
+
+**The evidence** (G3, G8). `cargo xtask test-removable` gains a
+class-crate half, per architecture, for `present` and `desktop`. The
+release profile links with fat LTO and one codegen unit, so no Rust rlib
+reaches the link line or a map of it, present or absent. So:
+* the **ELF half** reads the shipped release ELF (`llvm-nm -C`): no symbol
+  of an absent or fixture crate, the marker of each present one;
+* the **link half** reads the linker map of a link of the same
+  architecture, profile and flags with LTO alone turned off: no member of
+  an absent or fixture crate's rlib pulled in, the present crate's member
+  there.
+LTO only removes and merges code; it adds none from a crate it was not
+given. So what the non-LTO link leaves out, the LTO image cannot hold, and
+S1's "link line" (written as if there were no LTO) reads as this
+non-LTO link. KERNEL-CRATES.md §6 states the same argument. The ELF and
+the map are kept per profile and architecture beside test-removable's.
+check-removable-symbols judges both, in a class-crate mode, so
+test-removable keeps one judge.
+
+**Controls** (G6), each with gate.sh, `FIRED`: (i) a planted unconditional
+use of the fixture through the arms file, with the ELF and map judge run
+alone on that build and `--expect` on its own message (rule (d) catches
+the plant statically first, and has a control of its own); (ii)
+`#[inline(always)]` on `Eevdf::check`, firing on the present side; (iii) a
+`present_when` the arm does not link, firing statically.
+
+**The ids** (G7), reserved in `requirement-reservations.json` before they
+are written, released at landing. Absence is configuration evidence, as
+KERNEL-CRATES §6's removable crates are, and takes no id. The classes line
+is item behaviour:
+* **H.SCHED.18**: "A kernel shall run the scheduling classes its build
+  flags select and no other, and shall name them as it starts." Its
+  criterion names test-removable's class-crate half on every architecture
+  and buildable profile, and L.sched.102's check.
+* **L.sched.102**, unit `sched::init`: "Once every processor is in the
+  scheduler, sched::init shall print `sched    classes` and the names of
+  the classes the build flags compose, outermost first, joined by '+'."
+  Its criterion: check-boot-line compares that line, on every boot, with
+  the name the profile's tiers compose; its control changes Eevdf's `NAME`
+  and reads `FIRED`.
+The real-time ids S13 set aside start at H.SCHED.19; `mode_available`'s
+owed requirement (line 21, ruling 2) takes the next free L.sched id.
+
+**check-boot-line** (G9) takes the expected classes name from the
+`class_crates` record and the profile's tier values, with a self-test for
+a stack of two tiers.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
@@ -582,7 +671,12 @@ into this design before step 2's code.
   crate; `check-removable-symbols` finds none of its symbols in the ELF; a
   present build shows a marker inlining cannot remove (the boot line's
   stack names, and `check()` kept out of line); and a planted unconditional
-  use of the crate, run as a control, reads `FIRED`.
+  use of the crate, run as a control, reads `FIRED`. *Restated by line 22
+  (G3):* the release link is fat LTO with one codegen unit, so no rlib
+  reaches its link line; "the link line" is that of a link with the same
+  architecture, profile and flags and LTO alone turned off, whose map
+  shows no member of an absent crate's rlib, and the ELF half is read from
+  the shipped release ELF (§9b).
 * **S2, the rule-6e exception**, as §5.3: one file, hand-written arms, an
   `Empty` class for an absent tier, the arms held one to one with the flag
   file, nothing else reading a scheduler flag.
@@ -625,7 +719,7 @@ into this design before step 2's code.
   Step 2: none if behaviour is unchanged and only units are restated; any
   new boot check or refusal takes from L.sched.102. Step 3: ids only if
   `Mode`'s refusal is restated. Each class (step 4) and the switch (step 5)
-  reserves at its own design review: H.SCHED.18 on for SoftRt's starvation
+  reserves at its own design review: H.SCHED.19 on (G7 took H.SCHED.18) for SoftRt's starvation
   bound and HardRt's admission (ASR-8), L.sched ids for the core's
   dispatch, and a prefix of its own for each class crate.
 * **S14, where it stands**: below, and REALTIME.md §4 points here.
@@ -848,12 +942,20 @@ line), written in as §9a.
   `mode_available` is named by no requirement (937 named by none, from
   936), nor is `sched::init`'s refusal it guards, which every buildable
   profile folds away: no id for 3a (D12). **Owed**: a requirement from
-  L.sched.102 naming both, with the first buildable profile that has fair
+  the next free L.sched id (L.sched.102 is the classes line's, §9b) naming
+  both, with the first buildable profile that has fair
   absent or allows a mode beside Throughput (ledger line 21, ruling 2).
 * The `classes` boot line moved from `main.rs`'s `start_scheduler` into
   `sched::init`'s end, the same place in the boot: printed from
   `start_scheduler` it made that function 72 lines against the complexity
   baseline's 71, a failure 94e9edf6 brought and this repairs.
+
+**3a reviewed**: ledger line 21, OK IF 1-7; 1-5 met in 7d26af03, 7 by
+its message; 6 owed on the gate host (below, with the desktop build's
+`build` line and condition 1's control).
+
+**Step 3b's design** reviewed, ledger line 22, OK IF G1-G10 (G10: this
+line), written in as §9b; H.SCHED.18 and L.sched.102 reserved.
 
 Owed on the gate host with line 20's: the controls of D6 and D10 run as
 `gate.sh control` with `FIRED` (a `cfg!(ferrix_sched_fair = ..)` planted
