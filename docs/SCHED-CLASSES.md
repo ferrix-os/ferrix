@@ -1429,6 +1429,25 @@ line), written in as §9a.
 its message; 6 owed on the gate host (below, with the desktop build's
 `build` line and condition 1's control).
 
+**Step 4a built, reviewed**: ledger line 28, OK IF 1-7 (65b401692; the
+three deviations accepted: F5, F6, F10 and L.sched.107-108 move to 4b
+with the first upper tier, and F11's and F7's two-tier proofs come with
+4b's first two-tier build, which N2's const refuses until then). Met on
+the branch: (1) rule (e) also refuses a method called on a CpuQueue's
+`stack` and a `&mut StackQueue` handed out, with self-tests; (2) each of
+L.sched.103-106 names a check on the fair-only stack besides the host
+tests (L.sched.1's and 2's fair host tests for 103 and 106, the boot
+checks of L.sched.52 and L.sched.90 for 104 and 105, tagged); (3)
+`sched_realtime.fifo_rr` stays built no until F5, F6, F10 and
+L.sched.107-108 land, its `lands` saying so; (4) `Over::decision_in_ns`
+answers `None` when nothing runs and an upper entity waits (the wake asks
+for the pick, so no timer can re-arm at once for ever), with a host-test
+case; (7) this line. Owed: (5) S5's release ELF table on three
+architectures (on the gate host if this disk cannot hold it),
+traceability clean once the ids land on develop, the boots' rows; (6) on
+the gate host: the round trip, the controls of rule (e) and condition 1,
+coverage after the final rebase.
+
 **`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
 the three pending values confirmed as intended). Met: (1) `pending` only
 at `sc4_plus` on a target-only claim, each entry naming its ledger line,

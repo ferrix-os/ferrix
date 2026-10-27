@@ -546,8 +546,15 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         if queue.running_upper {
             // Lower entities waiting cannot displace an upper one.
             U::decision_in_ns(&queue.upper)
-        } else if U::len(&queue.upper) > 0 {
+        } else if U::len(&queue.upper) > 0 && L::current(&queue.lower).is_some() {
+            // A lower entity runs while an upper one waits: due now.
             Some(0)
+        } else if U::len(&queue.upper) > 0 {
+            // Nothing runs: the wake or the enqueue that queued the upper
+            // entity asks for the pick itself, so no timer is armed for it,
+            // and a timer re-armed at once for ever is not possible (the
+            // consultant's ledger line 28, condition 4).
+            None
         } else {
             L::decision_in_ns(&queue.lower)
         }

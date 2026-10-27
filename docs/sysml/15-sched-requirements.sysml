@@ -77,7 +77,8 @@ package FerrixSchedRequirements {
                 of two tiers: the decision is due at once with an upper task
                 waiting behind a lower one, none while the upper runs with lower
                 tasks waiting, never later than the remaining time, and none
-                with one task; with the fair class alone, L.sched.1's check.";
+                with one task; on the fair-only stack, L.sched.1's check, the
+                fair queue's decision within a slice.";
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::queue::CpuQueue::arm_timer";
         }
@@ -91,7 +92,9 @@ package FerrixSchedRequirements {
                 of two tiers: an upper arrival behind a lower task is a
                 preemption and a charge reporting a decision; an upper task's
                 quantum spent with another upper waiting is both; neither while
-                its quantum lasts.";
+                its quantum lasts; on the fair-only stack, the boot check that a
+                task made runnable on its own processor runs without another
+                interrupt (L.sched.52's), whose wake asks should_preempt.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::queue::CpuQueue::should_preempt";
         }
@@ -103,7 +106,9 @@ package FerrixSchedRequirements {
                 two tiers holding three tasks of ordinary weight reads three
                 units; ferrix-sched-fair's: a fair task reweighted to twice
                 nice 0 behind an upper tier reads two units, and LOAD_UNIT
-                equals NICE_0_WEIGHT at compile time.";
+                equals NICE_0_WEIGHT at compile time; on the fair-only stack,
+                the boot check that a wakee is pulled onto its waker's processor
+                (L.sched.90's), which reads the load average account_load keeps.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::queue::CpuQueue::account_load";
         }
@@ -112,7 +117,8 @@ package FerrixSchedRequirements {
                 yield its running task, which the running task's tier answers.";
             attribute :>> criterion = "ferrix-sched-class's host test on a stack
                 of two tiers: an upper task that yields lets the other upper
-                task run next; with the fair class alone, L.sched.2's check.";
+                task run next; on the fair-only stack, L.sched.2's check, a lone
+                yield asking nothing.";
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::yield_now";
         }

@@ -779,7 +779,7 @@ const LOCAL_WAKE_PATIENCE_NANOS: u64 = 200_000_000;
 /// it now. A timer still armed for an earlier sleep would rescue the task for
 /// the wrong reason.
 ///
-/// Verifies: L.sched.52
+/// Verifies: L.sched.52, L.sched.104
 fn made_runnable_here_runs_without_another_interrupt() -> Result<(), &'static str> {
     let allocations = crate::vmap::usage().allocations;
     let here = super::current()
@@ -2278,7 +2278,7 @@ const PULL_BUSY_NANOS: u64 = 40_000_000;
 /// (L.sched.90); and with the waker's flips wide it runs at home
 /// (L.sched.91). Needs three processors and a domain that
 /// steals work, as L.sched.85's case.
-/// Verifies: L.sched.90, L.sched.91
+/// Verifies: L.sched.90, L.sched.91, L.sched.105
 fn a_wakee_is_pulled_onto_its_wakers_processor(topology: &Topology) -> Result<(), &'static str> {
     let online = topology.online();
     let steals = super::DOMAIN

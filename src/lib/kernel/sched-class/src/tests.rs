@@ -367,6 +367,11 @@ fn the_stacks_decisions_agree_with_its_charge() {
         }
     };
     check(&q);
+    // Nothing runs and an upper entity waits: the pick is asked for by its
+    // arrival, not by the timer, which is armed for nothing.
+    Stack::enqueue(&mut q, 9, "early", Tier::Upper(())).unwrap();
+    assert_eq!(Stack::decision_in_ns(&q), None);
+    let _ = Stack::remove(&mut q, 9);
     Stack::enqueue(&mut q, 1, "low", Tier::Lower(())).unwrap();
     let _ = Stack::pick(&mut q);
     check(&q);

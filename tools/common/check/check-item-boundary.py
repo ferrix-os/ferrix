@@ -2977,6 +2977,15 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
             line = text.count("\n", 0, match.start()) + 1
             problems.append(f"{rel}:{line}: changes the fair tier through a `&mut RunQueue`; only the stack "
                             "and FairTier's forwarders may (SCHED-CLASSES.md section 9d, F1)")
+        # While StackQueue is RunQueue in every profile, a method called on a
+        # CpuQueue's `stack`, or a `&mut StackQueue` handed out, would compile
+        # and pass by Over (ledger line 28, condition 1): the queue is reached
+        # as `Stack::op(&queue.stack)` and `FairTier`'s alone.
+        if rel.startswith("src/kernel/src/sched/") and not rel.endswith("/task.rs"):
+            for match in re.finditer(r"\b(?:self|queue|q)\s*\.\s*stack\s*\.\s*[a-z_]+\s*\(|&\s*mut\s+StackQueue\b", code):
+                line = text.count("\n", 0, match.start()) + 1
+                problems.append(f"{rel}:{line}: reaches the class stack's queue other than through Stack's "
+                                "operations or FairTier (SCHED-CLASSES.md section 9d; ledger line 28 (1))")
     for package, kernels in sorted(outside.items()):
         if package.startswith("//"):
             continue
@@ -3039,6 +3048,12 @@ def _class_crate_self_test() -> list[str]:
         ("(e) a kernel file taking a &mut RunQueue",
          {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f(q: &mut RunQueue<u8>) {}\n"}},
          "&mut RunQueue"),
+        ("(e) a method called on a CpuQueue's stack",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f(&mut self) { self.stack.insert(1); }\n"}},
+         "other than through Stack"),
+        ("(e) a &mut StackQueue handed out",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/mod.rs": "fn g(q: &mut StackQueue) {}\n"}},
+         "other than through Stack"),
         ("(e) a kernel file calling fair_mut",
          {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f() { Stack::fair_mut(q); }\n"}},
          "&mut RunQueue"),
