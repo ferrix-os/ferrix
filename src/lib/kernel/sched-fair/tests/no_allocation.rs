@@ -75,7 +75,7 @@ fn scheduling_with_lent_slots_allocates_nothing() {
             let _ = queue.pick_next();
             let _ = queue.update_curr(seed % 3_000_000);
             if round % 3 == 0
-                && let Some((id, _, state, slot)) = queue.remove_curr()
+                && let Some((id, _, (state, slot))) = queue.remove_curr()
             {
                 timeline.insert(round + 5, id, id, slot);
                 away.push((id, state));

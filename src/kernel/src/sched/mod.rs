@@ -53,14 +53,7 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
-pub mod rehome_check;
-/// `schedule=edf`'s reservations (ledger 7088).
-#[cfg(ferrix_schedule = "edf")]
-pub mod reserve;
-/// Its boot check.
-#[cfg(all(ferrix_schedule = "edf", ferrix_checks = "on"))]
-pub mod reserve_check;
-mod slice_check;
+mod stack;
 mod task;
 pub mod trip;
 pub mod vtime;
@@ -1116,7 +1109,7 @@ fn adopt_boot_task() -> Result<(), &'static str> {
         queue.insert(&boot);
         // Make it the running entity rather than one waiting to run: it is
         // already on the processor.
-        let _ = queue.fair.pick_next();
+        let _ = <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::pick(&mut queue.fair);
         queue.exec_start = crate::timer::now_nanos();
         note_running(0, boot.id, quota::NONE, 0);
         // Whatever kernel time is pending goes to what ran before, and the
