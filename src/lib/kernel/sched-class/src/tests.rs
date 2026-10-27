@@ -16,6 +16,11 @@ struct FifoQueue {
     waiting: VecDeque<(u64, &'static str)>,
     running: Option<(u64, &'static str, u64)>,
     quantum: u64,
+    /// Whether the toy is throttled: it then has no work it may run while
+    /// anything below it waits (R3).
+    throttled: bool,
+    /// Real time passed while another tier ran (R4).
+    elapsed: u64,
 }
 
 impl SchedClass<&'static str> for Fifo {
@@ -120,6 +125,12 @@ impl SchedClass<&'static str> for Fifo {
             q.waiting.push_back((id, payload));
         }
     }
+    fn ready(q: &FifoQueue, below_waiting: bool) -> bool {
+        Fifo::len(q) > 0 && !(q.throttled && below_waiting)
+    }
+    fn elapse(q: &mut FifoQueue, ns: u64) {
+        q.elapsed += ns;
+    }
     fn steals_work(_: &FifoQueue) -> bool {
         false
     }
@@ -195,6 +206,12 @@ impl SchedClass<&'static str> for Lowly {
     }
     fn yield_current(q: &mut FifoQueue) {
         Fifo::yield_current(q);
+    }
+    fn ready(q: &FifoQueue, below_waiting: bool) -> bool {
+        Fifo::ready(q, below_waiting)
+    }
+    fn elapse(q: &mut FifoQueue, ns: u64) {
+        Fifo::elapse(q, ns);
     }
     fn steals_work(_: &FifoQueue) -> bool {
         true
@@ -400,4 +417,34 @@ fn the_stacks_decisions_agree_with_its_charge() {
     assert_eq!(Stack::pick(&mut q), Some(&"high2"));
     assert_eq!(Stack::load_weight(&q), 3 * LOAD_UNIT);
     check(&q);
+}
+
+/// R3 and R4 of the consultant's ledger line 29: a throttled upper tier
+/// neither preempts the lower one, nor arms a timer for itself, nor is
+/// picked while the lower has work; the lower tier's run advances the upper
+/// tier's clock; once unthrottled it preempts at once; and with nothing
+/// below waiting, a throttled tier still runs.
+#[test]
+fn a_throttled_upper_tier_does_not_spin() {
+    let mut q = Stack::new_queue((10, 10)).unwrap();
+    Stack::enqueue(&mut q, 1, "fair", Tier::Lower(())).unwrap();
+    assert_eq!(Stack::pick(&mut q), Some(&"fair"));
+    q.upper.throttled = true;
+    Stack::enqueue(&mut q, 2, "rt", Tier::Upper(())).unwrap();
+    assert!(!Stack::should_preempt(&q), "a throttled tier preempted");
+    assert_ne!(Stack::decision_in_ns(&q), Some(0), "a throttled tier armed the timer at once");
+    assert!(!Stack::charge(&mut q, 3), "a throttled tier made a decision due");
+    assert_eq!(q.upper.elapsed, 3, "the lower tier's run did not reach the upper tier's clock");
+    assert_eq!(Stack::pick(&mut q), Some(&"fair"), "a throttled tier was picked");
+    q.upper.throttled = false;
+    assert!(Stack::should_preempt(&q));
+    assert_eq!(Stack::pick(&mut q), Some(&"rt"));
+    // Throttled while it runs: the fair task waiting takes the processor.
+    q.upper.throttled = true;
+    assert_eq!(Stack::pick(&mut q), Some(&"fair"));
+    // Nothing below waiting: the floor does not bind, the throttled tier runs.
+    let _ = Stack::remove(&mut q, 1);
+    assert!(Stack::ready(&q, false));
+    assert_eq!(Stack::pick(&mut q), Some(&"rt"));
+    assert!(Stack::check(&q).is_ok());
 }
