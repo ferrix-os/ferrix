@@ -171,6 +171,7 @@ recognise it.
 | x86-64 Intel N150 (the SOYO M4 Pro) | 0x0102 | SMBIOS processor and board strings (`ferrix-smbios`, already in the loader) |
 | AArch64 UEFI virt (QEMU) | 0x0201 | arch; SMBIOS system "QEMU" |
 | AArch64 Pixel 7 | 0x0202 | its own loader (`src/boot/vendor/google/pixel7`) |
+| AArch64 Radxa Orion O6 (CIX P1) | 0x0203 | SMBIOS system and baseboard strings, not yet recorded (no board owned; `max_plus`'s board, SCHED-CLASSES.md §9c) |
 | ARMv7-A UEFI virt (QEMU) | 0x0301 | arch; SMBIOS system "QEMU" |
 | ARMv7-A STM32MP157 (the DK1) | 0x0302 | the device tree's `st,stm32mp157` compatible |
 
@@ -2011,7 +2012,7 @@ anchor.
   nazuna (D5).
 
 *The hardware-family registry*, `tools/common/data/hardware-families.toml`,
-holds §1.4's six families. It gives each one's id and architecture, which
+holds §1.4's seven families. It gives each one's id and architecture, which
 family is its architecture's generic one, and the rule the loader will
 recognise it by (S4).
 

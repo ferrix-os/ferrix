@@ -780,9 +780,9 @@ mod tests {
     #[test]
     fn signed_slots_with_no_board_family_are_refused() {
         let mut profile = super::Profile::load("max_plus").unwrap();
-        assert!(super::unnamed_boards(&profile).is_some_and(|why| why.contains("names no board")));
-        profile.slot_families.push("aarch64-uefi-virt".to_owned());
         assert!(super::unnamed_boards(&profile).is_none());
+        profile.slot_families.clear();
+        assert!(super::unnamed_boards(&profile).is_some_and(|why| why.contains("names no board")));
         assert!(super::unnamed_boards(&super::Profile::load("present").unwrap()).is_none());
     }
 

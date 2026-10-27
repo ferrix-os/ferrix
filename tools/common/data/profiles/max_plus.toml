@@ -28,9 +28,12 @@ buildable_from = "M5, with sched_windows=arinc_table at M3, and claimable once p
 modes = ["HardRt"]
 image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required" }
 # The families its loader accepts a signed slot manifest for (docs/SIGNING.md
-# section 1.4, section 10.6): none yet, so no slot boots until the board is
-# chosen and named here (E12).
-slot_families = []
+# section 1.4, section 10.6): the Radxa Orion O6 (CIX P1, Arm SMMUv3 through
+# ACPI's IORT, EDK2 UEFI), the customer's board for now (2026-10-27), not yet
+# bought. Until its family's recognition rule is built from a real board's
+# SMBIOS strings, the loader sees every machine as the generic AArch64
+# family, which this claimed profile does not accept: no slot boots (E12).
+slot_families = ["aarch64-orion-o6"]
 exceptions = []
 # The barest values that do not allow sc4_plus yet, each with what it waits
 # on and the ledger line that admitted it (E3; ledger line 25 (1)): the
