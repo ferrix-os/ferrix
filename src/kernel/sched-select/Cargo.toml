@@ -19,6 +19,9 @@ path = "../src/sched_select.rs"
 [dependencies]
 ferrix-sched-class.workspace = true
 ferrix-sched-fair.workspace = true
+# The standing negative case (SCHED-CLASSES.md §9b, G1): a dependency no
+# file names, so no build links it.
+ferrix-sched-fixture.workspace = true
 
 [lints]
 workspace = true

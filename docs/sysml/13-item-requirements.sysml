@@ -909,37 +909,16 @@ package FerrixItemRequirements {
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
         }
-        requirement <'H.SCHED.18'> anUnstableCoreLeavesServiceWhole : ItemHighLevel {
-            doc /* docs/CORE-QUARANTINE.md (customer, 2026-10-30, item 6;
-                consultant OK IF Q1-Q14, ledger 4856). */
-            attribute :>> statement = "A processor taken out of service shall be
-                left by every task and every movable interrupt, with no task
-                stranded on it and none run there, no interrupt lost, none
-                delivered there once its messages are moved -- between the
-                park and the move it may still take one, and runs its handler
-                -- no stale translation kept when it returns, and a park it
-                never acknowledges undone by its deadline; only root, through
-                cpuN/online, and lode, through the processor service token,
-                may ask, each change audited.";
-            attribute :>> criterion = "cargo xtask test-quarantine and
-                test-quarantine-smp2 (KVM): lode takes the target out after
-                eleven core-scoped corrected records; nothing runs or is
-                drained there; a reader blocked on an empty pipe is re-homed
-                at its wake; its interrupts are moved and none lands there
-                under disk traffic; the surface says so; the refused writes
-                are refused; root brings it back; fifty times out and back
-                under load. Negative controls (ledger 4932): the ACTIVE bit
-                never cleared, the re-home removed, the retarget skipped,
-                the park loop with interrupts masked, the capability check in
-                the writer's own namespace -- each fires.";
-            attribute :>> parent = "ASR-8";
-        }
-        requirement <'H.SCHED.28'> aReservationHoldsItsProcessorsShare : ItemHighLevel {
-            attribute :>> statement = "Under schedule=edf a thread with the authority may hold a
-                budget in each period on one processor: a set too wide for it shall be refused
-                by name, the thread shall run no more than its budget in a period, the earliest
-                deadline with budget shall run first, and the fair class shall have the rest.";
-            attribute :>> criterion = "L.sched.179 to L.sched.183. No timing claim.";
+        requirement <'H.SCHED.18'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
+            attribute :>> statement = "A kernel shall run the scheduling classes its
+                build flags select and no other, and shall name them as it starts.";
+            attribute :>> criterion = "cargo xtask test-removable's class-crate half,
+                on every architecture and buildable profile: the release ELF holds
+                the marker of each class the profile's flags select and no symbol
+                of any other, the fixture among them, and the map of the same link
+                with LTO alone turned off pulls in a member of each selected class
+                crate's rlib and of no other (docs/SCHED-CLASSES.md section 9b); and
+                L.sched.102's check on every boot.";
             attribute :>> parent = "ASR-8";
         }
     }
