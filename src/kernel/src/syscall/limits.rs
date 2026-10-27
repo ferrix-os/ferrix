@@ -426,7 +426,7 @@ fn policy_of(thread: &crate::syscall::thread::Thread) -> (i32, u32, bool) {
 }
 
 /// A policy and priority as the calls take them, checked as Linux's
-/// `__sched_setscheduler` checks them (L.sched.117): `SCHED_OTHER` at 0,
+/// `__sched_setscheduler` checks them (test-rtsched's errors step): `SCHED_OTHER` at 0,
 /// `SCHED_FIFO` and `SCHED_RR` at 1 to 99, and only in a build with a tier
 /// above fair (L.sched.116); every other policy -- `SCHED_BATCH`,
 /// `SCHED_IDLE`, `SCHED_DEADLINE`, `SCHED_EXT` -- is `EINVAL`.
@@ -448,7 +448,7 @@ fn checked_params(policy: i32, priority: u32) -> Result<Option<RtParams>, Errno>
 }
 
 /// Linux's permission rule for a change of policy (`user_check_sched_setscheduler`,
-/// L.sched.111): with `CAP_SYS_NICE` anything; otherwise only a target the
+/// test-rtsched's permission step): with `CAP_SYS_NICE` anything; otherwise only a target the
 /// caller owns, a real-time policy only with a nonzero `RLIMIT_RTPRIO` when
 /// it is a new policy, a priority raised only within that limit, and the
 /// reset-on-fork flag never cleared. Lowering a task to `SCHED_OTHER`, or
@@ -575,7 +575,7 @@ const SCHED_FLAG_UTIL_CLAMP: u64 = 0x60;
 const SCHED_FLAG_ALL: u64 = 0x7f;
 
 /// `sched_setattr`: as `sched_setscheduler`, from a `struct sched_attr`,
-/// read as Linux's `sched_copy_attr` reads it (L.sched.117): a size of zero
+/// read as Linux's `sched_copy_attr` reads it (test-rtsched's errors step): a size of zero
 /// is the first size, one below it or above a page `E2BIG` with the size
 /// this kernel knows written back, and bytes past that size must be zero.
 /// Under `SCHED_OTHER` its nice value is the thread's, as `setpriority`
@@ -667,7 +667,7 @@ pub(crate) fn sys_sched_setattr(
 
 /// `sched_getattr`: the thread's policy, flags, nice value and priority in a
 /// `struct sched_attr` of at most `size` bytes, its size field the bytes
-/// written (L.sched.117): a size below the first one, above a page, or
+/// written (test-rtsched's errors step): a size below the first one, above a page, or
 /// nonzero flags are `EINVAL`.
 pub(crate) fn sys_sched_getattr(
     process: &Process,

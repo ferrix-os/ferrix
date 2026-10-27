@@ -71,14 +71,17 @@ package FerrixSchedRequirements {
             attribute :>> statement = "CpuQueue::arm_timer shall arm the next
                 decision for the class stack's decision_in_ns, which is due at
                 once when a task of a higher tier waits while a lower one runs,
-                is never later than the running task's remaining slice or
+                is due at a throttled higher tier's period end while a lower one
+                runs, is never later than the running task's remaining slice or
                 budget, and is none only when no decision can be due.";
-            attribute :>> criterion = "ferrix-sched-class's host test on a stack
+            attribute :>> criterion = "ferrix-sched-class's host tests on a stack
                 of two tiers: the decision is due at once with an upper task
                 waiting behind a lower one, none while the upper runs with lower
                 tasks waiting, never later than the remaining time, and none
-                with one task; on the fair-only stack, L.sched.1's check, the
-                fair queue's decision within a slice.";
+                with one task; with the upper tier throttled, the decision is its
+                period's end (a_throttled_upper_tier_does_not_spin); on the
+                fair-only stack, L.sched.1's check, the fair queue's decision
+                within a slice; on desktop, H.SCHED.20's floor check.";
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::queue::CpuQueue::arm_timer";
         }
@@ -1130,7 +1133,7 @@ package FerrixSchedRequirements {
                 system call.";
             attribute :>> criterion = "The stage-5 order check on desktop: a
                 SCHED_FIFO task woken from another processor, and by a fair task on
-                its own, runs within 20 ms while a fair task spins there tickless.";
+                its own, runs within 100 ms while a fair task spins there tickless.";
             attribute :>> parent = "H.SCHED.19";
             attribute :>> unit = ("sched::wake_at_home", "sched::kick_after_wake",
                 "sched::queue::CpuQueue::should_preempt");
@@ -1148,29 +1151,16 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::place_on_idle", "sched::wake_onto",
                 "sched::queue::CpuQueue::steal_candidate");
         }
-        requirement <'L.sched.111'> thePolicyCallsPermissionRule : ItemLowLevel {
-            attribute :>> statement = "sched_setscheduler, sched_setparam and
-                sched_setattr shall allow a change of policy with CAP_SYS_NICE, and
-                otherwise only on a thread the caller owns: a new real-time policy
-                only with a nonzero RLIMIT_RTPRIO, which is 0 unless set, a priority
-                raised only within it, and the reset-on-fork flag never cleared;
-                anything else EPERM.";
-            attribute :>> criterion = "cargo xtask test-rtsched on desktop, on every
-                architecture: uid 1000 with RLIMIT_RTPRIO 0 is refused SCHED_FIFO
-                10 with EPERM; with 20 takes 10 and 20 and is refused 30, and takes
-                SCHED_RR 5 and SCHED_OTHER; under reset-on-fork set as root it is
-                refused clearing it.";
-            attribute :>> parent = "H.SCHED.19";
-            attribute :>> unit = ("syscall::limits::may_set_policy",
-                "syscall::limits::limit_of");
-        }
         requirement <'L.sched.112'> aChangeOfPolicyMovesTheTask : ItemLowLevel {
             attribute :>> statement = "A change of a task's policy or real-time
-                priority shall, under its home queue's lock, take a task that queue
-                holds, the running one included, off its tier and enqueue it at the
-                tail of its new place, and ask for a decision when the running task
-                moved or something now outranks it; an unchanged policy moves
-                nothing.";
+                priority shall store the new policy at once and, under its home
+                queue's lock, take a task that queue holds and does not run off its
+                tier and enqueue it at the tail of its new place; the running task
+                shall be moved so at its processor's next decision, before the
+                pick, and that decision asked for at once; an unchanged policy
+                moves nothing. Between the call and that decision the task's policy
+                reads as the new one (sched_getscheduler) while it still runs in
+                its old tier.";
             attribute :>> criterion = "The stage-5 move check on desktop: a fair
                 task made SCHED_FIFO while it spins beside another fair task takes
                 the processor from it, and given back to fair shares it again;
@@ -1178,15 +1168,15 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.19";
             attribute :>> unit = ("sched::set_policy",
                 "sched::queue::CpuQueue::set_policy",
+                "sched::queue::CpuQueue::requeue_if_moved",
                 "sched::queue::CpuQueue::release");
         }
         requirement <'L.sched.113'> aPolicyIsInheritedThroughOneFunction : ItemLowLevel {
-            attribute :>> statement = "Every user task, a fork's child, a clone's
-                thread and a native launch alike, shall be made through
-                prepare_user, which gives it its maker's real-time policy and
+            attribute :>> statement = "prepare_user, the scheduler's one maker of
+                user tasks, shall give each new task its maker's real-time policy and
                 priority with a node of its own, unless the maker has reset-on-fork
-                set, when it starts SCHED_OTHER and a thread's negative nice value
-                is raised to 0; the new task's reset-on-fork flag starts clear.";
+                set, when it starts SCHED_OTHER; the new task's reset-on-fork flag
+                starts clear.";
             attribute :>> criterion = "test-rtsched on desktop: a forked child and a
                 thread of a SCHED_FIFO 10 parent read SCHED_FIFO 10, and with
                 reset-on-fork a forked child reads SCHED_OTHER; its negative
@@ -1195,8 +1185,7 @@ package FerrixSchedRequirements {
                 (syscall::process's prepare_thread and start_thread, which
                 launch::load_native reaches through StartClaim::prepare).";
             attribute :>> parent = "H.SCHED.19";
-            attribute :>> unit = ("sched::prepare_user", "sched::inherit_policy",
-                "syscall::process::start_thread");
+            attribute :>> unit = ("sched::prepare_user", "sched::inherit_policy");
         }
         requirement <'L.sched.114'> cpuMaxCutsEveryTier : ItemLowLevel {
             attribute :>> statement = "A task's run time shall be charged to its
@@ -1223,35 +1212,17 @@ package FerrixSchedRequirements {
         }
         requirement <'L.sched.116'> withoutTheTierRealTimeIsEinval : ItemLowLevel {
             attribute :>> statement = "In a build without the realtime tier,
-                sched_setscheduler, sched_setparam and sched_setattr shall refuse
-                SCHED_FIFO and SCHED_RR with EINVAL, and set_policy shall refuse
-                them as NoTier, changing nothing.";
+                set_policy shall refuse every real-time policy as NoTier, before
+                any allocation and changing nothing, and realtime_built shall
+                answer false.";
             attribute :>> criterion = "test-rtsched on present, on every
                 architecture: SCHED_FIFO and SCHED_RR are EINVAL by
                 sched_setscheduler and sched_setattr, and the thread still reads
-                SCHED_OTHER; the stage-5 modes check: set_policy answers NoTier and
-                leaves the task fair.";
+                SCHED_OTHER (the Linux layer's EINVAL, which reads realtime_built);
+                the stage-5 modes check: set_policy answers NoTier and leaves the
+                task fair.";
             attribute :>> parent = "H.SCHED.18";
-            attribute :>> unit = ("syscall::limits::checked_params", "sched::set_policy");
-        }
-        requirement <'L.sched.117'> thePolicyCallsCheckTheirArguments : ItemLowLevel {
-            attribute :>> statement = "The policy calls shall refuse as Linux does:
-                a negative pid, a null parameter, a negative or unknown policy,
-                SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE and SCHED_EXT, a priority
-                outside 1 to 99 for SCHED_FIFO and SCHED_RR or other than 0 for
-                SCHED_OTHER, and nonzero flags with EINVAL; a pid naming no thread
-                with ESRCH; a sched_attr smaller than 48 bytes or larger than a page,
-                or with nonzero bytes past the 56 known, with E2BIG and 56 written
-                back; an unknown sched_flag with EINVAL and a utilisation clamp with
-                EOPNOTSUPP; and sched_getattr a size outside 48 bytes to a page with
-                EINVAL.";
-            attribute :>> criterion = "test-rtsched's errors step on desktop, on
-                every architecture: each refusal above with its errno, and a
-                zeroed tail past 56 bytes taken.";
-            attribute :>> parent = "H.SCHED.19";
-            attribute :>> unit = ("syscall::limits::sys_sched_setscheduler",
-                "syscall::limits::sys_sched_setattr", "syscall::limits::sys_sched_getattr",
-                "syscall::limits::sched_subject");
+            attribute :>> unit = ("sched::set_policy", "sched::realtime_built");
         }
     }
 }

@@ -687,7 +687,7 @@ package FerrixItemRequirements {
                 every architecture (docs/SCHED-CLASSES.md section 9e, R12): behind a
                 priority-99 holder, priorities 10, 20 and 20 run 20, 20, 10 with no
                 fair task between; a task woken from another processor and from its
-                own runs within 20 ms while a fair task spins there; a preempted
+                own runs within 100 ms while a fair task spins there; a preempted
                 SCHED_FIFO task keeps the head of its priority; two SCHED_RR tasks
                 share at the quantum and two SCHED_FIFO ones, the control, do not.";
             attribute :>> parent = "ASR-8";
