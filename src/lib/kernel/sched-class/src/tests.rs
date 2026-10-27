@@ -432,10 +432,24 @@ fn a_throttled_upper_tier_does_not_spin() {
     q.upper.throttled = true;
     Stack::enqueue(&mut q, 2, "rt", Tier::Upper(())).unwrap();
     assert!(!Stack::should_preempt(&q), "a throttled tier preempted");
-    assert_ne!(Stack::decision_in_ns(&q), Some(0), "a throttled tier armed the timer at once");
-    assert!(!Stack::charge(&mut q, 3), "a throttled tier made a decision due");
-    assert_eq!(q.upper.elapsed, 3, "the lower tier's run did not reach the upper tier's clock");
-    assert_eq!(Stack::pick(&mut q), Some(&"fair"), "a throttled tier was picked");
+    assert_ne!(
+        Stack::decision_in_ns(&q),
+        Some(0),
+        "a throttled tier armed the timer at once"
+    );
+    assert!(
+        !Stack::charge(&mut q, 3),
+        "a throttled tier made a decision due"
+    );
+    assert_eq!(
+        q.upper.elapsed, 3,
+        "the lower tier's run did not reach the upper tier's clock"
+    );
+    assert_eq!(
+        Stack::pick(&mut q),
+        Some(&"fair"),
+        "a throttled tier was picked"
+    );
     q.upper.throttled = false;
     assert!(Stack::should_preempt(&q));
     assert_eq!(Stack::pick(&mut q), Some(&"rt"));
