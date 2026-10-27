@@ -564,8 +564,7 @@ dependencies = [
  "ferrix-kernel-board-gs201-usb",
  "ferrix-kernel-board-stm32mp1",
  "ferrix-kernel-load",
- "ferrix-kernel-logctl",
- "ferrix-kernel-net-ring",
+ "ferrix-kernel-sched-select",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
@@ -613,6 +612,7 @@ dependencies = [
  "ferrix-fdt",
  "ferrix-frame",
  "ferrix-heap",
+ "ferrix-kernel-sched-select",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -641,6 +641,7 @@ dependencies = [
  "ferrix-elf",
  "ferrix-fdt",
  "ferrix-kernel-core",
+ "ferrix-kernel-sched-select",
  "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-objects",
@@ -701,32 +702,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrix-kernel-logctl"
+name = "ferrix-kernel-sched-select"
 version = "0.1.0"
 dependencies = [
- "ferrix-blkring",
- "ferrix-kernel-core",
- "ferrix-kernel-item",
- "ferrix-linux-abi",
- "ferrix-logctl",
- "ferrix-native-abi",
- "ferrix-sched",
-]
-
-[[package]]
-name = "ferrix-kernel-net-ring"
-version = "0.1.0"
-dependencies = [
- "ferrix-blkring",
- "ferrix-bootinfo",
- "ferrix-kernel-core",
- "ferrix-kernel-load",
- "ferrix-linux-abi",
- "ferrix-native-abi",
- "ferrix-net",
- "ferrix-netring",
- "ferrix-netwire",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ compile-time trait interface between the kernel, so that we can select our
 desired schedulers by enabling or disabling a crate via a flag … and that
 certification which requires no dead code can easily be achieved by just
 moving out the crate". This is that design, for stage 14
-([REALTIME.md](REALTIME.md) §3) and MICROKERNEL.md's `schedule` flag. It
+([REALTIME.md](REALTIME.md) §3) and MICROKERNEL.md's scheduler flags. It
 needs the certification consultant's design review before any code, as
 every composition-root seam has had (KERNEL-CRATES.md §6.3).
 
@@ -269,8 +269,10 @@ policies would be a project of its own, and never in a certified profile.
   always there. The flags are `sched_windows`, `sched_deadline`,
   `sched_realtime`, `sched_fair` and `sched_ext`, and each value is a crate
   or `absent`, declaring the highest level it allows as every flag value
-  does. The present `schedule` flag (`fair` | `edf` | `windows`) is
-  replaced by them. Today's values, with room for more (§6a):
+  does. They replaced the `schedule` flag (`fair` | `edf` | `windows`) in
+  step 3a, with `sched_dispatch` (§5a); `sched_ext` waits for ext's design
+  (a flag has two values at least, §9a). Today's values, with room for
+  more (§6a):
 
   | Flag | Values |
   |---|---|
@@ -794,6 +796,62 @@ empty.
 **N7** reviewed, ledger line 19, OK IF 1-4, met in f9165ad1.
 
 **Step 3's design** reviewed, ledger line 20, OK IF D1-D13 (D13: this
-line), written in as §9a. Next, each pushed as it is done: 3a, then 3b;
-N4's measurement on the gate host. Still open for the customer: C3, fair in
+line), written in as §9a.
+
+**Step 3a, built** (for the consultant's code review against line 20):
+* The flags (D1): `schedule` gone; `sched_dispatch`, `sched_windows`,
+  `sched_deadline`, `sched_realtime` and `sched_fair` in its place with the
+  allows §9a gives. **`sched_ext` is not declared**: the flag file's rule
+  that a flag has two values at least (check-item-boundary) refuses a flag
+  of `absent` alone, and ext has no design to give it a second; it arrives
+  with that design, which also places it (C1). The audit word's tiers are
+  therefore four.
+* The profiles (D1, D2) as §9a's table, less `sched_ext`, each with the
+  comments D2 asks; each gains `modes` (`present`, `desktop`: Throughput;
+  `fast`, `max`: HardRt).
+* The selection crate (D3, D4, D7): `ferrix-kernel-sched-select`, its root
+  `src/kernel/src/sched_select.rs`, the arms file: a `Value` const and a
+  tier alias each built value, a `compile_error!` each unbuilt one,
+  `Stack = Windows<Deadline<Realtime<Fair>>>` under `fixed`, which today
+  is `Eevdf` itself, the stack's name asserted not empty, and
+  `mode_available`. Ring core in `certification-item.json` with its two
+  `unclassified_deps` under line 20; a layering rule; built by the one
+  build script; the core, the item (`build_flags.rs`) and the binary
+  depend on it. `sched/stack.rs` re-exports its `Stack`; N2's const holds
+  unchanged.
+* The flag word (D5): `build_flag_word!` and `flag_word` moved into the
+  arms file, the core re-exporting both; `flag_word` asserts at most 64
+  values; the binary asserts `SELECT_FLAG_WORD`; 51 of 64, recorded in
+  BUILD-FLAGS.md.
+* Who reads the flags (D6): `build_flags.rs` takes each `sched_*` flag's
+  value and place from the arm's const; check-build-flags refuses a
+  `ferrix_sched_*` cfg anywhere in the kernel but the arms file, and holds
+  the arms one to one with the flag file (one arm a value, place and
+  presence right, `compile_error!` exactly for the unbuilt), with
+  self-tests for a planted read, a value with no arm, a value with two, an
+  unbuilt value given code, a wrong place and an undeclared value.
+* The audit words (D8): the first word the fourteen other flags in bits 0
+  to 27; the second the profile, the level, `sched_dispatch` in 8-9 and
+  the four tiers in 10-21. AUDIT.md §1 restated; BUILD-FLAGS.md,
+  MICROKERNEL.md, REALTIME.md, RUNTIME-SETTINGS.md and
+  LINUX-ABI-SEPARATION.md no longer name `schedule` as a flag.
+* Modes (D9): HardRt uses the deadline or the windows tier;
+  `mode_available` is the selection crate's const fn the core consults
+  before making its Throughput domain; check-build-flags holds each
+  profile's `modes` to the modes whose tiers are present, both ways, and
+  (D10) a claimed profile to `sched_dispatch = "fixed"`, with self-tests.
+  `mode_available` is named by no requirement (937 named by none, from
+  936): no id for 3a (D12), so it waits for the first profile allowing a
+  mode beside Throughput.
+* The `classes` boot line moved from `main.rs`'s `start_scheduler` into
+  `sched::init`'s end, the same place in the boot: printed from
+  `start_scheduler` it made that function 72 lines against the complexity
+  baseline's 71, a failure 94e9edf6 brought and this repairs.
+
+Owed on the gate host with line 20's: the controls of D6 and D10 run as
+`gate.sh control` with `FIRED` (a `cfg!(ferrix_sched_fair = ..)` planted
+in a core file, a declared value with no arm, a value with two arms,
+`switchable` planted in `fast.toml`), the four boots as rows with the new
+`build` line and check-boot-line passing, S5's round trip on the landing
+hash. Next: 3b; N4's measurement on the gate host. Still open for the customer: C3, fair in
 `max`.
