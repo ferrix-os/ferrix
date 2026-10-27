@@ -1,6 +1,6 @@
 [package]
-name = "ferrix-sched"
-description = "Scheduling logic: the EEVDF fair class, and the scheduling-domain and class-stack shapes"
+name = "ferrix-sched-fair"
+description = "The fair scheduling class: EEVDF, its weights and the direct switch's job fold (docs/SCHED-CLASSES.md)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 ferrix-fallible = { workspace = true }
+ferrix-sched-class = { workspace = true }
 
 [lints]
 workspace = true

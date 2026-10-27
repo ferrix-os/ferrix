@@ -319,7 +319,7 @@ fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, CreateError> {
         device: Arc::clone(node),
         location: crate::interfaces::block_ring::location_of(node),
     });
-    if sched::spawn("audio", run, id, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn("audio", run, id, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         let _ = take_start(id);
         CLAIMS.release(node);
         return Err(CreateError::NoMemory);

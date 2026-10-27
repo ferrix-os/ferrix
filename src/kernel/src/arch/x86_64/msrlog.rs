@@ -18,7 +18,8 @@ pub(super) mod decode;
 use core::arch::x86_64::__cpuid;
 
 use ferrix_bootinfo::BootView;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::cpu;
 use crate::console::println;

@@ -153,7 +153,7 @@ fn wait_through_the_releases(
         "cgroup-events-waiter",
         waiter,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )?;
     // The release must find the waiter on the queue: a fixed sleep would
     // only assume it got there (see the eventfd check's `until_listed`).

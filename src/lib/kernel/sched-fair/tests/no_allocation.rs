@@ -9,7 +9,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use ferrix_fallible as _;
-use ferrix_sched::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot, Timeline};
+use ferrix_sched_class as _;
+use ferrix_sched_fair::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot, Timeline};
 
 std::thread_local! {
     /// Allocations this thread has made while counting.

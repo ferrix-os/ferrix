@@ -609,7 +609,7 @@ fn watch(fence: &Arc<SyncFile>) -> Result<(), Errno> {
         start
     };
     if start {
-        match sched::spawn("syncfiles", run, 0, ferrix_sched::NICE_0_WEIGHT) {
+        match sched::spawn("syncfiles", run, 0, ferrix_sched_fair::NICE_0_WEIGHT) {
             Ok(task) => {
                 let previous = TASK.lock().replace(task);
                 drop(previous);
