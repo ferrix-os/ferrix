@@ -707,6 +707,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-sched-class",
  "ferrix-sched-fair",
+ "ferrix-sched-fifo",
  "ferrix-sched-fixture",
 ]
 

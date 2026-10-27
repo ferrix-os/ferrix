@@ -112,6 +112,10 @@ impl SchedClass<&'static str> for Fifo {
         if q.waiting.is_empty() {
             return None;
         }
+        // Throttled with nothing running: its period's end, as FifoRr's.
+        if q.throttled && q.running.is_none() {
+            return Some(TOY_PERIOD_REST);
+        }
         Some(
             q.running
                 .map_or(0, |(.., used)| q.quantum.saturating_sub(used)),
@@ -422,8 +426,12 @@ fn the_stacks_decisions_agree_with_its_charge() {
 /// R3 and R4 of the consultant's ledger line 29: a throttled upper tier
 /// neither preempts the lower one, nor arms a timer for itself, nor is
 /// picked while the lower has work; the lower tier's run advances the upper
-/// tier's clock; once unthrottled it preempts at once; and with nothing
+/// tier's clock, and the timer is armed for the throttle's end, so the
+/// upper tier runs again; once unthrottled it preempts at once; and with nothing
 /// below waiting, a throttled tier still runs.
+/// What the toy's throttled period has left: when it is due again.
+const TOY_PERIOD_REST: u64 = 7;
+
 #[test]
 fn a_throttled_upper_tier_does_not_spin() {
     let mut q = Stack::new_queue((10, 10)).unwrap();
@@ -432,10 +440,10 @@ fn a_throttled_upper_tier_does_not_spin() {
     q.upper.throttled = true;
     Stack::enqueue(&mut q, 2, "rt", Tier::Upper(())).unwrap();
     assert!(!Stack::should_preempt(&q), "a throttled tier preempted");
-    assert_ne!(
+    assert_eq!(
         Stack::decision_in_ns(&q),
-        Some(0),
-        "a throttled tier armed the timer at once"
+        Some(TOY_PERIOD_REST),
+        "a throttled tier armed the timer at once, or not for its period's end"
     );
     assert!(
         !Stack::charge(&mut q, 3),
