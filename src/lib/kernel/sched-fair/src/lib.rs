@@ -1376,6 +1376,14 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
         queue.yield_curr();
     }
 
+    /// The fair class never throttles itself: work queued is work it may run.
+    fn ready(queue: &RunQueue<T>, _: bool) -> bool {
+        <Self as ferrix_sched_class::SchedClass<T>>::len(queue) > 0
+    }
+
+    /// No budget measured in real time.
+    fn elapse(_: &mut RunQueue<T>, _: u64) {}
+
     fn steals_work(_: &RunQueue<T>) -> bool {
         true
     }
