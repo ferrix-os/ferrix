@@ -17,6 +17,7 @@
 //! of the kernel's crates, so the core re-exports both.
 
 #![no_std]
+#![forbid(unsafe_code)]
 
 use ferrix_sched_class::SchedClass;
 // Renamed: check-item-boundary.py reads every kernel crate root as one
