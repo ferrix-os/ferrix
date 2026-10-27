@@ -141,7 +141,7 @@ values.fixed = { allows = ["sc4", "present", "sc2", "none"], lands = "today", bu
 values.switchable = { allows = ["none"], lands = "stage 14", built = "no" }
 
 [flags.sched_windows]
-why = "K9's static time windows, the outermost tier, with EDF inside each window (ferrix-sched-windows), or none"
+why = "K9's static time windows, the outermost tier, with fixed-priority preemptive scheduling inside each window, the ARINC 653 shape (ferrix-sched-windows; SCHED-CLASSES.md C6), or none"
 values.arinc = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
 values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 

@@ -377,7 +377,9 @@ Never edit a running configuration in place (seL4 defers edits of the
 running schedule entry for this reason). An ARINC-style static time
 partition schedule *between* domains sharing CPUs is MICROKERNEL.md's
 maximum-certification profile (`sched_windows=arinc`), a separate later
-feature.
+feature. Inside each window it schedules by fixed-priority preemption, as
+ARINC 653 and the certified partitioning RTOSes do (the customer,
+2026-10-27; SCHED-CLASSES.md C6), not EDF.
 
 ### 3.8 Measure as Linux does, and say what is not isolated
 
