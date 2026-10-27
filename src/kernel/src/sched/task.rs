@@ -148,10 +148,13 @@ pub struct Task {
     /// Whether a run queue holds it, as a queued entity or as the running one.
     queued: AtomicBool,
     /// Whether a processor runs it, or has not yet saved its context: set as
-    /// a switch to it commits (`switch_chosen`), cleared once the switch
-    /// away from it has saved it (`finish_switch`), both under the lock of
-    /// the queue that owns it. A task found waiting in a queue with this set
-    /// stops the machine (FX-0537, docs/SCHED-CLASSES.md §9e, line 30 B1).
+    /// a switch to it commits (`switch_chosen`, under the lock of the queue
+    /// that runs it), cleared once the switch away from it has saved it
+    /// (`finish_switch`, under the lock of the queue it was switched away
+    /// from, which the switch hands over). A task moved between queues
+    /// carries it false: a move of one with it set, or a pick of one another
+    /// processor runs, stops the machine (FX-0537, docs/SCHED-CLASSES.md
+    /// §9e, line 30 B1).
     on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.

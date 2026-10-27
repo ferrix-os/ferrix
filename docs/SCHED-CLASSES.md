@@ -1011,6 +1011,15 @@ ids below):
   load figures change meaning once a higher tier exists, documented
   then).
 
+**Rule (e) after 4b** (line 31, condition 6). Line 28 widened
+check-item-boundary's rule (e) to refuse a `&mut RunQueue`, `fair_mut`, a
+method called on a `CpuQueue`'s `stack` and a `&mut StackQueue` handed out,
+while the fair-only stack let the compiler accept a direct `RunQueue` call.
+Now that `desktop` builds the two-tier stack, a direct `RunQueue` call no
+longer compiles there, and the rule could narrow; it stays as widened, since
+`present` still builds the fair-only stack, where only the rule catches
+one.
+
 ## 9e. Step 4b: FIFO and round-robin above fair (OK IF R1-R15, 2026-10-27)
 
 The first class above fair: `SCHED_FIFO` and `SCHED_RR`, as Linux has them,
@@ -1611,10 +1620,30 @@ traceability clean once the ids land on develop, the boots' rows; (6) on
 the gate host: the round trip, the controls of rule (e) and condition 1,
 coverage after the final rebase.
 
+**Step 4b reviewed**: ledger line 31, OK IF 1-7, at db558fd63 (B1-B3 of
+line 30 met). Met on the branch: (2) the withdrawn L.sched.111 and 117
+recorded in requirement-reservations.json as never to be reused, and
+TRACEABILITY.md regenerated; (3) L.sched.109's 100 ms restated as a bound
+that shows the preemption happens, not a latency claim (F-95's and the
+gate host's); (4) `Task::on_cpu`'s doc says the mark is cleared under the
+lock of the queue the task was switched away from, and that a task moved
+between queues carries it false; (6) line 28's conditions 1 and 4 are met
+(rule (e)'s widening with its self-tests, `Over::decision_in_ns`'s `None`
+with its host test, both above), and rule (e) stays as widened for now,
+as §9d records; (7) this line, and the landing names line 31. Owed on the
+gate host: (1) the FX-0537 control through `gate.sh control --expect
+FX-0537` on desktop x86-64 with the patch §9e quotes, and the flips check
+in the desktop boots' rows on three architectures; (5) the develop
+reservations (H.SCHED.18-20 and this branch's L.sched ids, after which
+`--check` is clean), S5's ELF table for `present` before and after on
+three architectures, the class-crate half on three architectures, the
+round trip on the landing hash, coverage after the final rebase, the
+`gate.sh` controls of R12's checks, the boots as rows.
+
 **Step 4b built** (for the consultant's code review against ledger line
 29, R1-R15; commits 5af67ba86, 4a123dda1, 229cf6b7e; reviewed at
-229cf6b7e, line 30, NOT YET on B1-B3, answered in 8c9620fd5 and the commit
-after it): the core half and `ferrix-sched-fifo` selected on `desktop`,
+229cf6b7e, line 30, NOT YET on B1-B3, answered in 8c9620fd5 and
+db558fd63): the core half and `ferrix-sched-fifo` selected on `desktop`,
 whose classes line reads `fifo_rr+eevdf` on all three architectures;
 `present` unchanged.
 * R1: a task's `FifoSlot` is allocated by `sched::set_policy` before any

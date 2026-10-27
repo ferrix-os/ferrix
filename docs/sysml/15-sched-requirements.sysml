@@ -1133,7 +1133,11 @@ package FerrixSchedRequirements {
                 system call.";
             attribute :>> criterion = "The stage-5 order check on desktop: a
                 SCHED_FIFO task woken from another processor, and by a fair task on
-                its own, runs within 100 ms while a fair task spins there tickless.";
+                its own, runs within 100 ms while a fair task spins there tickless.
+                The bound is an emulated processor's, and shows only that the
+                preemption happens: without it the wait has no end, the fair task
+                running tickless. It is not a latency claim; that is F-95's and the
+                gate host's.";
             attribute :>> parent = "H.SCHED.19";
             attribute :>> unit = ("sched::wake_at_home", "sched::kick_after_wake",
                 "sched::queue::CpuQueue::should_preempt");
