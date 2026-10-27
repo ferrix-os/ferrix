@@ -957,6 +957,45 @@ its message; 6 owed on the gate host (below, with the desktop build's
 **Step 3b's design** reviewed, ledger line 22, OK IF G1-G10 (G10: this
 line), written in as §9b; H.SCHED.18 and L.sched.102 reserved.
 
+D3's release ELF table, the stack the fair class alone through the
+selection crate:
+
+| Function | 94e9edf6 (before 3a) | 4287d870 (3a, its conditions) |
+|---|---|---|
+| `choose_next`, x86-64 | 0x58c | 0x58c |
+| `ferrix_fast_write_read`, x86-64 | 0x27d4 | 0x27d4 |
+| `choose_next`, AArch64 | 0x74c | 0x74c |
+| `choose_next`, ARMv7-A | 0xac4 | 0xac4 |
+
+**Step 3b, built** (for the consultant's code review against line 22):
+* G1: `ferrix-sched-fixture`, `src/lib/kernel/sched-fixture`: a FIFO class
+  of at most sixteen entities, `no_std`, `forbid(unsafe_code)`,
+  `publish = false`, no `ferrix_` cfg, four host tests; a dependency of
+  the selection crate alone, named by no file, declaring no flag value.
+* G2: the arms file's crate-level `expect(unused_crate_dependencies)`,
+  naming the fixture in its reason; rule (d) refuses any name of it.
+* G4, G5: `class_crates` in `certification-item.json` (fair: `sched_fair`
+  = `eevdf`, its name `eevdf` and its marker; the fixture), with
+  `named_outside` naming the N7 rows for fair in the core, the item and
+  the load (the load's spawns use the `NICE_` weights too). check-item-
+  boundary holds rules (a)-(d) and that a recorded name is the class's
+  `NAME`, each with a self-test; its F-76 rule passes a fixture of the
+  selection crate, which no register entry stands for.
+* G3, G8: `check-removable-symbols.py --class` judges a release ELF and a
+  non-LTO map against the record (five self-tests); `cargo xtask
+  test-removable` gains the class-crate half for `present` and `desktop`
+  on each architecture, the map's link made through `FERRIX_LINK_MAP`
+  (LTO off, its own target directory). KERNEL-CRATES.md §6 states the LTO
+  argument; S1 is restated (§10).
+* G7: H.SCHED.18 (parent ASR-8) and L.sched.102 (unit `sched::init`)
+  written, their reservation released in the same commit; L.sched.102 is
+  verified by xtask's `boot_line`, H.SCHED.18 by test-removable's
+  class-crate half.
+* G9: check-boot-line composes the expected classes line from
+  `class_crates` and the profile's tier values and refuses a boot whose
+  line differs, with self-tests for a stack of two tiers and an absent
+  one.
+
 Owed on the gate host with line 20's: the controls of D6 and D10 run as
 `gate.sh control` with `FIRED` (a `cfg!(ferrix_sched_fair = ..)` planted
 in a core file, a declared value with no arm, a value with two arms,

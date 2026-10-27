@@ -195,13 +195,6 @@
       "branch": "driver-model-step1",
       "date": "2026-10-25",
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
-    },
-    {
-      "ids": ["H.SCHED.18", "L.sched.102"],
-      "owner": "sched-classes",
-      "branch": "claude/ferrix-roadmap-completion-hkxlpp",
-      "date": "2026-10-27",
-      "purpose": "docs/SCHED-CLASSES.md section 9b, step 3b (the consultant's design review OK IF G1-G10, ledger line 22 of the sched-classes container ledger): H.SCHED.18, a kernel runs the scheduling classes its build flags select and no other, and names them as it starts; L.sched.102, sched::init prints the classes the flags compose, compared with the profile on every boot"
     }
   ]
 }

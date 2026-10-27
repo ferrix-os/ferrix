@@ -823,9 +823,28 @@ flag is the configuration record of it (3558 addendum (a)).
      objdump reads every architecture's ELF) (3934 (4)). `cargo xtask test-removable` links the release kernel
      with each value on the three architectures, keeps each ELF under
      `target/removable/` and runs the check on it.
+   * **The scheduling-class crates** (`docs/SCHED-CLASSES.md` §9b; ledger
+     line 22 of the sched-classes container ledger) are removable the same
+     way, chosen by the scheduler's tier flags in the selection crate's
+     arms file rather than by `main.rs`, and recorded in `class_crates`.
+     Their evidence has two halves, because the release link is fat LTO
+     over one codegen unit, so no Rust rlib reaches its link line or a map
+     of it, present or absent: the **ELF half** reads the shipped release
+     ELF (a selected class's marker, its check kept out of line; no symbol
+     of another); the **link half** reads the linker map of a link of the
+     same architecture, profile and flags with LTO alone turned off (a
+     member of each selected class crate's rlib pulled in, none of
+     another's). LTO only removes and merges the code it is given; it adds
+     none from a crate the link was not given. So what the non-LTO link
+     leaves out, the LTO image cannot hold, and the two halves together
+     show a crate the flags do not select is absent.
+     `check-removable-symbols.py --class` judges both; `cargo xtask
+     test-removable` runs it for each architecture and buildable profile,
+     keeping the ELF and the map under `target/removable/`.
    * `check-build-flags.py` rule 6e (one self-test case): a cfg of a
      recorded flag anywhere under `src/kernel` but `main.rs`,
-     `build_flags.rs`'s table and `kernel_core.rs`'s flag word is refused.
+     `build_flags.rs`'s table and the flag word (`kernel_core.rs`'s, since
+     SCHED-CLASSES.md step 3a `sched_select.rs`'s) is refused.
    * The negative controls, each through `fleet/gate.sh control --expect`
      and each to read `FIRED`, are listed with their logs in the landing
      message: (a) a planted dependency, `use ferrix_kernel_settings as _;`

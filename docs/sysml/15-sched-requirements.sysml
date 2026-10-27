@@ -368,6 +368,17 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.16";
             attribute :>> unit = ("sched::reap_ahead", "sched::exit_counted");
         }
+        requirement <'L.sched.102'> theBootNamesTheClassesTheFlagsCompose : ItemLowLevel {
+            attribute :>> statement = "Once every processor is in the scheduler,
+                sched::init shall print `sched    classes` and the names of the
+                classes the build flags compose, outermost first, joined by '+'.";
+            attribute :>> criterion = "On every boot, check-boot-line.py compares
+                that line with the name the profile's tier flags compose from
+                certification-item.json's class_crates (eevdf for present and
+                desktop); with Eevdf's NAME changed, it refuses the boot.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = "sched::init";
+        }
     }
 
     package RunningTask {

@@ -1,0 +1,14 @@
+[package]
+name = "ferrix-sched-fixture"
+description = "A scheduling class no build flag selects: the standing negative case of docs/SCHED-CLASSES.md section 9b, which shows a class crate the flags do not select is not linked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-sched-class.workspace = true
+
+[lints]
+workspace = true

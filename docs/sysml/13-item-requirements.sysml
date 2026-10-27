@@ -663,6 +663,18 @@ package FerrixItemRequirements {
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
         }
+        requirement <'H.SCHED.18'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
+            attribute :>> statement = "A kernel shall run the scheduling classes its
+                build flags select and no other, and shall name them as it starts.";
+            attribute :>> criterion = "cargo xtask test-removable's class-crate half,
+                on every architecture and buildable profile: the release ELF holds
+                the marker of each class the profile's flags select and no symbol
+                of any other, the fixture among them, and the map of the same link
+                with LTO alone turned off pulls in a member of each selected class
+                crate's rlib and of no other (docs/SCHED-CLASSES.md section 9b); and
+                L.sched.102's check on every boot.";
+            attribute :>> parent = "ASR-8";
+        }
     }
 
     package Interrupts {

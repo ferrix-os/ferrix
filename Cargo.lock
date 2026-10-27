@@ -600,6 +600,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-sched-class",
  "ferrix-sched-fair",
+ "ferrix-sched-fixture",
 ]
 
 [[package]]
@@ -865,6 +866,13 @@ name = "ferrix-sched-fair"
 version = "0.1.0"
 dependencies = [
  "ferrix-fallible",
+ "ferrix-sched-class",
+]
+
+[[package]]
+name = "ferrix-sched-fixture"
+version = "0.1.0"
+dependencies = [
  "ferrix-sched-class",
 ]
 
