@@ -12,7 +12,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 |---|---:|---:|---:|---:|
 | [`arch/x86_64`](#archx86_64) | 414 | - | - | 18 |
 | [`discovery`](#discovery) | 170 | 111 | 131 | 8 |
-| [`sched`](#sched) | 153 | 3 | 3 | 11 |
+| [`sched`](#sched) | 152 | 3 | 3 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 100 | - | - | 2 |
 | [`user`](#user) | 73 | - | 1 | 3 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1260** | **175** | **230** | 78 |
+| **Total** | **1259** | **175** | **230** | 78 |
 
 ---
 
@@ -157,7 +157,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 38 | - | - | 38 | 109, 117, 132, 167-169, 173-174, 186, 194, 201, 204-206, 213, 228, 234, 237, 239, 251, 273, 281, 283, 294-295, 297-298, 303-305, 307, 309, 314, 317-318, 331-332, 340 |
 | `sched/mod.rs` | `core` | 22 | 3 | 2 | 2 | 1410, 2727 |
-| `sched/queue.rs` | `core` | 22 | 0 | 0 | 0 | - |
+| `sched/queue.rs` | `core` | 21 | 0 | 0 | 0 | - |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
 | `sched/preempt.rs` | `core` | 12 | - | - | 12 | 188, 355, 365-366, 370, 375-376, 378, 390, 414-415, 417 |

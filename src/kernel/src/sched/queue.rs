@@ -486,12 +486,12 @@ impl CpuQueue {
             &mut self.fair,
             task.id,
             Arc::clone(task),
-            (task.entity_state(), slot),
+            task.entity_with(slot),
         ) {
             // The only refusals are a duplicate identifier and a zero weight,
             // neither of which this kernel can produce; dropping the clone is
             // what keeps the task alive in the table regardless.
-            task.return_run_slot(refused.entity.1);
+            task.keep_refused(refused.entity);
             drop(refused.payload);
             return;
         }
@@ -521,9 +521,8 @@ impl CpuQueue {
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
-        if let Some((_, task, (state, slot))) = Stack::remove_current(&mut self.fair) {
-            task.return_run_slot(slot);
-            task.store_entity_state(state);
+        if let Some((_, task, entity)) = Stack::remove_current(&mut self.fair) {
+            task.keep_entity(entity);
             task.set_queued(false);
         }
     }
@@ -744,17 +743,16 @@ impl CpuQueue {
         peer.set_weight(weight);
         // `rescale_slice` as `insert` makes it, with the peer counted.
         let slice_after = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.fair) + 1);
-        let (id, state) = (peer.id, peer.entity_state());
+        let (id, entity) = (peer.id, peer.entity_with(slot));
         // The peer's own reference goes into the queue, and the caller's
         // comes out of it into `between`: moved, not counted up and down.
-        match Stack::hand_over(&mut self.fair, id, peer, (state, slot), slice_after) {
+        match Stack::hand_over(&mut self.fair, id, peer, entity, slice_after) {
             Ok(left) => {
                 if let Some(next) = Stack::current(&self.fair) {
                     next.set_queued(true);
                 }
-                if let Some((_, task, (state, slot))) = left {
-                    task.return_run_slot(slot);
-                    task.store_entity_state(state);
+                if let Some((_, task, entity)) = left {
+                    task.keep_entity(entity);
                     task.set_queued(false);
                     // Under a fold, the caller's state and word here, the
                     // store first as `set_state_from` makes them, and the
@@ -772,7 +770,7 @@ impl CpuQueue {
             Err(refused) => {
                 // A duplicate or a weight of zero, neither of which this
                 // kernel makes: as `insert` refuses.
-                refused.payload.return_run_slot(refused.entity.1);
+                refused.payload.keep_refused(refused.entity);
                 return None;
             }
         }

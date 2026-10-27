@@ -6,7 +6,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | coverage | 1926 | 402 | 264 | **1260** |
+| x86_64 | coverage | 1925 | 402 | 264 | **1259** |
 | aarch64 | debug | 643 | 311 | 157 | **175** |
 | armv7a | debug | 996 | 414 | 352 | **230** |
 
@@ -16,7 +16,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**1926** unreached statements, coverage profile.
+**1925** unreached statements, coverage profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -25,7 +25,7 @@ The statements in the certified item that the measured suite did not reach, on e
 | Reached only when something has already failed | 65 | 3% |
 | Run, and credited to another line | 5 | 0% |
 | Hardware the measured machine does not have | 264 | 14% |
-| Needs a test | 1260 | 65% |
+| Needs a test | 1259 | 65% |
 
 ### x86_64: Unreachable on the measured architecture — 186 statements
 
@@ -128,7 +128,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `item` | `discovery/smbios.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### x86_64: Needs a test — 1260 statements
+### x86_64: Needs a test — 1259 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -156,9 +156,9 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 23 | `core` | `user/space.rs` |
 | 22 | `core` | `arch/x86_64/syscall.rs` |
 | 22 | `core` | `sched/mod.rs` |
-| 22 | `core` | `sched/queue.rs` |
 | 21 | `core` | `arch/x86_64/msrlog/decode.rs` |
 | 21 | `core` | `discovery/tree.rs` |
+| 21 | `core` | `sched/queue.rs` |
 | 253 | | *and 46 more files* |
 
 ### x86_64: argued line by line — 264 statements

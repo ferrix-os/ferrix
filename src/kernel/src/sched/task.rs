@@ -553,6 +553,25 @@ impl Task {
         })
     }
 
+    /// What it is queued with, from its record and `slot`, its run slot:
+    /// the class stack's entity (`sched::stack::StackEntity`, N2).
+    pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
+        (self.entity_state(), slot)
+    }
+
+    /// Keep what a queue handed back as it let the task go: its run slot,
+    /// then its record.
+    pub(crate) fn keep_entity(&self, (state, slot): super::stack::StackEntity) {
+        self.return_run_slot(slot);
+        self.store_entity_state(state);
+    }
+
+    /// Take back the run slot of an entity a queue refused, the record as
+    /// it was (the queue changed nothing).
+    pub(crate) fn keep_refused(&self, (_, slot): super::stack::StackEntity) {
+        self.return_run_slot(slot);
+    }
+
     /// Take the slot a run queue holds this task in, to queue it with.
     /// `None` if a queue already holds it.
     pub(crate) fn take_run_slot(&self) -> Option<TaskSlot> {
