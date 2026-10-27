@@ -677,7 +677,7 @@ owed requirement (line 21, ruling 2) takes the next free L.sched id.
 `class_crates` record and the profile's tier values, with a self-test for
 a stack of two tiers.
 
-## 9c. `max+`: a time-triggered table inside the windows (proposed, for design review)
+## 9c. `max+`: a cyclic executive inside the windows (OK IF E1-E13, 2026-10-27)
 
 The customer (2026-10-27), after C6: "Can you also add the more
 conservative alternative to Max, so that you could technically build a
@@ -685,9 +685,9 @@ EAL 7 / SIL 4 OS with Max+". C6 gave `max` fixed priorities inside each
 window. The more conservative scheduling, which some DAL A and railway
 SIL 4 systems use, makes no run-time choice at all: a time-triggered table
 (a cyclic executive) inside each window, each slot naming the one task
-that runs in it. This section proposes it as a value and a profile; it is
-not built, and it waits for the consultant's design review before any
-code.
+that runs in it: a cyclic executive inside ARINC windows, not APEX's
+priority scheduling, and never to be read as that (ledger line 24, C1).
+Reviewed before code: ledger line 24, OK IF E1-E13.
 
 **What "technically build" means here, and what it does not.** A profile
 selects code: `max+` would compile the kernel with the most conservative
@@ -747,6 +747,69 @@ personality (C7). The design review is asked to name any other value of
   claimable, re-homing the checks that run a Linux program, is owed before
   `max_plus` can be more than a target, and `linux_abi = "off"` would have
   to allow `sc4_plus`.
+
+**As the review has it (ledger line 24):**
+* **E1, a target.** `sc4_plus` lists sc4's targets with EAL7, its `why`
+  says no formal model, no formal correspondence and no evaluation stand
+  behind it, `max_plus`'s claim starts "target", CLAIM.md holds neither,
+  and check-build-flags refuses an `sc4_plus` profile claiming more.
+* **E2.** A value allows `sc4_plus` only if it allows `sc4`: the flag
+  file's coverage rule (check-item-boundary) and check-build-flags both
+  hold it; `sc4_plus` adds EAL 7 alone.
+* **E3, C7's consequences.** `linux_abi = "off"` and `fs = "none"` both
+  require `personality = "none"`, so `max_plus` has all three, and
+  `partition_speculation` and `restricted_fastpath` are `not_applicable`.
+  The three allow `sc4_plus` only with their own evidence (the later steps
+  of LINUX-ABI-SEPARATION §11.11, the checks that run a Linux program
+  re-homed, ledger 3257 (1), 3208 (6)(g)); until then `max_plus` lists them
+  under `pending`, a key a target-only profile alone may carry, and
+  check-item-boundary reports it not claimable.
+* **E4, the table's own crate.** `ferrix-sched-windows-table` neither
+  depends on nor names `ferrix-sched-windows`; the major frame both share
+  is a third crate that implements no `SchedClass`, classified before its
+  code; `class_crates` gets the table crate's entry, name and marker; the
+  class-crate half shows a `max_plus` kernel holds no
+  `ferrix_sched_windows` symbol and a `max` kernel none of the table's.
+* **E5, the table, designed before its code, each point failing closed:**
+  the table is compiled in or carried in the signed image, never written
+  at run time; the boot refuses a table that does not fit the major frame,
+  overlaps or names no task; a task that overruns its slot is preempted at
+  the slot's end and never delays the next slot; an empty slot, or one
+  whose task is blocked, runs the idle task; on SMP one table a processor,
+  with no migration; and where the kernel's own tasks run with no fair
+  tier is answered once, for `max` and `max_plus` alike (their own slots
+  or a kernel window), at the windows crates' design review.
+* **E6.** HardRt holds through the windows tier for `max_plus` too; the
+  mode-map check passes it with `modes = ["HardRt"]`.
+* **E7.** `arinc_table` is `built = "no"`, its arm a `compile_error!`
+  naming it, landing at M3.
+* **E8, the counts** as check-build-flags and the files compute them: six
+  profiles and five levels (of sixteen each), `sched_windows` three values
+  (of eight), the flag word 54 of 64.
+* **E9.** No ids for this step; the table's code reserves its own (from
+  H.SCHED.19); a level and a profile are configuration and take none.
+* **E11, the countermeasure floor.** The barest value is chosen among the
+  values that allow `sc4`; a value whose code is a countermeasure or its
+  check stays (`mitigations = on`, `checks = on` with `ferrix.checks` pinned
+  to `run`, `ssbd = always`, `program_barrier = switch`, `smt = off`,
+  `ferrix.vtd` and `ferrix.amdvi` on). `ipc_fastpath = off` is `max_plus`'s
+  for good: the 2026-10-02 rule that may turn it on for `max` does not
+  reach it. The three E3 values are the exception while pending: they
+  allow neither `sc4` nor `sc4_plus` yet.
+* **E12.** `slot_signing = "required"` (off lets the loader boot an
+  unsigned slot, a run-time choice), with `slot_families` empty until the
+  board is chosen, so no slot boots before then; `fs = none`; the
+  restricted-exit flags `not_applicable`; and none of `ferrix.root`,
+  `ferrix.init`, `ferrix.onexit` or `console`, which take a free value in
+  `max`, is permitted: the image fixes them.
+* **E13, the check.** Every flag and image key names its `barest` value
+  with the reason; check-build-flags refuses one that names none, a
+  barest value that does not allow `sc4` (unless pending, above), a value
+  other than the barest allowing `sc4_plus`, an `sc4_plus` profile whose
+  values are not the barest or whose barest value neither allows
+  `sc4_plus` nor is pending, and a boot option it permits with other than
+  one literal value; each with a self-test. Which value is barest stays a
+  reviewed judgement, recorded in the flag file and the ledger.
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
@@ -1044,6 +1107,13 @@ line), written in as §9a.
 **3a reviewed**: ledger line 21, OK IF 1-7; 1-5 met in 7d26af03, 7 by
 its message; 6 owed on the gate host (below, with the desktop build's
 `build` line and condition 1's control).
+
+**`max+` reviewed**: ledger line 24, OK IF E1-E13, §9c. Built here (the
+level, the value, the profile, the `barest` keys, `pending`, the checks):
+E1-E3, E6-E8, E11-E13; owed: E4 and E5 with the table crate (M3), E10
+this line and the landing's; the controls of E13 on the gate host. E13's
+"the barest value allows `sc4`" is read as excusing the three E3 values
+while pending, for the consultant to confirm.
 
 **Step 3b's design** reviewed, ledger line 22, OK IF G1-G10 (G10: this
 line), written in as §9b; H.SCHED.18 and L.sched.102 reserved.
