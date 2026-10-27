@@ -402,6 +402,9 @@ compile-time trait, chosen per profile -- is [SCHED-CLASSES.md](SCHED-CLASSES.md
 
 ## 4. A possible order of landings
 
+The packaging of the classes, reviewed OK IF S1-S14 on 2026-10-26, and
+where it stands: [SCHED-CLASSES.md](SCHED-CLASSES.md).
+
 Each needs the consultant's design review and its requirement ids reserved
 on `develop` first (GAME-PATH §5.6).
 

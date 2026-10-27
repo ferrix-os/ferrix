@@ -1,6 +1,8 @@
 # Scheduling classes as removable crates
 
-**Design for review, 2026-10-26.** Not built. The customer asked
+**Design reviewed, 2026-10-26: OK IF S1-S14** (§10; ledger line 11 of
+this container's consultant ledger, still to be copied to the gate
+host's). Not built. The customer asked
 (2026-10-26): "design all our schedulers to be crates with one common
 compile-time trait interface between the kernel, so that we can select our
 desired schedulers by enabling or disabling a crate via a flag … and that
@@ -175,28 +177,35 @@ asked for compile-time traits with no run-time cost, so the choice moves
    #[cfg(ferrix_sched_dispatch = "switchable")]
    pub type Stack = ferrix_sched_switch::Switchable<DesktopSet>;
    ```
-   (the full type is generated from the tier flags by the same build
-   script that generates the flag word, so it is written in one place).
+   Written by hand, not generated (S2): one cfg arm a declared value of
+   each tier flag, giving that tier's type, an absent tier being a
+   zero-sized `Empty` class; `check-build-flags.py` holds the arms one to
+   one with the flag file.
 2. **The core names `Stack` directly**: `Stack::pick(..)`, `Stack::charge(..)`.
    rustc monomorphises and inlines it into the core in every profile, dev
    included: no symbol, no `unsafe`, no registration. A crate the flags do
    not select is named nowhere, so rustc never loads it and the linker
    never sees it, as before. The type checker is the registration check:
    a profile whose flags select no `Stack`, or two, does not compile.
-3. **What it asks of the rules.** BUILD-FLAGS.md rule 6e allows a recorded
-   flag's cfg only in `main.rs`, `build_flags.rs` and the core's flag word.
-   This crate is one more such file, the only one for the scheduler, and it
-   is the composition root's choice moved earlier, not a cfg spread through
-   the core. Its flag word is const-asserted equal to the binary's (K4),
-   and `removable_problems` holds every class crate to being named only
-   here. If the consultant refuses the exception, the link-time binding
-   above is the fallback, with its cost measured.
-4. **Per-task state lives with the stack, not in `Task`.** `Task`'s layout
-   cannot depend on which classes are compiled without making every core
-   type generic over the scheduler. The stack owns a table of `Entity`
-   values indexed by the task's slot, made at boot with the task limit's
-   capacity, and the core passes the slot: one indexed load where today
-   there is a field access.
+3. **What it asks of the rules** (S2, accepted over the link-time seam).
+   BUILD-FLAGS.md rule 6e allows a recorded flag's cfg only in `main.rs`,
+   `build_flags.rs` and the core's flag word. The exception is one file:
+   this crate's root, a kernel crate in the core ring under `src/kernel`,
+   built by the one build script, its flag word const-asserted equal to the
+   binary's (K4). Nothing else in the kernel reads a scheduler flag: which
+   modes exist, the boot line and the policy lists come from `Stack`'s
+   constants. `removable_problems` cannot hold these crates as it stands
+   (it requires a dependency on the load crate and the binary as the only
+   dependant), so the class crates get a record kind of their own, with its
+   self-tests and controls (S3).
+4. **Per-task state lives in `Task`** (S4). The core names `Stack`
+   concretely, so `Task` holds `<Stack as SchedClass>::Entity` and the
+   task's `Params` as fields, allocated and charged to the job with the
+   `Task` as today. Its layout differs by profile, which is fine: each
+   profile is its own reference configuration. (A first draft kept a
+   boot-sized table indexed by task slot; the review refused it: there is
+   no system-wide task limit to size it by, and it would add a global
+   refusal and a charging question F-37 would have to answer.)
 
 ## 5a. Fixed for the certified builds, switchable for desktop
 
@@ -248,6 +257,18 @@ deadline):
    silently (ARCHITECTURE.md §5).
 5. **Swap** the domain's variant in one store, **resume**, and free the old
    queues after another grace period.
+
+**Where the switching lives** (S9, S10). The protocol needs `smp` and the
+IPI rendezvous, which a crate below the core cannot call, so the crate
+graph is drawn acyclic: `Switchable` and its per-domain variant, the
+moving of tasks with fresh state, the run-time making of queues, and the
+right and the entry (native or Linux) that asks for a switch all live in
+`ferrix-sched-switch` or a removable kernel crate above the core. In a
+`fixed` build that entry answers `NOT_SUPPORTED` at its dispatch, before
+any argument check. No `Mode` variant, trait method or `Domain` field
+exists only for switching. `switchable` allows level `none` alone, every
+profile with a claim is `fixed` (so `fast` stays `fixed`), and a `fixed`
+profile may not give a tier a set of values; each rule has a control.
 
 No guarantee holds across the switch, and the transition is bounded by the
 longest non-preemptible section, the IPI latency and the number of tasks
@@ -320,11 +341,10 @@ line, never a change to the core.
    and rises only with its own evidence, so adding one can never weaken a
    certified profile: a certified profile names its values explicitly
    (BUILD-FLAGS.md rule 4) and does not pick up a new one by default.
-3. Its name in the selection crate's generated `Stack` (and in
-   `Switchable`'s set, if desktop compiles it), and one entry in
-   `composition_root.removable`, so the
-   generic checks (`removable_problems`, the ELF symbol check,
-   `test-removable`) cover it with no new check code.
+3. Its cfg arm in the selection crate (and its place in `Switchable`'s
+   set, if desktop compiles it), and one entry in the class crates' record
+   (S3), which the checks of that record kind, the ELF and link-line checks
+   and `test-removable` then cover.
 4. Its Linux policy numbers declared (below), if it takes any.
 
 **A tier holds one crate per build**, chosen by its flag, so two
@@ -345,9 +365,9 @@ certified crate is a decision nobody made). Each crate also declares what
 it is, as associated constants the stack and the checks read:
 
 ```rust
-/// Which policies a task may ask this crate for, by Linux number
-/// (SCHED_OTHER 0, FIFO 1, RR 2, BATCH 3, IDLE 5, DEADLINE 6, EXT 7)
-/// and by native name.
+/// Which native policies a task may ask this crate for. The Linux
+/// personality maps its policy numbers (SCHED_OTHER 0, FIFO 1, RR 2,
+/// BATCH 3, IDLE 5, DEADLINE 6, EXT 7) to these in its own table (C1).
 const POLICIES: &'static [Policy];
 /// Whether `admit` can refuse: true for a class with a guarantee to keep.
 const ADMITS: bool;
@@ -391,6 +411,20 @@ trait, added as above, with its own review.
 5. **Switchable for desktop** (§5a): accepted as the desktop's only, with
    the switch protocol; and whether `fast` stays `fixed`.
 
+## 7a. Settled by the review
+
+* Build flags, not Cargo features: ledger 3558 (10) stands. The customer's
+  "flag in our Cargo.toml" is one line of a profile file
+  (`sched_realtime = "absent"` in `tools/common/data/profiles/max.toml`
+  leaves the crate out).
+* The selection crate over the link-time seam (S2); per-task state in
+  `Task` (S4).
+* `fast` stays `fixed`; `switchable` is desktop's alone (S10).
+* Open for the customer: whether fair is optional in `max` (C3: without
+  it, every kernel worker and server needs a reservation, and every user of
+  the `NICE_` constants must be absent too); where the fair server lives is
+  free (C4: a crate of its own only once two classes link it).
+
 ## 8. What it costs, and what it would cost with Cargo features
 
 **This design:** moving today's scheduler behind the selection crate is a refactor of
@@ -423,3 +457,77 @@ at the price of the configuration space the item was built to avoid.
 5. `ferrix-sched-switch` and `sched_dispatch = "switchable"` for desktop,
    once there are two implementations of a tier to switch between (BORE
    beside EEVDF, or the `ext` agent).
+
+## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
+
+A certification-consultant subagent of the customer's session, ledger line
+11 of the ledger it keeps in this container (to be copied to the gate
+host's). Each is a condition on the step named; S1-S12 and S14 are written
+into this design before step 2's code.
+
+* **S1, absent code, evidence.** `cargo tree` and Cargo metadata are not
+  evidence (Cargo lists every class crate in every build). What is: the
+  binary's link line (`--print link-args` or the linker map, kept per
+  profile and architecture by `test-removable`) names no rlib of an absent
+  crate; `check-removable-symbols` finds none of its symbols in the ELF; a
+  present build shows a marker inlining cannot remove (the boot line's
+  stack names, and `check()` kept out of line); and a planted unconditional
+  use of the crate, run as a control, reads `FIRED`.
+* **S2, the rule-6e exception**, as §5.3: one file, hand-written arms, an
+  `Empty` class for an absent tier, the arms held one to one with the flag
+  file, nothing else reading a scheduler flag.
+* **S3, a record kind for the class crates**, with self-tests and
+  controls; §6a no longer claims "no new check code".
+* **S4, per-task state in `Task`**, as §5.4.
+* **S5, the direct hand-over is a required operation.** The fused hand-over
+  the IPC round trip rests on (today `RunQueue::hand_over`, L.sched.55 and
+  64-66, with the job fold) is a required trait method, not a provided
+  default. Step 2 lands only if the round trip, measured before and after
+  under the `optimize-ipc-round-trip` protocol on x86-64 and both Arm
+  boots, shows no regression beyond noise.
+* **S6, an inventory before step 2**: every `ferrix-sched` item and every
+  scheduler unit in core `sched/**` and `object/quota.rs` (the `NICE_`
+  constants, about 53 uses, `carried_weight`, the job fold, `wake_wide`,
+  `Timeline`, `CpuSet`, `domain.rs`) assigned to the interface crate, a
+  class crate or the core; each L.sched requirement re-pointed with its
+  flag predicate; moved bodies byte-identical, coverage carried by span
+  (F-75).
+* **S7, the core ring only when its gates pass**: `forbid(unsafe_code)`,
+  the fallible-allocation gate (so `new_queue` returns a `Result`), the
+  overflow lint, coverage and traceability read the class crates and pass,
+  else this repeats F-56. `ferrix-sched`'s two `unclassified_deps` entries
+  go when it moves and F-76's count is recounted in FINDINGS.md and
+  README.md (F-76 stays open for the other libraries). Each value's allowed
+  levels match its crate's level; new values start at `none`.
+* **S8, the audit words.** One flag a tier plus `sched_dispatch`, less
+  `schedule`, makes twenty flags against `audit_words`' sixteen two-bit
+  slots, and `sched_fair` will want more than four values: the start-up
+  audit record (AUDIT.md §1, FAU_GEN.1 b) is redesigned in step 3's review.
+* **S9, S10, switching stays out of certified profiles**, as §5a.
+* **S11, defaults.** A source check that no claimed profile inherits a
+  provided default, with a planted control; `Over`'s work-stealing answer
+  is a function of the queues, not the constant `STEALS_WORK`.
+* **S12, modes as a profile key.** The modes a profile allows become a key
+  the kernel enforces; the two-sided rule keeps its two controls; each
+  allowed mode is exercised by that profile's rows.
+* **S13, requirement ids.** L.sched.96-101 and H.SCHED.17 are taken; new
+  ids start at L.sched.102 and H.SCHED.18. Step 1 (this design): none.
+  Step 2: none if behaviour is unchanged and only units are restated; any
+  new boot check or refusal takes from L.sched.102. Step 3: ids only if
+  `Mode`'s refusal is restated. Each class (step 4) and the switch (step 5)
+  reserves at its own design review: H.SCHED.18 on for SoftRt's starvation
+  bound and HardRt's admission (ASR-8), L.sched ids for the core's
+  dispatch, and a prefix of its own for each class crate.
+* **S14, where it stands**: below, and REALTIME.md §4 points here.
+
+Lesser points: C1 (Linux numbers in the personality's table, §6a); C2,
+`boost` as a per-class `Entity` operation cannot move a task between tiers
+(a fair owner boosted by a FIFO waiter changes tier), so the owned wait
+queue's review defines it at the stack level; C3 and C4 (§7a); C5, the
+switch's bound goes into MEMORY-AND-TIMING when step 5 lands.
+
+## Where it stands
+
+2026-10-26: designed and reviewed, OK IF S1-S14; the conditions are
+written in above. Nothing built. Next: the customer's answer on C3 (fair in
+`max`), then step 2 with S5 and S6 first.
