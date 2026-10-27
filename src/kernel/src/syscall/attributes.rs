@@ -656,7 +656,7 @@ pub(crate) fn forget_robust_list(process: &Process) {
 
 /// The thread `get_robust_list` asks about: the caller for 0, else the thread
 /// numbered `pid`, in the caller's process or any other.
-fn robust_list_subject(
+pub(crate) fn robust_list_subject(
     process: &Process,
     pid: i32,
 ) -> Result<Arc<crate::syscall::thread::Thread>, Errno> {
