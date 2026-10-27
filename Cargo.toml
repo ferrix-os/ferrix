@@ -97,7 +97,7 @@ members = [
     "src/lib/init/svc",
     "src/lib/platform/pci",
     "src/lib/kernel/qr",
-    "src/lib/kernel/sched",
+    "src/lib/kernel/sched-fair",
     "src/lib/kernel/sched-class",
     "src/lib/fs/common/vfs",
     "src/lib/proto/pkg",
@@ -268,7 +268,7 @@ ferrix-sysfs = { path = "src/lib/fs/common/sysfs" }
 ferrix-svc = { path = "src/lib/init/svc" }
 ferrix-restart = { path = "src/lib/init/restart" }
 ferrix-pci = { path = "src/lib/platform/pci" }
-ferrix-sched = { path = "src/lib/kernel/sched" }
+ferrix-sched-fair = { path = "src/lib/kernel/sched-fair" }
 ferrix-sched-class = { path = "src/lib/kernel/sched-class" }
 ferrix-pkg = { path = "src/lib/proto/pkg" }
 

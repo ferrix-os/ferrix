@@ -266,7 +266,7 @@ pub(crate) fn start_committer() -> bool {
         "disk commit",
         commit_forever,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )
     .is_ok();
     if !spawned {
@@ -438,7 +438,7 @@ const DEVMGR_PATIENCE_NANOS: u64 = 60_000_000_000;
 /// then does what bring-up does without the option -- the switch and the
 /// data disk -- checks that pid 1 moved, and tells pid 1 where `/` is.
 pub fn switch_after_devmgr() {
-    if sched::spawn("root switch", after_devmgr, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn("root switch", after_devmgr, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         println!("  root     no task to switch / on: it stays in memory");
         crate::init::notify_root(false);
     }

@@ -2,7 +2,7 @@
 //!
 //! A kernel thread: a stack, a saved stack pointer, and the bookkeeping that
 //! says where it is. Everything about *choosing* between tasks is
-//! `ferrix_sched`'s; everything here is what the choice is made about.
+//! `ferrix_sched_fair`'s; everything here is what the choice is made about.
 //!
 //! # Where the saved stack pointer lives
 //!
@@ -22,7 +22,8 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
-use ferrix_sched::{CpuSet, EntityState, Node, Slot};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::{EntityState, Node, Slot};
 use ferrix_sync::IrqControl;
 
 use crate::arch;
@@ -57,13 +58,13 @@ pub(crate) const BLOCKED: u8 = 1;
 /// Dead: it has returned or exited, and its stack is waiting to be freed.
 pub(crate) const DEAD: u8 = 2;
 
-/// A waker's record of its wakees, for `ferrix_sched::wake_wide`
+/// A waker's record of its wakees, for `ferrix_sched_class::wake_wide`
 /// (L.sched.91): written only by the task itself while it runs.
 #[derive(Debug)]
 struct Wakees {
     /// The last task it woke from a call, by id.
     last: AtomicU64,
-    /// How often it changed wakee, halved once a second (`ferrix_sched::flip`).
+    /// How often it changed wakee, halved once a second (`ferrix_sched_class::flip`).
     flips: AtomicU32,
     /// When `flips` was last halved, in nanoseconds.
     halved_at: AtomicU64,
@@ -912,7 +913,7 @@ impl Task {
         if changed {
             self.wakees.last.store(wakee, Ordering::Relaxed);
         }
-        let (flips, halved_at) = ferrix_sched::flip(
+        let (flips, halved_at) = ferrix_sched_class::flip(
             flips,
             self.wakees.halved_at.load(Ordering::Relaxed),
             now(),
@@ -934,7 +935,7 @@ impl Task {
         if at == 0 || window >= BUSY_WINDOW_NS {
             if at != 0 {
                 let since = ran.saturating_sub(self.wakees.sampled_ran.load(Ordering::Relaxed));
-                let share = ferrix_sched::utilisation(since, window).unwrap_or(UNMEASURED);
+                let share = ferrix_sched_class::utilisation(since, window).unwrap_or(UNMEASURED);
                 self.wakees.busy.store(share, Ordering::Relaxed);
             }
             self.wakees.sampled_at.store(now.max(1), Ordering::Relaxed);

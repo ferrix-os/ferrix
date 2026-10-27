@@ -1872,7 +1872,7 @@ fn check_a_wait_is_woken_by_what_it_waits_for(counter: &mut Counter) -> Result<(
         "native waker",
         write_after_a_delay,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )
     .map_err(|_| "could not start the waker")?;
     stage_deadline(&side, PATIENCE_NANOS)?;
@@ -3589,7 +3589,7 @@ fn check_a_port_wait_is_woken_by_a_message(counter: &mut Counter) -> Result<(), 
         "port waker",
         write_after_a_delay,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )
     .map_err(|_| "could not start the waker")?;
     stage_deadline(&side, PATIENCE_NANOS)?;
@@ -3703,7 +3703,7 @@ fn check_an_interrupt_wakes_its_waiter(
                 "interrupt firer",
                 fire_after_a_delay,
                 usize::try_from(extra).unwrap_or(0),
-                ferrix_sched::NICE_0_WEIGHT,
+                ferrix_sched_fair::NICE_0_WEIGHT,
             )
             .map_err(|_| "could not start the interrupt firer")?;
             stage_deadline(side, PATIENCE_NANOS)?;

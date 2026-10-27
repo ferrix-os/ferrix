@@ -37,7 +37,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_bootinfo::BootView;
 use ferrix_native_abi::types as abi;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::Once;
 
 use super::cpu;

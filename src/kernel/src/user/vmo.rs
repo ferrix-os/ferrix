@@ -78,7 +78,7 @@ use crate::fallible::AllocError;
 use crate::sync::SpinLock;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_frame::Frame;
-use ferrix_sched::CpuSet;
+use ferrix_sched_class::CpuSet;
 
 use crate::mm;
 use crate::object::quota::{Charge, Resource};

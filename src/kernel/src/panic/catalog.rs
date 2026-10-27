@@ -1113,7 +1113,7 @@ pub static SCHEDULER_BRING_UP: Explanation = Explanation {
          and joining.",
         "The machine has more processors than a scheduling domain's `CpuSet` can hold.",
         "The vmap arena had no stack left for the boot processor's idle task.",
-        "`ferrix_sched` rejected the scheduler's slice constant when a run queue was built.",
+        "`ferrix_sched_fair` rejected the scheduler's slice constant when a run queue was built.",
     ],
     see: "src/kernel/src/sched/mod.rs init; src/kernel/src/sched/mod.rs wait_for_processors; \
           docs/ROADMAP.md stage 5",

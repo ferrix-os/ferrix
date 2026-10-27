@@ -770,7 +770,8 @@
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-qr": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
@@ -795,7 +796,7 @@
         "ferrix-objects": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-virtio": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"

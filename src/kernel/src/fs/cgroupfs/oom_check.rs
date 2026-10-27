@@ -259,7 +259,7 @@ fn run_watched(
 ) -> Checked<Watched> {
     *WAITER_ANSWER.lock() = None;
     *WAITER_SET.lock() = Some(Arc::clone(set));
-    let task = crate::sched::spawn("oom-events-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = crate::sched::spawn("oom-events-waiter", waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while watching.queue().listed() == 0
         && WAITER_ANSWER.lock().is_none()

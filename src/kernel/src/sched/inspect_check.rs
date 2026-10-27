@@ -19,7 +19,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::NICE_0_WEIGHT;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::WaitQueue;
 use super::inspect::{self, MAX_FRAMES};

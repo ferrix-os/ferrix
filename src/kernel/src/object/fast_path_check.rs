@@ -461,9 +461,9 @@ fn check_a_spinner_keeps_its_share(on: bool) -> Result<(), &'static str> {
         "fast path spinner",
         spin,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
         cpu,
-        ferrix_sched::CpuSet::of(cpu),
+        ferrix_sched_class::CpuSet::of(cpu),
     )?;
     let ran_before = spinner.runtime();
     let _ = trips_between(cpu, cpu, TRIPS * 10)?;
@@ -1361,9 +1361,9 @@ fn check_an_end_before_the_park() -> Result<(), &'static str> {
             "check-park-end",
             park_after_its_end,
             0,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             here,
-            ferrix_sched::CpuSet::of(here),
+            ferrix_sched_class::CpuSet::of(here),
         )?;
         let deadline = crate::timer::now_nanos().saturating_add(PARK_PATIENCE_NANOS);
         let finished = wait_until(deadline, "", || {
@@ -1705,8 +1705,8 @@ fn job_loads_hold(shape: JobShape, seen: &JobSeen) -> Result<(), &'static str> {
 ///
 /// Verifies: `L.sched.64`
 fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
-    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
-    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
+    let nice_0 = ferrix_sched_fair::NICE_0_WEIGHT;
+    let heavier = ferrix_sched_fair::weight_of_nice(-5).unwrap_or(3121);
     for (shape, caller_base, echo_base, folds) in [
         (JobShape::One, nice_0, nice_0, true),
         (JobShape::One, nice_0, heavier, true),
@@ -1748,8 +1748,8 @@ fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
 ///
 /// Verifies: `L.sched.65`
 fn check_the_direct_switch_weights() -> Result<(), &'static str> {
-    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
-    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
+    let nice_0 = ferrix_sched_fair::NICE_0_WEIGHT;
+    let heavier = ferrix_sched_fair::weight_of_nice(-5).unwrap_or(3121);
     let (seen, _) = job_case(JobShape::One, nice_0, heavier)?;
     let (handed, charged) = (seen.handed, seen.charged);
     if seen.own.1 != seen.base || (seen.weight != handed && seen.weight != charged) {

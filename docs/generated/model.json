@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "9211e8acc1d53316d1346ef0e215510c30d3dd314e10396cd6db79ed94ce0fb7",
+  "digest": "589993a07c18c0333294c3d59ad661d9b81b5a7c2076969a6be5dca66067e242",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -22679,7 +22679,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::theDirectSwitchIsThePick",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"RunQueue::hand_over equals enqueue, the rescale, remove_curr and pick_next field for field on 200,000 random queues (the ferrix-sched host test); a spinner beside the trips keeps its share, and an echo pinned to another processor never runs on the caller's (the `fastcase` line).\"",
+                      "value": "\"RunQueue::hand_over equals enqueue, the rescale, remove_curr and pick_next field for field on 200,000 random queues (the ferrix-sched-fair host test); a spinner beside the trips keeps its share, and an echo pinned to another processor never runs on the caller's (the `fastcase` line).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 627
@@ -31246,7 +31246,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::theCarriedWeightIsTheWideFormula",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load.\"",
+                  "value": "\"quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched_fair::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1007
@@ -31257,7 +31257,7 @@
                   "qualifiedName": "FerrixObjectRequirements::QuotaSlots::theCarriedWeightIsTheWideFormula",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"ferrix-sched's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one.\"",
+                  "value": "\"ferrix-sched-fair's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1011
@@ -38265,7 +38265,7 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aTaskSlotIsOneAtomicCell",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched host test).\"",
+                  "value": "\"The loom model of the cell finds no interleaving of two takers, a give-back and a look where two holders have the node or a node is lost, and fails both its controls (a take by a load and a store; a give-back by a plain store); a slot taken apart and put together serves a queue as the same node (the ferrix-sched-fair host test).\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 577
@@ -38436,7 +38436,7 @@
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::theFoldIsPlannedBeforeTheCharge",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"ferrix-sched's host test drives the kernel's plan and settlement against a model of quota::adjust over 40,000 random job trees of depth 1 to 8 with siblings and nested jobs, the two tasks in one job, siblings, nested either way and apart, equal and unequal weights, and finds every job's load and contribution and both weights equal to the general sequence's; with a fold planned at a job the two do not share, it fails.\"",
+                  "value": "\"ferrix-sched-fair's host test drives the kernel's plan and settlement against a model of quota::adjust over 40,000 random job trees of depth 1 to 8 with siblings and nested jobs, the two tasks in one job, siblings, nested either way and apart, equal and unequal weights, and finds every job's load and contribution and both weights equal to the general sequence's; with a fold planned at a job the two do not share, it fails.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 635
@@ -39347,7 +39347,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWakeeIsPulledOntoItsWakersProcessor",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"Stage 5's wake-affine case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on the checking processor, woken from a call made there, runs there; the same task pinned at home, with its home idle, woken by its sleep's end, or busy for 40 ms of its life before it blocked, runs at home (three attempts each); ferrix-sched's host tests hold the load comparison; with the pull removed from the wake, with the pinned and affinity tests dropped, or with the task's load left out, the boot fails with the case's own sentence.\"",
+                      "value": "\"Stage 5's wake-affine case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on the checking processor, woken from a call made there, runs there; the same task pinned at home, with its home idle, woken by its sleep's end, or busy for 40 ms of its life before it blocked, runs at home (three attempts each); ferrix-sched-fair's host tests hold the load comparison; with the pull removed from the wake, with the pinned and affinity tests dropped, or with the task's load left out, the boot fails with the case's own sentence.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 974
@@ -39404,7 +39404,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWideWakePullsNothing",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"Stage 5's wake-affine case: with the waker's flips set wide and the wakee's at the domain's processor count, the wake that is pulled otherwise runs the task at home (three attempts); ferrix-sched's host tests hold the bound and the halving; with the refusal ignored, the boot fails with the case's own sentence.\"",
+                      "value": "\"Stage 5's wake-affine case: with the waker's flips set wide and the wakee's at the domain's processor count, the wake that is pulled otherwise runs the task at home (three attempts); ferrix-sched-fair's host tests hold the bound and the halving; with the refusal ignored, the boot fails with the case's own sentence.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 995

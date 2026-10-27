@@ -3,7 +3,7 @@
 //! Stage 5 of `docs/ROADMAP.md`. Until now the kernel has run one thread of
 //! control per processor, and every "CPU" in the code has meant a processor.
 //! From here a processor runs a *task*, chosen from a queue of its own, and
-//! the choosing is `ferrix_sched`'s EEVDF fair class — written in `src/lib/` and
+//! the choosing is `ferrix_sched_fair`'s EEVDF fair class — written in `src/lib/` and
 //! tested on the host, because a scheduler that is wrong is wrong in a way
 //! nothing on the machine can print.
 //!
@@ -58,7 +58,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::{Balance, CpuSet, Domain, Mode, NICE_0_WEIGHT, Placement, check_partition};
+use ferrix_sched_class::{Balance, CpuSet, Domain, Mode, Placement, check_partition};
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::{IrqControl, IrqSpinLock, Once, SpinLock};
 
 use crate::arch;
@@ -513,7 +514,7 @@ static ZOMBIES: IrqSpinLock<Zombies, arch::Irq> = IrqSpinLock::new(Zombies::new(
 #[derive(Debug)]
 struct Zombies {
     /// The tasks, keyed by the order they died in.
-    list: ferrix_sched::Timeline<Arc<Task>>,
+    list: ferrix_sched_fair::Timeline<Arc<Task>>,
     /// The next one's place in that order.
     next: u64,
 }
@@ -522,7 +523,7 @@ impl Zombies {
     /// None.
     const fn new() -> Zombies {
         Zombies {
-            list: ferrix_sched::Timeline::new(),
+            list: ferrix_sched_fair::Timeline::new(),
             next: 0,
         }
     }
@@ -1232,7 +1233,7 @@ fn domain_cpus() -> Option<&'static CpuSet> {
     DOMAIN.get().map(Domain::cpus)
 }
 
-/// Ask `ferrix_sched` where a task should go, given what every processor is
+/// Ask `ferrix_sched_class` where a task should go, given what every processor is
 /// carrying right now.
 ///
 /// Takes every run queue's lock in turn, which is why it is never called with
@@ -2013,7 +2014,7 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
 /// preemption and a warm cache (Linux's `wake_affine_idle`), a busy share
 /// not yet measured, or this processor's load average with the task's load
 /// added at 108% of the home's with it taken away or more
-/// (`ferrix_sched::pull_fits`, Linux's `wake_affine_weight`).
+/// (`ferrix_sched_class::pull_fits`, Linux's `wake_affine_weight`).
 fn refuses(how: Onto, here: &CpuQueue, home: &CpuQueue, task: &Task) -> bool {
     match how {
         Onto::Sync => here.waiting() != 0,
@@ -2026,7 +2027,7 @@ fn refuses(how: Onto, here: &CpuQueue, home: &CpuQueue, task: &Task) -> bool {
             };
             let load =
                 busy.saturating_mul(u64::from(task.base_weight())) / u64::from(NICE_0_WEIGHT);
-            !ferrix_sched::pull_fits(here.load_average(), home.load_average(), load)
+            !ferrix_sched_class::pull_fits(here.load_average(), home.load_average(), load)
         }
     }
 }
@@ -2079,7 +2080,7 @@ fn pull_onto_waker(task: &Arc<Task>) -> bool {
 /// never pulls. It records the wakee whatever the answer, as Linux's
 /// `record_wakee` does on every wake. Then the domain must steal work and
 /// hold both processors, the task must not be pinned and must be allowed
-/// here, the wake must not be wide (`ferrix_sched::wake_wide`, with the
+/// here, the wake must not be wide (`ferrix_sched_class::wake_wide`, with the
 /// domain's processor count as the factor), and no processor the task may
 /// run on other than its home may be idle: an idle one is L.sched.85's to
 /// take, as Linux's `select_idle_sibling` comes before stacking on the
@@ -2100,7 +2101,7 @@ fn pull_target(task: &Arc<Task>) -> Option<usize> {
         return None;
     }
     let factor = u32::try_from(domain.cpus().len()).unwrap_or(u32::MAX);
-    if ferrix_sched::wake_wide(waker_flips, task.wakee_flips(), factor) {
+    if ferrix_sched_class::wake_wide(waker_flips, task.wakee_flips(), factor) {
         return None;
     }
     if idle_allowed(task, domain) {
@@ -2297,7 +2298,7 @@ fn placed_on_wake(
 /// the same `insert`.
 fn move_onto(
     task: &Arc<Task>,
-    state: Option<ferrix_sched::EntityState>,
+    state: Option<ferrix_sched_fair::EntityState>,
     to: usize,
     queue: &mut CpuQueue,
 ) {
@@ -3626,7 +3627,7 @@ pub(crate) fn print_picks(cpu: usize) {
 /// One processor's run queue, for a check or the boot log.
 #[derive(Clone, Copy, Debug)]
 pub struct CpuReport {
-    /// Its decaying load average, out of `ferrix_sched::LOAD_SCALE`.
+    /// Its decaying load average, out of `ferrix_sched_class::LOAD_SCALE`.
     pub(crate) load: u64,
     /// The slice it is currently handing out.
     pub(crate) slice_ns: u64,

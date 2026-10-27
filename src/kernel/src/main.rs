@@ -1274,9 +1274,9 @@ fn start_scheduler(cpus: &'static smp::Topology) {
     println!(
         "  load     busy processor {} of {}, idle {} of {}",
         report.load_high,
-        ferrix_sched::LOAD_SCALE,
+        ferrix_sched_class::LOAD_SCALE,
         report.load_low,
-        ferrix_sched::LOAD_SCALE,
+        ferrix_sched_class::LOAD_SCALE,
     );
     println!(
         "  balance  {} tasks moved between processors that never went idle",

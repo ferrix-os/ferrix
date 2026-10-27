@@ -540,8 +540,6 @@ by every class and by the core):
 |---|---|---|
 | `CpuSet`, `MAX_CPUS` | `domain.rs` | affinity and domain membership, named by the whole kernel (about 30 files) |
 | `Mode`, `Class`, `Domain`, `check_partition`, the domain errors of `SchedError` (`ModeUnavailable`, `EmptyDomain`, `Overlap`, `Uncovered`, `NoSuchCpu`) | `domain.rs`, `lib.rs` | modes name tiers, not crates (§6) |
-| `Node`, `Slot` | `tree.rs` | the allocation-free tree both the fair queue and the core's `Timeline` use |
-| `Timeline` | `timeline.rs` | the core's sleepers, ordered by due instant: no class's |
 | `Load`, `CpuLoad`, `LOAD_SCALE`, `LOAD_PERIOD_NS`, `place`, `Placement`, `flip`, `FLIP_DECAY_NS`, `wake_wide`, `pull_fits`, `utilisation`, `BALANCE_THRESHOLD`, `imbalance`, `busiest`, `Balance`, `quietest` | `balance.rs` | load tracking and placement, which the core does for any class that steals work |
 | `SchedClass`, `Over`, `Empty` | new | §4 |
 
@@ -551,6 +549,7 @@ by every class and by the core):
 |---|---|
 | `RunQueue`, `Config`, `EntityState`, `EntityView`, `Refused`, `Left`, the queue errors of `SchedError` (`ZeroWeight`, `Duplicate`, …), the private `Entity`, `Key` and the arithmetic | `lib.rs` |
 | `NICE_0_WEIGHT`, `weight_of_nice` and its table | `lib.rs` |
+| `Node`, `Slot`, `Timeline` (the tree and the core's sleepers): found at the split to be built on the fair entity (`Node` holds an `Entity<T>`), so they stay here; a `max` without fair needs a sleeper queue of its own | `tree.rs`, `timeline.rs` |
 | `carried_weight`, `carried_weight_with`, `JobPlan`, `plan_job_fold`, `settle_job_fold` (the job weights and the direct switch's fold) | `lib.rs` |
 | `slice_for` | `balance.rs` (the slice is EEVDF's) |
 | the property tests of the queue, the weights and the fold | `tests.rs` |
@@ -594,7 +593,14 @@ the interface crate `ferrix-sched-class` built alone
 `hand_over`, `put_back` for a stack's lower tier, `steals_work` as a
 function of the queue; `Over`, `Tier`, `Empty`; seven host tests over toy
 classes), named by no kernel crate yet.
-Next, each pushed as it is done so another session can take it up: the split of
+`ferrix-sched` split (§11): `ferrix-sched-class` holds the domains, the
+load tracking and balancing and `DomainError`; `ferrix-sched-fair` holds
+EEVDF, the tree, the timeline, the weights, the fold and `slice_for`, and
+implements `SchedClass` as `Eevdf` (one host test holds the interface to
+the queue). The kernel's 70 files re-pointed by path only; booted on
+x86-64, AArch64 and ARMv7-A.
+Next, each pushed as it is done so another session can take it up: the
+rest of the split of
 `ferrix-sched` per §11 with no behaviour change; then the selection crate
 and the core through `Stack`, with the IPC round trip measured before and
 after (S5). Still open for the customer: C3, fair in `max`.

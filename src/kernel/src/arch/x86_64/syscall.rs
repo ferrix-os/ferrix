@@ -37,7 +37,7 @@
 use core::mem::offset_of;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 use crate::smp::PerCpu;
 use crate::trap::{Abi, Outcome};

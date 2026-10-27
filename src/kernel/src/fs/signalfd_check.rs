@@ -623,7 +623,7 @@ fn wait_out_a_signal(
         )
     };
     let ended_before = ended();
-    let waiter = crate::sched::spawn("signalfd-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn("signalfd-waiter", waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
     until_listed(inner, set);
     if ANSWER.lock().is_some() {
         return Err("a read, poll or epoll_wait on a signalfd with nothing pending did not wait");

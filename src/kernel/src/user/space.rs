@@ -98,7 +98,7 @@ use crate::sync::SpinLock;
 use ferrix_bootinfo::{PAGE_SIZE, USER_VIRT_END, is_user_address};
 use ferrix_frame::Frame;
 use ferrix_paging::MapFlags;
-use ferrix_sched::CpuSet;
+use ferrix_sched_class::CpuSet;
 use ferrix_sync::{SleepLock, SleepLockGuard};
 use ferrix_vma::{Backing, PageRange, Unmapping, Vma, VmaFlags};
 

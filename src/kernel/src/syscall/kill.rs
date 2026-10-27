@@ -393,7 +393,7 @@ fn alarms_changed() {
         *running = true;
         start
     };
-    if start && sched::spawn("itimers", run_alarm_clock, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if start && sched::spawn("itimers", run_alarm_clock, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         // Nothing runs, and whoever arrived meanwhile was told it did: the
         // next `setitimer` tries again, as it always did after a failed
         // spawn. Only out of memory reaches here.

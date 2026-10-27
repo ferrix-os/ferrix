@@ -385,7 +385,7 @@ fn check_the_processor(tree: &Arc<Job>) -> Result<u64, &'static str> {
 /// A job's weight as its parent's load counts it: `cpu.weight` 100 is one
 /// task at nice 0.
 fn scaled(weight: u32) -> i64 {
-    i64::from(weight) * i64::from(ferrix_sched::NICE_0_WEIGHT) / i64::from(DEFAULT_WEIGHT)
+    i64::from(weight) * i64::from(ferrix_sched_fair::NICE_0_WEIGHT) / i64::from(DEFAULT_WEIGHT)
 }
 
 /// `cpu.weight` is clamped to 1 to 10,000, and setting a busy job's weight

@@ -288,7 +288,7 @@ fn start_waiter_late(
         group: job.quota_index(),
         undo: Arc::new(UndoList::new()),
     });
-    let task = sched::spawn("sem-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = sched::spawn("sem-waiter", waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
     if late != 0 {
         sched::sleep_for(late);
     }

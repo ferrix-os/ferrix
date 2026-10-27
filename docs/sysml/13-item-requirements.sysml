@@ -622,7 +622,7 @@ package FerrixItemRequirements {
                 processor, nothing else waiting and no sleeper due.";
             attribute :>> criterion = "RunQueue::hand_over equals enqueue, the
                 rescale, remove_curr and pick_next field for field on 200,000 random
-                queues (the ferrix-sched host test); a spinner beside the trips keeps
+                queues (the ferrix-sched-fair host test); a spinner beside the trips keeps
                 its share, and an echo pinned to another processor never runs on the
                 caller's (the `fastcase` line).";
             attribute :>> parent = ("G.1", "ASR-8");

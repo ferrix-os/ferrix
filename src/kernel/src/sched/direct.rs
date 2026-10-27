@@ -33,7 +33,7 @@
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sched::JobPlan;
+use ferrix_sched_fair::JobPlan;
 use ferrix_sync::{IrqControl, SpinLock};
 
 use super::queue::CpuQueue;
@@ -269,7 +269,7 @@ impl Direct {
         // `set_state_from` adds it.
         peer.store_state(RUNNABLE);
         let joined = peer.join_word();
-        let plan = ferrix_sched::plan_job_fold(joined, caller.group_word(), quota::NONE);
+        let plan = ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE);
         match (plan, joined) {
             (JobPlan::Separate, Some((job, weight))) => {
                 quota::adjust(job, i64::from(weight));

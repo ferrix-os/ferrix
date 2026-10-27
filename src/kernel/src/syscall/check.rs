@@ -2867,7 +2867,7 @@ fn hangup_revokes_reading() -> Result<(), &'static str> {
         "revoke-reader",
         revoke_reader,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )
     .map_err(|_| "could not start the revoke check's reader")?;
     crate::sched::sleep_for(20_000_000);
@@ -6705,7 +6705,7 @@ fn replace_while_two_spin(replaced: &Arc<Process>) -> Result<(), &'static str> {
         crate::sched::sleep_for(STOP_POLL_NANOS);
     }
     *REPLACING.lock() = Some(Arc::clone(replaced));
-    let replacer = crate::sched::spawn("replacer", replace, 0, ferrix_sched::NICE_0_WEIGHT)
+    let replacer = crate::sched::spawn("replacer", replace, 0, ferrix_sched_fair::NICE_0_WEIGHT)
         .map_err(|_| "could not start the task that replaces the program")?;
     let reach = crate::timer::now_nanos().saturating_add(REPLACE_REACH_NANOS);
     while replaced.live_thread_count() > 1 {
@@ -8491,7 +8491,7 @@ fn waitv_then_wake_from(
     )?;
     *FUTEX_ANSWER.lock() = None;
     *WAITV_SUBJECT.lock() = Some((Arc::clone(process), vector, words.len() as u64, timeout));
-    let waiter = crate::sched::spawn("waitv-waiter", waitv_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn("waitv-waiter", waitv_waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
 
     let patience = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while words
@@ -8858,7 +8858,7 @@ fn wait_then_wake_behind(
     write_timespec(process, timeout, sleep.0, sleep.1)?;
     *FUTEX_ANSWER.lock() = None;
     *FUTEX_SUBJECT.lock() = Some((Arc::clone(process), word, timeout, wait));
-    let waiter = crate::sched::spawn("futex-waiter", futex_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn("futex-waiter", futex_waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
 
     let deadline = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while futex::waiters_on(process, word) <= ahead {
@@ -8995,7 +8995,7 @@ fn call_past_the_heap_lock(
         HeapCall::Map => process.space().layout(),
         HeapCall::Shrink | HeapCall::Fork => process.hold_heap_for_check(),
     };
-    let task = crate::sched::spawn("heap-lock", heap_caller, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = crate::sched::spawn("heap-lock", heap_caller, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
 
     let deadline = crate::timer::now_nanos().saturating_add(HEAP_PATIENCE_NANOS);
     while !HEAP_STARTED.load(Ordering::SeqCst) {
@@ -12188,14 +12188,14 @@ pub fn run_seam_count() -> Result<(usize, u64), &'static str> {
     SEAM_DONE.store(0, Ordering::Release);
     let before = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT);
     for cpu in 0..online {
-        let mut only = ferrix_sched::CpuSet::empty();
+        let mut only = ferrix_sched_class::CpuSet::empty();
         only.insert(cpu)
             .map_err(|_| "no such processor for a seam caller")?;
         let _ = crate::sched::spawn_on(
             "seam-count",
             seam_caller,
             number,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             cpu,
             only,
         )?;
@@ -12934,7 +12934,8 @@ fn times_sleeper(_argument: usize) {
 /// against the switches made, not against the yields.
 /// Verifies: L.sched.83
 fn check_switches_are_counted(cpu: usize) -> Result<[u64; 4], &'static str> {
-    use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+    use ferrix_sched_class::CpuSet;
+    use ferrix_sched_fair::NICE_0_WEIGHT;
 
     TIMES_YIELDED.store(0, Ordering::Release);
     TIMES_ARRIVED.store(0, Ordering::Release);

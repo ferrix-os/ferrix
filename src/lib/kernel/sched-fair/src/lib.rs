@@ -53,7 +53,7 @@
 //! queued.
 //!
 //! ```
-//! use ferrix_sched::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot};
+//! use ferrix_sched_fair::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot};
 //!
 //! let mut queue: RunQueue<&str> = RunQueue::new(Config { slice_ns: 3_000_000 }).unwrap();
 //! let state = EntityState::new(NICE_0_WEIGHT);
@@ -72,8 +72,6 @@
 
 extern crate alloc;
 
-mod balance;
-mod domain;
 mod timeline;
 mod tree;
 
@@ -83,12 +81,6 @@ mod tests;
 use alloc::boxed::Box;
 use core::fmt;
 
-pub use balance::{
-    BALANCE_THRESHOLD, Balance, CpuLoad, FLIP_DECAY_NS, LOAD_PERIOD_NS, LOAD_SCALE, Load,
-    Placement, busiest, flip, imbalance, place, pull_fits, quietest, slice_for, utilisation,
-    wake_wide,
-};
-pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
 pub use timeline::Timeline;
 use tree::{Key, Tree, before};
 pub use tree::{Node, Slot};
@@ -253,17 +245,6 @@ pub enum SchedError {
     ZeroWeight,
     /// An entity with this identifier is already on the queue.
     Duplicate(u64),
-    /// A scheduling mode that is named, and not written yet.
-    ModeUnavailable(Mode),
-    /// A domain with no CPUs in it.
-    EmptyDomain,
-    /// A CPU claimed by two domains.
-    Overlap(usize),
-    /// A CPU claimed by no domain.
-    Uncovered(usize),
-    /// A CPU number past the end of a [`CpuSet`], or a domain naming a CPU
-    /// the machine does not have.
-    NoSuchCpu(usize),
 }
 
 impl fmt::Display for SchedError {
@@ -272,13 +253,6 @@ impl fmt::Display for SchedError {
             SchedError::ZeroSlice => f.write_str("a run queue needs a slice longer than zero"),
             SchedError::ZeroWeight => f.write_str("an entity needs a weight above zero"),
             SchedError::Duplicate(id) => write!(f, "entity {id} is already queued"),
-            SchedError::ModeUnavailable(mode) => {
-                write!(f, "the {} mode is not written yet", mode.name())
-            }
-            SchedError::EmptyDomain => f.write_str("a scheduling domain has no CPUs"),
-            SchedError::Overlap(cpu) => write!(f, "CPU {cpu} is in two scheduling domains"),
-            SchedError::Uncovered(cpu) => write!(f, "CPU {cpu} is in no scheduling domain"),
-            SchedError::NoSuchCpu(cpu) => write!(f, "there is no CPU {cpu}"),
         }
     }
 }
@@ -835,6 +809,13 @@ impl<T> RunQueue<T> {
             .map(Entity::key)
     }
 
+    /// Return the running entity to the tree without choosing: what a class
+    /// stack does to this class when a class above it takes the CPU. The
+    /// entity stays counted in the virtual time.
+    pub fn put_back(&mut self) {
+        self.put_curr_back();
+    }
+
     /// Return the running entity to the tree, still counted.
     fn put_curr_back(&mut self) {
         if let Some(node) = self.curr.take() {
@@ -1262,5 +1243,142 @@ impl<T> RunQueue<T> {
             return Err("the queue's base is not at its virtual time");
         }
         Ok(())
+    }
+}
+
+/// The slice each of `runnable` entities should ask for, given a target
+/// latency and a floor.
+///
+/// # Why a fixed slice is wrong
+///
+/// A slice is also a latency bound: the last of `n` runnable entities waits
+/// `n` slices before it runs. With a fixed slice that wait grows without limit
+/// — a thousand runnable tasks at a millisecond each is a second before the
+/// last one is looked at, and stage 5's own test ran exactly a thousand.
+///
+/// So the slice is a share of a target *period* instead, which is Linux's
+/// `sched_latency` divided by the number of runnable entities. Every entity
+/// still gets its weighted share of the processor; what changes is that it is
+/// delivered in smaller instalments.
+///
+/// # Why there is a floor
+///
+/// Taken to its conclusion the arithmetic asks for slices of nanoseconds, and
+/// then the machine does nothing but switch. Below `minimum_ns` the period is
+/// allowed to stretch instead — which is Linux's `sched_min_granularity`, and
+/// is the admission that beyond some number of runnable tasks, latency has to
+/// give.
+#[must_use]
+pub const fn slice_for(target_latency_ns: u64, minimum_ns: u64, runnable: usize) -> u64 {
+    let count = if runnable == 0 { 1 } else { runnable as u64 };
+    let share = target_latency_ns / count;
+    if share < minimum_ns {
+        minimum_ns
+    } else {
+        share
+    }
+}
+
+/// The fair class as a [`ferrix_sched_class::SchedClass`]: EEVDF, every
+/// operation forwarding to the [`RunQueue`] it is
+/// (`docs/SCHED-CLASSES.md` §3). A task off every queue carries its
+/// [`EntityState`] and the [`Slot`] it is queued in.
+#[derive(Debug)]
+pub struct Eevdf;
+
+/// What a task carries between fair queues.
+pub type FairEntity<T> = (EntityState, Slot<T>);
+
+impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
+    const NAME: &'static str = "eevdf";
+    type Queue = RunQueue<T>;
+    type Entity = FairEntity<T>;
+    type Config = Config;
+
+    fn new_queue(config: Config) -> Result<RunQueue<T>, ferrix_sched_class::Refusal> {
+        RunQueue::new(config).map_err(|_| ferrix_sched_class::Refusal::Invalid)
+    }
+
+    fn len(queue: &RunQueue<T>) -> usize {
+        queue.len()
+    }
+
+    fn enqueue(
+        queue: &mut RunQueue<T>,
+        id: u64,
+        payload: T,
+        (state, slot): FairEntity<T>,
+    ) -> Result<(), ferrix_sched_class::Back<T, FairEntity<T>>> {
+        queue
+            .enqueue(id, payload, state, slot)
+            .map_err(|refused| back(refused, state))
+    }
+
+    fn remove(queue: &mut RunQueue<T>, id: u64) -> Option<(T, FairEntity<T>)> {
+        queue
+            .remove(id)
+            .map(|(payload, state, slot)| (payload, (state, slot)))
+    }
+
+    fn remove_current(
+        queue: &mut RunQueue<T>,
+    ) -> Option<ferrix_sched_class::Left<T, FairEntity<T>>> {
+        queue
+            .remove_curr()
+            .map(|(id, payload, state, slot)| (id, payload, (state, slot)))
+    }
+
+    fn pick(queue: &mut RunQueue<T>) -> Option<&T> {
+        queue.pick_next()
+    }
+
+    fn put_back(queue: &mut RunQueue<T>) {
+        queue.put_back();
+    }
+
+    fn current(queue: &RunQueue<T>) -> Option<&T> {
+        queue.current()
+    }
+
+    fn hand_over(
+        queue: &mut RunQueue<T>,
+        id: u64,
+        payload: T,
+        (state, slot): FairEntity<T>,
+        slice_after: u64,
+    ) -> ferrix_sched_class::Handed<T, FairEntity<T>> {
+        queue
+            .hand_over(id, payload, state, slot, slice_after)
+            .map(|left| left.map(|(id, payload, state, slot)| (id, payload, (state, slot))))
+            .map_err(|refused| back(refused, state))
+    }
+
+    fn charge(queue: &mut RunQueue<T>, ran_ns: u64) -> bool {
+        queue.update_curr(ran_ns)
+    }
+
+    fn remaining_ns(queue: &RunQueue<T>) -> Option<u64> {
+        queue.remaining_ns()
+    }
+
+    fn steals_work(_: &RunQueue<T>) -> bool {
+        true
+    }
+
+    fn check(queue: &RunQueue<T>) -> Result<(), &'static str> {
+        queue.check_invariants()
+    }
+}
+
+/// A refusal as the class interface hands it back, with the state the
+/// entity arrived with (the queue had changed nothing).
+fn back<T>(refused: Refused<T>, state: EntityState) -> ferrix_sched_class::Back<T, FairEntity<T>> {
+    ferrix_sched_class::Back {
+        payload: refused.payload,
+        entity: (state, refused.slot),
+        reason: match refused.reason {
+            SchedError::Duplicate(id) => ferrix_sched_class::Refusal::Duplicate(id),
+            SchedError::ZeroSlice | SchedError::ZeroWeight => ferrix_sched_class::Refusal::Invalid,
+        },
     }
 }

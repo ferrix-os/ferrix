@@ -574,7 +574,7 @@ package FerrixSchedRequirements {
                 holders have the node or a node is lost, and fails both its controls
                 (a take by a load and a store; a give-back by a plain store); a slot
                 taken apart and put together serves a queue as the same node (the
-                ferrix-sched host test).";
+                ferrix-sched-fair host test).";
             attribute :>> parent = ("H.SCHED.13", "H.FAIL.1");
             attribute :>> unit = ("sched::task::Task::take_run_slot",
                 "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
@@ -626,7 +626,7 @@ package FerrixSchedRequirements {
                 caller's leave has answered: by the net in one adjustment when the
                 leave answered as planned, and otherwise by the peer's join and then
                 the caller's leave, each in its own job.";
-            attribute :>> criterion = "ferrix-sched's host test drives the kernel's
+            attribute :>> criterion = "ferrix-sched-fair's host test drives the kernel's
                 plan and settlement against a model of quota::adjust over 40,000
                 random job trees of depth 1 to 8 with siblings and nested jobs, the
                 two tasks in one job, siblings, nested either way and apart, equal
@@ -968,7 +968,7 @@ package FerrixSchedRequirements {
                 checking processor, woken from a call made there, runs there; the
                 same task pinned at home, with its home idle, woken by its
                 sleep's end, or busy for 40 ms of its life before it blocked,
-                runs at home (three attempts each); ferrix-sched's host tests
+                runs at home (three attempts each); ferrix-sched-fair's host tests
                 hold the load comparison; with the pull removed from the wake,
                 with the pinned and affinity tests dropped, or with the task's
                 load left out, the boot fails with the case's own sentence.";
@@ -990,7 +990,7 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "Stage 5's wake-affine case: with the waker's
                 flips set wide and the wakee's at the domain's processor count, the
                 wake that is pulled otherwise runs the task at home (three
-                attempts); ferrix-sched's host tests hold the bound and the
+                attempts); ferrix-sched-fair's host tests hold the bound and the
                 halving; with the refusal ignored, the boot fails with the case's
                 own sentence.";
             attribute :>> parent = "H.SCHED.1";

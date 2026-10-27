@@ -928,7 +928,7 @@ fn start_pumping() {
     if PUMPING.swap(true, Ordering::AcqRel) {
         return;
     }
-    if crate::sched::spawn("console", run_pump, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if crate::sched::spawn("console", run_pump, 0, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         PUMPING.store(false, Ordering::Release);
     }
 }
