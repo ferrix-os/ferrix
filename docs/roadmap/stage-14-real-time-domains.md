@@ -9,5 +9,10 @@ domain while a `Throughput` domain on other cores is saturated, reporting a
 maximum inside the stated bound; plus an admission test that refuses an
 unschedulable set instead of missing deadlines.
 
+**Research (2026-10-26):** [docs/REALTIME.md](../REALTIME.md) surveys what
+Linux, seL4 MCS, QNX, Zircon and the ARINC 653 systems do, what Ferrix has
+today, and proposes the stage's design and an order of landings. Nothing is
+built yet.
+
 ---
 
