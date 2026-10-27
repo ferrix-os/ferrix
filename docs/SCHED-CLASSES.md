@@ -652,8 +652,15 @@ first, joined by `+`, built at compile time; `Empty` names nothing. Each
 boot prints it after the scheduler starts (`sched    classes eevdf` on
 the fair-only stack), and every class's `check` and `Over`'s are
 `#[inline(never)]`, so a present class shows in the release ELF as its
-check (`<Eevdf as SchedClass<Arc<Task>>>::check` on all three
-architectures).
+check (`<Eevdf as SchedClass<Arc<Task>>>::check`, a local text symbol in
+the x86_64, aarch64 and armv7a release kernels by `llvm-nm -C`). Reviewed,
+ledger line 15, OK IF 1-4: the marker in the Arm release kernels (met),
+the line named at landing, and with line 13's 1 and 3 the boots as gate
+rows showing the classes line and S5's measurement on a hash including
+it. The line is informational until step 3 gives the stack a flag to be
+compared with, when it takes a requirement reserved from L.sched.102; the
+selection crate then also asserts at compile time that the name is not
+empty.
 
 Next, each pushed as it is done so another session can take it up: N4's
 measurement and N7's review; then the selection crate as S2 has it (N1). Still open for the customer: C3, fair in
