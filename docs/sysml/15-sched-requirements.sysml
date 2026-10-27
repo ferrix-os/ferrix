@@ -3,7 +3,7 @@
  *
  * What each unit of src/kernel/src/sched/ does, as `ItemLowLevel` requirements
  * (part 13 defines the format, part 14's pilot settled how they are cut).
- * The scheduling decision itself is `src/lib/kernel/sched`'s `RunQueue`, an
+ * The scheduling decision itself is `src/lib/kernel/sched-fair`'s `RunQueue`, an
  * EEVDF queue the kernel's per-processor queue wraps; its host tests are the
  * checks, and each requirement names the kernel function that carries the
  * behaviour into the item as its `unit`.
@@ -469,7 +469,7 @@ package FerrixSchedRequirements {
 
     package DirectSwitch {
         doc /* src/kernel/src/sched/direct.rs, sched/queue.rs and
-             * src/lib/kernel/sched: the direct switch of channel_write_read's fast
+             * src/lib/kernel/sched-fair: the direct switch of channel_write_read's fast
              * path (docs/OPAQUE-KERNEL.md §9.7, part 1). */
 
         requirement <'L.sched.55'> handOverIsTheGeneralSequence : ItemLowLevel {
@@ -968,7 +968,7 @@ package FerrixSchedRequirements {
                 checking processor, woken from a call made there, runs there; the
                 same task pinned at home, with its home idle, woken by its
                 sleep's end, or busy for 40 ms of its life before it blocked,
-                runs at home (three attempts each); ferrix-sched-fair's host tests
+                runs at home (three attempts each); ferrix-sched-class's host tests
                 hold the load comparison; with the pull removed from the wake,
                 with the pinned and affinity tests dropped, or with the task's
                 load left out, the boot fails with the case's own sentence.";
@@ -990,7 +990,7 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "Stage 5's wake-affine case: with the waker's
                 flips set wide and the wakee's at the domain's processor count, the
                 wake that is pulled otherwise runs the task at home (three
-                attempts); ferrix-sched-fair's host tests hold the bound and the
+                attempts); ferrix-sched-class's host tests hold the bound and the
                 halving; with the refusal ignored, the boot fails with the case's
                 own sentence.";
             attribute :>> parent = "H.SCHED.1";

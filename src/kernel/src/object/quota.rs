@@ -1354,8 +1354,8 @@ pub fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
         at = slot.parent.load(Ordering::Acquire);
         Some((own, load))
     });
-    let clamped =
-        ferrix_sched_fair::carried_weight_with(base, levels, extra).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+    let clamped = ferrix_sched_fair::carried_weight_with(base, levels, extra)
+        .clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
     u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
 }
 

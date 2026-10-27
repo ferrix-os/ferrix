@@ -2484,7 +2484,12 @@ fn start_poll(program: &Side, fd: i32) -> Result<u64, &'static str> {
     program.put(POLLFD, &pollfd)?;
     *POLLED.lock() = None;
     *POLL_ON.lock() = Some((Arc::clone(&program.process), fd));
-    let _ = sched::spawn("chardev-poll", poll_helper, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let _ = sched::spawn(
+        "chardev-poll",
+        poll_helper,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
     sched::sleep_for(STILL_NANOS);
     if POLLED.lock().is_some() {
         return Err("a poll on an unsignalled fence returned before its driver died");

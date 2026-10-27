@@ -28,7 +28,9 @@
 use alloc::sync::Arc;
 
 use ferrix_sched_class::{CpuLoad, Load};
-use ferrix_sched_fair::{Config, EntityState, JobPlan, RunQueue, Timeline, settle_job_fold, slice_for};
+use ferrix_sched_fair::{
+    Config, EntityState, JobPlan, RunQueue, Timeline, settle_job_fold, slice_for,
+};
 
 use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
 

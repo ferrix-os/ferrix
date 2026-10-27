@@ -87,7 +87,12 @@ fn ended_by(
     *WAITER_ANSWER.lock() = None;
     *WAITER_FILE.lock() = Some(Arc::clone(waited));
     let ended_before = ended(waited);
-    let task = crate::sched::spawn("pipe-waiter", waiter, what, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let task = crate::sched::spawn(
+        "pipe-waiter",
+        waiter,
+        what,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while listed(waited) == 0
         && WAITER_ANSWER.lock().is_none()

@@ -374,13 +374,14 @@ allowlisted crates are linked by the core today without being classified at
 all, which this change makes visible rather than causes; classifying them
 `core` is the natural next step (F-56; `docs/BACKLOG.md`). And they are not
 the only ones: since the kernel split gave the core and the item manifests
-of their own, they are seen to link 25 more first-party libraries that no
+of their own, they are seen to link 26 more first-party libraries that no
 ring classifies -- `ferrix-acpi`, `ferrix-audit`, `ferrix-blkring`,
 `ferrix-bootinfo`, `ferrix-cgroupfs`, `ferrix-crng`, `ferrix-description`,
 `ferrix-devmgr-proto`, `ferrix-elf`, `ferrix-fbtext`, `ferrix-fdt`,
 `ferrix-frame`, `ferrix-heap`, `ferrix-kmem`, `ferrix-linux-abi`,
 `ferrix-native-abi`, `ferrix-objects`, `ferrix-paging`, `ferrix-pci`,
-`ferrix-qr`, `ferrix-sched`, `ferrix-vdso`, `ferrix-vfs`, `ferrix-virtio`
+`ferrix-qr`, `ferrix-sched-class`, `ferrix-sched-fair` (split from
+`ferrix-sched` on 2026-10-26), `ferrix-vdso`, `ferrix-vfs`, `ferrix-virtio`
 and `ferrix-vma` -- which no item-scoped gate reads, two of them filesystem
 crates the core names (F-76). The kernel crates list them under
 `unclassified_deps`, F-76's debt register and not an endorsement: the gate

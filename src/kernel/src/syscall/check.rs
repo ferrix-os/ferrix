@@ -8491,7 +8491,12 @@ fn waitv_then_wake_from(
     )?;
     *FUTEX_ANSWER.lock() = None;
     *WAITV_SUBJECT.lock() = Some((Arc::clone(process), vector, words.len() as u64, timeout));
-    let waiter = crate::sched::spawn("waitv-waiter", waitv_waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "waitv-waiter",
+        waitv_waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let patience = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while words
@@ -8858,7 +8863,12 @@ fn wait_then_wake_behind(
     write_timespec(process, timeout, sleep.0, sleep.1)?;
     *FUTEX_ANSWER.lock() = None;
     *FUTEX_SUBJECT.lock() = Some((Arc::clone(process), word, timeout, wait));
-    let waiter = crate::sched::spawn("futex-waiter", futex_waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "futex-waiter",
+        futex_waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let deadline = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while futex::waiters_on(process, word) <= ahead {
@@ -8995,7 +9005,12 @@ fn call_past_the_heap_lock(
         HeapCall::Map => process.space().layout(),
         HeapCall::Shrink | HeapCall::Fork => process.hold_heap_for_check(),
     };
-    let task = crate::sched::spawn("heap-lock", heap_caller, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let task = crate::sched::spawn(
+        "heap-lock",
+        heap_caller,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let deadline = crate::timer::now_nanos().saturating_add(HEAP_PATIENCE_NANOS);
     while !HEAP_STARTED.load(Ordering::SeqCst) {

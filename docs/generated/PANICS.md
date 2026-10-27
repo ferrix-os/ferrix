@@ -940,8 +940,8 @@ slept or preempted until every processor is running tasks.
    between waking and joining.
 2. The machine has more processors than a scheduling domain's `CpuSet` can hold.
 3. The vmap arena had no stack left for the boot processor's idle task.
-4. `ferrix_sched` rejected the scheduler's slice constant when a run queue was
-   built.
+4. `ferrix_sched_fair` rejected the scheduler's slice constant when a run queue
+   was built.
 
 See: src/kernel/src/sched/mod.rs init; src/kernel/src/sched/mod.rs
 wait_for_processors; docs/ROADMAP.md stage 5.

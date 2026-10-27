@@ -148,7 +148,7 @@ package FerrixScheduling {
     enum def TaskState { Runnable; Blocked; Dead; }
 
     enum def SchedClass {
-        doc /* Highest first. src/lib/kernel/sched names Fair and Idle today; the
+        doc /* Highest first. src/lib/kernel/sched-class names Fair and Idle today; the
              * real-time classes are stage 14's. */
         Edf;
         Fifo;
@@ -163,7 +163,7 @@ package FerrixScheduling {
         @stage { number = 5; }
         doc /* src/kernel/src/sched/task.rs: a kernel thread — a guard-paged stack,
              * a saved stack pointer, and the bookkeeping that says where it
-             * is. Everything about choosing between tasks is src/lib/kernel/sched's.
+             * is. Everything about choosing between tasks is src/lib/kernel/sched-fair's.
              * The saved stack pointer is touched only by the CPU that holds
              * the owning run queue's lock at that moment. From stage 6 also a
              * user thread, 1:1, forced by the ABI; one of the nine kernel
@@ -339,7 +339,7 @@ package FerrixScheduling {
 
     #implemented part def EevdfRunQueue {
         @stage { number = 5; }
-        doc /* src/lib/kernel/sched: entities with weight and virtual runtime; the
+        doc /* src/lib/kernel/sched-fair: entities with weight and virtual runtime; the
              * queue's virtual time is the weight-average; an entity is
              * eligible when its virtual runtime is at or behind it; the pick
              * is the eligible entity with the earliest virtual deadline. The
@@ -362,7 +362,7 @@ package FerrixScheduling {
 
     #implemented part def LoadAverage {
         @stage { number = 5; }
-        doc /* src/lib/kernel/sched/balance.rs. A geometric decay with a 33-millisecond
+        doc /* src/lib/kernel/sched-class/src/balance.rs. A geometric decay with a 33-millisecond
              * half-life, in the shape of Linux's PELT, measuring *weighted
              * demand* rather than occupancy — a processor is either running
              * something or it is not, so "busy" saturates at one task and says
@@ -449,7 +449,7 @@ package FerrixScheduling {
 
     #implemented part def SchedulingDomain {
         @stage { number = 5; }
-        doc /* src/lib/kernel/sched/domain.rs. CPUs are partitioned into domains, each
+        doc /* src/lib/kernel/sched-class/src/domain.rs. CPUs are partitioned into domains, each
              * in one of three modes, changeable at runtime. Per domain, not
              * global: a four-core machine runs a HardRt partition on one core
              * and Throughput on the other three, with rustc on the latter.
@@ -518,7 +518,7 @@ package FerrixScheduling {
                  * processor; Placement and Balancing above were added after
                  * it: src/kernel/src/sched/mod.rs's balance(), at most every 16
                  * milliseconds per processor, pulling and pushing over
-                 * src/lib/kernel/sched's arithmetic. */
+                 * src/lib/kernel/sched-fair's arithmetic. */
         }
         #planned part fifoRr : FifoRrClass { @stage { number = 14; } }
         #planned part edf : EdfClass { @stage { number = 14; } }
