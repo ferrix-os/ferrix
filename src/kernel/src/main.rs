@@ -48,11 +48,15 @@ use ferrix_kernel_load::*;
 // is named by the binary (`kernel-interface.py`).
 use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};
 
-// The four crates compiled with one set of build flags (ledger line 3282,
-// (K4)): the build line is the item's `cfg`s, and the binary's, the core's
-// and the load's must be the same, or the image would run code its line does
-// not name.
+// The kernel's crates compiled with one set of build flags (ledger line 3282,
+// (K4)): the build line is the item's `cfg`s, and the binary's, the core's,
+// the load's and the scheduler selection's must be the same, or the image
+// would run code its line does not name.
 const BINARY_FLAG_WORD: u64 = flag_word(&build_flag_word!());
+const _: () = assert!(
+    ferrix_kernel_sched_select::SELECT_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-sched-select was compiled with other build flags than the binary"
+);
 const _: () = assert!(
     CORE_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-core was compiled with other build flags than the binary"
@@ -1230,7 +1234,6 @@ fn start_scheduler(cpus: &'static smp::Topology) {
             "could not start the scheduler: {problem}"
         );
     }
-    println!("  sched    classes {}", sched::STACK_NAME);
     // First thing once a task can run: on the Pixel 7 the watchdogs have
     // been counting since the loader, and the checks below take seconds.
     arch::start_watchdogs();

@@ -278,7 +278,10 @@ fn a_stack_over_the_empty_class_is_its_upper_class() {
     assert_eq!(order, ["a", "b"]);
     assert_eq!(<Empty as SchedClass<&'static str>>::NAME, "");
     assert_eq!(<Alone as SchedClass<&'static str>>::NAME, "toy-fifo");
-    assert_eq!(<Stack as SchedClass<&'static str>>::NAME, "toy-fifo+toy-lowly");
+    assert_eq!(
+        <Stack as SchedClass<&'static str>>::NAME,
+        "toy-fifo+toy-lowly"
+    );
     assert_eq!(
         <Over<Empty, Over<Fifo, Lowly>> as SchedClass<&'static str>>::NAME,
         "toy-fifo+toy-lowly"

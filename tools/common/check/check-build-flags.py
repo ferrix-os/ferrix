@@ -35,9 +35,22 @@ are read, which boot options are, and the kernel's own table of flags.
    the profiles, the levels and every flag with every value, in the flag
    file's order, each `cfg!` filed under its own word. The audit record
    packs places in those lists, and AUDIT.md decodes them by the file. And
-   the core's `build_flag_word!` names the same values in the same order:
-   each of the kernel's crates expands it, and the binary requires the four
-   words equal (ledger line 3282, (K4)).
+   `build_flag_word!` (in the scheduler selection's arms file, which the
+   core re-exports) names the same values in the same order: each of the
+   kernel's crates expands it, and the binary requires their words equal
+   (ledger line 3282, (K4)).
+
+4. **The scheduler's flags are read in the arms file alone**
+   (docs/SCHED-CLASSES.md §9a; the consultant's design review of step 3,
+   ledger line 20, D6, D7, D9, D10): no `ferrix_sched_*` cfg anywhere in the
+   kernel but src/kernel/src/sched_select.rs; there, each declared value of
+   each `sched_*` flag has exactly one arm, a `Value` const naming it with
+   its place in the flag file's list (or the identity tier alias of an
+   `absent` one), or a `compile_error!` naming it when it is not built,
+   and no arm names an undeclared value; `build_flags.rs` takes each
+   `sched_*` flag from that const. Each profile's `modes` is exactly the
+   modes whose tiers it has present, and a profile with a claim is
+   `sched_dispatch = "fixed"`.
 
 The first two have a planted negative control (a `ferrix_` cfg in a library; a reader
 of an undeclared option), run with `gate.sh control` over `cargo xtask
@@ -294,7 +307,8 @@ def literal_problems(rust_files: list[tuple[str, str]], registry: dict) -> list[
 
 
 KERNEL_TABLE = "src/kernel/src/build_flags.rs"
-TABLE_ENTRY = re.compile(r'name:\s*"([a-z0-9_]+)"|cfg!\(\s*ferrix_([a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\)\s*,\s*"([a-z0-9_]+)"')
+TABLE_ENTRY = re.compile(r'name:\s*"([a-z0-9_]+)"|cfg!\(\s*ferrix_([a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\)\s*,\s*"([a-z0-9_]+)"'
+                         r'|Values::Selected\(\s*ferrix_kernel_sched_select::([A-Z_]+)\s*\)')
 
 
 def kernel_table_problems(source: str, flag_file: dict, profiles: list[str]) -> list[str]:
@@ -307,6 +321,12 @@ def kernel_table_problems(source: str, flag_file: dict, profiles: list[str]) -> 
     for match in TABLE_ENTRY.finditer(comments_blanked(source)):
         if match.group(1):
             table.append((match.group(1), []))
+        elif match.group(5) and table:
+            # A scheduler flag: its value is the arms file's (D6), checked there.
+            want = list(flag_file.get("flags", {}).get(table[-1][0], {}).get("values", {}))
+            if not table[-1][0].startswith("sched_") or match.group(5) != SCHED_CONSTS.get(table[-1][0]):
+                problems.append(f"{KERNEL_TABLE}: {table[-1][0]} is taken from the arms file's {match.group(5)}")
+            table[-1][1].extend(want)
         elif table:
             flag, value, word = match.group(2), match.group(3), match.group(4)
             if flag != table[-1][0] or value != word:
@@ -324,7 +344,7 @@ def kernel_table_problems(source: str, flag_file: dict, profiles: list[str]) -> 
     return problems
 
 
-KERNEL_WORD = "src/kernel/src/kernel_core.rs"
+KERNEL_WORD = "src/kernel/src/sched_select.rs"
 WORD_ENTRY = re.compile(r'cfg!\(\s*ferrix_([a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\)')
 
 
@@ -358,6 +378,115 @@ def flag_word_problems(source: str, flag_file: dict, profiles: list[str]) -> lis
             problems.append(f"{KERNEL_WORD}: build_flag_word!'s {name} values are {values}, the flag file's {want}")
     return problems
 
+
+
+# The scheduler's flags (docs/SCHED-CLASSES.md §9a; ledger line 20, D6, D7):
+# the arms file is the only file reading a `sched_*` cfg, with one arm a
+# declared value. `SCHED_CONSTS` is the const each flag's arm defines.
+ARMS = KERNEL_WORD
+SCHED_CONSTS = {
+    "sched_dispatch": "DISPATCH",
+    "sched_windows": "WINDOWS",
+    "sched_deadline": "DEADLINE",
+    "sched_realtime": "REALTIME",
+    "sched_fair": "FAIR",
+}
+ARM = re.compile(r'#\[cfg\(\s*ferrix_(sched_[a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\)\]\s*'
+                 r'(?:pub\s+const\s+([A-Z_]+)\s*:\s*Value\s*=\s*Value\s*\{\s*name:\s*"([a-z0-9_]+)"\s*,\s*'
+                 r'place:\s*(\d+)\s*,\s*present:\s*(true|false)\s*,?\s*\}\s*;'
+                 r'|(compile_error!)\(\s*"([^"]*)"\s*\)\s*;'
+                 r'|pub\s+type\s+[A-Za-z]+(?:<[A-Z]>)?\s*=\s*[^;]+;)')
+
+
+def sched_cfg_problems(rust_files: list[tuple[str, str]]) -> list[str]:
+    """No `ferrix_sched_*` cfg in the kernel outside the arms file (D6)."""
+    problems = []
+    for rel, source in rust_files:
+        if not rel.startswith(KERNEL) or rel == ARMS:
+            continue
+        for line, name in cfg_names(source):
+            if name.startswith("ferrix_sched_"):
+                problems.append(f"{rel}:{line}: names `{name}`; only the scheduler selection's arms file "
+                                f"({ARMS}) reads a scheduler flag (SCHED-CLASSES.md §9a, D6)")
+    return problems
+
+
+def arms_problems(source: str, flag_file: dict) -> list[str]:
+    """Each declared value of each `sched_*` flag has exactly one `Value`
+    arm, naming it at its place, or, unbuilt, one `compile_error!` naming
+    it; no arm names an undeclared value (D6, D7)."""
+    blanked = comments_blanked(source)
+    start = blanked.find("macro_rules! build_flag_word")
+    if start >= 0:
+        end = blanked.find("\n}", start)
+        blanked = blanked[:start] + " " * (end - start) + blanked[end:]
+    sched = {flag: entry for flag, entry in flag_file.get("flags", {}).items() if flag.startswith("sched_")}
+    problems = []
+    seen: dict[tuple[str, str], int] = {}
+    for match in ARM.finditer(blanked):
+        flag, value = match.group(1), match.group(2)
+        values = list(sched.get(flag, {}).get("values", {}))
+        if flag != "sched_dispatch" and flag not in sched:
+            problems.append(f"{ARMS}: an arm for `{flag}`, which the flag file does not declare")
+            continue
+        if value not in values:
+            problems.append(f"{ARMS}: an arm for {flag}={value}, which the flag file does not declare")
+            continue
+        built = sched[flag]["values"][value].get("built") == "yes"
+        if match.group(3):
+            seen[(flag, value)] = seen.get((flag, value), 0) + 1
+            const, name, place, present = match.group(3), match.group(4), int(match.group(5)), match.group(6)
+            if const != SCHED_CONSTS.get(flag) or name != value or place != values.index(value) \
+                    or present != ("false" if value == "absent" else "true"):
+                problems.append(f"{ARMS}: {flag}={value}'s arm names {const} {{ {name}, {place}, {present} }}, "
+                                f"not {SCHED_CONSTS.get(flag)} {{ {value}, {values.index(value)}, "
+                                f"{'false' if value == 'absent' else 'true'} }}")
+            if not built:
+                problems.append(f"{ARMS}: {flag}={value} is not built, and its arm is not a compile_error! (D7)")
+        elif match.group(7):
+            seen[(flag, value)] = seen.get((flag, value), 0) + 1
+            if built:
+                problems.append(f"{ARMS}: {flag}={value} is built, and its arm is a compile_error!")
+            elif f"{flag}={value}" not in match.group(8):
+                problems.append(f"{ARMS}: {flag}={value}'s compile_error! does not name it")
+    for flag, entry in sched.items():
+        for value in entry.get("values", {}):
+            count = seen.get((flag, value), 0)
+            if count != 1:
+                problems.append(f"{ARMS}: {flag}={value} has {count} arms, not one (D6)")
+    return problems
+
+
+# The modes and their tiers (D9): Throughput the fair tier, SoftRt the
+# realtime and fair tiers, HardRt the deadline or the windows tier.
+MODES = {
+    "Throughput": lambda present: "sched_fair" in present,
+    "SoftRt": lambda present: {"sched_realtime", "sched_fair"} <= present,
+    "HardRt": lambda present: bool({"sched_deadline", "sched_windows"} & present),
+}
+
+
+def mode_problems(profiles: dict[str, dict]) -> list[str]:
+    """Each profile's `modes` is the set of modes whose tiers it has present,
+    both ways (D9); a profile with a claim is `sched_dispatch = "fixed"` (D10)."""
+    problems = []
+    for name, profile in sorted(profiles.items()):
+        flags = profile.get("flags", {})
+        present = {flag for flag, value in flags.items()
+                   if flag.startswith("sched_") and flag != "sched_dispatch" and value != "absent"}
+        have = {mode for mode, needs in MODES.items() if needs(present)}
+        listed = set(profile.get("modes", []))
+        for mode in sorted(listed - set(MODES)):
+            problems.append(f"profiles/{name}.toml: modes names {mode}, which is no mode")
+        for mode in sorted((listed & set(MODES)) - have):
+            problems.append(f"profiles/{name}.toml: allows {mode}, whose tiers are absent")
+        for mode in sorted(have - listed):
+            problems.append(f"profiles/{name}.toml: has {mode}'s tiers present and leaves {mode} out of modes "
+                            "(compiled code no mode uses)")
+        if profile.get("level") != "none" and flags.get("sched_dispatch") != "fixed":
+            problems.append(f"profiles/{name}.toml: a profile with a claim is sched_dispatch=fixed, "
+                            f"not {flags.get('sched_dispatch')} (S10, D10)")
+    return problems
 
 
 # Rule 6e (docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623 (R3)): a
@@ -505,6 +634,52 @@ def self_test() -> list[str]:
     found = composition_root_problems(rooted, {"runtime_settings"})
     if len(found) != 1 or "fs/x.rs" not in found[0]:
         failures.append(f"rule 6e missed a removable flag's cfg outside the root, or refused the root or another flag: {found}")
+    sched_file = {"flags": {"sched_fair": {"values": {"eevdf": {"built": "yes"}, "absent": {"built": "yes"}}},
+                            "sched_realtime": {"values": {"fifo_rr": {"built": "no"}, "absent": {"built": "yes"}}}}}
+    arms = (
+        '#[cfg(ferrix_sched_realtime = "fifo_rr")]\ncompile_error!("sched_realtime=fifo_rr is not built yet");\n'
+        '#[cfg(ferrix_sched_realtime = "absent")]\npub const REALTIME: Value = Value { name: "absent", place: 1, present: false };\n'
+        '#[cfg(ferrix_sched_realtime = "absent")]\npub type Realtime<L> = L;\n'
+        '#[cfg(ferrix_sched_fair = "eevdf")]\npub const FAIR: Value = Value { name: "eevdf", place: 0, present: true };\n'
+        '#[cfg(ferrix_sched_fair = "absent")]\npub const FAIR: Value = Value { name: "absent", place: 1, present: false };\n'
+    )
+    if arms_problems(arms, sched_file):
+        failures.append(f"a complete arms file was refused: {arms_problems(arms, sched_file)}")
+    for what, broken in [
+        ("a declared value with no arm", arms.replace('#[cfg(ferrix_sched_fair = "absent")]\npub const FAIR: Value = '
+                                                      'Value { name: "absent", place: 1, present: false };\n', "")),
+        ("a value with two arms", arms + '#[cfg(ferrix_sched_fair = "eevdf")]\npub const FAIR: Value = '
+                                         'Value { name: "eevdf", place: 0, present: true };\n'),
+        ("an unbuilt value given code", arms.replace('compile_error!("sched_realtime=fifo_rr is not built yet");',
+                                                     'pub const REALTIME: Value = Value { name: "fifo_rr", place: 0, present: true };')),
+        ("a value at the wrong place", arms.replace('name: "eevdf", place: 0', 'name: "eevdf", place: 1')),
+        ("an undeclared value", arms + '#[cfg(ferrix_sched_fair = "bore")]\npub const FAIR: Value = '
+                                       'Value { name: "bore", place: 2, present: true };\n'),
+    ]:
+        if not arms_problems(broken, sched_file):
+            failures.append(f"the arms check passed {what}")
+    found = sched_cfg_problems([
+        ("src/kernel/src/sched_select.rs", '#[cfg(ferrix_sched_fair = "eevdf")]\nconst A: u8 = 0;\n'),
+        ("src/kernel/src/sched/x.rs", 'const B: bool = cfg!(ferrix_sched_fair = "eevdf");\n'),
+        ("src/kernel/src/sched/y.rs", 'const C: bool = cfg!(ferrix_checks = "on");\n'),
+    ])
+    if len(found) != 1 or "sched/x.rs" not in found[0]:
+        failures.append(f"the scheduler-flag rule missed a planted read or refused the arms file or another flag: {found}")
+    good_modes = {"p": {"level": "present", "modes": ["Throughput"],
+                        "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf", "sched_windows": "absent"}}}
+    if mode_problems(good_modes):
+        failures.append(f"a profile whose modes match its tiers was refused: {mode_problems(good_modes)}")
+    for what, profile, expect in [
+        ("a mode whose tiers are absent", {"level": "none", "modes": ["Throughput", "HardRt"],
+                                           "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf"}}, "tiers are absent"),
+        ("a present tier no mode uses", {"level": "none", "modes": ["Throughput"],
+                                         "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf",
+                                                   "sched_windows": "arinc"}}, "leaves HardRt"),
+        ("a claimed profile that is switchable", {"level": "sc2", "modes": ["Throughput"],
+                                                  "flags": {"sched_dispatch": "switchable", "sched_fair": "eevdf"}}, "S10"),
+    ]:
+        if not any(expect in p for p in mode_problems({"p": profile})):
+            failures.append(f"the modes rule passed {what}")
     keys = {"image_keys": {"w": {"values": {"absent": {"allows": ["sc4", "none"]},
                                             "present": {"allows": ["none"], "requires": ["rs=live"]}}}}}
     good = {"p": {"level": "none", "flags": {"rs": "live"}, "image": {"w": "present"}}}
@@ -554,6 +729,13 @@ def main() -> int:
         for problem in table:
             print(f"    {problem}", file=sys.stderr)
         status = 1
+    sched = sched_cfg_problems(files) + arms_problems((ROOT / ARMS).read_text(encoding="utf-8"), flag_file)
+    if sched:
+        print("build-flags: a scheduler flag read outside its arms, or the arms do not follow the flag file "
+              "(SCHED-CLASSES.md §9a):", file=sys.stderr)
+        for problem in sched:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
     rooted = composition_root_problems(files, removable_flags())
     if rooted:
         print("build-flags: a removable crate's flag read outside the composition root (rule 6e):", file=sys.stderr)
@@ -564,9 +746,9 @@ def main() -> int:
     for path in sorted((ROOT / "tools/common/data/profiles").glob("*.toml")):
         with path.open("rb") as handle:
             profile_files[path.stem] = tomllib.load(handle)
-    images = image_key_problems(flag_file, profile_files)
+    images = image_key_problems(flag_file, profile_files) + mode_problems(profile_files)
     if images:
-        print("build-flags: the profiles' image keys do not follow the flag file:", file=sys.stderr)
+        print("build-flags: the profiles' image keys, modes or dispatch do not follow the rules:", file=sys.stderr)
         for problem in images:
             print(f"    {problem}", file=sys.stderr)
         status = 1

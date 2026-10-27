@@ -249,7 +249,8 @@
         "trap/**",
         "user/**",
         "vmap.rs",
-        "kernel_core.rs"
+        "kernel_core.rs",
+        "sched_select.rs"
       ]
     },
     "item": {
@@ -775,6 +776,17 @@
         "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
+      }
+    },
+    "ferrix-kernel-sched-select": {
+      "path": "src/kernel/sched-select",
+      "root": "sched_select.rs",
+      "rings": [
+        "core"
+      ],
+      "unclassified_deps": {
+        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)"
       }
     },
     "ferrix-kernel-item": {

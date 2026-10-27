@@ -81,7 +81,6 @@ pub(crate) use preempt::{
 };
 pub use preempt::{preempt_disable, preempt_enable};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
-pub use stack::NAME as STACK_NAME;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
 pub use wait::{LastLook, WaitQueue};
@@ -899,6 +898,11 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     let online = topology.count();
     let cpus =
         CpuSet::first(online).map_err(|_| "more processors than a scheduling domain holds")?;
+    // The mode's tiers compiled in (SCHED-CLASSES.md §9a, D9), before the
+    // library's own refusal of a mode not written yet.
+    if !ferrix_kernel_sched_select::mode_available(Mode::Throughput) {
+        return Err("the Throughput mode's fair tier is not compiled in");
+    }
     let domain =
         Domain::new(cpus, Mode::Throughput).map_err(|_| "the Throughput domain was refused")?;
     check_partition(core::slice::from_ref(&domain), online)
@@ -930,7 +934,10 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     // The secondaries are asleep in `smp::secondary_main`. Wake them, so each
     // takes up the idle loop that is its half of the scheduler.
     let _ = arch::send_ipi_to_others();
-    wait_for_processors(online)
+    wait_for_processors(online)?;
+    // The stack's name, S1's marker (SCHED-CLASSES.md §10, N3).
+    crate::console::println!("  sched    classes {}", stack::NAME);
+    Ok(())
 }
 
 /// Wait until every processor is in the scheduler, or say which never came.

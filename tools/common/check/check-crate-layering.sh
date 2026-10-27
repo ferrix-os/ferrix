@@ -127,6 +127,9 @@ kernel_rule() {
 kernel_rule ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-load "the kernel's load ring" "ferrix-kernel|ferrix-boot"
+# The scheduler selection sits below the core (docs/SCHED-CLASSES.md §9a,
+# D4): it links only the class crates, never a kernel crate above it.
+kernel_rule ferrix-kernel-sched-select "the scheduler selection" "ferrix-kernel|ferrix-kernel-core|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 2. The host-testable libraries sit below both.

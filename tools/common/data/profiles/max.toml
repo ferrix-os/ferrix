@@ -13,6 +13,10 @@ level = "sc4"
 claim = "IEC 61508-3 SC 4 / ISO 26262 ASIL D, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
+# The scheduling modes a domain may run (docs/SCHED-CLASSES.md §9a, D9):
+# exactly those whose tiers [flags] has present, which check-build-flags
+# holds both ways.
+modes = ["HardRt"]
 image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "off" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = []
@@ -26,7 +30,15 @@ partition_speculation = "exit"
 ipc_fastpath = "off"
 restricted_fastpath = "off"
 kernel_memory = "retyped"
-schedule = "windows"
+# `schedule = "windows"` translated: the EDF is the windows crate's. Fair
+# absent does not decide C3, which stays the customer's.
+# Besides its unbuilt values, fair absent cannot build while the core uses
+# the fair class outside `Stack` (docs/SCHED-CLASSES.md §11's table; D2).
+sched_dispatch = "fixed"
+sched_windows = "arinc"
+sched_deadline = "absent"
+sched_realtime = "absent"
+sched_fair = "absent"
 checks = "on"
 program_barrier = "switch"
 ssbd = "always"

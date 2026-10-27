@@ -156,7 +156,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 38 | - | - | 38 | 109, 117, 132, 167-169, 173-174, 186, 194, 201, 204-206, 213, 228, 234, 237, 239, 251, 273, 281, 283, 294-295, 297-298, 303-305, 307, 309, 314, 317-318, 331-332, 340 |
-| `sched/mod.rs` | `core` | 22 | 3 | 2 | 2 | 1411, 2728 |
+| `sched/mod.rs` | `core` | 22 | 3 | 2 | 2 | 1418, 2735 |
 | `sched/queue.rs` | `core` | 21 | 0 | 0 | 0 | - |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
@@ -202,7 +202,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 415, 861, 1538 |
+| `main.rs` | `item` | 65 | 6 | 4 | 3 | 419, 865, 1541 |
 
 ---
 

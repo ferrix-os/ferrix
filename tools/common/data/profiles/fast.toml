@@ -8,6 +8,10 @@ level = "sc2"
 claim = "IEC 61508-3 SC 2 / ISO 26262 ASIL B, from M7"
 claim_architectures = ["aarch64"]
 buildable_from = "M5"
+# The scheduling modes a domain may run (docs/SCHED-CLASSES.md §9a, D9):
+# exactly those whose tiers [flags] has present, which check-build-flags
+# holds both ways.
+modes = ["HardRt"]
 image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = ["aarch64-uefi-virt"]
@@ -21,7 +25,13 @@ partition_speculation = "partition"
 ipc_fastpath = "on"
 restricted_fastpath = "on"
 kernel_memory = "heap"
-schedule = "edf"
+# Besides its unbuilt values, fair absent cannot build while the core uses
+# the fair class outside `Stack` (docs/SCHED-CLASSES.md §11's table; D2).
+sched_dispatch = "fixed"
+sched_windows = "absent"
+sched_deadline = "edf_cbs"
+sched_realtime = "absent"
+sched_fair = "absent"
 checks = "on"
 program_barrier = "switch"
 ssbd = "always"

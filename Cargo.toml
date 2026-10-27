@@ -110,6 +110,7 @@ members = [
     # The kernel proper.
     "src/kernel",
     "src/kernel/core",
+    "src/kernel/sched-select",
     "src/kernel/item",
     "src/kernel/load",
     "src/kernel/settings",
@@ -242,6 +243,7 @@ ferrix-rtl8169-driver = { path = "src/user/system/native/drivers/net/rtl8169" }
 ferrix-objects = { path = "src/lib/kernel/objects" }
 ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-kernel-core = { path = "src/kernel/core" }
+ferrix-kernel-sched-select = { path = "src/kernel/sched-select" }
 ferrix-kernel-item = { path = "src/kernel/item" }
 ferrix-kernel-load = { path = "src/kernel/load" }
 ferrix-kernel-settings = { path = "src/kernel/settings" }

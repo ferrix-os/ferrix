@@ -22,6 +22,7 @@ ferrix-bootinfo.workspace = true
 ferrix-crng.workspace = true
 ferrix-elf.workspace = true
 ferrix-paging.workspace = true
+ferrix-kernel-sched-select.workspace = true
 ferrix-sched-class.workspace = true
 ferrix-smbios.workspace = true
 ferrix-sync.workspace = true

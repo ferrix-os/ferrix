@@ -17,6 +17,7 @@ path = "../src/kernel_item.rs"
 
 [dependencies]
 ferrix-kernel-core.workspace = true
+ferrix-kernel-sched-select.workspace = true
 ferrix-audit.workspace = true
 ferrix-blkring.workspace = true
 ferrix-bootinfo.workspace = true

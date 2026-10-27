@@ -545,11 +545,14 @@ policy or an accessor.
   `build_script_problems` (four self-test cases) fails a kernel crate with
   another script or none and any other package naming it;
   `check-build-flags.py` rule 1 reads "the kernel's crates".
-* **The flag words** (K4): `kernel_core.rs`'s `build_flag_word!` lists the
-  `cfg!` of every declared value (42), `check-build-flags.py` holds the list
-  to the flag file (three self-test cases); each crate expands it into
-  `CORE_FLAG_WORD`, `ITEM_FLAG_WORD`, `LOAD_FLAG_WORD`, and `main.rs`
-  const-asserts each equal to its own word, naming the crate that differs.
+* **The flag words** (K4): `build_flag_word!` lists the `cfg!` of every
+  declared value (42 when written; 51 since the scheduler's flags), in
+  `kernel_core.rs` until SCHED-CLASSES.md's step 3a moved it to the
+  scheduler selection's `sched_select.rs` (the core re-exports it);
+  `check-build-flags.py` holds the list to the flag file (three self-test
+  cases); each crate expands it into `CORE_FLAG_WORD`, `ITEM_FLAG_WORD`,
+  `LOAD_FLAG_WORD`, `SELECT_FLAG_WORD`, and `main.rs` const-asserts each
+  equal to its own word, naming the crate that differs.
 * **The item's discovery policy handed to the core's device checks** (ledger
   lines 3294, 3331, (P1)-(P6)). Since S3's base the core's
   `device/check.rs`, which the core's `device::publish` runs, named

@@ -101,7 +101,11 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
 | `restricted_fastpath` | `off`, `on` | K1's fastpath for the restricted exit and re-entry. Requires `personality=user` | per K1's review | `on` | not applicable | not applicable | per K1's review | — | M3 |
 | `kernel_memory` | `retyped`, `heap` | K16's memory from the job's own reservation, or today's fallible, charged shared heap | `retyped` | `heap` | `heap` | `heap` | `retyped`: all; `heap`: `present` (AoU-5), `sc2` (under `fast`'s justification), `none` | `heap` only | M6 |
-| `schedule` | `windows`, `edf`, `fair` | K9's static windows with EDF inside them; stage 14's HardRt (partitioned EDF with CBS); or today's fair scheduler | `windows` | `edf` | `fair` | `fair` | `windows`: all; `edf`: `sc2`, `present`, `none`; `fair`: `present` (with AoU-4: no timing claim), `none` | `fair` only | M3 |
+| `sched_dispatch` | `fixed`, `switchable` | the scheduler stack compiled in: one implementation a tier (`fixed`), or every one the profile compiles, chosen per domain at run time (`switchable`, desktop only; SCHED-CLASSES.md §5a) | `fixed` | `fixed` | `fixed` | `fixed` | `fixed`: all; `switchable`: `none` | `fixed` only | stage 14 |
+| `sched_windows` | `arinc`, `absent` | K9's static windows with EDF inside them (ferrix-sched-windows), the outermost tier | `arinc` | `absent` | `absent` | `absent` | `arinc`: all; `absent`: all | `absent` only | M3 |
+| `sched_deadline` | `edf_cbs`, `absent` | stage 14's HardRt tier, partitioned EDF with CBS (ferrix-sched-edf) | `absent` | `edf_cbs` | `absent` | `absent` | `edf_cbs`: `sc2`, `present`, `none`; `absent`: all | `absent` only | M3 |
+| `sched_realtime` | `fifo_rr`, `absent` | stage 14's SoftRt tier, fixed priorities (ferrix-sched-fifo) | `absent` | `absent` | `absent` | `absent` | `fifo_rr`: `none`; `absent`: all | `absent` only | stage 14 |
+| `sched_fair` | `eevdf`, `absent` | the fair tier, EEVDF (ferrix-sched-fair), today's scheduler | `absent` (C3 open) | `absent` | `eevdf` | `eevdf` | `eevdf`: `present` (with AoU-4: no timing claim; under F-76 until S7), `none`; `absent`: all | `eevdf` and `absent` declared; `absent` builds once the core uses fair only through `Stack` | today |
 | `checks` | `on`, `off` | the in-kernel boot checks compiled in. With `on`, the boot option `ferrix.checks` still chooses whether they run, as today; a certified profile permits it only with the checks running. `off` is for ad-hoc builds only, and `xtask check` builds an `off` variant on every architecture so it cannot rot (BF7) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | always compiled in | M0 |
 | `program_barrier` | `switch`, `session` | `switch`: the barrier at every switch between programs not in one marked speculation domain (today's rule, SPECULATION §3). `session`: §3.1 below | `switch` | `switch` | `session` | `switch` | `switch`: all; `session`: `none` | `switch` | M0 |
 | `ssbd` | `always`, `on_request` | Speculative Store Bypass Disable for every program (today), or per thread for programs that ask (§3.1) | `always` | `always` | `on_request` | `always` | `always`: all; `on_request`: `none` | `always` | M0 |
@@ -335,7 +339,11 @@ runtime_trades = "none"
 ipc_fastpath = "on"
 restricted_fastpath = "on"
 kernel_memory = "heap"
-schedule = "edf"
+sched_dispatch = "fixed"
+sched_windows = "absent"
+sched_deadline = "edf_cbs"
+sched_realtime = "absent"
+sched_fair = "absent"
 checks = "on"
 ```
 
@@ -349,7 +357,7 @@ profile.
 **The boot line**, printed early by every kernel:
 
 ```
-build profile=fast level=sc2 personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap schedule=edf checks=on
+build profile=fast level=sc2 personality=user fs=server mitigations=on partition_speculation=partition ipc_fastpath=on restricted_fastpath=on kernel_memory=heap sched_dispatch=fixed sched_windows=absent sched_deadline=edf_cbs sched_realtime=absent sched_fair=absent checks=on
 ```
 
 The kernel computes every word of it from `cfg!` (rule 6). An ad-hoc build
@@ -554,7 +562,14 @@ Design on branch `microkernel-plan`, 2026-10-13.
   the binary), which `check-item-boundary.py` holds (K1); the core's
   `build_flag_word!` names every declared value, `check-build-flags.py`
   holds it to the flag file, each crate expands it into a word of its own,
-  and the binary const-asserts the four words equal (K4).
+  and the binary const-asserts the four words equal (K4). Since step 3a of
+  SCHED-CLASSES.md (§9a) the macro and `flag_word` live in the scheduler
+  selection's arms file, `src/kernel/src/sched_select.rs`, the lowest
+  kernel crate, the core re-exporting both, and the binary asserts that
+  crate's word too. **The word holds 51 of its 64 values** (5 profiles, 4
+  levels, 42 flag values): 13 left. `flag_word` refuses more than 64 at
+  compile time (D5), so a flag file that outgrows the word stops the build
+  rather than leaving values two crates could differ in unseen.
 * **`runtime_settings`, `settings_writer` and the removable crate
   (2026-10-24, branch `feature/settings-crate`)**: the consultant's rulings
   3558 (5)-(14), amended by 3595 (the crash hold and `lode-crashd` leave
@@ -563,8 +578,10 @@ Design on branch `microkernel-plan`, 2026-10-13.
   and the crate (`KERNEL-CRATES.md` §6). Design review before code: **OK IF
   (R1)-(R21), ledger line 3623**, each condition answered in
   `KERNEL-CRATES.md` §6 and the landing message. Built: the flag (last in
-  the flag file's order, so `audit_words` packs 15 flags in bits 0 to 29
-  and the earlier flags keep their bits), every profile setting it and
+  the flag file's order, so `audit_words` packed 15 flags in bits 0 to 29
+  and the earlier flags kept their bits; since the scheduler's flags
+  replaced `schedule` it packs the 14 others in bits 0 to 27, the
+  scheduler's in the second word, SCHED-CLASSES.md §9a), every profile setting it and
   both image keys, the image manifest, xtask's writer refusal,
   `cargo xtask test-removable`, and the checks of §6.1.
 

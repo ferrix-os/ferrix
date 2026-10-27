@@ -479,6 +479,7 @@ dependencies = [
  "ferrix-crng",
  "ferrix-elf",
  "ferrix-kernel-load",
+ "ferrix-kernel-sched-select",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
@@ -503,6 +504,7 @@ dependencies = [
  "ferrix-fdt",
  "ferrix-frame",
  "ferrix-heap",
+ "ferrix-kernel-sched-select",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -530,6 +532,7 @@ dependencies = [
  "ferrix-elf",
  "ferrix-fdt",
  "ferrix-kernel-core",
+ "ferrix-kernel-sched-select",
  "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-objects",
@@ -589,6 +592,14 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-sched-select"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
 ]
 
 [[package]]

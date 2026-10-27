@@ -1269,7 +1269,8 @@ level the customer chose earlier: SC 4 / ASIL D.)
 **The flags are defined in [`docs/BUILD-FLAGS.md`](BUILD-FLAGS.md)** (the
 customer, 2026-10-13: "a good start would then be to define the build time
 flags"): `personality`, `fs`, `mitigations`, `partition_speculation`,
-`ipc_fastpath`, `restricted_fastpath`, `kernel_memory`, `schedule` and
+`ipc_fastpath`, `restricted_fastpath`, `kernel_memory`, the scheduler's
+`sched_*` flags (which replaced `schedule`, SCHED-CLASSES.md §9a) and
 `checks`, each a compile-time key-value `--cfg`, never a Cargo feature
 (`kernel_cargo_features` stays 0) and never a boot option. Code a profile
 does not select is not in its image, so it is neither dead nor deactivated

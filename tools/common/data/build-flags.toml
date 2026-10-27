@@ -126,11 +126,40 @@ why = "K16's memory retyped from the job's own reservation, or today's fallible,
 values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
-[flags.schedule]
-why = "K9's static windows with EDF inside them, stage 14's HardRt (partitioned EDF with CBS), or today's fair scheduler"
-values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
-values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
-values.fair = { allows = ["present", "none"], lands = "today", built = "yes" }
+# The scheduler (docs/SCHED-CLASSES.md §6, §9a; ledger line 20 of the
+# container's consultant ledger, D1): how the stack is dispatched, then one
+# flag a tier, outermost first, each value naming the crate that fills it.
+# The selection crate's arms file (src/kernel/src/sched_select.rs) is the
+# only code that reads them (D6). A value that succeeds one of `schedule`'s
+# keeps its allows; one with none starts at `none`; `absent` allows every
+# level, S1's absence evidence making it true in a claimed build (3b). No
+# `sched_ext` flag yet: a flag has two values at least, and ext has no
+# design to give it its second; it arrives with that design.
+[flags.sched_dispatch]
+why = "the scheduler stack compiled in, fixed (one implementation a tier), or switchable at run time among the ones compiled (desktop only, SCHED-CLASSES.md §5a)"
+values.fixed = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.switchable = { allows = ["none"], lands = "stage 14", built = "no" }
+
+[flags.sched_windows]
+why = "K9's static time windows, the outermost tier, with EDF inside each window (ferrix-sched-windows), or none"
+values.arinc = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
+values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+
+[flags.sched_deadline]
+why = "stage 14's HardRt tier, partitioned EDF with CBS servers (ferrix-sched-edf), or none"
+values.edf_cbs = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
+values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+
+[flags.sched_realtime]
+why = "stage 14's SoftRt tier, fixed priorities FIFO and round-robin (ferrix-sched-fifo), or none"
+values.fifo_rr = { allows = ["none"], lands = "stage 14", built = "no" }
+values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+
+# eevdf's `present` stands under F-76 until S7 classifies ferrix-sched-fair.
+[flags.sched_fair]
+why = "the fair tier, EEVDF (ferrix-sched-fair), today's scheduler, or none"
+values.eevdf = { allows = ["present", "none"], lands = "today", built = "yes" }
+values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.checks]
 why = "the in-kernel boot checks compiled in; with `on`, ferrix.checks still chooses whether they run. `off` is for ad-hoc builds alone, built by xtask check on every architecture (BF7)"
