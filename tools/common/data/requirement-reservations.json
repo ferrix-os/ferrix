@@ -12,6 +12,16 @@
   ],
   "reservations": [
     {
+      "ids": [
+        "H.QUOTA.18-21",
+        "L.mm.83-90"
+      ],
+      "owner": "kmem-class",
+      "branch": "kmem-class",
+      "date": "2026-10-27",
+      "purpose": "F-98, docs/KMEM-BOUNDS.md (the consultant's OK IF K1-K10, ledger 4626; K1 OK IF K1.1-K1.5, ledger 4643): R1-R4 at the item level (H.QUOTA.18-21), and their mechanisms (L.mm.83-90): the witness's answered and oversized counts, the region map's limit refused ENOMEM, the charge before the heap, the watermark on charged heap"
+    },
+    {
       "ids": ["L.sched.96-101"],
       "owner": "chardev-sigrace",
       "branch": "bugfix/tsc-aux, feature/sched-setaffinity",
