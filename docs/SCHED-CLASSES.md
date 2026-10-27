@@ -23,7 +23,10 @@ neither dead nor deactivated (DO-178C §6.4.4.3). Inside a kernel, which of
 the compiled classes a domain *uses* is its mode, chosen at run time, and
 a mode whose classes are not compiled is refused, as `domain.rs` refuses
 `SoftRt` and `HardRt` today. Dispatch is static: no `dyn`, no function
-table, nothing registered at run time.
+table, nothing registered at run time. A certified profile fixes one
+implementation a tier, monomorphised and inlined (§5); the desktop profile
+may compile several and switch among them at run time through the same
+trait (§5a).
 
 ## 2. Why build flags and not Cargo features
 
@@ -149,38 +152,114 @@ shape: `fn boost(entity: &mut Self::Entity, donor: &Donor)` and its
 priority or reservation. It is part of the trait from the start so that
 the owned wait queue does not need to know which classes exist.
 
-## 5. How the kernel reaches it
+## 5. How the kernel reaches it: a selection crate, chosen before the core
 
 The scheduler is called from everywhere in the core: the wake paths, the
-futex and address-wait tables, IPC's direct switch, the timer. Those are
-compiled before the binary that chooses the classes, so they cannot name
-the stack's type. KERNEL-CRATES §6.3 already settled what to do in that
-case ("a caller that cannot name it: a link-time binding"):
+futex and address-wait tables, IPC's direct switch, the timer. A first
+draft of this design bound it at link time, as `Setters` is
+(KERNEL-CRATES §6.3, "a caller that cannot name it"): the core calling
+`__ferrix_sched_<op>` symbols the binary defines. That is static but not
+free: every scheduler operation becomes an out-of-line call across a crate
+boundary that rustc cannot inline (fat LTO in `release` may recover it;
+`dev` and `iterate` do not), on the IPC round trip's path. The customer
+asked for compile-time traits with no run-time cost, so the choice moves
+*before* the core instead:
 
-1. `sched/class.rs` in the core declares the seam with the existing
-   `seam!` macro: one list of the operations above as
-   `__ferrix_sched_<op>` symbols, with safe wrappers the scheduler calls,
-   and a `bind_scheduler!(Stack)` macro.
-2. The binary's root binds it once per profile, under the flags:
+1. **`ferrix-kernel-sched-select`**, a kernel crate of a few lines, sits
+   below the core in the crate graph. It depends on the interface crate and
+   on every class crate, and holds one item, chosen by the build flags:
    ```rust
-   #[cfg(all(ferrix_sched_fair = "present", ferrix_sched_fifo = "present",
-             ferrix_sched_edf = "absent"))]
-   ferrix_kernel_core::bind_scheduler!(Over<ferrix_sched_fifo::Fifo, ferrix_sched_fair::Fair>);
+   #[cfg(ferrix_sched_dispatch = "fixed")]
+   pub type Stack = /* the profile's classes, e.g. */
+       Over<ferrix_sched_windows::Arinc, ferrix_sched_edf::EdfCbs>;
+   #[cfg(ferrix_sched_dispatch = "switchable")]
+   pub type Stack = ferrix_sched_switch::Switchable<DesktopSet>;
    ```
-   None or two invocations do not link, so the linker is the registration
-   check, as for `Setters`.
-3. **Per-task state lives with the stack, not in `Task`.** `Task`'s layout
+   (the full type is generated from the tier flags by the same build
+   script that generates the flag word, so it is written in one place).
+2. **The core names `Stack` directly**: `Stack::pick(..)`, `Stack::charge(..)`.
+   rustc monomorphises and inlines it into the core in every profile, dev
+   included: no symbol, no `unsafe`, no registration. A crate the flags do
+   not select is named nowhere, so rustc never loads it and the linker
+   never sees it, as before. The type checker is the registration check:
+   a profile whose flags select no `Stack`, or two, does not compile.
+3. **What it asks of the rules.** BUILD-FLAGS.md rule 6e allows a recorded
+   flag's cfg only in `main.rs`, `build_flags.rs` and the core's flag word.
+   This crate is one more such file, the only one for the scheduler, and it
+   is the composition root's choice moved earlier, not a cfg spread through
+   the core. Its flag word is const-asserted equal to the binary's (K4),
+   and `removable_problems` holds every class crate to being named only
+   here. If the consultant refuses the exception, the link-time binding
+   above is the fallback, with its cost measured.
+4. **Per-task state lives with the stack, not in `Task`.** `Task`'s layout
    cannot depend on which classes are compiled without making every core
-   type generic. The bound stack owns a table of `Entity` values indexed by
-   the task's slot, made at boot with the task limit's capacity, and the
-   core passes the slot. This keeps `Task` one layout for every profile.
-4. **The cost** is one direct, out-of-line call a scheduler operation
-   instead of today's inlined calls: a few nanoseconds, measured against
-   the IPC round trip (the `optimize-ipc-round-trip` budget) before
-   landing. If it is too much on the direct-switch path, that one path may
-   take the stack's type through a generic entry instantiated in the binary
-   (the §6.3 "caller that names it" shape), since the binary does reach
-   it.
+   type generic over the scheduler. The stack owns a table of `Entity`
+   values indexed by the task's slot, made at boot with the task limit's
+   capacity, and the core passes the slot: one indexed load where today
+   there is a field access.
+
+## 5a. Fixed for the certified builds, switchable for desktop
+
+The customer (2026-10-26): "Ideally for the desktop build it should be
+dynamic, while for the max security build it should be fixed in place
+compiled in." One flag, **`sched_dispatch`**, says which:
+
+| Value | `Stack` is | Allows | Profiles |
+|---|---|---|---|
+| `fixed` | the profile's tiers, stacked with `Over` and monomorphised: one implementation a tier, no run-time choice | `sc4`, `present`, `sc2`, `none` | `max`, `fast`, `present` |
+| `switchable` | `Switchable<Set>`: every implementation the profile compiles, a run-time choice a tier per domain | `none` | `desktop` |
+
+**`Switchable` is one more implementation of `SchedClass`**, in its own
+removable crate, `ferrix-sched-switch`, so the core is the same code in
+both: it calls `Stack::pick` either way. `Switchable<Set>` holds, a tier, an
+enum of the implementations the desktop profile compiles (say
+`Fair::{Eevdf, Bore}`, `Realtime::{FifoRr}`, `Deadline::{EdfCbs}`) and,
+a domain, which variant a tier uses now. Each operation is a `match` on
+that variant forwarding to the chosen crate's function, monomorphised: no
+`dyn`, no function pointers (the trait's associated types do not allow
+trait objects anyway), one well-predicted branch a call, since the choice
+changes rarely. A `max` kernel never links `ferrix-sched-switch` or any
+implementation it does not stack, so it carries no switching code and no
+alternative scheduler: absent, not deactivated.
+
+With `switchable`, a tier flag's value becomes a set (`sched_fair =
+["eevdf", "bore"]`): the compiled implementations the domain may choose
+among; with `fixed` it must be one value, which `check-build-flags.py`
+holds. The profile rule against deactivated code still applies: every
+compiled implementation must be one a domain may select.
+
+**The run-time switch.** A domain changes a tier's implementation through
+the same handle that changes its mode (GAME-PATH's session-held domain
+handle), with a right of its own, and the same quiescent protocol as a
+mode switch (REALTIME.md §3.7), because a scheduler's per-task state means
+nothing to another (EEVDF's lag is not BORE's burst score nor EDF's
+deadline):
+
+1. **Prepare**: make the new implementation's per-CPU queues for the
+   domain's CPUs, before anything stops; with no memory, refuse.
+2. **Stop admitting** into the tier on those CPUs.
+3. **Quiesce**: every CPU of the domain passes a scheduling point (an IPI
+   rendezvous); `smp::synchronize` lets lock-free readers of the old
+   variant finish.
+4. **Move the tasks**: each task of the tier is dequeued from the old
+   implementation and enqueued into the new one with fresh per-task state
+   from its `Params`; a task whose `Params` the new implementation does not
+   accept is demoted with an error the switching caller sees, never
+   silently (ARCHITECTURE.md §5).
+5. **Swap** the domain's variant in one store, **resume**, and free the old
+   queues after another grace period.
+
+No guarantee holds across the switch, and the transition is bounded by the
+longest non-preemptible section, the IPI latency and the number of tasks
+moved; the desktop has no claim to keep, which is why this is the desktop's
+only.
+
+**Loading a scheduler that was not compiled in** is a different thing.
+Linux does it with `sched_ext` and BPF; Ferrix has neither BPF nor loadable
+kernel modules. On desktop it is the `ext` tier's userspace agent (§6a),
+which `switchable` can select like any other implementation, with its
+watchdog falling back to the fair tier. A verified in-kernel bytecode for
+policies would be a project of its own, and never in a certified profile.
 
 ## 6. Flags, modes and profiles
 
@@ -241,8 +320,9 @@ line, never a change to the core.
    and rises only with its own evidence, so adding one can never weaken a
    certified profile: a certified profile names its values explicitly
    (BUILD-FLAGS.md rule 4) and does not pick up a new one by default.
-3. One `bind_scheduler!` line in the root for each combination the
-   profiles use, and one entry in `composition_root.removable`, so the
+3. Its name in the selection crate's generated `Stack` (and in
+   `Switchable`'s set, if desktop compiles it), and one entry in
+   `composition_root.removable`, so the
    generic checks (`removable_problems`, the ELF symbol check,
    `test-removable`) cover it with no new check code.
 4. Its Linux policy numbers declared (below), if it takes any.
@@ -306,12 +386,14 @@ trait, added as above, with its own review.
 3. **Where SoftRt's fair server lives**: in `ferrix-sched-fifo` (it exists
    only to protect fair from fifo) or as a small `ferrix-sched-server`
    crate that EDF could reuse.
-4. **The direct-switch path** (§5.4): accept the out-of-line call, or
-   specialise that path.
+4. **The selection crate's cfg exception** (§5.3), or the link-time
+   binding with its cost.
+5. **Switchable for desktop** (§5a): accepted as the desktop's only, with
+   the switch protocol; and whether `fast` stays `fixed`.
 
 ## 8. What it costs, and what it would cost with Cargo features
 
-**This design:** moving today's scheduler behind the seam is a refactor of
+**This design:** moving today's scheduler behind the selection crate is a refactor of
 the core with no behaviour change (fair alone, the `present` profile),
 landed and gated before any new class, as `Setters` was. Then each new
 class is a crate, its flag, its binding line and its checks. Extending
@@ -330,11 +412,14 @@ at the price of the configuration space the item was built to avoid.
 ## 9. Order
 
 1. This design, reviewed; requirement ids reserved on `develop`.
-2. `ferrix-sched-class` and the seam, with `ferrix-sched` moved to
-   `ferrix-sched-fair` behind it. No behaviour change; the IPC round trip
-   measured before and after.
+2. `ferrix-sched-class` and the selection crate, with `ferrix-sched` moved
+   to `ferrix-sched-fair` behind it, `fixed`. No behaviour change; the IPC
+   round trip measured before and after.
 3. The per-class flags replacing `schedule`, with the profile rules and
    their controls.
 4. Then stage 14's classes, each as its own crate and landing, in
    REALTIME.md §4's order: `ferrix-sched-fifo` with SoftRt, then
    `ferrix-sched-edf` with HardRt, then `ferrix-sched-windows` with M3.
+5. `ferrix-sched-switch` and `sched_dispatch = "switchable"` for desktop,
+   once there are two implementations of a tier to switch between (BORE
+   beside EEVDF, or the `ext` agent).
