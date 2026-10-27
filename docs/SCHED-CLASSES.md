@@ -67,6 +67,7 @@ cost.
 | `ferrix-sched-fifo` | core | `SCHED_FIFO` and `SCHED_RR`: 99 priority lists and a bitmap, the RR quantum, the deferred fair server |
 | `ferrix-sched-edf` | core | partitioned EDF with a hard CBS: reservations, refills, per-CPU admission |
 | `ferrix-sched-windows` | core | later (M3): the static time-partition schedule of MICROKERNEL.md K9, with EDF inside each window |
+| more, later | none until evidenced | BORE, a userspace `sched_ext`-style agent, and others: each a crate and a flag value (§6a) |
 | idle | in the kernel | always present: the bottom of every stack, not a crate |
 
 The class crates are pure: no `unsafe`, no `ferrix_` cfg (BUILD-FLAGS.md
@@ -183,21 +184,35 @@ case ("a caller that cannot name it: a link-time binding"):
 
 ## 6. Flags, modes and profiles
 
-* **One flag per class**: `sched_fair`, `sched_fifo`, `sched_edf`,
-  `sched_windows`, each `present` or `absent`, each value declaring the
-  highest level it allows, as every flag does. The present `schedule`
-  flag (`fair` | `edf` | `windows`) is replaced by them; the profiles keep
-  their meaning:
+* **One flag per tier, whose value names the crate that fills it.** A
+  *tier* is a place in the stack, in Linux's order: `windows` (the static
+  time partitions, outermost), `deadline`, `realtime` (fixed priority),
+  `fair`, `ext` (an extensible, agent-driven scheduler, §6a), then idle,
+  always there. The flags are `sched_windows`, `sched_deadline`,
+  `sched_realtime`, `sched_fair` and `sched_ext`, and each value is a crate
+  or `absent`, declaring the highest level it allows as every flag value
+  does. The present `schedule` flag (`fair` | `edf` | `windows`) is
+  replaced by them. Today's values, with room for more (§6a):
 
-  | Profile | fair | fifo | edf | windows |
-  |---|---|---|---|---|
-  | `max` | absent or present (§7) | absent | present | present |
-  | `fast` | present | present | present | absent |
-  | `desktop` | present | present | present | absent |
-  | `present` (today) | present | absent | absent | absent |
+  | Flag | Values |
+  |---|---|
+  | `sched_windows` | `arinc` (`ferrix-sched-windows`), `absent` |
+  | `sched_deadline` | `edf_cbs` (`ferrix-sched-edf`), `absent` |
+  | `sched_realtime` | `fifo_rr` (`ferrix-sched-fifo`), `absent` |
+  | `sched_fair` | `eevdf` (`ferrix-sched-fair`), `absent` |
+  | `sched_ext` | `absent` |
 
-* **Modes are the run-time choice among compiled classes.** `Throughput`
-  needs fair; `SoftRt` needs fifo and fair; `HardRt` needs edf. A domain
+  | Profile | windows | deadline | realtime | fair | ext |
+  |---|---|---|---|---|---|
+  | `max` | `arinc` | `edf_cbs` | `absent` | `absent` or `eevdf` (§7) | `absent` |
+  | `fast` | `absent` | `edf_cbs` | `fifo_rr` | `eevdf` | `absent` |
+  | `desktop` | `absent` | `edf_cbs` | `fifo_rr` | `eevdf` | `absent` |
+  | `present` (today) | `absent` | `absent` | `absent` | `eevdf` | `absent` |
+
+* **Modes are the run-time choice among compiled tiers.** `Throughput`
+  needs the fair tier; `SoftRt` needs the realtime and fair tiers; `HardRt`
+  needs the deadline tier. A mode names tiers, never crates, so it does not
+  change when a tier's crate does. A domain
   asked for a mode whose classes are absent is refused `ModeUnavailable`,
   exactly as today. `Mode::classes()` becomes a `const fn` of the compiled
   flags, so `SoftRt` in a kernel without fifo is a refusal the compiler
@@ -209,6 +224,75 @@ case ("a caller that cannot name it: a link-time binding"):
   every mode it allows must have its classes present. `check-build-flags.py`
   enforces both, with a planted profile of each kind as its negative
   controls.
+
+## 6a. Open for schedulers added later
+
+The set of schedulers is meant to grow: BORE, `SCHED_RR` on its own,
+`sched_ext`-style schedulers and whatever comes after. Nothing in the design
+names a fixed list, and adding one is a crate, a flag value and a binding
+line, never a change to the core.
+
+**Adding a scheduler** is these steps, and only these:
+
+1. A crate under `src/lib/kernel/` implementing `SchedClass`, pure as the
+   others (§3): no `unsafe`, no `ferrix_` cfg, host-tested on its own.
+2. A value of its tier's flag in `build-flags.toml`, naming the crate and
+   the highest level it allows. A new scheduler starts at `none` (no claim)
+   and rises only with its own evidence, so adding one can never weaken a
+   certified profile: a certified profile names its values explicitly
+   (BUILD-FLAGS.md rule 4) and does not pick up a new one by default.
+3. One `bind_scheduler!` line in the root for each combination the
+   profiles use, and one entry in `composition_root.removable`, so the
+   generic checks (`removable_problems`, the ELF symbol check,
+   `test-removable`) cover it with no new check code.
+4. Its Linux policy numbers declared (below), if it takes any.
+
+**A tier holds one crate per build**, chosen by its flag, so two
+implementations of the same tier are alternatives: BORE or EEVDF, never
+both picking for one CPU. A later step may let one build hold two crates
+in a tier for different domains (EEVDF for a server domain, BORE for a
+desktop one): the flag's value becomes a set, the domain's mode names
+which, and the profile rule still holds every compiled crate to a mode
+that uses it. That is a change to the flag and to `Mode`, not to the trait.
+
+**The trait stays stable as it grows.** The operations every scheduler
+needs are required methods. An operation added later (a new hint, a new
+accounting event) arrives as a provided method whose default refuses or
+does nothing, so existing crates still compile. A profile that claims a
+level then requires every crate it links to implement each such method
+itself, which a check reads from the crate (a default inherited in a
+certified crate is a decision nobody made). Each crate also declares what
+it is, as associated constants the stack and the checks read:
+
+```rust
+/// Which policies a task may ask this crate for, by Linux number
+/// (SCHED_OTHER 0, FIFO 1, RR 2, BATCH 3, IDLE 5, DEADLINE 6, EXT 7)
+/// and by native name.
+const POLICIES: &'static [Policy];
+/// Whether `admit` can refuse: true for a class with a guarantee to keep.
+const ADMITS: bool;
+```
+
+The Linux personality's `sched_setscheduler` and `sched_setattr` look a
+policy up in the compiled tiers' `POLICIES`, and a policy no compiled crate
+declares is `EINVAL`, as `SCHED_FIFO` is today. So `SCHED_EXT` exists in a
+kernel exactly when an ext crate does.
+
+**The examples the customer named:**
+
+| Scheduler | Tier | How it fits |
+|---|---|---|
+| **BORE** (Burst-Oriented Response Enhancer, a patch on Linux's EEVDF that weights a task by how bursty it has been, for desktop responsiveness) | `fair` | `ferrix-sched-bore`, a value `bore` of `sched_fair`. It shares most of EEVDF's code, so the fair crates should keep the EEVDF run queue in a library both use, with BORE adding its burst score to the eligibility and the slice. `desktop` could choose it; a certified profile would not without its own evidence. |
+| **`SCHED_RR` on its own** | `realtime` | `fifo_rr` already serves both policies (one priority bitmap; RR adds a quantum on the CPU's one-shot timer). If RR alone is wanted, a crate `ferrix-sched-rr` declaring only policy 2 is another value of `sched_realtime`. |
+| **`sched_ext`** (Linux 6.12: a scheduler written in BPF and loaded at run time, with a watchdog that falls back to the fair class when it stalls) | `ext` | Ferrix has no BPF, so the policy runs as a **userspace agent**: `ferrix-sched-agent`, a value `agent` of `sched_ext`, keeps a per-CPU queue the agent fills through a native channel and shared ring (Google's ghOSt is the same shape), and a watchdog that hands the agent's tasks back to the fair tier if the agent misses a deadline or dies, as `sched_ext`'s does. Policy 7 maps to it. It is the clearest case for "absent" in a certified profile: a policy loaded at run time is code no certification has seen. |
+| **CFS, a classic O(1), MuQSS, …** | `fair` | Each another value of `sched_fair`, for comparison or for a workload. |
+| **Static priority ceilings, a mixed-criticality class, a cyclic executive for a domain** | `deadline` or `windows` | Further values of those tiers. |
+
+**What stays fixed** is the trait's shape (per-CPU queue state, per-task
+state, admit, enqueue, dequeue, pick, charge, preempts, next event, check,
+boost) and the tier order. A scheduler that needs something none of these
+can say -- say, gang scheduling across CPUs -- needs a new operation in the
+trait, added as above, with its own review.
 
 ## 7. Decisions for the customer and the consultant
 
