@@ -285,3 +285,15 @@ fn a_bad_configuration_is_refused_by_the_class_it_is_for() {
     assert!(matches!(Stack::new_queue((0, 1)), Err(Refusal::Invalid)));
     assert!(matches!(Stack::new_queue((1, 0)), Err(Refusal::Invalid)));
 }
+
+#[test]
+fn the_stack_check_finds_a_tier_running_out_of_turn() {
+    let mut q = stack();
+    Stack::enqueue(&mut q, 1, "high", Up::Upper(())).unwrap();
+    let _ = Stack::pick(&mut q);
+    Stack::check(&q).unwrap();
+    // The lower tier made to run behind the stack's back.
+    Stack::enqueue(&mut q, 2, "low", Up::Lower(())).unwrap();
+    let _ = Lowly::pick(&mut q.lower);
+    assert!(Stack::check(&q).is_err());
+}
