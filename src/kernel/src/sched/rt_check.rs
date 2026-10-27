@@ -53,8 +53,11 @@ use super::{PolicyRefused, WaitQueue};
 const GAP_NANOS: u64 = 200_000;
 
 /// How soon a woken real-time task must run while a fair task spins on its
-/// processor.
-const WAKE_NANOS: u64 = 20_000_000;
+/// processor: without the wake's preemption it would wait for ever, the fair
+/// task running tickless, so a bound well above an emulated processor's
+/// stalls on a loaded host still tells the two apart (a loaded gate host
+/// missed 20 ms, 2026-10-27).
+const WAKE_NANOS: u64 = 100_000_000;
 
 /// The round-robin case's window.
 const RR_WINDOW_NANOS: u64 = 400_000_000;
