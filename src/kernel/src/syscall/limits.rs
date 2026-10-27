@@ -11,21 +11,23 @@
 //! and a shell prints it for `ulimit -s`, and the rest read as unlimited,
 //! which is the truth about a kernel that does not count those resources.
 //!
-//! # What the scheduler is asked
+//! # The scheduler
 //!
-//! A thread's processors (`sched_setaffinity`, applied and read back as
-//! Linux 7.0 does: `docs/GAME-MODE-SCHED.md` §2.1) and its slice request
-//! (`sched_setattr`, §2.2). Policy and priority are validated as Linux
-//! validates them and then not applied, and each handler says so.
+//! Policy and priority are the scheduler's: `SCHED_FIFO` and `SCHED_RR`, in
+//! a build with a tier above fair, move a thread's task to that tier, under
+//! Linux's permission rule (`docs/SCHED-CLASSES.md` §9e). Affinity is
+//! validated as Linux validates it and then not applied, as its handler
+//! says; the processors themselves are real, and that is what
+//! `sched_getaffinity` reports.
 
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
+use ferrix_sched_class::{RtParams, RtPolicy};
 use ferrix_vfs::fd::MAX_LIMIT;
-
-use ferrix_sched::CpuSet;
 
 use crate::sched;
 use crate::smp;
@@ -62,6 +64,10 @@ pub(crate) fn dispatch(
         Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2]),
         Syscall::SchedGetattr => sys_sched_getattr(process, int(a[0]), a[1], a[2] as u32, a[3]),
         Syscall::SchedSetscheduler => sys_sched_setscheduler(process, int(a[0]), int(a[1]), a[2]),
+        Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2] as u32),
+        Syscall::SchedGetattr => {
+            sys_sched_getattr(process, int(a[0]), a[1], a[2] as u32, a[3] as u32)
+        }
         Syscall::SchedGetPriorityMax => priority_range(int(a[0])).map(|(_, max)| max),
         Syscall::SchedGetPriorityMin => priority_range(int(a[0])).map(|(min, _)| min),
         Syscall::SchedRrGetInterval => {
@@ -108,6 +114,8 @@ pub(crate) fn limit_of(process: &Process, resource: u32) -> Result<Limit, Errno>
             soft: STACK_DEFAULT,
             hard: RLIM_INFINITY,
         }),
+        // Linux's default: no real-time priority without `CAP_SYS_NICE`.
+        RLIMIT_RTPRIO => stored.unwrap_or(Limit { soft: 0, hard: 0 }),
         _ => stored.unwrap_or(Limit {
             soft: RLIM_INFINITY,
             hard: RLIM_INFINITY,
@@ -422,316 +430,325 @@ pub(crate) fn sys_sched_setaffinity(
     }
 }
 
-/// `SCHED_OTHER`, the only policy this kernel runs anything under.
+/// `SCHED_OTHER`.
 const SCHED_OTHER: i32 = 0;
+/// `SCHED_FIFO`.
+const SCHED_FIFO: i32 = 1;
+/// `SCHED_RR`.
+const SCHED_RR: i32 = 2;
+/// `SCHED_RESET_ON_FORK`, or'ed into a policy.
+const SCHED_RESET_ON_FORK: i32 = 0x4000_0000;
+/// `RLIMIT_RTPRIO`: the highest real-time priority a task may raise itself
+/// to without `CAP_SYS_NICE`.
+const RLIMIT_RTPRIO: u32 = 14;
 
-/// The pid checks every `sched_*param` and `sched_*scheduler` call makes
-/// first: a null structure or a negative pid is `EINVAL` before any lookup.
-fn param_args(pid: i32, at: u64) -> Result<(), Errno> {
-    if at == 0 || pid < 0 {
+/// The thread a `sched_*` call names: the caller for 0, else the thread
+/// numbered `pid` (a thread id, as Linux's calls take), after the checks
+/// every one makes first: a negative pid is `EINVAL`, and so is a null
+/// structure where `at` is one.
+fn sched_subject(
+    process: &Process,
+    pid: i32,
+    at: Option<u64>,
+) -> Result<Arc<crate::syscall::thread::Thread>, Errno> {
+    if pid < 0 || at == Some(0) {
         return Err(Errno::EINVAL);
+    }
+    attributes::robust_list_subject(process, pid)
+}
+
+/// A thread's policy and priority, as the calls answer them: its task's, or
+/// `SCHED_OTHER` for a thread with no live task.
+fn policy_of(thread: &crate::syscall::thread::Thread) -> (i32, u32, bool) {
+    let Some(task) = attributes::task_of(thread) else {
+        return (SCHED_OTHER, 0, false);
+    };
+    let word = task.rt_word();
+    let (policy, priority) = match word.params() {
+        Some(RtParams {
+            policy: RtPolicy::Fifo,
+            priority,
+        }) => (SCHED_FIFO, u32::from(priority)),
+        Some(RtParams {
+            policy: RtPolicy::Rr,
+            priority,
+        }) => (SCHED_RR, u32::from(priority)),
+        None => (SCHED_OTHER, 0),
+    };
+    (policy, priority, word.resets_on_fork())
+}
+
+/// A policy and priority as the calls take them, checked as Linux's
+/// `__sched_setscheduler` checks them (L.sched.117): `SCHED_OTHER` at 0,
+/// `SCHED_FIFO` and `SCHED_RR` at 1 to 99, and only in a build with a tier
+/// above fair (L.sched.116); every other policy -- `SCHED_BATCH`,
+/// `SCHED_IDLE`, `SCHED_DEADLINE`, `SCHED_EXT` -- is `EINVAL`.
+fn checked_params(policy: i32, priority: u32) -> Result<Option<RtParams>, Errno> {
+    let rt = |policy| {
+        let priority = u8::try_from(priority).map_err(|_| Errno::EINVAL)?;
+        let params = RtParams { policy, priority };
+        if !params.valid() || !sched::realtime_built() {
+            return Err(Errno::EINVAL);
+        }
+        Ok(Some(params))
+    };
+    match policy {
+        SCHED_OTHER if priority == 0 => Ok(None),
+        SCHED_FIFO => rt(RtPolicy::Fifo),
+        SCHED_RR => rt(RtPolicy::Rr),
+        _ => Err(Errno::EINVAL),
+    }
+}
+
+/// Linux's permission rule for a change of policy (`user_check_sched_setscheduler`,
+/// L.sched.111): with `CAP_SYS_NICE` anything; otherwise only a target the
+/// caller owns, a real-time policy only with a nonzero `RLIMIT_RTPRIO` when
+/// it is a new policy, a priority raised only within that limit, and the
+/// reset-on-fork flag never cleared. Lowering a task to `SCHED_OTHER`, or
+/// its priority, needs only ownership.
+fn may_set_policy(
+    caller: &Process,
+    thread: &crate::syscall::thread::Thread,
+    new: Option<RtParams>,
+    reset_on_fork: bool,
+) -> Result<(), Errno> {
+    if credentials::require_privilege(caller).is_ok() {
+        return Ok(());
+    }
+    let target = thread.process();
+    if !credentials::same_owner(caller, target) {
+        return Err(Errno::EPERM);
+    }
+    let (policy, priority, resets) = policy_of(thread);
+    if let Some(new) = new {
+        let limit = limit_of(target, RLIMIT_RTPRIO)?.soft;
+        let new_policy = match new.policy {
+            RtPolicy::Fifo => SCHED_FIFO,
+            RtPolicy::Rr => SCHED_RR,
+        };
+        if new_policy != policy && limit == 0 {
+            return Err(Errno::EPERM);
+        }
+        let raised = u64::from(new.priority);
+        if raised > u64::from(priority) && raised > limit {
+            return Err(Errno::EPERM);
+        }
+    }
+    if resets && !reset_on_fork {
+        return Err(Errno::EPERM);
     }
     Ok(())
 }
 
-/// `sched_getparam`: `struct sched_param` is one `int`, and under
-/// `SCHED_OTHER` its priority is always zero.
+/// Apply a checked policy to `thread`'s task (L.sched.112): moved between
+/// tiers under its queue's lock, at the tail of its new place.
+fn apply_policy(
+    thread: &crate::syscall::thread::Thread,
+    params: Option<RtParams>,
+    reset_on_fork: bool,
+) -> Result<usize, Errno> {
+    let Some(task) = attributes::task_of(thread) else {
+        return Err(Errno::ESRCH);
+    };
+    match sched::set_policy(&task, params, reset_on_fork) {
+        Ok(()) => Ok(0),
+        Err(sched::PolicyRefused::NoTier) => Err(Errno::EINVAL),
+        Err(sched::PolicyRefused::NoMemory) => Err(Errno::ENOMEM),
+    }
+}
+
+/// `sched_getparam`: `struct sched_param` is one `int`, the thread's
+/// real-time priority, zero under `SCHED_OTHER`.
 pub(crate) fn sys_sched_getparam(process: &Process, pid: i32, at: u64) -> Result<usize, Errno> {
-    param_args(pid, at)?;
-    let _target = subject(process, pid)?;
-    uaccess::put_u32(process.space(), at, 0).map(|()| 0)
+    let thread = sched_subject(process, pid, Some(at))?;
+    let (_, priority, _) = policy_of(&thread);
+    uaccess::put_u32(process.space(), at, priority).map(|()| 0)
 }
 
-/// `sched_setparam`: only priority zero is valid under `SCHED_OTHER`, so that
-/// is all that is accepted.
+/// `sched_setparam`: a new priority under the thread's own policy.
 pub(crate) fn sys_sched_setparam(process: &Process, pid: i32, at: u64) -> Result<usize, Errno> {
-    param_args(pid, at)?;
+    if pid < 0 || at == 0 {
+        return Err(Errno::EINVAL);
+    }
     let priority = uaccess::get_u32(process.space(), at)?;
-    let target = subject(process, pid)?;
-    if priority != 0 {
-        return Err(Errno::EINVAL);
-    }
-    if !credentials::same_owner(process, &target) {
-        return Err(Errno::EPERM);
-    }
-    Ok(0)
+    let thread = sched_subject(process, pid, Some(at))?;
+    let (policy, _, resets) = policy_of(&thread);
+    let params = checked_params(policy, priority)?;
+    may_set_policy(process, &thread, params, resets)?;
+    apply_policy(&thread, params, resets)
 }
 
-/// `SCHED_ATTR_SIZE_VER0`: `struct sched_attr` up to `sched_period`.
-const SCHED_ATTR_SIZE_VER0: usize = 48;
-/// `SCHED_ATTR_SIZE_VER1`: with the utilisation clamps, the whole structure
-/// as this kernel knows it.
-const SCHED_ATTR_SIZE_VER1: usize = 56;
-/// Linux's `PAGE_SIZE` bound on a `sched_attr` a caller may pass.
-const SCHED_ATTR_SIZE_MAX: usize = 4096;
-/// `SCHED_FLAG_KEEP_POLICY`: leave the policy as it is.
-const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
-/// `SCHED_FLAG_KEEP_PARAMS`: leave the nice value and the slice as they are.
-const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
-/// The longest `sched_runtime` a fair task may ask for, 100 ms: Linux's
-/// ceiling in `__setparam_fair`. What the queue then grants is never longer
-/// than its own slice (`ferrix_sched::effective_request`).
-const MAX_REQUEST_NS: u64 = 100_000_000;
-
-/// `SCHED_DEADLINE`'s two doors under `schedule=edf`: the calling thread alone takes a
-/// reservation, deadline equal to period, or falls back to `SCHED_OTHER`; `CAP_SYS_NICE` here,
-/// and the kernel's own authority below it (ledger 7088 E.2). `None` for what is not its.
-#[cfg(ferrix_schedule = "edf")]
-fn deadline_setattr(process: &Process, pid: i32, attr: &SchedAttr) -> Option<Result<usize, Errno>> {
-    const SCHED_DEADLINE: u32 = 6;
-    let held = sched::reserve::holds_own();
-    if attr.policy != SCHED_DEADLINE && !held {
-        return None;
-    }
-    let mine = pid == 0
-        || attributes::thread_named(process, pid).is_some_and(|thread| {
-            attributes::task_of(&thread).is_some_and(|task| {
-                sched::current().is_some_and(|own| alloc::sync::Arc::ptr_eq(&task, &own))
-            })
-        });
-    if !mine {
-        return Some(Err(Errno::EPERM));
-    }
-    if attr.flags != 0 || attr.priority != 0 {
-        return Some(Err(Errno::EINVAL));
-    }
-    if let Err(why) = credentials::require_privilege(process) {
-        return Some(Err(why));
-    }
-    if attr.policy != SCHED_DEADLINE {
-        let _ = sched::reserve::give_back();
-        return None;
-    }
-    use sched::reserve::{Refusal, Reservation};
-    Some(
-        match sched::reserve::take(Reservation {
-            runtime_ns: attr.runtime,
-            deadline_ns: attr.deadline,
-            period_ns: if attr.period == 0 {
-                attr.deadline
-            } else {
-                attr.period
-            },
-        }) {
-            Ok(()) => Ok(0),
-            Err(Refusal::Malformed) => Err(Errno::EINVAL),
-            // As Linux's admission answers.
-            Err(Refusal::Unschedulable | Refusal::Full | Refusal::Already) => Err(Errno::EBUSY),
-            Err(Refusal::Denied) => Err(Errno::EPERM),
-        },
-    )
-}
-
-/// `sched_setattr`: the nice value and the slice request of a fair thread
-/// (`docs/GAME-MODE-SCHED.md` §2.2, F7; L.sched.109).
-///
-/// Only `SCHED_OTHER` at priority zero, as [`sys_sched_setscheduler`]
-/// accepts; every other policy, `SCHED_FLAG_RESET_ON_FORK`, the reclaim and
-/// overrun flags, the utilisation clamps and any unknown flag are `EINVAL`.
-/// `sched_runtime` is zero for the queue's slice, or clamped to 0.1 to
-/// 100 ms as Linux 7.0's `__setparam_fair` clamps it. The structure is read
-/// as `sched_copy_attr` reads it: a size of zero is the first version's, a
-/// size below it or above a page is `E2BIG` with this kernel's size written
-/// back, and so is a larger structure whose unknown tail is not zero.
-/// Permission is `setpriority`'s, except that a nice value lowered without
-/// privilege is `EPERM` here, as `sched_setattr`'s `can_nice` answers.
-pub(crate) fn sys_sched_setattr(
-    process: &Process,
-    pid: i32,
-    at: u64,
-    flags: u64,
-) -> Result<usize, Errno> {
-    if at == 0 || pid < 0 || flags != 0 {
-        return Err(Errno::EINVAL);
-    }
-    let attr = read_sched_attr(process, at)?;
-    #[cfg(ferrix_schedule = "edf")]
-    if let Some(answer) = deadline_setattr(process, pid, &attr) {
-        return answer;
-    }
-    let keep_policy = attr.flags & SCHED_FLAG_KEEP_POLICY != 0;
-    let keep_params = attr.flags & SCHED_FLAG_KEEP_PARAMS != 0;
-    if attr.flags & !(SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0
-        || (!keep_policy && attr.policy != SCHED_OTHER as u32)
-        || attr.priority != 0
-    {
-        return Err(Errno::EINVAL);
-    }
-    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
-    if !credentials::same_owner(process, thread.process()) {
-        return Err(Errno::EPERM);
-    }
-    if keep_params {
-        return Ok(0);
-    }
-    let nice = attr.nice.clamp(-20, 19);
-    if nice < thread.nice() && credentials::require_privilege(process).is_err() {
-        return Err(Errno::EPERM);
-    }
-    let request = match attr.runtime {
-        0 => 0,
-        asked => asked.clamp(ferrix_sched::MIN_REQUEST_NS, MAX_REQUEST_NS),
-    };
-    thread.set_nice(nice);
-    if let Some(task) = attributes::task_of(&thread) {
-        attributes::apply_nice(thread.nice(), &task);
-    }
-    attributes::set_slice_request(&thread, request);
-    Ok(0)
-}
-
-/// `sched_getattr`: the policy, the nice value and the slice request of a
-/// fair thread, written as `sched_attr_copy_to_user` writes them: as much of
-/// the structure as both sides know, with `size` saying how much that was.
-/// `sched_runtime` is the request the thread's task has, or with none the
-/// slice a task alone on its queue is given; Linux answers its own base
-/// slice there.
-pub(crate) fn sys_sched_getattr(
-    process: &Process,
-    pid: i32,
-    at: u64,
-    size: u32,
-    flags: u64,
-) -> Result<usize, Errno> {
-    let size = size as usize;
-    if at == 0
-        || pid < 0
-        || flags != 0
-        || !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size)
-    {
-        return Err(Errno::EINVAL);
-    }
-    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
-    // The task's own record, which is what its queue is told, not the
-    // thread's: so a task made without its thread's request reads none
-    // (L.sched.109's check).
-    let asked =
-        attributes::task_of(&thread).map_or(thread.slice_request(), |task| task.request_ns());
-    let runtime = match asked {
-        0 => sched::BASE_SLICE_NS,
-        asked => asked,
-    };
-    let written = size.min(SCHED_ATTR_SIZE_VER1);
-    let mut attr = [0_u8; SCHED_ATTR_SIZE_VER1];
-    put(&mut attr, 0, &(written as u32).to_ne_bytes());
-    put(&mut attr, 4, &(SCHED_OTHER as u32).to_ne_bytes());
-    put(&mut attr, 16, &thread.nice().to_ne_bytes());
-    put(&mut attr, 24, &runtime.to_ne_bytes());
-    let out = attr.get(..written).ok_or(Errno::EINVAL)?;
-    uaccess::copy_to_user(process.space(), at, out).map_err(|_| Errno::EFAULT)?;
-    Ok(0)
-}
-
-/// Write `bytes` into `buffer` at `offset`, where they always fit.
-fn put(buffer: &mut [u8], offset: usize, bytes: &[u8]) {
-    if let Some(field) = buffer.get_mut(offset..offset + bytes.len()) {
-        field.copy_from_slice(bytes);
-    }
-}
-
-/// The fields of a `struct sched_attr` this kernel reads.
-struct SchedAttr {
-    /// `sched_policy`.
-    policy: u32,
-    /// `sched_flags`.
-    flags: u64,
-    /// `sched_nice`.
-    nice: i32,
-    /// `sched_priority`.
-    priority: u32,
-    /// `sched_runtime`, in nanoseconds.
-    runtime: u64,
-    /// `sched_deadline`.
-    #[cfg(ferrix_schedule = "edf")]
-    deadline: u64,
-    /// `sched_period`.
-    #[cfg(ferrix_schedule = "edf")]
-    period: u64,
-}
-
-/// Read a `struct sched_attr` from `at` as Linux's `sched_copy_attr` does.
-fn read_sched_attr(process: &Process, at: u64) -> Result<SchedAttr, Errno> {
-    let too_big = || {
-        let _ = uaccess::put_u32(process.space(), at, SCHED_ATTR_SIZE_VER1 as u32);
-        Errno::E2BIG
-    };
-    let size = match uaccess::get_u32(process.space(), at)? as usize {
-        0 => SCHED_ATTR_SIZE_VER0,
-        size => size,
-    };
-    if !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size) {
-        return Err(too_big());
-    }
-    let mut raw = [0_u8; SCHED_ATTR_SIZE_VER1];
-    let known = size.min(SCHED_ATTR_SIZE_VER1);
-    let head = raw.get_mut(..known).ok_or(Errno::EINVAL)?;
-    uaccess::copy_from_user(process.space(), at, head).map_err(|_| Errno::EFAULT)?;
-    // `copy_struct_from_user`: a tail this kernel does not know must be zero.
-    if size > SCHED_ATTR_SIZE_VER1 {
-        let mut tail = vec![0_u8; size - SCHED_ATTR_SIZE_VER1];
-        uaccess::copy_from_user(process.space(), at + SCHED_ATTR_SIZE_VER1 as u64, &mut tail)
-            .map_err(|_| Errno::EFAULT)?;
-        if tail.iter().any(|&byte| byte != 0) {
-            return Err(too_big());
-        }
-    }
-    let word = |offset: usize| {
-        raw.get(offset..offset + 4)
-            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
-            .unwrap_or_default()
-    };
-    let long = |offset: usize| {
-        raw.get(offset..offset + 8)
-            .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
-            .unwrap_or_default()
-    };
-    Ok(SchedAttr {
-        policy: u32::from_ne_bytes(word(4)),
-        flags: u64::from_ne_bytes(long(8)),
-        nice: i32::from_ne_bytes(word(16)),
-        priority: u32::from_ne_bytes(word(20)),
-        runtime: u64::from_ne_bytes(long(24)),
-        #[cfg(ferrix_schedule = "edf")]
-        deadline: u64::from_ne_bytes(long(32)),
-        #[cfg(ferrix_schedule = "edf")]
-        period: u64::from_ne_bytes(long(40)),
-    })
-}
-
-/// `sched_getscheduler`: `SCHED_OTHER`, for every process.
+/// `sched_getscheduler`: the thread's policy, with `SCHED_RESET_ON_FORK`
+/// or'ed in when it is set.
 pub(crate) fn sys_sched_getscheduler(process: &Process, pid: i32) -> Result<usize, Errno> {
-    if pid < 0 {
-        return Err(Errno::EINVAL);
-    }
-    let _target = subject(process, pid)?;
-    Ok(0)
+    let thread = sched_subject(process, pid, None)?;
+    let (policy, _, resets) = policy_of(&thread);
+    let reset = if resets { SCHED_RESET_ON_FORK } else { 0 };
+    usize::try_from(policy | reset).map_err(|_| Errno::EINVAL)
 }
 
-/// `sched_setscheduler`: `SCHED_OTHER` at priority zero is accepted, being
-/// what every process already has; anything else is `EINVAL`.
-///
-/// Root on Linux could move itself to `SCHED_FIFO`. Here that would be a
-/// promise -- run me before every fair task, and preempt them to do it -- that
-/// the scheduler has no class to keep, so it is refused rather than accepted
-/// and ignored.
+/// `sched_setscheduler`: `SCHED_OTHER` at 0, or `SCHED_FIFO` or `SCHED_RR`
+/// at 1 to 99 in a build with a tier above fair, with
+/// `SCHED_RESET_ON_FORK` or'ed in for the flag (docs/SCHED-CLASSES.md §9e).
 pub(crate) fn sys_sched_setscheduler(
     process: &Process,
     pid: i32,
     policy: i32,
     at: u64,
 ) -> Result<usize, Errno> {
+    if policy < 0 || pid < 0 || at == 0 {
+        return Err(Errno::EINVAL);
+    }
+    let reset_on_fork = policy & SCHED_RESET_ON_FORK != 0;
+    let policy = policy & !SCHED_RESET_ON_FORK;
+    let priority = uaccess::get_u32(process.space(), at)?;
+    let thread = sched_subject(process, pid, Some(at))?;
+    let params = checked_params(policy, priority)?;
+    may_set_policy(process, &thread, params, reset_on_fork)?;
+    apply_policy(&thread, params, reset_on_fork)
+}
+
+/// `sched_attr`'s first size, `SCHED_ATTR_SIZE_VER0`: up to its period.
+const SCHED_ATTR_SIZE_VER0: u32 = 48;
+/// Its size with the utilisation clamps, `SCHED_ATTR_SIZE_VER1`: all of it.
+const SCHED_ATTR_SIZE_VER1: u32 = 56;
+/// The most `sched_setattr` reads of a larger structure, as Linux's
+/// `sched_copy_attr`: a page, past which it is `E2BIG`.
+const SCHED_ATTR_MAX: u32 = 4096;
+/// `SCHED_FLAG_RESET_ON_FORK`.
+const SCHED_FLAG_RESET_ON_FORK: u64 = 0x01;
+/// `SCHED_FLAG_KEEP_POLICY`: the policy stays as it is.
+const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+/// `SCHED_FLAG_KEEP_PARAMS`: the priority and the nice value stay.
+const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+/// `SCHED_FLAG_UTIL_CLAMP_MIN` and `_MAX`: no utilisation clamps here, which
+/// Linux built without them answers `EOPNOTSUPP`.
+const SCHED_FLAG_UTIL_CLAMP: u64 = 0x60;
+/// Every flag Linux knows, `SCHED_FLAG_ALL`: another is `EINVAL`.
+const SCHED_FLAG_ALL: u64 = 0x7f;
+
+/// `sched_setattr`: as `sched_setscheduler`, from a `struct sched_attr`,
+/// read as Linux's `sched_copy_attr` reads it (L.sched.117): a size of zero
+/// is the first size, one below it or above a page `E2BIG` with the size
+/// this kernel knows written back, and bytes past that size must be zero.
+/// Under `SCHED_OTHER` its nice value is the thread's, as `setpriority`
+/// sets it.
+pub(crate) fn sys_sched_setattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    flags: u32,
+) -> Result<usize, Errno> {
+    if pid < 0 || at == 0 || flags != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let space = process.space();
+    let mut size = uaccess::get_u32(space, at)?;
+    if size == 0 {
+        size = SCHED_ATTR_SIZE_VER0;
+    }
+    if !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_MAX).contains(&size) {
+        uaccess::put_u32(space, at, SCHED_ATTR_SIZE_VER1)?;
+        return Err(Errno::E2BIG);
+    }
+    let mut attr = [0_u8; SCHED_ATTR_SIZE_VER1 as usize];
+    let known = size.min(SCHED_ATTR_SIZE_VER1) as usize;
+    let head = attr.get_mut(..known).ok_or(Errno::EINVAL)?;
+    uaccess::copy_from_user(space, at, head).map_err(|_| Errno::EFAULT)?;
+    // Anything past the structure this kernel knows must be zero.
+    let mut past = SCHED_ATTR_SIZE_VER1;
+    while past < size {
+        let mut chunk = [0_u8; 64];
+        let len = (size - past).min(64) as usize;
+        let chunk = chunk.get_mut(..len).ok_or(Errno::EINVAL)?;
+        uaccess::copy_from_user(space, at + u64::from(past), chunk).map_err(|_| Errno::EFAULT)?;
+        if chunk.iter().any(|&byte| byte != 0) {
+            uaccess::put_u32(space, at, SCHED_ATTR_SIZE_VER1)?;
+            return Err(Errno::E2BIG);
+        }
+        past += len as u32;
+    }
+    let word = |at: usize| {
+        attr.get(at..at + 4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_ne_bytes)
+            .unwrap_or(0)
+    };
+    let policy = word(4) as i32;
+    let sched_flags = u64::from(word(8)) | (u64::from(word(12)) << 32);
+    let nice = (word(16) as i32).clamp(-20, 19);
+    let priority = word(20);
+    if sched_flags & !SCHED_FLAG_ALL != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if sched_flags & SCHED_FLAG_UTIL_CLAMP != 0 {
+        return Err(Errno::EOPNOTSUPP);
+    }
     if policy < 0 {
         return Err(Errno::EINVAL);
     }
-    param_args(pid, at)?;
-    let priority = uaccess::get_u32(process.space(), at)?;
-    let target = subject(process, pid)?;
-    if policy != SCHED_OTHER || priority != 0 {
-        return Err(Errno::EINVAL);
-    }
-    if !credentials::same_owner(process, &target) {
+    let thread = sched_subject(process, pid, Some(at))?;
+    let (current, current_priority, _) = policy_of(&thread);
+    let reset_on_fork = sched_flags & SCHED_FLAG_RESET_ON_FORK != 0;
+    let policy = if sched_flags & SCHED_FLAG_KEEP_POLICY != 0 {
+        current
+    } else {
+        policy
+    };
+    let keep_params = sched_flags & SCHED_FLAG_KEEP_PARAMS != 0;
+    let priority = if keep_params && policy == current {
+        current_priority
+    } else {
+        priority
+    };
+    let params = checked_params(policy, priority)?;
+    may_set_policy(process, &thread, params, reset_on_fork)?;
+    // A nice value lowered needs the privilege `setpriority` asks for.
+    let set_nice = params.is_none() && !keep_params && nice != thread.nice();
+    if set_nice && nice < thread.nice() && credentials::require_privilege(process).is_err() {
         return Err(Errno::EPERM);
     }
+    let _ = apply_policy(&thread, params, reset_on_fork)?;
+    if set_nice {
+        thread.set_nice(nice);
+        if let Some(task) = attributes::task_of(&thread) {
+            attributes::apply_nice(thread.nice(), &task);
+        }
+    }
+    Ok(0)
+}
+
+/// `sched_getattr`: the thread's policy, flags, nice value and priority in a
+/// `struct sched_attr` of at most `size` bytes, its size field the bytes
+/// written (L.sched.117): a size below the first one, above a page, or
+/// nonzero flags are `EINVAL`.
+pub(crate) fn sys_sched_getattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    size: u32,
+    flags: u32,
+) -> Result<usize, Errno> {
+    if pid < 0 || at == 0 || flags != 0 || !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_MAX).contains(&size)
+    {
+        return Err(Errno::EINVAL);
+    }
+    let thread = sched_subject(process, pid, Some(at))?;
+    let (policy, priority, resets) = policy_of(&thread);
+    let written = size.min(SCHED_ATTR_SIZE_VER1);
+    let mut attr = [0_u8; SCHED_ATTR_SIZE_VER1 as usize];
+    let mut put = |at: usize, value: u32| {
+        if let Some(bytes) = attr.get_mut(at..at + 4) {
+            bytes.copy_from_slice(&value.to_ne_bytes());
+        }
+    };
+    put(0, written);
+    put(4, policy as u32);
+    put(8, u32::from(resets) * SCHED_FLAG_RESET_ON_FORK as u32);
+    put(16, thread.nice() as u32);
+    put(20, priority);
+    let out = attr.get(..written as usize).ok_or(Errno::EINVAL)?;
+    uaccess::copy_to_user(process.space(), at, out).map_err(|_| Errno::EFAULT)?;
     Ok(0)
 }
 
@@ -748,21 +765,27 @@ fn priority_range(policy: i32) -> Result<(usize, usize), Errno> {
     }
 }
 
-/// `sched_rr_get_interval`, and its `time64` form on ARMv7-A.
-///
-/// Zero, which is what Linux reports for a task whose policy has no fixed
-/// round-robin quantum and whose run queue carries no load to divide: the
-/// fair scheduler's slices are computed per decision, not held per task.
+/// `sched_rr_get_interval`, and its `time64` form on ARMv7-A: the
+/// round-robin quantum for a `SCHED_RR` thread (100 ms, R13), and zero for
+/// any other, which is what Linux reports for a `SCHED_FIFO` task and, here,
+/// for a fair one, whose slices are computed per decision, not held per task.
 pub(crate) fn sys_sched_rr_get_interval(
     process: &Process,
     pid: i32,
     at: u64,
     width: TimeWidth,
 ) -> Result<usize, Errno> {
-    if pid < 0 {
-        return Err(Errno::EINVAL);
-    }
-    let _target = subject(process, pid)?;
-    time::write_pair(process, at, 0, 0, width)?;
+    let thread = sched_subject(process, pid, None)?;
+    let quantum = match policy_of(&thread) {
+        (SCHED_RR, _, _) => sched::rr_quantum_ns(),
+        _ => 0,
+    };
+    time::write_pair(
+        process,
+        at,
+        quantum / 1_000_000_000,
+        quantum % 1_000_000_000,
+        width,
+    )?;
     Ok(0)
 }

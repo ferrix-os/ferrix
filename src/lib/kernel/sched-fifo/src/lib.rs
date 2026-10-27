@@ -594,6 +594,7 @@ impl<T> SchedClass<T> for FifoRr {
 
 impl<T> RealtimeClass<T> for FifoRr {
     type Slot = FifoSlot<T>;
+    const RR_QUANTUM_NS: u64 = RR_QUANTUM_NS;
 
     fn new_slot() -> Option<FifoSlot<T>> {
         FifoSlot::new().ok()
