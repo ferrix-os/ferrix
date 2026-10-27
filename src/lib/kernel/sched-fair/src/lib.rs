@@ -1360,6 +1360,22 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
         queue.remaining_ns()
     }
 
+    fn should_preempt(queue: &RunQueue<T>) -> bool {
+        queue.should_preempt()
+    }
+
+    fn decision_in_ns(queue: &RunQueue<T>) -> Option<u64> {
+        queue.decision_in_ns()
+    }
+
+    fn load_weight(queue: &RunQueue<T>) -> u64 {
+        queue.load_weight()
+    }
+
+    fn yield_current(queue: &mut RunQueue<T>) {
+        queue.yield_curr();
+    }
+
     fn steals_work(_: &RunQueue<T>) -> bool {
         true
     }
@@ -1369,6 +1385,75 @@ impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
     #[inline(never)]
     fn check(queue: &RunQueue<T>) -> Result<(), &'static str> {
         queue.check_invariants()
+    }
+}
+
+/// The interface's load unit is this class's nice-0 weight, so a fair
+/// entity at nice 0 is one unit of load (docs/SCHED-CLASSES.md §9d).
+const _: () = assert!(
+    ferrix_sched_class::LOAD_UNIT == NICE_0_WEIGHT as u64,
+    "the class interface's load unit is not the fair class's nice-0 weight"
+);
+
+/// The fair tier of a class stack: the innermost one, wherever fair is in
+/// the stack (docs/SCHED-CLASSES.md §9d; the consultant's ledger lines 26
+/// and 27, F1 and F7). The fair-only calls the kernel makes -- weights, the
+/// picture the checks and `/proc` read, the slice, the levelling, the steal
+/// choice -- reach it through here, read-only but for the three named
+/// changes; every change of membership or of the running entity goes
+/// through the stack. A stack without a fair tier does not implement it,
+/// so a kernel that still calls the fair tier does not compile for it.
+pub trait FairTier<T>: ferrix_sched_class::SchedClass<T> {
+    /// The fair tier's queue, to read.
+    fn fair(queue: &Self::Queue) -> &RunQueue<T>;
+
+    /// [`RunQueue::set_weight`] on the fair tier.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::set_weight`].
+    fn set_weight(queue: &mut Self::Queue, id: u64, weight: u32) -> Result<bool, SchedError>;
+
+    /// [`RunQueue::set_slice_ns`] on the fair tier.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::set_slice_ns`].
+    fn set_slice_ns(queue: &mut Self::Queue, slice_ns: u64) -> Result<(), SchedError>;
+
+    /// [`RunQueue::level`] on the fair tier.
+    fn level(queue: &mut Self::Queue);
+}
+
+impl<T> FairTier<T> for Eevdf {
+    fn fair(queue: &RunQueue<T>) -> &RunQueue<T> {
+        queue
+    }
+    fn set_weight(queue: &mut RunQueue<T>, id: u64, weight: u32) -> Result<bool, SchedError> {
+        queue.set_weight(id, weight)
+    }
+    fn set_slice_ns(queue: &mut RunQueue<T>, slice_ns: u64) -> Result<(), SchedError> {
+        queue.set_slice_ns(slice_ns)
+    }
+    fn level(queue: &mut RunQueue<T>) {
+        queue.level();
+    }
+}
+
+impl<T, U: ferrix_sched_class::SchedClass<T>, L: FairTier<T>> FairTier<T>
+    for ferrix_sched_class::Over<U, L>
+{
+    fn fair(queue: &Self::Queue) -> &RunQueue<T> {
+        L::fair(&queue.lower)
+    }
+    fn set_weight(queue: &mut Self::Queue, id: u64, weight: u32) -> Result<bool, SchedError> {
+        L::set_weight(&mut queue.lower, id, weight)
+    }
+    fn set_slice_ns(queue: &mut Self::Queue, slice_ns: u64) -> Result<(), SchedError> {
+        L::set_slice_ns(&mut queue.lower, slice_ns)
+    }
+    fn level(queue: &mut Self::Queue) {
+        L::level(&mut queue.lower);
     }
 }
 

@@ -171,6 +171,41 @@ impl<T> SchedClass<T> for Fixture {
             .map(|(.., used)| queue.quantum.saturating_sub(*used))
     }
 
+    fn should_preempt(queue: &Queue<T>) -> bool {
+        queue.waiting_len() > 0
+            && queue
+                .running
+                .as_ref()
+                .is_none_or(|(.., used)| *used >= queue.quantum)
+    }
+
+    fn decision_in_ns(queue: &Queue<T>) -> Option<u64> {
+        if queue.waiting_len() == 0 {
+            return None;
+        }
+        Some(
+            queue
+                .running
+                .as_ref()
+                .map_or(0, |(.., used)| queue.quantum.saturating_sub(*used)),
+        )
+    }
+
+    fn load_weight(queue: &Queue<T>) -> u64 {
+        (Self::len(queue) as u64).saturating_mul(ferrix_sched_class::LOAD_UNIT)
+    }
+
+    fn yield_current(queue: &mut Queue<T>) {
+        if let Some((id, payload, used)) = queue.running.take() {
+            if let Some(slot) = queue.waiting.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some((id, payload));
+            } else {
+                // Full: nowhere to wait, so it keeps the processor.
+                queue.running = Some((id, payload, used));
+            }
+        }
+    }
+
     fn steals_work(_: &Queue<T>) -> bool {
         false
     }

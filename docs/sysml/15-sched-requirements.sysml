@@ -67,6 +67,55 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
                 "sched::set_task_group", "sched::note_moved");
         }
+        requirement <'L.sched.103'> theTimerIsArmedForTheStacksDecision : ItemLowLevel {
+            attribute :>> statement = "CpuQueue::arm_timer shall arm the next
+                decision for the class stack's decision_in_ns, which is due at
+                once when a task of a higher tier waits while a lower one runs,
+                is never later than the running task's remaining slice or
+                budget, and is none only when no decision can be due.";
+            attribute :>> criterion = "ferrix-sched-class's host test on a stack
+                of two tiers: the decision is due at once with an upper task
+                waiting behind a lower one, none while the upper runs with lower
+                tasks waiting, never later than the remaining time, and none
+                with one task; with the fair class alone, L.sched.1's check.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = "sched::queue::CpuQueue::arm_timer";
+        }
+        requirement <'L.sched.104'> theTickPreemptsThroughTheStack : ItemLowLevel {
+            attribute :>> statement = "CpuQueue::should_preempt shall answer the
+                class stack's should_preempt: true when a task of a higher tier
+                waits while a lower one runs, and agreeing with the stack's
+                charge, so that a charge that reports a decision due is followed
+                by a preemption while anything else could run.";
+            attribute :>> criterion = "ferrix-sched-class's host test on a stack
+                of two tiers: an upper arrival behind a lower task is a
+                preemption and a charge reporting a decision; an upper task's
+                quantum spent with another upper waiting is both; neither while
+                its quantum lasts.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::queue::CpuQueue::should_preempt";
+        }
+        requirement <'L.sched.105'> theLoadIsTheStacks : ItemLowLevel {
+            attribute :>> statement = "CpuQueue::account_load shall accumulate the
+                class stack's load_weight, the sum of every tier's load in
+                LOAD_UNITs, a fair task at nice 0 being one.";
+            attribute :>> criterion = "ferrix-sched-class's host test: a stack of
+                two tiers holding three tasks of ordinary weight reads three
+                units; ferrix-sched-fair's: a fair task reweighted to twice
+                nice 0 behind an upper tier reads two units, and LOAD_UNIT
+                equals NICE_0_WEIGHT at compile time.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::queue::CpuQueue::account_load";
+        }
+        requirement <'L.sched.106'> aYieldIsTheRunningTiers : ItemLowLevel {
+            attribute :>> statement = "yield_now shall ask the class stack to
+                yield its running task, which the running task's tier answers.";
+            attribute :>> criterion = "ferrix-sched-class's host test on a stack
+                of two tiers: an upper task that yields lets the other upper
+                task run next; with the fair class alone, L.sched.2's check.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = "sched::yield_now";
+        }
     }
 
     package Wakes {

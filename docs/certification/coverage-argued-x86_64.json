@@ -950,119 +950,119 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2678-2680",
+      "lines": "2683-2685",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2737",
+      "lines": "2742",
       "category": "defensive",
       "match": "queue.insert(previous);",
       "why": "A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3580-3581",
+      "lines": "3585-3586",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3585",
+      "lines": "3590",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3590-3591",
+      "lines": "3595-3596",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3594-3595",
+      "lines": "3599-3600",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3599",
+      "lines": "3604",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3602-3603",
+      "lines": "3607-3608",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3608",
+      "lines": "3613",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3612",
+      "lines": "3617",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3619",
+      "lines": "3624",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3624",
+      "lines": "3629",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3634",
+      "lines": "3639",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "258",
+      "lines": "260",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "270-271",
+      "lines": "272-273",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "366",
+      "lines": "368",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "475",
+      "lines": "477",
       "category": "defensive",
       "match": "super::note_missing_slot();",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."

@@ -1663,3 +1663,37 @@ fn the_class_interface_hands_back_what_the_queue_does() {
         (80, state, Refusal::Duplicate(3))
     );
 }
+
+/// F11 and F1 of the consultant's ledger lines 26-27: every operation the
+/// kernel calls on its class stack, and every fair-only call it makes
+/// through [`FairTier`], compile and forward for a stack with a tier above
+/// fair (here the empty class, until step 4b's first real one).
+///
+/// Verifies: L.sched.105
+#[test]
+fn a_stack_with_a_tier_above_fair_reaches_the_fair_tier() {
+    use ferrix_sched_class::{Empty, Over, SchedClass, Tier};
+    type Two = Over<Empty, Eevdf>;
+    let mut q = <Two as SchedClass<u64>>::new_queue(((), Config { slice_ns: SLICE })).unwrap();
+    Two::enqueue(
+        &mut q,
+        1,
+        1u64,
+        Tier::Lower((EntityState::new(NICE_0_WEIGHT), slot())),
+    )
+    .unwrap();
+    assert_eq!(Two::pick(&mut q), Some(&1));
+    assert_eq!(<Two as FairTier<u64>>::fair(&q).current_id(), Some(1));
+    assert!(<Two as FairTier<u64>>::set_weight(&mut q, 1, 2 * NICE_0_WEIGHT).unwrap());
+    <Two as FairTier<u64>>::set_slice_ns(&mut q, 2_000_000).unwrap();
+    <Two as FairTier<u64>>::level(&mut q);
+    assert_eq!(
+        <Two as FairTier<u64>>::fair(&q).config().slice_ns,
+        2_000_000
+    );
+    assert_eq!(Two::load_weight(&q), 2 * u64::from(NICE_0_WEIGHT));
+    assert!(!Two::should_preempt(&q));
+    assert_eq!(Two::decision_in_ns(&q), None);
+    Two::yield_current(&mut q);
+    assert!(Two::check(&q).is_ok());
+}

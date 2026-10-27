@@ -197,11 +197,11 @@
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
     },
     {
-      "ids": ["L.sched.103-108"],
+      "ids": ["L.sched.107-108"],
       "owner": "sched-classes",
       "branch": "claude/ferrix-roadmap-completion-hkxlpp",
       "date": "2026-10-27",
-      "purpose": "docs/SCHED-CLASSES.md section 9d, step 4a, a stack of two tiers (the consultant's OK IF F1-F16, ledger lines 26-27 of the sched-classes container ledger): 103 the timer armed for the stack's decision_in_ns, 104 tick preemption through Stack::should_preempt, 105 the load through Stack::load_weight, 106 yield through Stack::yield_current, 107 the upper cell under its queue's lock, 108 a weight kept for a task outside the fair tier"
+      "purpose": "docs/SCHED-CLASSES.md section 9d, step 4a, a stack of two tiers (the consultant's OK IF F1-F16, ledger lines 26-27 of the sched-classes container ledger): 107 the upper cell under its queue's lock, 108 a weight kept for a task outside the fair tier, both written with step 4b's first upper tier; 103-106 written and released"
     }
   ]
 }

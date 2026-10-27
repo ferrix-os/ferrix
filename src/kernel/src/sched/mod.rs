@@ -1779,7 +1779,12 @@ pub fn current_runtime() -> u64 {
 pub fn yield_now() {
     let saved = <arch::Irq as IrqControl>::disable();
     if let Some(lock) = this_cpu().and_then(queue_of) {
-        lock.lock().stack.yield_curr();
+        {
+            let mut queue = lock.lock();
+            <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::yield_current(
+                &mut queue.stack,
+            );
+        }
     }
     <arch::Irq as IrqControl>::restore(saved);
     schedule();
@@ -3429,7 +3434,7 @@ pub(crate) fn open_window(tasks: &[Arc<Task>]) {
         // ahead by before this instant — including a host stall charged to
         // whichever spinner was running while its siblings were still being
         // made — is not the window's to repay. See `RunQueue::level`.
-        queue.stack.level();
+        <stack::Stack as ferrix_sched_fair::FairTier<Arc<Task>>>::level(&mut queue.stack);
         queue.stats.measuring = true;
         queue.stats.worst_lag = 0;
         queue.stats.worst_overrun = 0;

@@ -2966,6 +2966,17 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
             if package in cargo.get("dependencies", {}) and listed is None:
                 problems.append(f"{directory}: {kernel} depends on the class crate {package}; only {SELECT_CRATE} "
                                 "may, or a named_outside entry with its N7 row")
+    # (e) the kernel changes the fair tier only through the stack or the
+    # fair tier's named forwarders, never through a `&mut RunQueue` of its
+    # own (SCHED-CLASSES.md section 9d, F1; ledger line 26).
+    for rel, text in sorted(sources.items()):
+        if not rel.startswith("src/kernel/"):
+            continue
+        code = rustlex.mask(text)
+        for match in re.finditer(r"\bfair_mut\b|&\s*mut\s+(?:ferrix_sched_fair::)?RunQueue\b", code):
+            line = text.count("\n", 0, match.start()) + 1
+            problems.append(f"{rel}:{line}: changes the fair tier through a `&mut RunQueue`; only the stack "
+                            "and FairTier's forwarders may (SCHED-CLASSES.md section 9d, F1)")
     for package, kernels in sorted(outside.items()):
         if package.startswith("//"):
             continue
@@ -3025,6 +3036,12 @@ def _class_crate_self_test() -> list[str]:
         ("(c) a kernel crate naming a class crate unrecorded", {"packages": fair_outside}, "only ferrix-kernel-sched-select"),
         ("(c) a stale named_outside entry",
          {"packages": {**_CLASS_PACKAGES, "ferrix-kernel-core": ("src/kernel/core", {"dependencies": {}})}}, "stale"),
+        ("(e) a kernel file taking a &mut RunQueue",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f(q: &mut RunQueue<u8>) {}\n"}},
+         "&mut RunQueue"),
+        ("(e) a kernel file calling fair_mut",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f() { Stack::fair_mut(q); }\n"}},
+         "&mut RunQueue"),
         ("a name the class does not give", {"record": {**_CLASS_RECORD, "ferrix-sched-fair": {
             **_CLASS_RECORD["ferrix-sched-fair"], "name": "cfs"}}}, "is not the NAME"),
         ("(d) a file naming the fixture",

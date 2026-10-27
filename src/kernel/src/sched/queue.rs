@@ -28,7 +28,9 @@
 use alloc::sync::Arc;
 
 use ferrix_sched_class::{CpuLoad, Load, SchedClass};
-use ferrix_sched_fair::{Config, EntityState, JobPlan, Timeline, settle_job_fold, slice_for};
+use ferrix_sched_fair::{
+    Config, EntityState, FairTier, JobPlan, Timeline, settle_job_fold, slice_for,
+};
 
 use super::stack::{Stack, StackQueue};
 
@@ -219,20 +221,20 @@ impl CpuQueue {
     /// so that a failure prints what every entity looked like when it was
     /// passed over.
     pub(crate) fn note_pick(&mut self, now: u64) {
-        let Some(picked) = self.stack.current_id() else {
+        let Some(picked) = Stack::fair(&self.stack).current_id() else {
             return;
         };
         let mut pick = Pick {
             at: now,
             picked,
             scanned: picked,
-            avg: self.stack.avg_vruntime(),
+            avg: Stack::fair(&self.stack).avg_vruntime(),
             seen: [Seen::default(); TRACE_ENTITIES],
             count: 0,
         };
         let mut best_eligible: Option<Seen> = None;
         let mut best_any: Option<Seen> = None;
-        self.stack.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             let seen = Seen {
                 id: view.id,
                 vruntime: view.vruntime,
@@ -350,7 +352,7 @@ impl CpuQueue {
         task.set_weight(due);
         // The only refusal is a weight of zero, which `effective` never
         // answers.
-        let _ = self.stack.set_weight(id, due);
+        let _ = Stack::set_weight(&mut self.stack, id, due);
         Some((base, due))
     }
 
@@ -385,7 +387,7 @@ impl CpuQueue {
     fn measure(&mut self) {
         let mut total = 0u128;
         let mut weights = 0u128;
-        self.stack.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             if view.payload.is_measured() {
                 total += u128::from(view.payload.since_baseline(view.sum_exec));
                 weights += u128::from(view.weight);
@@ -396,7 +398,7 @@ impl CpuQueue {
         }
 
         let mut worst = 0u64;
-        self.stack.for_each(|view| {
+        Stack::fair(&self.stack).for_each(|view| {
             if !view.payload.is_measured() {
                 return;
             }
@@ -516,7 +518,7 @@ impl CpuQueue {
         task.set_weight(weight);
         // The only refusal is a weight of zero, which `weight_of_nice` never
         // answers and no caller here passes.
-        let _ = self.stack.set_weight(task.id, weight);
+        let _ = Stack::set_weight(&mut self.stack, task.id, weight);
     }
 
     /// Take the running task out of the fair class, keeping what it needs to
@@ -556,7 +558,8 @@ impl CpuQueue {
         // runnable tasks reads four times one with a single task rather than
         // the same "busy". The idle task is not in the fair queue, so an idle
         // processor contributes nothing without a special case.
-        self.load.accumulate(elapsed, self.stack.load_weight());
+        self.load
+            .accumulate(elapsed, Stack::load_weight(&self.stack));
     }
 
     /// This processor as the balancer sees it.
@@ -604,19 +607,14 @@ impl CpuQueue {
         // nothing, and this is where tickless comes from. With something
         // waiting, a decision at least once a slice, however long a request
         // the running task holds: see `RunQueue::decision_in_ns`.
-        let slice = self
-            .stack
-            .decision_in_ns()
-            .map(|left| now.saturating_add(left));
+        let slice = Stack::decision_in_ns(&self.stack).map(|left| now.saturating_add(left));
 
         // A task under a `cpu.max` is cut when its quota is used up, however
         // alone it is: nothing else would interrupt it to throttle it. The
         // task the fair class runs, which is the one charged (`account_in`):
         // a switch arms the timer before it stores its pick in `current`
         // (`switch_chosen`), so `current` there is still the outgoing task.
-        let bandwidth = self
-            .stack
-            .current()
+        let bandwidth = Stack::current(&self.stack)
             .filter(|_| crate::object::quota::bandwidth_in_use())
             .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
             .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
@@ -634,7 +632,7 @@ impl CpuQueue {
         // idle 2 is. `is_pinned` stays because it says something different —
         // a task with exactly one home should not be moved even *to* that
         // home, since it is already there.
-        self.stack.latest_where(|task| {
+        Stack::fair(&self.stack).latest_where(|task| {
             !task.is_pinned() && task.may_run_on(to) && task.state() == RUNNABLE
         })
     }
@@ -665,17 +663,17 @@ impl CpuQueue {
         let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.stack));
         // The only refusal is a slice of zero, and `slice_for` floors at
         // `MIN_SLICE_NS`, which is not zero.
-        let _ = self.stack.set_slice_ns(slice);
+        let _ = Stack::set_slice_ns(&mut self.stack, slice);
     }
 
     /// The slice this queue is currently handing out.
     pub(crate) fn slice_ns(&self) -> u64 {
-        self.stack.config().slice_ns
+        Stack::fair(&self.stack).config().slice_ns
     }
 
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
-        self.stack.should_preempt()
+        Stack::should_preempt(&self.stack)
     }
 
     /// Whether a sleeper's time has come by `now`: whether
@@ -804,7 +802,9 @@ impl CpuQueue {
     /// The number `arm_timer` decides on, so it is also the number that says
     /// whether this processor's timer needs to exist at all.
     pub(crate) fn waiting(&self) -> usize {
-        self.stack.queued()
+        // Derived over the whole stack (docs/SCHED-CLASSES.md §9d, F3):
+        // everything queued less the running one, of any tier.
+        Stack::len(&self.stack).saturating_sub(usize::from(Stack::current(&self.stack).is_some()))
     }
 
     /// Tasks on this queue, the running one included.

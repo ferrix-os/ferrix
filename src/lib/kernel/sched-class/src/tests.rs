@@ -6,7 +6,7 @@ extern crate std;
 use std::collections::VecDeque;
 use std::vec::Vec;
 
-use super::{Back, Empty, Handed, Left, Over, Refusal, SchedClass, Tier};
+use super::{Back, Empty, Handed, LOAD_UNIT, Left, Over, Refusal, SchedClass, Tier};
 
 /// A toy class: runs in arrival order, a quantum of `Config` nanoseconds.
 struct Fifo;
@@ -100,6 +100,26 @@ impl SchedClass<&'static str> for Fifo {
     fn remaining_ns(q: &FifoQueue) -> Option<u64> {
         q.running.map(|(.., used)| q.quantum.saturating_sub(used))
     }
+    fn should_preempt(q: &FifoQueue) -> bool {
+        !q.waiting.is_empty() && q.running.is_none_or(|(.., used)| used >= q.quantum)
+    }
+    fn decision_in_ns(q: &FifoQueue) -> Option<u64> {
+        if q.waiting.is_empty() {
+            return None;
+        }
+        Some(
+            q.running
+                .map_or(0, |(.., used)| q.quantum.saturating_sub(used)),
+        )
+    }
+    fn load_weight(q: &FifoQueue) -> u64 {
+        Fifo::len(q) as u64 * LOAD_UNIT
+    }
+    fn yield_current(q: &mut FifoQueue) {
+        if let Some((id, payload, _)) = q.running.take() {
+            q.waiting.push_back((id, payload));
+        }
+    }
     fn steals_work(_: &FifoQueue) -> bool {
         false
     }
@@ -163,6 +183,18 @@ impl SchedClass<&'static str> for Lowly {
     }
     fn remaining_ns(q: &FifoQueue) -> Option<u64> {
         Fifo::remaining_ns(q)
+    }
+    fn should_preempt(q: &FifoQueue) -> bool {
+        Fifo::should_preempt(q)
+    }
+    fn decision_in_ns(q: &FifoQueue) -> Option<u64> {
+        Fifo::decision_in_ns(q)
+    }
+    fn load_weight(q: &FifoQueue) -> u64 {
+        Fifo::load_weight(q)
+    }
+    fn yield_current(q: &mut FifoQueue) {
+        Fifo::yield_current(q);
     }
     fn steals_work(_: &FifoQueue) -> bool {
         true
@@ -305,4 +337,62 @@ fn the_stack_check_finds_a_tier_running_out_of_turn() {
     Stack::enqueue(&mut q, 2, "low", Up::Lower(())).unwrap();
     let _ = Lowly::pick(&mut q.lower);
     assert!(Stack::check(&q).is_err());
+}
+
+/// F4 and F14 of the consultant's ledger lines 26-27 on a two-tier stack:
+/// the tick's `charge` and `should_preempt` agree, and `decision_in_ns` is
+/// `None` only when no decision can be due and never later than
+/// `remaining_ns`, through every state a short run of arrivals, charges,
+/// picks and yields reaches.
+///
+/// Verifies: L.sched.103, L.sched.104, L.sched.105, L.sched.106
+#[test]
+fn the_stacks_decisions_agree_with_its_charge() {
+    let mut q = Stack::new_queue((10, 10)).unwrap();
+    let check = |q: &<Stack as SchedClass<&'static str>>::Queue| {
+        if let (Some(decision), Some(remaining)) =
+            (Stack::decision_in_ns(q), Stack::remaining_ns(q))
+        {
+            assert!(
+                decision <= remaining,
+                "a decision later than the running entity's end"
+            );
+        }
+        if Stack::len(q) <= 1 {
+            assert_eq!(
+                Stack::decision_in_ns(q),
+                None,
+                "a decision due with nothing to choose"
+            );
+        }
+    };
+    check(&q);
+    Stack::enqueue(&mut q, 1, "low", Tier::Lower(())).unwrap();
+    let _ = Stack::pick(&mut q);
+    check(&q);
+    assert!(!Stack::should_preempt(&q));
+    Stack::enqueue(&mut q, 2, "high", Tier::Upper(())).unwrap();
+    // An upper arrival is a decision due now, and a preemption.
+    assert_eq!(Stack::decision_in_ns(&q), Some(0));
+    assert!(Stack::should_preempt(&q));
+    assert!(Stack::charge(&mut q, 1));
+    assert_eq!(Stack::pick(&mut q), Some(&"high"));
+    check(&q);
+    // The upper runs; the lower waiting cannot displace it.
+    assert!(!Stack::should_preempt(&q));
+    assert_eq!(Stack::decision_in_ns(&q), None);
+    Stack::enqueue(&mut q, 3, "high2", Tier::Upper(())).unwrap();
+    assert_eq!(Stack::decision_in_ns(&q), Some(10));
+    assert!(!Stack::charge(&mut q, 4));
+    assert!(!Stack::should_preempt(&q));
+    assert!(Stack::charge(&mut q, 6));
+    assert!(
+        Stack::should_preempt(&q),
+        "a charge that reports a decision due and no preemption"
+    );
+    check(&q);
+    Stack::yield_current(&mut q);
+    assert_eq!(Stack::pick(&mut q), Some(&"high2"));
+    assert_eq!(Stack::load_weight(&q), 3 * LOAD_UNIT);
+    check(&q);
 }
