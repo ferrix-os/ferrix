@@ -30,3 +30,15 @@ pub(crate) type Stack = ferrix_sched_fair::Eevdf;
 
 /// One CPU's queue of [`Stack`].
 pub(crate) type StackQueue = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::Queue;
+
+/// What a task carries for [`Stack`] while it is off every queue: for the
+/// fair class alone, its record and its run slot (`Task::entity_with`,
+/// `Task::keep_entity`).
+pub(crate) type StackEntity = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::Entity;
+
+/// The stack's entity is the fair class's (the code review of the split,
+/// N2): `Task` keeps it as its record's atomics and its run slot's cell
+/// (L.sched.63), and assembles it in `Task::entity_with`. A stack whose
+/// entity is anything else stops the build here, where `Task`'s keeping of
+/// it has to change with it.
+const _: fn(StackEntity) -> ferrix_sched_fair::FairEntity<Arc<Task>> = |entity| entity;
