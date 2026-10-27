@@ -577,7 +577,8 @@ package FerrixSchedRequirements {
                 ferrix-sched-fair host test).";
             attribute :>> parent = ("H.SCHED.13", "H.FAIL.1");
             attribute :>> unit = ("sched::task::Task::take_run_slot",
-                "sched::task::Task::return_run_slot", "sched::task::Task::take_sleep_slot",
+                "sched::task::Task::return_run_slot", "sched::task::Task::keep_entity",
+                "sched::task::Task::take_sleep_slot",
                 "sched::task::Task::return_sleep_slot", "sched::task::Task::holds_slots",
                 "sched::task::Task::holds_sleep_slot");
         }
