@@ -27,9 +27,8 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched::{Config, CpuLoad, EntityState, Load, Timeline, slice_for};
-#[cfg(ferrix_fast_ipc)]
-use ferrix_sched::{JobPlan, settle_job_fold};
+use ferrix_sched_class::{CpuLoad, Load};
+use ferrix_sched_fair::{Config, EntityState, JobPlan, RunQueue, Timeline, settle_job_fold, slice_for};
 
 use super::task::{BLOCKED, RUNNABLE, SleepSlot, Task, TaskId};
 use crate::object::timer::Armed;
@@ -1223,7 +1222,7 @@ impl PendingJoin {
     }
 
     /// The caller's leave answered `left`: the load's change, once, by
-    /// `ferrix_sched::settle_job_fold`. A leave that did not answer as
+    /// `ferrix_sched_fair::settle_job_fold`. A leave that did not answer as
     /// planned -- which `Task::set_group`'s callers rule out -- is counted,
     /// and the stage-9 check requires none.
     fn settle(&mut self, left: Option<(u32, u32)>) {

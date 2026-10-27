@@ -23,7 +23,47 @@
 #![forbid(unsafe_code)]
 
 use core::convert::Infallible;
+use core::fmt;
 use core::marker::PhantomData;
+
+mod balance;
+mod domain;
+
+pub use balance::{
+    BALANCE_THRESHOLD, Balance, CpuLoad, FLIP_DECAY_NS, LOAD_PERIOD_NS, LOAD_SCALE, Load,
+    Placement, busiest, flip, imbalance, place, pull_fits, quietest, utilisation, wake_wide,
+};
+pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
+
+/// Why a domain or a CPU set was refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DomainError {
+    /// A scheduling mode that is named, and not written yet.
+    ModeUnavailable(Mode),
+    /// A domain with no CPUs in it.
+    EmptyDomain,
+    /// A CPU claimed by two domains.
+    Overlap(usize),
+    /// A CPU claimed by no domain.
+    Uncovered(usize),
+    /// A CPU number past the end of a [`CpuSet`], or a domain naming a CPU
+    /// the machine does not have.
+    NoSuchCpu(usize),
+}
+
+impl fmt::Display for DomainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DomainError::ModeUnavailable(mode) => {
+                write!(f, "the {} mode is not written yet", mode.name())
+            }
+            DomainError::EmptyDomain => f.write_str("a scheduling domain has no CPUs"),
+            DomainError::Overlap(cpu) => write!(f, "CPU {cpu} is in two scheduling domains"),
+            DomainError::Uncovered(cpu) => write!(f, "CPU {cpu} is in no scheduling domain"),
+            DomainError::NoSuchCpu(cpu) => write!(f, "there is no CPU {cpu}"),
+        }
+    }
+}
 
 /// An entity a queue would not take, handed back whole with the reason: in
 /// the kernel the payload is the last reference to a task, and losing it
@@ -398,5 +438,7 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     }
 }
 
+#[cfg(test)]
+mod domain_tests;
 #[cfg(test)]
 mod tests;

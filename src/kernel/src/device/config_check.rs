@@ -52,7 +52,8 @@ use ferrix_pci::ConfigSpace as _;
 use ferrix_pci::capability::{ID_MSI, ID_MSIX, ID_PCI_EXPRESS, ID_VENDOR};
 use ferrix_pci::header::{BAR0, COMMAND, COMMAND_BUS_MASTER, COMMAND_INTERRUPT_DISABLE};
 use ferrix_pci::virtio;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 
 use super::{ConfigWrites, DeviceNode, Location, Register, devices};
 use crate::mmio::Mmio;

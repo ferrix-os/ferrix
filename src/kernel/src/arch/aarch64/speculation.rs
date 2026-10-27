@@ -28,7 +28,7 @@ use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use ferrix_bootinfo::BootView;
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 use super::cpu;
 use crate::arch::speculation::{Defences, HARDENED, applied_by, record_this_cpu, this_cpu};

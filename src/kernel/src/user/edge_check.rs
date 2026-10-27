@@ -487,9 +487,9 @@ fn check_a_window_settles_while_frames_move() -> Result<(), &'static str> {
         "frame churn",
         churn_frames,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
         there,
-        ferrix_sched::CpuSet::of(there),
+        ferrix_sched_class::CpuSet::of(there),
     )
     .inspect_err(|_| CHURNING.store(false, Ordering::Release))?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
