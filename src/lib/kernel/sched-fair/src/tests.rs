@@ -1618,227 +1618,74 @@ fn the_class_interface_is_the_queue() {
     Alone::check(&through).unwrap();
 }
 
-// ---------------------------------------------------------------------------
-// Slice requests (F7, docs/GAME-MODE-SCHED.md §2.2)
-// ---------------------------------------------------------------------------
-
-/// A request as a test draws one: none, the floor, inside the queue's
-/// slice, the slice itself, or longer than it (which the cap shortens).
-fn drawn_request(rng: &mut Rng) -> u64 {
-    match rng.below(5) {
-        0 => 0,
-        1 => MIN_REQUEST_NS,
-        2 => MIN_REQUEST_NS + rng.below(SLICE),
-        3 => SLICE,
-        _ => SLICE + 1 + rng.below(100 * SLICE),
-    }
-}
-
-/// A state at `weight` asking for `request_ns`, owed nothing.
-fn asking(weight: u32, request_ns: u64) -> EntityState {
-    EntityState {
-        request_ns,
-        ..EntityState::new(weight)
-    }
-}
-
-/// The deadline less the virtual runtime of entity `id`, running or waiting.
-fn request_of(queue: &RunQueue<u64>, id: u64) -> u64 {
-    let entity = match queue.curr.as_ref().filter(|node| node.entity.id == id) {
-        Some(node) => &node.entity,
-        None => queue.tree.get(queue.tree.find(id).unwrap()).unwrap(),
-    };
-    entity.deadline.wrapping_sub(entity.vruntime)
-}
-
-/// The queue's own slice when none is asked for; what is asked for inside
-/// the slice; never more than the slice (the cap) and never less than the
-/// floor unless the slice itself is shorter.
-///
-/// Verifies: `L.sched.107`, `L.sched.108`
+/// The class interface hands back what the queue does, field for field:
+/// the leaving entity's whole state through the hand-over and through a
+/// removal, a refusal's reason as the interface names it, and a slice of
+/// zero refused when the queue is made (the code review of the split, C3;
+/// N4's hand-over on the stack type).
 #[test]
-fn the_effective_request_is_the_ask_capped_at_the_slice() {
-    assert_eq!(effective_request(0, SLICE), SLICE);
-    assert_eq!(effective_request(500_000, SLICE), 500_000);
-    assert_eq!(effective_request(SLICE, SLICE), SLICE);
-    assert_eq!(effective_request(SLICE + 1, SLICE), SLICE);
-    assert_eq!(effective_request(100 * SLICE, SLICE), SLICE);
-    assert_eq!(effective_request(1, SLICE), MIN_REQUEST_NS);
-    assert_eq!(effective_request(MIN_REQUEST_NS, SLICE), MIN_REQUEST_NS);
-    assert_eq!(effective_request(1, MIN_REQUEST_NS / 2), MIN_REQUEST_NS / 2);
-    assert_eq!(effective_request(0, MIN_REQUEST_NS / 2), MIN_REQUEST_NS / 2);
-    let mut rng = Rng(0x5_11CE);
-    for _ in 0..100_000 {
-        let slice = 1 + rng.below(4 * SLICE);
-        let request = drawn_request(&mut rng);
-        let given = effective_request(request, slice);
-        assert!(given <= slice, "{request} on {slice} gave {given}");
-        assert!(
-            given >= MIN_REQUEST_NS.min(slice),
-            "{request} on {slice} gave {given}"
-        );
+fn the_class_interface_hands_back_what_the_queue_does() {
+    use ferrix_sched_class::{Refusal, SchedClass};
+    assert!(matches!(
+        <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: 0 }),
+        Err(Refusal::Invalid)
+    ));
+    let mut direct = queue();
+    let mut through = <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: SLICE }).unwrap();
+    for id in 1..=3 {
+        let state = EntityState::new(NICE_0_WEIGHT + 100 * id as u32);
+        direct.enqueue(id, id, state, slot()).unwrap();
+        Eevdf::enqueue(&mut through, id, id, (state, slot())).unwrap();
     }
-}
-
-/// At each of the six places a request starts -- enqueue, the renewal of a
-/// spent request, a yield, a change of weight, a levelling and the direct
-/// switch's arrival (in `hand_over_is_the_general_sequence`) -- the new
-/// deadline is the virtual runtime plus the effective request at the
-/// entity's weight.
-///
-/// Verifies: `L.sched.107`
-#[test]
-fn every_new_request_is_measured_with_the_entitys_own() {
-    let mut rng = Rng(0x0F7_0F7);
-    for case in 0..20_000 {
-        let mut queue = queue();
-        let weight = drawn_weight(&mut rng);
-        let request = drawn_request(&mut rng);
-        let want = |weight| to_virtual(effective_request(request, SLICE), weight);
-        queue
-            .enqueue(1, 1, asking(weight, request), slot())
+    for round in 0..50 {
+        let _ = direct.pick_next();
+        let _ = Eevdf::pick(&mut through);
+        let _ = direct.update_curr(SLICE / 4 + round);
+        let _ = Eevdf::charge(&mut through, SLICE / 4 + round);
+    }
+    // A removal: the same entity, the same state.
+    let (a, (sa, _)) = direct.remove(2).unwrap();
+    let (b, (sb, _)) = Eevdf::remove(&mut through, 2).unwrap();
+    assert_eq!((a, sa), (b, sb));
+    // The hand-over on a queue with something waiting, and then on one
+    // with nothing waiting: the leaving entity's state, field for field.
+    let _ = direct.pick_next();
+    let _ = Eevdf::pick(&mut through);
+    for arriving in [7, 8] {
+        let state = EntityState::new(NICE_0_WEIGHT);
+        let left = direct
+            .hand_over(arriving, arriving, state, slot(), SLICE)
+            .unwrap()
             .unwrap();
-        queue
-            .enqueue(2, 2, asking(drawn_weight(&mut rng), 0), slot())
-            .unwrap();
-        assert_eq!(request_of(&queue, 1), want(weight), "case {case}: enqueue");
-        // Run entity 1 until its request is spent: the renewal.
-        while queue.current_id() != Some(1) {
-            let _ = queue.update_curr(SLICE);
-            let _ = queue.pick_next();
-        }
-        let mut renewed = false;
-        for _ in 0..1_000 {
-            if queue.update_curr(MIN_REQUEST_NS / 4 + rng.below(SLICE)) {
-                renewed = true;
-                break;
-            }
-        }
-        assert!(renewed, "case {case}: never spent");
-        let start = queue.curr.as_ref().unwrap().entity.deadline;
-        let at = queue.curr.as_ref().unwrap().entity.vruntime;
-        assert_eq!(start.wrapping_sub(at), want(weight), "case {case}: renewal");
-        // A yield moves the deadline one request further.
-        queue.yield_curr();
-        assert_eq!(
-            queue.curr.as_ref().unwrap().entity.deadline,
-            start.wrapping_add(want(weight)),
-            "case {case}: yield"
-        );
-        // A change of weight measures the request again at the new weight.
-        let heavier = weight.saturating_mul(2).min(u32::MAX >> 8);
-        if heavier != weight {
-            assert!(queue.set_weight(1, heavier).unwrap());
-            assert_eq!(request_of(&queue, 1), want(heavier), "case {case}: reweigh");
-        }
-        // A levelling measures every request from the average.
-        queue.level();
-        let now = queue.curr.as_ref().unwrap().entity.weight;
-        assert_eq!(request_of(&queue, 1), want(now), "case {case}: level");
-        assert_eq!(
-            request_of(&queue, 2),
-            to_virtual(
-                SLICE,
-                queue.tree.get(queue.tree.find(2).unwrap()).unwrap().weight
-            ),
-            "case {case}: level, no request"
-        );
-        check(&queue);
-    }
-}
-
-/// No request changes what the queue's bounds are measured with: an entity
-/// placed with any lag, at or past the clamp, lands at the same virtual
-/// runtime and leaves with the same lag whatever it asks for.
-///
-/// Verifies: `L.sched.108`
-#[test]
-fn no_request_moves_a_bound() {
-    let mut rng = Rng(0xCA9);
-    for case in 0..50_000 {
-        let weight = drawn_weight(&mut rng);
-        let vlag = drawn_lag(&mut rng, weight);
-        let neighbour = drawn_weight(&mut rng);
-        let run = rng.below(4 * SLICE);
-        let mut asked = queue();
-        let mut plain = queue();
-        for (queue, request) in [(&mut asked, drawn_request(&mut rng)), (&mut plain, 0)] {
-            queue.enqueue(9, 9, asking(neighbour, 0), slot()).unwrap();
-            let _ = queue.pick_next();
-            let _ = queue.update_curr(run);
-            let state = EntityState {
-                vlag,
-                ..asking(weight, request)
-            };
-            queue.enqueue(1, 1, state, slot()).unwrap();
-        }
-        let placed = |queue: &RunQueue<u64>| {
-            queue
-                .tree
-                .get(queue.tree.find(1).unwrap())
+        let left_through =
+            Eevdf::hand_over(&mut through, arriving, arriving, (state, slot()), SLICE)
                 .unwrap()
-                .vruntime
-        };
-        assert_eq!(placed(&asked), placed(&plain), "case {case}: placement");
+                .unwrap();
         assert_eq!(
-            asked.lag_limit(weight),
-            plain.lag_limit(weight),
-            "case {case}"
+            (left.0, left.1, left.2.0),
+            (left_through.0, left_through.1, left_through.2.0)
         );
-        let (_, gone_asked, _) = asked.remove(1).unwrap();
-        let (_, gone_plain, _) = plain.remove(1).unwrap();
-        assert_eq!(
-            gone_asked.vlag, gone_plain.vlag,
-            "case {case}: the lag it leaves with"
-        );
-        assert_eq!(
-            asked.decision_in_ns(),
-            plain.decision_in_ns(),
-            "case {case}"
-        );
+        assert_eq!(direct.current(), Eevdf::current(&through));
+        check(&direct);
+        Eevdf::check(&through).unwrap();
     }
-}
-
-/// Two eligible entities owed the same, one asking for the floor and one
-/// for nothing: the short request has the earlier deadline and runs first.
-///
-/// Verifies: `L.sched.107`
-#[test]
-fn a_shorter_request_is_picked_first() {
-    let mut queue = queue();
-    queue
-        .enqueue(1, 1, asking(NICE_0_WEIGHT, 0), slot())
-        .unwrap();
-    queue
-        .enqueue(2, 2, asking(NICE_0_WEIGHT, MIN_REQUEST_NS), slot())
-        .unwrap();
-    assert_eq!(queue.pick_next(), Some(&2));
-    check(&queue);
-}
-
-/// A request is carried while the entity is off the queue, and a changed
-/// request leaves the deadline it has and measures the next one.
-///
-/// Verifies: `L.sched.107`
-#[test]
-fn a_request_is_carried_and_a_change_waits_for_the_next() {
-    let mut queue = queue();
-    queue
-        .enqueue(1, 1, asking(NICE_0_WEIGHT, 500_000), slot())
-        .unwrap();
-    let (_, state, slot_back) = queue.remove(1).unwrap();
-    assert_eq!(state.request_ns, 500_000);
-    queue.enqueue(1, 1, state, slot_back).unwrap();
-    assert_eq!(request_of(&queue, 1), to_virtual(500_000, NICE_0_WEIGHT));
-    let _ = queue.pick_next();
-    let before = queue.curr.as_ref().unwrap().entity.deadline;
-    assert!(queue.set_request(1, MIN_REQUEST_NS));
-    assert_eq!(queue.curr.as_ref().unwrap().entity.deadline, before);
-    assert!(!queue.set_request(7, MIN_REQUEST_NS));
-    while !queue.update_curr(MIN_REQUEST_NS / 2) {}
+    // Refusals, as the interface names them, the entity handed back whole.
+    let zero = EntityState {
+        weight: 0,
+        vlag: 0,
+        sum_exec: 0,
+    };
+    let back = Eevdf::enqueue(&mut through, 40, 40, (zero, slot())).unwrap_err();
     assert_eq!(
-        request_of(&queue, 1),
-        to_virtual(MIN_REQUEST_NS, NICE_0_WEIGHT)
+        (back.payload, back.entity.0, back.reason),
+        (40, zero, Refusal::Invalid)
     );
-    check(&queue);
+    let state = EntityState::new(NICE_0_WEIGHT);
+    let back = Eevdf::enqueue(&mut through, 8, 70, (state, slot())).unwrap_err();
+    assert_eq!((back.payload, back.reason), (70, Refusal::Duplicate(8)));
+    let back = Eevdf::hand_over(&mut through, 3, 80, (state, slot()), SLICE).unwrap_err();
+    assert_eq!(
+        (back.payload, back.entity.0, back.reason),
+        (80, state, Refusal::Duplicate(3))
+    );
 }

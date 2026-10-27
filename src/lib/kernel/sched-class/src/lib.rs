@@ -292,6 +292,10 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         U::len(&queue.upper) + L::len(&queue.lower)
     }
 
+    // An entity is in one tier's queue at most: the kernel queues a task
+    // through its one run slot, which a queue keeps while the task is on it
+    // (the split's review, C2), so the stack does not look for the same
+    // identifier in the other tier.
     fn enqueue(
         queue: &mut Self::Queue,
         id: u64,
@@ -433,6 +437,9 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         L::check(&queue.lower)?;
         if queue.running_upper && L::current(&queue.lower).is_some() {
             return Err("a stack's lower class has a running entity while its upper class runs");
+        }
+        if !queue.running_upper && U::current(&queue.upper).is_some() {
+            return Err("a stack's upper class has a running entity while its lower class runs");
         }
         Ok(())
     }
