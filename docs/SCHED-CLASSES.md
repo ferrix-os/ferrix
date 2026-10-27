@@ -551,6 +551,19 @@ fair crate, which is one of the `NICE_` users C3 would make absent in a
 spawns), 30 of `CpuSet` and `MAX_CPUS` (mm, arch, user, object), and the
 core scheduler's own imports in `sched/{mod,queue,task,direct,check}.rs`.
 
+**What the core keeps of the fair crate outside `Stack`** (the split's
+review, N7; counted 2026-10-26 after the core went through `Stack`). Each
+fixes the fair class in every profile until C3 is decided, or goes through
+`Stack` when a second class needs it:
+
+| Use | Where | Why outside `Stack` today |
+|---|---|---|
+| `NICE_0_WEIGHT` (about 70 uses) and `weight_of_nice` (3) | spawns of kernel tasks, `syscall/attributes.rs` (nice), `object/quota.rs` (`cpu.weight`), the boot checks | a task's weight is the fair class's parameter; in a stack it becomes the task's `Params` |
+| `carried_weight`, `carried_weight_with`, `JobPlan`, `plan_job_fold`, `settle_job_fold` | `object/quota.rs`, `sched/direct.rs`, `sched/queue.rs` | the job weights and the direct switch's job fold (L.sched.64-66), which hold when both tasks are fair (N4) |
+| `slice_for`, `Config` | `sched/queue.rs` | the fair queue's slice, rescaled by how many are runnable |
+| `Timeline`, `Node`, `Slot`, `EntityState` | `sched/queue.rs` (the sleepers), `sched/task.rs` (the run and sleep slots) | the sleepers' timeline is built on the fair entity; the task's run slot becomes the stack's `Entity` (N2) |
+| `Eevdf` | `sched/stack.rs` | the stack itself |
+
 **Requirements.** Every L.sched unit names a core function
 (`sched::queue::CpuQueue::hand_over`, `::arm_timer`, `::sleeper_due`, …),
 none a library item, so no unit is re-pointed by the move; two statements
