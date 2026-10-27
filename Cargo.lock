@@ -851,6 +851,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-sched-class"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-sdmmc"
 version = "0.1.0"
 dependencies = [

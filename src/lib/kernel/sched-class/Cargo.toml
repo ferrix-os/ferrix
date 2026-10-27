@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-sched-class"
+description = "The scheduling-class interface: the SchedClass trait every scheduler crate implements, the class stack and the empty class (docs/SCHED-CLASSES.md)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
