@@ -1,0 +1,86 @@
+# `max_plus` ("Max+"): the barest microkernel Ferrix can build (the
+# customer, 2026-10-27: "max+ shall be the most bare microkernel possible"),
+# docs/SCHED-CLASSES.md section 9c, the consultant's design review OK IF
+# E1-E13 (ledger line 24 of the sched-classes container ledger). Every flag
+# and image key takes its `barest` value from build-flags.toml, held by
+# check-build-flags (E13); the countermeasures and their checks stay (E11).
+#
+# Its level, sc4_plus, is sc4's targets with EAL 7, and is a target, not a
+# claim: nothing here is formally verified, and no evaluation stands behind
+# it (E1). It differs from `max` in the windows' static slot table instead of
+# fixed priorities (P1), no Linux personality and so no filesystem and no
+# restricted-exit flags (C7, E3), signed slots only, and no boot option that
+# takes a free value (E12).
+#
+# Not claimable until `pending` is empty: personality=none, fs=none and
+# linux_abi=off allow sc4_plus only with their own evidence (E3: the later
+# steps of LINUX-ABI-SEPARATION.md section 11.11, the checks that run a Linux
+# program re-homed, ledger 3257 (1) and 3208 (6)(g)). Not buildable before
+# sched_windows=arinc_table and max's own values land.
+
+profile = "max_plus"
+level = "sc4_plus"
+claim = "target: EAL 7 / IEC 61508-3 SC 4 / ISO 26262 ASIL D / EN 50716 SIL 4 / DO-178C DAL A; no formal evidence and no evaluation yet"
+claim_architectures = ["aarch64"]
+buildable_from = "M5, with sched_windows=arinc_table at M3, and claimable once pending is empty"
+# The scheduling modes a domain may run (docs/SCHED-CLASSES.md section 9a,
+# D9): the windows tier's HardRt alone (E6).
+modes = ["HardRt"]
+image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required" }
+# The families its loader accepts a signed slot manifest for (docs/SIGNING.md
+# section 1.4, section 10.6): none yet, so no slot boots until the board is
+# chosen and named here (E12).
+slot_families = []
+exceptions = []
+# The barest values that do not allow sc4_plus yet, each with what it waits
+# on (E3): the profile is reported not claimable while any is listed.
+pending = [
+    { flag = "personality", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps; ledger 3257 (1), 3208 (6)(g)" },
+    { flag = "fs", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps" },
+    { flag = "linux_abi", value = "off", until = "the checks that run a Linux program re-homed (LINUX-ABI-SEPARATION.md section 11.11)" },
+]
+
+[flags]
+personality = "none"
+fs = "none"
+mitigations = "on"
+partition_speculation = "not_applicable"
+ipc_fastpath = "off"
+restricted_fastpath = "not_applicable"
+kernel_memory = "retyped"
+sched_dispatch = "fixed"
+sched_windows = "arinc_table"
+sched_deadline = "absent"
+sched_realtime = "absent"
+sched_fair = "absent"
+checks = "on"
+program_barrier = "switch"
+ssbd = "always"
+smt = "off"
+runtime_trades = "none"
+linux_abi = "off"
+runtime_settings = "fixed"
+
+# Each permitted boot option names one literal value (E12, E13); the root,
+# init, the action when init exits and the console take a free value in
+# `max`, so here none of them is permitted and the image fixes them.
+[boot_options]
+"ferrix.checks" = ["run"]
+"ferrix.panic" = ["halt"]
+"ferrix.vtd" = ["on"]
+"ferrix.amdvi" = ["on"]
+
+[build]
+cargo_profile = "release"
+toolchain = "1.97.1"
+codegen = { opt-level = 2, lto = true, codegen-units = 1, panic = "abort" }
+
+[build.rustflags]
+x86_64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=pie", "-C", "link-arg=-no-pie", "-C", "force-frame-pointers=yes"]
+aarch64 = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+armv7a = ["-C", "link-arg=-zmax-page-size=4096", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]
+
+[build.link]
+x86_64 = { mode = "static PIE, PIC code model", args = ["-pie", "--no-dynamic-linker"] }
+aarch64 = { mode = "static PIE", args = ["-pie", "--no-dynamic-linker", "-znotext"] }
+armv7a = { mode = "fixed address with relocations", args = ["--emit-relocs"] }

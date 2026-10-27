@@ -63,6 +63,7 @@ test-flags`.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import tomllib
@@ -540,6 +541,64 @@ def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str
     return problems
 
 
+# max+'s rule (docs/SCHED-CLASSES.md section 9c; the consultant's design
+# review, ledger line 24, E1, E2, E13): every flag and image key names its
+# `barest` value, the one that links the least code and leaves the least to
+# decide at run time among the values that allow sc4 (the countermeasure
+# floor, E11); only that value may allow sc4_plus, which is sc4's targets
+# with EAL 7 and a target alone; and a profile at sc4_plus takes the barest
+# value of every flag and key, names one literal value for every boot
+# option it permits, and claims a target.
+TOP = "sc4_plus"
+
+
+def barest_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
+    problems = []
+    # A barest value still waiting on its evidence (E3) allows neither sc4
+    # nor sc4_plus yet: it is excused while an sc4_plus profile lists it as
+    # pending, and only then.
+    awaited = {(e.get("flag"), e.get("value")) for profile in profiles.values() if profile.get("level") == TOP
+               for e in profile.get("pending", [])}
+    tables = [("flag", name, entry) for name, entry in flag_file.get("flags", {}).items()]
+    tables += [("image key", name, entry) for name, entry in flag_file.get("image_keys", {}).items()]
+    barest = {}
+    for kind, name, entry in tables:
+        values = entry.get("values", {})
+        chosen = entry.get("barest")
+        if chosen not in values:
+            problems.append(f"build-flags.toml: {kind} {name} names no barest value among its own (E13)")
+            continue
+        barest[name] = chosen
+        if "sc4" not in values[chosen].get("allows", []) and (name, chosen) not in awaited:
+            problems.append(f"build-flags.toml: {kind} {name}'s barest value {chosen} does not allow sc4 (E13)")
+        for value, spec in values.items():
+            allows = spec.get("allows", [])
+            if TOP in allows and "sc4" not in allows:
+                problems.append(f"build-flags.toml: {name}={value} allows {TOP} and not sc4, which it covers (E2)")
+            if TOP in allows and value != chosen:
+                problems.append(f"build-flags.toml: {name}={value} allows {TOP} and is not the barest, {chosen} (E13)")
+    for profile_name, profile in sorted(profiles.items()):
+        if profile.get("level") != TOP:
+            continue
+        where = f"profiles/{profile_name}.toml"
+        if not str(profile.get("claim", "")).startswith("target"):
+            problems.append(f"{where}: a profile at {TOP} claims a target and no more (E1)")
+        pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
+        chosen_values = {**profile.get("flags", {}), **profile.get("image", {})}
+        for name, value in sorted(chosen_values.items()):
+            if name in barest and value != barest[name]:
+                problems.append(f"{where}: {name}={value} is not its barest value, {barest[name]} (E13)")
+        for kind, name, entry in tables:
+            chosen = barest.get(name)
+            spec = entry.get("values", {}).get(chosen, {})
+            if chosen is not None and TOP not in spec.get("allows", []) and (name, chosen) not in pending:
+                problems.append(f"{where}: {name}={chosen} does not allow {TOP} and is not listed as pending (E3)")
+        for option, permitted in sorted(profile.get("boot_options", {}).items()):
+            if permitted is not True and (not isinstance(permitted, list) or len(permitted) != 1 or "*" in permitted):
+                problems.append(f"{where}: boot option {option} names {permitted}, not one literal value (E13)")
+    return problems
+
+
 # The audit record's fields (D8; ledger line 21 (4)): two bits a flag in the
 # first word, the scheduler's flags left out; in the second the profile and
 # the level four bits each, `sched_dispatch` two, each tier three. A value
@@ -773,6 +832,33 @@ def self_test() -> list[str]:
     ]:
         if not any(expect in p for p in mode_problems({"p": profile}, arms_modes)):
             failures.append(f"the modes rule passed {what}")
+    top = {"flags": {"f": {"barest": "b", "values": {"a": {"allows": ["sc4", "none"]},
+                                                   "b": {"allows": ["sc4_plus", "sc4", "none"]}}}},
+           "image_keys": {"k": {"barest": "x", "values": {"x": {"allows": ["sc4_plus", "sc4"]}, "y": {"allows": ["sc4"]}}}}}
+    good = {"p": {"level": "sc4_plus", "claim": "target: EAL 7", "flags": {"f": "b"}, "image": {"k": "x"},
+                  "boot_options": {"ferrix.checks": ["run"]}}}
+    if barest_problems(top, good):
+        failures.append(f"a barest profile and flag file were refused: {barest_problems(top, good)}")
+    unnamed = json.loads(json.dumps(top))
+    del unnamed["flags"]["f"]["barest"]
+    wider = json.loads(json.dumps(top))
+    wider["flags"]["f"]["values"]["a"]["allows"].insert(0, "sc4_plus")
+    above = json.loads(json.dumps(top))
+    above["flags"]["f"]["values"]["b"]["allows"] = ["sc4_plus", "none"]
+    for what, flag_file, profiles, expect in [
+        ("a flag naming no barest value", unnamed, {}, "names no barest"),
+        ("a value not the barest allowing sc4_plus", wider, {}, "is not the barest"),
+        ("a value allowing sc4_plus and not sc4", above, {}, "(E2)"),
+        ("a held claim at sc4_plus", top, {"p": dict(good["p"], claim="EAL 7")}, "(E1)"),
+        ("a value of an sc4_plus profile not the barest", top, {"p": dict(good["p"], flags={"f": "a"})}, "not its barest"),
+        ("a barest value below sc4 not pending", json.loads(json.dumps(top).replace('["sc4_plus", "sc4", "none"]', '["none"]')),
+         {}, "does not allow sc4"),
+        ("a free boot option", top, {"p": dict(good["p"], boot_options={"console": ["*"]})}, "one literal"),
+        ("a barest value not allowing sc4_plus unlisted", json.loads(json.dumps(top).replace('["sc4_plus", "sc4", "none"]', '["sc4", "none"]')),
+         good, "not listed as pending"),
+    ]:
+        if not any(expect in p for p in barest_problems(flag_file, profiles)):
+            failures.append(f"max+'s rule passed {what}")
     fields = {"levels": {"none": {}}, "flags": {"a": {"values": {str(n): {} for n in range(4)}},
                                                 "sched_fair": {"values": {str(n): {} for n in range(8)}}}}
     if audit_field_problems(fields, ["p"]):
@@ -855,6 +941,7 @@ def main() -> int:
     images = image_key_problems(flag_file, profile_files)
     images += mode_problems(profile_files, mode_map((ROOT / ARMS).read_text(encoding="utf-8")))
     images += audit_field_problems(flag_file, profiles)
+    images += barest_problems(flag_file, profile_files)
     if images:
         print("build-flags: the profiles' image keys, modes or dispatch do not follow the rules:", file=sys.stderr)
         for problem in images:

@@ -44,6 +44,7 @@ const FLAGS: [Flag; 21] = [
             (cfg!(ferrix_profile = "fast"), "fast"),
             (cfg!(ferrix_profile = "max"), "max"),
             (cfg!(ferrix_profile = "none"), "none"),
+            (cfg!(ferrix_profile = "max_plus"), "max_plus"),
         ]),
     },
     Flag {
@@ -53,6 +54,7 @@ const FLAGS: [Flag; 21] = [
             (cfg!(ferrix_level = "present"), "present"),
             (cfg!(ferrix_level = "sc2"), "sc2"),
             (cfg!(ferrix_level = "sc4"), "sc4"),
+            (cfg!(ferrix_level = "sc4_plus"), "sc4_plus"),
         ]),
     },
     Flag {

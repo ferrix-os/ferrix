@@ -2588,6 +2588,11 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
+def problems_of_claim(profile: dict) -> bool:
+    """Whether a profile's claim is anything but a target."""
+    return not str(profile.get("claim", "")).startswith("target")
+
+
 def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], list[str]]:
     """A profile file against the flag file: (problems, the reasons it does not
     build yet). Every flag set (rule 4), each value declared and allowed at
@@ -2612,6 +2617,17 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     for exception in profile.get("exceptions", []):
         if not exception.get("ends") or not exception.get("why"):
             problems.append(f"exception {exception.get('flag')}={exception.get('value')} names no end or reason")
+    # `pending` (SCHED-CLASSES.md section 9c, E3; ledger line 24): a value a
+    # target-only profile names before it allows the profile's level, each
+    # with what it waits on. It is no claim's to carry: the profile is
+    # reported not claimable while one is listed, and one that excuses
+    # nothing is stale.
+    pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
+    if pending and not str(profile.get("claim", "")).startswith("target"):
+        problems.append("only a profile whose claim is a target may list pending values (E3)")
+    for entry in profile.get("pending", []):
+        if not entry.get("until"):
+            problems.append(f"pending {entry.get('flag')}={entry.get('value')} names nothing it waits on")
     for flag, value in values.items():
         spec = declared.get(flag, {}).get("values", {}).get(value)
         if spec is None:
@@ -2628,11 +2644,18 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
         allowed = level in spec.get("allows", [])
         if not allowed and (flag, value) in exceptions and name == "present":
             allowed = True
+        if not allowed and (flag, value) in pending and not problems_of_claim(profile):
+            allowed = True
+            waiting.append(f"{flag}={value} is not claimable at {level} yet (pending)")
         if not allowed:
             problems.append(f"{flag}={value} does not allow level {level} (it allows "
                             f"{', '.join(spec.get('allows', []))}): refused (rule 3)")
         if spec.get("built") == "no" or (spec.get("built") == "stand-in" and level != "none"):
             waiting.append(f"{flag}={value} lands at {spec.get('lands')}")
+    for flag, value in pending:
+        spec = declared.get(flag, {}).get("values", {}).get(value, {})
+        if values.get(flag) != value or level in spec.get("allows", []):
+            problems.append(f"pending {flag}={value} waits on nothing this profile uses")
     for flag, value in exceptions:
         spec = declared.get(flag, {}).get("values", {}).get(value, {})
         if values.get(flag) != value or level in spec.get("allows", []):
@@ -3084,6 +3107,18 @@ def _profile_self_test() -> list[str]:
         failures.append("present's dated exception was not honoured")
     if not profile_problems("p", profile("present", "c", excepted), flags)[0]:
         failures.append("an exception outside present was honoured")
+    awaiting = profile("sc4", "c")
+    awaiting["claim"] = "target: x"
+    awaiting["pending"] = [{"flag": "f", "value": "c", "until": "its evidence"}]
+    found, waits = profile_problems("p", awaiting, flags)
+    if found or not any("pending" in w for w in waits):
+        failures.append(f"a target's pending value was not reported as waiting: {found} {waits}")
+    held = dict(awaiting, claim="EAL 9")
+    if not any("only a profile whose claim is a target" in p for p in profile_problems("p", held, flags)[0]):
+        failures.append("a held claim's pending value was accepted")
+    stale = dict(awaiting, flags={"f": "a"})
+    if not any("waits on nothing" in p for p in profile_problems("p", stale, flags)[0]):
+        failures.append("a stale pending entry was accepted")
     manifest = {"rings": {"item": {"level": "present"}, "load": {"level": "none", "in_ring0_when": ["f=c"]}},
                 "crates": {"members": {"k": {"ring": "item", "level": "none", "in_ring0_when": ["f=c"]}}}}
     found = component_problems("present", profile("present", "c", excepted, "present"), flags, manifest)

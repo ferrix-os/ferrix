@@ -50,10 +50,12 @@ macro_rules! build_flag_word {
             cfg!(ferrix_profile = "fast"),
             cfg!(ferrix_profile = "max"),
             cfg!(ferrix_profile = "none"),
+            cfg!(ferrix_profile = "max_plus"),
             cfg!(ferrix_level = "none"),
             cfg!(ferrix_level = "present"),
             cfg!(ferrix_level = "sc2"),
             cfg!(ferrix_level = "sc4"),
+            cfg!(ferrix_level = "sc4_plus"),
             cfg!(ferrix_personality = "user"),
             cfg!(ferrix_personality = "kernel"),
             cfg!(ferrix_personality = "none"),
@@ -76,6 +78,7 @@ macro_rules! build_flag_word {
             cfg!(ferrix_sched_dispatch = "switchable"),
             cfg!(ferrix_sched_windows = "arinc"),
             cfg!(ferrix_sched_windows = "absent"),
+            cfg!(ferrix_sched_windows = "arinc_table"),
             cfg!(ferrix_sched_deadline = "edf_cbs"),
             cfg!(ferrix_sched_deadline = "absent"),
             cfg!(ferrix_sched_realtime = "fifo_rr"),
@@ -162,6 +165,10 @@ pub const WINDOWS: Value = Value {
 /// The windows tier over `L`: `L` itself while it is absent.
 #[cfg(ferrix_sched_windows = "absent")]
 pub type Windows<L> = L;
+#[cfg(ferrix_sched_windows = "arinc_table")]
+compile_error!(
+    "sched_windows=arinc_table is not built yet (ferrix-sched-windows-table, M3; SCHED-CLASSES.md section 9c)"
+);
 
 // sched_deadline: HardRt's EDF with CBS.
 #[cfg(ferrix_sched_deadline = "edf_cbs")]

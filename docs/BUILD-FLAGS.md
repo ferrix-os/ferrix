@@ -294,10 +294,25 @@ for exactly that pair.
 | `present` (interim, today's item) | SC 2 | — | SIL 2 | DAL C | Class C | EAL5+ |
 | `sc2` (`fast`) | SC 2 | ASIL B | SIL 2 | — | Class C | as `fast`'s ST says |
 | `sc4` (`max`) | SC 4 | ASIL D | SIL 4 | DAL A objectives | Class C | EAL6+ |
+| `sc4_plus` (`max_plus`, a target only) | SC 4 | ASIL D | SIL 4 | DAL A objectives | Class C | EAL7 |
 
 A profile's claim must be allowed by every one of its values, standard by
 standard; the gate fails a profile with any value that does not reach the
 claim's target in some standard.
+
+**`max_plus` ("Max+")** (SCHED-CLASSES.md §9c; the customer, 2026-10-27,
+"the most bare microkernel possible"; the consultant's OK IF E1-E13,
+ledger line 24 of the sched-classes ledger) is the barest kernel Ferrix
+can build: every flag and image key in the flag file names its `barest`
+value, the one that links the least code and leaves the least to decide
+at run time among those that allow `sc4`, a countermeasure or its check
+always kept, and `max_plus` takes each. Only a barest value may allow
+`sc4_plus`. Its level is a target, not a claim: EAL 7's formal model,
+formal correspondence and evaluation do not exist. `personality`, `fs`
+and `linux_abi` take `none`, `none` and `off`, which wait on their own
+evidence and are listed under the profile's `pending`, so it is reported
+not claimable until they allow `sc4_plus`. check-build-flags holds all
+of it.
 
 ## 5. Files and commands
 
