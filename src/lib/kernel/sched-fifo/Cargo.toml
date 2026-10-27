@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-sched-fifo"
+description = "SCHED_FIFO and SCHED_RR: fixed priorities above the fair class, with Linux's real-time throttle as the fair class's floor (docs/SCHED-CLASSES.md section 9e)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrix-fallible = { workspace = true }
+ferrix-sched-class = { workspace = true }
+
+[lints]
+workspace = true
