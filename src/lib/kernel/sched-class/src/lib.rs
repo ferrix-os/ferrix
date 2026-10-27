@@ -184,6 +184,27 @@ pub trait SchedClass<T> {
     /// CPU's one-shot timer is armed for. `None` with nothing running.
     fn remaining_ns(queue: &Self::Queue) -> Option<u64>;
 
+    /// Whether something queued should run instead of the running entity,
+    /// now: what the tick and a wake-up ask (docs/SCHED-CLASSES.md §9d, F4).
+    /// It agrees with [`SchedClass::charge`]: a charge that reports a
+    /// decision due leaves this true while anything else could run.
+    fn should_preempt(queue: &Self::Queue) -> bool;
+
+    /// Nanoseconds until a decision among the queued entities is due: what
+    /// the CPU's one-shot timer is armed for (F14). `None` only when no
+    /// decision can be due, which is what lets a CPU with one task run
+    /// tickless; never later than [`SchedClass::remaining_ns`] when both are
+    /// `Some`.
+    fn decision_in_ns(queue: &Self::Queue) -> Option<u64>;
+
+    /// The queue's load, in [`LOAD_UNIT`]s for each entity of ordinary
+    /// weight it holds: what the processor's load average accumulates.
+    fn load_weight(queue: &Self::Queue) -> u64;
+
+    /// The running entity gives up the rest of its turn: what `sched_yield`
+    /// asks. Nothing with nothing running.
+    fn yield_current(queue: &mut Self::Queue);
+
     /// Whether an idle CPU may take this queue's tasks, now. False for every
     /// real-time class: partitioning is what makes admission mean anything.
     /// A function of the queue, not a constant, so that a stack answers by
@@ -197,6 +218,12 @@ pub trait SchedClass<T> {
     /// The first one that does not hold.
     fn check(queue: &Self::Queue) -> Result<(), &'static str>;
 }
+
+/// One entity of ordinary weight, as [`SchedClass::load_weight`] counts it.
+/// The fair class's nice-0 weight, which ferrix-sched-fair asserts equal at
+/// compile time; a constant of the interface so that no class crate needs
+/// another to say what a load is (docs/SCHED-CLASSES.md §9d).
+pub const LOAD_UNIT: u64 = 1024;
 
 /// The class with nothing in it: a tier a profile leaves out. It takes no
 /// entity (its entity type has no values), so nothing can be queued on it.
@@ -240,6 +267,16 @@ impl<T> SchedClass<T> for Empty {
     fn remaining_ns((): &()) -> Option<u64> {
         None
     }
+    fn should_preempt((): &()) -> bool {
+        false
+    }
+    fn decision_in_ns((): &()) -> Option<u64> {
+        None
+    }
+    fn load_weight((): &()) -> u64 {
+        0
+    }
+    fn yield_current((): &mut ()) {}
     fn steals_work((): &()) -> bool {
         false
     }
@@ -492,6 +529,39 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
             U::remaining_ns(&queue.upper)
         } else {
             L::remaining_ns(&queue.lower)
+        }
+    }
+
+    fn should_preempt(queue: &Self::Queue) -> bool {
+        if queue.running_upper {
+            U::should_preempt(&queue.upper)
+        } else {
+            // Anything of the upper tier waiting takes the CPU from the lower,
+            // as `charge` reports it.
+            U::len(&queue.upper) > 0 || L::should_preempt(&queue.lower)
+        }
+    }
+
+    fn decision_in_ns(queue: &Self::Queue) -> Option<u64> {
+        if queue.running_upper {
+            // Lower entities waiting cannot displace an upper one.
+            U::decision_in_ns(&queue.upper)
+        } else if U::len(&queue.upper) > 0 {
+            Some(0)
+        } else {
+            L::decision_in_ns(&queue.lower)
+        }
+    }
+
+    fn load_weight(queue: &Self::Queue) -> u64 {
+        U::load_weight(&queue.upper).saturating_add(L::load_weight(&queue.lower))
+    }
+
+    fn yield_current(queue: &mut Self::Queue) {
+        if queue.running_upper {
+            U::yield_current(&mut queue.upper);
+        } else {
+            L::yield_current(&mut queue.lower);
         }
     }
 
