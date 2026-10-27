@@ -107,7 +107,9 @@ pub type Handed<T, E> = Result<Option<Left<T, E>>, Back<T, E>>;
 /// Associated functions, not methods: the queue is passed in, so a stack of
 /// classes is a tuple of queues and a type, with nothing to construct.
 pub trait SchedClass<T> {
-    /// What the boot line and the audit record call it.
+    /// What the boot line and the audit record call it. A stack's is its
+    /// classes', top tier first, joined by `+` (`edf+fifo+eevdf`); an absent
+    /// tier ([`Empty`]) names nothing.
     const NAME: &'static str;
 
     /// What one CPU keeps.
@@ -202,7 +204,7 @@ pub trait SchedClass<T> {
 pub struct Empty;
 
 impl<T> SchedClass<T> for Empty {
-    const NAME: &'static str = "empty";
+    const NAME: &'static str = "";
     type Queue = ();
     type Entity = Infallible;
     type Config = ();
@@ -274,8 +276,68 @@ pub struct Stacked<UQ, LQ> {
     running_upper: bool,
 }
 
+/// The longest name a stack can have, in bytes: a stack whose classes'
+/// names come to more does not compile.
+pub const NAME_CAPACITY: usize = 64;
+
+/// A stack's name as it is built, before it is a `&str`.
+#[derive(Debug)]
+pub struct Joined {
+    bytes: [u8; NAME_CAPACITY],
+    len: usize,
+}
+
+impl Joined {
+    /// `upper` and `lower` joined by `+`, or whichever of them is not empty.
+    const fn of(upper: &str, lower: &str) -> Self {
+        let (upper, lower) = (upper.as_bytes(), lower.as_bytes());
+        let both = !upper.is_empty() && !lower.is_empty();
+        assert!(
+            upper.len() + lower.len() + both as usize <= NAME_CAPACITY,
+            "a stack's name is longer than NAME_CAPACITY"
+        );
+        let mut joined = Self {
+            bytes: [0; NAME_CAPACITY],
+            len: 0,
+        };
+        joined.push(upper);
+        if both {
+            joined.push(b"+");
+        }
+        joined.push(lower);
+        joined
+    }
+
+    const fn push(&mut self, part: &[u8]) {
+        let mut i = 0;
+        while i < part.len() {
+            self.bytes[self.len] = part[i];
+            self.len += 1;
+            i += 1;
+        }
+    }
+
+    const fn as_str(&'static self) -> &'static str {
+        match core::str::from_utf8(self.bytes.split_at(self.len).0) {
+            Ok(name) => name,
+            // Two `str`s and a `+` joined at whole characters are UTF-8.
+            Err(_) => panic!("a stack's name is not UTF-8"),
+        }
+    }
+}
+
+/// Where an [`Over`] stack's name is built: a constant of its own, so the
+/// name can borrow it for `'static`.
+trait Named<T> {
+    const JOINED: Joined;
+}
+
+impl<T, U: SchedClass<T>, L: SchedClass<T>> Named<T> for Over<U, L> {
+    const JOINED: Joined = Joined::of(U::NAME, L::NAME);
+}
+
 impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
-    const NAME: &'static str = "stack";
+    const NAME: &'static str = <Self as Named<T>>::JOINED.as_str();
     type Queue = Stacked<U::Queue, L::Queue>;
     type Entity = Tier<U::Entity, L::Entity>;
     type Config = (U::Config, L::Config);
@@ -432,6 +494,9 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         }
     }
 
+    // Out of line, as each class's own is: a present class shows in the
+    // image as its check (SCHED-CLASSES.md S1).
+    #[inline(never)]
     fn check(queue: &Self::Queue) -> Result<(), &'static str> {
         U::check(&queue.upper)?;
         L::check(&queue.lower)?;

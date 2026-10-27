@@ -635,10 +635,26 @@ owed: the round trip measured before and after under the
 `optimize-ipc-round-trip` protocol on the gate host, or the fast path's
 remaining difference removed.
 
-Next, each pushed as it is done so another session can take it up: the
-rest of N2 to N7 of the code review (the entity in `Task` as
-`<Stack as SchedClass<Arc<Task>>>::Entity` behind L.sched.63's cell, the
-stack's name on the boot line in a commit of its own, the field-for-field
-hand-over test on the stack type, the inventory's list of fair uses kept
-outside `Stack`); then the selection crate as S2 has it (N1). Still open for the customer: C3, fair in
+**N2, the entity in `Task`** (ledger line 14, OK IF 1-4): what a task is
+queued with is `StackEntity`, `<Stack as SchedClass<Arc<Task>>>::Entity`,
+assembled by `Task::entity_with` from the record's atomics and the run
+slot behind L.sched.63's cell, and kept by `Task::keep_entity` and
+`Task::keep_refused`. A const in `stack.rs` requires it to be
+`FairEntity<Arc<Task>>`; it may go only with the change S4's full form
+makes when a stack's entity first differs (step 4), and the commit adding
+a second class says so. Owed with line 13's: `sched/queue.rs:747`, the
+hand-over's entity line, measured on the gate host after the final
+rebase; S5's round trip and the four boots taken on a hash that includes
+it.
+
+**N3, the marker** (S1): `Over`'s `NAME` is its classes' names, top tier
+first, joined by `+`, built at compile time; `Empty` names nothing. Each
+boot prints it after the scheduler starts (`sched    classes eevdf` on
+the fair-only stack), and every class's `check` and `Over`'s are
+`#[inline(never)]`, so a present class shows in the release ELF as its
+check (`<Eevdf as SchedClass<Arc<Task>>>::check` on all three
+architectures).
+
+Next, each pushed as it is done so another session can take it up: N4's
+measurement and N7's review; then the selection crate as S2 has it (N1). Still open for the customer: C3, fair in
 `max`.
