@@ -729,11 +729,14 @@ says so rather than claiming it.
   (six and five of sixteen), the flag word 54 of 64.
 
 **Open for the customer and the consultant:**
-* **C7, the Linux personality in `max+`.** `max` has `linux_abi = "on"`.
-  The smallest kernel for EAL 7 would leave the Linux ABI out
-  (`linux_abi = "off"`), which today is build-only and carries no claim
-  (LINUX-ABI-SEPARATION.md §11.11). Keep it on in `max+` as in `max`, or
-  make `max+` the profile that needs it off and owe that work?
+* **C7, decided by the customer (2026-10-27): no Linux personality in
+  `max+`** ("go for it", to the choice between keeping it and making
+  `max+` the profile that needs it off). `max_plus` has `linux_abi =
+  "off"`, the smallest kernel Ferrix can build. That value is build-only
+  and carries no claim today (LINUX-ABI-SEPARATION.md §11.11): making it
+  claimable, re-homing the checks that run a Linux program, is owed before
+  `max_plus` can be more than a target, and `linux_abi = "off"` would have
+  to allow `sc4_plus`.
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
