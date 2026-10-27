@@ -527,8 +527,70 @@ Lesser points: C1 (Linux numbers in the personality's table, §6a); C2,
 queue's review defines it at the stack level; C3 and C4 (§7a); C5, the
 switch's bound goes into MEMORY-AND-TIMING when step 5 lands.
 
+## 11. Step 2's inventory (S6)
+
+Every item of `ferrix-sched` (`src/lib/kernel/sched`, 4,876 lines with its
+tests) and every scheduler unit of the core, assigned before the move. A
+moved body is byte-identical; only its path changes.
+
+**To `ferrix-sched-class`, the interface crate** (no class's policy, shared
+by every class and by the core):
+
+| Item | From | Why here |
+|---|---|---|
+| `CpuSet`, `MAX_CPUS` | `domain.rs` | affinity and domain membership, named by the whole kernel (about 30 files) |
+| `Mode`, `Class`, `Domain`, `check_partition`, the domain errors of `SchedError` (`ModeUnavailable`, `EmptyDomain`, `Overlap`, `Uncovered`, `NoSuchCpu`) | `domain.rs`, `lib.rs` | modes name tiers, not crates (§6) |
+| `Node`, `Slot` | `tree.rs` | the allocation-free tree both the fair queue and the core's `Timeline` use |
+| `Timeline` | `timeline.rs` | the core's sleepers, ordered by due instant: no class's |
+| `Load`, `CpuLoad`, `LOAD_SCALE`, `LOAD_PERIOD_NS`, `place`, `Placement`, `flip`, `FLIP_DECAY_NS`, `wake_wide`, `pull_fits`, `utilisation`, `BALANCE_THRESHOLD`, `imbalance`, `busiest`, `Balance`, `quietest` | `balance.rs` | load tracking and placement, which the core does for any class that steals work |
+| `SchedClass`, `Over`, `Empty` | new | §4 |
+
+**To `ferrix-sched-fair`, EEVDF**:
+
+| Item | From |
+|---|---|
+| `RunQueue`, `Config`, `EntityState`, `EntityView`, `Refused`, `Left`, the queue errors of `SchedError` (`ZeroWeight`, `Duplicate`, …), the private `Entity`, `Key` and the arithmetic | `lib.rs` |
+| `NICE_0_WEIGHT`, `weight_of_nice` and its table | `lib.rs` |
+| `carried_weight`, `carried_weight_with`, `JobPlan`, `plan_job_fold`, `settle_job_fold` (the job weights and the direct switch's fold) | `lib.rs` |
+| `slice_for` | `balance.rs` (the slice is EEVDF's) |
+| the property tests of the queue, the weights and the fold | `tests.rs` |
+| `impl SchedClass for Eevdf` | new, forwarding to `RunQueue` |
+
+`SchedError` is split by the line above; the two halves keep their
+variants' names and messages.
+
+**Stays in the core** (`src/kernel/src/sched/`): `queue.rs` (`CpuQueue`,
+whose `fair: RunQueue` becomes the stack's queue in step 2's second half),
+`task.rs` (whose `EntityState`, `Node` and `Slot` fields become the stack's
+`Entity`, S4), `direct.rs` (the direct switch, through the required
+hand-over, S5), `mod.rs`, `preempt.rs`, `wait.rs`, `work.rs`, `borrow.rs`,
+`inspect.rs`, `trip.rs`, `vtime.rs` and their checks. `object/quota.rs`
+keeps `cpu.weight` and the job weights; it names `NICE_0_WEIGHT` from the
+fair crate, which is one of the `NICE_` users C3 would make absent in a
+`max` without fair.
+
+**Users of the moved names**, re-pointed by path only: 53 uses of
+`NICE_0_WEIGHT` and `weight_of_nice` (attributes, the stage checks, quota,
+spawns), 30 of `CpuSet` and `MAX_CPUS` (mm, arch, user, object), and the
+core scheduler's own imports in `sched/{mod,queue,task,direct,check}.rs`.
+
+**Requirements.** Every L.sched unit names a core function
+(`sched::queue::CpuQueue::hand_over`, `::arm_timer`, `::sleeper_due`, …),
+none a library item, so no unit is re-pointed by the move; two statements
+name the library in prose (L.object.160's `ferrix_sched::carried_weight`,
+and the criteria of L.sched.55 and its high-level parent naming
+"the ferrix-sched host test"), which step 2 restates as `ferrix-sched-fair`.
+`certification-item.json`'s two `unclassified_deps` entries for
+`ferrix-sched` (core and item) become entries for the two new crates until
+S7's gates pass, and F-76's count is recounted then.
+
 ## Where it stands
 
 2026-10-26: designed and reviewed, OK IF S1-S14; the conditions are
-written in above. Nothing built. Next: the customer's answer on C3 (fair in
-`max`), then step 2 with S5 and S6 first.
+written in above. LAVD is desktop only (the customer: it "does not have to
+be included in max"). Step 2 started: the inventory (§11, S6) written.
+Next, each pushed as it is done so another session can take it up: the
+interface crate `ferrix-sched-class`, alone and host-tested; the split of
+`ferrix-sched` per §11 with no behaviour change; then the selection crate
+and the core through `Stack`, with the IPC round trip measured before and
+after (S5). Still open for the customer: C3, fair in `max`.
