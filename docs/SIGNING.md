@@ -171,7 +171,7 @@ recognise it.
 | x86-64 Intel N150 (the SOYO M4 Pro) | 0x0102 | SMBIOS processor and board strings (`ferrix-smbios`, already in the loader) |
 | AArch64 UEFI virt (QEMU) | 0x0201 | arch; SMBIOS system "QEMU" |
 | AArch64 Pixel 7 | 0x0202 | its own loader (`src/boot/vendor/google/pixel7`) |
-| AArch64 Radxa Orion O6 (CIX P1) | 0x0203 | SMBIOS system and baseboard strings, not yet recorded (no board owned; `max_plus`'s board, SCHED-CLASSES.md §9c) |
+| AArch64 AMD Kria KV260 (Zynq UltraScale+ K26) | 0x0204 | the device tree's `xlnx,zynqmp-sk-kv260` compatible, not yet recorded (no board owned; `max_plus`'s board, SCHED-CLASSES.md §9c; 0x0203, the Radxa Orion O6 it replaced, retired unrecorded) |
 | ARMv7-A UEFI virt (QEMU) | 0x0301 | arch; SMBIOS system "QEMU" |
 | ARMv7-A STM32MP157 (the DK1) | 0x0302 | the device tree's `st,stm32mp157` compatible |
 

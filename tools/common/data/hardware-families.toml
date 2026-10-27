@@ -38,11 +38,11 @@ arch = "aarch64"
 generic = false
 recognised_by = "its own loader (src/boot/vendor/google/pixel7); no slot path (§7.3)"
 
-[family.aarch64-orion-o6]
-id = 515            # 0x0203
+[family.aarch64-kv260]
+id = 516            # 0x0204; 0x0203 was the Radxa Orion O6, never recorded, retired 2026-10-27
 arch = "aarch64"
 generic = false
-recognised_by = "SMBIOS system and baseboard strings of the Radxa Orion O6 (CIX P1, CD8180; ferrix-smbios), not yet recorded: no board is owned (the customer, 2026-10-27, max_plus's board for now, SCHED-CLASSES.md section 9c)"
+recognised_by = "the device tree's xlnx,zynqmp-sk-kv260 compatible (AMD Kria KV260, Zynq UltraScale+ K26), not yet recorded: no board is owned (the customer, 2026-10-27, max_plus's board in place of the Orion O6, SCHED-CLASSES.md section 9c)"
 # No recognition rule is recorded, so the loader cannot tell this board from
 # the generic family: it counts as no board (ledger line 26, on b1d64901c).
 recorded = false

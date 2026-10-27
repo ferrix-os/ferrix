@@ -3190,7 +3190,7 @@ def _profile_self_test() -> list[str]:
     unbooted = dict(profile("sc2", "b"), image={"slot_signing": "required"}, slot_families=[])
     if not any("names no board" in w for w in profile_problems("p", unbooted, flags)[1]):
         failures.append("signed slots with no board named were reported buildable")
-    unrecorded = dict(unbooted, slot_families=["aarch64-orion-o6"])
+    unrecorded = dict(unbooted, slot_families=["aarch64-kv260"])
     if not any("names no board" in w for w in profile_problems("p", unrecorded, flags)[1]):
         failures.append("signed slots naming only an unrecorded family were reported buildable")
     known = dict(unbooted, slot_families=["aarch64-uefi-virt"])
