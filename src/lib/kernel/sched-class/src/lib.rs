@@ -40,6 +40,10 @@ pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
 pub enum DomainError {
     /// A scheduling mode that is named, and not written yet.
     ModeUnavailable(Mode),
+    /// A mode whose tiers are compiled in, whose domain cannot be made yet:
+    /// `SoftRt` before its own processors, a fully preemptible kernel and
+    /// threaded interrupts land (docs/SCHED-CLASSES.md §9e, R9).
+    NotCreatable(Mode),
     /// A domain with no CPUs in it.
     EmptyDomain,
     /// A CPU claimed by two domains.
@@ -56,6 +60,9 @@ impl fmt::Display for DomainError {
         match self {
             DomainError::ModeUnavailable(mode) => {
                 write!(f, "the {} mode is not written yet", mode.name())
+            }
+            DomainError::NotCreatable(mode) => {
+                write!(f, "the {} mode is compiled, not yet creatable", mode.name())
             }
             DomainError::EmptyDomain => f.write_str("a scheduling domain has no CPUs"),
             DomainError::Overlap(cpu) => write!(f, "CPU {cpu} is in two scheduling domains"),
@@ -692,7 +699,16 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
             // consultant's ledger line 28, condition 4).
             None
         } else {
-            L::decision_in_ns(&queue.lower)
+            // The upper tier holds nothing ready: nothing, or tasks a throttle
+            // holds back, whose period's end is a decision of its own (R4);
+            // so whichever comes first.
+            match (
+                L::decision_in_ns(&queue.lower),
+                U::decision_in_ns(&queue.upper),
+            ) {
+                (Some(lower), Some(upper)) => Some(lower.min(upper)),
+                (lower, upper) => lower.or(upper),
+            }
         }
     }
 

@@ -28,7 +28,9 @@
 use alloc::sync::Arc;
 
 use ferrix_sched_class::{CpuLoad, Load, RtParams, SchedClass};
-use ferrix_sched_fair::{Config, FairTier, JobPlan, Timeline, settle_job_fold, slice_for};
+use ferrix_sched_fair::{
+    Config, FairTier, JobPlan, StackTiers, Timeline, settle_job_fold, slice_for,
+};
 
 use super::stack::{Stack, StackQueue};
 
@@ -185,9 +187,9 @@ pub(crate) struct CpuQueue {
 impl CpuQueue {
     /// An empty queue.
     pub(crate) fn new() -> Result<CpuQueue, &'static str> {
-        let stack = Stack::new_queue(Config {
+        let stack = Stack::new_queue(<Stack as StackTiers<Arc<Task>>>::stack_config(Config {
             slice_ns: TARGET_LATENCY_NS,
-        })
+        }))
         .map_err(|_| "the scheduler's slice is not a slice")?;
         Ok(CpuQueue {
             stack,

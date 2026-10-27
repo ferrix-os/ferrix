@@ -786,7 +786,8 @@
       ],
       "unclassified_deps": {
         "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
-        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)"
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
+        "ferrix-sched-fifo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (SCHED_FIFO and SCHED_RR, named only by the fifo_rr arm, docs/SCHED-CLASSES.md §9e; grown under the consultant's ledger line 29, R11; classified under S7)"
       }
     },
     "ferrix-kernel-item": {

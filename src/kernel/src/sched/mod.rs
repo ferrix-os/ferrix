@@ -48,6 +48,7 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
+mod rt_check;
 mod stack;
 mod task;
 pub mod trip;
@@ -898,13 +899,8 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     let online = topology.count();
     let cpus =
         CpuSet::first(online).map_err(|_| "more processors than a scheduling domain holds")?;
-    // The mode's tiers compiled in (SCHED-CLASSES.md §9a, D9), before the
-    // library's own refusal of a mode not written yet.
-    if !ferrix_kernel_sched_select::mode_available(Mode::Throughput) {
-        return Err("the Throughput mode's fair tier is not compiled in");
-    }
     let domain =
-        Domain::new(cpus, Mode::Throughput).map_err(|_| "the Throughput domain was refused")?;
+        make_domain(cpus, Mode::Throughput).map_err(|_| "the Throughput domain was refused")?;
     check_partition(core::slice::from_ref(&domain), online)
         .map_err(|_| "the scheduling domains do not cover every processor exactly once")?;
     let _ = DOMAIN.call_once(|| domain);
@@ -1467,6 +1463,26 @@ pub fn current_resets_on_fork() -> bool {
     with_current(|task| task.rt_word().resets_on_fork()).unwrap_or(false)
 }
 
+/// A scheduling domain of `cpus` running `mode`, as this build can make
+/// one (docs/SCHED-CLASSES.md §9a, D9, and §9e, R9, L.sched.115): a mode
+/// whose tiers are not compiled in is `ModeUnavailable`, before the
+/// library's own refusal of a mode not written yet; `SoftRt`, compiled in
+/// on `desktop`, is `NotCreatable` until its own processors, a fully
+/// preemptible kernel and threaded interrupts land (REALTIME.md §4).
+///
+/// # Errors
+///
+/// The [`ferrix_sched_class::DomainError`] of the refusal.
+pub fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
+    if !ferrix_kernel_sched_select::mode_available(mode) {
+        return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
+    }
+    if mode == Mode::SoftRt {
+        return Err(ferrix_sched_class::DomainError::NotCreatable(mode));
+    }
+    Domain::new(cpus, mode)
+}
+
 /// Whether this build has a tier above fair, so that a task may ask for
 /// `SCHED_FIFO` or `SCHED_RR` (L.sched.116).
 #[must_use]
@@ -1607,6 +1623,41 @@ impl Drop for PreparedTask {
         }
         self.thread.process().thread_gone(false);
     }
+}
+
+/// Start a kernel thread on `cpu` alone under the real-time policy
+/// `params`, given before any queue sees it: for the real-time checks
+/// (`rt_check`). Refused in a build without a tier above fair.
+///
+/// # Errors
+///
+/// No tier above fair, no memory for its node, or no stack for it.
+pub(crate) fn spawn_rt_on(
+    name: &'static str,
+    entry: fn(usize),
+    argument: usize,
+    cpu: usize,
+    params: ferrix_sched_class::RtParams,
+) -> Result<Arc<Task>, &'static str> {
+    let queue = queue_of(cpu).ok_or("no such processor")?;
+    let node = stack::new_upper_node().ok_or("no tier above fair, or no memory for its node")?;
+    let task = make_task(
+        name,
+        entry,
+        argument,
+        NICE_0_WEIGHT,
+        cpu,
+        CpuSet::of(cpu),
+        None,
+        None,
+        None,
+    )?;
+    if task.give_upper_node(node).is_err() {
+        return Err("a new task already had a real-time node");
+    }
+    task.store_policy(Some(params), false);
+    enqueue(&task, cpu, queue);
+    Ok(task)
 }
 
 /// Make a task and put it on `cpu`'s queue: the path every kernel task takes.

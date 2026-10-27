@@ -168,7 +168,7 @@ values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands 
 [flags.sched_realtime]
 why = "stage 14's SoftRt tier, fixed priorities FIFO and round-robin (ferrix-sched-fifo), or none"
 barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
-values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b, with F5, F6, F10 and L.sched.107-108 (ledger line 28 (3))", built = "no" }
+values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b (ledger line 29, R11)", built = "yes" }
 values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 # eevdf's `present` stands under F-76 until S7 classifies ferrix-sched-fair.

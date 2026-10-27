@@ -1497,6 +1497,9 @@ pub trait StackTiers<T>: FairTier<T> {
     type Cell: ferrix_sched_class::UpperCell<Self::UpperSlot>;
     /// A fresh node, `None` with no tier above fair or no memory (R1).
     fn new_upper_slot() -> Option<Self::UpperSlot>;
+    /// The stack's configuration, from the fair tier's: the tiers above
+    /// fair take none.
+    fn stack_config(fair: Config) -> Self::Config;
     /// The stack's entity for a fair task.
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity;
     /// The stack's entity for a real-time task.
@@ -1514,6 +1517,9 @@ impl<T> StackTiers<T> for Eevdf {
     fn new_upper_slot() -> Option<core::convert::Infallible> {
         None
     }
+    fn stack_config(fair: Config) -> Config {
+        fair
+    }
     fn fair_entity(entity: FairEntity<T>) -> FairEntity<T> {
         entity
     }
@@ -1528,7 +1534,7 @@ impl<T> StackTiers<T> for Eevdf {
     }
 }
 
-impl<T, U: ferrix_sched_class::RealtimeClass<T>> StackTiers<T>
+impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
     for ferrix_sched_class::Over<U, Eevdf>
 {
     const REALTIME: bool = true;
@@ -1538,6 +1544,9 @@ impl<T, U: ferrix_sched_class::RealtimeClass<T>> StackTiers<T>
 
     fn new_upper_slot() -> Option<U::Slot> {
         U::new_slot()
+    }
+    fn stack_config(fair: Config) -> ((), Config) {
+        ((), fair)
     }
     fn fair_entity(entity: FairEntity<T>) -> Self::Entity {
         ferrix_sched_class::Tier::Lower(entity)

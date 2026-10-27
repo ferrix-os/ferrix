@@ -11,7 +11,7 @@ buildable_from = "today"
 # The scheduling modes a domain may run (docs/SCHED-CLASSES.md §9a, D9):
 # exactly those whose tiers [flags] has present, which check-build-flags
 # holds both ways.
-modes = ["Throughput"]
+modes = ["Throughput", "SoftRt"]
 image = { driver_updates = "absent", settings_writer = "present", slot_signing = "off" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
 slot_families = ["x86_64-uefi-pc", "x86_64-n150", "aarch64-uefi-virt", "armv7a-uefi-virt", "armv7a-stm32mp157"]
@@ -28,7 +28,7 @@ kernel_memory = "heap"
 sched_dispatch = "fixed"
 sched_windows = "absent"
 sched_deadline = "absent"
-sched_realtime = "absent"
+sched_realtime = "fifo_rr"  # SCHED_FIFO and SCHED_RR above fair (SCHED-CLASSES.md section 9e)
 sched_fair = "eevdf"
 checks = "on"
 program_barrier = "session"
