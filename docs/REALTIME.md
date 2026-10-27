@@ -397,6 +397,9 @@ feature.
   bounds (loop bounds, chain depths, the longest section), which matches
   ARCHITECTURE.md's "does not promise a certified worst-case execution time".
 
+How the classes are packaged -- each a removable crate behind one
+compile-time trait, chosen per profile -- is [SCHED-CLASSES.md](SCHED-CLASSES.md).
+
 ## 4. A possible order of landings
 
 Each needs the consultant's design review and its requirement ids reserved
