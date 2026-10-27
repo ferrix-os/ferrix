@@ -376,7 +376,7 @@ non-preemptible section plus the IPI latency plus the migration work.
 Never edit a running configuration in place (seL4 defers edits of the
 running schedule entry for this reason). An ARINC-style static time
 partition schedule *between* domains sharing CPUs is MICROKERNEL.md's
-maximum-certification profile (`schedule=windows`), a separate later
+maximum-certification profile (`sched_windows=arinc`), a separate later
 feature.
 
 ### 3.8 Measure as Linux does, and say what is not isolated

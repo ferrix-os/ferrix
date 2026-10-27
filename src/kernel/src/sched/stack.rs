@@ -3,12 +3,11 @@
 //!
 //! Every operation the scheduler makes on a CPU's classes goes through
 //! [`Stack`], named here once as a type, so the compiler monomorphises and
-//! inlines it: the choice costs nothing at run time. Today's kernel has one
-//! class, the fair one, so `Stack` is [`ferrix_sched_fair::Eevdf`] and its
-//! queue is EEVDF's `RunQueue`. When the per-tier build flags arrive (step
-//! 3), this choice moves into the selection crate below the core, chosen by
-//! them (S2); until then there is no flag to choose by, and nothing here
-//! reads one.
+//! inlines it: the choice costs nothing at run time. The selection crate
+//! below the core chooses it by the per-tier build flags
+//! (`ferrix_kernel_sched_select`, S2, §9a); this file reads none. Every
+//! buildable profile has the fair tier alone, so `Stack` is
+//! [`ferrix_sched_fair::Eevdf`] and its queue is EEVDF's `RunQueue`.
 //!
 //! **Still the fair class's own.** A few calls the scheduler makes are
 //! EEVDF's alone and are made on the queue directly, because no second class
@@ -25,8 +24,8 @@ use alloc::sync::Arc;
 
 use super::task::Task;
 
-/// The class stack: the fair class alone.
-pub(crate) type Stack = ferrix_sched_fair::Eevdf;
+/// The class stack, as the build flags compose it.
+pub(crate) use ferrix_kernel_sched_select::Stack;
 
 /// One CPU's queue of [`Stack`].
 pub(crate) type StackQueue = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::Queue;
@@ -45,4 +44,4 @@ const _: fn(StackEntity) -> ferrix_sched_fair::FairEntity<Arc<Task>> = |entity| 
 
 /// What the boot line calls the class stack (SCHED-CLASSES.md S1): its
 /// classes' names, top tier first.
-pub const NAME: &str = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::NAME;
+pub(crate) const NAME: &str = <Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::NAME;
