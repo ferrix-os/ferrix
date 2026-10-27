@@ -1298,8 +1298,8 @@ const CLASS_PROFILES: [&str; 2] = ["present", "desktop"];
 /// release kernel, then the same kernel with LTO alone turned off and the
 /// linker's map of it, both kept in `kept`, judged by
 /// `check-removable-symbols.py --class` against `class_crates`: each class
-/// crate the profile's flags select leaves its marker and its rlib's member,
-/// and every other, the fixture among them, leaves neither.
+/// crate the profile's flags select leaves its marker in the ELF and its
+/// code in the map, and every other, the fixture among them, leaves nothing.
 ///
 /// Verifies: H.SCHED.18
 fn class_crates(xtask: &std::path::Path, arches: &[Arch], kept: &std::path::Path) -> Result<usize> {

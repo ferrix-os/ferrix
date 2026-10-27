@@ -670,8 +670,9 @@ package FerrixItemRequirements {
                 on every architecture and buildable profile: the release ELF holds
                 the marker of each class the profile's flags select and no symbol
                 of any other, the fixture among them, and the map of the same link
-                with LTO alone turned off pulls in a member of each selected class
-                crate's rlib and of no other (docs/SCHED-CLASSES.md section 9b); and
+                with LTO alone turned off holds each selected class crate's code and
+                neither a member nor a symbol of any other (docs/SCHED-CLASSES.md
+                section 9b); and
                 L.sched.102's check on every boot.";
             attribute :>> parent = "ASR-8";
         }

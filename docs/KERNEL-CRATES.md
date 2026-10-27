@@ -832,8 +832,9 @@ flag is the configuration record of it (3558 addendum (a)).
      of it, present or absent: the **ELF half** reads the shipped release
      ELF (a selected class's marker, its check kept out of line; no symbol
      of another); the **link half** reads the linker map of a link of the
-     same architecture, profile and flags with LTO alone turned off (a
-     member of each selected class crate's rlib pulled in, none of
+     same architecture, profile and flags with LTO alone turned off (each
+     selected class crate's code there, as a member of its rlib or its
+     generic functions monomorphised into another crate's; neither of
      another's). LTO only removes and merges the code it is given; it adds
      none from a crate the link was not given. So what the non-LTO link
      leaves out, the LTO image cannot hold, and the two halves together

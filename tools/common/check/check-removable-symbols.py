@@ -20,10 +20,12 @@ build left, release, on each architecture (`cargo xtask test-removable`).
 design review of step 3b, ledger line 22, G3, G8): each crate of
 `class_crates` is judged against the profile the kernel was built from. A
 crate its flags do not select, and the fixture, leave no symbol in the
-release ELF and no member of their rlib in the map of a link of the same
-architecture, profile and flags with LTO alone turned off; a selected one
-leaves its marker (its check, kept out of line) in the ELF and its rlib's
-member in that map. LTO only removes and merges code, so what the non-LTO
+release ELF, and neither a member of their rlib nor a symbol of theirs in
+the map of a link of the same architecture, profile and flags with LTO
+alone turned off; a selected one leaves its marker (its check, kept out of
+line) in the ELF and its code in that map: a member of its rlib, or, for a
+crate of generics alone such as ferrix-sched-fair, its functions
+monomorphised into the crates that use it, which the map names. LTO only removes and merges code, so what the non-LTO
 link leaves out the LTO image cannot hold.
 """
 
@@ -130,14 +132,17 @@ def class_judge(names: list[str], map_text: str, record: dict, flags: dict[str, 
             if not any(symbol.startswith(entry.get("marker", "\0")) for symbol in names):
                 problems.append(f"{package} is selected ({what}) and its marker {entry.get('marker')}.. is not "
                                 "in the ELF")
-            if member not in map_text:
-                problems.append(f"{package} is selected ({what}) and the non-LTO map pulls in no member of its rlib")
+            if member not in map_text and f"{name}::" not in map_text:
+                problems.append(f"{package} is selected ({what}) and the non-LTO map holds none of its code, "
+                                "neither a member of its rlib nor a symbol of it monomorphised into another")
         else:
             if mine:
                 problems.append(f"{package} is not selected ({what}) and the ELF holds {len(mine)} symbol(s) of it, "
                                 f"the first {mine[0]}")
             if member in map_text:
                 problems.append(f"{package} is not selected ({what}) and the non-LTO map pulls in a member of its rlib")
+            if f"{name}::" in map_text:
+                problems.append(f"{package} is not selected ({what}) and the non-LTO map holds a symbol of it")
     return problems
 
 
@@ -172,7 +177,7 @@ def self_test() -> list[str]:
     }
     present = ["<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<T>>::check",
                "ferrix_sched_fair::RunQueue<T>::insert"]
-    good_map = "/t/libferrix_sched_fair-0a.rlib(ferrix_sched_fair-0a.o):(.text.x)\n"
+    good_map = "/t/libferrix_kernel_core-0c.rlib(core.o):(.text.x)\n    ferrix_sched_fair::tree::check_node::<T>\n"
     flags = {"sched_fair": "eevdf"}
     if class_judge(present, good_map, record, flags):
         failures.append(f"a kernel with fair and without the fixture was refused: {class_judge(present, good_map, record, flags)}")
@@ -180,7 +185,9 @@ def self_test() -> list[str]:
         ("the fixture in the ELF", present + ["ferrix_sched_fixture::Queue<T>::holds"], good_map, "the ELF holds"),
         ("the fixture's rlib in the map", present, good_map + "/t/libferrix_sched_fixture-1b.rlib(x.o)\n", "pulls in a member"),
         ("fair's marker inlined away", present[1:], good_map, "marker"),
-        ("fair's rlib missing from the map", present, "", "no member"),
+        ("fair's code missing from the map", present, "/t/libferrix_kernel_core-0c.rlib(core.o)\n", "none of its code"),
+        ("the fixture's code monomorphised into another", present,
+         good_map + "    ferrix_sched_fixture::Queue<T>::holds\n", "holds a symbol of it"),
     ]:
         if not any(expect in p for p in class_judge(names, text, record, flags)):
             failures.append(f"the class-crate judge passed {what}")

@@ -618,9 +618,12 @@ reaches the link line or a map of it, present or absent. So:
 * the **ELF half** reads the shipped release ELF (`llvm-nm -C`): no symbol
   of an absent or fixture crate, the marker of each present one;
 * the **link half** reads the linker map of a link of the same
-  architecture, profile and flags with LTO alone turned off: no member of
-  an absent or fixture crate's rlib pulled in, the present crate's member
-  there.
+  architecture, profile and flags with LTO alone turned off: neither a
+  member of an absent or fixture crate's rlib nor a symbol of it; the
+  present crate's code there, as a member of its rlib or, for a crate of
+  generics alone such as `ferrix-sched-fair`, as its functions
+  monomorphised into the crates that use it (the first x86_64 run found
+  fair has no member of its own: 42 of its functions in the core's).
 LTO only removes and merges code; it adds none from a crate it was not
 given. So what the non-LTO link leaves out, the LTO image cannot hold, and
 S1's "link line" (written as if there were no LTO) reads as this
