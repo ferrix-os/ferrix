@@ -1551,6 +1551,70 @@ traceability clean once the ids land on develop, the boots' rows; (6) on
 the gate host: the round trip, the controls of rule (e) and condition 1,
 coverage after the final rebase.
 
+**Step 4b built** (for the consultant's code review against ledger line
+29, R1-R15; commits 5af67ba86, 4a123dda1 and the one after them): the
+core half and `ferrix-sched-fifo` selected on `desktop`, whose classes line
+reads `fifo_rr+eevdf` on all three architectures; `present` unchanged.
+* R1: a task's `FifoSlot` is allocated by `sched::set_policy` before any
+  lock (`ENOMEM`, nothing changed), and by `prepare_user` for a real-time
+  parent's child; kept on the return to fair (the move check), freed with
+  the task. No scheduler path allocates.
+* R2, **not met as written**: `FifoRr::remove` by identifier walks the
+  tree, O(n). The interface's `remove(queue, id)` carries no key, and the
+  task does not hold its node's key while the queue does; the walk serves
+  `sched_setscheduler`'s move of a queued, not running, task alone, never a
+  switch, a wake or the tick (MEMORY-AND-TIMING.md says so). The choice for
+  the review: accept the walk on that path, or a `remove` that takes the
+  entity's key, kept by the task as the queue lends its node. `check()`
+  holds order and balance; the crate's nine host tests cover the rest of
+  R2's list.
+* R3, R4: `ready` and `elapse`, as 4a's line 28 recorded; and one defect
+  the floor's boot check found: `Over::decision_in_ns` asked a throttled
+  upper tier nothing while the lower ran, so no timer was armed for the
+  period's end and a throttled `SCHED_FIFO` task never ran again beside a
+  tickless fair one. It now answers the earlier of the two, with the host
+  test's toy modelling the period's end.
+* R5: wake preemption through `Stack::should_preempt` (L.sched.109) and no
+  placement, pull or steal of a real-time task (L.sched.110), each with a
+  check, the placement's with a fair control.
+* R6: the upper cell (L.sched.107), a weight kept (L.sched.108), N2's
+  consts restated (the innermost entity is `FairEntity`; a fair-only
+  build's entity and cell asserted by size), `move_onto` never given a
+  real-time task, the fold gate in `direct.rs` with L.sched.64-66
+  restated, and the fast path's fifth job case: a fair caller and a
+  `SCHED_FIFO` echo in one job do not fold. One change from the design: a
+  change of policy on a *running* task is applied at its processor's next
+  decision (`CpuQueue::requeue_if_moved`, in `choose_next` before the
+  pick), and only asks for that decision at once. Moving it at the call
+  left the stack holding the running task as a waiting entity until then,
+  and `test-rtsched` crashed in that window in two boots of four
+  (a switch to a context never saved); a queued task that is not running
+  still moves at once.
+* R7: the calls' argument checks with Linux's errnos (L.sched.117);
+  `FUTEX_LOCK_PI` still `ENOSYS`; `present`'s `EINVAL` (L.sched.116),
+  `sched_setattr` and `sched_getattr` added to the ABI tables on all four
+  numberings.
+* R8: `prepare_user` the one maker, `inherit_policy` its one inheritance
+  (L.sched.113); checked by `test-rtsched` (a fork and a thread, a fork
+  under reset-on-fork, with its negative control) and by the native
+  launch's prepared start under a `SCHED_FIFO` maker, with and without
+  reset-on-fork.
+* R9: `make_domain` refuses `SoftRt` as `NotCreatable` (L.sched.115);
+  REALTIME.md states the narrow guarantee.
+* R10: H.SCHED.19-20 and L.sched.107-117 written, the reservation entry
+  released; the ids' reservation on `develop` is still owed (the
+  traceability check says so and nothing else).
+* R11: the arm, `unclassified_deps` citing line 29, `desktop` taking it.
+  Owed: test-removable's class-crate half on three architectures and S5's
+  ELF table for `present` (the disk here holds one architecture's at a
+  time), the round trip on the landing hash.
+* R12: `sched/rt_check.rs` (order, wakes, placement, FIFO's place, RR and
+  its FIFO control, a yield, the floor, the move), the `cpu.max` cut on a
+  `SCHED_FIFO` program (cpu_check, L.sched.114), `test-rtsched` on
+  `desktop` and on `present`, the native launch's check.
+* R13, R14, C2: REALTIME.md and `/proc/loadavg`'s documentation.
+* R15: this line.
+
 **`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
 the three pending values confirmed as intended). Met: (1) `pending` only
 at `sc4_plus` on a target-only claim, each entry naming its ledger line,

@@ -192,7 +192,9 @@ pub(super) fn filesystems(_: &Kernel) -> Result<Vec<u8>> {
 /// `/proc/loadavg`: the averages (`super::loadavg`), the runnable tasks,
 /// the live processes not yet reaped -- Linux counts threads there, and a
 /// process is what this kernel keeps a count of -- and the last task number
-/// made.
+/// made. The averages and the runnable count include real-time tasks, each
+/// counted as one task of ordinary weight, as Linux counts them
+/// (`docs/SCHED-CLASSES.md` §9e, R14, C2).
 pub(super) fn loadavg(_: &Kernel) -> Result<Vec<u8>> {
     let (running, loads) = super::loadavg::now();
     let total = crate::object::process::listed()

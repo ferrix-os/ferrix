@@ -1751,9 +1751,10 @@ impl Drop for PreparedTask {
     }
 }
 
-/// Start a kernel thread on `cpu` alone under the real-time policy
-/// `params`, given before any queue sees it: for the real-time checks
-/// (`rt_check`). Refused in a build without a tier above fair.
+/// Start a kernel thread on `cpu`, able to run on `affinity`, under the
+/// real-time policy `params`, given before any queue sees it: for the
+/// real-time checks (`rt_check`). Refused in a build without a tier above
+/// fair.
 ///
 /// # Errors
 ///
@@ -1763,6 +1764,7 @@ pub(crate) fn spawn_rt_on(
     entry: fn(usize),
     argument: usize,
     cpu: usize,
+    affinity: CpuSet,
     params: ferrix_sched_class::RtParams,
 ) -> Result<Arc<Task>, &'static str> {
     let queue = queue_of(cpu).ok_or("no such processor")?;
@@ -1773,7 +1775,7 @@ pub(crate) fn spawn_rt_on(
         argument,
         NICE_0_WEIGHT,
         cpu,
-        CpuSet::of(cpu),
+        affinity,
         None,
         None,
         None,
@@ -3903,7 +3905,13 @@ fn choose_next(
         depart(queue, cpu, previous);
     }
 
-    let next = pick_inside(queue, cpu, previous.as_ref());
+    // A running task whose policy changed moves to its new tier here, where
+    // the pick below makes the stack's running entity this processor's
+    // task again under the same lock hold (`CpuQueue::set_policy`).
+    if let Some(previous) = previous.as_ref().filter(|task| task.state() == RUNNABLE) {
+        queue.requeue_if_moved(previous);
+    }
+    let next = queue.pick_next();
     if queue.stats.measuring {
         queue.note_pick(now);
     }
