@@ -71,7 +71,7 @@ cost.
 | `ferrix-sched-fair` | core | EEVDF: today's `ferrix-sched` run queue, weights and `carried_weight`, moved |
 | `ferrix-sched-fifo` | core | `SCHED_FIFO` and `SCHED_RR`: 99 priority lists and a bitmap, the RR quantum, the deferred fair server |
 | `ferrix-sched-edf` | core | partitioned EDF with a hard CBS: reservations, refills, per-CPU admission |
-| `ferrix-sched-windows` | core | later (M3): the static time-partition schedule of MICROKERNEL.md K9, with EDF inside each window |
+| `ferrix-sched-windows` | core | later (M3): the static time-partition schedule of MICROKERNEL.md K9, with fixed-priority preemptive scheduling inside each window (C6) |
 | more, later | none until evidenced | BORE, a userspace `sched_ext`-style agent, and others: each a crate and a flag value (§6a) |
 | idle | in the kernel | always present: the bottom of every stack, not a crate |
 
@@ -407,8 +407,17 @@ trait, added as above, with its own review.
   tier alone: every kernel worker and server runs on a reservation, and
   every user of the fair crate outside `Stack` (§11's table, the `NICE_`
   weights among them, in the core, the item and the load) must go through
-  `Stack` or be absent before `max` can build. Where the fair server lives
-  is free (C4: a crate of its own only once two classes link it).
+  `Stack` or be absent before `max` can build.
+* **C6, decided by the customer (2026-10-27): fixed priorities inside the
+  windows.** Inside each partition's window `ferrix-sched-windows`
+  schedules by fixed-priority preemption, as ARINC 653's APEX and the
+  certified partitioning RTOSes do (PikeOS, VxWorks 653, INTEGRITY-178),
+  analysed by response-time analysis, which assessors know; not EDF, as
+  this design first said. An overload in a window then misses the lowest
+  priorities' deadlines first, not every task's. `max`'s real-time
+  scheduling is this tier alone: `sched_realtime` (FIFO/RR without
+  budgets) and `sched_deadline` stay absent there. Where the fair server
+  lives is free (C4: a crate of its own only once two classes link it).
 
 ## 8. What it costs, and what it would cost with Cargo features
 
@@ -476,8 +485,8 @@ no predecessor starts at `none`.
 | `fast` | fixed | absent | edf_cbs | absent | absent | absent |
 | `max` | fixed | arinc | absent | absent | absent | absent |
 
-`max`'s EDF is the one inside its windows, the windows crate's (§3), not a
-deadline tier; its `fair = absent` translates `schedule = "windows"`,
+`max`'s scheduling inside its windows is the windows crate's own,
+fixed-priority (C6, §7a), not a deadline tier; its `fair = absent` translates `schedule = "windows"`,
 and is what the customer decided for C3 (§7a). `max` and `fast` cannot
 build, as today, for their unbuilt values and, besides, while the core
 uses fair outside `Stack` (§11's table). `desktop` stays `fixed` until
@@ -541,7 +550,8 @@ boot, so the four boots' rows show it with check-boot-line passing.
 
 **Modes** (D9, S12). `Throughput` uses the fair tier; `SoftRt` the
 realtime and fair tiers; `HardRt` the deadline tier **or the windows
-tier**, whose crate carries the EDF inside its windows (§3), so `max`
+tier**, whose crate schedules by fixed priority inside its windows (C6),
+a hard real-time mode by its reserved windows, so `max`
 allows `HardRt` and no new mode is made. No mode uses `ext` until ext's
 own design says one does (and where ext sits, under fair or as the fair
 tier, is that design's: C1). A profile with both the deadline and the
