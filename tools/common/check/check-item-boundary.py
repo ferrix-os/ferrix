@@ -2588,7 +2588,7 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
-def problems_of_claim(profile: dict) -> bool:
+def claims_more_than_a_target(profile: dict) -> bool:
     """Whether a profile's claim is anything but a target."""
     return not str(profile.get("claim", "")).startswith("target")
 
@@ -2623,11 +2623,17 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     # reported not claimable while one is listed, and one that excuses
     # nothing is stale.
     pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
-    if pending and not str(profile.get("claim", "")).startswith("target"):
-        problems.append("only a profile whose claim is a target may list pending values (E3)")
+    if pending and (claims_more_than_a_target(profile) or level != "sc4_plus"):
+        problems.append("only a profile at sc4_plus whose claim is a target may list pending values "
+                        "(E3; ledger line 25 (1))")
     for entry in profile.get("pending", []):
-        if not entry.get("until"):
-            problems.append(f"pending {entry.get('flag')}={entry.get('value')} names nothing it waits on")
+        if not entry.get("until") or not entry.get("ledger"):
+            problems.append(f"pending {entry.get('flag')}={entry.get('value')} names nothing it waits on, "
+                            "or no ledger line (the list grows only with one)")
+    # Signed slots only and no board named: the image boots nothing, so the
+    # profile is not buildable (ledger line 25 (2)).
+    if profile.get("image", {}).get("slot_signing") == "required" and not profile.get("slot_families"):
+        waiting.append("slot_families names no board, and slot_signing=required boots no other slot")
     for flag, value in values.items():
         spec = declared.get(flag, {}).get("values", {}).get(value)
         if spec is None:
@@ -2644,7 +2650,7 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
         allowed = level in spec.get("allows", [])
         if not allowed and (flag, value) in exceptions and name == "present":
             allowed = True
-        if not allowed and (flag, value) in pending and not problems_of_claim(profile):
+        if not allowed and (flag, value) in pending and not claims_more_than_a_target(profile):
             allowed = True
             waiting.append(f"{flag}={value} is not claimable at {level} yet (pending)")
         if not allowed:
@@ -3107,15 +3113,26 @@ def _profile_self_test() -> list[str]:
         failures.append("present's dated exception was not honoured")
     if not profile_problems("p", profile("present", "c", excepted), flags)[0]:
         failures.append("an exception outside present was honoured")
-    awaiting = profile("sc4", "c")
+    flags["levels"]["sc4_plus"] = {"targets": {"s": "2", "t": "2", "u": "1"}}
+    awaiting = profile("sc4_plus", "c")
     awaiting["claim"] = "target: x"
-    awaiting["pending"] = [{"flag": "f", "value": "c", "until": "its evidence"}]
+    awaiting["pending"] = [{"flag": "f", "value": "c", "until": "its evidence", "ledger": "24"}]
     found, waits = profile_problems("p", awaiting, flags)
     if found or not any("pending" in w for w in waits):
         failures.append(f"a target's pending value was not reported as waiting: {found} {waits}")
     held = dict(awaiting, claim="EAL 9")
-    if not any("only a profile whose claim is a target" in p for p in profile_problems("p", held, flags)[0]):
+    if not any("only a profile at sc4_plus whose claim is a target" in p for p in profile_problems("p", held, flags)[0]):
         failures.append("a held claim's pending value was accepted")
+    lower = dict(awaiting, level="sc4")
+    if not any("only a profile at sc4_plus" in p for p in profile_problems("p", lower, flags)[0]):
+        failures.append("a pending value below sc4_plus was accepted")
+    unledgered = dict(awaiting, pending=[{"flag": "f", "value": "c", "until": "its evidence"}])
+    if not any("no ledger line" in p for p in profile_problems("p", unledgered, flags)[0]):
+        failures.append("a pending entry naming no ledger line was accepted")
+    unbooted = dict(profile("sc2", "b"), image={"slot_signing": "required"}, slot_families=[])
+    if not any("names no board" in w for w in profile_problems("p", unbooted, flags)[1]):
+        failures.append("signed slots with no board named were reported buildable")
+    del flags["levels"]["sc4_plus"]
     stale = dict(awaiting, flags={"f": "a"})
     if not any("waits on nothing" in p for p in profile_problems("p", stale, flags)[0]):
         failures.append("a stale pending entry was accepted")

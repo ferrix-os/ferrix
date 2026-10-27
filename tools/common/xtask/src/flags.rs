@@ -267,6 +267,9 @@ pub(crate) struct Profile {
     /// Its image keys (`image = { .. }`), in the file's order: what the
     /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
     pub(crate) image: Vec<(String, String)>,
+    /// The board families its loader accepts a signed slot for
+    /// (`slot_families`, docs/SIGNING.md §1.4).
+    pub(crate) slot_families: Vec<String>,
 }
 
 impl Profile {
@@ -314,12 +317,17 @@ impl Profile {
                 .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
             image.push((key.clone(), value.to_owned()));
         }
+        let slot_families = root
+            .get("slot_families")
+            .and_then(Value::strings)
+            .unwrap_or_default();
         Ok(Profile {
             name: name.to_owned(),
             level,
             values,
             exceptions,
             image,
+            slot_families,
         })
     }
 }
@@ -406,7 +414,27 @@ impl Resolved {
 pub(crate) fn resolve(profile: Option<&str>, sets: &[(String, String)]) -> Result<Resolved> {
     let resolved = resolve_unbuilt(profile, sets)?;
     buildable(&resolved)?;
+    if let Some(why) = unnamed_boards(&Profile::load(&resolved.base)?) {
+        return Err(Error::new(why));
+    }
     Ok(resolved)
+}
+
+/// Why a profile that boots only signed slots, and names no board family
+/// its loader accepts one for, is not buildable: such an image boots
+/// nothing (docs/SCHED-CLASSES.md §9c; ledger line 25 (2)).
+fn unnamed_boards(profile: &Profile) -> Option<String> {
+    let required = profile
+        .image
+        .iter()
+        .any(|(key, value)| key == "slot_signing" && value == "required");
+    (required && profile.slot_families.is_empty()).then(|| {
+        format!(
+            "profile {} is not yet buildable: it boots only signed slots and names no board \
+             family in slot_families, so its image would boot nothing",
+            profile.name
+        )
+    })
 }
 
 /// [`resolve`] without the last check: whether the result builds today.
@@ -747,6 +775,15 @@ mod tests {
             .iter()
             .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn signed_slots_with_no_board_family_are_refused() {
+        let mut profile = super::Profile::load("max_plus").unwrap();
+        assert!(super::unnamed_boards(&profile).is_some_and(|why| why.contains("names no board")));
+        profile.slot_families.push("aarch64-uefi-virt".to_owned());
+        assert!(super::unnamed_boards(&profile).is_none());
+        assert!(super::unnamed_boards(&super::Profile::load("present").unwrap()).is_none());
     }
 
     #[test]

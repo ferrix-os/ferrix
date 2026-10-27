@@ -550,6 +550,9 @@ def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str
 # value of every flag and key, names one literal value for every boot
 # option it permits, and claims a target.
 TOP = "sc4_plus"
+# The flags and keys whose barest value E11 keeps as a countermeasure or its
+# check: never pending, so never waived (ledger line 25 (1)).
+COUNTERMEASURES = {"mitigations", "checks", "ssbd", "program_barrier", "smt", "slot_signing"}
 
 
 def barest_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
@@ -584,6 +587,9 @@ def barest_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
         if not str(profile.get("claim", "")).startswith("target"):
             problems.append(f"{where}: a profile at {TOP} claims a target and no more (E1)")
         pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
+        for flag, value in sorted(pending):
+            if flag in COUNTERMEASURES:
+                problems.append(f"{where}: pending {flag}={value} would waive a countermeasure's floor (E11)")
         chosen_values = {**profile.get("flags", {}), **profile.get("image", {})}
         for name, value in sorted(chosen_values.items()):
             if name in barest and value != barest[name]:
@@ -853,6 +859,8 @@ def self_test() -> list[str]:
         ("a value of an sc4_plus profile not the barest", top, {"p": dict(good["p"], flags={"f": "a"})}, "not its barest"),
         ("a barest value below sc4 not pending", json.loads(json.dumps(top).replace('["sc4_plus", "sc4", "none"]', '["none"]')),
          {}, "does not allow sc4"),
+        ("a countermeasure pending", top, {"p": dict(good["p"], pending=[{"flag": "smt", "value": "off"}])},
+         "countermeasure's floor"),
         ("a free boot option", top, {"p": dict(good["p"], boot_options={"console": ["*"]})}, "one literal"),
         ("a barest value not allowing sc4_plus unlisted", json.loads(json.dumps(top).replace('["sc4_plus", "sc4", "none"]', '["sc4", "none"]')),
          good, "not listed as pending"),

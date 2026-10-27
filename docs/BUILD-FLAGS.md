@@ -312,7 +312,12 @@ formal correspondence and evaluation do not exist. `personality`, `fs`
 and `linux_abi` take `none`, `none` and `off`, which wait on their own
 evidence and are listed under the profile's `pending`, so it is reported
 not claimable until they allow `sc4_plus`. check-build-flags holds all
-of it.
+of it. xtask's own rule 3 does not read `pending`: it refuses to build
+`max_plus` on `personality = none` outright, which fails closed and is
+no disagreement with the Python checks' "not claimable". Signed slots
+only with no board family named also makes it unbuildable, in both. Its
+boot-option pinning is recorded in the profile, not enforced by the
+kernel, until M5 (SCHED-CLASSES.md §9c, ledger line 25 (3)).
 
 ## 5. Files and commands
 
