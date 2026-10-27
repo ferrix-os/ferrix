@@ -22,6 +22,8 @@
 // §9b, G2): naming it, even `as _`, would load it and hand its rlib to the
 // linker, the opposite of what it shows. check-item-boundary's rule (d)
 // refuses any name of it, so this lint is the only thing it is excused from.
+// ferrix_sched_fifo is named only by its arm, so a build without it leaves
+// it unnamed and unlinked as well (§9e, R11).
 #![expect(
     unused_crate_dependencies,
     reason = "ferrix_sched_fixture, the standing negative case no build links (SCHED-CLASSES.md §9b)"
@@ -185,8 +187,17 @@ pub const DEADLINE: Value = Value {
 pub type Deadline<L> = L;
 
 // sched_realtime: SoftRt's fixed priorities.
+/// `sched_realtime` as this build has it.
 #[cfg(ferrix_sched_realtime = "fifo_rr")]
-compile_error!("sched_realtime=fifo_rr is not built yet (ferrix-sched-fifo, stage 14)");
+pub const REALTIME: Value = Value {
+    name: "fifo_rr",
+    place: 0,
+    present: true,
+};
+/// The realtime tier over `L`: `SCHED_FIFO` and `SCHED_RR` above it
+/// (ferrix-sched-fifo, SCHED-CLASSES.md §9e, ledger line 29).
+#[cfg(ferrix_sched_realtime = "fifo_rr")]
+pub type Realtime<L> = ferrix_sched_class::Over<ferrix_sched_fifo::FifoRr, L>;
 /// `sched_realtime` as this build has it.
 #[cfg(ferrix_sched_realtime = "absent")]
 pub const REALTIME: Value = Value {
