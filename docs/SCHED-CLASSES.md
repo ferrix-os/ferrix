@@ -437,6 +437,130 @@ at the price of the configuration space the item was built to avoid.
    once there are two implementations of a tier to switch between (BORE
    beside EEVDF, or the `ext` agent).
 
+## 9a. Step 3, as its design review has it (OK IF D1-D13, 2026-10-27)
+
+A design review before code, ledger line 20 of the container's ledger (to
+be copied to the gate host's). Step 3 is split: **3a**, the flags, the
+selection crate, the profiles, the audit words and the modes; **3b**, S3's
+record kind for the class crates and S1's absence evidence. 3a may land
+before 3b (D11).
+
+**The flags** (D1). `schedule` goes; six flags take its place, in this
+order, each `absent` value allowing every level (in a claimed build S1's
+evidence is what makes absence true, D11):
+
+| Flag | Values (allows; built) |
+|---|---|
+| `sched_dispatch` | `fixed` (sc4, present, sc2, none; yes), `switchable` (none; no, step 5) |
+| `sched_windows` | `arinc` (windows's: sc4, present, sc2, none; no, M3), `absent` |
+| `sched_deadline` | `edf_cbs` (edf's: present, sc2, none; no, M3), `absent` |
+| `sched_realtime` | `fifo_rr` (none; no, stage 14), `absent` |
+| `sched_fair` | `eevdf` (fair's: present, none; yes; `present` standing under F-76 until S7 classifies ferrix-sched-fair), `absent` |
+| `sched_ext` | `absent` |
+
+A value that directly succeeds a recorded one keeps its allows; one with
+no predecessor starts at `none`.
+
+**The profiles** (D1, D2), today's `schedule` translated value for value:
+
+| Profile | dispatch | windows | deadline | realtime | fair | ext |
+|---|---|---|---|---|---|---|
+| `present` | fixed | absent | absent | absent | eevdf | absent |
+| `desktop` | fixed | absent | absent | absent | eevdf | absent |
+| `fast` | fixed | absent | edf_cbs | absent | absent | absent |
+| `max` | fixed | arinc | absent | absent | absent | absent |
+
+`max`'s EDF is the one inside its windows, the windows crate's (§3), not a
+deadline tier; its `fair = absent` translates `schedule = "windows"` and
+does not decide C3, which stays the customer's. `max` and `fast` cannot
+build, as today, for their unbuilt values and, besides, while the core
+uses fair outside `Stack` (§11's table). `desktop` stays `fixed` until
+step 5; `fifo_rr` and `switchable` enter profiles with their crates.
+
+**Composition** (D3). One generic alias a tier flag, a value an arm,
+`absent` the identity:
+
+```rust
+#[cfg(ferrix_sched_windows = "absent")]  pub type Windows<L> = L;
+#[cfg(ferrix_sched_windows = "arinc")]   compile_error!("sched_windows=arinc is not built yet");
+// likewise Deadline<L> and Realtime<L>
+#[cfg(ferrix_sched_ext = "absent")]      pub type ExtUnder<C> = C;
+#[cfg(ferrix_sched_fair = "eevdf")]      pub type Fair = ferrix_sched_fair::Eevdf;
+#[cfg(ferrix_sched_fair = "absent")]     pub type Fair = ferrix_sched_class::Empty;
+#[cfg(ferrix_sched_dispatch = "fixed")]
+pub type Stack = Windows<Deadline<Realtime<ExtUnder<Fair>>>>;
+```
+
+The fair-only stack is exactly `Eevdf`: N2's const holds unchanged, no
+`Empty` tier nests, and `Over` costs only where two tiers are present. A
+built value's arm becomes `Over<Its, L>`. Every built-no value's arm is a
+`compile_error!` naming it, besides xtask's refusal (D7). A const asserts
+the stack's name is not empty (line 15's C1). S5's evidence: the release
+ELF table (`choose_next`, `ferrix_fast_write_read`) before and after on
+all three architectures, and the round trip on the landing hash with line
+13's. If the table shows `Over`'s stored `running_upper` costing, it is
+derived from `U::current` instead (C2).
+
+**The selection crate** (D4): `ferrix-kernel-sched-select`,
+`src/kernel/sched-select/Cargo.toml`, built by the one build script, its
+root `src/kernel/src/sched_select.rs` the arms file. A `kernel_crates`
+entry, ring core, in `certification-item.json`; `unclassified_deps`
+ferrix-sched-class and ferrix-sched-fair (F-76's register grows under line
+20); a layering rule that it links none of ferrix-kernel, -core, -item,
+-load or ferrix-boot; check-item-boundary passing; only crates that name
+it depend on it. `build_flag_word!` and `flag_word` move into it, one
+list, the core re-exporting both, and the binary asserts its word equal to
+the others (K4's fifth).
+
+**The flag word** (D5). `flag_word` fails at compile time when given more
+than 64 values (today it drops them, so two crates built with different
+late flags would compare equal). With step 3 it holds 52 of 64;
+BUILD-FLAGS.md records the headroom.
+
+**Who reads the flags** (D6). The arms file is the only file that selects
+code by a `sched_*` cfg. The boot line's words and `audit_words`' sched
+fields come from value-name consts each arm defines, not from `cfg!` in
+`build_flags.rs`. Rule 6e's check allows a `sched_*` cfg only in the arms
+file and in `build_flag_word!`'s definition; controls, each `FIRED`: a
+planted `cfg!(ferrix_sched_fair = ..)` in a core file, a declared value
+with no arm, a value with two arms.
+
+**The audit words** (D8, S8). The first word: the fourteen other flags,
+two bits each. The second: the profile in bits 0-3, the level in 4-7,
+`sched_dispatch` in 8-9, the five tiers three bits each in 10-24 (eight
+values a tier). AUDIT.md §1 is restated with each list's decoding; H.AUD.7
+and its check stand, no id. BUILD-FLAGS.md, REALTIME.md, MICROKERNEL.md
+and this file stop naming `schedule`. The `build` line changes on every
+boot, so the four boots' rows show it with check-boot-line passing.
+
+**Modes** (D9, S12). `Throughput` uses the fair tier; `SoftRt` the
+realtime and fair tiers; `HardRt` the deadline tier **or the windows
+tier**, whose crate carries the EDF inside its windows (§3), so `max`
+allows `HardRt` and no new mode is made. No mode uses `ext` until ext's
+own design says one does (and where ext sits, under fair or as the fair
+tier, is that design's: C1). `Mode` lives below the selection crate, so
+availability is a const of the selection crate the domain's refusal
+consults. Profiles gain a `modes` key; check-build-flags holds it equal to
+the set of modes whose tiers are present, both sides with a control: a
+mode allowed whose tiers are absent, and a mode whose tiers are present
+left out. No id while every buildable profile allows only `Throughput`;
+the first that allows another reserves one.
+
+**Dispatch** (D10, S10). check-build-flags fails a claimed profile whose
+`sched_dispatch` is not `fixed`; the control, `switchable` planted in
+`fast.toml`, reads `FIRED`. A tier given a set of values cannot arise
+while each tier flag takes one value.
+
+**3b and the order** (D11). S3's record kind with its self-tests and
+controls, and S1's link-line and ELF evidence with a planted
+unconditional use reading `FIRED` (a fixture class crate if no real absent
+crate exists). 3b lands before any class crate other than fair enters the
+tree, and before any profile with an absent tier whose crate is in the
+tree builds or claims. The `classes` boot line's comparison with the
+profile, and its requirement from L.sched.102, come with 3b.
+
+**Ids** (D12): none for 3a.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
@@ -667,6 +791,9 @@ compared with, when it takes a requirement reserved from L.sched.102; the
 selection crate then also asserts at compile time that the name is not
 empty.
 
-Next, each pushed as it is done so another session can take it up: N4's
-measurement and N7's review; then the selection crate as S2 has it (N1). Still open for the customer: C3, fair in
+**N7** reviewed, ledger line 19, OK IF 1-4, met in f9165ad1.
+
+**Step 3's design** reviewed, ledger line 20, OK IF D1-D13 (D13: this
+line), written in as §9a. Next, each pushed as it is done: 3a, then 3b;
+N4's measurement on the gate host. Still open for the customer: C3, fair in
 `max`.
