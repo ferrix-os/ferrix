@@ -36,6 +36,12 @@ arch = "aarch64"
 generic = false
 recognised_by = "its own loader (src/boot/vendor/google/pixel7); no slot path (§7.3)"
 
+[family.aarch64-orion-o6]
+id = 515            # 0x0203
+arch = "aarch64"
+generic = false
+recognised_by = "SMBIOS system and baseboard strings of the Radxa Orion O6 (CIX P1, CD8180; ferrix-smbios), not yet recorded: no board is owned (the customer, 2026-10-27, max_plus's board for now, SCHED-CLASSES.md section 9c)"
+
 [family.armv7a-uefi-virt]
 id = 769            # 0x0301
 arch = "armv7a"
