@@ -546,33 +546,38 @@ keeps `cpu.weight` and the job weights; it names `NICE_0_WEIGHT` from the
 fair crate, which is one of the `NICE_` users C3 would make absent in a
 `max` without fair.
 
-**Users of the moved names**, re-pointed by path only: 53 uses of
-`NICE_0_WEIGHT` and `weight_of_nice` (attributes, the stage checks, quota,
-spawns), 30 of `CpuSet` and `MAX_CPUS` (mm, arch, user, object), and the
+**Users of the moved names**, re-pointed by path only: the uses of
+`NICE_0_WEIGHT` and `weight_of_nice` the table below counts (attributes,
+the stage checks, quota, spawns), 30 of `CpuSet` and `MAX_CPUS` (mm, arch, user, object), and the
 core scheduler's own imports in `sched/{mod,queue,task,direct,check}.rs`.
 
 **What the core keeps of the fair crate outside `Stack`** (the split's
-review, N7; counted 2026-10-26 after the core went through `Stack`). Each
+review, N7, ledger line 19; counted at 1c725245 by `git grep` over
+`src/kernel`, a use being one line naming it). Each
 fixes the fair class in every profile until C3 is decided, or goes through
 `Stack` when a second class needs it:
 
 | Use | Where | Why outside `Stack` today |
 |---|---|---|
-| `NICE_0_WEIGHT` (about 70 uses) and `weight_of_nice` (3) | spawns of kernel tasks, `syscall/attributes.rs` (nice), `object/quota.rs` (`cpu.weight`), the boot checks | a task's weight is the fair class's parameter; in a stack it becomes the task's `Params` |
-| `carried_weight`, `carried_weight_with`, `JobPlan`, `plan_job_fold`, `settle_job_fold` | `object/quota.rs`, `sched/direct.rs`, `sched/queue.rs` | the job weights and the direct switch's job fold (L.sched.64-66), which hold when both tasks are fair (N4) |
+| `NICE_0_WEIGHT` (148 lines in 54 files: 42 in 20 product files, 106 in check files) and `weight_of_nice` (8 lines, 2 of them comments) | spawns of kernel tasks, in the load ring as well as the core (`interfaces/*`, `fs/root_disk.rs`, `fs/terminal.rs`, `fs/timerfd.rs`, `net/mod.rs`, `discovery/devmgr.rs`, the gs201 watchdog, x86-64's `msrlog.rs` and `powerctl.rs`), `syscall/attributes.rs` (nice), `syscall/kill.rs`, `object/quota.rs` (`cpu.weight`), the boot checks (`sched/check.rs`, `object/fast_path_check.rs` 1709 and 1752) | a task's weight is the fair class's parameter; in a stack it becomes the task's `Params`. A `max` without fair (C3) changes the load ring's spawns too |
+| `carried_weight`, `carried_weight_with`, `JobPlan`, `plan_job_fold`, `settle_job_fold` | `object/quota.rs`, `sched/direct.rs`, `sched/queue.rs` | the job weights and the direct switch's job fold (L.sched.64-66), which hold as written only while both tasks are fair (N4): the step that first puts a tier above fair owes their restatement under rule 7, with its check |
 | `slice_for`, `Config` | `sched/queue.rs` | the fair queue's slice, rescaled by how many are runnable |
-| `Timeline`, `Node`, `Slot`, `EntityState` | `sched/queue.rs` (the sleepers), `sched/task.rs` (the run and sleep slots) | the sleepers' timeline is built on the fair entity; the task's run slot becomes the stack's `Entity` (N2) |
+| `Timeline`, `Node`, `Slot`, `EntityState` | `sched/queue.rs` (the sleepers), `sched/task.rs` (the run and sleep slots) | the sleepers' timeline is built on the fair entity; the task's run slot and record are the stack's `Entity` through `Task::entity_with` (N2) |
+| `Timeline` of the dead | `sched/mod.rs` 519 and 528 (`Zombies`) | the dead are filed in their run slot on a timeline of their own, not the sleepers' |
+| `Option<EntityState>` | `sched/mod.rs` 2303 (`move_onto`, after `CpuQueue::release`) | a steal carries the record its victim's queue let go to the queue it moves to |
+| `FairEntity` | `sched/stack.rs` | the const requiring the stack's entity to be the fair one (N2) |
 | `Eevdf` | `sched/stack.rs` | the stack itself |
 
 **Requirements.** Every L.sched unit names a core function
 (`sched::queue::CpuQueue::hand_over`, `::arm_timer`, `::sleeper_due`, …),
-none a library item, so no unit is re-pointed by the move; two statements
-name the library in prose (L.object.160's `ferrix_sched::carried_weight`,
-and the criteria of L.sched.55 and its high-level parent naming
-"the ferrix-sched host test"), which step 2 restates as `ferrix-sched-fair`.
-`certification-item.json`'s two `unclassified_deps` entries for
-`ferrix-sched` (core and item) become entries for the two new crates until
-S7's gates pass, and F-76's count is recounted then.
+none a library item, so no unit was re-pointed by the move. Two statements
+named the library in prose (L.object.160's `ferrix_sched::carried_weight`,
+and the criteria of L.sched.55 and its high-level parent naming "the
+ferrix-sched host test"); the split restated them as `ferrix-sched-fair`
+(b829273f, 8062be55; ledger line 12). `certification-item.json`'s
+`unclassified_deps` entries for `ferrix-sched` became entries for the two
+new crates (the core both, the item the fair one) until S7's gates pass,
+and F-76 was recounted (26 libraries, 22 core, 16 item).
 
 ## Where it stands
 
