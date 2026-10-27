@@ -1011,7 +1011,7 @@ ids below):
   load figures change meaning once a higher tier exists, documented
   then).
 
-## 9e. Step 4b: FIFO and round-robin above fair (proposed, for design review)
+## 9e. Step 4b: FIFO and round-robin above fair (OK IF R1-R15, 2026-10-27)
 
 The first class above fair: `SCHED_FIFO` and `SCHED_RR`, as Linux has them,
 in `ferrix-sched-fifo`, selected by `sched_realtime = "fifo_rr"` in
@@ -1131,6 +1131,109 @@ moving itself to `SCHED_FIFO` and back, on `desktop`.
    `SoftRt` domain exists: accepted for a profile with no claim?
 4. Which of the boot checks above need a Linux program, and which can be
    kernel tasks.
+
+**As the review has it** (ledger line 29, OK IF R1-R15; the answers: the
+class's own tree accepted, fair's being EEVDF's own; the throttle inside
+the class accepted, a fair server needing an EDF tier `desktop` lacks;
+real-time tasks in `desktop`'s `Throughput` boot domain accepted, the
+guarantee stated narrowly; the checks split below):
+
+* **R1, the slot.** A task's `FifoSlot` is allocated fallibly in
+  `sched_setscheduler` (and `sched_setattr`) when it first asks for a
+  real-time policy, which answers `ENOMEM` with nothing changed; no
+  scheduler path allocates. The slot is kept when the task returns to
+  fair (a second request needs no allocation) and freed with the task.
+* **R2, the tree.** `remove` takes the task's (priority, sequence) key,
+  kept in its entity, O(log n), not a walk; `check()` holds the tree's
+  order and balance; host tests cover order within and across priorities,
+  the head-of-priority rule on preemption, RR rotation, yield to the tail,
+  removing the running task and a waiting one, and balance over a few
+  hundred random operations.
+* **R3, no spin while throttled.** The interface gains a required
+  operation, `ready(queue, below_waiting) -> bool`: whether the class has
+  work it may run now, given whether anything below it waits. Fair and the
+  fixture answer `len > 0`, `Empty` false, `FifoRr` `len > 0` and not
+  throttled while something below waits. `Over` asks `U::ready` (with
+  `L::len > 0`), never `U::len`, in `should_preempt`, `decision_in_ns`,
+  `charge`, `pick`, `steals_work` and `hand_over`'s fast path, so a
+  throttled tier arms no timer at once, preempts nothing, and leaves
+  fair's IPC fast path on; the two-tier host test gains the throttled
+  case.
+* **R4, the floor never idles.** The throttle binds only while something
+  below waits (`ready`'s second argument), so a processor with nothing but
+  real-time work runs it. Its clock is the class's own, advanced by every
+  charge on the processor, the lower tier's included (`Over::charge`
+  hands the elapsed time to the upper tier through a required
+  `elapse(queue, ns)`), in periods of 1 s from the queue's making; while
+  throttled, `decision_in_ns` answers the period's rest, so unthrottling
+  is a timer, not an unrelated event. Idle time does not advance it, which
+  matters only when nothing below waits, when the throttle does not bind.
+* **R5, the wake.** Preemption on a wake, local and remote, goes through
+  `Stack::should_preempt` (L.sched.109). A woken real-time task stays on
+  the processor its affinity and its last run give it, as a fair one
+  does; it is never pushed to another (no scan, no cross-processor lock),
+  stated as a requirement (L.sched.110) with its consequence: a higher
+  priority task on a busy processor waits for that processor even when
+  another is idle, in `desktop`'s boot domain.
+* **R6, 4a's carry-overs**, each with its requirement and check: the upper
+  cell (F6, L.sched.107), a weight kept (F5, L.sched.108), N2's const
+  restated so a two-tier entity nests down to `FairEntity` and the
+  fair-only const is unchanged (F7), the sleepers' and the dead's
+  timelines and `move_onto` for a real-time task (F8: a real-time task
+  sleeps and is filed dead in them as any task, and is never stolen), and
+  the fold gate in the core with L.sched.64-66 restated in place and a
+  boot check that a fair task handing over to a FIFO server does not fold
+  (F10).
+* **R7, the calls fail closed with Linux's errno**: the target pid,
+  `sched_attr`'s size and flags, and the priority range per policy
+  (L.sched.117). **No priority inheritance**: `FUTEX_LOCK_PI` answers
+  `ENOSYS` as today, and H.SCHED.19 excludes inversion through user locks.
+  On `present` the `EINVAL` refusal of `SCHED_FIFO` and `SCHED_RR` is its
+  own behaviour, with its requirement (L.sched.116) and a check there.
+* **R8, inheritance through one function**: `fork`, `clone` and
+  `launch::load_native` all go through one (L.sched.113); boot checks for
+  a fork and a native launch under a real-time parent, with and without
+  reset-on-fork.
+* **R9, `SoftRt` refused by name.** `Domain::new(SoftRt)` on `desktop`
+  answers a refusal of its own, "compiled, not yet creatable", with its
+  requirement (L.sched.115) and a check. The boot domain's real-time
+  guarantee is priority order and the floor only: no isolation, no bound
+  on the kernel's non-preemptible sections, no interrupt threading; said
+  here and in REALTIME.md.
+* **R10, the ids**, reserved by a docs landing before code: H.SCHED.19,
+  priority order and preemption; H.SCHED.20, the floor "while fair tasks
+  are runnable"; L.sched.109 wake preemption through the stack, 110 wake
+  placement, 111 the calls' permission rule, 112 the move between tiers,
+  113 inheritance, 114 the cpu.max cut on every tier, 115 the `SoftRt`
+  refusal, 116 `present`'s `EINVAL`, 117 the calls' argument checks;
+  L.sched.107-108 as reserved.
+* **R11, selection and evidence**: `fifo_rr` becomes built only in the
+  commit that lands R6; `class_crates` gains its entry, and the selection
+  crate's `unclassified_deps` entry for `ferrix-sched-fifo` cites ledger
+  line 29 for F-76; the class-crate half shows it absent from `present` and
+  present in `desktop` on all three architectures; `desktop`'s classes line
+  reads `fifo_rr+eevdf`; S5: `present`'s ELF table unchanged, the round trip
+  on the landing hash.
+* **R12, the checks**, each with a control: kernel tasks for the class's
+  behaviour (priority order and preemption on a local and a remote wake;
+  a preempted FIFO task keeps the head of its priority; RR rotation at its
+  quantum and a yield to the tail; the floor's 50 ms for a fair task while a
+  FIFO task spins, and unthrottling at the period's end; the cpu.max cut
+  on a FIFO task); a Linux program for the ABI (each call's encoding, the
+  `CAP_SYS_NICE` and `RLIMIT_RTPRIO` refusals, reset-on-fork through
+  `fork()`, `sched_rr_get_interval`, a `chrt`-shaped move to `SCHED_FIFO` and
+  back); a native program for `load_native`'s inheritance; a Linux program
+  on `present` for the `EINVAL`.
+* **R13, constants**: the floor (950 of every 1000 ms) and the RR quantum
+  (100 ms) are constants of the crate, named in REALTIME.md, never a
+  run-time setting. An RR task's quantum restarts after a yield and after
+  it was preempted, as Linux's does (C1).
+* **R14**: `/proc`'s documentation says its load figures count real-time
+  tasks.
+* **R15**: where it stands names line 29, and so does the landing.
+* **C2**: a FIFO task at priority 99 starves the kernel's fair worker
+  tasks (the reaper, the network's) for 950 ms of every second; said beside
+  the floor.
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
