@@ -205,6 +205,18 @@ pub trait SchedClass<T> {
     /// asks. Nothing with nothing running.
     fn yield_current(queue: &mut Self::Queue);
 
+    /// Whether the class has work it may run now, given whether anything
+    /// below it in the stack waits (docs/SCHED-CLASSES.md §9e, R3). A class
+    /// that throttles itself answers false while throttled and something
+    /// below waits, though it holds tasks: a stack asks this, never the
+    /// class's length, so a throttled tier neither preempts nor arms a timer.
+    fn ready(queue: &Self::Queue, below_waiting: bool) -> bool;
+
+    /// `ns` of real time passed on the CPU while another tier ran: what a
+    /// class whose budget is measured per period of real time counts its
+    /// period by (R4). Nothing for a class without one.
+    fn elapse(queue: &mut Self::Queue, ns: u64);
+
     /// Whether an idle CPU may take this queue's tasks, now. False for every
     /// real-time class: partitioning is what makes admission mean anything.
     /// A function of the queue, not a constant, so that a stack answers by
@@ -277,6 +289,10 @@ impl<T> SchedClass<T> for Empty {
         0
     }
     fn yield_current((): &mut ()) {}
+    fn ready((): &(), _: bool) -> bool {
+        false
+    }
+    fn elapse((): &mut (), _: u64) {}
     fn steals_work((): &()) -> bool {
         false
     }
@@ -382,6 +398,13 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> Named<T> for Over<U, L> {
     const JOINED: Joined = Joined::of(U::NAME, L::NAME);
 }
 
+/// Whether an [`Over`] stack's upper tier has work it may run now: what the
+/// stack asks wherever it chooses between its tiers, never the upper tier's
+/// length (R3).
+fn upper_ready<T, U: SchedClass<T>, L: SchedClass<T>>(queue: &Stacked<U::Queue, L::Queue>) -> bool {
+    U::ready(&queue.upper, L::len(&queue.lower) > 0)
+}
+
 impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     const NAME: &'static str = <Self as Named<T>>::JOINED.as_str();
     type Queue = Stacked<U::Queue, L::Queue>;
@@ -446,13 +469,18 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
     }
 
     fn pick(queue: &mut Self::Queue) -> Option<&T> {
-        if U::len(&queue.upper) > 0 {
+        if upper_ready::<T, U, L>(queue) {
             // The lower class's running entity, if any, waits again.
             if !queue.running_upper {
                 L::put_back(&mut queue.lower);
             }
             queue.running_upper = true;
             return U::pick(&mut queue.upper);
+        }
+        // The upper tier's running entity, if any, waits again: it is
+        // throttled, or has nothing (R3).
+        if queue.running_upper {
+            U::put_back(&mut queue.upper);
         }
         queue.running_upper = false;
         L::pick(&mut queue.lower)
@@ -495,7 +523,7 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
                         reason: back.reason,
                     })
             }
-            Tier::Lower(entity) if !queue.running_upper && U::len(&queue.upper) == 0 => {
+            Tier::Lower(entity) if !queue.running_upper && !upper_ready::<T, U, L>(queue) => {
                 L::hand_over(&mut queue.lower, id, payload, entity, slice_after)
                     .map(|left| {
                         left.map(|(id, payload, entity)| (id, payload, Tier::Lower(entity)))
@@ -517,10 +545,12 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
 
     fn charge(queue: &mut Self::Queue, ran_ns: u64) -> bool {
         if queue.running_upper {
+            L::elapse(&mut queue.lower, ran_ns);
             U::charge(&mut queue.upper, ran_ns)
         } else {
-            // Something of the upper class waiting is a decision due too.
-            L::charge(&mut queue.lower, ran_ns) || U::len(&queue.upper) > 0
+            U::elapse(&mut queue.upper, ran_ns);
+            // Something of the upper class ready is a decision due too.
+            L::charge(&mut queue.lower, ran_ns) || upper_ready::<T, U, L>(queue)
         }
     }
 
@@ -538,7 +568,7 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         } else {
             // Anything of the upper tier waiting takes the CPU from the lower,
             // as `charge` reports it.
-            U::len(&queue.upper) > 0 || L::should_preempt(&queue.lower)
+            upper_ready::<T, U, L>(queue) || L::should_preempt(&queue.lower)
         }
     }
 
@@ -546,10 +576,10 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         if queue.running_upper {
             // Lower entities waiting cannot displace an upper one.
             U::decision_in_ns(&queue.upper)
-        } else if U::len(&queue.upper) > 0 && L::current(&queue.lower).is_some() {
+        } else if upper_ready::<T, U, L>(queue) && L::current(&queue.lower).is_some() {
             // A lower entity runs while an upper one waits: due now.
             Some(0)
-        } else if U::len(&queue.upper) > 0 {
+        } else if upper_ready::<T, U, L>(queue) {
             // Nothing runs: the wake or the enqueue that queued the upper
             // entity asks for the pick itself, so no timer is armed for it,
             // and a timer re-armed at once for ever is not possible (the
@@ -572,8 +602,18 @@ impl<T, U: SchedClass<T>, L: SchedClass<T>> SchedClass<T> for Over<U, L> {
         }
     }
 
+    fn ready(queue: &Self::Queue, below_waiting: bool) -> bool {
+        U::ready(&queue.upper, below_waiting || L::len(&queue.lower) > 0)
+            || L::ready(&queue.lower, below_waiting)
+    }
+
+    fn elapse(queue: &mut Self::Queue, ns: u64) {
+        U::elapse(&mut queue.upper, ns);
+        L::elapse(&mut queue.lower, ns);
+    }
+
     fn steals_work(queue: &Self::Queue) -> bool {
-        if U::len(&queue.upper) > 0 {
+        if upper_ready::<T, U, L>(queue) {
             U::steals_work(&queue.upper)
         } else {
             L::steals_work(&queue.lower)
