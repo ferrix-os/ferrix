@@ -9,16 +9,14 @@
 //! buildable profile has the fair tier alone, so `Stack` is
 //! [`ferrix_sched_fair::Eevdf`] and its queue is EEVDF's `RunQueue`.
 //!
-//! **Still the fair class's own.** A few calls the scheduler makes are
-//! EEVDF's alone and are made on the queue directly, because no second class
-//! exists yet to say what they mean for it: a task's weight
-//! (`RunQueue::set_weight`), the picture `/proc` and the checks read
-//! (`for_each`, `avg_vruntime`, `current_id`, `queued`), the slice
-//! (`set_slice_ns`, `config`, `should_preempt`), the processor's load
-//! (`load_weight`), the stealing choice (`latest_where`), `yield_curr` and
-//! `level`. They become operations of `SchedClass` with the second class
-//! (step 4), each in its own review; until then a `Stack` other than the
-//! fair class does not compile, which is the point.
+//! **The fair tier's own calls.** The scheduler's fair-only calls --
+//! weights, the picture `/proc` and the checks read, the slice, the
+//! levelling, the steal choice -- reach the fair tier through
+//! `ferrix_sched_fair::FairTier`, read-only but for its named forwarders;
+//! every change of membership or of the running entity goes through the
+//! stack. docs/SCHED-CLASSES.md §9d maps each call (F2, F16), and
+//! check-item-boundary refuses a `&mut RunQueue` taken anywhere in the
+//! kernel (F1).
 
 use alloc::sync::Arc;
 
