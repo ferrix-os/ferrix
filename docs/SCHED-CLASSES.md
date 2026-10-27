@@ -540,7 +540,12 @@ realtime and fair tiers; `HardRt` the deadline tier **or the windows
 tier**, whose crate carries the EDF inside its windows (§3), so `max`
 allows `HardRt` and no new mode is made. No mode uses `ext` until ext's
 own design says one does (and where ext sits, under fair or as the fair
-tier, is that design's: C1). `Mode` lives below the selection crate, so
+tier, is that design's: C1). A profile with both the deadline and the
+windows tier runs both under HardRt, as intended: the windows partition
+time between domains, and the deadline tier is the EDF of a domain whose
+processors are its own, outside the windows; no profile has both today,
+and the one that first does says which domains each serves (ledger line
+21, C1). `Mode` lives below the selection crate, so
 availability is a const of the selection crate the domain's refusal
 consults. Profiles gain a `modes` key; check-build-flags holds it equal to
 the set of modes whose tiers are present, both sides with a control: a
@@ -841,8 +846,10 @@ line), written in as §9a.
   profile's `modes` to the modes whose tiers are present, both ways, and
   (D10) a claimed profile to `sched_dispatch = "fixed"`, with self-tests.
   `mode_available` is named by no requirement (937 named by none, from
-  936): no id for 3a (D12), so it waits for the first profile allowing a
-  mode beside Throughput.
+  936), nor is `sched::init`'s refusal it guards, which every buildable
+  profile folds away: no id for 3a (D12). **Owed**: a requirement from
+  L.sched.102 naming both, with the first buildable profile that has fair
+  absent or allows a mode beside Throughput (ledger line 21, ruling 2).
 * The `classes` boot line moved from `main.rs`'s `start_scheduler` into
   `sched::init`'s end, the same place in the boot: printed from
   `start_scheduler` it made that function 72 lines against the complexity
