@@ -23,7 +23,7 @@
 - [◐ Claude Code — Anthropic's coding agent on Ferrix](claude-code.md)
 - [✓ Stage 13 — Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md)
 - [◐ Namespace and cgroup follow-ons](follow-ons.md)
-- [○ Stage 14 — Real-time domains](stage-14-real-time-domains.md)
+- [◐ Stage 14 — Real-time domains](stage-14-real-time-domains.md)
 - [◐ Stage 15 — A real userland](stage-15-real-userland.md)
 - [✓ Stage 16 — `rustc`](stage-16-rustc.md)
 - [✓ Stage 17 — Display and input](stage-17-display-input.md)
