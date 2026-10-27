@@ -593,7 +593,12 @@ fn a_wait_is_woken(process: &Arc<Process>, page: u64, how: HowWaits) -> Result<b
     *WAITER_ANSWER.lock() = None;
     *WAITER_SUBJECT.lock() = Some((Arc::clone(process), page, target, how));
     let ended_before = ended();
-    let waiter = crate::sched::spawn("poll-waiter", poll_waiter, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "poll-waiter",
+        poll_waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
     until_listed(listed, || WAITER_ANSWER.lock().is_some());
     crate::sched::sleep_for(STILL_WAITING_NANOS);
     if WAITER_ANSWER.lock().is_some() {
