@@ -1419,13 +1419,143 @@ pub fn prepare_user(
     // Its process's job, for its share of the processor and for what it
     // charges; set before any queue can see it.
     task.set_group(thread.process().core().quota_slot());
-    Ok(PreparedTask {
+    let prepared = PreparedTask {
         task,
         cpu,
         queue,
         thread,
         launched: false,
+    };
+    // Dropped on a refusal, it frees what was made, as any start that fails.
+    inherit_policy(&prepared.task)?;
+    Ok(prepared)
+}
+
+/// Give `child`, a user task no queue has seen, the policy of the task
+/// making it, this processor's running one (`docs/SCHED-CLASSES.md` §9e, F9,
+/// R8, L.sched.113): a real-time policy and priority are inherited, with a
+/// node of their own, unless the parent has reset-on-fork set, when the
+/// child starts `SCHED_OTHER`; the child's own reset-on-fork flag starts
+/// clear either way, as Linux's does. Every user task is made through
+/// [`prepare_user`] -- a fork's child, a clone's thread and a native launch
+/// alike -- so this is the one place a policy is inherited.
+///
+/// # Errors
+///
+/// No memory for the child's node.
+fn inherit_policy(child: &Task) -> Result<(), &'static str> {
+    let Some(params) = with_current(|parent| {
+        let word = parent.rt_word();
+        word.params().filter(|_| !word.resets_on_fork())
     })
+    .flatten() else {
+        return Ok(());
+    };
+    let node = stack::new_upper_node().ok_or("no memory for the new task's real-time node")?;
+    // A task just made owns no node, and no queue has seen it: kept.
+    if child.give_upper_node(node).is_err() {
+        return Err("the new task already had a real-time node");
+    }
+    child.store_policy(Some(params), false);
+    Ok(())
+}
+
+/// Whether the running task has reset-on-fork set: the nice value a thread
+/// it starts inherits is then raised to zero if it is negative, as Linux's
+/// `sched_fork` does (L.sched.113).
+pub fn current_resets_on_fork() -> bool {
+    with_current(|task| task.rt_word().resets_on_fork()).unwrap_or(false)
+}
+
+/// Whether this build has a tier above fair, so that a task may ask for
+/// `SCHED_FIFO` or `SCHED_RR` (L.sched.116).
+#[must_use]
+pub const fn realtime_built() -> bool {
+    stack::REALTIME
+}
+
+/// The round-robin quantum of the tier above fair, in nanoseconds: what
+/// `sched_rr_get_interval` answers for a `SCHED_RR` task (R13).
+#[must_use]
+pub const fn rr_quantum_ns() -> u64 {
+    stack::RR_QUANTUM_NS
+}
+
+/// Why [`set_policy`] refused a policy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PolicyRefused {
+    /// The build has no tier above fair (L.sched.116).
+    NoTier,
+    /// No memory for the task's node of that tier (R1).
+    NoMemory,
+}
+
+/// Give `task` a real-time policy and priority, or `SCHED_OTHER` with
+/// `None`, and its reset-on-fork flag, and ask for a decision if that has
+/// changed which task should be running (`docs/SCHED-CLASSES.md` §9e,
+/// L.sched.112). The queue holding the task is found and locked as
+/// [`set_weight`] finds it. A task's first real-time policy allocates its
+/// node here, before any lock is taken (R1); refused for want of it,
+/// nothing has changed.
+///
+/// # Errors
+///
+/// [`PolicyRefused`], with nothing changed.
+pub fn set_policy(
+    task: &Arc<Task>,
+    params: Option<ferrix_sched_class::RtParams>,
+    reset_on_fork: bool,
+) -> Result<(), PolicyRefused> {
+    let mut node = None;
+    if params.is_some() {
+        if !stack::REALTIME {
+            return Err(PolicyRefused::NoTier);
+        }
+        if !task.owns_upper_node() {
+            node = Some(stack::new_upper_node().ok_or(PolicyRefused::NoMemory)?);
+        }
+    }
+    let saved = <arch::Irq as IrqControl>::disable();
+    let mut kick_cpu = None;
+    // A node another call gave the task first: freed as this returns, with
+    // no lock held.
+    let mut _spare = None;
+    loop {
+        let cpu = task.cpu();
+        let Some(lock) = queue_of(cpu) else {
+            if let Some(node) = node.take() {
+                _spare = task.give_upper_node(node).err();
+            }
+            task.store_policy(params, reset_on_fork);
+            break;
+        };
+        let mut queue = lock.lock();
+        // It may have moved between the read and the lock, as in `wake`.
+        if task.cpu() != cpu {
+            continue;
+        }
+        if let Some(node) = node.take() {
+            _spare = task.give_upper_node(node).err();
+        }
+        if queue.set_policy(task, params, reset_on_fork) {
+            kick_cpu = Some(cpu);
+        }
+        break;
+    }
+    // As `set_weight`.
+    let here = this_cpu();
+    let remote = match kick_cpu {
+        Some(cpu) if here == Some(cpu) => {
+            resched_here(cpu);
+            None
+        }
+        other => other,
+    };
+    <arch::Irq as IrqControl>::restore(saved);
+    if let Some(cpu) = remote {
+        kick(cpu);
+    }
+    Ok(())
 }
 
 /// A user task made and counted, on no queue yet.
@@ -1954,6 +2084,11 @@ enum Onto {
 /// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
 /// interrupts masked.
 fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
+    // A real-time task is woken where it is, never moved (R5, L.sched.110),
+    // as `place_on_idle` declines it.
+    if !task.is_fair() {
+        return Placed::Declined;
+    }
     // A pull's affinity and pinning were decided by `may_pull`.
     let Some(mine) = queue_of(here).filter(|_| how == Onto::Pull || may_place(task, here)) else {
         return Placed::Declined;
@@ -2305,20 +2440,14 @@ fn placed_on_wake(
 
 /// Queue `task` on processor `to`'s queue, `queue`, whose lock the caller
 /// holds with the lock of the queue `task` comes from: the one move between
-/// queues, made by a steal (`steal_from`, with the state the victim's queue
-/// let go) and by a wake's placement (`place_on_idle`, with none: the task
-/// was on no queue, and carries the state it stored when it blocked). Either
-/// way the lag it carries is placed against `queue`'s own virtual time, by
-/// the same `insert`.
-fn move_onto(
-    task: &Arc<Task>,
-    state: Option<ferrix_sched_fair::EntityState>,
-    to: usize,
-    queue: &mut CpuQueue,
-) {
-    if let Some(state) = state {
-        task.store_entity_state(state);
-    }
+/// queues, made by a steal (`steal_from`, the task carrying the state the
+/// victim's queue let go, `CpuQueue::release`) and by a wake's placement
+/// (`place_on_idle`: the task was on no queue, and carries the state it
+/// stored when it blocked). Either way the lag it carries is placed against
+/// `queue`'s own virtual time, by the same `insert`. Never a real-time task
+/// (F8, L.sched.110): the fair class alone offers a steal, and a wake's
+/// placement declines one.
+fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
     task.set_cpu(to);
     // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
     queue.insert(task);
@@ -2371,7 +2500,11 @@ pub(crate) fn placements() -> u64 {
 /// that found work of its own meanwhile is not taken; one that finds it
 /// after this runs `task` after its pick, as any queued task.
 fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
-    if task.is_pinned() {
+    // A real-time task stays on the processor its affinity and its last run
+    // give it, as `docs/SCHED-CLASSES.md` §9e has it (R5, L.sched.110): never
+    // pushed to another, so a higher priority waits for its own processor
+    // even while another is idle.
+    if task.is_pinned() || !task.is_fair() {
         return None;
     }
     let domain = DOMAIN.get()?;
@@ -2394,7 +2527,7 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
         if !queue.is_running_idle() || queue.waiting() != 0 {
             continue;
         }
-        move_onto(task, None, to, &mut queue);
+        move_onto(task, to, &mut queue);
         count_placed(home, to);
         return Some(to);
     }
@@ -3234,8 +3367,8 @@ fn steal_from(me: usize, victim: usize) -> bool {
     let keeps_its_last = theirs_queue.is_running_idle() && theirs_queue.waiting() <= 1;
     let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
         Some(id) => match theirs_queue.release(id) {
-            Some((task, state)) => {
-                move_onto(&task, Some(state), me, mine_queue);
+            Some(task) => {
+                move_onto(&task, me, mine_queue);
                 theirs_queue.stats.stolen_out += 1;
                 mine_queue.stats.stolen_in += 1;
                 true

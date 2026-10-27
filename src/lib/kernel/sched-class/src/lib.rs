@@ -275,6 +275,9 @@ impl RtParams {
 pub trait RealtimeClass<T>: SchedClass<T> {
     /// A task's node in the class.
     type Slot;
+    /// The quantum of a round-robin task, in nanoseconds: what
+    /// `sched_rr_get_interval` answers for one.
+    const RR_QUANTUM_NS: u64;
     /// A fresh node, or `None` with no memory for one.
     fn new_slot() -> Option<Self::Slot>;
     /// The entity for `params`, in `slot`.

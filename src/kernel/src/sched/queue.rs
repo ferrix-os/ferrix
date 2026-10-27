@@ -27,10 +27,8 @@
 
 use alloc::sync::Arc;
 
-use ferrix_sched_class::{CpuLoad, Load, SchedClass};
-use ferrix_sched_fair::{
-    Config, EntityState, FairTier, JobPlan, Timeline, settle_job_fold, slice_for,
-};
+use ferrix_sched_class::{CpuLoad, Load, RtParams, SchedClass};
+use ferrix_sched_fair::{Config, FairTier, JobPlan, Timeline, settle_job_fold, slice_for};
 
 use super::stack::{Stack, StackQueue};
 
@@ -521,6 +519,38 @@ impl CpuQueue {
         let _ = Stack::set_weight(&mut self.stack, task.id, weight);
     }
 
+    /// Give `task` a new policy (`sched::set_policy`), whether it is running
+    /// here, queued here or on no queue: one queued here, the running one
+    /// included, is taken off its tier and enqueued again at the tail of its
+    /// new place (L.sched.112). Answers whether a decision is due now: the
+    /// running task moved, or something now outranks it.
+    pub(crate) fn set_policy(
+        &mut self,
+        task: &Arc<Task>,
+        params: Option<RtParams>,
+        reset_on_fork: bool,
+    ) -> bool {
+        let running = self
+            .current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, task));
+        // Unchanged, nothing moves, as Linux's `__sched_setscheduler` returns
+        // before its requeue.
+        if task.rt_params() == params || !task.is_queued() {
+            task.store_policy(params, reset_on_fork);
+            return false;
+        }
+        let Some(task) = self.release(task.id) else {
+            task.store_policy(params, reset_on_fork);
+            return false;
+        };
+        task.store_policy(params, reset_on_fork);
+        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot, or
+        // in its node of the tier above fair, given before its policy was.
+        self.insert(&task);
+        running || self.should_preempt()
+    }
+
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {
@@ -638,18 +668,18 @@ impl CpuQueue {
     }
 
     /// Take a queued task off this queue, for another one to run.
-    pub(crate) fn release(&mut self, id: TaskId) -> Option<(Arc<Task>, EntityState)> {
+    pub(crate) fn release(&mut self, id: TaskId) -> Option<Arc<Task>> {
         // Charged first for the reason `insert` is: the lag the leaving task
         // takes with it is measured against a virtual time that must include
         // everything the running task has had.
         if self.current.is_some() {
             self.account(crate::timer::now_nanos());
         }
-        let (task, (state, slot)) = Stack::remove(&mut self.stack, id)?;
-        task.return_run_slot(slot);
+        let (task, entity) = Stack::remove(&mut self.stack, id)?;
+        task.keep_entity(entity);
         task.set_queued(false);
         self.rescale_slice();
-        Some((task, state))
+        Some(task)
     }
 
     /// Share the target latency out among however many are runnable now.

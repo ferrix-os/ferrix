@@ -1809,13 +1809,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        258,
-        "the x86-64 table maps 258 calls"
+        260,
+        "the x86-64 table maps 260 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        226,
-        "the AArch64 table maps 226 calls"
+        228,
+        "the AArch64 table maps 228 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -2100,6 +2100,8 @@ const ARM_NUMBERS: &[(usize, Syscall)] = &[
     (374, Syscall::Sendmmsg),                 // sendmmsg
     (375, Syscall::Setns),                    // setns
     (379, Syscall::FinitModule),              // finit_module
+    (380, Syscall::SchedSetattr),             // sched_setattr
+    (381, Syscall::SchedGetattr),             // sched_getattr
     (382, Syscall::Renameat2),                // renameat2
     (384, Syscall::Getrandom),                // getrandom
     (385, Syscall::MemfdCreate),              // memfd_create
@@ -2332,7 +2334,7 @@ fn arm_covers_the_calls_musl_startup_makes() {
 #[test]
 fn arm_table_size_is_stable() {
     // A canary, as for the other two tables.
-    assert_eq!(mapped_arm().len(), 278, "the ARMv7-A table maps 278 calls");
+    assert_eq!(mapped_arm().len(), 280, "the ARMv7-A table maps 280 calls");
 }
 
 /// The filesystem-control and extended-attribute calls, against the numbers in
@@ -3390,7 +3392,7 @@ mod virtgpu;
 /// Every i386 number [`from_i386`] translates beside the thread-area pair:
 /// the constant, the number `asm/unistd_32.h` gives it, and ARMv7-A's constant
 /// for the same call.
-const I386_NUMBERS: [(usize, usize, usize); 248] = [
+const I386_NUMBERS: [(usize, usize, usize); 250] = [
     (i386::FORK, 2, arm::FORK),
     (i386::KILL, 37, arm::KILL),
     (i386::WAIT4, 114, arm::WAIT4),
@@ -3651,6 +3653,8 @@ const I386_NUMBERS: [(usize, usize, usize); 248] = [
     (i386::FSTATAT64, 300, arm::FSTATAT64),
     (i386::RSEQ, 386, arm::RSEQ),
     (i386::WAITID, 284, arm::WAITID),
+    (i386::SCHED_SETATTR, 351, arm::SCHED_SETATTR),
+    (i386::SCHED_GETATTR, 352, arm::SCHED_GETATTR),
 ];
 
 /// Every i386 number [`from_i386`] translates, as `asm/unistd_32.h` numbers

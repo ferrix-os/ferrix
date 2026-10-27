@@ -269,7 +269,15 @@ impl Direct {
         // `set_state_from` adds it.
         peer.store_state(RUNNABLE);
         let joined = peer.join_word();
-        let plan = ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE);
+        // A fold only between two fair tasks (docs/SCHED-CLASSES.md §9e, R6,
+        // F10): the fused step is the fair class's, and a real-time task on
+        // either side takes the stack's general sequence, under which the
+        // caller's leave and the peer's join are made apart.
+        let plan = if caller.is_fair() && peer.is_fair() {
+            ferrix_sched_fair::plan_job_fold(joined, caller.group_word(), quota::NONE)
+        } else {
+            JobPlan::Separate
+        };
         match (plan, joined) {
             (JobPlan::Separate, Some((job, weight))) => {
                 quota::adjust(job, i64::from(weight));

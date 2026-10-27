@@ -22,8 +22,8 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
-use ferrix_sched_class::CpuSet;
-use ferrix_sched_fair::{EntityState, Node, Slot};
+use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell};
+use ferrix_sched_fair::{EntityState, Node, Slot, Split, StackTiers};
 use ferrix_sync::IrqControl;
 
 use crate::arch;
@@ -225,6 +225,86 @@ pub struct Task {
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     sleep_slot: SlotCell,
+    /// Its run slot while a tier above fair holds it: taken from `run_slot`
+    /// as it is queued there, so that `run_slot` is held exactly while no
+    /// queue holds the task whatever its tier (T11, `holds_slots`), and
+    /// given back as it leaves. Empty for every fair task.
+    parked: SlotCell,
+    /// Its scheduling policy, as [`RtWord`] packs it: `SCHED_OTHER` (zero
+    /// policy bits) or a real-time policy and priority, whether it owns a
+    /// node of the tier above fair, and its reset-on-fork flag. Read without
+    /// the queue's lock (`sched_getscheduler`); written only under it.
+    rt: AtomicU32,
+    /// Its node in the tier above fair, while no queue holds it
+    /// (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): allocated once, when it
+    /// first asks for a real-time policy, and kept when it returns to fair.
+    /// Zero-sized in a build without that tier.
+    upper: super::stack::UpperCellOf,
+}
+
+/// A task's policy word: the priority in the low byte, the policy above it,
+/// then the two flags.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RtWord(u32);
+
+impl RtWord {
+    /// The policy's bits: zero for `SCHED_OTHER`.
+    const POLICY: u32 = 0x300;
+    /// `SCHED_FIFO`'s.
+    const FIFO: u32 = 0x100;
+    /// `SCHED_RR`'s.
+    const RR: u32 = 0x200;
+    /// It owns a node of the tier above fair, in its cell or lent to a queue.
+    const OWNS_SLOT: u32 = 1 << 16;
+    /// Its children start `SCHED_OTHER` (`SCHED_RESET_ON_FORK`).
+    const RESET_ON_FORK: u32 = 1 << 17;
+
+    /// Its real-time policy and priority, `None` under `SCHED_OTHER`.
+    #[must_use]
+    pub const fn params(self) -> Option<RtParams> {
+        let policy = match self.0 & Self::POLICY {
+            Self::FIFO => RtPolicy::Fifo,
+            Self::RR => RtPolicy::Rr,
+            _ => return None,
+        };
+        Some(RtParams {
+            policy,
+            #[expect(clippy::cast_possible_truncation, reason = "the low byte, masked")]
+            priority: (self.0 & 0xff) as u8,
+        })
+    }
+
+    /// Whether its children start `SCHED_OTHER`.
+    #[must_use]
+    pub const fn resets_on_fork(self) -> bool {
+        self.0 & Self::RESET_ON_FORK != 0
+    }
+
+    /// Whether it owns a node of the tier above fair.
+    const fn owns_slot(self) -> bool {
+        self.0 & Self::OWNS_SLOT != 0
+    }
+
+    /// The word with `params` and `reset_on_fork`, the node kept as it was.
+    const fn with(self, params: Option<RtParams>, reset_on_fork: bool) -> RtWord {
+        let policy = match params {
+            Some(RtParams {
+                policy: RtPolicy::Fifo,
+                priority,
+            }) => Self::FIFO | priority as u32,
+            Some(RtParams {
+                policy: RtPolicy::Rr,
+                priority,
+            }) => Self::RR | priority as u32,
+            None => 0,
+        };
+        let reset = if reset_on_fork {
+            Self::RESET_ON_FORK
+        } else {
+            0
+        };
+        RtWord(policy | reset | (self.0 & Self::OWNS_SLOT))
+    }
 }
 
 /// One of a task's slots, while the task holds it: a node pointer, null
@@ -260,6 +340,11 @@ impl SlotCell {
     /// A cell holding `slot`.
     fn new(slot: TaskSlot) -> SlotCell {
         SlotCell(AtomicPtr::new(Box::into_raw(slot.into_box())))
+    }
+
+    /// A cell holding nothing yet.
+    const fn empty() -> SlotCell {
+        SlotCell(AtomicPtr::new(core::ptr::null_mut()))
     }
 
     /// Take the slot, if the cell holds it.
@@ -492,6 +577,9 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            parked: SlotCell::empty(),
+            rt: AtomicU32::new(0),
+            upper: UpperCell::empty(),
         })
     }
 
@@ -550,26 +638,117 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            parked: SlotCell::empty(),
+            rt: AtomicU32::new(0),
+            upper: UpperCell::empty(),
         })
     }
 
-    /// What it is queued with, from its record and `slot`, its run slot:
-    /// the class stack's entity (`sched::stack::StackEntity`, N2).
+    /// What it is queued with, from `slot`, its run slot: the class stack's
+    /// entity (`sched::stack::StackEntity`, N2, F7). For a real-time task,
+    /// its policy and its node of the tier above fair, the run slot parked
+    /// meanwhile; otherwise its record and the run slot.
+    ///
+    /// Under the lock of the queue it goes on, the only taker of its node.
     pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
-        (self.entity_state(), slot)
+        if let Some(params) = self.rt_params()
+            && let Some(node) = self.upper.take()
+        {
+            self.parked.put(slot);
+            return super::stack::Stack::upper_entity(params, node);
+        }
+        // A real-time policy with no node cannot be: the node is put in its
+        // cell before the policy is stored (`sched::set_policy`,
+        // `sched::prepare_user`), and only a queue holding the task takes
+        // it. Queued fair otherwise, which is what it was before.
+        super::stack::Stack::fair_entity((self.entity_state(), slot))
     }
 
-    /// Keep what a queue handed back as it let the task go: its run slot,
-    /// then its record.
-    pub(crate) fn keep_entity(&self, (state, slot): super::stack::StackEntity) {
-        self.return_run_slot(slot);
-        self.store_entity_state(state);
+    /// Keep what a queue handed back as it let the task go: its node of the
+    /// tier above fair and its parked run slot, or its run slot and then
+    /// its record.
+    pub(crate) fn keep_entity(&self, entity: super::stack::StackEntity) {
+        match super::stack::Stack::split(entity) {
+            Split::Upper(node) => self.keep_upper(node),
+            Split::Fair((state, slot)) => {
+                self.return_run_slot(slot);
+                self.store_entity_state(state);
+            }
+        }
     }
 
-    /// Take back the run slot of an entity a queue refused, the record as
-    /// it was (the queue changed nothing).
-    pub(crate) fn keep_refused(&self, (_, slot): super::stack::StackEntity) {
-        self.return_run_slot(slot);
+    /// Take back an entity a queue refused, the record as it was (the
+    /// queue changed nothing).
+    pub(crate) fn keep_refused(&self, entity: super::stack::StackEntity) {
+        match super::stack::Stack::split(entity) {
+            Split::Upper(node) => self.keep_upper(node),
+            Split::Fair((_, slot)) => self.return_run_slot(slot),
+        }
+    }
+
+    /// Its node back in its cell, and its parked run slot back where it is
+    /// held while no queue holds the task.
+    fn keep_upper(&self, node: super::stack::UpperSlot) {
+        if self.upper.put(node).is_err() {
+            // The cell is empty while a queue holds the node, and only that
+            // queue's lock holder fills it: as a run slot given back twice.
+            crate::panic::fatal!(
+                crate::panic::catalog::TASK_SLOT_RETURNED_TWICE,
+                "a task's real-time node was given back while its cell held one"
+            );
+        }
+        if let Some(slot) = self.parked.take() {
+            self.return_run_slot(slot);
+        }
+    }
+
+    /// Its policy word.
+    pub fn rt_word(&self) -> RtWord {
+        RtWord(self.rt.load(Ordering::Acquire))
+    }
+
+    /// Its real-time policy and priority, `None` under `SCHED_OTHER`.
+    pub fn rt_params(&self) -> Option<RtParams> {
+        self.rt_word().params()
+    }
+
+    /// Whether it is scheduled by the fair class: `SCHED_OTHER`.
+    pub fn is_fair(&self) -> bool {
+        self.rt_params().is_none()
+    }
+
+    /// Whether it owns a node of the tier above fair.
+    pub(crate) fn owns_upper_node(&self) -> bool {
+        self.rt_word().owns_slot()
+    }
+
+    /// Keep `node` as its node of the tier above fair, for a task that owns
+    /// none: under the lock of its home queue, or before any queue has seen
+    /// it. A task that owns one already hands `node` back, to be freed by a
+    /// caller holding no queue lock.
+    ///
+    /// # Errors
+    ///
+    /// `node`, not kept.
+    pub(crate) fn give_upper_node(
+        &self,
+        node: super::stack::UpperSlot,
+    ) -> Result<(), super::stack::UpperSlot> {
+        if self.owns_upper_node() {
+            return Err(node);
+        }
+        self.upper.put(node)?;
+        let _ = self.rt.fetch_or(RtWord::OWNS_SLOT, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// Store its policy and reset-on-fork flag: under the lock of its home
+    /// queue, with no queue holding it (`CpuQueue::set_policy` takes it off
+    /// and puts it back), or before any queue has seen it. A real-time
+    /// policy only for a task that owns its node.
+    pub(crate) fn store_policy(&self, params: Option<RtParams>, reset_on_fork: bool) {
+        let word = self.rt_word().with(params, reset_on_fork);
+        self.rt.store(word.0, Ordering::Release);
     }
 
     /// Take the slot a run queue holds this task in, to queue it with.

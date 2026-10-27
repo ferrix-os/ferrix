@@ -644,7 +644,7 @@ pub(crate) fn forget_robust_list(process: &Process) {
 
 /// The thread `get_robust_list` asks about: the caller for 0, else the thread
 /// numbered `pid`, in the caller's process or any other.
-fn robust_list_subject(
+pub(crate) fn robust_list_subject(
     process: &Process,
     pid: i32,
 ) -> Result<Arc<crate::syscall::thread::Thread>, Errno> {
@@ -830,7 +830,7 @@ pub(crate) fn sys_setpriority(
 }
 
 /// The task that runs `thread`, if it is still alive.
-fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
+pub(crate) fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
     thread.process().tasks().into_iter().find(|task| {
         crate::syscall::thread::of_task(task).is_some_and(|runs| core::ptr::eq(runs, thread))
     })

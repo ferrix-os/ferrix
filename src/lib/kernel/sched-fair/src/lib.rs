@@ -1486,6 +1486,9 @@ pub trait StackTiers<T>: FairTier<T> {
     /// Whether the stack has a tier above fair: whether a task may ask for a
     /// real-time policy.
     const REALTIME: bool;
+    /// The round-robin quantum of the tier above fair, in nanoseconds; zero
+    /// with no such tier.
+    const RR_QUANTUM_NS: u64;
     /// A task's node in the tier above fair; no values for the fair-only
     /// stack.
     type UpperSlot;
@@ -1504,6 +1507,7 @@ pub trait StackTiers<T>: FairTier<T> {
 
 impl<T> StackTiers<T> for Eevdf {
     const REALTIME: bool = false;
+    const RR_QUANTUM_NS: u64 = 0;
     type UpperSlot = core::convert::Infallible;
     type Cell = ferrix_sched_class::NoCell<core::convert::Infallible>;
 
@@ -1528,6 +1532,7 @@ impl<T, U: ferrix_sched_class::RealtimeClass<T>> StackTiers<T>
     for ferrix_sched_class::Over<U, Eevdf>
 {
     const REALTIME: bool = true;
+    const RR_QUANTUM_NS: u64 = U::RR_QUANTUM_NS;
     type UpperSlot = U::Slot;
     type Cell = ferrix_sched_class::LockedCell<U::Slot>;
 

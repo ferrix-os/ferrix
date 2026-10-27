@@ -650,8 +650,9 @@ package FerrixSchedRequirements {
         }
         requirement <'L.sched.64'> theDirectSwitchFoldsItsJobLoad : ItemLowLevel {
             attribute :>> statement = "The direct switch shall change the processor
-                load of a job both its tasks are counted in by the net of the peer's
-                join and the caller's leave in one adjustment, and otherwise make the
+                load of a job both its tasks are counted in, both being fair
+                (SCHED_OTHER), by the net of the peer's join and the caller's leave
+                in one adjustment, and otherwise make the
                 peer's join and then the caller's leave as the general path does; a
                 direct switch that does not reach the caller's leave shall make the
                 peer's join alone.";
@@ -674,7 +675,8 @@ package FerrixSchedRequirements {
         requirement <'L.sched.65'> theDirectSwitchWeighsWithThePeerCounted : ItemLowLevel {
             attribute :>> statement = "The direct switch shall give the peer, and the
                 running task under account's rule, the weights effective gives with
-                the peer counted in its job's load.";
+                the peer counted in its job's load; a real-time task's weight is kept
+                in its fair record for its return to fair.";
             attribute :>> criterion = "Stage 9's weight case, with the fast path off
                 and on: a caller of trips in one job with an echo of another weight
                 runs, after its last trip, at the weight effective gives with the
@@ -689,7 +691,8 @@ package FerrixSchedRequirements {
         requirement <'L.sched.66'> theFoldIsPlannedBeforeTheCharge : ItemLowLevel {
             attribute :>> statement = "The direct switch shall plan a fold of its job
                 loads from the peer's join and the caller's word before the charge,
-                only at a job both are counted in, and shall settle it once the
+                only at a job both are counted in and only when both are fair
+                (SCHED_OTHER), and shall settle it once the
                 caller's leave has answered: by the net in one adjustment when the
                 leave answered as planned, and otherwise by the peer's join and then
                 the caller's leave, each in its own job.";
