@@ -96,7 +96,7 @@ pub use queue::Due;
 #[doc(hidden)]
 pub use queue::{FIRE_BATCH, Fired, take_next};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
-pub(crate) use task::SleepSlot;
+pub use stack::NAME as STACK_NAME;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
 pub use wait::{LastLook, WaitQueue};
