@@ -677,6 +677,64 @@ owed requirement (line 21, ruling 2) takes the next free L.sched id.
 `class_crates` record and the profile's tier values, with a self-test for
 a stack of two tiers.
 
+## 9c. `max+`: a time-triggered table inside the windows (proposed, for design review)
+
+The customer (2026-10-27), after C6: "Can you also add the more
+conservative alternative to Max, so that you could technically build a
+EAL 7 / SIL 4 OS with Max+". C6 gave `max` fixed priorities inside each
+window. The more conservative scheduling, which some DAL A and railway
+SIL 4 systems use, makes no run-time choice at all: a time-triggered table
+(a cyclic executive) inside each window, each slot naming the one task
+that runs in it. This section proposes it as a value and a profile; it is
+not built, and it waits for the consultant's design review before any
+code.
+
+**What "technically build" means here, and what it does not.** A profile
+selects code: `max+` would compile the kernel with the most conservative
+choice of every flag, so that what an EAL 7 or SIL 4 evaluation needs to
+reason about is as small and as static as Ferrix can make it. It does not
+supply that evaluation's evidence. EAL 7 asks for a formal model of the
+security policy and formally verified design and implementation
+correspondence (ADV_SPM.1, ADV_FSP.6, ADV_TDS.6 or higher, ADV_IMP.2 with
+formal correspondence); Ferrix has no formal proof today, and the level
+says so rather than claiming it.
+
+**Proposed:**
+* **P1, a value `sched_windows = "arinc_table"`** in its own crate,
+  `ferrix-sched-windows-table`: the same static major frame of windows as
+  `arinc`, and inside each window a static slot table built at boot from
+  the partition configuration and never changed (no priorities, no
+  queues ordered at run time, no admission at run time: a task is in a
+  slot or it does not run). Its own crate, so a `max+` kernel links no
+  priority code and S1's evidence shows it. `lands` M3 with `arinc`,
+  `built = "no"`. Allows every level that `arinc` does and `sc4_plus`.
+* **P2, a level `sc4_plus`**: `sc4`'s targets with Common Criteria EAL 7
+  (IEC 61508-3 SC 4, ISO 26262 ASIL D, EN 50716 SIL 4, DO-178C DAL A,
+  IEC 62304 Class C, EAL 7). It covers `sc4` standard by standard. A value
+  allows it only where it says so explicitly (DF1): the proposal is the
+  values `max` uses that leave no run-time flexibility (`personality =
+  user`, `fs = server`, `mitigations = on`, `partition_speculation = exit`,
+  `ipc_fastpath = off`, `restricted_fastpath = off`, `kernel_memory =
+  retyped`, `sched_dispatch = fixed`, `sched_windows = arinc_table`, the
+  other tiers `absent`, `checks = on`, `program_barrier = switch`, `ssbd =
+  always`, `smt = off`, `runtime_trades = none`, `runtime_settings =
+  fixed`), and not `sched_windows = arinc`.
+* **P3, a profile `max_plus`** (profile names are lower case, digits and
+  `_`; "Max+" in prose): `max`'s values with `sched_windows =
+  "arinc_table"`, level `sc4_plus`, `modes = ["HardRt"]`, buildable from
+  `max`'s stage, its claim a target ("EAL 7 / SIL 4 / ASIL D / DAL A, no
+  formal evidence yet") rather than a held claim.
+* **P4, the audit record and the flag word**: one value more for
+  `sched_windows` (three of its eight), one profile and one level more
+  (six and five of sixteen), the flag word 54 of 64.
+
+**Open for the customer and the consultant:**
+* **C7, the Linux personality in `max+`.** `max` has `linux_abi = "on"`.
+  The smallest kernel for EAL 7 would leave the Linux ABI out
+  (`linux_abi = "off"`), which today is build-only and carries no claim
+  (LINUX-ABI-SEPARATION.md §11.11). Keep it on in `max+` as in `max`, or
+  make `max+` the profile that needs it off and owe that work?
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
