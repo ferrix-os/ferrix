@@ -24,8 +24,6 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `CORE_FLAG_WORD` | const | bin |  |
-| `flag_word` | fn | item, load |  |
-| `build_flag_word` | macro | item, load, bin |  |
 | `fatal` | macro | item, load, bin |  |
 | `println` | macro | item, load, bin |  |
 | `println_unlogged` | macro | bin |  |
@@ -56,6 +54,8 @@ checks above is `pub` for raised checks (F3).
 | `trap` | mod | item, load, bin |  |
 | `user` | mod | item, load, bin |  |
 | `vmap` | mod | item, load, bin |  |
+| `build_flag_word` | re-export | item, load |  |
+| `flag_word` | re-export | item, load |  |
 
 ### `arch`
 
