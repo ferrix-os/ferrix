@@ -41,12 +41,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use core::cmp::Ordering;
 
-use ferrix_sched_class::{Back, Handed, LOAD_UNIT, Left, Refusal, SchedClass};
+use ferrix_sched_class::{Back, Handed, LOAD_UNIT, Left, RealtimeClass, Refusal, SchedClass};
 
 /// The lowest real-time priority.
-pub const MIN_PRIORITY: u8 = 1;
+pub const MIN_PRIORITY: u8 = Params::MIN_PRIORITY;
 /// The highest real-time priority.
-pub const MAX_PRIORITY: u8 = 99;
+pub const MAX_PRIORITY: u8 = Params::MAX_PRIORITY;
 /// A `SCHED_RR` entity's quantum: Linux's default `sched_rr_timeslice_ms`.
 pub const RR_QUANTUM_NS: u64 = 100_000_000;
 /// The throttle's period: Linux's default `sched_rt_period_us`.
@@ -55,31 +55,9 @@ pub const PERIOD_NS: u64 = 1_000_000_000;
 /// Linux's default `sched_rt_runtime_us`.
 pub const RUNTIME_NS: u64 = 950_000_000;
 
-/// A real-time policy.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Policy {
-    /// `SCHED_FIFO`: no quantum.
-    Fifo,
-    /// `SCHED_RR`: [`RR_QUANTUM_NS`] at a time.
-    Rr,
-}
-
-/// What a task asked for: its policy and its priority.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Params {
-    /// The policy.
-    pub policy: Policy,
-    /// The priority, [`MIN_PRIORITY`] to [`MAX_PRIORITY`].
-    pub priority: u8,
-}
-
-impl Params {
-    /// Whether the priority is in range.
-    #[must_use]
-    pub const fn valid(self) -> bool {
-        self.priority >= MIN_PRIORITY && self.priority <= MAX_PRIORITY
-    }
-}
+/// A real-time policy and the parameters a task asks for: the interface's,
+/// which any real-time class keeps the same way.
+pub use ferrix_sched_class::{RtParams as Params, RtPolicy as Policy};
 
 /// Where a node sits: higher priority first, then arrival.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -611,6 +589,22 @@ impl<T> SchedClass<T> for FifoRr {
             return Err("a fifo queue's period clock is past its period");
         }
         Ok(())
+    }
+}
+
+impl<T> RealtimeClass<T> for FifoRr {
+    type Slot = FifoSlot<T>;
+
+    fn new_slot() -> Option<FifoSlot<T>> {
+        FifoSlot::new().ok()
+    }
+
+    fn entity(params: Params, slot: FifoSlot<T>) -> FifoEntity<T> {
+        (params, slot)
+    }
+
+    fn into_slot((_, slot): FifoEntity<T>) -> FifoSlot<T> {
+        slot
     }
 }
 
