@@ -163,7 +163,7 @@ package FerrixRoadmap {
         attribute :>> status = StageStatus::Done;
         attribute :>> size = "week";
         doc /* Task, kernel stacks, context switch, per-CPU runqueues, the
-             * class stack, EEVDF in src/lib/kernel/sched. Scheduling domains from the
+             * class stack, EEVDF in src/lib/kernel/sched-fair. Scheduling domains from the
              * start with Throughput alone implemented. Exit, met on all three:
              * a thousand kernel threads spawned on one processor run bounded
              * work to completion and give every stack back (about 28,000
