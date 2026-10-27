@@ -811,6 +811,96 @@ personality (C7). The design review is asked to name any other value of
   one literal value; each with a self-test. Which value is barest stays a
   reviewed judgement, recorded in the flag file and the ledger.
 
+## 9d. Step 4a: a stack of two tiers (proposed, for design review)
+
+Step 4 brings the first class above fair, `ferrix-sched-fifo` (4b). Before
+it can, the core must be able to hold a stack of two tiers. Today it
+cannot: `StackQueue` is EEVDF's `RunQueue` itself, and fifteen calls in
+`sched/queue.rs` and `sched/mod.rs` reach it directly (`stack.rs` lists
+them). Step 4a changes no behaviour: with the fair-only stack every call
+compiles to what it is today. It makes the two-tier stack compile, and
+says for each call what it means once a task of a higher tier can be
+queued or running.
+
+**The fair tier, reached through the stack.** A trait of the fair crate,
+`FairTier<T>`, gives the fair tier's queue inside a stack's queue:
+
+```rust
+pub trait FairTier<T>: SchedClass<T> {
+    fn fair(queue: &Self::Queue) -> &RunQueue<T>;
+    fn fair_mut(queue: &mut Self::Queue) -> &mut RunQueue<T>;
+}
+impl<T> FairTier<T> for Eevdf { /* the queue itself */ }
+impl<T, U: SchedClass<T>, L: FairTier<T>> FairTier<T> for Over<U, L> { /* queue.lower's */ }
+```
+
+Fair is always the innermost tier (§6: windows, deadline, realtime,
+fair), so the lower side is enough. A stack without a fair tier (`max`,
+`max_plus`: C3) does not implement it, so a core that still calls the fair
+tier does not compile for them: §11's N7 table, the list of what must go
+through `Stack` before `max` builds, becomes compiler-checked. For the
+fair-only stack `fair` is the identity and inlines away (S5: the release
+ELF table again, before and after).
+
+**Each call, under a stack with a tier above fair:**
+
+| Call | Where | With a higher tier |
+|---|---|---|
+| `set_weight` | `reweight`, `set_weight` | the fair tier's alone: a weight is a fair parameter; a task of a higher tier keeps its weight for when it returns to fair |
+| `for_each`, `avg_vruntime`, `current_id` | `note_pick`, `measure`, /proc | the fair tier's picture: the fairness checks and the EEVDF trace are about fair tasks; a higher tier's tasks are listed by its own class (4b) |
+| `queued` | `waiting` (the timer's decision) | **the whole stack's**: becomes `Stack::len` less the running one, a trait operation; a FIFO task waiting must keep the tick |
+| `set_slice_ns`, `config` | `rescale_slice`, `slice_ns` | the fair tier's, scaled by the fair tier's own length, not the stack's |
+| `should_preempt` | the tick | **the stack's**: a provided-free required operation `SchedClass::should_preempt(queue)`; `Over` answers yes when the upper tier has work and the lower runs, else asks the running tier (S11: required, no default) |
+| `load_weight` | `account`'s load average | the stack's: a higher tier's tasks count as load; a trait operation, its weight for a fixed-priority task the fair `NICE_0_WEIGHT` (stated, reviewed in 4b) |
+| `latest_where` | `steal_candidate` | the fair tier's: only fair tasks are stolen (`steals_work`, S11); a SoftRt domain does not steal |
+| `yield_curr` | `yield_now` | the running tier's: a trait operation `SchedClass::yield_current` (FIFO: to the tail of its priority, 4b) |
+| `level` | the fairness check's window | the fair tier's |
+| `pick` | the boot task's adoption | already `Stack::pick` |
+
+So four calls become trait operations, required with no default (S11):
+`waiting`, `should_preempt`, `load_weight`, `yield_current`; the rest go
+through `FairTier::fair`. Each new operation gets its forwarding in `Eevdf`
+and `Over`, a host test on a two-tier toy stack in `ferrix-sched-class`
+(the toy FIFO over a toy fair class there), and the field-for-field test
+on the fair-only stack (N4).
+
+**The task's entity, S4's full form.** N2's const requires the stack's
+entity to be `FairEntity`; a two-tier stack's is `Tier<U::Entity,
+FairEntity>`. The task keeps the fair part as today (the record's atomics,
+the run slot behind L.sched.63's cell) and gains one field for the parts
+above it: `upper: UpperCell`, the higher tiers' entity and which tier the
+task is in, behind a cell of its own that only the queue's lock holder
+takes, as the run slot is. `Task::entity_with` assembles `Tier::Lower`
+from the fair parts when the task is fair and `Tier::Upper` from the cell
+when it is not; `keep_entity` takes either apart. For the fair-only stack
+the cell's type is zero-sized and the const becomes "the fair-only stack's
+entity is `FairEntity`, and every stack's lower-most entity is", so N2's
+guarantee is kept for the path the IPC round trip takes. The policy a task
+asked for (4b: `sched_setscheduler`) is what moves it between tiers, under
+its queue's lock, by `remove` from one tier and `enqueue` into the other.
+
+**Rule 7.** L.sched.64-66 (the direct switch's job fold) hold as written
+while both tasks are fair. With a higher tier they are restated: a
+hand-over between tiers goes through `Over::hand_over`, which falls back
+to `enqueue` + `pick` when the arriving and leaving tasks are in different
+tiers, and the fold applies only when both are fair. Ids for the
+restatement, and for the four new operations' requirements, are reserved
+from L.sched.103 before 4a's code (S13).
+
+**The field's name** (C1 of line 13): `CpuQueue::fair` becomes
+`CpuQueue::stack`, in its own commit, path-only.
+
+**Questions for the review:**
+1. Is `FairTier` on the innermost tier the right shape, or should the
+   EEVDF-only calls become trait operations every class answers?
+2. `queued`/`should_preempt`/`load_weight`/`yield_current` as required
+   operations: accepted as S11 asks?
+3. The task's `upper` cell beside the fair parts, rather than one cell for
+   the whole stack entity: the fair parts stay where L.sched.63 and the
+   IPC path want them.
+4. A fixed-priority task's load weight as `NICE_0_WEIGHT`, or its own?
+5. Which ids 4a takes.
+
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
 A certification-consultant subagent of the customer's session, ledger line
