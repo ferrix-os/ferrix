@@ -6,8 +6,11 @@
 //! that on every architecture and buildable profile, from the release ELF
 //! and a non-LTO link's map. It is the standing negative case, kept after
 //! step 4 until a ledger line retires it. A first-in, first-out list of at
-//! most [`CAPACITY`] entities, charging a fixed quantum; no flag value
-//! names it, so it is never a scheduler a profile can choose.
+//! most [`CAPACITY`] entities, charging a fixed quantum, without
+//! preemption: `pick` keeps the running entity rather than letting it
+//! compete with the waiting ones, as a class that schedules would (ledger
+//! line 23, C3). No flag value names it, so it is never a scheduler a
+//! profile can choose.
 
 #![no_std]
 #![forbid(unsafe_code)]

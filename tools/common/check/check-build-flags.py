@@ -398,6 +398,28 @@ ARM = re.compile(r'#\[cfg\(\s*ferrix_(sched_[a-z0-9_]+)\s*=\s*"([a-z0-9_]+)"\s*\
                  r'|pub\s+type\s+[A-Za-z]+(?:<[A-Z]>)?\s*=\s*[^;]+;)')
 
 
+# Stack's nesting in the arms file, outermost first, as its tier aliases name
+# it; the flag file declares the tier flags in the same order, which
+# check-boot-line.py composes the classes line by (ledger line 23 (3)).
+TIER_ALIASES = {"Windows": "sched_windows", "Deadline": "sched_deadline", "Realtime": "sched_realtime",
+                "Fair": "sched_fair"}
+STACK = re.compile(r"pub\s+type\s+Stack\s*=\s*([^;]+);")
+
+
+def tier_order_problems(source: str, flag_file: dict) -> list[str]:
+    """Stack's tiers, outermost first, are the flag file's tier flags in
+    their declared order."""
+    match = STACK.search(comments_blanked(source))
+    if match is None:
+        return [f"{ARMS}: no `pub type Stack`"]
+    nesting = [TIER_ALIASES.get(alias, alias) for alias in re.findall(r"[A-Za-z_]+", match.group(1))]
+    declared = [flag for flag in flag_file.get("flags", {}) if flag.startswith("sched_") and flag != "sched_dispatch"]
+    if nesting != declared:
+        return [f"{ARMS}: Stack nests {nesting}, and the flag file declares the tiers {declared}; "
+                "the classes line is composed in the flag file's order"]
+    return []
+
+
 def sched_cfg_problems(rust_files: list[tuple[str, str]]) -> list[str]:
     """No `ferrix_sched_*` cfg in the kernel outside the arms file (D6)."""
     problems = []
@@ -712,6 +734,11 @@ def self_test() -> list[str]:
     ]:
         if not arms_problems(broken, sched_file):
             failures.append(f"the arms check passed {what}")
+    tiers_file = {"flags": {"sched_dispatch": {}, "sched_windows": {}, "sched_fair": {}}}
+    if tier_order_problems("pub type Stack = Windows<Fair>;\n", tiers_file):
+        failures.append("a Stack nested in the flag file's order was refused")
+    if not tier_order_problems("pub type Stack = Fair<Windows>;\n", tiers_file):
+        failures.append("a Stack nested against the flag file's order passed")
     found = sched_cfg_problems([
         ("src/kernel/src/sched_select.rs", '#[cfg(ferrix_sched_fair = "eevdf")]\nconst A: u8 = 0;\n'),
         ("src/kernel/src/sched/x.rs", 'const B: bool = cfg!(ferrix_sched_fair = "eevdf");\n'),
@@ -806,7 +833,9 @@ def main() -> int:
         for problem in table:
             print(f"    {problem}", file=sys.stderr)
         status = 1
-    sched = sched_cfg_problems(files) + arms_problems((ROOT / ARMS).read_text(encoding="utf-8"), flag_file)
+    arms_source = (ROOT / ARMS).read_text(encoding="utf-8")
+    sched = sched_cfg_problems(files) + arms_problems(arms_source, flag_file)
+    sched += tier_order_problems(arms_source, flag_file)
     if sched:
         print("build-flags: a scheduler flag read outside its arms, or the arms do not follow the flag file "
               "(SCHED-CLASSES.md §9a):", file=sys.stderr)

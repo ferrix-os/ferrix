@@ -119,6 +119,12 @@ def class_judge(names: list[str], map_text: str, record: dict, flags: dict[str, 
     """What is wrong with a kernel built with the profile `flags`, whose
     release ELF holds the demangled `names` and whose non-LTO link's map is
     `map_text`, against the class crates' `record`."""
+    # The absent side reads an absence in the map, so a map that could hold
+    # nothing it looks for -- empty, truncated, or with its names mangled --
+    # is refused before it is read (ledger line 23 (1)).
+    if "ferrix_kernel_core::" not in map_text:
+        return ["the non-LTO map names no demangled path of the kernel's core (ferrix_kernel_core::): "
+                "it is empty, truncated or mangled, and cannot show an absence"]
     problems = []
     for package, entry in sorted(record.items()):
         if package.startswith("//") or package == "named_outside":
@@ -177,7 +183,8 @@ def self_test() -> list[str]:
     }
     present = ["<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<T>>::check",
                "ferrix_sched_fair::RunQueue<T>::insert"]
-    good_map = "/t/libferrix_kernel_core-0c.rlib(core.o):(.text.x)\n    ferrix_sched_fair::tree::check_node::<T>\n"
+    good_map = ("/t/libferrix_kernel_core-0c.rlib(core.o):(.text.x)\n    ferrix_kernel_core::sched::init\n"
+                "    ferrix_sched_fair::tree::check_node::<T>\n")
     flags = {"sched_fair": "eevdf"}
     if class_judge(present, good_map, record, flags):
         failures.append(f"a kernel with fair and without the fixture was refused: {class_judge(present, good_map, record, flags)}")
@@ -185,12 +192,16 @@ def self_test() -> list[str]:
         ("the fixture in the ELF", present + ["ferrix_sched_fixture::Queue<T>::holds"], good_map, "the ELF holds"),
         ("the fixture's rlib in the map", present, good_map + "/t/libferrix_sched_fixture-1b.rlib(x.o)\n", "pulls in a member"),
         ("fair's marker inlined away", present[1:], good_map, "marker"),
-        ("fair's code missing from the map", present, "/t/libferrix_kernel_core-0c.rlib(core.o)\n", "none of its code"),
+        ("fair's code missing from the map", present,
+         "/t/libferrix_kernel_core-0c.rlib(core.o)\n    ferrix_kernel_core::sched::init\n", "none of its code"),
         ("the fixture's code monomorphised into another", present,
          good_map + "    ferrix_sched_fixture::Queue<T>::holds\n", "holds a symbol of it"),
     ]:
         if not any(expect in p for p in class_judge(names, text, record, flags)):
             failures.append(f"the class-crate judge passed {what}")
+    if not any("cannot show an absence" in p for p in class_judge(present, "", record, flags)) or \
+            not any("cannot show an absence" in p for p in class_judge(present, "_ZN17ferrix_sched_fair4tree\n", record, flags)):
+        failures.append("an empty or mangled map was read as showing an absence")
     if not class_judge(present, good_map, record, {"sched_fair": "absent"}):
         failures.append("fair in a kernel whose flags leave it out passed")
     return failures

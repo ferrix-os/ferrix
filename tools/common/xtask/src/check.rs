@@ -1308,6 +1308,12 @@ fn class_crates(xtask: &std::path::Path, arches: &[Arch], kept: &std::path::Path
         for profile in CLASS_PROFILES {
             let stem = format!("{}-class-{profile}", arch.name());
             let map = kept.join(format!("{stem}.map"));
+            // A link cargo found fresh and skipped writes no map, and an older
+            // run's would be judged in its place (ledger line 23 (1)).
+            if map.exists() {
+                std::fs::remove_file(&map)
+                    .map_err(|error| Error::new(format!("{}: {error}", map.display())))?;
+            }
             for with_map in [false, true] {
                 let mut build = Command::new(xtask);
                 let _ = build.current_dir(paths::workspace_root()).args([
