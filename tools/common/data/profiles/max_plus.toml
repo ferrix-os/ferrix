@@ -33,11 +33,13 @@ image = { driver_updates = "absent", settings_writer = "absent", slot_signing = 
 slot_families = []
 exceptions = []
 # The barest values that do not allow sc4_plus yet, each with what it waits
-# on (E3): the profile is reported not claimable while any is listed.
+# on and the ledger line that admitted it (E3; ledger line 25 (1)): the
+# profile is reported not claimable while any is listed. The list may shrink
+# freely and grows only with a ledger line.
 pending = [
-    { flag = "personality", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps; ledger 3257 (1), 3208 (6)(g)" },
-    { flag = "fs", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps" },
-    { flag = "linux_abi", value = "off", until = "the checks that run a Linux program re-homed (LINUX-ABI-SEPARATION.md section 11.11)" },
+    { flag = "personality", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps; ledger 3257 (1), 3208 (6)(g)", ledger = "sched-classes line 24" },
+    { flag = "fs", value = "none", until = "LINUX-ABI-SEPARATION.md section 11.11's later steps", ledger = "sched-classes line 24" },
+    { flag = "linux_abi", value = "off", until = "the checks that run a Linux program re-homed (LINUX-ABI-SEPARATION.md section 11.11)", ledger = "sched-classes line 24" },
 ]
 
 [flags]

@@ -1108,6 +1108,24 @@ line), written in as §9a.
 its message; 6 owed on the gate host (below, with the desktop build's
 `build` line and condition 1's control).
 
+**`max+` built, reviewed**: ledger line 25, OK IF 1-6 (E13's waiver of
+the three pending values confirmed as intended). Met: (1) `pending` only
+at `sc4_plus` on a target-only claim, each entry naming its ledger line,
+and never on a countermeasure's flag (check-build-flags), with
+self-tests; (2) signed slots only with no board named is not buildable,
+in check-item-boundary and xtask alike (self-tests); (4) BUILD-FLAGS.md
+says xtask's rule 3 refuses `max_plus` on `personality = none` without
+reading `pending`, failing closed; (6) this line; C1, the rename. (3) is
+owed before `max_plus` builds (M5): today a profile's `boot_options`
+records the options it permits and the kernel does not read it, so
+`max_plus`'s dropped options (`ferrix.root`, `ferrix.init`,
+`ferrix.onexit`, `console`) are recorded, not enforced, until the kernel
+refuses or fixes at compile time every option an `sc4_plus` build does
+not permit, failing closed, under a requirement reserved first and with a
+control. C2: the rings and crates at level `present`, below `sc4_plus`,
+are the gap `max` has at `sc4`, and close with it. (5) owed on the gate
+host: the four boots, the Arm builds, the controls.
+
 **`max+` reviewed**: ledger line 24, OK IF E1-E13, §9c. Built here (the
 level, the value, the profile, the `barest` keys, `pending`, the checks):
 E1-E3, E6-E8, E11-E13; owed: E4 and E5 with the table crate (M3), E10
