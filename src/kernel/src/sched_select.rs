@@ -18,6 +18,14 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+// The fixture class crate is a dependency no file names (SCHED-CLASSES.md
+// §9b, G2): naming it, even `as _`, would load it and hand its rlib to the
+// linker, the opposite of what it shows. check-item-boundary's rule (d)
+// refuses any name of it, so this lint is the only thing it is excused from.
+#![expect(
+    unused_crate_dependencies,
+    reason = "ferrix_sched_fixture, the standing negative case no build links (SCHED-CLASSES.md §9b)"
+)]
 
 use ferrix_sched_class::SchedClass;
 // Renamed: check-item-boundary.py reads every kernel crate root as one

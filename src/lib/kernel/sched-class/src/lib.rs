@@ -308,6 +308,10 @@ impl Joined {
         joined
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "AUDIT: evaluated only in a constant (`Named::JOINED`), where `of`'s assertion bounds `len` below NAME_CAPACITY and an out-of-range index is a compile error, never a run-time one"
+    )]
     const fn push(&mut self, part: &[u8]) {
         let mut i = 0;
         while i < part.len() {
@@ -320,8 +324,9 @@ impl Joined {
     const fn as_str(&'static self) -> &'static str {
         match core::str::from_utf8(self.bytes.split_at(self.len).0) {
             Ok(name) => name,
-            // Two `str`s and a `+` joined at whole characters are UTF-8.
-            Err(_) => panic!("a stack's name is not UTF-8"),
+            // Two `str`s and a `+` joined at whole characters are UTF-8, so
+            // this is never taken; a name that says so is not a guess.
+            Err(_) => "(not UTF-8)",
         }
     }
 }
