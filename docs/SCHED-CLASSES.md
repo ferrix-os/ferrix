@@ -728,6 +728,16 @@ says so rather than claiming it.
   `sched_windows` (three of its eight), one profile and one level more
   (six and five of sixteen), the flag word 54 of 64.
 
+**The rule for `max+`** (the customer, 2026-10-27: "max+ shall be the
+most bare microkernel possible"): every flag of `max_plus` takes the value
+that links the least code and leaves the least to decide at run time,
+whatever that costs in features. A flag added later declares which of its
+values that is, and `max_plus` takes it; a value that adds code or a
+run-time choice never allows `sc4_plus`. Where `max` and `max_plus` differ
+today: the windows' slot table instead of priorities (P1) and no Linux
+personality (C7). The design review is asked to name any other value of
+`max` that is not the barest, and a check that holds the rule.
+
 **Open for the customer and the consultant:**
 * **C7, decided by the customer (2026-10-27): no Linux personality in
   `max+`** ("go for it", to the choice between keeping it and making
