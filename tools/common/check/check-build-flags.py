@@ -457,42 +457,96 @@ def arms_problems(source: str, flag_file: dict) -> list[str]:
     return problems
 
 
-# The modes and their tiers (D9): Throughput the fair tier, SoftRt the
-# realtime and fair tiers, HardRt the deadline or the windows tier.
-MODES = {
-    "Throughput": lambda present: "sched_fair" in present,
-    "SoftRt": lambda present: {"sched_realtime", "sched_fair"} <= present,
-    "HardRt": lambda present: bool({"sched_deadline", "sched_windows"} & present),
-}
+# The modes and their tiers (D9) are read from the kernel's own map,
+# `mode_available`'s match in the arms file, so the profile rule and the
+# kernel's refusal cannot drift apart (ledger line 21 (2)). An arm is
+# `SchedMode::<Mode> => <expression>`, the expression of `<TIER>.present`
+# joined by `&&` and `||`.
+MODE_ARM = re.compile(r"SchedMode::([A-Za-z]+)\s*=>\s*([^,]+),")
+TIER_OF = {const: flag for flag, const in SCHED_CONSTS.items()}
 
 
-def mode_problems(profiles: dict[str, dict]) -> list[str]:
+def mode_map(source: str) -> dict[str, tuple[str, set[str]]]:
+    """{mode: (a Python expression over `present`, the tiers it names)} from
+    the arms file's `mode_available`."""
+    blanked = comments_blanked(source)
+    start = blanked.find("fn mode_available")
+    if start < 0:
+        return {}
+    body = blanked[start : blanked.find("\n}", start)]
+    modes = {}
+    for mode, expression in MODE_ARM.findall(body):
+        names = set(re.findall(r"\b([A-Z]+)\.present\b", expression))
+        python = re.sub(r"\b([A-Z]+)\.present\b", lambda m: repr(TIER_OF.get(m.group(1), m.group(1))) + " in present",
+                        expression).replace("&&", " and ").replace("||", " or ")
+        if re.fullmatch(r"[\s'a-z_()]*(?:(?:in present|and|or)[\s'a-z_()]*)*", python) is None:
+            raise ValueError(f"{ARMS}: mode_available's arm for {mode} is not tiers joined by && and ||: {expression}")
+        modes[mode] = (python, {TIER_OF.get(name, name) for name in names})
+    return modes
+
+
+def mode_problems(profiles: dict[str, dict], modes: dict[str, tuple[str, set[str]]]) -> list[str]:
     """Each profile's `modes` is the set of modes whose tiers it has present,
-    both ways (D9); a profile with a claim is `sched_dispatch = "fixed"` (D10)."""
+    both ways, never empty, and every tier it has present is one an allowed
+    mode uses (D9, S12, ledger line 21 (1)); a profile with a claim is
+    `sched_dispatch = "fixed"` (D10)."""
     problems = []
+    if not modes:
+        return [f"{ARMS}: no mode_available, so the modes cannot be read"]
     for name, profile in sorted(profiles.items()):
         flags = profile.get("flags", {})
         present = {flag for flag, value in flags.items()
                    if flag.startswith("sched_") and flag != "sched_dispatch" and value != "absent"}
-        have = {mode for mode, needs in MODES.items() if needs(present)}
+        have = {mode for mode, (needs, _) in modes.items() if eval(needs, {}, {"present": present})}  # noqa: S307
         listed = set(profile.get("modes", []))
-        for mode in sorted(listed - set(MODES)):
+        if not listed:
+            problems.append(f"profiles/{name}.toml: modes is empty or missing; a profile allows a mode at least")
+        for mode in sorted(listed - set(modes)):
             problems.append(f"profiles/{name}.toml: modes names {mode}, which is no mode")
-        for mode in sorted((listed & set(MODES)) - have):
+        for mode in sorted((listed & set(modes)) - have):
             problems.append(f"profiles/{name}.toml: allows {mode}, whose tiers are absent")
         for mode in sorted(have - listed):
             problems.append(f"profiles/{name}.toml: has {mode}'s tiers present and leaves {mode} out of modes "
                             "(compiled code no mode uses)")
+        used = set().union(*(modes[mode][1] for mode in listed & set(modes))) if listed & set(modes) else set()
+        for tier in sorted(present - used):
+            problems.append(f"profiles/{name}.toml: {tier}={flags[tier]} is present and no mode it allows uses "
+                            "it (compiled code no mode uses)")
         if profile.get("level") != "none" and flags.get("sched_dispatch") != "fixed":
             problems.append(f"profiles/{name}.toml: a profile with a claim is sched_dispatch=fixed, "
                             f"not {flags.get('sched_dispatch')} (S10, D10)")
     return problems
 
 
+# The audit record's fields (D8; ledger line 21 (4)): two bits a flag in the
+# first word, the scheduler's flags left out; in the second the profile and
+# the level four bits each, `sched_dispatch` two, each tier three. A value
+# past its field would alias another in the record, so the flag file may not
+# outgrow them, nor either word its 32 bits.
+def audit_field_problems(flag_file: dict, profiles: list[str]) -> list[str]:
+    flags = flag_file.get("flags", {})
+    problems = []
+    width = {flag: 2 if flag in ("sched_dispatch",) or not flag.startswith("sched_") else 3 for flag in flags}
+    for flag, entry in flags.items():
+        count = len(entry.get("values", {}))
+        if count > 1 << width[flag]:
+            problems.append(f"build-flags.toml: {flag} has {count} values, more than its {width[flag]}-bit "
+                            "audit field holds")
+    for what, count in (("profiles", len(profiles)), ("levels", len(flag_file.get("levels", {})))):
+        if count > 16:
+            problems.append(f"{what}: {count}, more than the audit record's four bits hold")
+    first = sum(width[f] for f in flags if not f.startswith("sched_"))
+    second = 8 + sum(width[f] for f in flags if f.startswith("sched_"))
+    for which, bits in (("first", first), ("second", second)):
+        if bits > 32:
+            problems.append(f"the audit record's {which} word needs {bits} bits, more than 32")
+    return problems
+
+
 # Rule 6e (docs/KERNEL-CRATES.md section 6; ledger 3558 (11), 3623 (R3)): a
 # removable crate's flag selects code in the composition root alone. Besides
 # main.rs, only the flag lists that name every declared value by rule 6 may
-# name it: build_flags.rs's table and kernel_core.rs's flag word.
+# name it: build_flags.rs's table and sched_select.rs's flag word.
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
 COMPOSITION_ROOT = "src/kernel/src/main.rs"
 
@@ -665,10 +719,17 @@ def self_test() -> list[str]:
     ])
     if len(found) != 1 or "sched/x.rs" not in found[0]:
         failures.append(f"the scheduler-flag rule missed a planted read or refused the arms file or another flag: {found}")
+    arms_modes = mode_map(
+        "pub const fn mode_available(mode: SchedMode) -> bool {\n    match mode {\n"
+        "        SchedMode::Throughput => FAIR.present,\n"
+        "        SchedMode::SoftRt => REALTIME.present && FAIR.present,\n"
+        "        SchedMode::HardRt => DEADLINE.present || WINDOWS.present,\n    }\n}\n")
+    if set(arms_modes) != {"Throughput", "SoftRt", "HardRt"} or arms_modes["SoftRt"][1] != {"sched_realtime", "sched_fair"}:
+        failures.append(f"mode_available's match was misread: {arms_modes}")
     good_modes = {"p": {"level": "present", "modes": ["Throughput"],
                         "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf", "sched_windows": "absent"}}}
-    if mode_problems(good_modes):
-        failures.append(f"a profile whose modes match its tiers was refused: {mode_problems(good_modes)}")
+    if mode_problems(good_modes, arms_modes):
+        failures.append(f"a profile whose modes match its tiers was refused: {mode_problems(good_modes, arms_modes)}")
     for what, profile, expect in [
         ("a mode whose tiers are absent", {"level": "none", "modes": ["Throughput", "HardRt"],
                                            "flags": {"sched_dispatch": "fixed", "sched_fair": "eevdf"}}, "tiers are absent"),
@@ -677,9 +738,25 @@ def self_test() -> list[str]:
                                                    "sched_windows": "arinc"}}, "leaves HardRt"),
         ("a claimed profile that is switchable", {"level": "sc2", "modes": ["Throughput"],
                                                   "flags": {"sched_dispatch": "switchable", "sched_fair": "eevdf"}}, "S10"),
+        ("a tier no allowed mode uses", {"level": "none", "modes": [],
+                                         "flags": {"sched_dispatch": "fixed", "sched_realtime": "fifo_rr",
+                                                   "sched_fair": "absent"}}, "no mode it allows uses"),
+        ("an empty modes list", {"level": "none", "modes": [],
+                                 "flags": {"sched_dispatch": "fixed", "sched_fair": "absent"}}, "is empty"),
     ]:
-        if not any(expect in p for p in mode_problems({"p": profile})):
+        if not any(expect in p for p in mode_problems({"p": profile}, arms_modes)):
             failures.append(f"the modes rule passed {what}")
+    fields = {"levels": {"none": {}}, "flags": {"a": {"values": {str(n): {} for n in range(4)}},
+                                                "sched_fair": {"values": {str(n): {} for n in range(8)}}}}
+    if audit_field_problems(fields, ["p"]):
+        failures.append(f"flags that fit their audit fields were refused: {audit_field_problems(fields, ['p'])}")
+    fields["flags"]["a"]["values"]["4"] = {}
+    fields["flags"]["sched_fair"]["values"]["8"] = {}
+    if len(audit_field_problems(fields, ["p"])) != 2:
+        failures.append("a two-bit flag with five values or a tier with nine passed the audit-field rule")
+    wide = {"levels": {}, "flags": {f"f{n}": {"values": {"a": {}, "b": {}}} for n in range(17)}}
+    if not any("first word" in p for p in audit_field_problems(wide, [])):
+        failures.append("seventeen two-bit flags passed the audit word's 32 bits")
     keys = {"image_keys": {"w": {"values": {"absent": {"allows": ["sc4", "none"]},
                                             "present": {"allows": ["none"], "requires": ["rs=live"]}}}}}
     good = {"p": {"level": "none", "flags": {"rs": "live"}, "image": {"w": "present"}}}
@@ -746,7 +823,9 @@ def main() -> int:
     for path in sorted((ROOT / "tools/common/data/profiles").glob("*.toml")):
         with path.open("rb") as handle:
             profile_files[path.stem] = tomllib.load(handle)
-    images = image_key_problems(flag_file, profile_files) + mode_problems(profile_files)
+    images = image_key_problems(flag_file, profile_files)
+    images += mode_problems(profile_files, mode_map((ROOT / ARMS).read_text(encoding="utf-8")))
+    images += audit_field_problems(flag_file, profiles)
     if images:
         print("build-flags: the profiles' image keys, modes or dispatch do not follow the rules:", file=sys.stderr)
         for problem in images:
