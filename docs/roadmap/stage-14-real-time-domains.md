@@ -11,8 +11,28 @@ unschedulable set instead of missing deadlines.
 
 **Research (2026-10-26):** [docs/REALTIME.md](../REALTIME.md) surveys what
 Linux, seL4 MCS, QNX, Zircon and the ARINC 653 systems do, what Ferrix has
-today, and proposes the stage's design and an order of landings. Nothing is
-built yet.
+today, and proposes the stage's design and an order of landings.
+
+**Built so far (2026-10-27, on `claude/ferrix-roadmap-completion-hkxlpp`,
+landing owed):** the groundwork every real-time class sits on,
+[docs/SCHED-CLASSES.md](../SCHED-CLASSES.md), each step reviewed by the
+certification consultant:
+
+* `ferrix-sched-class`, the compile-time `SchedClass` trait every
+  scheduler implements, and the class stack (`Over`, `Empty`);
+* `ferrix-sched-fair`, EEVDF moved behind that trait, with the core's
+  queue, run slot and hand-over going through it, at no cost to the IPC
+  fast path (its size unchanged in the release ELF);
+* the per-tier build flags (`sched_dispatch`, `sched_windows`,
+  `sched_deadline`, `sched_realtime`, `sched_fair`) replacing `schedule`,
+  the selection crate that composes the stack from them, the profiles'
+  `modes`, and the boot line naming the stack;
+* the evidence that a class crate a build leaves out is not linked
+  (test-removable's class-crate half and a fixture crate).
+
+`max` has no fair tier, the customer's decision (2026-10-27). Not built
+yet: the FIFO/RR, EDF/CBS and windows classes, threaded interrupts,
+priority inheritance, the mode switch and the exit tests above.
 
 ---
 
