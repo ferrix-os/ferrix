@@ -305,7 +305,7 @@ impl CpuQueue {
         if delta == 0 {
             return None;
         }
-        if let Some(task) = self.fair.current() {
+        if let Some(task) = Stack::current(&self.fair) {
             self.stats.busy_ns += delta;
             // Its job's `cpu.stat`, and its `cpu.max` (`object::quota`).
             crate::object::quota::charge_cpu(&mut self.pending, task.group(), now, delta, user);
@@ -313,7 +313,7 @@ impl CpuQueue {
             self.stats.idle_ns += delta;
         }
         let remaining = Stack::remaining_ns(&self.fair)?;
-        if let Some(task) = self.fair.current() {
+        if let Some(task) = Stack::current(&self.fair) {
             task.add_runtime(delta);
         }
         if Stack::charge(&mut self.fair, delta) {
@@ -337,7 +337,7 @@ impl CpuQueue {
     /// [`CpuQueue::account_with`]'s. Answers the base weight and the weight
     /// the share gave, kept or not.
     fn follow_group_share(&mut self, extra: Option<(u32, i64)>) -> Option<(u32, u32)> {
-        let task = self.fair.current()?;
+        let task = Stack::current(&self.fair)?;
         if task.group() == crate::object::quota::NONE {
             return None;
         }
@@ -365,7 +365,7 @@ impl CpuQueue {
             return (self.stats.busy_ns, self.stats.idle_ns);
         }
         let since = now.saturating_sub(self.exec_start);
-        if self.fair.current().is_some() {
+        if Stack::current(&self.fair).is_some() {
             (self.stats.busy_ns.saturating_add(since), self.stats.idle_ns)
         } else {
             (self.stats.busy_ns, self.stats.idle_ns.saturating_add(since))
@@ -538,7 +538,7 @@ impl CpuQueue {
 
     /// Whether this CPU has anything to run besides its idle task.
     pub(crate) fn has_work(&self) -> bool {
-        !self.fair.is_empty()
+        Stack::len(&self.fair) != 0
     }
 
     /// Fold the time since the last call into the load average.
@@ -662,7 +662,7 @@ impl CpuQueue {
     /// one is looked at. Scaling the slice makes the wait the target latency
     /// instead, until the floor stops it.
     fn rescale_slice(&mut self) {
-        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len());
+        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, Stack::len(&self.fair));
         // The only refusal is a slice of zero, and `slice_for` floors at
         // `MIN_SLICE_NS`, which is not zero.
         let _ = self.fair.set_slice_ns(slice);
@@ -810,13 +810,13 @@ impl CpuQueue {
 
     /// Tasks on this queue, the running one included.
     pub(crate) fn len(&self) -> usize {
-        self.fair.len()
+        Stack::len(&self.fair)
     }
 
     /// Check the fair class's own bookkeeping.
     pub(crate) fn check_invariants(&self) -> Result<(), &'static str> {
         Stack::check(&self.fair)?;
-        let running_is_current = match (self.fair.current(), self.current.as_ref()) {
+        let running_is_current = match (Stack::current(&self.fair), self.current.as_ref()) {
             (Some(fair), Some(current)) => Arc::ptr_eq(fair, current),
             // Nothing in the fair class: the idle task is what runs.
             (None, Some(current)) => self
