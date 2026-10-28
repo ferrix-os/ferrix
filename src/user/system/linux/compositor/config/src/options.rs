@@ -298,6 +298,10 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     // hyprix's own: the colour laid behind a layer surface whose rule asks
     // for a blur, on a screen that draws none; -1 (unset) lays nothing.
     ("hyprix:blur_scrim", Int(-1)),
+    // hyprix's own (docs/GPU-COMPOSITOR.md): off, auto or on -- whether a
+    // screen with no virgl GPU is drawn by hyprix-gpu on the machine's
+    // Vulkan driver. Off until it is proven on the N150.
+    ("hyprix:gpu", Str("off")),
     // hyprix's own (docs/DESKTOP.md §2.2), not Hyprland's: a floating
     // window that draws its own frame -- client-side decorations, a window
     // geometry inside its buffer -- is drawn with no border, shadow or
