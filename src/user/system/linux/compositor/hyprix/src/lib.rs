@@ -35,6 +35,8 @@ pub mod dragging;
 #[cfg(target_os = "linux")]
 mod flush;
 pub mod frame;
+pub mod gpu_canvas;
+pub mod helper;
 pub mod front;
 pub mod grants;
 pub mod keymap;

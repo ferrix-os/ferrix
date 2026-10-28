@@ -607,6 +607,7 @@ dependencies = [
  "compositor-ctl",
  "compositor-drm",
  "compositor-evecho",
+ "compositor-gpu-protocol",
  "compositor-ipc",
  "compositor-layout",
  "compositor-lock",

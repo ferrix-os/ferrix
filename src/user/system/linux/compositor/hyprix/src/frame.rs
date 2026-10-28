@@ -101,9 +101,9 @@ pub struct Output<'a> {
 #[derive(Debug)]
 pub struct Gpu {
     /// The canvas the frame is composed on.
-    pub canvas: compositor_render::gpu::Canvas<Box<dyn compositor_virgl::Device>>,
+    pub canvas: crate::gpu_canvas::GpuCanvas,
     /// What is behind the windows, and the blur of it.
-    pub backdrop: compositor_render::gpu::Backdrop,
+    pub backdrop: crate::gpu_canvas::GpuBackdrop,
     /// Which kind of device it is, with what it said of the buffers it
     /// imports: how clients' dmabufs are taken in (`crate::dmabuf`).
     pub drawn: crate::dmabuf::Drawn,
