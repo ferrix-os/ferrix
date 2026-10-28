@@ -16,9 +16,7 @@
 //! And its textures are made by the canvas that first keeps it, since a
 //! backdrop has no device of its own.
 
-use compositor_virgl::Device;
-
-use super::{BLEND_REPLACE, Canvas, Image, SAMPLER_NEAREST};
+use super::{Backend, Blend, Filter, Image, Renderer};
 use crate::backdrop::{TILE, gathered};
 use crate::damage::intersect;
 use crate::{Blur, Damage, Painter, Rect, Rounding};
@@ -113,7 +111,7 @@ impl Backdrop {
     }
 }
 
-impl<D: Device> Canvas<D> {
+impl<B: Backend> Renderer<B> {
     /// The backdrop's two textures, made the first time it is kept.
     fn backdrop_images(&mut self, backdrop: &mut Backdrop) -> Option<(Image, Image)> {
         if let Some(images) = backdrop.images {
@@ -149,16 +147,16 @@ impl<D: Device> Canvas<D> {
         let Some((sharp, _)) = self.backdrop_images(backdrop) else {
             return;
         };
-        let (view, resource) = (self.target.opaque_view, self.target.resource);
+        let target = self.target;
         self.aim(sharp);
         self.textured(
-            view,
-            resource,
-            SAMPLER_NEAREST,
+            target,
+            true,
+            Filter::Nearest,
             bounds,
             (bounds, Rounding::none()),
             1.0,
-            BLEND_REPLACE,
+            Blend::Replace,
             &quads,
         );
         // A changed pixel shows in the blur as far away as the kernel

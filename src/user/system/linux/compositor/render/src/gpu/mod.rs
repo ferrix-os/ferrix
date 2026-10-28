@@ -42,81 +42,208 @@
 //! # Failure
 //!
 //! The trait's operations answer nothing, so a device that fails is
-//! remembered: everything after it is skipped, and [`Canvas::finish`] says
+//! remembered: everything after it is skipped, and [`Renderer::finish`] says
 //! what went wrong. The compositor's answer to that is the software
 //! renderer.
+//!
+//! # Backends
+//!
+//! What a frame is made of -- each operation's quads, its shader and that
+//! shader's constants, what is read and what is drawn into -- is
+//! [`Renderer`]'s, whatever runs it. How that reaches a GPU is a
+//! [`Backend`]'s: [`Virgl`] writes virgl streams, and the Vulkan helper
+//! (`src/user/system/linux/hyprix-gpu`, `docs/GPU-COMPOSITOR.md`) records
+//! command buffers. Both draw the same quads with the same shaders, the
+//! GLSL under `src/user/system/linux/compositor/virgl/shaders`, so a frame
+//! is judged against the software one the same way on either.
 
 mod backdrop;
 mod blur;
 #[cfg(test)]
 mod tests;
+mod virgl;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
+use std::os::fd::{BorrowedFd, OwnedFd};
 
-use compositor_virgl::{
-    Blend, Device, Rasterizer, Region, Sampler, Stream, Texture, VertexBuffer, VertexElement, View,
-    pipe, shaders,
-};
+pub use compositor_virgl::{Device, Layout, Region};
 
 pub use self::backdrop::Backdrop;
+pub use self::virgl::Virgl;
 use crate::damage::intersect;
 use crate::{Blur, Color, Damage, Format, Gradient, Painter, Rect, Rounding, Shadow, Surface};
 
-// State objects, which this context numbers. Fixed ones first; everything
-// made as the frame needs it counts up from `FIRST_MADE`.
-const BLEND_OVER: u32 = 1;
-const BLEND_REPLACE: u32 = 2;
-const DSA: u32 = 3;
-const RASTERIZER: u32 = 4;
-const ELEMENTS: u32 = 5;
-const VERTEX: u32 = 6;
-const SAMPLER_NEAREST: u32 = 7;
-const SAMPLER_LINEAR: u32 = 8;
-const FIRST_MADE: u32 = 100;
-
-/// A fragment shader, by the handle it is made under.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-enum Program {
-    Solid = 10,
-    Surface = 11,
-    Gradient = 12,
-    Shadow = 13,
-    BlurPrepare = 14,
-    BlurDown = 15,
-    BlurUp = 16,
-    BlurFinish = 17,
+/// A fragment shader: one of the GLSL files under
+/// `src/user/system/linux/compositor/virgl/shaders`, with the one vertex
+/// shader `quad.vert` in front of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Program {
+    /// `solid.frag`: a colour in a rounded rectangle.
+    Solid,
+    /// `surface.frag`: a texture times an opacity in a rounded rectangle.
+    Surface,
+    /// `gradient.frag`: a border's ramp.
+    Gradient,
+    /// `shadow.frag`: a drop shadow's falloff.
+    Shadow,
+    /// `blur_prepare.frag`.
+    BlurPrepare,
+    /// `blur_down.frag`.
+    BlurDown,
+    /// `blur_up.frag`.
+    BlurUp,
+    /// `blur_finish.frag`.
+    BlurFinish,
 }
 
 impl Program {
-    const ALL: [(Self, &'static str); 8] = [
-        (Self::Solid, shaders::SOLID),
-        (Self::Surface, shaders::SURFACE),
-        (Self::Gradient, shaders::GRADIENT),
-        (Self::Shadow, shaders::SHADOW),
-        (Self::BlurPrepare, shaders::BLUR_PREPARE),
-        (Self::BlurDown, shaders::BLUR_DOWN),
-        (Self::BlurUp, shaders::BLUR_UP),
-        (Self::BlurFinish, shaders::BLUR_FINISH),
+    /// Every program, in the order of their files' names above.
+    pub const ALL: [Self; 8] = [
+        Self::Solid,
+        Self::Surface,
+        Self::Gradient,
+        Self::Shadow,
+        Self::BlurPrepare,
+        Self::BlurDown,
+        Self::BlurUp,
+        Self::BlurFinish,
     ];
+
+    /// How many of the four-float constants (`u[]`) it reads.
+    #[must_use]
+    pub const fn constants(self) -> usize {
+        match self {
+            Self::BlurPrepare | Self::BlurUp => 1,
+            Self::BlurDown => 2,
+            Self::Solid | Self::Surface | Self::Shadow | Self::BlurFinish => 3,
+            Self::Gradient => 4,
+        }
+    }
+
+    /// Whether it reads a texture.
+    #[must_use]
+    pub const fn samples(self) -> bool {
+        !matches!(self, Self::Solid | Self::Shadow)
+    }
 }
 
-/// How many bytes the vertex buffer is. Vertices are written into it in
-/// turn and it is begun again when it is full: a draw reads what was written
-/// before it in the stream, whatever is written after.
-const VERTEX_BYTES: u32 = 256 * 1024;
+/// How a draw's colour is mixed with what is there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Blend {
+    /// Premultiplied source-over.
+    Over,
+    /// The draw's colour, alpha and all, in place of what is there.
+    Replace,
+}
 
-/// Bytes of one vertex: a place and a texture coordinate, two floats each.
-const VERTEX_STRIDE: u32 = 16;
+/// How a texture is read between its pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Filter {
+    /// The nearest pixel.
+    Nearest,
+    /// Bilinear, clamped to the edge.
+    Linear,
+}
 
-/// The most quads one draw carries, which keeps a draw's vertices well
-/// inside one command and one command well inside one submission.
-const QUADS_A_DRAW: usize = 128;
+/// What a texture is made for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Use {
+    /// Pixels are moved into it, or read back from it, by the processor.
+    pub moved: bool,
+    /// It is drawn into.
+    pub drawn: bool,
+    /// A screen may be shown it.
+    pub scanout: bool,
+}
 
-/// How full a stream gets before it is submitted, in bytes: under the render
-/// node's 64 KiB with room for the longest single operation.
-const FLUSH_BYTES: usize = 32 * 1024;
+/// What runs a [`Renderer`]'s draws on a GPU.
+///
+/// Textures are named by the numbers this answers. Every texture holds four
+/// bytes a pixel, blue first, premultiplied; a draw's vertices are in pixels
+/// of the texture aimed at, `(x, y, u, v)`, three a triangle, and its
+/// constants are the program's `u[]`, four floats each. The operations
+/// that answer nothing remember a failure for [`Backend::flush`].
+pub trait Backend: core::fmt::Debug {
+    /// Make a `width` × `height` texture for `usage`.
+    ///
+    /// # Errors
+    ///
+    /// The device's.
+    fn image(&mut self, width: u32, height: u32, usage: Use) -> io::Result<u32>;
+
+    /// Import a client's dmabuf to sample where it lies, or `None` when
+    /// this backend imports none.
+    ///
+    /// # Errors
+    ///
+    /// The device refused this one.
+    fn import(&mut self, fd: BorrowedFd<'_>, layout: &Layout) -> io::Result<Option<u32>>;
+
+    /// Move pixels into `region` of a texture made to be moved; `data`
+    /// begins at the region's first pixel, rows `stride` bytes apart. Draws
+    /// asked for before this read what was there before it.
+    ///
+    /// # Errors
+    ///
+    /// The device's.
+    fn upload(&mut self, image: u32, region: Region, stride: u32, data: &[u8]) -> io::Result<()>;
+
+    /// Let a texture go.
+    ///
+    /// # Errors
+    ///
+    /// The device's.
+    fn release(&mut self, image: u32) -> io::Result<()>;
+
+    /// Draw into `image`, `width` × `height`, from here on.
+    fn aim(&mut self, image: u32, width: u32, height: u32);
+
+    /// Draw with `program` and its `constants`, mixed as `blend`.
+    fn program(&mut self, program: Program, blend: Blend, constants: &[f32]);
+
+    /// Read `image` through `filter` from here on, its alpha as one when
+    /// `opaque`.
+    fn sample(&mut self, image: u32, opaque: bool, filter: Filter);
+
+    /// Draw triangles with whatever is bound.
+    fn draw(&mut self, vertices: &[[f32; 4]]);
+
+    /// Run what has been asked for, and say whether all of it could be.
+    ///
+    /// # Errors
+    ///
+    /// The first thing the device refused since the last call.
+    fn flush(&mut self) -> io::Result<()>;
+
+    /// Read `region` of a texture back: four bytes a pixel, rows packed,
+    /// after everything drawn so far.
+    ///
+    /// # Errors
+    ///
+    /// The device's.
+    fn read(&mut self, image: u32, region: Region) -> io::Result<Vec<u8>>;
+
+    /// [`Backend::read`] into `into`, rows `stride` bytes apart.
+    ///
+    /// # Errors
+    ///
+    /// The device's; an `into` too short.
+    fn read_into(
+        &mut self,
+        image: u32,
+        region: Region,
+        into: &mut [u8],
+        stride: usize,
+    ) -> io::Result<()>;
+
+    /// A descriptor for `image` that a card can be shown, if there is one.
+    ///
+    /// # Errors
+    ///
+    /// The device's.
+    fn export(&mut self, image: u32) -> io::Result<Option<OwnedFd>>;
+}
 
 /// Frames a surface's texture is kept for without being drawn, before it is
 /// handed to the next surface of its size.
@@ -135,18 +262,15 @@ const MAX_SPARE: usize = 8;
 /// let go of and the device asked again.
 const REFUSED_MOST: usize = 256;
 
-/// A texture with the two ways of using it: drawn into, and read from.
-#[derive(Clone, Copy, Debug)]
-struct Image {
-    resource: u32,
-    /// The surface object it is drawn into through.
-    surface: u32,
-    /// The sampler view it is read through, alpha and all.
-    view: u32,
-    /// The same, reading alpha as one.
-    opaque_view: u32,
-    width: u32,
-    height: u32,
+/// A texture, by the number its backend names it, and its size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Image {
+    /// The backend's number for it.
+    pub id: u32,
+    /// Its width in pixels.
+    pub width: u32,
+    /// Its height in pixels.
+    pub height: u32,
 }
 
 /// A surface's texture, and when it was last drawn.
@@ -156,10 +280,10 @@ struct Kept {
     used: u64,
 }
 
-/// A frame drawn on a GPU, the size of the output.
+/// A frame drawn on a GPU, the size of the output, through `B`.
 #[derive(Debug)]
-pub struct Canvas<D: Device> {
-    device: D,
+pub struct Renderer<B: Backend> {
+    backend: B,
     width: u32,
     height: u32,
     /// What the frame is drawn into, and what a window's blur is read from.
@@ -168,15 +292,6 @@ pub struct Canvas<D: Device> {
     /// blur waits to be copied into a window's shape.
     levels: Vec<Image>,
     blurred: Option<Image>,
-    stream: Stream,
-    vertices: u32,
-    vertex_at: u32,
-    next_handle: u32,
-    /// What is bound, so that nothing is bound twice.
-    bound_target: Option<u32>,
-    bound_program: Option<Program>,
-    bound_blend: Option<u32>,
-    bound_view: Option<(u32, u32)>,
     surfaces: BTreeMap<u64, Kept>,
     /// Clients' GPU buffers this canvas imported, by the key their surface
     /// gave (`Surface::on_device`). Never handed to another surface: the
@@ -188,17 +303,13 @@ pub struct Canvas<D: Device> {
     refused: BTreeSet<u64>,
     spare: Vec<Image>,
     ramps: Vec<(Gradient, Image)>,
-    /// The resources the draws written since the last submission read from.
-    ///
-    /// Moving pixels into a texture is not part of the command stream: it
-    /// happens when it is asked for, while what is in the stream happens
-    /// when the stream is submitted. So a draw that is written but not yet
-    /// submitted would read pixels that arrived after it -- but only if it
-    /// reads *that* texture, and this is how that is known.
-    sampled: Vec<u32>,
     frame: u64,
     failed: Option<io::Error>,
 }
+
+/// The frame drawn through a virgl context: what a render node or the test
+/// server runs.
+pub type Canvas<D> = Renderer<Virgl<D>>;
 
 /// `value` as a float: a position on a screen, exact in `f32`.
 #[expect(
@@ -212,6 +323,16 @@ const fn float(value: i64) -> f32 {
 /// `value`, known to be inside a canvas, as a texture's coordinate.
 fn unsigned(value: i64) -> u32 {
     u32::try_from(value.max(0)).unwrap_or(0)
+}
+
+/// `rect`, known to be inside a texture, as a region of it.
+fn region(rect: Rect) -> Region {
+    Region {
+        x: unsigned(rect.x),
+        y: unsigned(rect.y),
+        width: unsigned(rect.width),
+        height: unsigned(rect.height),
+    }
 }
 
 /// A rectangle as a shader takes one: x, y, width, height.
@@ -243,53 +364,63 @@ fn rounding_floats(rounding: Rounding) -> [f32; 2] {
     ]
 }
 
-impl<D: Device> Canvas<D> {
+impl<D: Device> Renderer<Virgl<D>> {
     /// An opaque black `width` × `height` frame on `device`.
     ///
     /// # Errors
     ///
     /// The device's, for the textures and the state every frame uses.
     pub fn new(device: D, width: u32, height: u32) -> io::Result<Self> {
+        Self::with_backend(Virgl::new(device)?, width, height)
+    }
+
+    /// The device, for whoever shows the frame.
+    pub const fn device(&mut self) -> &mut D {
+        self.backend.device()
+    }
+}
+
+impl<B: Backend> Renderer<B> {
+    /// An opaque black `width` × `height` frame drawn through `backend`.
+    ///
+    /// # Errors
+    ///
+    /// The backend's, for the frame's own texture.
+    pub fn with_backend(backend: B, width: u32, height: u32) -> io::Result<Self> {
         if width == 0 || height == 0 || width > crate::MAX_SIZE || height > crate::MAX_SIZE {
             return Err(io::Error::other("a canvas of no size, or too large"));
         }
         let mut canvas = Self {
-            device,
+            backend,
             width,
             height,
             target: Image {
-                resource: 0,
-                surface: 0,
-                view: 0,
-                opaque_view: 0,
+                id: 0,
                 width,
                 height,
             },
             levels: Vec::new(),
             blurred: None,
-            stream: Stream::new(),
-            vertices: 0,
-            vertex_at: 0,
-            next_handle: FIRST_MADE,
-            bound_target: None,
-            bound_program: None,
-            bound_blend: None,
-            bound_view: None,
             surfaces: BTreeMap::new(),
             imports: BTreeMap::new(),
             refused: BTreeSet::new(),
             spare: Vec::new(),
             ramps: Vec::new(),
-            sampled: Vec::new(),
             frame: 0,
             failed: None,
         };
-        canvas.vertices = canvas.device.buffer(VERTEX_BYTES)?;
-        canvas.begin();
         // The frame's own texture is one a screen may be pointed at, so that
         // a card with a screen beside this renderer can show what was drawn
         // rather than being handed a copy of it.
-        canvas.target = canvas.made(width, height, true, true, true)?;
+        canvas.target = canvas.made(
+            width,
+            height,
+            Use {
+                moved: true,
+                drawn: true,
+                scanout: true,
+            },
+        )?;
         let whole = Damage::full(width, height);
         Painter::clear(&mut canvas, Color(0xff00_0000), &whole);
         canvas.finish()?;
@@ -308,31 +439,75 @@ impl<D: Device> Canvas<D> {
         self.height
     }
 
-    /// The texture the frame is drawn into, by the number a stream -- or a
-    /// scanout -- names it by.
+    /// The texture the frame is drawn into, by the number its backend -- or
+    /// a scanout -- names it by.
     #[must_use]
     pub const fn resource(&self) -> u32 {
-        self.target.resource
+        self.target.id
     }
 
-    /// The device, for whoever shows the frame.
-    pub const fn device(&mut self) -> &mut D {
-        &mut self.device
+    /// The backend.
+    pub const fn backend(&mut self) -> &mut B {
+        &mut self.backend
+    }
+
+    /// Draw a texture the caller made through [`Renderer::backend`] --
+    /// one moved into by the caller -- as a surface would be drawn:
+    /// stretched over `rect`, corners cut, at `opacity`. Its alpha is read
+    /// as one when `opaque` (an XRGB8888 buffer's).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a surface's draw is its texture, its place, its shape and how it is mixed"
+    )]
+    pub fn composite_image(
+        &mut self,
+        image: Image,
+        opaque: bool,
+        rect: Rect,
+        rounding: Rounding,
+        opacity: f32,
+        nearest: bool,
+        damage: &Damage,
+    ) {
+        let opacity = opacity.clamp(0.0, 1.0);
+        if self.failed.is_some() || opacity == 0.0 || rect.width <= 0 || rect.height <= 0 {
+            return;
+        }
+        let quads = Self::clips(rect, damage, Painter::bounds(self));
+        if quads.is_empty() {
+            return;
+        }
+        let filter = if nearest {
+            Filter::Nearest
+        } else {
+            Filter::Linear
+        };
+        self.aim(self.target);
+        self.textured(
+            image,
+            opaque,
+            filter,
+            rect,
+            (rect, rounding),
+            opacity,
+            Blend::Over,
+            &quads,
+        );
     }
 
     /// A descriptor for the frame's own texture that a card can be shown, if
     /// this device has one.
     ///
     /// A screen pointed at it shows what was drawn without the pixels
-    /// leaving the device, which is what [`Canvas::read`] otherwise costs
+    /// leaving the device, which is what [`Renderer::read`] otherwise costs
     /// every frame.
     ///
     /// # Errors
     ///
     /// The device's.
-    pub fn export(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
-        let resource = self.target.resource;
-        self.device.export(resource)
+    pub fn export(&mut self) -> io::Result<Option<OwnedFd>> {
+        let id = self.target.id;
+        self.backend.export(id)
     }
 
     /// Submit what has been drawn, and say whether all of it could be.
@@ -357,7 +532,7 @@ impl<D: Device> Canvas<D> {
     ///
     /// # Errors
     ///
-    /// The device's, or [`Canvas::finish`]'s.
+    /// The device's, or [`Renderer::finish`]'s.
     pub fn read(&mut self, rect: Rect) -> io::Result<Vec<u8>> {
         self.flush();
         if let Some(error) = self.failed.take() {
@@ -366,25 +541,17 @@ impl<D: Device> Canvas<D> {
         let Some(rect) = intersect(rect, Painter::bounds(self)) else {
             return Ok(Vec::new());
         };
-        self.device.read(
-            self.target.resource,
-            Region {
-                x: unsigned(rect.x),
-                y: unsigned(rect.y),
-                width: unsigned(rect.width),
-                height: unsigned(rect.height),
-            },
-        )
+        self.backend.read(self.target.id, region(rect))
     }
 
     /// Read `rect` of the frame straight into a screen's `buffer`, rows
-    /// `stride` bytes apart, at `rect`'s own place in it: [`Canvas::read`]
+    /// `stride` bytes apart, at `rect`'s own place in it: [`Renderer::read`]
     /// without the vector between, which a device with shared memory
     /// fills in one copy.
     ///
     /// # Errors
     ///
-    /// The device's, or [`Canvas::finish`]'s; a buffer too short.
+    /// The device's, or [`Renderer::finish`]'s; a buffer too short.
     pub fn read_into(&mut self, rect: Rect, buffer: &mut [u8], stride: u32) -> io::Result<()> {
         self.flush();
         if let Some(error) = self.failed.take() {
@@ -400,74 +567,8 @@ impl<D: Device> Canvas<D> {
         let into = buffer
             .get_mut(start..)
             .ok_or_else(|| io::Error::other("a rectangle outside the buffer"))?;
-        self.device.read_into(
-            self.target.resource,
-            Region {
-                x: unsigned(rect.x),
-                y: unsigned(rect.y),
-                width: unsigned(rect.width),
-                height: unsigned(rect.height),
-            },
-            into,
-            stride as usize,
-        )
-    }
-
-    /// The state every draw shares, made once.
-    fn begin(&mut self) {
-        let stream = &mut self.stream;
-        stream.create_blend(BLEND_OVER, Blend::PREMULTIPLIED_OVER);
-        stream.create_blend(BLEND_REPLACE, Blend::REPLACE);
-        stream.create_dsa(DSA);
-        stream.bind_object(pipe::object::DSA, DSA);
-        stream.create_rasterizer(RASTERIZER, Rasterizer { scissor: false });
-        stream.bind_object(pipe::object::RASTERIZER, RASTERIZER);
-        stream.create_vertex_elements(
-            ELEMENTS,
-            &[
-                VertexElement {
-                    offset: 0,
-                    buffer: 0,
-                    format: pipe::FORMAT_R32G32_FLOAT,
-                },
-                VertexElement {
-                    offset: 8,
-                    buffer: 0,
-                    format: pipe::FORMAT_R32G32_FLOAT,
-                },
-            ],
-        );
-        stream.bind_object(pipe::object::VERTEX_ELEMENTS, ELEMENTS);
-        let _ = stream.create_shader(
-            VERTEX,
-            pipe::SHADER_VERTEX,
-            shaders::VERTEX,
-            shaders::TOKENS,
-        );
-        stream.bind_shader(VERTEX, pipe::SHADER_VERTEX);
-        stream.create_sampler_state(
-            SAMPLER_NEAREST,
-            Sampler {
-                filter: pipe::TEX_FILTER_NEAREST,
-            },
-        );
-        stream.create_sampler_state(
-            SAMPLER_LINEAR,
-            Sampler {
-                filter: pipe::TEX_FILTER_LINEAR,
-            },
-        );
-        // The shaders in a submission each: the longest is a few kilobytes
-        // of text, and all of them at once is more than a submission holds.
-        for (program, text) in Program::ALL {
-            let _ = self.stream.create_shader(
-                program as u32,
-                pipe::SHADER_FRAGMENT,
-                text,
-                shaders::TOKENS,
-            );
-            self.flush();
-        }
+        self.backend
+            .read_into(self.target.id, region(rect), into, stride as usize)
     }
 
     /// Remember the first failure; everything after it is skipped.
@@ -477,152 +578,45 @@ impl<D: Device> Canvas<D> {
         }
     }
 
-    /// Submit the stream so far.
+    /// Run what has been asked for.
     fn flush(&mut self) {
-        if self.stream.is_empty() {
-            return;
-        }
-        if self.failed.is_none()
-            && let Err(error) = self.device.submit(self.stream.words())
-        {
+        if let Err(error) = self.backend.flush() {
             self.fail(error);
         }
-        self.stream.reset();
-        // Nothing is waiting to be submitted any more, so nothing waiting
-        // can read a texture written after it.
-        self.sampled.clear();
     }
 
-    /// Submit what is waiting if any of it reads `resource`, which pixels
-    /// are about to be moved into.
-    ///
-    /// The ordering [`Canvas::sampled`] describes. In a frame as this
-    /// compositor draws one each surface is brought up to date and then
-    /// drawn, so the texture being written is one nothing waiting reads and
-    /// this costs nothing -- which is the point, since a submission is a
-    /// round trip through the driver and the device.
-    fn flush_readers_of(&mut self, resource: u32) {
-        if self.sampled.contains(&resource) {
-            self.flush();
-        }
-    }
-
-    /// Submit if the stream is getting full. Between operations only: an
-    /// operation's state and its draw go in one submission.
-    fn room(&mut self) {
-        if self.stream.len_bytes() > FLUSH_BYTES {
-            self.flush();
-        }
-    }
-
-    /// A new state object's handle.
-    fn handle(&mut self) -> u32 {
-        let handle = self.next_handle;
-        self.next_handle = self.next_handle.wrapping_add(1).max(FIRST_MADE);
-        handle
-    }
-
-    /// Make a texture with its surface and its views. `moved` is whether
-    /// pixels go to or from it; `drawn` whether it is ever a target.
+    /// Make a texture.
     fn image(&mut self, width: u32, height: u32, moved: bool, drawn: bool) -> io::Result<Image> {
-        self.made(width, height, moved, drawn, false)
+        self.made(
+            width,
+            height,
+            Use {
+                moved,
+                drawn,
+                scanout: false,
+            },
+        )
     }
 
-    /// The same, saying whether a screen may be shown it.
-    fn made(
-        &mut self,
-        width: u32,
-        height: u32,
-        moved: bool,
-        drawn: bool,
-        scanout: bool,
-    ) -> io::Result<Image> {
-        let bind = if drawn {
-            pipe::BIND_RENDER_TARGET | pipe::BIND_SAMPLER_VIEW
-        } else {
-            pipe::BIND_SAMPLER_VIEW
-        };
-        let resource = self.device.texture(Texture {
-            width,
-            height,
-            format: pipe::FORMAT_B8G8R8A8_UNORM,
-            bind,
-            moved,
-            scanout,
-        })?;
-        let image = Image {
-            resource,
-            surface: if drawn { self.handle() } else { 0 },
-            view: self.handle(),
-            opaque_view: self.handle(),
-            width,
-            height,
-        };
-        if drawn {
-            self.stream
-                .create_surface(image.surface, resource, pipe::FORMAT_B8G8R8A8_UNORM);
-        }
-        for (handle, opaque) in [(image.view, false), (image.opaque_view, true)] {
-            self.stream.create_sampler_view(
-                handle,
-                View {
-                    resource,
-                    format: pipe::FORMAT_B8G8R8A8_UNORM,
-                    opaque,
-                },
-            );
-        }
-        Ok(image)
+    /// The same, for any use.
+    fn made(&mut self, width: u32, height: u32, usage: Use) -> io::Result<Image> {
+        let id = self.backend.image(width, height, usage)?;
+        Ok(Image { id, width, height })
     }
 
     /// Draw into `image` from here on.
     fn aim(&mut self, image: Image) {
-        if self.bound_target == Some(image.resource) {
-            return;
-        }
-        self.bound_target = Some(image.resource);
-        self.stream.set_framebuffer(image.surface);
-        self.stream.set_viewport(image.width, image.height);
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a texture's size, at most 16384, exact in f32"
-        )]
-        let (wide, tall) = (image.width as f32, image.height as f32);
-        self.stream
-            .set_constants(pipe::SHADER_VERTEX, &[2.0 / wide, 2.0 / tall, -1.0, -1.0]);
+        self.backend.aim(image.id, image.width, image.height);
     }
 
     /// Draw with `program`, its constants `constants`, mixed as `blend`.
-    fn program(&mut self, program: Program, blend: u32, constants: &[f32]) {
-        if self.bound_program != Some(program) {
-            self.bound_program = Some(program);
-            self.stream
-                .bind_shader(program as u32, pipe::SHADER_FRAGMENT);
-        }
-        if self.bound_blend != Some(blend) {
-            self.bound_blend = Some(blend);
-            self.stream.bind_object(pipe::object::BLEND, blend);
-        }
-        self.stream.set_constants(pipe::SHADER_FRAGMENT, constants);
+    fn program(&mut self, program: Program, blend: Blend, constants: &[f32]) {
+        self.backend.program(program, blend, constants);
     }
 
-    /// Read `view`, which is a view of `resource`, through `sampler` from
-    /// here on.
-    fn sample(&mut self, view: u32, resource: u32, sampler: u32) {
-        // Written down even when the view is bound already: what matters is
-        // that the draws waiting to be submitted read this resource, and a
-        // second draw through the same view is one more of them.
-        if !self.sampled.contains(&resource) {
-            self.sampled.push(resource);
-        }
-        if self.bound_view == Some((view, sampler)) {
-            return;
-        }
-        self.bound_view = Some((view, sampler));
-        self.stream
-            .set_sampler_views(pipe::SHADER_FRAGMENT, &[view]);
-        self.stream
-            .bind_sampler_states(pipe::SHADER_FRAGMENT, &[sampler]);
+    /// Read `image` through `filter` from here on.
+    fn sample(&mut self, image: Image, opaque: bool, filter: Filter) {
+        self.backend.sample(image.id, opaque, filter);
     }
 
     /// The parts of `rect` inside `damage` and inside `bounds`.
@@ -642,37 +636,18 @@ impl<D: Device> Canvas<D> {
     /// a surface's rectangle reads that part of the surface.
     fn draw(&mut self, quads: &[Rect], across: Rect) {
         let (wide, tall) = (float(across.width.max(1)), float(across.height.max(1)));
-        for chunk in quads.chunks(QUADS_A_DRAW) {
-            let mut data = Vec::with_capacity(chunk.len() * 6 * VERTEX_STRIDE as usize);
-            for quad in chunk {
-                let (x0, y0) = (float(quad.x), float(quad.y));
-                let (x1, y1) = (float(quad.right()), float(quad.bottom()));
-                // Two triangles, which is what a list of quads is drawn as.
-                for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y0), (x1, y1), (x0, y1)] {
-                    let u = (x - float(across.x)) / wide;
-                    let v = (y - float(across.y)) / tall;
-                    data.extend([x, y, u, v].into_iter().flat_map(f32::to_le_bytes));
-                }
+        let mut vertices = Vec::with_capacity(quads.len() * 6);
+        for quad in quads {
+            let (x0, y0) = (float(quad.x), float(quad.y));
+            let (x1, y1) = (float(quad.right()), float(quad.bottom()));
+            // Two triangles, which is what a list of quads is drawn as.
+            for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y0), (x1, y1), (x0, y1)] {
+                let u = (x - float(across.x)) / wide;
+                let v = (y - float(across.y)) / tall;
+                vertices.push([x, y, u, v]);
             }
-            let Ok(len) = u32::try_from(data.len()) else {
-                return;
-            };
-            if self.vertex_at.saturating_add(len) > VERTEX_BYTES {
-                self.vertex_at = 0;
-            }
-            let _ = self
-                .stream
-                .write_buffer(self.vertices, self.vertex_at, &data);
-            self.stream.set_vertex_buffers(&[VertexBuffer {
-                stride: VERTEX_STRIDE,
-                offset: self.vertex_at,
-                resource: self.vertices,
-            }]);
-            self.stream
-                .draw(pipe::PRIM_TRIANGLES, 0, len / VERTEX_STRIDE);
-            self.vertex_at = self.vertex_at.saturating_add(len);
-            self.room();
         }
+        self.backend.draw(&vertices);
     }
 
     /// A solid colour inside a rounded rectangle, over or instead of what
@@ -682,7 +657,7 @@ impl<D: Device> Canvas<D> {
         rect: Rect,
         rounding: Rounding,
         color: [f32; 4],
-        blend: u32,
+        blend: Blend,
         damage: &Damage,
     ) {
         if self.failed.is_some() {
@@ -712,18 +687,18 @@ impl<D: Device> Canvas<D> {
     )]
     fn textured(
         &mut self,
-        view: u32,
-        resource: u32,
-        sampler: u32,
+        image: Image,
+        opaque: bool,
+        filter: Filter,
         rect: Rect,
         shape: (Rect, Rounding),
         opacity: f32,
-        blend: u32,
+        blend: Blend,
         quads: &[Rect],
     ) {
         let [radius, power] = rounding_floats(shape.1);
         let [x, y, wide, tall] = rect_floats(shape.0);
-        self.sample(view, resource, sampler);
+        self.sample(image, opaque, filter);
         self.program(
             Program::Surface,
             blend,
@@ -797,21 +772,10 @@ impl<D: Device> Canvas<D> {
             let start = unsigned(moved.y) as usize * surface.stride() as usize
                 + unsigned(moved.x) as usize * 4;
             let data = surface.data().get(start..).unwrap_or(&[]);
-            // The pixels must be there before the draw that reads them, and
-            // a transfer is not part of the stream: anything waiting to be
-            // submitted that reads this texture goes first.
-            self.flush_readers_of(image.resource);
-            if let Err(error) = self.device.upload(
-                image.resource,
-                Region {
-                    x: unsigned(moved.x),
-                    y: unsigned(moved.y),
-                    width: unsigned(moved.width),
-                    height: unsigned(moved.height),
-                },
-                surface.stride(),
-                data,
-            ) {
+            if let Err(error) = self
+                .backend
+                .upload(image.id, region(moved), surface.stride(), data)
+            {
                 self.fail(error);
                 return None;
             }
@@ -841,17 +805,17 @@ impl<D: Device> Canvas<D> {
             return None;
         }
         if let Some(old) = self.imports.remove(&key) {
-            let _ = self.device.release(old.image.resource);
+            let _ = self.backend.release(old.image.id);
         }
-        let layout = compositor_virgl::Layout {
+        let layout = Layout {
             width: wide,
             height: tall,
             stride: surface.stride(),
             offset: on.offset,
             modifier: on.modifier,
         };
-        let resource = match self.device.import(fd, &layout) {
-            Ok(Some(resource)) => resource,
+        let id = match self.backend.import(fd, &layout) {
+            Ok(Some(id)) => id,
             Ok(None) => return None,
             Err(_) => {
                 // A key is a buffer's for its life and no other's after, so
@@ -865,23 +829,10 @@ impl<D: Device> Canvas<D> {
             }
         };
         let image = Image {
-            resource,
-            surface: 0,
-            view: self.handle(),
-            opaque_view: self.handle(),
+            id,
             width: wide,
             height: tall,
         };
-        for (handle, opaque) in [(image.view, false), (image.opaque_view, true)] {
-            self.stream.create_sampler_view(
-                handle,
-                View {
-                    resource,
-                    format: pipe::FORMAT_B8G8R8A8_UNORM,
-                    opaque,
-                },
-            );
-        }
         let _ = self.imports.insert(
             key,
             Kept {
@@ -918,7 +869,7 @@ impl<D: Device> Canvas<D> {
             .collect();
         for key in stale {
             if let Some(kept) = self.imports.remove(&key) {
-                let _ = self.device.release(kept.image.resource);
+                let _ = self.backend.release(kept.image.id);
             }
         }
         // The oldest first, which are the sizes longest out of use. A
@@ -926,7 +877,7 @@ impl<D: Device> Canvas<D> {
         // memory and nothing else, so the answer is dropped.
         while self.spare.len() > MAX_SPARE {
             let image = self.spare.remove(0);
-            let _ = self.device.release(image.resource);
+            let _ = self.backend.release(image.id);
         }
     }
 
@@ -958,11 +909,8 @@ impl<D: Device> Canvas<D> {
                 color.alpha(),
             ]);
         }
-        // A ramp is made the first time its gradient is drawn, so nothing
-        // waiting reads it; the rule is the same either way.
-        self.flush_readers_of(image.resource);
-        if let Err(error) = self.device.upload(
-            image.resource,
+        if let Err(error) = self.backend.upload(
+            image.id,
             Region {
                 x: 0,
                 y: 0,
@@ -1005,7 +953,7 @@ impl<D: Device> Canvas<D> {
             return;
         };
         self.aim(self.target);
-        self.sample(ramp.view, ramp.resource, SAMPLER_NEAREST);
+        self.sample(ramp, false, Filter::Nearest);
         let (sine, flip_x, flip_y) = gradient.axis().parts();
         let [radius, power] = rounding_floats(rounding);
         let [ax, ay, aw, ah] = rect_floats(across);
@@ -1017,7 +965,7 @@ impl<D: Device> Canvas<D> {
         let len = len as f32;
         self.program(
             Program::Gradient,
-            BLEND_OVER,
+            Blend::Over,
             &[
                 ax,
                 ay,
@@ -1041,7 +989,7 @@ impl<D: Device> Canvas<D> {
     }
 }
 
-impl<D: Device> Painter for Canvas<D> {
+impl<B: Backend> Painter for Renderer<B> {
     type Backdrop = Backdrop;
 
     fn bounds(&self) -> Rect {
@@ -1054,7 +1002,7 @@ impl<D: Device> Painter for Canvas<D> {
             Painter::bounds(self),
             Rounding::none(),
             premultiplied(opaque),
-            BLEND_REPLACE,
+            Blend::Replace,
             damage,
         );
     }
@@ -1067,7 +1015,7 @@ impl<D: Device> Painter for Canvas<D> {
         if color.alpha() == 0 {
             return;
         }
-        self.solid(rect, rounding, premultiplied(color), BLEND_OVER, damage);
+        self.solid(rect, rounding, premultiplied(color), Blend::Over, damage);
     }
 
     fn fill_rounded_gradient(
@@ -1142,7 +1090,7 @@ impl<D: Device> Painter for Canvas<D> {
         let power = shadow.power.clamp(1, 4) as f32;
         self.program(
             Program::Shadow,
-            BLEND_OVER,
+            Blend::Over,
             &[
                 color[0],
                 color[1],
@@ -1258,18 +1206,14 @@ fn spread(across: Rect, surface: &Surface<'_>, image: Image) -> Rect {
     )
 }
 
-impl<D: Device> Canvas<D> {
+impl<B: Backend> Renderer<B> {
     /// Whether this canvas's device takes `surface`'s GPU buffer
     /// ([`Surface::on_device`]) to sample where it lies: asked when a
     /// client hands a buffer over whose pixels cannot be read here, which
     /// is then either shown this way or not at all. The import is kept for
     /// the frames that follow.
     pub fn imports(&mut self, surface: &Surface<'_>) -> bool {
-        let imported = self.imported_image(surface).is_some();
-        // Its views are written outside any frame: submitted if many
-        // buffers arrive before the next one.
-        self.room();
-        imported
+        self.imported_image(surface).is_some()
     }
 
     /// Blend `surface`, stretched over `across`, inside `shape`.
@@ -1318,24 +1262,20 @@ impl<D: Device> Canvas<D> {
         };
         let across = spread(across, surface, image);
         self.aim(self.target);
-        let view = if surface.format() == Format::Xrgb8888 {
-            image.opaque_view
+        let opaque = surface.format() == Format::Xrgb8888;
+        let filter = if nearest {
+            Filter::Nearest
         } else {
-            image.view
-        };
-        let sampler = if nearest {
-            SAMPLER_NEAREST
-        } else {
-            SAMPLER_LINEAR
+            Filter::Linear
         };
         self.textured(
-            view,
-            image.resource,
-            sampler,
+            image,
+            opaque,
+            filter,
             across,
             shape,
             opacity,
-            BLEND_OVER,
+            Blend::Over,
             &quads,
         );
     }
