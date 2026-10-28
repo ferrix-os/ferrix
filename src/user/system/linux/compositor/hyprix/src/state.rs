@@ -3621,17 +3621,29 @@ fn as_input(what: compositor_server::Injected) -> Option<crate::seat::Input> {
 /// compositor's, which would be a second frame round the client's, and a
 /// maximized window with no border, shadow or rounding at all
 /// (`docs/DESKTOP.md` §2.2).
+///
+/// A maximized window -- snapped to its whole work area, Yoru's maximize
+/// button -- is drawn as Hyprland draws a fullscreen one: with no shadow,
+/// and at `decoration:fullscreen_opacity` (`maximized`) rather than the
+/// inactive opacity, unless a rule gave it an opacity of its own. Nothing
+/// of the desktop shows beside it to be seen through it, and on a screen
+/// drawn in software a see-through game window behind a focused dialog was
+/// most of every frame (the N150, 2026-10-28); opaque, it is a copy, and
+/// what is behind it is not drawn at all.
 fn drawn_with(
     styled: &BTreeMap<WindowId, compositor_render::WindowStyle>,
     slots: &[Slot],
     sources: &BTreeMap<WindowId, Source>,
     own_frames: Option<&State>,
+    maximized: (&State, f32),
 ) -> BTreeMap<WindowId, compositor_render::WindowStyle> {
     let mut out = styled.clone();
+    let (state, maximized_opacity) = maximized;
     for (&window, source) in sources {
         let Some(slot) = slots.get(source.client) else {
             continue;
         };
+        as_maximized(&mut out, window, state, maximized_opacity);
         // And a maximized one fills its work area edge to edge, with square
         // corners and nothing round it, whoever draws its frame.
         if own_frames
@@ -3664,6 +3676,24 @@ fn drawn_with(
         }
     }
     out
+}
+
+/// Draw `window` as [`drawn_with`] draws a maximized one, if it is one: no
+/// shadow, and at `opacity` unless a rule gave it its own.
+fn as_maximized(
+    styles: &mut BTreeMap<WindowId, compositor_render::WindowStyle>,
+    window: WindowId,
+    state: &State,
+    opacity: f32,
+) {
+    if state.snap_of(window) != Some(compositor_layout::Snap::Maximized) {
+        return;
+    }
+    let style = styles.entry(window).or_default();
+    style.shadow = false;
+    if style.opacity.is_none() {
+        style.opacity = Some(opacity);
+    }
 }
 
 /// Tell every surface that went into the frame that it was drawn.

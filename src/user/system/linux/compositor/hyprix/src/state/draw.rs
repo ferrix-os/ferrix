@@ -22,6 +22,19 @@ use super::{
 const BARE_GRACE: Duration = Duration::from_secs(3);
 
 impl Compositor<'_> {
+    /// `decoration:fullscreen_opacity`, what a maximized window is drawn at.
+    fn maximized_opacity(&self) -> f32 {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a share between zero and one; `f32` holds it"
+        )]
+        let value = self
+            .config
+            .float("decoration:fullscreen_opacity")
+            .unwrap_or(1.0) as f32;
+        value.clamp(0.0, 1.0)
+    }
+
     /// Draw a frame if one is owed and the screens can take it. `changed`
     /// gains whatever moving the pointer's planes changed. Gives whether
     /// an animation is running, which the wait has to know.
@@ -176,6 +189,7 @@ impl Compositor<'_> {
             &self.slots,
             &self.sources,
             own_frames.then_some(&self.state),
+            (&self.state, self.maximized_opacity()),
         );
         // Where a window dragged to a monitor's edge would snap.
         crate::act::with_preview(

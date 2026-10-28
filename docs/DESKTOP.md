@@ -300,7 +300,10 @@ Hyprland's `fullscreen 1`.
   left or right edge half-tiles; while it is there a translucent preview of
   the rectangle it will take is drawn (GNOME's tile preview). Dragging a
   snapped or maximized window away restores its old size under the pointer,
-  at the same relative place across its width.
+  at the same relative place across its width. A maximized window is drawn
+  as Hyprland draws a fullscreen one: no shadow, and at
+  `decoration:fullscreen_opacity` rather than see-through when it loses the
+  focus (a rule's opacity still wins).
 * **Minimize.** `xdg_toplevel.set_minimized` and the foreign-toplevel
   request hide the window to a per-monitor special workspace; activating it
   from the overview, a taskbar or `focuswindow` brings it back. The
