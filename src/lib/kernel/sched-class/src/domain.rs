@@ -30,9 +30,12 @@ pub enum Mode {
 
 /// A scheduling class: one policy in a mode's stack.
 ///
-/// Stage 14 adds the fixed-priority and deadline classes above [`Class::Fair`].
+/// Stage 14 adds the deadline class above [`Class::Fair`] in `HardRt`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Class {
+    /// `SCHED_FIFO` and `SCHED_RR`: fixed priorities above the fair class
+    /// (`ferrix-sched-fifo`, docs/SCHED-CLASSES.md §9e).
+    Realtime,
     /// EEVDF.
     Fair,
     /// The per-CPU idle task, which runs when no class above it has anything.
@@ -41,6 +44,12 @@ pub enum Class {
 
 /// The Throughput mode's stack.
 const THROUGHPUT: [Class; 2] = [Class::Fair, Class::Idle];
+
+/// The `SoftRt` mode's stack: fixed priorities above the fair class
+/// (docs/SCHED-CLASSES.md §9f). Whether a kernel has the tiers is the
+/// kernel's question (its selection crate's `mode_available`), asked before
+/// a domain is made.
+const SOFT_RT: [Class; 3] = [Class::Realtime, Class::Fair, Class::Idle];
 
 impl Mode {
     /// The classes asked for work, highest first.
@@ -54,7 +63,8 @@ impl Mode {
     pub const fn classes(self) -> Result<&'static [Class], DomainError> {
         match self {
             Mode::Throughput => Ok(&THROUGHPUT),
-            Mode::SoftRt | Mode::HardRt => Err(DomainError::ModeUnavailable(self)),
+            Mode::SoftRt => Ok(&SOFT_RT),
+            Mode::HardRt => Err(DomainError::ModeUnavailable(self)),
         }
     }
 

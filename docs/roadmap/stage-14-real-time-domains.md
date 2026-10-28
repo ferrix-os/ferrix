@@ -34,12 +34,19 @@ certification consultant:
   review): priorities 1 to 99, preemption on a wake, RR's 100 ms quantum,
   the 950-of-1000 ms floor that keeps fair tasks 50 ms a second, Linux's
   policy calls with `CAP_SYS_NICE` and `RLIMIT_RTPRIO`, reset-on-fork, and
-  boot checks plus `cargo xtask test-rtsched` for each.
+  boot checks plus `cargo xtask test-rtsched` for each;
+* a `SoftRt` domain made at run time inside the kernel (step 5a, on
+  `feature/sched-softrt-domain`, landing owed): processors taken out of
+  the boot domain under a running load and given back on dissolution, the
+  partition held by every placement, steal and wake and checked at every
+  pick (FX-0538), jobs admitted with their descendants, and a boot check
+  with controls on both Arm boots.
 
 `max` has no fair tier, the customer's decision (2026-10-27). Not built
-yet: a `SoftRt` domain of its own (compiled in, refused by name), the
-EDF/CBS and windows classes, threaded interrupts, priority inheritance,
-the mode switch and the exit tests above.
+yet: the system calls that make a domain and admit a job to it, behind a
+domain authority object (step 5b), the EDF/CBS and windows classes,
+threaded interrupts, priority inheritance, interrupt placement per domain
+and the exit tests above.
 
 ---
 

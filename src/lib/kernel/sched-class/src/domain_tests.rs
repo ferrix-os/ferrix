@@ -21,21 +21,40 @@ fn throughput_is_fair_then_idle_and_steals() {
 }
 
 #[test]
-fn the_real_time_modes_are_named_and_refused() {
-    for mode in [Mode::SoftRt, Mode::HardRt] {
-        assert_eq!(
-            mode.classes(),
-            Err(DomainError::ModeUnavailable(mode)),
-            "{} is stage 14's",
-            mode.name()
-        );
-        assert!(!mode.steals_work(), "{} does not steal", mode.name());
-        assert_eq!(
-            Domain::new(CpuSet::first(1).unwrap(), mode),
-            Err(DomainError::ModeUnavailable(mode)),
-            "and no domain can be built in it"
-        );
-    }
+fn soft_real_time_is_fixed_priorities_over_fair_and_does_not_steal() {
+    assert_eq!(
+        Mode::SoftRt.classes(),
+        Ok(&[Class::Realtime, Class::Fair, Class::Idle][..]),
+        "the SoftRt stack"
+    );
+    assert!(!Mode::SoftRt.steals_work(), "SoftRt does not steal");
+    let cpus = CpuSet::first(2).unwrap();
+    assert_eq!(
+        Domain::new(cpus, Mode::SoftRt).map(|domain| domain.mode()),
+        Ok(Mode::SoftRt),
+        "and a domain can be built in it"
+    );
+    assert_eq!(
+        Domain::new(CpuSet::empty(), Mode::SoftRt),
+        Err(DomainError::EmptyDomain),
+        "of at least one CPU"
+    );
+}
+
+#[test]
+fn hard_real_time_is_named_and_refused() {
+    let mode = Mode::HardRt;
+    assert_eq!(
+        mode.classes(),
+        Err(DomainError::ModeUnavailable(mode)),
+        "HardRt is stage 14's"
+    );
+    assert!(!mode.steals_work(), "HardRt does not steal");
+    assert_eq!(
+        Domain::new(CpuSet::first(1).unwrap(), mode),
+        Err(DomainError::ModeUnavailable(mode)),
+        "and no domain can be built in it"
+    );
 }
 
 #[test]
