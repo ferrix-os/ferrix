@@ -48,6 +48,12 @@ const INSTALLED_ROOT: &[u8] = b"ferrix.root=btrfs";
 /// The live session's own word, which starts the installer's daemon and
 /// its window; blanked on the installed disk, the same length.
 const LIVE_WORD: &[u8] = b"ferrix.live";
+/// The words only the live session carries, each blanked on the installed
+/// disk: [`LIVE_WORD`], and `ferrix.unisolated`, which lets the live session
+/// drive a machine with no IOMMU (its drivers then trusted with all of
+/// memory, as on Linux) and which the installed system never keeps -- it
+/// isolates its drivers, or does not start them.
+const LIVE_ONLY_WORDS: [&[u8]; 2] = [LIVE_WORD, b"ferrix.unisolated"];
 
 /// The root volume's label, which is how the kernel finds it.
 const ROOT_LABEL: &[u8] = b"ferrix-root";
@@ -339,14 +345,30 @@ pub(crate) fn installed_cmdline(disk: &mut File, at: u64) -> io::Result<bool> {
         return Ok(false);
     };
     text[position..position + INSTALLED_ROOT.len()].copy_from_slice(INSTALLED_ROOT);
-    if let Some(at) = text
-        .windows(LIVE_WORD.len())
-        .position(|window| window == LIVE_WORD)
-    {
-        text[at..at + LIVE_WORD.len()].fill(b' ');
-    }
+    blank_live_words(&mut text);
     write_at(disk, offset, &text)?;
     Ok(true)
+}
+
+/// Blank every whole word of [`LIVE_ONLY_WORDS`] in a command line, in
+/// place, so its length is kept.
+pub(crate) fn blank_live_words(text: &mut [u8]) {
+    let edge = |byte: Option<&u8>| byte.is_none_or(u8::is_ascii_whitespace);
+    for word in LIVE_ONLY_WORDS {
+        let mut at = 0;
+        while let Some(found) = text
+            .get(at..)
+            .and_then(|rest| rest.windows(word.len()).position(|window| window == word))
+        {
+            let start = at + found;
+            let end = start + word.len();
+            let whole = (start == 0 || edge(text.get(start - 1))) && edge(text.get(end));
+            if whole {
+                text[start..end].fill(b' ');
+            }
+            at = end;
+        }
+    }
 }
 
 /// Whether anything is mounted from `disk` or one of its partitions.
@@ -467,4 +489,40 @@ fn confirm() -> Result<bool, String> {
         .read_line(&mut line)
         .map_err(|e| e.to_string())?;
     Ok(line.trim() == "yes")
+}
+
+#[cfg(test)]
+mod live_words {
+    use super::blank_live_words;
+
+    #[test]
+    fn the_installed_line_keeps_no_live_word() {
+        let mut text = b"ferrix.init=/sbin/init ferrix.root=btrfs ferrix.live ferrix.unisolated ferrix.efifb ferrix.fbcon\n".to_vec();
+        let length = text.len();
+        blank_live_words(&mut text);
+        assert_eq!(text.len(), length);
+        let words: Vec<&[u8]> = text
+            .split(u8::is_ascii_whitespace)
+            .filter(|w| !w.is_empty())
+            .collect();
+        assert_eq!(
+            words,
+            [
+                &b"ferrix.init=/sbin/init"[..],
+                b"ferrix.root=btrfs",
+                b"ferrix.efifb",
+                b"ferrix.fbcon"
+            ]
+        );
+    }
+
+    #[test]
+    fn only_whole_words_are_blanked() {
+        let mut text = b"ferrix.lively ferrix.unisolated.x xferrix.live ferrix.live".to_vec();
+        blank_live_words(&mut text);
+        assert_eq!(
+            &text[..],
+            b"ferrix.lively ferrix.unisolated.x xferrix.live            "
+        );
+    }
 }

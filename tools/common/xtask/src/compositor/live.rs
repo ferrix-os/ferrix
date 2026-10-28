@@ -66,10 +66,20 @@ exec-once = /bin/ferrix-installer --autostart\n";
 /// firmware's mode instead of the loader's last screen; where firmware's
 /// framebuffer is RAM, as virtio-gpu's in QEMU, it is not lent and nothing
 /// changes (`docs/DISPLAY.md` §8). `ferrix.fbcon` draws the boot log on that
-/// screen until then, which is the only log a person at a PC sees. The
-/// installer keeps both for the installed system and drops only the live
-/// root and `ferrix.live`. Neither is a configuration a claim is made of.
-const LIVE_WORDS: &str = "ferrix.root=tmpfs ferrix.live ferrix.efifb ferrix.fbcon";
+/// screen until then, which is the only log a person at a PC sees.
+///
+/// `ferrix.unisolated` lets the live session drive a machine with no IOMMU
+/// -- the defaults of `VirtualBox` and `VMware`, a PC with VT-d or AMD-Vi
+/// off -- whose drivers are then trusted with all of memory, as on Linux;
+/// where an IOMMU isolates a device it changes nothing (the customer,
+/// 2026-10-28). The installed system never keeps it: the installer blanks
+/// it with `ferrix.live` and keeps the rest. None of these is a
+/// configuration a claim is made of.
+const LIVE_WORDS: &str =
+    "ferrix.root=tmpfs ferrix.live ferrix.unisolated ferrix.efifb ferrix.fbcon";
+
+/// What the kernel says at stage 10 when `ferrix.unisolated` is on.
+const UNISOLATED_SAID: &str = "ferrix.unisolated: devmgr may start drivers";
 
 /// The units the installer brings, as `(name, text)`; each is wanted by
 /// `graphical.target`.
@@ -556,6 +566,10 @@ pub(crate) fn test_iso(args: &Args) -> Result<()> {
                 YORU_DOCK,
                 "Yoru, the default desktop, never put up its dock",
             ),
+            (
+                UNISOLATED_SAID,
+                "the live session did not carry ferrix.unisolated",
+            ),
         ] {
             if !said.iter().any(|line| line.contains(wanted)) {
                 return Err(Error::new(format!(
@@ -597,6 +611,7 @@ fn boot_live(arch: Arch, built: &Built, args: &Args, how: &str) -> Result<Vec<St
                 .iter()
                 .any(|line| line.contains("ferrix-installer: the window is up"))
                 && lines.iter().any(|line| line.contains("sessiond: "))
+                && lines.iter().any(|line| line.contains(YORU_DOCK))
         })?;
         std::thread::sleep(Duration::from_secs(15));
         qmp.screendump(Some(DEVICE_ID), &dump)?;
@@ -822,12 +837,43 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
             )));
         }
     }
+    installed_isolates(arch, &said)?;
     println!(
         "  {arch}: the installed disk booted alone to {GATE_USER}'s locked session, and \
          {GATE_USER}'s password opened it to Yoru ({}, {})",
         dump.display(),
         unlocked.display()
     );
+    Ok(())
+}
+
+/// The installed system isolates its drivers: the live session's
+/// `ferrix.unisolated` is not on its command line, nor said by its kernel,
+/// and the command line is the live one made installed.
+fn installed_isolates(arch: Arch, said: &[String]) -> Result<()> {
+    let installed_line = said
+        .iter()
+        .find(|line| line.contains("cmdline ") && line.contains("(from /FERRIX/CMDLINE.TXT)"))
+        .ok_or_else(|| {
+            Error::new(format!(
+                "{arch}: the installed boot's loader named no command line"
+            ))
+        })?;
+    if !installed_line.contains("ferrix.root=btrfs")
+        || !installed_line.contains("ferrix.efifb")
+        || installed_line
+            .split_whitespace()
+            .any(|word| word == "ferrix.live")
+    {
+        return Err(Error::new(format!(
+            "{arch}: the installed command line is not the live one made installed: {installed_line}"
+        )));
+    }
+    if let Some(line) = said.iter().find(|line| line.contains("ferrix.unisolated")) {
+        return Err(Error::new(format!(
+            "{arch}: the installed system kept a live-only word: {line}"
+        )));
+    }
     Ok(())
 }
 
