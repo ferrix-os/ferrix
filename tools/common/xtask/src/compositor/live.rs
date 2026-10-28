@@ -28,8 +28,9 @@
 //! `test-iso` boots the ISO under OVMF twice, as a CD on q35's AHCI port and
 //! as a USB stick on an xHCI controller, and requires the live desktop:
 //! hyprix's card, the session started as uid 1000 by `sessiond`, the
-//! installer's daemon listening, the graphical installer's window, and a
-//! screen that is not one colour.
+//! installer's daemon listening, the graphical installer's window, a
+//! screen that is not one colour, and a first click on "Install Ferrix",
+//! where the screen shows it, that moves the installer on to its next page.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -57,6 +58,28 @@ const LABEL: &str = "FERRIX_LIVE";
 const LIVE_LINES: &str = "# The live session (cargo xtask iso): the installer opens at login, and only\n\
 # on a live session -- it exits at once where the command line lacks ferrix.live.\n\
 exec-once = /bin/ferrix-installer --autostart\n";
+
+/// The line of the desktop's configuration that opens a terminal at login,
+/// which the live session leaves out ([`live_config`]).
+const BOOT_TERMINAL: &str = "exec-once = /bin/term /bin/zinc";
+
+/// The live session's `hyprland.conf`: the desktop's, less the terminal it
+/// opens at login, and the installer started instead.
+///
+/// The installer is to be the one window a live session opens with. With a
+/// terminal started beside it, which of the two mapped last -- and so lay
+/// on top, focused -- was a race the boot's timing decided: on about one
+/// boot in seven (2026-10-28, v0.2.0's candidate aa86f862d) the terminal
+/// covered the installer's buttons, and a click on "Install Ferrix" went to
+/// it. A terminal stays a key (SUPER RETURN) or the dock's button away.
+fn live_config() -> String {
+    let desktop: String = super::run::RUN_CONFIG
+        .lines()
+        .filter(|line| line.trim() != BOOT_TERMINAL)
+        .map(|line| format!("{line}\n"))
+        .collect();
+    format!("{desktop}{LIVE_LINES}")
+}
 
 /// The live session's words after the image's own command line.
 ///
@@ -243,7 +266,7 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
     crate::omz::require_installed()?;
     crate::apps::build_carried(arch, args)?;
     let programs = Programs::build(arch)?;
-    let config = format!("{}{LIVE_LINES}", super::run::RUN_CONFIG);
+    let config = live_config();
     let (config, mut carried) = desktop(
         arch,
         config,
@@ -626,6 +649,18 @@ fn boot_live(arch: Arch, built: &Built, args: &Args, how: &str) -> Result<Vec<St
             "  {arch}: the screen as {how} has {colours} colours: {}",
             dump.display()
         );
+        let heard: Vec<String> = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        let desk = desktop_size(&heard).ok_or_else(|| {
+            Error::new(format!(
+                "{arch}: booted as {how}, hyprix never named its monitors"
+            ))
+        })?;
+        first_click(&mut qmp, &dump, desk, arch, how)?;
         said = watching
             .lines()
             .iter()
@@ -643,6 +678,162 @@ fn boot_live(arch: Arch, built: &Built, args: &Args, how: &str) -> Result<Vec<St
         hook,
     )?;
     Ok(said)
+}
+
+/// The installer's "Install Ferrix" button: its fill, the Nocturne accent.
+const BUTTON: [u8; 3] = [145, 132, 217];
+
+/// How far a channel may be from [`BUTTON`] and still be the button.
+const BUTTON_STEP: u8 = 12;
+
+/// The button's rectangle in `image`, `(left, top, right, bottom)`
+/// exclusive: the tallest band of rows, 20 at least, each with a twentieth
+/// of the screen's width in the button's fill. That leaves out the Welcome
+/// step's marker and the language field's outline, which are the same
+/// colour and a few rows tall. `None` when nothing is: the Welcome page is
+/// not showing, or something covers its button.
+fn button_rect(image: &crate::display::Image) -> Option<(usize, usize, usize, usize)> {
+    let mut bands: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut open = false;
+    for y in 0..image.height {
+        let row: Vec<usize> = (0..image.width)
+            .filter(|x| is_button(image, (y * image.width + x) * 3))
+            .collect();
+        let (Some(&left), Some(&last)) = (row.first(), row.last()) else {
+            open = false;
+            continue;
+        };
+        if row.len() < image.width / 20 {
+            open = false;
+            continue;
+        }
+        match bands.last_mut() {
+            Some(band) if open => *band = (band.0.min(left), band.1, band.2.max(last + 1), y + 1),
+            _ => bands.push((left, y, last + 1, y + 1)),
+        }
+        open = true;
+    }
+    bands
+        .into_iter()
+        .filter(|band| band.3 - band.1 >= 20)
+        .max_by_key(|band| band.3 - band.1)
+}
+
+/// Whether the pixel whose red byte is at `at` is the button's fill.
+fn is_button(image: &crate::display::Image, at: usize) -> bool {
+    image.pixels.get(at..at + 3).is_some_and(|rgb| {
+        rgb.iter()
+            .zip(BUTTON)
+            .all(|(c, b)| c.abs_diff(b) <= BUTTON_STEP)
+    })
+}
+
+/// How many pixels inside `rect` are still the button's fill.
+fn button_left(image: &crate::display::Image, rect: (usize, usize, usize, usize)) -> usize {
+    let (left, top, right, bottom) = rect;
+    (top..bottom)
+        .flat_map(|y| (left..right).map(move |x| (y * image.width + x) * 3))
+        .filter(|&at| is_button(image, at))
+        .count()
+}
+
+/// How big every screen is together, from hyprix's line naming its
+/// monitors (`hyprix: 2 monitors [card0 Virtual-1 1024x768 1024x768, card1
+/// Virtual-2 1280x800 1280x800]`): their widths added, as hyprix lays them
+/// out left to right, and the tallest's height.
+fn desktop_size(lines: &[String]) -> Option<(usize, usize)> {
+    let line = lines
+        .iter()
+        .find(|line| line.contains("hyprix: ") && line.contains(" monitor"))?;
+    let listed = line.split_once('[')?.1.split_once(']')?.0;
+    let mut size = (0, 0);
+    for monitor in listed.split(", ") {
+        let (width, height) = monitor.split_whitespace().nth(2)?.split_once('x')?;
+        let (width, height): (usize, usize) = (width.parse().ok()?, height.parse().ok()?);
+        size = (size.0 + width, size.1.max(height));
+    }
+    (size.0 > 0).then_some(size)
+}
+
+/// The first click a person makes: on "Install Ferrix", where the screen
+/// shows it, after which the installer must show its next page.
+///
+/// A window that opens under another, or a page that does not follow the
+/// click, is a live session whose installer cannot be started by its first
+/// click, which is the one thing the live session is for (2026-10-28).
+fn first_click(
+    qmp: &mut Qmp,
+    dump: &Path,
+    desk: (usize, usize),
+    arch: Arch,
+    how: &str,
+) -> Result<()> {
+    let bytes =
+        std::fs::read(dump).map_err(|error| Error::new(format!("{}: {error}", dump.display())))?;
+    let before = crate::display::parse_ppm(&bytes)?;
+    let Some(rect) = button_rect(&before) else {
+        return Err(Error::new(format!(
+            "{arch}: booted as {how}, no \"Install Ferrix\" button is to be seen: the installer's \
+             Welcome page is not on top ({})",
+            dump.display()
+        )));
+    };
+    let (left, top, right, bottom) = rect;
+    // A tablet's place is a fraction of every screen together, which
+    // hyprix lays out left to right from the first; the screendump is the
+    // first one's.
+    let (across, down) = desk;
+    let at =
+        |middle: usize, size: usize| i32::try_from(middle * 0x7fff / size.max(1)).unwrap_or(0x3fff);
+    let (x, y) = (at((left + right) / 2, across), at((top + bottom) / 2, down));
+    let axis = |name: &str, value: i32| {
+        format!(
+            "{{\"type\":\"abs\",\"data\":{{\"axis\":{},\"value\":{value}}}}}",
+            crate::display::json_string(name)
+        )
+    };
+    let button = |down: bool| {
+        format!("{{\"type\":\"btn\",\"data\":{{\"down\":{down},\"button\":\"left\"}}}}")
+    };
+    // The tablet, not whichever pointer QEMU last saw become active: an
+    // absolute event sent to a relative mouse moves nothing.
+    qmp.choose_pointer("Tablet")?;
+    qmp.input_send_event(&[axis("x", x), axis("y", y)])?;
+    std::thread::sleep(Duration::from_millis(300));
+    qmp.input_send_event(&[button(true)])?;
+    std::thread::sleep(Duration::from_millis(100));
+    qmp.input_send_event(&[button(false)])?;
+    // Off the window, so that a button still showing is not taken for a
+    // page that moved on because the pointer over it changed its shade.
+    qmp.input_send_event(&[axis("x", 0x100), axis("y", 0x100)])?;
+    let after = dump.with_extension("click.ppm");
+    let whole = (right - left) * (bottom - top);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        qmp.screendump(Some(DEVICE_ID), &after)?;
+        let bytes = std::fs::read(&after)
+            .map_err(|error| Error::new(format!("{}: {error}", after.display())))?;
+        let image = crate::display::parse_ppm(&bytes)?;
+        let left_over = button_left(&image, rect);
+        // The next page has no button there: a quarter of its fill is
+        // the most a page that moved on can still show in its place.
+        if left_over * 4 < whole {
+            println!(
+                "  {arch}: booted as {how}, the first click on \"Install Ferrix\" moved the installer on: {}",
+                after.display()
+            );
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::new(format!(
+                "{arch}: booted as {how}, a click on \"Install Ferrix\" at {left}..{right}x{top}..{bottom} \
+                 left the Welcome page showing ({} of its {whole} pixels still the button): {}",
+                left_over,
+                after.display()
+            )));
+        }
+    }
 }
 
 /// How many colours a binary PPM screendump has, up to 4096.
@@ -937,4 +1128,89 @@ fn install_unattended(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod live_config_tests {
+    use super::{BOOT_TERMINAL, LIVE_LINES, live_config};
+
+    /// The installer is the only window the live session opens at login:
+    /// no other `exec-once` starts a program with a window beside it.
+    #[test]
+    fn the_live_session_opens_the_installer_and_no_terminal() {
+        let config = live_config();
+        assert!(config.ends_with(LIVE_LINES));
+        assert!(config.contains("exec-once = /bin/ferrix-installer --autostart\n"));
+        assert!(
+            !config.lines().any(|line| line.trim() == BOOT_TERMINAL),
+            "the live session starts a terminal beside the installer"
+        );
+        let windows: Vec<&str> = config
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("exec-once") && !line.contains("/bin/vdagent"))
+            .collect();
+        assert_eq!(windows, ["exec-once = /bin/ferrix-installer --autostart"]);
+        // A terminal is still a key away.
+        assert!(config.contains("bind = SUPER, RETURN, exec, /bin/term /bin/zinc"));
+    }
+
+    /// The button is found as the tallest band of its fill, not with the
+    /// language field's outline above it, and is gone when covered.
+    #[test]
+    fn the_install_button_is_the_tallest_band_of_its_colour() {
+        let (width, height) = (400, 200);
+        let mut pixels = vec![20u8; width * height * 3];
+        let mut paint = |left: usize, top: usize, right: usize, bottom: usize| {
+            for y in top..bottom {
+                for x in left..right {
+                    let at = (y * width + x) * 3;
+                    pixels[at..at + 3].copy_from_slice(&super::BUTTON);
+                }
+            }
+        };
+        // The field's outline: two rows, as wide as the page.
+        paint(40, 30, 360, 31);
+        paint(40, 60, 360, 61);
+        // The Welcome step's marker: too narrow to count.
+        paint(300, 5, 310, 9);
+        // The button.
+        paint(200, 100, 280, 126);
+        let image = crate::display::Image {
+            width,
+            height,
+            pixels,
+        };
+        let rect = super::button_rect(&image);
+        assert_eq!(rect, Some((200, 100, 280, 126)));
+        assert_eq!(super::button_left(&image, (200, 100, 280, 126)), 80 * 26);
+        let covered = crate::display::Image {
+            pixels: vec![20u8; width * height * 3],
+            ..image
+        };
+        assert_eq!(super::button_rect(&covered), None);
+    }
+
+    /// Every screen together, from hyprix's line naming them.
+    #[test]
+    fn the_desktop_is_every_screen_side_by_side() {
+        let lines = [
+            "    2.43 | hyprix: 2 monitors [card0 Virtual-1 1024x768 1024x768, card1 Virtual-2 1280x800 1280x800]".to_owned(),
+        ];
+        assert_eq!(super::desktop_size(&lines), Some((2304, 800)));
+        let one = ["hyprix: 1 monitor [card0 Virtual-1 1920x1080 1920x1080]".to_owned()];
+        assert_eq!(super::desktop_size(&one), Some((1920, 1080)));
+        assert_eq!(super::desktop_size(&[]), None);
+    }
+
+    /// The desktop's own configuration still opens one, and the line the
+    /// live session leaves out is that one, word for word.
+    #[test]
+    fn the_desktop_still_opens_its_terminal() {
+        assert!(
+            super::super::run::RUN_CONFIG
+                .lines()
+                .any(|line| line.trim() == BOOT_TERMINAL)
+        );
+    }
 }
