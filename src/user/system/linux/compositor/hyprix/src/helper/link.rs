@@ -70,9 +70,7 @@ impl Link {
         let (socket, theirs) = Socket::pair()?;
         let raw = theirs.as_raw_fd();
         let mut command = Command::new(program);
-        let _ = command
-            .env("HYPRIX_GPU_FD", "3")
-            .stdin(Stdio::null());
+        let _ = command.env("HYPRIX_GPU_FD", "3").stdin(Stdio::null());
         if let Some(node) = node {
             let _ = command.env("HYPRIX_GPU_NODE", node);
         }
@@ -127,9 +125,9 @@ impl Link {
         )?;
         let deadline = Instant::now() + READY_DEADLINE;
         loop {
-            let received = self
-                .receive(deadline)?
-                .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "hyprix-gpu was not ready in time"))?;
+            let received = self.receive(deadline)?.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::TimedOut, "hyprix-gpu was not ready in time")
+            })?;
             match received.message {
                 Message::Ready {
                     version,
@@ -240,7 +238,11 @@ impl Link {
         name: u64,
         fourcc: u32,
     ) -> io::Result<()> {
-        if self.textures.get(&name).is_some_and(|held| held.0 == Held::Dmabuf) {
+        if self
+            .textures
+            .get(&name)
+            .is_some_and(|held| held.0 == Held::Dmabuf)
+        {
             return Ok(());
         }
         let Some(on) = surface.device() else {
@@ -338,7 +340,10 @@ impl Link {
             .last()
             .map_or(FIRST_ARENA, |(_, _, size)| size.saturating_mul(2))
             .max(len.saturating_mul(2));
-        let id = self.arenas.last().map_or(1, |(id, _, _)| id.wrapping_add(1));
+        let id = self
+            .arenas
+            .last()
+            .map_or(1, |(id, _, _)| id.wrapping_add(1));
         let shared = Shared::new(size)?;
         let raw = shared.as_raw_fd();
         #[expect(
@@ -361,7 +366,11 @@ impl Link {
 
     /// `part` of `surface`'s pixels, copied into the arena: where, and the
     /// rows' stride.
-    pub(crate) fn upload(&mut self, surface: &Surface<'_>, part: Rect) -> io::Result<(u32, usize, u32)> {
+    pub(crate) fn upload(
+        &mut self,
+        surface: &Surface<'_>,
+        part: Rect,
+    ) -> io::Result<(u32, usize, u32)> {
         let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
             usize::try_from(part.x),
             usize::try_from(part.y),

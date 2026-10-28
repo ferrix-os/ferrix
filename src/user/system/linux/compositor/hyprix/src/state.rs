@@ -4479,7 +4479,9 @@ fn gpu_for(
                 drawn,
             }))
         }
-        Err(why) if renderer == Renderer::Auto && crate::helper::mode() != crate::helper::Mode::Off => {
+        Err(why)
+            if renderer == Renderer::Auto && crate::helper::mode() != crate::helper::Mode::Off =>
+        {
             match helper_for(screen, (width, height), report) {
                 Ok(gpu) => {
                     report(&format!("hyprix: {screen}: no virgl GPU ({why})"));
@@ -4514,7 +4516,9 @@ fn helper_for(
     report: &mut dyn FnMut(&str),
 ) -> Result<crate::frame::Gpu, String> {
     let (canvas, device) = crate::helper::canvas(width, height)?;
-    report(&format!("hyprix: {screen}: frames are drawn by hyprix-gpu on {device}"));
+    report(&format!(
+        "hyprix: {screen}: frames are drawn by hyprix-gpu on {device}"
+    ));
     Ok(crate::frame::Gpu {
         canvas: crate::gpu_canvas::GpuCanvas::Helper(canvas),
         backdrop: crate::gpu_canvas::GpuBackdrop::Helper(crate::helper::Backdrop::new(

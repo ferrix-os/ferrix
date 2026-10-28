@@ -22,7 +22,10 @@ pub(crate) struct Socket {
 #[derive(Debug)]
 pub(crate) struct Received {
     /// Its header.
-    #[expect(dead_code, reason = "the serial is for answers matched to requests, which version 1 does not need")]
+    #[expect(
+        dead_code,
+        reason = "the serial is for answers matched to requests, which version 1 does not need"
+    )]
     pub(crate) header: Header,
     /// The message.
     pub(crate) message: Message,
@@ -94,7 +97,12 @@ impl Socket {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if !readable(self.fd.as_raw_fd(), left)? {
-                return Ok(None);
+                // poll counts whole milliseconds, and may wake a little
+                // before the deadline: only the deadline ends the wait.
+                if Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                continue;
             }
             let Some((bytes, fds)) = receive_record(self.fd.as_raw_fd())? else {
                 continue;
@@ -123,7 +131,7 @@ fn readable(fd: RawFd, left: Duration) -> io::Result<bool> {
         events: libc::POLLIN,
         revents: 0,
     };
-    let millis = i32::try_from(left.as_millis()).unwrap_or(i32::MAX);
+    let millis = i32::try_from(left.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
     #[expect(
         unsafe_code,
         reason = "AUDIT: poll is not in std; it reads and writes one live pollfd"

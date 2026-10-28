@@ -18,9 +18,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use compositor_gpu_protocol as proto;
-use compositor_render::{
-    Blur, Color, Damage, Gradient, Painter, Rect, Rounding, Shadow, Surface,
-};
+use compositor_render::{Blur, Color, Damage, Gradient, Painter, Rect, Rounding, Shadow, Surface};
 use proto::{Message, Op, OpsWriter};
 
 use super::link::Link;
@@ -410,7 +408,11 @@ impl Canvas {
             i64::from(surface.width()),
             i64::from(surface.height()),
         )];
-        let need = if made.unwrap_or(false) { &whole[..] } else { need };
+        let need = if made.unwrap_or(false) {
+            &whole[..]
+        } else {
+            need
+        };
         for &part in need {
             let Some(part) = compositor_render::intersect(part, whole[0]) else {
                 continue;
@@ -491,9 +493,15 @@ fn rects(damage: &Damage) -> Vec<proto::Rect> {
 /// A rectangle of the layout's as the protocol's: negative sizes are
 /// empty, coordinates clamped to `i32`.
 pub(crate) fn to_rect(rect: Rect) -> proto::Rect {
-    let clamp = |value: i64| i32::try_from(value).unwrap_or(if value < 0 { i32::MIN } else { i32::MAX });
+    let clamp =
+        |value: i64| i32::try_from(value).unwrap_or(if value < 0 { i32::MIN } else { i32::MAX });
     let size = |value: i64| u32::try_from(value.max(0)).unwrap_or(u32::MAX);
-    proto::Rect::new(clamp(rect.x), clamp(rect.y), size(rect.width), size(rect.height))
+    proto::Rect::new(
+        clamp(rect.x),
+        clamp(rect.y),
+        size(rect.width),
+        size(rect.height),
+    )
 }
 
 fn to_rounding(rounding: Rounding) -> proto::Rounding {
