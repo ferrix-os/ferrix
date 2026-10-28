@@ -202,6 +202,13 @@
       "branch": "claude/ferrix-roadmap-completion-hkxlpp",
       "date": "2026-10-27",
       "purpose": "Withdrawn, never to be reused: written for step 4b (docs/SCHED-CLASSES.md section 9e) as the Linux policy calls' permission rule (111) and argument checks (117), and dropped by the consultant's code review, ledger line 30 (B2), the behaviour being the load ring's, not the item's; test-rtsched still shows both (line 31, condition 2)"
+    },
+    {
+      "ids": ["H.SCHED.21-23", "L.sched.118-130"],
+      "owner": "sched-classes",
+      "branch": "feature/ferrix-roadmap-completion-hkxlpp",
+      "date": "2026-10-28",
+      "purpose": "docs/SCHED-CLASSES.md step 5 (stage 14), a SoftRt domain made at run time (section 9f, the consultant's OK IF V1-V16, ledger line 32): H.SCHED.21 the partition, 22 the handle's life and dissolution, 23 the floor; L.sched from 118 for D-1 to D-5, the switch, admission, the exemption and present's refusal. Released in the commits that write them"
     }
   ]
 }
