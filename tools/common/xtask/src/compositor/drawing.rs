@@ -265,7 +265,7 @@ const GPU_EXPECTED_PATH: &str = "etc/expected.xrle";
 ///
 /// The settings are `DECORATED_CONFIG`'s, for its reason: the picture is
 /// `src/user/system/linux/compositor/render`'s `decorated_style`.
-const GPU_CONFIG: &str = "\
+pub(super) const GPU_CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor --gl`.
 decoration:rounding = 12
 decoration:inactive_opacity = 0.6
@@ -344,16 +344,6 @@ const GPU_PATIENCE: Duration = Duration::from_secs(90);
 /// who drew it: the compositor must say it draws on the GPU, and must not
 /// say it fell back.
 pub(super) fn test_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
-    let expected_image = std::fs::read(paths::workspace_root().join(DECORATED_EXPECTED.1))
-        .map_err(|error| Error::new(format!("{}: {error}", DECORATED_EXPECTED.1)))?;
-    let carried = Carried {
-        ports: vec![crate::ports::File {
-            path: GPU_EXPECTED_PATH.to_owned(),
-            mode: 0o644,
-            content: crate::ports::Content::Bytes(expected_image),
-        }],
-        ..Carried::none()
-    };
     // `--boot dmabuf` is the same boot with the windows presented as
     // dmabufs; no other boot has a GPU form.
     let (config, said_too): (&str, &[&str]) = match args.boot.as_deref() {
@@ -364,6 +354,41 @@ pub(super) fn test_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<(
                 "test-compositor --gl has one named boot, dmabuf; not {other}"
             )));
         }
+    };
+    gpu_picture(
+        arch,
+        programs,
+        args,
+        (config, Vec::new()),
+        said_too,
+        ON_THE_GPU,
+    )
+}
+
+/// A boot whose frames some GPU draws, judged by the guest's own
+/// screenshot against the decorated pair's blessed picture: `config` and
+/// the files `ports` beside the expected image, what the guest must have
+/// said beside the picture, and the line by which the compositor says who
+/// draws (`drawn_by`).
+pub(super) fn gpu_picture(
+    arch: Arch,
+    programs: &Programs,
+    args: &Args,
+    (config, ports): (&str, Vec<crate::ports::File>),
+    said_too: &[&str],
+    drawn_by: &str,
+) -> Result<()> {
+    let expected_image = std::fs::read(paths::workspace_root().join(DECORATED_EXPECTED.1))
+        .map_err(|error| Error::new(format!("{}: {error}", DECORATED_EXPECTED.1)))?;
+    let mut ports = ports;
+    ports.push(crate::ports::File {
+        path: GPU_EXPECTED_PATH.to_owned(),
+        mode: 0o644,
+        content: crate::ports::Content::Bytes(expected_image),
+    });
+    let carried = Carried {
+        ports,
+        ..Carried::none()
     };
     let (image, kernel) = build_image(arch, programs, &undithered(config), carried, args)?;
     let port = free_port()?;
@@ -427,11 +452,11 @@ pub(super) fn test_gpu(arch: Arch, programs: &Programs, args: &Args) -> Result<(
         Ok(())
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
-    judge_gpu(arch, &said, said_too)
+    judge_gpu(arch, &said, said_too, drawn_by)
 }
 
 /// What [`test_gpu`] requires of what the guest said.
-fn judge_gpu(arch: Arch, said: &[String], said_too: &[&str]) -> Result<()> {
+fn judge_gpu(arch: Arch, said: &[String], said_too: &[&str], drawn_by: &str) -> Result<()> {
     let transcript = || {
         said.iter()
             .map(|line| said_on_its_own(line).to_owned())
@@ -466,9 +491,9 @@ fn judge_gpu(arch: Arch, said: &[String], said_too: &[&str]) -> Result<()> {
             line.trim()
         )));
     }
-    if !said.iter().any(|line| line.contains(ON_THE_GPU)) {
+    if !said.iter().any(|line| line.contains(drawn_by)) {
         return Err(Error::new(format!(
-            "{arch}: the compositor did not say it draws on the GPU:\n    {}",
+            "{arch}: the compositor did not say `{drawn_by}`:\n    {}",
             transcript()
         )));
     }

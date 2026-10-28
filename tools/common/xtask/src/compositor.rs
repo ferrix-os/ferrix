@@ -670,7 +670,7 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["tole-demo-gpu"]) {
         tole_demo::build_ahead_gpu(arch)?;
     }
-    if asked(&["gpu-helper"]) {
+    if asked(&["gpu-helper", "helper-desktop"]) {
         gpu_helper::build_ahead(arch)?;
     }
     if asked(&["locked", "locked-held"]) {
@@ -799,7 +799,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 71] = [
+const BOOTS: [(&str, Boot); 72] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -865,6 +865,7 @@ const BOOTS: [(&str, Boot); 71] = [
     ("tole-demo", tole_demo::test_tole_demo),
     ("tole-demo-gpu", tole_demo::test_tole_demo_gpu),
     ("gpu-helper", gpu_helper::test_gpu_helper),
+    ("helper-desktop", gpu_helper::test_helper_desktop),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),

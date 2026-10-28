@@ -208,6 +208,52 @@ fn judge(arch: Arch, said: &[String], packaged: bool) -> Result<()> {
     Ok(())
 }
 
+/// What hyprix says when a screen's frames are drawn by the helper on
+/// lavapipe.
+const DRAWN_BY_HELPER: &str = "frames are drawn by hyprix-gpu on llvmpipe";
+
+/// `test-compositor --boot helper-desktop`'s lines beside the GPU boot's
+/// own (`drawing::GPU_CONFIG`): hyprix asked for the helper, and the
+/// helper given the yserver volume's lavapipe through the environment
+/// hyprix hands it -- its own loader and libraries are the image's
+/// (`crate::hyprix_gpu`), lavapipe's and LLVM's are found on the volume.
+const HELPER_LINES: &str = "\
+hyprix:gpu = on
+env = VK_ICD_FILENAMES,/data/usr/share/vulkan/icd.d/lvp_icd.json
+env = LD_LIBRARY_PATH,/data/usr/lib/x86_64-linux-gnu
+";
+
+/// `test-compositor --boot helper-desktop`: hyprix drawing its frames
+/// through hyprix-gpu end to end (`docs/GPU-COMPOSITOR.md`), on lavapipe
+/// in the guest -- the protocol, the arena, the helper's Vulkan backend,
+/// its memfd outputs and hyprix's reading them back -- judged as the
+/// virgl boot is (`test-compositor --gl`): the guest's own screenshot of
+/// the decorated pair against the picture the software renderer blesses,
+/// hyprix saying the helper draws, and never that it fell back.
+///
+/// Skipped, and said, where the yserver or intel-uapi volume is missing,
+/// or on an architecture other than x86-64.
+pub(super) fn test_helper_desktop(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let Some(volume) = super::tole_demo::gpu_volume(arch) else {
+        return Ok(());
+    };
+    if let Err(why) = crate::intel_uapi::volume() {
+        println!("  {arch}: helper-desktop skipped: {why}");
+        return Ok(());
+    }
+    let mut args = args.clone();
+    args.data_image = Some(volume);
+    let config = format!("{HELPER_LINES}{}", super::drawing::GPU_CONFIG);
+    super::drawing::gpu_picture(
+        arch,
+        programs,
+        &args,
+        (&config, crate::hyprix_gpu::carried()?),
+        &[],
+        DRAWN_BY_HELPER,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
