@@ -158,6 +158,14 @@ fn read_fields(reader: &mut impl BufRead) -> io::Result<Vec<(String, String)>> {
     Ok(fields)
 }
 
+/// What the window says when the system to copy cannot be read: the
+/// medium was started as a CD or a USB stick, which Ferrix does not read
+/// as a disk yet (docs/TRY-FERRIX.md). Nothing has been written then.
+const NO_MEDIUM: &str = "Ferrix cannot read the medium it was started from: it was started \
+from a CD or a USB stick, which this version cannot read as a disk yet, so there is nothing \
+to copy. Nothing was written to any disk. To install, attach the ISO to a virtual machine as a \
+disk (virtio, SATA or NVMe) instead of a CD, as Try Ferrix on GitHub shows.";
+
 /// The `disks` answer.
 fn disks(out: &mut UnixStream) -> Result<(), String> {
     let text = listing();
@@ -374,7 +382,10 @@ fn run_install(fields: &[(String, String)], out: &mut dyn Write, busy: &[&str]) 
         })
     };
     let result = plan().and_then(|plan| {
-        let live = find_live()?;
+        let live = find_live().map_err(|why| {
+            println!("ferrix-installd: {why}");
+            NO_MEDIUM.to_owned()
+        })?;
         println!(
             "ferrix-installd: installing onto {} from {live} for {}",
             plan.target,
