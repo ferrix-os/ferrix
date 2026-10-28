@@ -349,13 +349,19 @@ maximized to 1024 by 746, 85% green and no blue, the click at 512,373 and
 the key 41. Its negative control is a program built not to call
 `ResizeBuffers` (DXVK then scales the old blue frames to the window), and
 the gate fails with "the program's buffers are [], not the window's
-1024x746". Endfield on the N150 had shown its loading screen in the top
-left corner after a maximize, the rest black: that was yserver's zero-copy
-path (the window's backing owed the frames and never written, and the
-maximize carried the stale backing over), which only a card's DRI3
-buffers take and which this gate on lavapipe therefore does not reach.
-The fork's unit test `a_backing_owed_a_direct_present_is_settled_before_it_goes`
-holds that part.
+1024x746".
+
+What Endfield on the N150 showed that day came from yserver's zero-copy
+path, which only a card's DRI3 buffers take, and which this gate on
+lavapipe therefore does not reach: the old loading screen in the corner
+after a maximize (the window's backing owed the frames and never
+written, then carried over), a crash at the new size (lavapipe could not
+import anv's 1920x974 buffers; the game's `vkCreateSwapchainKHR` failed
+and it stopped taking input), and black dashes and a flickering HUD (a
+buffer made idle before hyprix had read it). The fork's unit tests hold
+each, and `tools/common/n150/endfield/zero-copy-soak.sh` runs this program
+on the box on anv, through the zero-copy path, maximizing and restoring
+it, and fails when its presents stall or it cannot follow the maximize.
 
 **What Ferrix answered wrongly on the way:** nothing. Both boots passed on
 their first run under KVM (2026-10-12): `wineboot` about 38 s of guest time,
