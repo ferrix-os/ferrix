@@ -29,7 +29,7 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
-## v0.2.0 (2026-10-28), the first live ISO
+## v0.2.0 (2026-10-29), the first live ISO
 
 A live ISO you can boot: Ferrix's desktop, Yoru, starts from memory, with
 an installer that puts Ferrix on a disk of its own. Download
@@ -130,6 +130,9 @@ What does not work, yet:
   under Proton, say -- can occasionally fail to start; and after such a
   program is killed the system can stall for minutes, the network and
   `ssh` not answering, before it recovers. Both were seen on the N150.
+- **The desktop is drawn in software on a PC.** "See-through windows"
+  (Settings, Appearance) makes large unfocused windows slow to draw on a
+  low-end processor: leave it off there.
 - The dock's clock shows UTC whatever the time zone; programs (`date`, the
   lock screen's clock) follow the zone you chose.
 - The installer does not resize another system's partition, write a
