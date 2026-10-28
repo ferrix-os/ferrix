@@ -1473,7 +1473,10 @@ pub fn current_resets_on_fork() -> bool {
 /// # Errors
 ///
 /// The [`ferrix_sched_class::DomainError`] of the refusal.
-pub(crate) fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
+pub(crate) fn make_domain(
+    cpus: CpuSet,
+    mode: Mode,
+) -> Result<Domain, ferrix_sched_class::DomainError> {
     if !ferrix_kernel_sched_select::mode_available(mode) {
         return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
     }
