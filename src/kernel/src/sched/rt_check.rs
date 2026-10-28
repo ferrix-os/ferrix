@@ -38,9 +38,10 @@
 //!   fair 200 times beside a waiting one, with processors idle to steal:
 //!   the running task is moved only at its processor's next decision
 //!   (line 30, B1; its control is the move made at the call, FX-0537).
-//! * **The modes** (L.sched.115, L.sched.116): a `SoftRt` domain is refused
-//!   by name where the tier is built, `ModeUnavailable` where it is not, and
-//!   a real-time policy refused there too.
+//! * **The modes** (L.sched.115, L.sched.116): a `SoftRt` domain is made
+//!   where the tier is built (run at run time by `domains_check`),
+//!   `ModeUnavailable` where it is not, and a real-time policy refused there
+//!   too.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -188,8 +189,8 @@ pub(super) fn run() -> Result<&'static str, &'static str> {
 fn modes() -> Result<(), &'static str> {
     let made = super::make_domain(CpuSet::of(0), Mode::SoftRt);
     if super::realtime_built() {
-        if made != Err(DomainError::NotCreatable(Mode::SoftRt)) {
-            return Err("a SoftRt domain was not refused as compiled, not yet creatable");
+        if made.map(|domain| domain.mode()) != Ok(Mode::SoftRt) {
+            return Err("a SoftRt domain was refused in a build with its tier");
         }
     } else {
         if made != Err(DomainError::ModeUnavailable(Mode::SoftRt)) {

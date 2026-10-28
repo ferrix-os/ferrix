@@ -322,8 +322,15 @@ bound on the kernel's non-preemptible sections (F-95), no threaded
 interrupts, and no priority inheritance through user locks
 (`FUTEX_LOCK_PI` stays `ENOSYS`). A woken real-time task stays on its own
 processor (L.sched.110): a higher priority waits for that processor even
-while another is idle. A `SoftRt` domain is compiled in and refused by name,
-"compiled, not yet creatable", until those land (L.sched.115).
+while another is idle. A `SoftRt` domain is made at run time inside the kernel
+(docs/SCHED-CLASSES.md §9f, step 5a, L.sched.115, L.sched.118-128): a set
+of processors taken out of `Throughput`, running only the tasks admitted
+to it; no system call makes one yet (step 5b). What it adds is
+isolation: the boot domain's tasks never run on its processors
+(H.SCHED.21). It adds no latency claim, and **until interrupt placement
+(GAME-PATH's G3) a `SoftRt` domain's processors take every device
+interrupt they took before** (C1), each of them noise on a real-time task
+there; the per-processor kernel tasks run there too (V7).
 
 **C2.** A `SCHED_FIFO` task at priority 99 starves the kernel's own fair
 worker tasks -- the reaper, the network's -- on its processor for 950 ms of
