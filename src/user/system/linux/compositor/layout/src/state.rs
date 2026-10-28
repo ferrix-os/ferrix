@@ -4377,28 +4377,38 @@ impl State {
             reason = "as above: a configured reach is a handful of pixels"
         )]
         let reach = reach as f64;
-        self.layout()
+        // From the top down. A floating window the press is inside ends
+        // the search: a press on its pixels is its own, not a grab of the
+        // border of a window beneath it. Tiled windows do not overlap, and
+        // with no gaps one's ring reaches into its neighbour, where the
+        // shared edge is grabbed, as before.
+        let layout = self.layout();
+        let windows: Vec<&Placed> = layout
             .iter()
             .flat_map(|output| output.windows.iter())
-            .rev()
-            .find_map(|placed| {
-                if self
-                    .workspace_of(placed.window)
-                    .and_then(|workspace| self.fullscreen(workspace))
-                    .is_some_and(|(id, _)| id == placed.window)
-                {
+            .collect();
+        for placed in windows.into_iter().rev() {
+            if self
+                .workspace_of(placed.window)
+                .and_then(|workspace| self.fullscreen(workspace))
+                .is_some_and(|(id, _)| id == placed.window)
+            {
+                continue;
+            }
+            let (left, top, right, bottom) = edges(placed.rect);
+            let inside = at.0 >= left && at.0 < right && at.1 >= top && at.1 < bottom;
+            if inside {
+                if placed.floating {
                     return None;
                 }
-                let (left, top, right, bottom) = edges(placed.rect);
-                let inside = at.0 >= left && at.0 < right && at.1 >= top && at.1 < bottom;
-                let within = at.0 >= left - reach
-                    && at.0 < right + reach
-                    && at.1 >= top - reach
-                    && at.1 < bottom + reach;
-                if inside || !within {
-                    return None;
-                }
-                Some((
+                continue;
+            }
+            let within = at.0 >= left - reach
+                && at.0 < right + reach
+                && at.1 >= top - reach
+                && at.1 < bottom + reach;
+            if within {
+                return Some((
                     placed.window,
                     Corner {
                         left: at.0 < left,
@@ -4406,8 +4416,10 @@ impl State {
                         top: at.1 < top,
                         bottom: at.1 >= bottom,
                     },
-                ))
-            })
+                ));
+            }
+        }
+        None
     }
 
     /// `moveoutofgroup`: take the focused window out of its group and put it

@@ -439,6 +439,12 @@ impl Bars {
         (!covered).then_some((window, hit))
     }
 
+    /// Say that `window`'s bar is at `rect`, as a drawn frame does.
+    #[cfg(test)]
+    pub(crate) fn place(&mut self, window: WindowId, rect: Rect) {
+        self.placed.push((window, rect));
+    }
+
     /// Whether a press on `window`'s bar now is the second of a double
     /// click; remembers it either way.
     pub fn double_click(&mut self, window: WindowId) -> bool {
