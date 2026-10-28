@@ -561,6 +561,7 @@ impl<'r> Compositor<'r> {
         crate::helper::set_mode(crate::helper::Mode::parse(
             config.str("hyprix:gpu").unwrap_or("off"),
         ));
+        crate::helper::set_env(&config.env);
         let screens = Screen::all(backends, &rules, options.renderer, report)?;
         // The `windowrule` lines, which are applied when a window maps.
         let window_rules = crate::rules::Rules::new(&config, report);
@@ -1787,6 +1788,7 @@ impl<'r> Compositor<'r> {
                 crate::helper::set_mode(crate::helper::Mode::parse(
                     self.config.str("hyprix:gpu").unwrap_or("off"),
                 ));
+                crate::helper::set_env(&self.config.env);
                 self.rebuild_animations();
                 (self.report)("hyprix: reloaded the configuration");
                 run_exec(
