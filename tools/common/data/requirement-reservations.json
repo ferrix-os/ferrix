@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.x86_64.212-213"],
+      "owner": "power-seat",
+      "branch": "power-seat",
+      "date": "2026-10-29",
+      "purpose": "x86-64 ACPI S5 power-off (the consultant's OK IF (1)-(12), ledger 4704): L.x86_64.212 the S5 registers recorded at boot, all or nothing (FADT PM1a/b_CNT, SMI_CMD, ACPI_ENABLE, the DSDT's \\_S5); L.x86_64.213 power_off's SLP_TYP then SLP_TYP|SLP_EN writes after debug_exit returned"
+    },
+    {
       "ids": [
         "H.QUOTA.18-21",
         "L.mm.83-90"
