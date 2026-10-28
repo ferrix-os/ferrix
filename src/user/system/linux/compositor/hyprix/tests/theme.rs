@@ -58,6 +58,28 @@ fn yoru_parses_floats_and_styles_its_frames() {
         style.shadow_inactive.is_some(),
         "a lighter shadow elsewhere"
     );
+    // Software screens draw no blur under Yoru; its shell's layers, drawn
+    // for one, get a dark scrim behind them instead (the customer's
+    // unreadable wallpaper switcher over a white window, 2026-10-28).
+    assert_eq!(config.int("hyprix:blur_in_software"), Some(0));
+    let scrim = style.blur_scrim.expect("a scrim where there is no blur");
+    assert!(scrim.alpha() >= 0xC0, "near-opaque: {scrim:?}");
+    assert!(
+        scrim.red() < 0x30 && scrim.green() < 0x30 && scrim.blue() < 0x40,
+        "dark, under light text: {scrim:?}"
+    );
+    let rules: Vec<_> = config
+        .layer_rules
+        .iter()
+        .filter_map(|raw| compositor_config::LayerRule::parse(&raw.value).ok())
+        .collect();
+    for namespace in ["yoru-walls", "yoru-dock", "yoru-sidebar-left", "launcher"] {
+        let layered = compositor_config::Layered::of(&rules, namespace);
+        assert!(
+            layered.blur,
+            "{namespace} asks for the blur the scrim stands in for"
+        );
+    }
     let bars = hyprix::titlebar::Style::from_config(&config);
     assert_eq!(bars.height, 34);
     assert!(bars.title_left);

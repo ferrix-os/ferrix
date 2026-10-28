@@ -72,6 +72,18 @@ pub struct Style {
     /// rather than from the windows it floats over. Off by default, as in
     /// Hyprland; a window's own `xray` rule says otherwise for that one.
     pub xray: bool,
+    /// `hyprix:blur_scrim`: what is laid behind a layer surface whose
+    /// `layerrule` asked for a blur, on a screen that draws none -- a
+    /// software screen under `hyprix:blur_in_software = 0`, or
+    /// `blur:enabled` off. `None`, the default, lays nothing, as Hyprland.
+    ///
+    /// A shell drawn for a blurred backdrop is translucent, its text light
+    /// on a little of its own ground: over a bright window and no blur,
+    /// that text is unreadable (Yoru's wallpaper switcher over a white
+    /// window, the customer, 2026-10-28). A near-opaque dark colour behind
+    /// it keeps it readable for the price of one blend a pixel,
+    /// where even a downscaled blur is most of a software frame.
+    pub blur_scrim: Option<Color>,
 }
 
 impl Style {
@@ -223,6 +235,8 @@ impl Style {
                 .unwrap_or(true)
                 .then(|| blur_of(config)),
             xray: config.bool("decoration:blur:xray").unwrap_or(false),
+            blur_scrim: colour_or_unset(config, "hyprix:blur_scrim")
+                .filter(|colour| colour.alpha() > 0),
         }
     }
 
@@ -1198,6 +1212,14 @@ fn draw_layer<P: Painter>(
             Some(behind) => canvas.blur_backdrop(behind, rect, Rounding::none(), &blur, damage),
             None => canvas.blur(rect, Rounding::none(), &blur, damage),
         }
+    } else if let Some(scrim) = style
+        .blur_scrim
+        .filter(|_| layer.blur && style.blur.is_none())
+        && surface.format() == Format::Argb8888
+    {
+        // No blur on this screen, and the surface was drawn for one: the
+        // scrim instead, over the rectangle the blur would have covered.
+        canvas.fill(rect, scrim, damage);
     }
     // Stretched to its rectangle, as a window is: a client that drew at
     // scale 1 on a screen at scale 2 -- every one the compositor has not

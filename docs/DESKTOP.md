@@ -900,6 +900,19 @@ dock's blur is three quarters of the frame. A guest drawing in software
 A host test also checks that the glow and the inactive shadow are the same
 picture on the GPU as in software.
 
+Yoru's theme does keep it off in software (`hyprix:blur_in_software = 0`),
+and since 2026-10-28 lays `hyprix:blur_scrim` instead: Nocturne's ground at
+85% behind every layer surface whose rule asks for a blur -- the dock, the
+sidebars, the wallpaper switcher, the launcher -- on a screen that draws
+none, which is every PC the live ISO boots on. The shell is drawn for a
+blurred backdrop, and without one the switcher's light text over a bright
+window was unreadable. The scrim is a fill of the rectangle the blur would
+have covered, inside the damage: 2.5 ms for a whole 1920x1080 surface on
+one of nazuna's cores, where the blur was most of a frame. `compositor-render`'s
+`a_shell_drawn_for_a_blur_gets_the_scrim_where_no_blur_is_drawn` holds the
+picture (`blur-scrim-switcher`) and the text's contrast, 4.5:1 or better
+with the scrim and 2.7:1 without.
+
 On the answers to §6.4: no Alt or Ctrl bind in `yoru-keys.conf` (the
 theme's test refuses one), the dock's hints say `Super`, Files is shelf,
 and the shell has the weather's opt-in rule (§6.6) and its test.
