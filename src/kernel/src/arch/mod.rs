@@ -86,6 +86,10 @@ pub enum StatLayout {
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 mod arm_common;
 
+/// Arm's power-off is its `shutdown` (PSCI `SYSTEM_OFF`); only x86-64 tells a
+/// halt from a power-off.
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::shutdown as power_off;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -117,6 +121,9 @@ pub use aarch64::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
+/// As AArch64's.
+#[cfg(target_arch = "arm")]
+pub use armv7a::shutdown as power_off;
 #[cfg(target_arch = "arm")]
 pub use armv7a::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -403,7 +410,8 @@ pub(crate) use x86_64::{
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
-    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
+    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, power_off, reset,
+    shutdown,
 };
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{

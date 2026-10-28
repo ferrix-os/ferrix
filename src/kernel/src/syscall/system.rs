@@ -764,10 +764,10 @@ mod command {
 /// `reboot`: power off, halt or restart the machine, after checking the magic
 /// numbers that keep a stray call from doing it.
 ///
-/// Power-off and halt both call the architecture's `shutdown`, which is the
-/// kernel's own way of stopping and powers the machine off where it can --
-/// halting without powering off would leave a QEMU run waiting forever for a
-/// machine that has nothing more to say. Restart calls the architecture's
+/// Power-off calls the architecture's `power_off` and halt its `shutdown`:
+/// both stop the machine and end a QEMU run (halting without that would leave
+/// a run waiting forever for a machine that has nothing more to say), and on
+/// x86-64 only the power-off also enters ACPI's S5, which switches a PC off. Restart calls the architecture's
 /// `reset`, which powers off instead where firmware cannot reset: a machine
 /// that was asked to come back and did not is noticed, and a kernel that
 /// pretended to reset and carried on running is not. The Ctrl-Alt-Del
@@ -818,7 +818,7 @@ pub(crate) fn sys_reboot(
         command::POWER_OFF => {
             println!("reboot: Power down");
             let _ = crate::console::pstore::stop(Stop::PowerOff);
-            arch::shutdown()
+            arch::power_off()
         }
         command::HALT => {
             println!("reboot: System halted");

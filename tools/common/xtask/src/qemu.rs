@@ -2870,16 +2870,18 @@ fn qemu_command(
                     .x86_cpu
                     .clone()
                     .unwrap_or_else(|| x86_cpu_for(&binary, &accelerator)),
-                // A controlled way for the guest to end the test: writing 0x10
-                // to port 0xF4 exits QEMU with status 33.
-                "-device",
-                "isa-debug-exit,iobase=0xf4,iosize=0x04",
                 // A VT-d unit for stage 10's IOMMU domains, remapping
                 // interrupts (`INTEL_IOMMU`), unless the boot is
                 // `test-nvrm`'s without.
                 "-device",
                 intel_iommu(args),
             ]);
+            // A controlled way for the guest to end the test: writing 0x10
+            // to port 0xF4 exits QEMU with status 33. Left off for a run
+            // that must power off as a PC does, through ACPI's S5.
+            if !args.no_debug_exit {
+                let _ = command.args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]);
+            }
             attach_intel_gpu_standin(&mut command, args);
             x86_heads(&mut command, args);
             // The image on the first port of q35's AHCI controller, where a

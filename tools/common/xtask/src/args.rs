@@ -516,6 +516,11 @@ pub(crate) struct Args {
     /// firmware's boot order: the live ISO written to a stick
     /// (`test-iso`). Never a flag of its own.
     pub(crate) boot_usb: bool,
+    /// Leave QEMU's `isa-debug-exit` device off the x86-64 machine, so that
+    /// only the guest's own ACPI power-off ends QEMU, as on the documented
+    /// QEMU line and a PC (`test-iso`'s power-off, `L.x86_64.213`). Never a
+    /// flag of its own.
+    pub(crate) no_debug_exit: bool,
     /// `--plan <DIR>`: a plan of builds `FERRIX_BUILDS=record:` wrote, which
     /// `test-selfhost` has Ferrix carry out and `builds-execute` carries out
     /// (see `crate::builds`).

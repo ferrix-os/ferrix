@@ -47,14 +47,14 @@
     },
     {
       "file": "arch/x86_64/cpu.rs",
-      "lines": "1351, 1357",
+      "lines": "1379, 1385",
       "category": "defensive",
       "match": "let empty = [0_u8; 10];",
       "why": "The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1825, 1827",
+      "lines": "1943, 1945",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."

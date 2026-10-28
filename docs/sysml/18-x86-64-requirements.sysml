@@ -2565,10 +2565,57 @@ package FerrixX8664Requirements {
                 status 33, and init's exit line is in the log (F-46).";
             attribute :>> parent = "H.BOOT.6";
             attribute :>> unit = ("arch::x86_64::shutdown",
+                "arch::x86_64::power_off",
                 "arch::x86_64::cpu::debug_exit",
                 "arch::x86_64::cpu::outl",
                 "console::announce_power_off",
                 "console::announce_power_off_failed");
+        }
+        requirement <'L.x86_64.212'> theSoftOffIsRecordedWhole : ItemLowLevel {
+            doc /* ACPI 6.5 7.4.2 and 16.1.7; the consultant's OK IF, ledger
+                line 4704, conditions 3 and 4. The AML is matched, not run:
+                ferrix_acpi::sleep::s5_sleep_types. */
+            attribute :>> statement = "At interrupt bring-up the kernel shall
+                record what entering S5 needs -- the FADT's PM1a and PM1b
+                control ports, SLP_TYPa and SLP_TYPb
+                from the DSDT's Name (_S5, Package) -- all of it or nothing:
+                nothing on a hardware-reduced machine, for a PM1 control block
+                absent, outside I/O space or past 16 bits, a PM1_CNT_LEN under
+                2, a DSDT that fails its signature, length or checksum, and no
+                single constant _S5 package. SMI_CMD and ACPI_ENABLE are
+                recorded with them, an SMI_CMD past 16 bits as none (no
+                handoff).";
+            attribute :>> criterion = "ferrix-acpi's host tests: q35's and a
+                firmware's _S5 bytes read, every constant encoding and PkgLength
+                size, every truncation and arbitrary bytes no answer and no
+                panic, a method, a string and disagreeing packages no answer,
+                and each fail-closed case of the FADT and the DSDT recording
+                nothing.";
+            attribute :>> parent = "H.BOOT.6";
+            attribute :>> unit = ("arch::x86_64::record_sleep_registers");
+        }
+        requirement <'L.x86_64.213'> theMachineEntersSoftOff : ItemLowLevel {
+            doc /* ACPI 6.5 4.8.3.2 and 16.1.7, Linux's acpi_hw_legacy_sleep;
+                the consultant's OK IF, ledger line 4704, conditions 1, 2 and
+                10. No _PTS is run (no AML interpreter), and the other
+                processors are not stopped first, as for shutdown and reset:
+                a machine S5 does not take is said and halted. */
+            attribute :>> statement = "power_off shall, after the debug-exit write
+                returned and with interrupts masked, where S5 was recorded,
+                hand the machine to ACPI through SMI_CMD when SCI_EN is clear
+                (waiting a bounded time), write SLP_TYP to PM1a and PM1b, then
+                SLP_TYP with SLP_EN, and only then say the power-off failed and
+                halt.";
+            attribute :>> criterion = "cargo xtask test-iso: the live session's
+                person types poweroff on a QEMU line with no isa-debug-exit,
+                FERRIX-POWER-OFF is printed with no FERRIX-POWER-OFF-FAILED
+                after it, and QEMU exits by itself with status 0; test-boot
+                x86_64 still exits 33 (L.x86_64.98).";
+            attribute :>> parent = "H.BOOT.6";
+            attribute :>> unit = ("arch::x86_64::power_off",
+                "arch::x86_64::acpi_power_off",
+                "arch::x86_64::cpu::outw",
+                "arch::x86_64::cpu::inw");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware

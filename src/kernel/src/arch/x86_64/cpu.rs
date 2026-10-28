@@ -52,6 +52,34 @@ pub(crate) unsafe fn outl(port: u16, value: u32) {
     }
 }
 
+/// Write a 16-bit word to an I/O port.
+///
+/// # Safety
+///
+/// (FIRMWARE) As [`outb`]: the caller must know what device is behind
+/// `port`; its one caller writes the PM1 control blocks firmware named.
+pub(crate) unsafe fn outw(port: u16, value: u16) {
+    // SAFETY: (FIRMWARE) the caller guarantees the port and the value.
+    unsafe {
+        asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
+    }
+}
+
+/// Read a 16-bit word from an I/O port.
+///
+/// # Safety
+///
+/// (FIRMWARE) As [`inb`]; its one caller reads the PM1 control blocks
+/// firmware named, which reading does not change.
+pub(crate) unsafe fn inw(port: u16) -> u16 {
+    let value: u16;
+    // SAFETY: (FIRMWARE) the caller guarantees the port.
+    unsafe {
+        asm!("in ax, dx", out("ax") value, in("dx") port, options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
 /// Halt until the next interrupt.
 pub(crate) fn hlt() {
     // SAFETY: (SYSREG) `hlt` at ring 0 stops the CPU until an interrupt arrives and has

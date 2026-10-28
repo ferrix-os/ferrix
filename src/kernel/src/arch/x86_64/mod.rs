@@ -1774,10 +1774,11 @@ pub(crate) fn frame_pointer() -> u64 {
     cpu::frame_pointer()
 }
 
-/// Stop the machine, and QEMU with it, once the console has sent its last line.
+/// Stop the machine, and QEMU with it, once the console has sent its last line:
+/// `reboot(2)`'s `HALT`, and what [`power_off`] does before S5.
 ///
-/// QEMU's debug-exit device is the only way off, so QEMU's status is always 33
-/// for a power-off here; real hardware discards the write and is halted.
+/// QEMU's debug-exit device is the way out of a gate's QEMU, whose status is
+/// then 33; real hardware discards the write and is halted.
 pub fn shutdown() -> ! {
     powerctl::restore("power-off");
     crate::console::announce_power_off();
@@ -1785,6 +1786,123 @@ pub fn shutdown() -> ! {
     cpu::debug_exit();
     crate::console::announce_power_off_failed();
     halt()
+}
+
+/// Power the machine off, once the console has sent its last line: QEMU's
+/// debug-exit device first, as [`shutdown`] does, so a gate's QEMU still
+/// exits 33 (`L.x86_64.98`); then ACPI's soft-off, S5, where firmware described
+/// it ([`acpi_power_off`], `L.x86_64.213`); and only if the machine is still
+/// running after both, the failure line and a halt.
+///
+/// `reboot(2)`'s `POWER_OFF` and the power-off at init's exit come here;
+/// `HALT` stays [`shutdown`], which never enters S5 (the consultant's OK IF,
+/// ledger line 4704, condition 1).
+pub fn power_off() -> ! {
+    powerctl::restore("power-off");
+    crate::console::announce_power_off();
+    crate::console::drain();
+    cpu::disable_interrupts();
+    cpu::debug_exit();
+    acpi_power_off();
+    crate::console::announce_power_off_failed();
+    halt()
+}
+
+/// What [`acpi_power_off`] writes, from the FADT and the DSDT's `\_S5`
+/// ([`record_sleep_registers`]): the PM1 control ports (`PM1b` 0 for none), the
+/// sleep types for S5, `SMI_CMD` and `ACPI_ENABLE`. Read only once
+/// [`SLEEP_RECORDED`] is set, which is set last and only when all of it was
+/// found (condition 3).
+static SLEEP_PM1A: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+static SLEEP_PM1B: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+static SLEEP_TYPE_A: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+static SLEEP_TYPE_B: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+static SLEEP_SMI_COMMAND: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
+static SLEEP_ACPI_ENABLE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+static SLEEP_RECORDED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// `PM1_CNT`'s `SCI_EN`: set once the machine is in ACPI mode.
+const SCI_EN: u16 = 1 << 0;
+/// `PM1_CNT`'s `SLP_TYP` field, bits 10 to 12.
+const SLP_TYP_SHIFT: u32 = 10;
+const SLP_TYP_MASK: u16 = 0x7 << SLP_TYP_SHIFT;
+/// `PM1_CNT`'s `SLP_EN`: writing it enters the state `SLP_TYP` names.
+const SLP_EN: u16 = 1 << 13;
+/// How many [`settle_briefly`]s, about a millisecond each, firmware gets to
+/// hand the machine to ACPI after `ACPI_ENABLE` (condition 10).
+const ACPI_ENABLE_WAIT: u32 = 300;
+
+/// Remember what entering S5 needs, all of it or nothing, for
+/// [`acpi_power_off`]: by the time the machine powers off, the tables' memory
+/// has been reclaimed. A hardware-reduced machine, a PM1 block that is
+/// absent, outside I/O space or past 16 bits, and a DSDT with no single
+/// constant `\_S5` record nothing (`ferrix_acpi::sleep`, `L.x86_64.212`).
+fn record_sleep_registers(acpi: &ferrix_acpi::Acpi<'_, crate::discovery::acpi::DirectMap>) {
+    use core::sync::atomic::Ordering::{Relaxed, Release};
+    let Some(control) = acpi.sleep_control() else {
+        return;
+    };
+    SLEEP_PM1A.store(control.pm1a, Relaxed);
+    SLEEP_PM1B.store(control.pm1b.unwrap_or(0), Relaxed);
+    SLEEP_TYPE_A.store(control.sleep_type_a, Relaxed);
+    SLEEP_TYPE_B.store(control.sleep_type_b, Relaxed);
+    SLEEP_SMI_COMMAND.store(control.smi_command, Relaxed);
+    SLEEP_ACPI_ENABLE.store(control.acpi_enable, Relaxed);
+    SLEEP_RECORDED.store(true, Release);
+}
+
+/// Enter S5 where [`record_sleep_registers`] found how (`L.x86_64.213`).
+///
+/// Hand the machine to ACPI first if firmware has not (`SCI_EN` clear, and
+/// `SMI_CMD` and `ACPI_ENABLE` named), waiting a bounded time for it; then,
+/// as Linux's `acpi_hw_legacy_sleep` does, write `SLP_TYP` to `PM1a` and `PM1b`,
+/// then `SLP_TYP` with `SLP_EN`, and give it time to take hold. Returns only
+/// on a machine that did not power off, or where nothing was recorded.
+/// Interrupts are masked by the caller and nothing is printed here.
+fn acpi_power_off() {
+    use core::sync::atomic::Ordering::{Acquire, Relaxed};
+    if !SLEEP_RECORDED.load(Acquire) {
+        return;
+    }
+    let pm1a = SLEEP_PM1A.load(Relaxed);
+    let pm1b = SLEEP_PM1B.load(Relaxed);
+    let smi = SLEEP_SMI_COMMAND.load(Relaxed);
+    let enable = SLEEP_ACPI_ENABLE.load(Relaxed);
+    // SAFETY: (FIRMWARE) called below only with pm1a and pm1b, the ports the
+    // FADT named as the PM1 control blocks; reading one changes nothing.
+    let read = |port: u16| unsafe { cpu::inw(port) };
+    // SAFETY: (FIRMWARE) called below only with pm1a and pm1b and a value
+    // that changes nothing but SLP_TYP and SLP_EN, to the DSDT's \_S5 type:
+    // with SLP_EN it switches the machine off, which is the point.
+    let write = |port: u16, value: u16| unsafe { cpu::outw(port, value) };
+    if read(pm1a) & SCI_EN == 0 && smi != 0 && enable != 0 {
+        // SAFETY: (FIRMWARE) the FADT named this port and value as the way to
+        // hand the machine to ACPI.
+        unsafe { cpu::outb(smi, enable) };
+        for _ in 0..ACPI_ENABLE_WAIT {
+            if read(pm1a) & SCI_EN != 0 {
+                break;
+            }
+            settle_briefly();
+        }
+    }
+    let blocks = [
+        (pm1a, SLEEP_TYPE_A.load(Relaxed)),
+        (pm1b, SLEEP_TYPE_B.load(Relaxed)),
+    ];
+    for with_enable in [false, true] {
+        for (port, sleep_type) in blocks {
+            if port == 0 {
+                continue;
+            }
+            let kept = read(port) & !(SLP_TYP_MASK | SLP_EN);
+            let typed = kept | ((u16::from(sleep_type) << SLP_TYP_SHIFT) & SLP_TYP_MASK);
+            write(port, if with_enable { typed | SLP_EN } else { typed });
+        }
+    }
+    for _ in 0..10 {
+        settle();
+    }
 }
 
 /// The FADT's reset register, when firmware describes one in I/O space: its
@@ -1905,6 +2023,7 @@ pub unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'static st
         .map_err(|_| "the machine has no readable ACPI tables")?;
     let acpi = firmware.acpi();
     record_reset_register(&acpi);
+    record_sleep_registers(&acpi);
 
     let counter = clock::init(&acpi)?;
     // The HPET is the last resort and a slow one: said here, beside the

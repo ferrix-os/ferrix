@@ -24,13 +24,18 @@
     "is here to catch."
   ],
 
-  "max_register_sites": 40,
+  "max_register_sites": 47,
   "//max_register_sites": [
     "The cap that binds. Register access is a fixed cost here: a console per",
     "architecture, the x86 port primitives and their few users, the MMIO",
     "accessors themselves, and PCI configuration space. 34 sites today; the",
     "slack is for the boards this kernel has yet to boot on, not for a driver.",
-    "A new device is a ring-3 driver, and adds nothing here."
+    "A new device is a ring-3 driver, and adds nothing here.",
+    "47 since 2026-10-29 (power-seat, ACPI S5, L.x86_64.213, the consultant's",
+    "ledger lines 4704 and 4722): the 16-bit port primitives outw/inw in cpu.rs",
+    "(+4, 7 to 11) and the power-off's own accesses in x86_64/mod.rs (+3, 4 to",
+    "7: PM1's read and write, SMI_CMD's handoff). Not a device: the machine's own power-off, the",
+    "reset register's sibling, written only as the last act of reboot(2)."
   ],
 
   "register_paths": [
@@ -61,8 +66,8 @@
     {
       "file": "src/kernel/src/arch/x86_64/cpu.rs",
       "kind": "register",
-      "max_sites": 8,
-      "reason": "The x86 port primitives, inb/outb/inl/outl, and the asm that implements them. A port cannot be reached by a pointer; the instruction is the only spelling."
+      "max_sites": 11,
+      "reason": "The x86 port primitives, inb/outb/inw/outw/inl/outl, and the asm that implements them. A port cannot be reached by a pointer; the instruction is the only spelling."
     },
     {
       "file": "src/kernel/src/arch/x86_64/clock.rs",
@@ -73,8 +78,8 @@
     {
       "file": "src/kernel/src/arch/x86_64/mod.rs",
       "kind": "register",
-      "max_sites": 5,
-      "reason": "The keyboard controller's reset pulse, the last resort when a triple fault is the alternative, and the 0x80 post code used as an I/O delay."
+      "max_sites": 7,
+      "reason": "The keyboard controller's reset pulse, the last resort when a triple fault is the alternative, and the 0x80 post code used as an I/O delay. Since 2026-10-29 the ACPI S5 power-off (L.x86_64.213, ledger 4704): PM1's control blocks read and written once each through one closure, and SMI_CMD's handoff."
     },
     {
       "file": "src/kernel/src/arch/x86_64/console.rs",

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2402 declarations in the core's files, 175 in the item's; 78 checks-only.
+2406 declarations in the core's files, 175 in the item's; 78 checks-only.
 
 ## ferrix-kernel-core
 
@@ -321,6 +321,9 @@ checks above is `pub` for raised checks (F3).
 | `mtrr_type` | re-export | item |  |
 | `nospec_index` | re-export | item |  |
 | `power_claim` | re-export | item |  |
+| `power_off` | re-export | item, load |  |
+| `power_off` | re-export | item, load |  |
+| `power_off` | re-export | item, load |  |
 | `power_probe` | re-export | item |  |
 | `power_read` | re-export | item |  |
 | `power_set` | re-export | item |  |
@@ -357,9 +360,9 @@ checks above is `pub` for raised checks (F3).
 | `setup_signal_frame` | re-export | load |  |
 | `setup_signal_frame` | re-export | load |  |
 | `setup_signal_frame` | re-export | load |  |
-| `shutdown` | re-export | item, load |  |
-| `shutdown` | re-export | item, load |  |
-| `shutdown` | re-export | item, load |  |
+| `shutdown` | re-export | load |  |
+| `shutdown` | re-export | load |  |
+| `shutdown` | re-export | load |  |
 | `sigpage_code` | re-export | load |  |
 | `start_msr_log` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
@@ -881,6 +884,7 @@ checks above is `pub` for raised checks (F3).
 | `kernel_write_protected` | fn | bin |  |
 | `pat_at_entry` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `power_claim` | fn | item |  |
+| `power_off` | fn | item, load |  |
 | `power_probe` | fn | item |  |
 | `power_read` | fn | item |  |
 | `power_set` | fn | item |  |
@@ -890,7 +894,7 @@ checks above is `pub` for raised checks (F3).
 | `read_console_byte` | fn | load |  |
 | `reset` | fn | item, load, bin |  |
 | `ring3_reads_counter` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `shutdown` | fn | item, load |  |
+| `shutdown` | fn | load |  |
 | `start_msr_log` | fn | bin |  |
 | `start_watchdogs` | fn | bin |  |
 | `sync_instructions` | fn | load |  |

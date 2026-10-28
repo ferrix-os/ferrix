@@ -691,6 +691,11 @@ const SEAT_ALLOWED: &str = "allowed: the seat's";
 /// opened with SUPER RETURN, and `poweroff` or `reboot` typed into it. A
 /// power-off must end QEMU by itself through the kernel's power-off; a
 /// restart must bring the desktop back. Booted from the ISO as a CD.
+///
+/// The power-off runs on a QEMU line with no `isa-debug-exit` device, and
+/// must end with QEMU exiting by itself with status 0: ACPI's S5, as a PC
+/// powers off.
+/// Verifies: `L.x86_64.213`, H.BOOT.6
 fn seat_power(arch: Arch, built: &Built, args: &Args, power: Power) -> Result<()> {
     let port = free_port()?;
     let boot = Args {
@@ -700,6 +705,9 @@ fn seat_power(arch: Arch, built: &Built, args: &Args, power: Power) -> Result<()
         qmp_port: Some(port),
         // A restart restarts the machine rather than ending QEMU.
         reset: power == Power::Restart,
+        // A power-off must switch the machine off as a PC's does, through
+        // ACPI's S5, with no debug-exit device to end QEMU (L.x86_64.213).
+        no_debug_exit: power == Power::Off,
         ..args.clone()
     };
     let command = power.command();
@@ -754,7 +762,8 @@ fn seat_power(arch: Arch, built: &Built, args: &Args, power: Power) -> Result<()
                 &boot,
                 super::EITHER,
                 hook,
-                crate::qemu::power_off_status(arch),
+                // QEMU's own status for a guest that entered S5.
+                0,
             )?;
             println!(
                 "  {arch}: the live session's person typed `poweroff`, and the machine powered off"
