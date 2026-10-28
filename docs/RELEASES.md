@@ -29,29 +29,35 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
-## v0.2.0 (2026-10-27), the first live ISO
+## v0.2.0 (2026-10-28), the first live ISO
 
 A live ISO you can boot: Ferrix's desktop, Yoru, starts from memory, with
 an installer that puts Ferrix on a disk of its own. Download
 `ferrix-v0.2.0-x86_64.iso` below, check it against `SHA256SUMS`, and follow
-[Try Ferrix](https://github.com/ferrix-os/ferrix/blob/develop/docs/TRY-FERRIX.md):
-it has the QEMU command line, how to write a USB stick, and what the
-installer asks.
+[Try Ferrix](https://github.com/ferrix-os/ferrix/blob/v0.2.0/docs/TRY-FERRIX.md):
+it has the QEMU command line, the settings VirtualBox and VMware need, how
+to write a USB stick, and what the installer asks.
 
-**This is a development preview, not a finished system.** The image is
-built from the `present` profile with slot signing off, so it carries no
-signature a loader checks, and it is not signed for Secure Boot: turn
-Secure Boot off to start it. Parts of authentication and process isolation
-are still being finished. Do not put anything on it that you cannot lose.
+**This is a development preview, not a finished system.** Ferrix is young:
+it has run on very few PCs, and parts of authentication and process
+isolation are still being finished. The image is not signed for Secure
+Boot (turn Secure Boot off to start it) and carries no signature its
+loader checks. Do not put anything on it that you cannot lose.
+
+The live ISO's command line is not a configuration any certification
+claim is made of: it skips the boot self-checks, lends the firmware's
+framebuffer to a driver (`ferrix.efifb`) and, on a machine without an
+IOMMU, lets drivers run unisolated (`ferrix.unisolated`, below).
 
 What is in it:
 
-- **A live session.** The ISO boots under UEFI as a CD and, written with
-  `dd` or Rufus's DD mode, as a USB stick or a virtual disk: El Torito and
-  a GUID partition table over the same EFI system partition. `/` is in
-  memory and the session logs in as `ferrix` with no password; nothing on
-  the machine's disks is touched.
-- **Yoru on hyprix**: Ferrix's own Wayland compositor, with the dock,
+- **A live session.** The ISO boots under UEFI (no legacy BIOS) as a CD,
+  a virtual disk or, written with `dd`, Rufus's DD mode or balenaEtcher, a
+  USB stick: El Torito and a GUID partition table over the same EFI system
+  partition. `/` is in memory and the session logs in as `ferrix` with no
+  password; nothing on the machine's disks is touched.
+- **Yoru on hyprix**, the default desktop of both the live session and the
+  installed system: Ferrix's own Wayland compositor, with the dock,
   sidebars, launcher and wallpaper picker in the Nocturne design; a
   terminal running zinc, the zsh-compatible shell; Settings, the Files app
   (shelf), `btop`, `curl`, `git`, `foot`, `ferrofetch` and the rest of the
@@ -60,49 +66,69 @@ What is in it:
   language, keyboard, the disk -- erase it whole, with a warning in red, or
   install into free space or one partition you choose, leaving the others
   alone --, your account, the time zone, a summary, progress, and restart.
-  The installed system starts with your session locked behind your
-  password. It is gated end to end in QEMU: installed onto a blank virtual
-  disk, booted alone, the account and password the installer was given.
+  The installed system starts Yoru with your session locked behind your
+  password.
 - **Drivers outside the kernel**: disk, network, graphics, input and
-  console drivers run as processes behind the IOMMU and are restarted when
-  they crash.
+  console drivers run as processes and are restarted when they crash.
 - **Licences and sources**: `THIRD_PARTY_LICENSES.MD` in the ISO (and
   `LICENSES.MD` on its EFI system partition, and the asset
   `ferrix-v0.2.0-x86_64-iso-THIRD-PARTY-LICENSES.md`) lists every part of
   the image, its licence and the licence's text;
   `ferrix-v0.2.0-sources.tar.gz` holds the exact source of every GPL and
-  LGPL program in it (busybox, git, alsa-utils, alsa-lib). The ISO carries
-  no firmware, no Google Chrome and no NVIDIA software, and no artwork but
-  Ferrix's own.
+  LGPL program in it. The ISO carries no firmware, no Google Chrome and no
+  NVIDIA software, and no artwork but Ferrix's own.
 
-Known to work:
+**Drivers and the IOMMU.** Ferrix runs each driver that does DMA behind
+the IOMMU (Intel VT-d, AMD-Vi), so a driver cannot reach memory it was not
+given. The **live session** also starts drivers on a machine with no IOMMU
+(VirtualBox's and VMware's defaults, a PC with VT-d or AMD-Vi off), and
+says so on its boot log: those drivers are then trusted with all of
+memory, as every driver is on Linux. The **installed system** never does:
+it isolates its drivers or does not start them. **Turn VT-d or AMD-Vi on
+(or the virtual machine's IOMMU) before you install**, or the installed
+system will have no USB keyboard, mouse or disk drivers.
 
-- **QEMU/KVM with virtio devices and an Intel IOMMU** (`intel-iommu`, and
-  `iommu_platform=on` on the virtio devices), as Try Ferrix shows: the live
-  desktop, and installing onto a virtio disk.
-- **The Intel N150 mini PC** Ferrix is developed on: its Intel graphics,
-  its AHCI SATA disk and its Motorcomm YT6801 Ethernet.
-- **DMA and interrupt isolation** through Intel VT-d and AMD-Vi.
-- **NVIDIA graphics only through the virtual-machine path**, a GPU passed
-  to a VM, not on a PC's own NVIDIA card.
+What was checked for this release, in QEMU 10.2 with OVMF (UEFI):
 
-What does not, yet:
+- **Try Ferrix's virtio machine** (KVM, virtio-gpu, virtio input, disk and
+  network, an Intel IOMMU): the live desktop as a CD, as a USB stick and as
+  a virtual disk, and an install onto a blank virtual disk that then boots
+  alone to the person's locked Yoru session -- the release's gates
+  `test-iso` and `test-iso-install`, the latter run repeatedly.
+- **A machine shaped like a PC** (a plain VGA adapter, a USB keyboard and
+  mouse on xHCI, e1000e), with and without an IOMMU: the live desktop at
+  the firmware's resolution from the ISO as a USB stick, driven by the USB
+  keyboard and mouse; and, with the ISO attached as a SATA disk, the whole
+  graphical install onto an NVMe disk, which then booted alone, isolated,
+  and opened Yoru to the password typed on the USB keyboard.
+- **Not checked for this release:** real PCs, VirtualBox and VMware.
+  Ferrix itself has run on the Intel N150 mini PC it is developed on (its
+  AHCI SATA disk and Motorcomm YT6801 Ethernet), but this ISO has not been
+  booted there.
 
-- **Little bare-metal coverage.** Ferrix has run on very few PCs. Expect
-  firmware, graphics or input it does not know.
-- **An IOMMU is required.** Ferrix starts a driver only for a device the
-  IOMMU isolates, and this image does not turn that off (the `present`
-  profile does not permit `ferrix.unisolated` on x86-64): on a machine or
-  a virtual machine without VT-d or AMD-Vi, no driver starts and the screen
-  stays empty. VirtualBox and VMware are untested.
-- **No Wi-Fi** and no Bluetooth; AMD graphics are not driven.
-- **Installing needs the medium as a disk Ferrix drives.** In a virtual
-  machine attach the ISO as a virtio disk; booted as a CD, or from a USB
-  stick on a PC, the live session works but the installer cannot read the
-  system to copy (Ferrix has no CD driver and does not serve USB disks yet).
+What does not work, yet:
+
+- **Installing from a CD or a USB stick.** Ferrix has no CD driver and
+  does not yet read USB disks as disks, so booted that way the live session
+  works but the installer cannot read the system to copy: it says so at
+  Install and writes nothing. To install, attach the ISO to a virtual
+  machine as a disk -- virtio, SATA or NVMe (Try Ferrix shows how, for
+  QEMU, VirtualBox and VMware); installing on a PC from a USB stick comes
+  in a later release.
+- **Graphics on a PC are the firmware's framebuffer**: the resolution the
+  firmware chose, no GPU acceleration. Ferrix drives virtio-gpu in virtual
+  machines; Intel graphics only under an option this image does not set;
+  AMD and NVIDIA graphics not at all.
+- **Input on a PC is USB only** (keyboards and mice on an xHCI controller).
+  PS/2 keyboards and mice -- which many laptops' built-in keyboards and
+  touchpads are, or I2C -- are not driven.
+- **Little hardware**: Ethernet only on virtio-net, the Motorcomm YT6801
+  and some of Realtek's RTL8111/8168 family (no Intel Ethernet); no Wi-Fi,
+  no Bluetooth; disks on AHCI SATA, NVMe and virtio.
+- The dock's clock shows UTC whatever the time zone; programs (`date`, the
+  lock screen's clock) follow the zone you chose.
 - The installer does not resize another system's partition, write a
-  firmware boot entry, or keep an MBR disk's partitions.
-- English only.
+  firmware boot entry, or keep an MBR disk's partitions. English only.
 
 What to check:
 
