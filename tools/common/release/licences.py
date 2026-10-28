@@ -444,6 +444,15 @@ def crate_locks(present: set[str], scratch: pathlib.Path) -> list[pathlib.Path]:
                         target.mkdir(parents=True, exist_ok=True)
                         (target / member.name.split("/")[1]).write_bytes(archive.extractfile(member).read())
             if (target / "Cargo.lock").is_file():
+                # A workspace of its own: the scratch directory may sit
+                # inside this tree (the live ISO's is under build/), and
+                # cargo would otherwise take the tree's workspace for its
+                # own and refuse to fetch -- which a machine with every
+                # crate cached never notices, and a release runner does.
+                manifest = target / "Cargo.toml"
+                text = manifest.read_text()
+                if "workspace" not in tomllib.loads(text):
+                    manifest.write_text(text + "\n[workspace]\n")
                 (target / "src").mkdir(exist_ok=True)
                 (target / "src" / "main.rs").write_text("fn main() {}\n")
                 locks.append(target / "Cargo.lock")
