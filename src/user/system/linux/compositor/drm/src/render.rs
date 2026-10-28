@@ -555,6 +555,34 @@ impl Render {
         }
     }
 
+    /// A buffer object of `size` bytes from i915's `DRM_IOCTL_I915_GEM_CREATE`,
+    /// answering its handle: linear system memory the GPU reaches through
+    /// the LLC, which the Intel driver's copying `card0` reads the same way.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the node said; `ENOTTY` from a node that is not i915's.
+    pub fn i915_create(&self, size: u64) -> io::Result<u32> {
+        // `struct drm_i915_gem_create`, 16 bytes: size u64, handle u32, pad u32.
+        const GEM_CREATE: u32 = 0xC010_645B;
+        let mut bytes = [0_u8; 16];
+        if let Some(field) = bytes.get_mut(..8) {
+            field.copy_from_slice(&size.to_le_bytes());
+        }
+        // SAFETY: a live buffer of exactly the 16 bytes the request's number
+        // encodes, which the driver reads and writes within.
+        let result = unsafe { libc::ioctl(self.fd, GEM_CREATE as _, bytes.as_mut_ptr()) };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut handle = [0_u8; 4];
+        handle.copy_from_slice(bytes.get(8..12).unwrap_or(&[0; 4]));
+        match u32::from_le_bytes(handle) {
+            0 => Err(io::Error::other("the driver gave no handle")),
+            handle => Ok(handle),
+        }
+    }
+
     /// What `VIRTGPU_RESOURCE_INFO` says is behind object `handle`: its
     /// resource and its size.
     ///

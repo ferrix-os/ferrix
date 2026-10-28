@@ -36,6 +36,8 @@ const SCANOUT_ENV: &str = "FERRIX_VTEST_SCANOUT";
 #[derive(Debug)]
 pub(crate) struct NvidiaScanouts {
     node: Rc<Render>,
+    /// i915's node rather than nvidia-drm's: buffers from `GEM_CREATE`.
+    intel: bool,
 }
 
 /// One line on standard output, hyprix's log.
@@ -66,9 +68,16 @@ impl NvidiaScanouts {
         if !std::env::var(SCANOUT_ENV).is_ok_and(|value| value.trim() == "1") {
             return None;
         }
-        let node = Render::open_driven_by("nvidia-drm").ok()?;
+        if let Ok(node) = Render::open_driven_by("nvidia-drm") {
+            return Some(Self {
+                node: Rc::new(node),
+                intel: false,
+            });
+        }
+        let node = Render::open_driven_by("i915").ok()?;
         Some(Self {
             node: Rc::new(node),
+            intel: true,
         })
     }
 }
@@ -82,7 +91,11 @@ impl ScanoutSource for NvidiaScanouts {
     fn allocate(&mut self, width: u32, height: u32) -> io::Result<Scanout> {
         let stride = stride(width).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
         let size = u64::from(stride) * u64::from(height);
-        let handle = self.node.nvidia_alloc_scanout(size)?;
+        let handle = if self.intel {
+            self.node.i915_create(size)?
+        } else {
+            self.node.nvidia_alloc_scanout(size)?
+        };
         let held = Held {
             node: Rc::clone(&self.node),
             handle,
