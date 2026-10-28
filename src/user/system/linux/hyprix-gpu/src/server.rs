@@ -507,7 +507,8 @@ impl Server {
         let mut outputs = Vec::new();
         let mut exported = Vec::new();
         for _ in 0..count.clamp(1, 3) {
-            match self.device.0.borrow_mut().output(size) {
+            let made = self.device.0.borrow_mut().any_output(size);
+            match made {
                 Ok(output) => exported.push(output),
                 Err(error) => {
                     warn(&format!("canvas {canvas}: no output buffer: {error}"));

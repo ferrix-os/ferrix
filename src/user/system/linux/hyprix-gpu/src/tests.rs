@@ -298,7 +298,11 @@ fn a_frame_through_the_socket_lands_in_the_output() {
     else {
         panic!("not Outputs: {outputs:?}");
     };
-    assert_eq!(modifier, 0, "linear outputs");
+    // Linear dmabufs, or memfds where the device exports none.
+    assert!(
+        modifier == crate::vulkan::LINEAR || modifier == crate::vulkan::MEMFD,
+        "an output of modifier {modifier:#x}"
+    );
     assert_eq!(fds.len(), 2);
     let data = pixels(64, 48);
     let arena_fd = arena(1 << 20, &data);
@@ -502,4 +506,55 @@ fn a_desktop_frame_at_1080p() {
         times[0],
         times[times.len() - 1]
     );
+}
+
+/// A frame copied into a memfd output -- what a device without dmabuf
+/// export draws into -- is there when the memfd is read.
+#[test]
+fn a_frame_lands_in_a_memfd_output() {
+    use compositor_render::gpu::{Backend as _, Region};
+    let Some(mut vulkan) = lavapipe("a_frame_lands_in_a_memfd_output") else {
+        return;
+    };
+    let output = match vulkan.host_output(SIZE) {
+        Ok(output) => output,
+        Err(why) => {
+            assert!(
+                vulkan.core().host_import().is_none(),
+                "a device with host import made no memfd output: {why}"
+            );
+            return;
+        }
+    };
+    assert_eq!(output.modifier, crate::vulkan::MEMFD);
+    let mut gpu = Renderer::with_backend(vulkan, SIZE.0, SIZE.1).expect("a renderer");
+    let whole = Damage::full(SIZE.0, SIZE.1);
+    gpu.clear(Color(0xff10_2030), &whole);
+    gpu.fill(Rect::new(8, 8, 40, 20), Color(0xffff_8000), &whole);
+    let target = gpu.target();
+    gpu.backend()
+        .copy(
+            target.id,
+            output.id,
+            &[Region {
+                x: 0,
+                y: 0,
+                width: SIZE.0,
+                height: SIZE.1,
+            }],
+        )
+        .expect("copied");
+    gpu.finish().expect("drawn");
+    let bytes = mapped(&output.fd, (output.stride * SIZE.1) as usize);
+    let at = |x: usize, y: usize| {
+        let start = y * output.stride as usize + x * 4;
+        [bytes[start], bytes[start + 1], bytes[start + 2]]
+    };
+    assert_eq!(
+        at(0, 0),
+        [0x30, 0x20, 0x10],
+        "the cleared ground, blue first"
+    );
+    assert_eq!(at(10, 10), [0x00, 0x80, 0xff], "the fill");
+    let _ = gpu.backend().release(output.id);
 }

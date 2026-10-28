@@ -189,7 +189,7 @@ pub(super) fn build_ahead_gpu(arch: Arch) -> Result<()> {
 
 /// The yserver volume, which holds lavapipe, when the GPU boot can run on
 /// `arch`; why not said when it cannot.
-fn gpu_volume(arch: Arch) -> Option<PathBuf> {
+pub(super) fn gpu_volume(arch: Arch) -> Option<PathBuf> {
     if arch != Arch::X86_64 {
         println!(
             "  {arch}: tole-demo-gpu skipped: the yserver volume, which holds lavapipe, is x86-64"

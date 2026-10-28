@@ -77,6 +77,7 @@ mod files;
 mod firmware_screen;
 pub(crate) mod frames;
 mod gnome_apps;
+mod gpu_helper;
 mod gtk_chooser;
 mod hyprlock;
 mod idle;
@@ -669,6 +670,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["tole-demo-gpu"]) {
         tole_demo::build_ahead_gpu(arch)?;
     }
+    if asked(&["gpu-helper"]) {
+        gpu_helper::build_ahead(arch)?;
+    }
     if asked(&["locked", "locked-held"]) {
         let _ = build(arch, "compositor-vptr", "vlock")?;
     }
@@ -795,7 +799,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 70] = [
+const BOOTS: [(&str, Boot); 71] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -860,6 +864,7 @@ const BOOTS: [(&str, Boot); 70] = [
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),
     ("tole-demo", tole_demo::test_tole_demo),
     ("tole-demo-gpu", tole_demo::test_tole_demo_gpu),
+    ("gpu-helper", gpu_helper::test_gpu_helper),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),

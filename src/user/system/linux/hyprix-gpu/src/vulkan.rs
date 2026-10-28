@@ -36,6 +36,12 @@ pub const FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
 /// `DRM_FORMAT_MOD_LINEAR`.
 pub const LINEAR: u64 = 0;
 
+/// `DRM_FORMAT_MOD_INVALID`, which an output says when it is no dmabuf but
+/// plain shared memory (a memfd): what a device without dmabuf export --
+/// lavapipe on Ferrix -- draws the frame into, and the card is handed
+/// as a copy, as a `wl_shm` buffer is.
+pub const MEMFD: u64 = 0x00ff_ffff_ffff_ffff;
+
 /// Bytes of the push constants: `to_clip`, then `u[4]`.
 const CONSTANT_BYTES: u32 = 80;
 
@@ -107,6 +113,20 @@ struct Image {
     height: u32,
 }
 
+/// An output in a memfd: the device's buffer over this process's mapping
+/// of it.
+#[derive(Debug)]
+struct HostOutput {
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    ptr: *mut u8,
+    len: usize,
+    /// Bytes from one row to the next.
+    stride: u32,
+    width: u32,
+    height: u32,
+}
+
 /// A host-visible buffer, mapped.
 #[derive(Debug)]
 struct HostBuffer {
@@ -169,6 +189,8 @@ pub struct Vulkan {
     memory: vk::PhysicalDeviceMemoryProperties,
     /// Outputs in host-visible memory, mapped: where they start, how long.
     mapped: HashMap<u32, (*mut u8, usize)>,
+    /// Outputs in memfds, by number.
+    host_outputs: HashMap<u32, HostOutput>,
     failed: Option<io::Error>,
     /// Whether the device was lost: nothing more is drawn.
     lost: bool,
@@ -228,6 +250,7 @@ impl Vulkan {
             image_drm,
             memory,
             mapped: HashMap::new(),
+            host_outputs: HashMap::new(),
             failed: None,
             lost: false,
             core,
@@ -964,12 +987,236 @@ impl Vulkan {
             .collect()
     }
 
+    /// An output: a linear dmabuf where the device exports them, else a
+    /// memfd ([`Vulkan::host_output`]) -- lavapipe on Ferrix.
+    ///
+    /// # Errors
+    ///
+    /// Neither could be made.
+    pub fn any_output(&mut self, size: (u32, u32)) -> io::Result<Exported> {
+        // `HYPRIX_GPU_OUTPUT=memfd`: memfds even where dmabufs could be had,
+        // to try a copying card's path on a host that has both.
+        if std::env::var_os("HYPRIX_GPU_OUTPUT").is_some_and(|value| value == "memfd") {
+            return self.host_output(size);
+        }
+        match self.output(size) {
+            Ok(output) => Ok(output),
+            Err(why) => self
+                .host_output(size)
+                .map_err(|other| io::Error::other(format!("{why}; and no memfd output: {other}"))),
+        }
+    }
+
+    /// An output in a memfd this process maps and the device writes through
+    /// `VK_EXT_external_memory_host`, for a device that exports no dmabufs.
+    /// Its modifier is [`MEMFD`].
+    ///
+    /// # Errors
+    ///
+    /// The device's, or a device with no host-memory import.
+    pub fn host_output(&mut self, (width, height): (u32, u32)) -> io::Result<Exported> {
+        let Some((host, align)) = self.core.host_import().map(|(h, a)| (h.clone(), a)) else {
+            return Err(io::Error::other("the device imports no host memory"));
+        };
+        let stride = width.saturating_mul(4);
+        let bytes = u64::from(stride) * u64::from(height);
+        let align = align.max(4096);
+        let len = bytes.div_ceil(align).saturating_mul(align);
+        let size = usize::try_from(len).map_err(|_| io::Error::other("an output too large"))?;
+        // SAFETY: a name and flags.
+        let raw = unsafe { libc::memfd_create(c"hyprix-gpu-output".as_ptr(), libc::MFD_CLOEXEC) };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: new and ours alone.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+        let length =
+            libc::off_t::try_from(len).map_err(|_| io::Error::other("an output too large"))?;
+        // SAFETY: our own memfd.
+        if unsafe { libc::ftruncate(fd.as_raw_fd(), length) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: a fresh shared mapping of our memfd.
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                fd.as_raw_fd(),
+                0,
+            )
+        };
+        if ptr == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let ptr = ptr.cast::<u8>();
+        let unmap = || {
+            // SAFETY: the mapping made above, unmapped once.
+            let _ = unsafe { libc::munmap(ptr.cast(), size) };
+        };
+        let ty = vk::ExternalMemoryHandleTypeFlags::HOST_ALLOCATION_EXT;
+        let mut external = vk::ExternalMemoryBufferCreateInfo::default().handle_types(ty);
+        let info = vk::BufferCreateInfo::default()
+            .size(len)
+            .usage(vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC)
+            .push_next(&mut external);
+        // SAFETY: a transfer buffer for external host memory.
+        let buffer = match unsafe { self.device().create_buffer(&info, None) } {
+            Ok(buffer) => buffer,
+            Err(e) => {
+                unmap();
+                return Err(said("vkCreateBuffer (host output)", e));
+            }
+        };
+        let mut props = vk::MemoryHostPointerPropertiesEXT::default();
+        // SAFETY: `ptr` is a host allocation kept mapped while the output
+        // lives, of the extension's handle type.
+        let asked = unsafe {
+            (host.fp().get_memory_host_pointer_properties_ext)(
+                self.device().handle(),
+                ty,
+                ptr.cast_const().cast(),
+                &mut props,
+            )
+        };
+        // SAFETY: the buffer is this device's.
+        let needs = unsafe { self.device().get_buffer_memory_requirements(buffer) };
+        let kind = asked.result().ok().and_then(|()| {
+            self.core.memory_type(
+                needs.memory_type_bits & props.memory_type_bits,
+                vk::MemoryPropertyFlags::empty(),
+            )
+        });
+        let Some(kind) = kind else {
+            // SAFETY: unused.
+            unsafe { self.device().destroy_buffer(buffer, None) };
+            unmap();
+            return Err(io::Error::other("no memory type takes the output's memfd"));
+        };
+        let mut from = vk::ImportMemoryHostPointerInfoEXT::default()
+            .handle_type(ty)
+            .host_pointer(ptr.cast());
+        let alloc = vk::MemoryAllocateInfo::default()
+            .allocation_size(len)
+            .memory_type_index(kind)
+            .push_next(&mut from);
+        // SAFETY: `ptr` is mapped for `len` bytes, aligned as the device
+        // asks, and stays mapped until the output is let go.
+        let memory = match unsafe { self.device().allocate_memory(&alloc, None) } {
+            Ok(memory) => memory,
+            Err(e) => {
+                // SAFETY: unused.
+                unsafe { self.device().destroy_buffer(buffer, None) };
+                unmap();
+                return Err(said("vkAllocateMemory (host output)", e));
+            }
+        };
+        // SAFETY: bound once, at 0, to memory as large as the buffer.
+        if let Err(e) = unsafe { self.device().bind_buffer_memory(buffer, memory, 0) } {
+            // SAFETY: unused.
+            unsafe { self.device().destroy_buffer(buffer, None) };
+            // SAFETY: nothing bound to it.
+            unsafe { self.device().free_memory(memory, None) };
+            unmap();
+            return Err(said("vkBindBufferMemory (host output)", e));
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let _ = self.host_outputs.insert(
+            id,
+            HostOutput {
+                buffer,
+                memory,
+                ptr,
+                len: size,
+                stride,
+                width,
+                height,
+            },
+        );
+        Ok(Exported {
+            id,
+            fd,
+            stride,
+            offset: 0,
+            modifier: MEMFD,
+            memory: vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        })
+    }
+
+    /// Copy `rects` of image `from` into the same places of host output
+    /// `to`.
+    fn copy_to_host(&mut self, from: u32, to: u32, rects: &[Region]) -> io::Result<()> {
+        let (Some(src), Some(dst)) = (
+            self.images.get(&from).map(|i| (i.image, i.width, i.height)),
+            self.host_outputs
+                .get(&to)
+                .map(|o| (o.buffer, o.stride, o.width, o.height)),
+        ) else {
+            return Err(io::Error::other("a copy between unknown images"));
+        };
+        let regions: Vec<vk::BufferImageCopy> = rects
+            .iter()
+            .filter_map(|r| {
+                let width = r.width.min(src.1.min(dst.2).saturating_sub(r.x));
+                let height = r.height.min(src.2.min(dst.3).saturating_sub(r.y));
+                (width > 0 && height > 0).then(|| vk::BufferImageCopy {
+                    buffer_offset: u64::from(r.y) * u64::from(dst.1) + u64::from(r.x) * 4,
+                    buffer_row_length: dst.1 / 4,
+                    buffer_image_height: 0,
+                    image_subresource: color_layers(),
+                    image_offset: vk::Offset3D {
+                        x: i32::try_from(r.x).unwrap_or(0),
+                        y: i32::try_from(r.y).unwrap_or(0),
+                        z: 0,
+                    },
+                    image_extent: vk::Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    },
+                })
+            })
+            .collect();
+        if regions.is_empty() {
+            return Ok(());
+        }
+        self.ready_to_copy()?;
+        // SAFETY: recording outside a rendering; the image is GENERAL and
+        // every region inside it and inside the buffer.
+        unsafe {
+            self.device().cmd_copy_image_to_buffer(
+                self.cmd,
+                src.0,
+                vk::ImageLayout::GENERAL,
+                dst.0,
+                &regions,
+            );
+        }
+        Ok(())
+    }
+
+    /// Let host output `id` go. The device must be done with it.
+    fn destroy_host_output(&self, output: HostOutput) {
+        // SAFETY: nothing pending uses it.
+        unsafe { self.device().destroy_buffer(output.buffer, None) };
+        // SAFETY: the buffer bound to it is gone.
+        unsafe { self.device().free_memory(output.memory, None) };
+        // SAFETY: the mapping made in `host_output`, unmapped once, after
+        // the device's import of it is gone.
+        let _ = unsafe { libc::munmap(output.ptr.cast(), output.len) };
+    }
+
     /// Copy `rects` of image `from` into the same places of image `to`.
     ///
     /// # Errors
     ///
     /// The device's; an unknown image.
     pub fn copy(&mut self, from: u32, to: u32, rects: &[Region]) -> io::Result<()> {
+        if self.host_outputs.contains_key(&to) {
+            return self.copy_to_host(from, to, rects);
+        }
         let (Some(src), Some(dst)) = (
             self.images.get(&from).map(|i| (i.image, i.width, i.height)),
             self.images.get(&to).map(|i| (i.image, i.width, i.height)),
@@ -1482,6 +1729,11 @@ impl Backend for Vulkan {
 
     fn release(&mut self, image: u32) -> io::Result<()> {
         let _ = self.mapped.remove(&image);
+        if let Some(output) = self.host_outputs.remove(&image) {
+            // The device may still be writing it: wait first.
+            let _ = self.submit_and_wait();
+            self.destroy_host_output(output);
+        }
         if let Some(image) = self.images.remove(&image) {
             if self.recording {
                 self.doomed.push(image);
@@ -1567,6 +1819,9 @@ impl Drop for Vulkan {
         }
         for image in std::mem::take(&mut self.doomed) {
             self.destroy_image(image);
+        }
+        for (_, output) in std::mem::take(&mut self.host_outputs) {
+            self.destroy_host_output(output);
         }
         for buffer in [
             self.vertices.take(),

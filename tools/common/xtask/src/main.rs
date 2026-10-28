@@ -137,6 +137,7 @@ mod game_rig;
 mod gate_rows;
 mod gateway;
 mod hotpath;
+mod hyprix_gpu;
 mod image_file;
 mod init;
 mod init_file;
