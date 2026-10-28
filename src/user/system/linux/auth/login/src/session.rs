@@ -24,10 +24,10 @@ use ferrix_svc_proto::control::{Answer, Call, Framer, SOCKET};
 /// Where the count is kept.
 const DIRECTORY: &str = "/run/ferrix/login";
 
-/// Put this process in a new session scope of `uid`'s: its name, or why
-/// not.
-/// Its unit's name and its slice's.
-pub(crate) fn join(uid: u32) -> Result<(String, String), String> {
+/// Put this process in a new session scope of `uid`'s: its unit's name
+/// and its slice's, or why not. A session on the console is the seat's
+/// (`docs/INIT.md` §10.1): its person may turn the machine off.
+pub(crate) fn join(uid: u32, console: bool) -> Result<(String, String), String> {
     let n = next().map_err(|error| format!("{DIRECTORY}: {error}"))?;
     let unit = format!("session-{n}.scope");
     let slice = format!("user-{uid}.slice");
@@ -35,6 +35,7 @@ pub(crate) fn join(uid: u32) -> Result<(String, String), String> {
         unit: unit.clone(),
         slice: Some(slice.clone()),
         pids: vec![std::process::id()],
+        seat: console,
     })?;
     Ok((slice, unit))
 }

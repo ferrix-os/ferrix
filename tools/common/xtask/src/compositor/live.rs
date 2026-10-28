@@ -658,6 +658,127 @@ pub(crate) fn test_iso(args: &Args) -> Result<()> {
         }
         println!("  {arch}: the live desktop came up from the ISO as {how}");
     }
+    seat_power(arch, &built, args, Power::Off)?;
+    seat_power(arch, &built, args, Power::Restart)?;
+    Ok(())
+}
+
+/// What the live session's person asks of the machine from a terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Power {
+    /// `poweroff`.
+    Off,
+    /// `reboot`.
+    Restart,
+}
+
+impl Power {
+    /// The command typed.
+    const fn command(self) -> &'static str {
+        match self {
+            Power::Off => "poweroff",
+            Power::Restart => "reboot",
+        }
+    }
+}
+
+/// What init says when it lets the seat's person turn the machine off
+/// (`docs/INIT.md` §10.1).
+const SEAT_ALLOWED: &str = "allowed: the seat's";
+
+/// The seat's person turns the machine off or restarts it
+/// (`docs/INIT.md` §10.1): in the live session, as `ferrix`, a terminal
+/// opened with SUPER RETURN, and `poweroff` or `reboot` typed into it. A
+/// power-off must end QEMU by itself through the kernel's power-off; a
+/// restart must bring the desktop back. Booted from the ISO as a CD.
+fn seat_power(arch: Arch, built: &Built, args: &Args, power: Power) -> Result<()> {
+    let port = free_port()?;
+    let boot = Args {
+        boot_cdrom: true,
+        boot_usb: false,
+        display: true,
+        qmp_port: Some(port),
+        // A restart restarts the machine rather than ending QEMU.
+        reset: power == Power::Restart,
+        ..args.clone()
+    };
+    let command = power.command();
+    let mut restarted = false;
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+        let up = watching.read_more(Instant::now() + Duration::from_secs(240), |lines| {
+            lines.iter().any(|line| line.contains(YORU_DOCK))
+                && lines.iter().any(|line| line.contains("sessiond: "))
+        })?;
+        if !up {
+            return Err(Error::new(format!(
+                "{arch}: `{command}` as the seat's person: the desktop never came up"
+            )));
+        }
+        std::thread::sleep(Duration::from_secs(5));
+        super::boot::press(&mut qmp, &["meta_l", "ret"])?;
+        // The terminal and its shell.
+        std::thread::sleep(Duration::from_secs(8));
+        for letter in command.chars() {
+            super::boot::press(&mut qmp, &[&letter.to_string()])?;
+            std::thread::sleep(Duration::from_millis(80));
+        }
+        super::boot::press(&mut qmp, &["ret"])?;
+        let deadline = Instant::now() + Duration::from_secs(180);
+        match power {
+            // Until QEMU exits, which closes the serial port.
+            Power::Off => {
+                let _ = watching.read_more(deadline, |_| false)?;
+            }
+            Power::Restart => {
+                restarted = watching.read_more(deadline, |lines| {
+                    lines.iter().filter(|line| line.contains(YORU_DOCK)).count() >= 2
+                })?;
+                watching.stop_when_done();
+            }
+        }
+        let said: Vec<&String> = watching.lines().iter().chain(watching.after()).collect();
+        if !said.iter().any(|line| line.contains(SEAT_ALLOWED)) {
+            return Err(Error::new(format!(
+                "{arch}: `{command}` typed as the seat's person: init never said `{SEAT_ALLOWED}`"
+            )));
+        }
+        Ok(())
+    };
+    match power {
+        Power::Off => {
+            let _ = crate::qemu::watch_then_powered_off(
+                arch,
+                &built.iso,
+                &built.kernel,
+                &boot,
+                super::EITHER,
+                hook,
+                crate::qemu::power_off_status(arch),
+            )?;
+            println!(
+                "  {arch}: the live session's person typed `poweroff`, and the machine powered off"
+            );
+        }
+        Power::Restart => {
+            let _ = crate::qemu::watch_then(
+                arch,
+                &built.iso,
+                &built.kernel,
+                &boot,
+                super::EITHER,
+                hook,
+            )?;
+            if !restarted {
+                return Err(Error::new(format!(
+                    "{arch}: the live session's person typed `reboot`, and the desktop did not come back"
+                )));
+            }
+            println!(
+                "  {arch}: the live session's person typed `reboot`, and the desktop came back"
+            );
+        }
+    }
     Ok(())
 }
 

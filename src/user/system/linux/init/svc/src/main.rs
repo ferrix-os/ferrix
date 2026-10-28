@@ -516,7 +516,15 @@ fn scope(rest: &[String]) -> Result<u8, Failure> {
         }
     }
     let unit = unit.ok_or_else(|| Failure::new(2, "svc scope needs --unit NAME"))?;
-    changed("scope", &ask(&Call::Scope { unit, slice, pids })?)
+    changed(
+        "scope",
+        &ask(&Call::Scope {
+            unit,
+            slice,
+            pids,
+            seat: false,
+        })?,
+    )
 }
 
 /// `svc top`: every unit with a cgroup, by memory, from the controller

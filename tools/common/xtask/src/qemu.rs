@@ -1545,6 +1545,7 @@ pub(crate) fn watch_to_power_off(
         until,
         watched.ended.powered_off,
         watched.ended.status.code(),
+        power_off_status(arch),
     ) {
         return Err(Error::new(format!(
             "{arch}: {problem}, so what it wrote to /data may not be committed.\n  Serial output \
@@ -1571,6 +1572,7 @@ fn power_off_problem(
     until: &str,
     exited_by_itself: bool,
     code: Option<i32>,
+    expected: i32,
 ) -> Option<String> {
     let after = lines
         .iter()
@@ -1601,16 +1603,66 @@ fn power_off_problem(
              {POWER_OFF_MARKER}: a fault or a reset on the way down, not a power-off"
         ));
     }
-    let expected = match arch {
-        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
-        Arch::AArch64 | Arch::Armv7a => 0,
-    };
     (code != Some(expected)).then(|| {
         format!(
             "QEMU exited with {status} after {POWER_OFF_MARKER}, not the {expected} {arch}'s \
              power-off gives: something else ended the run"
         )
     })
+}
+
+/// The status QEMU exits with at `arch`'s power-off on the gates' line: 33
+/// from x86-64's debug-exit device, 0 from PSCI's `SYSTEM_OFF` on Arm.
+pub(crate) fn power_off_status(arch: Arch) -> i32 {
+    match arch {
+        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
+        Arch::AArch64 | Arch::Armv7a => 0,
+    }
+}
+
+/// [`watch_then`], for a hook that asks the guest to power off as a person
+/// would: after it, QEMU must have exited by itself, with the kernel's
+/// power-off line after `until`, no failure line after that, and status
+/// `expected` (`docs/INIT.md` §10.1's gate in `test-iso`).
+///
+/// # Errors
+///
+/// As [`watch_then`], and when the guest did not power itself off so.
+pub(crate) fn watch_then_powered_off(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    until: &str,
+    mut at_marker: impl FnMut(&mut Watching<'_>) -> Result<()>,
+    expected: i32,
+) -> Result<Vec<String>> {
+    let watched = watch_hooked(arch, image, kernel, args, until, Some(&mut at_marker))?;
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: `{until}` was not printed within {}s.\n  Serial output is in {}",
+                args.timeout,
+                watched.log.display()
+            )));
+        }
+    }
+    if let Some(problem) = power_off_problem(
+        arch,
+        &watched.lines,
+        until,
+        watched.ended.powered_off,
+        watched.ended.status.code(),
+        expected,
+    ) {
+        return Err(Error::new(format!(
+            "{arch}: {problem}.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    Ok(watched.lines)
 }
 
 /// The hook [`watch_then`] runs at the marker.
@@ -4511,7 +4563,14 @@ mod tests {
             POWER_OFF_MARKER,
         ]);
         let problem = |arch, lines: &[String], by_itself, code| {
-            power_off_problem(arch, lines, SUCCESS_MARKER, by_itself, code)
+            power_off_problem(
+                arch,
+                lines,
+                SUCCESS_MARKER,
+                by_itself,
+                code,
+                super::power_off_status(arch),
+            )
         };
         assert_eq!(
             problem(Arch::X86_64, &off, true, Some(33)),

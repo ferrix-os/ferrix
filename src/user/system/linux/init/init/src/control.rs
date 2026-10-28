@@ -28,6 +28,9 @@ const MAX_UNSENT: usize = 4 << 20;
 struct Client {
     stream: UnixStream,
     uid: u32,
+    /// The process that connected, as `SO_PEERCRED` says: whose seat it
+    /// speaks for (`crate::seat`). 0 when the kernel names none.
+    pid: u32,
     framer: Framer,
     /// Bytes waiting for the socket to take them.
     unsent: Vec<u8>,
@@ -41,8 +44,13 @@ struct Client {
 /// What a connection did, for the event loop.
 #[derive(Debug)]
 pub(crate) enum Heard {
-    /// A call, with the uid of whoever made it.
-    Call { client: u64, uid: u32, call: Call },
+    /// A call, with the uid and the pid of whoever made it.
+    Call {
+        client: u64,
+        uid: u32,
+        pid: u32,
+        call: Call,
+    },
     /// The connection went, or spoke something else; it is closed.
     Gone,
     /// Nothing whole yet.
@@ -91,7 +99,7 @@ impl Control {
             if stream.set_nonblocking(true).is_err() {
                 continue;
             }
-            let Ok(uid) = sys::peer_uid(stream.as_raw_fd()) else {
+            let Ok((pid, uid)) = sys::peer_cred(stream.as_raw_fd()) else {
                 continue;
             };
             let id = self.next;
@@ -102,6 +110,7 @@ impl Control {
                 Client {
                     stream,
                     uid,
+                    pid,
                     framer: Framer::new(),
                     unsent: Vec::new(),
                     asked: false,
@@ -149,6 +158,7 @@ impl Control {
                     Heard::Call {
                         client: id,
                         uid: client.uid,
+                        pid: client.pid,
                         call,
                     }
                 }

@@ -29,6 +29,9 @@ pub(crate) fn join(uid: u32, pids: &[u32]) -> Result<String, String> {
         unit: unit.clone(),
         slice: Some(format!("user-{uid}.slice")),
         pids: pids.to_vec(),
+        // seat0's session: its person may turn the machine off
+        // (`docs/INIT.md` §10.1).
+        seat: true,
     })?;
     Ok(unit)
 }

@@ -990,6 +990,8 @@ as root unless something gives it the devices.
 
 * **One seat, one active graphical session**, in phase 2. More than one is
   later, and nothing here assumes it cannot happen.
+* **The seat's person may restart the machine and turn it off**, with no
+  password, and nobody else but root: `docs/INIT.md` §10.1 (2026-10-29).
 * **Anyone in the session may lock it.** It is harmless (§2.3).
 * **Only the session's own account unlocks it**, through `authd`'s grant.
   An administrator does not unlock another user's session by typing *their

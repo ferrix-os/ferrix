@@ -38,6 +38,7 @@ mod machine_id;
 mod probe;
 mod readiness;
 mod sandbox;
+mod seat;
 mod sockets;
 mod spawn;
 mod sys;
@@ -164,6 +165,8 @@ struct Init {
     control: Option<Control>,
     /// What each control connection asked, to shape the manager's reply.
     pending: BTreeMap<u64, Pending>,
+    /// The seat's scopes, whose people may turn the machine off (§10.1).
+    seats: seat::Seats,
     /// The log pipes and each unit's last lines.
     logs: Logs,
     /// Each unit's lines to the console, shed by severity under load
@@ -352,6 +355,7 @@ impl Init {
             source,
             control,
             pending: BTreeMap::new(),
+            seats: seat::Seats::default(),
             logs: Logs::default(),
             console: BTreeMap::new(),
             lode: lode::Lode::default(),
@@ -1241,7 +1245,12 @@ impl Init {
             return;
         };
         match control.read(id) {
-            Heard::Call { client, uid, call } => self.call(client, uid, call),
+            Heard::Call {
+                client,
+                uid,
+                pid,
+                call,
+            } => self.call(client, uid, pid, call),
             Heard::Gone => {
                 let _ = self.pending.remove(&id);
             }
@@ -1286,10 +1295,31 @@ impl Init {
         self.rewatch_client(id, waiting);
     }
 
-    /// A call from `svc`, made by `uid`.
-    fn call(&mut self, id: u64, uid: u32, call: Call) {
+    /// A call from `svc`, made by `uid` from process `pid`.
+    fn call(&mut self, id: u64, uid: u32, pid: u32, call: Call) {
         let startable = matches!(&call, Call::Start(unit) if self.startable_by(unit, uid));
-        if let Some(why) = refusal(uid, &call).filter(|_| !startable) {
+        // The seat's person may turn the machine off (§10.1).
+        let seated = uid != 0
+            && matches!(call, Call::Poweroff | Call::Reboot)
+            && self.seats.may_power(uid, &seat::Place::of(pid));
+        if uid != 0 && matches!(call, Call::Poweroff | Call::Reboot) {
+            let what = if matches!(call, Call::Poweroff) {
+                "a power-off"
+            } else {
+                "a restart"
+            };
+            let place = seat::Place::of(pid);
+            let cgroup = place.cgroup.as_deref().unwrap_or("?");
+            let verdict = if seated {
+                "allowed: the seat's"
+            } else {
+                "refused: not the seat's"
+            };
+            say(&format!(
+                "uid {uid} (pid {pid}, {cgroup}) asks for {what}: {verdict}"
+            ));
+        }
+        if let Some(why) = refusal(uid, &call).filter(|_| !startable && !seated) {
             self.answer(id, &Answer::Refused(why));
             return;
         }
@@ -1311,7 +1341,13 @@ impl Init {
             Call::ResetFailed(unit) => ask(self, Pending::Done, Request::ResetFailed(unit)),
             Call::Poweroff => ask(self, Pending::Done, Request::Poweroff),
             Call::Reboot => ask(self, Pending::Done, Request::Reboot),
-            Call::Scope { unit, slice, pids } => {
+            Call::Scope {
+                unit,
+                slice,
+                pids,
+                seat,
+            } => {
+                self.mark_scope(uid, &unit, slice.as_deref(), &pids, seat);
                 let pids = pids.into_iter().map(Pid).collect();
                 ask(self, Pending::Done, Request::Scope { unit, slice, pids });
             }
@@ -1442,6 +1478,26 @@ impl Init {
 }
 
 impl Init {
+    /// Say whether the scope `unit`, about to be made, is the seat's
+    /// (§10.1) -- unless a scope of that name is running, which the manager
+    /// refuses and whose mark stands.
+    fn mark_scope(&mut self, uid: u32, unit: &str, slice: Option<&str>, pids: &[u32], seat: bool) {
+        let running = self
+            .manager
+            .unit(unit)
+            .and_then(|found| self.manager.status(found))
+            .is_some_and(|status| status.active.name() != "inactive");
+        if running {
+            return;
+        }
+        let places: Vec<seat::Place> = pids.iter().map(|&pid| seat::Place::of(pid)).collect();
+        let mark = self.seats.mark(uid, seat, slice, &places);
+        if let Some(owner) = mark {
+            say(&format!("{unit} is seat0's, uid {owner}'s"));
+        }
+        self.seats.record(unit, mark);
+    }
+
     /// Whether `unit`'s file lets `uid` start it: `StartableBy=` names the
     /// user, by name or number (lode's alerts, `docs/LOGGING.md` §7.4).
     fn startable_by(&self, unit: &str, uid: u32) -> bool {
@@ -1473,7 +1529,15 @@ fn refusal(uid: u32, call: &Call) -> Option<String> {
     if uid == 0 || !call.changes_state() {
         return None;
     }
-    if let Call::Scope { slice, pids, .. } = call {
+    if let Call::Scope {
+        slice, pids, seat, ..
+    } = call
+    {
+        if *seat {
+            return Some(format!(
+                "Permission denied: only root says which scope is the seat's, and this is uid {uid}"
+            ));
+        }
         let own = format!("user-{uid}.slice");
         let owned = pids.iter().all(|&pid| owner(pid) == Some(uid));
         if slice.as_deref() == Some(own.as_str()) && owned {

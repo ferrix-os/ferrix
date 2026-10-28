@@ -385,7 +385,7 @@ pub(crate) fn nonblocking(fd: RawFd) -> io::Result<()> {
 }
 
 /// The uid of the process at the other end of a Unix socket.
-pub(crate) fn peer_uid(fd: RawFd) -> io::Result<u32> {
+pub(crate) fn peer_cred(fd: RawFd) -> io::Result<(u32, u32)> {
     let mut credentials = libc::ucred {
         pid: 0,
         uid: u32::MAX,
@@ -402,7 +402,8 @@ pub(crate) fn peer_uid(fd: RawFd) -> io::Result<u32> {
             &mut size,
         )
     };
-    check(ret).map(|_| credentials.uid)
+    let pid = u32::try_from(credentials.pid).unwrap_or(0);
+    check(ret).map(|_| (pid, credentials.uid))
 }
 
 /// Change what `fd` is watched for.

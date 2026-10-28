@@ -1041,7 +1041,8 @@ signals it needs to the port. It would be a different loop over the same
 length-prefixed records in `src/lib/init/svc-proto`, not text, so `svc`'s output can
 change without breaking another client. `SO_PEERCRED` says who is asking:
 anyone may ask for status. Only root may change state, except that a user
-may make a scope for their own processes under their own `user-<uid>.slice`.
+may make a scope for their own processes under their own `user-<uid>.slice`,
+and the seat's person may power the machine off or restart it (§10.1).
 `svc` takes the verbs people already know:
 
 ```
@@ -1066,6 +1067,56 @@ processes get as `INVOCATION_ID` and `svc status` shows. `svc status` ends
 with the run's last ten lines and `svc log unit` shows the current or last
 run, both from lode (`lode -u UNIT@last`), falling back to init's ring when
 lode keeps nothing the caller may read.
+
+### 10.1 The seat's person turns the machine off
+
+Built 2026-10-29 for v0.2.0 (`src/user/system/linux/init/init/src/seat.rs`).
+The person at the machine -- the user of the graphical session on seat0, or
+of a login on the console -- may `svc poweroff` and `svc reboot` (and
+`poweroff`, `reboot`, `shutdown`, and Yoru's power menu, which call them)
+without a password, as systemd-logind's `allow_active` lets the active
+local session's user. Nobody else who is not root may: not an ssh session,
+not another user, not a service.
+
+* **Which scopes are the seat's.** Root says so: `Call::Scope`'s `seat`
+  flag (tag 19 on the wire; a plain scope is still tag 18). `sessiond`, seat0's
+  owner, sets it on the graphical `session-<n>.scope`; `login` sets it
+  only when its standard input is `/dev/console` (5:1) and it runs as
+  root. A user's call with the flag is refused. A scope a user makes is the
+  seat's only when every process it takes is already in a seat's scope of
+  the same uid, so a program the desktop started stays the seat's wherever
+  it is moved, and a process that came in another way (an ssh session, in
+  `sshd`'s cgroup) does not become it by moving itself under its user's
+  slice. Init judges a scope when it is made, and judges again each time
+  a scope of that name is made after the last one ended; a running scope
+  takes no processes later (the manager refuses a second `Scope` of a
+  running name), and the scopes made by calls are not delegated, so no user
+  can write a process into one through `cgroup.procs` either (the kernel
+  checks the common ancestor's, which is root's).
+* **Who asks.** `SO_PEERCRED` gives the uid and the pid. `Poweroff` and
+  `Reboot` from a uid that is not 0 are allowed when `/proc/<pid>/cgroup`
+  is in or below a seat's scope under `user.slice/user-<uid>.slice`, and
+  `/proc/<pid>/status` names the same uid. Every such call is said on the
+  console and to lode, allowed or refused, with the uid, the pid and the
+  cgroup that decided it.
+* **What it does not claim.** The same uid is not a boundary: a remote
+  session of the seat's own user that has a program of the seat's session
+  act for it (`hyprctl dispatch exec poweroff`) turns the machine off, as
+  with logind and polkit. A pid the caller left and the same user's
+  seat process took is that user's either way; a pid another user's
+  process took fails the uid check.
+* **`reboot`** on a desktop image is `compositor-reboot`, which calls
+  `reboot(2)` itself for root and for a word to the firmware; run by
+  anyone else with no word it is `svc reboot`.
+* **The power button** (ACPI's fixed event) reaches nothing in ring 3: the
+  kernel handles no SCI. `docs/BACKLOG.md` has the row.
+
+Tested: `seat.rs`'s host tests (the seat's person, a program the desktop
+started, ssh, another uid, a reused pid, a scope made again; the negative
+control is the same tests with the mark recorded as none, which fail), and
+`cargo xtask test-iso`, where `ferrix` in the live session types `poweroff`
+into a terminal and the machine powers off, then `reboot` and the desktop
+comes back.
 
 ## 11. What the kernel needs, besides stage 13
 

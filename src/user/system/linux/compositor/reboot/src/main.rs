@@ -15,6 +15,15 @@
 //! from init's `svc` on the desktop it is carried on: `svc reboot` is the
 //! restart that stops the services in order first, and has no word to pass.
 //! What has been written is synced before it goes.
+//!
+//! Run by anyone but root with no word, it is `svc reboot`: the init's
+//! ordered restart, which the seat's person may ask for (`docs/INIT.md`
+//! §10.1) and reboot(2) would refuse.
+
+/// The init's client, which restarts the machine for a person who is not
+/// root.
+#[cfg(target_os = "linux")]
+const SVC: &str = "/bin/svc";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -91,6 +100,16 @@ fn main() -> std::process::ExitCode {
             }
         },
     };
+    // A person who is not root asks the init, which restarts the machine in
+    // order and lets the seat's person do it (`docs/INIT.md` §10.1);
+    // reboot(2) would refuse them. A word for the firmware is root's.
+    // SAFETY: `geteuid` takes nothing and cannot fail.
+    if word.is_none() && unsafe { libc::geteuid() } != 0 {
+        use std::os::unix::process::CommandExt as _;
+        let error = std::process::Command::new(SVC).arg("reboot").exec();
+        let _ = writeln!(std::io::stderr(), "reboot: {SVC}: {error}");
+        return ExitCode::FAILURE;
+    }
     // SAFETY: `sync` takes nothing and cannot fail.
     unsafe { libc::sync() };
     let result = match &word {

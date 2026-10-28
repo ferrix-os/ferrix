@@ -65,6 +65,7 @@ fn ask(unit: String, pid: u32) -> std::io::Result<()> {
         unit,
         slice: Some(SLICE.to_owned()),
         pids: vec![pid],
+        seat: false,
     };
     stream.write_all(&call.encode())?;
     let mut framer = Framer::new();
