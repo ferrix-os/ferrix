@@ -33,7 +33,9 @@ impl GpuCanvas {
     #[must_use]
     pub fn backdrop(&self, width: u32, height: u32) -> GpuBackdrop {
         match self {
-            Self::Virgl(_) => GpuBackdrop::Virgl(compositor_render::gpu::Backdrop::new(width, height)),
+            Self::Virgl(_) => {
+                GpuBackdrop::Virgl(compositor_render::gpu::Backdrop::new(width, height))
+            }
             Self::Helper(_) => GpuBackdrop::Helper(crate::helper::Backdrop::new(width, height)),
         }
     }
@@ -188,7 +190,9 @@ impl Painter for GpuCanvas {
 
     fn keep_backdrop(&mut self, backdrop: &mut Self::Backdrop, damage: &Damage) {
         match (self, backdrop) {
-            (Self::Virgl(canvas), GpuBackdrop::Virgl(backdrop)) => canvas.keep_backdrop(backdrop, damage),
+            (Self::Virgl(canvas), GpuBackdrop::Virgl(backdrop)) => {
+                canvas.keep_backdrop(backdrop, damage);
+            }
             (Self::Helper(canvas), GpuBackdrop::Helper(backdrop)) => {
                 canvas.keep_backdrop(backdrop, damage);
             }

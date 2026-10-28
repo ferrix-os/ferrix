@@ -181,9 +181,17 @@ fn a_frame_is_its_painter_calls_and_the_pixels_they_read() {
     ));
     assert!(first.iter().any(|seen| matches!(
         seen,
-        Seen::Message(Message::CreateTexture { texture: 7, width: 16, .. })
+        Seen::Message(Message::CreateTexture {
+            texture: 7,
+            width: 16,
+            ..
+        })
     )));
-    assert!(first.iter().any(|seen| matches!(seen, Seen::Message(Message::Arena { .. }))));
+    assert!(
+        first
+            .iter()
+            .any(|seen| matches!(seen, Seen::Message(Message::Arena { .. })))
+    );
     // A second frame: the texture is kept, only the damage under it moves.
     let part = Damage::from(Rect::new(20, 20, 4, 4));
     let surface = Surface::new(&pixels, 16, 16, 64, Format::Xrgb8888)
@@ -192,13 +200,21 @@ fn a_frame_is_its_painter_calls_and_the_pixels_they_read() {
     canvas.composite(&surface, Rect::new(20, 20, 16, 16), &part);
     assert!(canvas.finish().is_ok());
     let again: Vec<Seen> = seen.try_iter().collect();
-    assert!(!again.iter().any(|seen| matches!(seen, Seen::Message(Message::CreateTexture { .. }))));
+    assert!(
+        !again
+            .iter()
+            .any(|seen| matches!(seen, Seen::Message(Message::CreateTexture { .. })))
+    );
     assert!(again.iter().any(|seen| matches!(
         seen,
         Seen::Op(Op::Upload { rect, .. }) if rect.width == 4 && rect.height == 4
     )));
     // The card is told it may have the output back before it is drawn again.
-    assert!(again.iter().any(|seen| matches!(seen, Seen::Message(Message::Release { .. }))));
+    assert!(
+        again
+            .iter()
+            .any(|seen| matches!(seen, Seen::Message(Message::Release { .. })))
+    );
 }
 
 #[test]
@@ -219,7 +235,10 @@ fn a_helper_that_never_answers_fails_the_frame_in_time() {
     scene(&mut canvas, &[0; 16 * 64]);
     let started = Instant::now();
     let error = canvas.finish().err();
-    assert_eq!(error.map(|error| error.kind()), Some(std::io::ErrorKind::TimedOut));
+    assert_eq!(
+        error.map(|error| error.kind()),
+        Some(std::io::ErrorKind::TimedOut)
+    );
     assert!(started.elapsed() >= super::canvas::FRAME_DEADLINE);
     assert!(started.elapsed() < super::canvas::FRAME_DEADLINE * 4);
 }
