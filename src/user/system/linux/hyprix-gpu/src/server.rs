@@ -301,7 +301,7 @@ impl Server {
 
     /// Answer one record.
     fn answer(&mut self, record: &[u8], fds: Vec<OwnedFd>) -> Result<(), End> {
-        let (_, message) = match Message::decode(record) {
+        let (header, message) = match Message::decode(record) {
             Ok(decoded) => decoded,
             Err(error) => {
                 return Err(End::Socket(io::Error::other(format!(
@@ -441,7 +441,13 @@ impl Server {
                 stride,
             } => {
                 self.read(canvas, r, arena, offset, stride);
-                self.send(&Message::ReadDone { canvas, serial: 0 }, &[])
+                self.send(
+                    &Message::ReadDone {
+                        canvas,
+                        serial: header.serial,
+                    },
+                    &[],
+                )
             }
             // What only the helper sends.
             Message::Ready { .. }
@@ -659,6 +665,15 @@ impl Server {
             return;
         }
         let canvas_id = frame.canvas;
+        // A texture the frame samples that is not there -- never made, or
+        // an import the device refused -- fails the frame, so that hyprix
+        // draws it in software rather than show nothing where it is.
+        if let Op::Composite { texture, .. } | Op::CompositeScaled { texture, .. } = op
+            && !self.textures.contains_key(texture)
+        {
+            self.bad(failure::BAD_OP, format!("texture {texture} is not there"));
+            return;
+        }
         let textures = &self.textures;
         let Some(canvas) = self.canvases.get_mut(&canvas_id) else {
             self.bad(failure::BAD_OP, format!("no canvas {canvas_id}"));

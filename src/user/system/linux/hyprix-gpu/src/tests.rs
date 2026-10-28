@@ -410,6 +410,96 @@ fn a_frame_through_the_socket_lands_in_the_output() {
         frame(&wire, 4, 0, &[Op::Clear(0xff00_0000)]),
         Message::Done { output: 0, .. }
     ));
+    // A texture that is not there fails the frame: hyprix then draws it in
+    // software, rather than show nothing where the window is.
+    send(
+        &wire,
+        &Message::Release {
+            canvas: 1,
+            output: 1,
+        },
+        &[],
+    );
+    let missing = frame(
+        &wire,
+        5,
+        1,
+        &[Op::Composite {
+            texture: 99,
+            src: protocol::Rect::new(0, 0, 8, 8),
+            rect: protocol::Rect::new(0, 0, 8, 8),
+        }],
+    );
+    assert!(
+        matches!(missing, Message::Failed { code: 1, .. }),
+        "a missing texture was drawn as nothing: {missing:?}"
+    );
     drop(wire);
     helper.join().expect("the helper ended");
+}
+
+/// What a desktop frame costs at 1920x1080: a wallpaper-sized texture,
+/// a blurred translucent window and a shadow, drawn whole, twenty times.
+/// Run by hand (`--ignored`), on lavapipe or `HYPRIX_GPU_TEST_DEVICE`'s.
+#[test]
+#[ignore = "a measurement, not a check"]
+#[expect(
+    clippy::print_stderr,
+    reason = "a measurement says what it measured where the person running it reads"
+)]
+fn a_desktop_frame_at_1080p() {
+    let Some(vulkan) = lavapipe("a_desktop_frame_at_1080p") else {
+        return;
+    };
+    let (w, h) = (1920_u32, 1080_u32);
+    let wall = pixels(w, h);
+    let window = pixels(1280, 800);
+    let wallpaper = Surface::new(&wall, w, h, w * 4, Format::Xrgb8888)
+        .expect("a surface")
+        .named(1);
+    let terminal = Surface::new(&window, 1280, 800, 1280 * 4, Format::Argb8888)
+        .expect("a surface")
+        .named(2);
+    let mut gpu = Renderer::with_backend(vulkan, w, h).expect("a renderer");
+    let mut backdrop = compositor_render::gpu::Backdrop::new(w, h);
+    let whole = Damage::full(w, h);
+    let at = Rect::new(320, 140, 1280, 800);
+    let mut times = Vec::new();
+    for _ in 0..20 {
+        let start = std::time::Instant::now();
+        gpu.composite(
+            &wallpaper,
+            Rect::new(0, 0, i64::from(w), i64::from(h)),
+            &whole,
+        );
+        gpu.keep_backdrop(&mut backdrop, &whole);
+        gpu.shadow(
+            at,
+            &Shadow {
+                rounding: Rounding::circle(10),
+                range: 20,
+                power: 3,
+                color: Color(0xa000_0000),
+                offset: (0, 4),
+            },
+            &whole,
+        );
+        gpu.blur_backdrop(
+            &mut backdrop,
+            at,
+            Rounding::circle(10),
+            &Blur::new(8, 3),
+            &whole,
+        );
+        gpu.composite_scaled(&terminal, at, Rounding::circle(10), 0.9, false, &whole);
+        gpu.finish().expect("drawn");
+        times.push(start.elapsed());
+    }
+    times.sort();
+    eprintln!(
+        "1080p desktop frame: median {:?}, fastest {:?}, slowest {:?}",
+        times[times.len() / 2],
+        times[0],
+        times[times.len() - 1]
+    );
 }
