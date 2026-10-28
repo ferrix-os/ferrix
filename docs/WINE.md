@@ -321,7 +321,7 @@ on the host".
 `test-wine`'s desktop: hyprix, with yserver on `:0` as its client. The
 program runs presenting: a window of 512 by 512, a flip-model swap chain of
 two 64 by 64 buffers on it, and the same frame drawn into the back buffer
-and presented for 30 s, which DXVK scales to the window. That is the way a
+and presented for 45 s, which DXVK scales to the window. That is the way a
 game's frames go: DXVK's presentation through Wine's Vulkan surface on X11
 (Wine's X driver turns `VK_KHR_win32_surface` into an X surface of
 lavapipe's), yserver, and hyprix. Five seconds after the first present
@@ -335,16 +335,37 @@ about 3,200 frames in 30 s (`Present` waits for no refresh on yserver).
 Its negative control takes the screen before the program has a window, and
 the gate fails on the screen.
 
+**The maximize** (2026-10-28). Then the script maximizes the window, as
+the title bar's button does (`hyprctl dispatch snapwindow max`), and xtask
+takes the screen again, clicks into the window and types `a`. The program
+behaves as a windowed game does: each `WM_SIZE` is printed, after the
+first frame a new client size gets `ResizeBuffers` at that size, and at
+any size but the one it was shown at it clears to green instead of blue.
+The gate requires the program to be told the maximized window's size as
+hyprix reports it, its buffers that size, the screen at least 50% green
+and at most 2% blue (a stale frame from before the maximize is blue), and
+the click and the key to reach it. On 2026-10-28 under KVM: 504 by 478,
+maximized to 1024 by 746, 85% green and no blue, the click at 512,373 and
+the key 41. Its negative control is a program built not to call
+`ResizeBuffers` (DXVK then scales the old blue frames to the window), and
+the gate fails with "the program's buffers are [], not the window's
+1024x746". Endfield on the N150 had shown its loading screen in the top
+left corner after a maximize, the rest black: that was yserver's zero-copy
+path (the window's backing owed the frames and never written, and the
+maximize carried the stale backing over), which only a card's DRI3
+buffers take and which this gate on lavapipe therefore does not reach.
+The fork's unit test `a_backing_owed_a_direct_present_is_settled_before_it_goes`
+holds that part.
+
 **What Ferrix answered wrongly on the way:** nothing. Both boots passed on
 their first run under KVM (2026-10-12): `wineboot` about 38 s of guest time,
 the offscreen program 1.3 s, DXVK with 4 compiler threads.
 
-**What is not right yet, and is Wine's on yserver, not DXVK's.** The window
-is drawn at the size the program asked for, about 500 by 480, in the top
-left of the tile hyprix gave it, and the rest of the tile is black: the
-lead in §5 that notepad shows, now also for a Vulkan surface. The judge's
-shares are set for that size and hold if the window comes to fill its tile.
-The fix is E1.5's (stage 23), with notepad's.
+**The window's size.** Until 2026-10-12 the window was drawn at the size
+the program asked for in the top left of the tile hyprix gave it, the rest
+black: the lead in §5 that notepad showed, fixed with it (`WM_STATE`). It
+now floats at its own 504 by 478 and follows a resize, as the maximize
+above shows.
 
 **Where it runs.** On demand, as `test-wine` does, and for the same
 reasons: it attaches a volume, and it never downloads.

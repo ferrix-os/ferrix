@@ -25,6 +25,23 @@
  * every second counts the presents: Vulkan's presentation through Wine's X11
  * surface, which a game's frames take.
  *
+ * Presented, it also behaves as a windowed game does when its window is
+ * resized (maximized, say): each WM_SIZE is printed as
+ *
+ *   d3d11-triangle: client WIDTHxHEIGHT
+ *
+ * and, after the first frame, once the size differs from its buffers', the
+ * swap chain's buffers are made that size with ResizeBuffers
+ * (`d3d11-triangle: buffers WxH`). At any client size but the one the
+ * window was shown at, its frames are cleared to green rather than blue,
+ * so that a screen still showing blue after a resize shows a frame from
+ * before it. Keys and left
+ * button presses that reach the window are printed as
+ *
+ *   d3d11-triangle: key VK   /   d3d11-triangle: button X,Y
+ *
+ * (VK in hex, X and Y in the client area).
+ *
  * Shaders are compiled at run time by Wine's own d3dcompiler_47, from the
  * HLSL below.
  *
@@ -78,12 +95,17 @@ struct scene {
     ID3D11VertexShader *vs;
     ID3D11PixelShader *ps;
     UINT8 red, green, blue;
+    /* The target's size, and whether the frames are the resized ones. */
+    UINT width, height;
+    BOOL resized;
 };
 
-/* One frame into `view`: a clear to blue and the triangle. */
+/* One frame into `view`: a clear to blue (green once resized) and the
+ * triangle. */
 static void draw(const struct scene *scene, ID3D11RenderTargetView *view) {
-    static const float clear[4] = {0.0f, 0.0f, 1.0f, 1.0f};
-    D3D11_VIEWPORT viewport = {0, 0, SIZE, SIZE, 0, 1};
+    static const float blue[4] = {0.0f, 0.0f, 1.0f, 1.0f}, green[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+    const float *clear = scene->resized ? green : blue;
+    D3D11_VIEWPORT viewport = {0, 0, (FLOAT)scene->width, (FLOAT)scene->height, 0, 1};
     UINT stride = 2 * sizeof(float), offset = 0;
     ID3D11DeviceContext *context = scene->context;
     ID3D11DeviceContext_OMSetRenderTargets(context, 1, &view, NULL);
@@ -141,16 +163,31 @@ static int describe(const struct scene *scene, ID3D11Texture2D *source,
     return 0;
 }
 
+/* The client size the last WM_SIZE gave; 0 before one came. */
+static UINT client_width, client_height;
+
 static LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w, LPARAM l) {
-    if (message == WM_DESTROY) {
+    switch (message) {
+    case WM_DESTROY:
         PostQuitMessage(0);
+        return 0;
+    case WM_SIZE:
+        client_width = LOWORD(l);
+        client_height = HIWORD(l);
+        printf("d3d11-triangle: client %ux%u\n", client_width, client_height);
+        return 0;
+    case WM_KEYDOWN:
+        printf("d3d11-triangle: key %02x\n", (unsigned)w);
+        return 0;
+    case WM_LBUTTONDOWN:
+        printf("d3d11-triangle: button %d,%d\n", (short)LOWORD(l), (short)HIWORD(l));
         return 0;
     }
     return DefWindowProcW(window, message, w, l);
 }
 
 /* The frames presented in a window for `seconds` (see the top). */
-static int present(ID3D11Device *device, IDXGIAdapter *adapter, const struct scene *scene,
+static int present(ID3D11Device *device, IDXGIAdapter *adapter, struct scene *scene,
                    ID3D11Texture2D *staging, int seconds) {
     WNDCLASSW class = {.lpfnWndProc = window_procedure, .hInstance = GetModuleHandleW(NULL),
                        .lpszClassName = L"d3d11-triangle"};
@@ -190,17 +227,45 @@ static int present(ID3D11Device *device, IDXGIAdapter *adapter, const struct sce
 
     ULONGLONG start = GetTickCount64(), end = start + 1000ull * seconds, next = start + 1000;
     int presents = 0;
+    /* The client size the window was shown at: frames are green only at
+     * another, one the window was given later. */
+    UINT first_width = 0, first_height = 0;
     while (GetTickCount64() < end) {
         MSG message;
         while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        /* A windowed game's answer to a new client size: buffers of it. */
+        if (presents > 0 && client_width && client_height &&
+            (client_width != scene->width || client_height != scene->height)) {
+            ID3D11RenderTargetView_Release(view);
+            ID3D11Texture2D_Release(back);
+            if (FAILED(hr = IDXGISwapChain_ResizeBuffers(chain, 0, client_width, client_height,
+                                                         DXGI_FORMAT_UNKNOWN, 0)))
+                return fail("ResizeBuffers", hr);
+            if (FAILED(hr = IDXGISwapChain_GetBuffer(chain, 0, &IID_ID3D11Texture2D,
+                                                     (void **)&back)))
+                return fail("GetBuffer (resized)", hr);
+            if (FAILED(hr = ID3D11Device_CreateRenderTargetView(device, (ID3D11Resource *)back,
+                                                                NULL, &view)))
+                return fail("CreateRenderTargetView (resized)", hr);
+            scene->width = client_width;
+            scene->height = client_height;
+            if (!first_width) {
+                first_width = client_width;
+                first_height = client_height;
+            }
+            scene->resized = client_width != first_width || client_height != first_height;
+            printf("d3d11-triangle: buffers %ux%u\n", scene->width, scene->height);
+        }
         draw(scene, view);
         if (presents == 0) {
             int status = describe(scene, back, staging, 1);
             if (status)
                 return status;
+            first_width = client_width;
+            first_height = client_height;
         }
         if (FAILED(hr = IDXGISwapChain_Present(chain, 1, 0)))
             return fail("Present", hr);
@@ -269,6 +334,8 @@ int main(int argc, char **argv) {
         .red = (rgb >> 16) & 0xff,
         .green = (rgb >> 8) & 0xff,
         .blue = rgb & 0xff,
+        .width = SIZE,
+        .height = SIZE,
     };
     if (FAILED(hr = ID3D11Device_CreateVertexShader(device, ID3D10Blob_GetBufferPointer(vs_code),
                                                     ID3D10Blob_GetBufferSize(vs_code), NULL,
