@@ -146,6 +146,8 @@ run powerfail cargo xtask test-powerfail --arch all --seeds 8 --timeout 600
 run init cargo xtask test-init --arch all
 run auth cargo xtask test-auth --arch all
 run procfs cargo xtask test-procfs --arch all
+run rtsched cargo xtask test-rtsched --arch all --kernel-profile desktop
+run rtsched-present cargo xtask test-rtsched --arch all
 run kaslr cargo xtask test-kaslr --arch x86_64
 run adb cargo xtask test-adb --init "$musl"
 run audio cargo xtask test-audio --arch x86_64

@@ -29,7 +29,7 @@ use core::hint::spin_loop;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_bootinfo::{BootView, PAGE_SIZE};
-use ferrix_sched::{CpuSet, MAX_CPUS};
+use ferrix_sched_class::{CpuSet, MAX_CPUS};
 use ferrix_sync::{IrqControl, Once};
 
 use crate::sync::SpinLock;

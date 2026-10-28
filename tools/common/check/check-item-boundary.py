@@ -1742,10 +1742,15 @@ def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict,
     entry is stale, and fails, when the crate is classified or allowlisted
     since, when the manifest no longer depends on it, or when no file of the
     crate names it (`named`: package -> the library names its files name).
-    No other kernel crate keeps such a list."""
+    No other kernel crate keeps such a list. A fixture class crate
+    (`class_crates`, SCHED-CLASSES.md §9b, ledger line 22, G1) is the
+    selection crate's alone and named by no file, which its own rule (d)
+    holds: no register entry stands for it."""
     entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
     classified = crate_entries(manifest)
     allow = crate_allowlist(manifest)
+    fixtures = {k for k, v in manifest.get("class_crates", {}).items()
+                if isinstance(v, dict) and v.get("fixture")}
     problems = []
     for package, entry in sorted(entries.items()):
         rings = entry.get("rings", [])
@@ -1772,6 +1777,8 @@ def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict,
                 if RING_ORDER.get(classified[dep]["ring"], 9) > RING_ORDER[ring]:
                     problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on "
                                     f"{_a(classified[dep]['ring'])} crate")
+            elif dep in fixtures and package == SELECT_CRATE:
+                continue
             elif dep not in allow and dep not in listed:
                 problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on a crate in no ring, "
                                 f"not in crates.infrastructure_allowlist and not in its unclassified_deps "
@@ -2042,7 +2049,7 @@ def self_test() -> list[str]:
     if modules.get(("sys", "inline")) is None or modules[("sys", "inline")].file != "sys/mod.rs":
         failures.append("resolver: inline module sys::inline not placed in sys/mod.rs")
     failures += _crate_self_test()
-    failures += _hook_self_test() + _policy_self_test() + _removable_self_test()
+    failures += _hook_self_test() + _policy_self_test() + _removable_self_test() + _class_crate_self_test()
     failures += _kernel_self_test()
     failures += _gpu_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
@@ -2581,6 +2588,25 @@ def flag_file_problems(flags: dict) -> list[str]:
     return problems
 
 
+FAMILY_FILE = ROOT / "tools" / "common" / "data" / "hardware-families.toml"
+_FAMILIES: dict | None = None
+
+
+def _family_recorded(name: str) -> bool:
+    """Whether the hardware-family registry records `name`'s recognition
+    rule (`recorded` absent or true; ledger line 26)."""
+    global _FAMILIES
+    if _FAMILIES is None:
+        with FAMILY_FILE.open("rb") as handle:
+            _FAMILIES = tomllib.load(handle).get("family", {})
+    return name in _FAMILIES and _FAMILIES[name].get("recorded", True) is True
+
+
+def claims_more_than_a_target(profile: dict) -> bool:
+    """Whether a profile's claim is anything but a target."""
+    return not str(profile.get("claim", "")).startswith("target")
+
+
 def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], list[str]]:
     """A profile file against the flag file: (problems, the reasons it does not
     build yet). Every flag set (rule 4), each value declared and allowed at
@@ -2605,6 +2631,25 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
     for exception in profile.get("exceptions", []):
         if not exception.get("ends") or not exception.get("why"):
             problems.append(f"exception {exception.get('flag')}={exception.get('value')} names no end or reason")
+    # `pending` (SCHED-CLASSES.md section 9c, E3; ledger line 24): a value a
+    # target-only profile names before it allows the profile's level, each
+    # with what it waits on. It is no claim's to carry: the profile is
+    # reported not claimable while one is listed, and one that excuses
+    # nothing is stale.
+    pending = {(e.get("flag"), e.get("value")) for e in profile.get("pending", [])}
+    if pending and (claims_more_than_a_target(profile) or level != "sc4_plus"):
+        problems.append("only a profile at sc4_plus whose claim is a target may list pending values "
+                        "(E3; ledger line 25 (1))")
+    for entry in profile.get("pending", []):
+        if not entry.get("until") or not entry.get("ledger"):
+            problems.append(f"pending {entry.get('flag')}={entry.get('value')} names nothing it waits on, "
+                            "or no ledger line (the list grows only with one)")
+    # Signed slots only and no board named: the image boots nothing, so the
+    # profile is not buildable (ledger line 25 (2)).
+    recorded = [family for family in profile.get("slot_families", []) if _family_recorded(family)]
+    if profile.get("image", {}).get("slot_signing") == "required" and not recorded:
+        waiting.append("slot_families names no board whose recognition rule is recorded, and "
+                       "slot_signing=required boots no other slot")
     for flag, value in values.items():
         spec = declared.get(flag, {}).get("values", {}).get(value)
         if spec is None:
@@ -2621,11 +2666,18 @@ def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], 
         allowed = level in spec.get("allows", [])
         if not allowed and (flag, value) in exceptions and name == "present":
             allowed = True
+        if not allowed and (flag, value) in pending and not claims_more_than_a_target(profile):
+            allowed = True
+            waiting.append(f"{flag}={value} is not claimable at {level} yet (pending)")
         if not allowed:
             problems.append(f"{flag}={value} does not allow level {level} (it allows "
                             f"{', '.join(spec.get('allows', []))}): refused (rule 3)")
         if spec.get("built") == "no" or (spec.get("built") == "stand-in" and level != "none"):
             waiting.append(f"{flag}={value} lands at {spec.get('lands')}")
+    for flag, value in pending:
+        spec = declared.get(flag, {}).get("values", {}).get(value, {})
+        if values.get(flag) != value or level in spec.get("allows", []):
+            problems.append(f"pending {flag}={value} waits on nothing this profile uses")
     for flag, value in exceptions:
         spec = declared.get(flag, {}).get("values", {}).get(value, {})
         if values.get(flag) != value or level in spec.get("allows", []):
@@ -2842,6 +2894,208 @@ def run_removable(manifest: dict, files: list[str], root: str | None) -> list[st
                               profiles, values) + seam_scan_problems(removable, linked_sources(), "seam.rs")
 
 
+# The class crates (docs/SCHED-CLASSES.md §9b; the consultant's design review
+# of step 3b, ledger line 22, G4, G5): `class_crates` in
+# certification-item.json records each scheduling-class crate, the tier flag
+# and value that link it or `fixture: true`, and the marker a present one
+# leaves in the ELF. `named_outside` lists the kernel crates that still name a
+# class crate outside the selection crate, each by its row of SCHED-CLASSES.md
+# §11's N7 table; it may shrink freely and grows only with a ledger line.
+CLASS_DIR = "src/lib/kernel/sched-"
+CLASS_INTERFACE = "ferrix-sched-class"
+SELECT_CRATE = "ferrix-kernel-sched-select"
+ARMS_FILE = "sched_select.rs"
+_IMPLEMENTS = re.compile(r"\bimpl\s*<[^>]*>\s*(?:[\w:]+::)?SchedClass\s*<|\bimpl\s+(?:[\w:]+::)?SchedClass\s*<")
+
+
+def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], sources: dict[str, str],
+                         arms: str, flag_values: dict[str, list[str]],
+                         unbuilt: frozenset = frozenset()) -> list[str]:
+    """Rules (a)-(d) of SCHED-CLASSES.md §9b over the record, the workspace's
+    manifests, the Rust `sources` by path and the arms file's text."""
+    problems: list[str] = []
+    entries = {k: v for k, v in record.items() if not k.startswith("//") and k != "named_outside"}
+    outside = record.get("named_outside", {})
+    # (a) every class crate is recorded, the interface crate excepted.
+    for package, (directory, _) in sorted(packages.items()):
+        if not directory.startswith(CLASS_DIR) or package == CLASS_INTERFACE:
+            continue
+        implements = any(_IMPLEMENTS.search(rustlex.mask(text)) for rel, text in sources.items()
+                         if rel.startswith(directory + "/") and not rel.endswith("tests.rs"))
+        if implements and package not in entries:
+            problems.append(f"{directory}: {package} implements SchedClass and class_crates does not record it")
+    for package, entry in sorted(entries.items()):
+        if package not in packages:
+            problems.append(f"class_crates.{package}: no such package")
+            continue
+        name = entry.get("rust_name", package.replace("-", "_"))
+        # Comments blanked, string literals kept: the cfg's value is one.
+        arms_code = re.sub(r"//[^\n]*", "", arms)
+        if entry.get("fixture"):
+            # (d) no file names a fixture.
+            for rel, text in sorted(sources.items()):
+                if rel.startswith(packages[package][0] + "/"):
+                    continue
+                if re.search(rf"\b{name}\b", rustlex.mask(text)):
+                    problems.append(f"{rel}: names the fixture {name}; nothing may, so no build links it "
+                                    "(SCHED-CLASSES.md §9b (d))")
+            for other, (directory, cargo) in sorted(packages.items()):
+                if package in cargo.get("dependencies", {}) and other != SELECT_CRATE:
+                    problems.append(f"{directory}: {other} depends on the fixture {package}; only {SELECT_CRATE} may")
+            continue
+        # (b) its flag and value are declared, and that value's arm names it.
+        flag, value = entry.get("flag"), entry.get("present_when")
+        if value not in flag_values.get(flag, []):
+            problems.append(f"class_crates.{package}: {flag}={value} is not declared")
+            continue
+        arm = re.compile(rf'#\[cfg\(\s*ferrix_{flag}\s*=\s*"{value}"\s*\)\]\s*pub\s+type\s+[^;]*\b{name}::')
+        if (flag, value) in unbuilt:
+            # Not built yet: its arm is the compile_error! check-build-flags
+            # requires, and no arm may name the crate.
+            if re.search(rf"\b{name}::", arms_code):
+                problems.append(f"{ARMS_FILE}: names {name}, whose value {flag}={value} is not built yet")
+        elif not arm.search(arms_code):
+            problems.append(f"{ARMS_FILE}: the arm for {flag}={value} does not name {name}, which class_crates "
+                            "says it links")
+        # Its `name` is the one its class gives the boot line (L.sched.102).
+        said = entry.get("name")
+        own = "".join(text for rel, text in sources.items() if rel.startswith(packages[package][0] + "/"))
+        if not said or not re.search(rf'const\s+NAME\s*:\s*&\s*\'static\s+str\s*=\s*"{re.escape(said)}"', own):
+            problems.append(f"class_crates.{package}: its name {said!r} is not the NAME its SchedClass gives")
+    # (c) of the kernel's crates only the selection crate depends on a class
+    # crate, but for the recorded exceptions.
+    for kernel, (directory, cargo) in sorted(packages.items()):
+        if not directory.startswith("src/kernel") or kernel == SELECT_CRATE:
+            continue
+        for package in sorted(entries):
+            listed = outside.get(package, {}).get(kernel)
+            if package in cargo.get("dependencies", {}) and listed is None:
+                problems.append(f"{directory}: {kernel} depends on the class crate {package}; only {SELECT_CRATE} "
+                                "may, or a named_outside entry with its N7 row")
+    # (e) the kernel changes the fair tier only through the stack or the
+    # fair tier's named forwarders, never through a `&mut RunQueue` of its
+    # own (SCHED-CLASSES.md section 9d, F1; ledger line 26).
+    for rel, text in sorted(sources.items()):
+        if not rel.startswith("src/kernel/"):
+            continue
+        code = rustlex.mask(text)
+        for match in re.finditer(r"\bfair_mut\b|&\s*mut\s+(?:ferrix_sched_fair::)?RunQueue\b", code):
+            line = text.count("\n", 0, match.start()) + 1
+            problems.append(f"{rel}:{line}: changes the fair tier through a `&mut RunQueue`; only the stack "
+                            "and FairTier's forwarders may (SCHED-CLASSES.md section 9d, F1)")
+        # While StackQueue is RunQueue in every profile, a method called on a
+        # CpuQueue's `stack`, or a `&mut StackQueue` handed out, would compile
+        # and pass by Over (ledger line 28, condition 1): the queue is reached
+        # as `Stack::op(&queue.stack)` and `FairTier`'s alone.
+        if rel.startswith("src/kernel/src/sched/") and not rel.endswith("/task.rs"):
+            for match in re.finditer(r"\b(?:self|queue|q)\s*\.\s*stack\s*\.\s*[a-z_]+\s*\(|&\s*mut\s+StackQueue\b", code):
+                line = text.count("\n", 0, match.start()) + 1
+                problems.append(f"{rel}:{line}: reaches the class stack's queue other than through Stack's "
+                                "operations or FairTier (SCHED-CLASSES.md section 9d; ledger line 28 (1))")
+    for package, kernels in sorted(outside.items()):
+        if package.startswith("//"):
+            continue
+        for kernel, why in sorted(kernels.items()):
+            cargo = packages.get(kernel, ("", {}))[1]
+            if package not in cargo.get("dependencies", {}):
+                problems.append(f"class_crates.named_outside: {kernel} no longer depends on {package}; the entry is stale")
+            elif "N7" not in why:
+                problems.append(f"class_crates.named_outside.{package}.{kernel}: names no row of the N7 table")
+    return problems
+
+
+_CLASS_ARMS = (
+    '#[cfg(ferrix_sched_fair = "eevdf")]\npub type Fair = ferrix_sched_fair::Eevdf;\n'
+    '#[cfg(ferrix_sched_fair = "absent")]\npub type Fair = ferrix_sched_class::Empty;\n'
+)
+_CLASS_RECORD = {
+    "ferrix-sched-fair": {"rust_name": "ferrix_sched_fair", "flag": "sched_fair", "present_when": "eevdf",
+                          "name": "eevdf"},
+    "ferrix-sched-fixture": {"rust_name": "ferrix_sched_fixture", "fixture": True},
+    "named_outside": {"ferrix-sched-fair": {"ferrix-kernel-core": "N7: the NICE_ weights"}},
+}
+_CLASS_PACKAGES = {
+    "ferrix-sched-class": ("src/lib/kernel/sched-class", {"dependencies": {}}),
+    "ferrix-sched-fair": ("src/lib/kernel/sched-fair", {"dependencies": {}}),
+    "ferrix-sched-fixture": ("src/lib/kernel/sched-fixture", {"dependencies": {}}),
+    SELECT_CRATE: ("src/kernel/sched-select", {"dependencies": {"ferrix-sched-fair": {}, "ferrix-sched-fixture": {}}}),
+    "ferrix-kernel-core": ("src/kernel/core", {"dependencies": {"ferrix-sched-fair": {}}}),
+}
+_CLASS_SOURCES = {
+    "src/lib/kernel/sched-class/src/lib.rs": "impl<T> SchedClass<T> for Empty {}\n",
+    "src/lib/kernel/sched-fair/src/lib.rs": "impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {\n"
+                                            "    const NAME: &'static str = \"eevdf\";\n}\n",
+    "src/lib/kernel/sched-fixture/src/lib.rs": "impl<T> SchedClass<T> for Fixture {}\n",
+    "src/kernel/src/sched/mod.rs": "fn init() {}\n",
+}
+
+
+def _class_crate_self_test() -> list[str]:
+    failures = []
+    values = {"sched_fair": ["eevdf", "absent"]}
+
+    def run(record=None, packages=None, sources=None, arms=_CLASS_ARMS, unbuilt=frozenset()):
+        return class_crate_problems(record or _CLASS_RECORD, packages or _CLASS_PACKAGES,
+                                    sources or _CLASS_SOURCES, arms, values, unbuilt)
+    found = run()
+    if found:
+        failures.append(f"class crates: a tree that keeps the rules was refused: {found}")
+    unrecorded = {**_CLASS_PACKAGES, "ferrix-sched-bore": ("src/lib/kernel/sched-bore", {"dependencies": {}})}
+    bore = {**_CLASS_SOURCES, "src/lib/kernel/sched-bore/src/lib.rs": "impl<T> SchedClass<T> for Bore {}\n"}
+    fair_outside = {**_CLASS_PACKAGES,
+                    "ferrix-kernel-load": ("src/kernel/load", {"dependencies": {"ferrix-sched-fair": {}}})}
+    for what, kwargs, expect in [
+        ("(a) a class crate not recorded", {"packages": unrecorded, "sources": bore}, "does not record it"),
+        ("(b) a present_when the arm does not link",
+         {"arms": _CLASS_ARMS.replace("ferrix_sched_fair::Eevdf", "ferrix_sched_class::Empty")}, "does not name"),
+        ("(c) a kernel crate naming a class crate unrecorded", {"packages": fair_outside}, "only ferrix-kernel-sched-select"),
+        ("(c) a stale named_outside entry",
+         {"packages": {**_CLASS_PACKAGES, "ferrix-kernel-core": ("src/kernel/core", {"dependencies": {}})}}, "stale"),
+        ("(e) a kernel file taking a &mut RunQueue",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f(q: &mut RunQueue<u8>) {}\n"}},
+         "&mut RunQueue"),
+        ("(e) a method called on a CpuQueue's stack",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f(&mut self) { self.stack.insert(1); }\n"}},
+         "other than through Stack"),
+        ("(e) a &mut StackQueue handed out",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/mod.rs": "fn g(q: &mut StackQueue) {}\n"}},
+         "other than through Stack"),
+        ("(e) a kernel file calling fair_mut",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/queue.rs": "fn f() { Stack::fair_mut(q); }\n"}},
+         "&mut RunQueue"),
+        ("(b) an arm naming a crate whose value is not built",
+         {"unbuilt": frozenset({("sched_fair", "eevdf")})}, "is not built yet"),
+        ("a name the class does not give", {"record": {**_CLASS_RECORD, "ferrix-sched-fair": {
+            **_CLASS_RECORD["ferrix-sched-fair"], "name": "cfs"}}}, "is not the NAME"),
+        ("(d) a file naming the fixture",
+         {"sources": {**_CLASS_SOURCES, "src/kernel/src/sched/mod.rs": "fn init() { ferrix_sched_fixture::x(); }\n"}},
+         "names the fixture"),
+    ]:
+        if not any(expect in p for p in run(**kwargs)):
+            failures.append(f"class crates: the rules passed {what}")
+    return failures
+
+
+def run_class_crates(manifest: dict) -> list[str]:
+    """[`class_crate_problems`] over the tree."""
+    record = manifest.get("class_crates", {})
+    if not record:
+        return []
+    packages = workspace_packages()
+    sources = {}
+    for top in (ROOT / "src").rglob("*.rs"):
+        rel = top.relative_to(ROOT).as_posix()
+        if "/target/" not in f"/{rel}":
+            sources[rel] = top.read_text(encoding="utf-8", errors="replace")
+    with FLAG_FILE.open("rb") as handle:
+        flags = tomllib.load(handle).get("flags", {})
+    values = {name: list(flag.get("values", {})) for name, flag in flags.items()}
+    unbuilt = frozenset((name, value) for name, flag in flags.items()
+                        for value, spec in flag.get("values", {}).items() if spec.get("built") == "no")
+    arms = (KERNEL_SRC / ARMS_FILE).read_text(encoding="utf-8")
+    return class_crate_problems(record, packages, sources, arms, values, unbuilt)
+
+
 def profile_rule(manifest: dict) -> tuple[list[str], list[str]]:
     """Every check above over the tree's files: (problems, notes)."""
     with FLAG_FILE.open("rb") as handle:
@@ -2917,6 +3171,35 @@ def _profile_self_test() -> list[str]:
         failures.append("present's dated exception was not honoured")
     if not profile_problems("p", profile("present", "c", excepted), flags)[0]:
         failures.append("an exception outside present was honoured")
+    flags["levels"]["sc4_plus"] = {"targets": {"s": "2", "t": "2", "u": "1"}}
+    awaiting = profile("sc4_plus", "c")
+    awaiting["claim"] = "target: x"
+    awaiting["pending"] = [{"flag": "f", "value": "c", "until": "its evidence", "ledger": "24"}]
+    found, waits = profile_problems("p", awaiting, flags)
+    if found or not any("pending" in w for w in waits):
+        failures.append(f"a target's pending value was not reported as waiting: {found} {waits}")
+    held = dict(awaiting, claim="EAL 9")
+    if not any("only a profile at sc4_plus whose claim is a target" in p for p in profile_problems("p", held, flags)[0]):
+        failures.append("a held claim's pending value was accepted")
+    lower = dict(awaiting, level="sc4")
+    if not any("only a profile at sc4_plus" in p for p in profile_problems("p", lower, flags)[0]):
+        failures.append("a pending value below sc4_plus was accepted")
+    unledgered = dict(awaiting, pending=[{"flag": "f", "value": "c", "until": "its evidence"}])
+    if not any("no ledger line" in p for p in profile_problems("p", unledgered, flags)[0]):
+        failures.append("a pending entry naming no ledger line was accepted")
+    unbooted = dict(profile("sc2", "b"), image={"slot_signing": "required"}, slot_families=[])
+    if not any("names no board" in w for w in profile_problems("p", unbooted, flags)[1]):
+        failures.append("signed slots with no board named were reported buildable")
+    unrecorded = dict(unbooted, slot_families=["aarch64-kv260"])
+    if not any("names no board" in w for w in profile_problems("p", unrecorded, flags)[1]):
+        failures.append("signed slots naming only an unrecorded family were reported buildable")
+    known = dict(unbooted, slot_families=["aarch64-uefi-virt"])
+    if any("names no board" in w for w in profile_problems("p", known, flags)[1]):
+        failures.append("signed slots naming a recorded family were reported unbuildable")
+    del flags["levels"]["sc4_plus"]
+    stale = dict(awaiting, flags={"f": "a"})
+    if not any("waits on nothing" in p for p in profile_problems("p", stale, flags)[0]):
+        failures.append("a stale pending entry was accepted")
     manifest = {"rings": {"item": {"level": "present"}, "load": {"level": "none", "in_ring0_when": ["f=c"]}},
                 "crates": {"members": {"k": {"ring": "item", "level": "none", "in_ring0_when": ["f=c"]}}}}
     found = component_problems("present", profile("present", "c", excepted, "present"), flags, manifest)
@@ -3164,6 +3447,17 @@ def main() -> int:
             file=sys.stderr,
         )
         for problem in removable_found:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+
+    class_found = run_class_crates(manifest)
+    if class_found:
+        print(
+            f"item-boundary: {len(class_found)} problem(s) with the scheduling-class crates\n"
+            f"  (class_crates, docs/SCHED-CLASSES.md section 9b; ledger line 22):",
+            file=sys.stderr,
+        )
+        for problem in class_found:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 

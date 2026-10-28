@@ -510,7 +510,9 @@ changed by a running system or a Settings app**. Source:
 | `ipc_fastpath` | off, on | off | on (stand-in for off) | off; the run-time switch today is `ferrix.fastpath` |
 | `restricted_fastpath` | off, on, not_applicable | n/a | n/a | n/a |
 | `kernel_memory` | retyped, heap | heap | heap | heap |
-| `schedule` | windows, edf, fair | fair | fair | fair |
+| `sched_dispatch` | fixed, switchable | fixed | fixed | fixed |
+| `sched_windows`, `sched_deadline`, `sched_realtime` | arinc / edf_cbs / fifo_rr, absent | absent | absent | absent |
+| `sched_fair` | eevdf, absent | eevdf | eevdf | eevdf |
 | `checks` | on, off | on | on | both (`ferrix.checks` still chooses at boot with on) |
 | `program_barrier` | switch, session | switch | session (stand-in) | switch |
 | `ssbd` | always, on_request | always | on_request (stand-in) | always |

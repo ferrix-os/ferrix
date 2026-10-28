@@ -1001,11 +1001,11 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.160'> theCarriedWeightIsTheWideFormula : ItemLowLevel {
             attribute :>> statement = "quota::effective shall carry a task's weight up
-                its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving,
+                its jobs in 64-bit arithmetic (ferrix_sched_fair::carried_weight), giving,
                 before it clamps the answer, the value the same formula gives in
                 128-bit arithmetic, bit for bit, for every base and entity weight
                 below 2^32 and every load.";
-            attribute :>> criterion = "ferrix-sched's host test compares the two over
+            attribute :>> criterion = "ferrix-sched-fair's host test compares the two over
                 50000 random and boundary bases, weights and loads at each job depth
                 from 1 to 8, and at every weight 2^32 - 1, and finds no difference;
                 with one division made in 32 bits, it finds one.";

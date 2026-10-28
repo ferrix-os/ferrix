@@ -7,7 +7,9 @@
 # families its claim names, with no fallback to the generic one; a profile
 # without a claim accepts its own family, then the generic one of its arch
 # (§1.4). `recognised_by` is the rule the loader identifies the family by,
-# which slice S4 implements.
+# which slice S4 implements. `recorded = false` marks a family whose rule is
+# not recorded yet: a signed profile naming only such families boots
+# nowhere, and is not buildable (xtask, check-item-boundary).
 #
 # Integers are decimal: xtask's TOML reader takes no hex. Validated by
 # tools/common/check/check-signing-anchors.py in `cargo xtask check`.
@@ -35,6 +37,15 @@ id = 514            # 0x0202
 arch = "aarch64"
 generic = false
 recognised_by = "its own loader (src/boot/vendor/google/pixel7); no slot path (§7.3)"
+
+[family.aarch64-kv260]
+id = 516            # 0x0204; 0x0203 was the Radxa Orion O6, never recorded, retired 2026-10-27
+arch = "aarch64"
+generic = false
+recognised_by = "the device tree's xlnx,zynqmp-sk-kv260 compatible (AMD Kria KV260, Zynq UltraScale+ K26), not yet recorded: no board is owned (the customer, 2026-10-27, max_plus's board in place of the Orion O6, SCHED-CLASSES.md section 9c)"
+# No recognition rule is recorded, so the loader cannot tell this board from
+# the generic family: it counts as no board (ledger line 26, on b1d64901c).
+recorded = false
 
 [family.armv7a-uefi-virt]
 id = 769            # 0x0301

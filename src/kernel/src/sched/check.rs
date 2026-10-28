@@ -35,7 +35,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::{CpuSet, LOAD_SCALE, NICE_0_WEIGHT, weight_of_nice};
+use ferrix_sched_class::{CpuSet, LOAD_SCALE};
+use ferrix_sched_fair::{NICE_0_WEIGHT, weight_of_nice};
 use ferrix_sync::IrqControl;
 
 use super::task::{BLOCKED, Task};
@@ -70,7 +71,7 @@ const AFFINITY_WATCH_NANOS: u64 = 60_000_000;
 
 /// How long to let a load average settle before reading it.
 ///
-/// Three of `ferrix_sched`'s 33-millisecond half-lives, which takes a
+/// Three of `ferrix_sched_class`'s 33-millisecond half-lives, which takes a
 /// permanently busy processor to about seven eighths of full — comfortably
 /// past the half the check asks for, and not the near-perfect convergence it
 /// used to wait for.
@@ -214,6 +215,8 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     super::mark_check::run(topology)?;
     super::deadline_check::run()?;
+    let realtime = super::rt_check::run()?;
+    crate::console::println!("  sched    realtime {realtime}");
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;
@@ -778,7 +781,7 @@ const LOCAL_WAKE_PATIENCE_NANOS: u64 = 200_000_000;
 /// it now. A timer still armed for an earlier sleep would rescue the task for
 /// the wrong reason.
 ///
-/// Verifies: L.sched.52
+/// Verifies: L.sched.52, L.sched.104
 fn made_runnable_here_runs_without_another_interrupt() -> Result<(), &'static str> {
     let allocations = crate::vmap::usage().allocations;
     let here = super::current()
@@ -2277,7 +2280,7 @@ const PULL_BUSY_NANOS: u64 = 40_000_000;
 /// (L.sched.90); and with the waker's flips wide it runs at home
 /// (L.sched.91). Needs three processors and a domain that
 /// steals work, as L.sched.85's case.
-/// Verifies: L.sched.90, L.sched.91
+/// Verifies: L.sched.90, L.sched.91, L.sched.105
 fn a_wakee_is_pulled_onto_its_wakers_processor(topology: &Topology) -> Result<(), &'static str> {
     let online = topology.online();
     let steals = super::DOMAIN

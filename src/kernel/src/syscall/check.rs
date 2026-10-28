@@ -2867,7 +2867,7 @@ fn hangup_revokes_reading() -> Result<(), &'static str> {
         "revoke-reader",
         revoke_reader,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     )
     .map_err(|_| "could not start the revoke check's reader")?;
     crate::sched::sleep_for(20_000_000);
@@ -6705,7 +6705,7 @@ fn replace_while_two_spin(replaced: &Arc<Process>) -> Result<(), &'static str> {
         crate::sched::sleep_for(STOP_POLL_NANOS);
     }
     *REPLACING.lock() = Some(Arc::clone(replaced));
-    let replacer = crate::sched::spawn("replacer", replace, 0, ferrix_sched::NICE_0_WEIGHT)
+    let replacer = crate::sched::spawn("replacer", replace, 0, ferrix_sched_fair::NICE_0_WEIGHT)
         .map_err(|_| "could not start the task that replaces the program")?;
     let reach = crate::timer::now_nanos().saturating_add(REPLACE_REACH_NANOS);
     while replaced.live_thread_count() > 1 {
@@ -8491,7 +8491,12 @@ fn waitv_then_wake_from(
     )?;
     *FUTEX_ANSWER.lock() = None;
     *WAITV_SUBJECT.lock() = Some((Arc::clone(process), vector, words.len() as u64, timeout));
-    let waiter = crate::sched::spawn("waitv-waiter", waitv_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "waitv-waiter",
+        waitv_waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let patience = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while words
@@ -8858,7 +8863,12 @@ fn wait_then_wake_behind(
     write_timespec(process, timeout, sleep.0, sleep.1)?;
     *FUTEX_ANSWER.lock() = None;
     *FUTEX_SUBJECT.lock() = Some((Arc::clone(process), word, timeout, wait));
-    let waiter = crate::sched::spawn("futex-waiter", futex_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let waiter = crate::sched::spawn(
+        "futex-waiter",
+        futex_waiter,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let deadline = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
     while futex::waiters_on(process, word) <= ahead {
@@ -8995,7 +9005,12 @@ fn call_past_the_heap_lock(
         HeapCall::Map => process.space().layout(),
         HeapCall::Shrink | HeapCall::Fork => process.hold_heap_for_check(),
     };
-    let task = crate::sched::spawn("heap-lock", heap_caller, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let task = crate::sched::spawn(
+        "heap-lock",
+        heap_caller,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )?;
 
     let deadline = crate::timer::now_nanos().saturating_add(HEAP_PATIENCE_NANOS);
     while !HEAP_STARTED.load(Ordering::SeqCst) {
@@ -11828,6 +11843,57 @@ fn check_a_dropped_prepared_start_gives_everything_back(
     Ok(())
 }
 
+/// A native program's first task, prepared by a `SCHED_FIFO` maker through
+/// the claim `launch::load_native` starts it with, takes its maker's policy;
+/// under reset-on-fork it starts `SCHED_OTHER` (`docs/SCHED-CLASSES.md`
+/// §9e, R8). Only where the realtime tier is built; the maker, this check's
+/// task, is fair again after.
+///
+/// Verifies: L.sched.113
+fn check_a_start_takes_its_makers_policy(program: &Arc<Process>) -> Result<(), &'static str> {
+    if !crate::sched::realtime_built() {
+        return Ok(());
+    }
+    let me = crate::sched::current().ok_or("the start-policy check runs in no task")?;
+    let fifo = ferrix_sched_class::RtParams {
+        policy: ferrix_sched_class::RtPolicy::Fifo,
+        priority: 10,
+    };
+    let mut outcome = Ok(());
+    for (reset, want, wrong) in [
+        (
+            false,
+            Some(fifo),
+            "a native start did not take its maker's SCHED_FIFO",
+        ),
+        (
+            true,
+            None,
+            "a native start under reset-on-fork took its maker's SCHED_FIFO",
+        ),
+    ] {
+        if crate::sched::set_policy(&me, Some(fifo), reset).is_err() {
+            outcome = Err("the start-policy check's task was refused SCHED_FIFO");
+            break;
+        }
+        let Ok(Ok(prepared)) = process::claim_start(program).map(|claim| claim.prepare(None))
+        else {
+            outcome = Err("a native start under a SCHED_FIFO maker could not be prepared");
+            break;
+        };
+        let got = prepared.task().rt_word().params();
+        drop(prepared);
+        if got != want {
+            outcome = Err(wrong);
+            break;
+        }
+    }
+    if crate::sched::set_policy(&me, None, false).is_err() {
+        return Err("the start-policy check's task could not be made fair again");
+    }
+    outcome
+}
+
 /// Prepare `program`'s start and drop it: its thread is counted live and the
 /// claim held while it is prepared, and neither once it is dropped.
 fn prepare_and_drop_a_start(program: &Arc<Process>) -> Result<(), &'static str> {
@@ -11882,6 +11948,7 @@ fn check_a_program_is_handed_its_start_argument() -> Result<Option<i32>, &'stati
     }
     drop(claim);
     check_a_dropped_prepared_start_gives_everything_back(&program)?;
+    check_a_start_takes_its_makers_policy(&program)?;
     let claim = process::claim_start(&program)
         .map_err(|_| "a released claim on a process could not be taken again")?;
     let _task = claim
@@ -12188,14 +12255,14 @@ pub fn run_seam_count() -> Result<(usize, u64), &'static str> {
     SEAM_DONE.store(0, Ordering::Release);
     let before = crate::fs::seam::syscalls_except(SEAM_LEFT_OUT);
     for cpu in 0..online {
-        let mut only = ferrix_sched::CpuSet::empty();
+        let mut only = ferrix_sched_class::CpuSet::empty();
         only.insert(cpu)
             .map_err(|_| "no such processor for a seam caller")?;
         let _ = crate::sched::spawn_on(
             "seam-count",
             seam_caller,
             number,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             cpu,
             only,
         )?;
@@ -12934,7 +13001,8 @@ fn times_sleeper(_argument: usize) {
 /// against the switches made, not against the yields.
 /// Verifies: L.sched.83
 fn check_switches_are_counted(cpu: usize) -> Result<[u64; 4], &'static str> {
-    use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+    use ferrix_sched_class::CpuSet;
+    use ferrix_sched_fair::NICE_0_WEIGHT;
 
     TIMES_YIELDED.store(0, Ordering::Release);
     TIMES_ARRIVED.store(0, Ordering::Release);

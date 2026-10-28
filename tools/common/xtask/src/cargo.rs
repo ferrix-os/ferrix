@@ -156,6 +156,11 @@ pub(crate) fn mitigations_off_config(target: &str) -> String {
     format!("target.{target}.rustflags=[\"-C\",\"relocation-model=static\"]")
 }
 
+/// Set by `cargo xtask test-removable` alone: build the kernel with LTO
+/// turned off, in a target directory of its own, and have the linker write
+/// its map to this path (docs/SCHED-CLASSES.md §9b, G3).
+pub(crate) const LINK_MAP: &str = "FERRIX_LINK_MAP";
+
 /// Where a kernel without its defences is built: a target directory of its
 /// own, so that building one setting does not throw away the other's cache.
 pub(crate) fn mitigations_off_target_dir() -> PathBuf {
@@ -210,6 +215,23 @@ fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
         );
     } else if flags.profile != crate::flags::DEFAULT_PROFILE {
         println!("  profile {} (level {})", flags.profile, flags.level);
+    }
+    if let Some(map) = std::env::var_os(LINK_MAP) {
+        // test-removable's link half (docs/SCHED-CLASSES.md §9b, G3): the
+        // same kernel with LTO alone turned off, so the rlibs reach the
+        // link, and the linker's map of what it pulled in.
+        println!("  without LTO, the link's map to {}", map.to_string_lossy());
+        let directory = paths::target_dir().join("removable-nolto");
+        let made = directory.join(target).join(profile).join("ferrix-kernel");
+        let rustflags = format!(
+            "target.{target}.rustflags=[\"-C\",\"link-arg=-Map={}\"]",
+            map.to_string_lossy()
+        );
+        let build = build
+            .args(["--config", "profile.release.lto=false"])
+            .args(["--config", &rustflags])
+            .args([std::ffi::OsStr::new("--target-dir"), directory.as_os_str()]);
+        return Ok((build, made));
     }
     if !flags.mitigations_off() {
         let made = paths::target_dir()

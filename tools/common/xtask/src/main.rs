@@ -10,6 +10,7 @@
 //! cargo xtask test-vfs  --arch all --init PATH/{arch}/busybox [--timeout SECONDS]
 //! cargo xtask test-threads --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-sem --arch all [--i686] [--timeout SECONDS]
+//! cargo xtask test-rtsched --arch all [--kernel-profile desktop] [--timeout SECONDS]
 //! cargo xtask test-shm --arch all [--i686] [--timeout SECONDS]
 //! cargo xtask test-container --arch all [--timeout SECONDS]
 //! cargo xtask test-procfs --arch all [--i686] [--timeout SECONDS]
@@ -184,6 +185,7 @@ mod remote;
 mod rename_crash;
 mod restart;
 mod rows_bench;
+mod rtsched;
 mod rustc;
 mod seam;
 mod seat;
@@ -609,6 +611,7 @@ const TASKS: &[&[Task]] = &[
     rustc::TASKS,
     seam::TASKS,
     seat::TASKS,
+    rtsched::TASKS,
     sem::TASKS,
     serial::TASKS,
     settingsd::TASKS,

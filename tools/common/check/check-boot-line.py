@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 import tomllib
@@ -47,6 +48,11 @@ PROFILES = ROOT / "tools" / "common" / "data" / "profiles"
 # The kernel's line: `build` then the words, wherever the console put it.
 LINE = re.compile(r"(?:^|\s)build\s+(profile=\S+(?:\s+\S+)*)\s*$")
 NO_CLAIM = "; no claim"
+MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
+
+# L.sched.102 (docs/SCHED-CLASSES.md §9b, G9): the scheduler's classes, as
+# `sched::init` prints them once every processor is in the scheduler.
+CLASSES = re.compile(r"(?:^|\s)sched\s+classes\s+(\S+)\s*$")
 
 # DF8: the light values every desktop boot names.
 DESKTOP_LIGHT = {
@@ -127,6 +133,31 @@ def compare(want: dict[str, str], got: dict[str, str], claim_none: bool, no_clai
 MANIFEST_FLAGS = ("runtime_settings",)
 
 
+def expected_classes(words: dict[str, str], flag_file: dict, record: dict) -> str:
+    """The `sched    classes` line's name for the build `words`: each tier
+    flag's selected class (`class_crates`), outermost first, joined by '+',
+    an `absent` tier naming nothing (L.sched.102)."""
+    names = []
+    for flag in flag_file.get("flags", {}):
+        if not flag.startswith("sched_") or flag == "sched_dispatch" or words.get(flag) == "absent":
+            continue
+        crate = [entry for package, entry in record.items()
+                 if isinstance(entry, dict) and entry.get("flag") == flag and entry.get("present_when") == words.get(flag)]
+        if len(crate) != 1 or not crate[0].get("name"):
+            raise ValueError(f"class_crates records no one class crate, with its name, for {flag}={words.get(flag)}")
+        names.append(crate[0]["name"])
+    return "+".join(names)
+
+
+def found_classes(lines: list[str]) -> str | None:
+    """The name on the kernel's `sched    classes` line, if it printed one."""
+    for line in lines:
+        match = CLASSES.search(line.rstrip())
+        if match:
+            return match.group(1)
+    return None
+
+
 def expected_manifest(words: dict[str, str], profile_file: dict) -> str:
     """The image manifest an image of these build-line words must carry
     (docs/BUILD-FLAGS.md §5.1; ledger 3623 (R19)), from the files alone."""
@@ -183,6 +214,17 @@ def self_test() -> list[str]:
         failures.append("a desktop line without its light values was accepted")
     if found(["no line here"]) is not None:
         failures.append("a line was found where there is none")
+    tiers = {"flags": {"sched_dispatch": {}, "sched_deadline": {}, "sched_fair": {}, "checks": {}}}
+    record = {"fair": {"flag": "sched_fair", "present_when": "eevdf", "name": "eevdf"},
+              "edf": {"flag": "sched_deadline", "present_when": "edf_cbs", "name": "edf"},
+              "fixture": {"fixture": True}}
+    two = {"sched_dispatch": "fixed", "sched_deadline": "edf_cbs", "sched_fair": "eevdf"}
+    if expected_classes(two, tiers, record) != "edf+eevdf":
+        failures.append(f"a stack of two tiers was named {expected_classes(two, tiers, record)!r}, not 'edf+eevdf'")
+    if expected_classes({**two, "sched_deadline": "absent"}, tiers, record) != "eevdf":
+        failures.append("an absent tier was named")
+    if found_classes(["  2.0 |   sched    classes edf+eevdf"]) != "edf+eevdf" or found_classes(["sched x"]) is not None:
+        failures.append("the classes line was misread")
     return failures
 
 
@@ -240,6 +282,18 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    try:
+        with MANIFEST.open(encoding="utf-8") as handle:
+            record = json.load(handle).get("class_crates", {})
+        classes = expected_classes(want, flag_file, record)
+    except (OSError, ValueError) as error:
+        print(f"boot-line: REFUSED: {args.arch}: {error}", file=sys.stderr)
+        return 1
+    printed = found_classes(lines)
+    if printed != classes:
+        print(f"boot-line: REFUSED: {args.arch}: the kernel's classes line names {printed!r}, and the profile's "
+              f"tiers compose {classes!r} (L.sched.102)", file=sys.stderr)
+        return 1
     if args.manifest is not None:
         carried = args.manifest.read_text(encoding="utf-8") if args.manifest.is_file() else None
         problems = manifest_problems(expected_manifest(want, profile_file), carried)
@@ -253,7 +307,8 @@ def main() -> int:
         else f"profile {args.profile} (level {want['level']})"
     )
     print(
-        f"boot-line: {args.arch}: the kernel's build line matches {claim}, word for word"
+        f"boot-line: {args.arch}: the kernel's build line matches {claim}, word for word, and its "
+        f"classes line names {classes}"
         f"{', and so does the image manifest' if args.manifest is not None else ''}; "
         f"kernel sha256 {digest}"
     )

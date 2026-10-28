@@ -3,7 +3,7 @@
 //! Stage 5 of `docs/ROADMAP.md`. Until now the kernel has run one thread of
 //! control per processor, and every "CPU" in the code has meant a processor.
 //! From here a processor runs a *task*, chosen from a queue of its own, and
-//! the choosing is `ferrix_sched`'s EEVDF fair class — written in `src/lib/` and
+//! the choosing is `ferrix_sched_fair`'s EEVDF fair class — written in `src/lib/` and
 //! tested on the host, because a scheduler that is wrong is wrong in a way
 //! nothing on the machine can print.
 //!
@@ -48,6 +48,8 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
+mod rt_check;
+mod stack;
 mod task;
 pub mod trip;
 pub mod vtime;
@@ -58,7 +60,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use ferrix_sched::{Balance, CpuSet, Domain, Mode, NICE_0_WEIGHT, Placement, check_partition};
+use ferrix_sched_class::{Balance, CpuSet, Domain, Mode, Placement, check_partition};
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::{IrqControl, IrqSpinLock, Once, SpinLock};
 
 use crate::arch;
@@ -513,7 +516,7 @@ static ZOMBIES: IrqSpinLock<Zombies, arch::Irq> = IrqSpinLock::new(Zombies::new(
 #[derive(Debug)]
 struct Zombies {
     /// The tasks, keyed by the order they died in.
-    list: ferrix_sched::Timeline<Arc<Task>>,
+    list: ferrix_sched_fair::Timeline<Arc<Task>>,
     /// The next one's place in that order.
     next: u64,
 }
@@ -522,7 +525,7 @@ impl Zombies {
     /// None.
     const fn new() -> Zombies {
         Zombies {
-            list: ferrix_sched::Timeline::new(),
+            list: ferrix_sched_fair::Timeline::new(),
             next: 0,
         }
     }
@@ -897,7 +900,7 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     let cpus =
         CpuSet::first(online).map_err(|_| "more processors than a scheduling domain holds")?;
     let domain =
-        Domain::new(cpus, Mode::Throughput).map_err(|_| "the Throughput domain was refused")?;
+        make_domain(cpus, Mode::Throughput).map_err(|_| "the Throughput domain was refused")?;
     check_partition(core::slice::from_ref(&domain), online)
         .map_err(|_| "the scheduling domains do not cover every processor exactly once")?;
     let _ = DOMAIN.call_once(|| domain);
@@ -927,7 +930,10 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     // The secondaries are asleep in `smp::secondary_main`. Wake them, so each
     // takes up the idle loop that is its half of the scheduler.
     let _ = arch::send_ipi_to_others();
-    wait_for_processors(online)
+    wait_for_processors(online)?;
+    // The stack's name, S1's marker (SCHED-CLASSES.md §10, N3).
+    crate::console::println!("  sched    classes {}", stack::NAME);
+    Ok(())
 }
 
 /// Wait until every processor is in the scheduler, or say which never came.
@@ -1001,7 +1007,7 @@ fn adopt_boot_task() -> Result<(), &'static str> {
         queue.insert(&boot);
         // Make it the running entity rather than one waiting to run: it is
         // already on the processor.
-        let _ = queue.fair.pick_next();
+        let _ = <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::pick(&mut queue.stack);
         queue.exec_start = crate::timer::now_nanos();
         note_running(0, boot.id, quota::NONE, 0);
         // Whatever kernel time is pending goes to what ran before, and the
@@ -1232,7 +1238,7 @@ fn domain_cpus() -> Option<&'static CpuSet> {
     DOMAIN.get().map(Domain::cpus)
 }
 
-/// Ask `ferrix_sched` where a task should go, given what every processor is
+/// Ask `ferrix_sched_class` where a task should go, given what every processor is
 /// carrying right now.
 ///
 /// Takes every run queue's lock in turn, which is why it is never called with
@@ -1409,13 +1415,166 @@ pub fn prepare_user(
     // Its process's job, for its share of the processor and for what it
     // charges; set before any queue can see it.
     task.set_group(thread.process().core().quota_slot());
-    Ok(PreparedTask {
+    let prepared = PreparedTask {
         task,
         cpu,
         queue,
         thread,
         launched: false,
+    };
+    // Dropped on a refusal, it frees what was made, as any start that fails.
+    inherit_policy(&prepared.task)?;
+    Ok(prepared)
+}
+
+/// Give `child`, a user task no queue has seen, the policy of the task
+/// making it, this processor's running one (`docs/SCHED-CLASSES.md` §9e, F9,
+/// R8, L.sched.113): a real-time policy and priority are inherited, with a
+/// node of their own, unless the parent has reset-on-fork set, when the
+/// child starts `SCHED_OTHER`; the child's own reset-on-fork flag starts
+/// clear either way, as Linux's does. Every user task is made through
+/// [`prepare_user`] -- a fork's child, a clone's thread and a native launch
+/// alike -- so this is the one place a policy is inherited.
+///
+/// # Errors
+///
+/// No memory for the child's node.
+fn inherit_policy(child: &Task) -> Result<(), &'static str> {
+    let Some(params) = with_current(|parent| {
+        let word = parent.rt_word();
+        word.params().filter(|_| !word.resets_on_fork())
     })
+    .flatten() else {
+        return Ok(());
+    };
+    let node = stack::new_upper_node().ok_or("no memory for the new task's real-time node")?;
+    // A task just made owns no node, and no queue has seen it: kept.
+    if child.give_upper_node(node).is_err() {
+        return Err("the new task already had a real-time node");
+    }
+    child.store_policy(Some(params), false);
+    Ok(())
+}
+
+/// Whether the running task has reset-on-fork set: the nice value a thread
+/// it starts inherits is then raised to zero if it is negative, as Linux's
+/// `sched_fork` does (L.sched.113).
+pub fn current_resets_on_fork() -> bool {
+    with_current(|task| task.rt_word().resets_on_fork()).unwrap_or(false)
+}
+
+/// A scheduling domain of `cpus` running `mode`, as this build can make
+/// one (docs/SCHED-CLASSES.md §9a, D9, and §9e, R9, L.sched.115): a mode
+/// whose tiers are not compiled in is `ModeUnavailable`, before the
+/// library's own refusal of a mode not written yet; `SoftRt`, compiled in
+/// on `desktop`, is `NotCreatable` until its own processors, a fully
+/// preemptible kernel and threaded interrupts land (REALTIME.md §4).
+///
+/// # Errors
+///
+/// The [`ferrix_sched_class::DomainError`] of the refusal.
+pub(crate) fn make_domain(
+    cpus: CpuSet,
+    mode: Mode,
+) -> Result<Domain, ferrix_sched_class::DomainError> {
+    if !ferrix_kernel_sched_select::mode_available(mode) {
+        return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
+    }
+    if mode == Mode::SoftRt {
+        return Err(ferrix_sched_class::DomainError::NotCreatable(mode));
+    }
+    Domain::new(cpus, mode)
+}
+
+/// Whether this build has a tier above fair, so that a task may ask for
+/// `SCHED_FIFO` or `SCHED_RR` (L.sched.116).
+#[must_use]
+pub const fn realtime_built() -> bool {
+    stack::REALTIME
+}
+
+/// The round-robin quantum of the tier above fair, in nanoseconds: what
+/// `sched_rr_get_interval` answers for a `SCHED_RR` task (R13).
+#[must_use]
+pub const fn rr_quantum_ns() -> u64 {
+    stack::RR_QUANTUM_NS
+}
+
+/// Why [`set_policy`] refused a policy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PolicyRefused {
+    /// The build has no tier above fair (L.sched.116).
+    NoTier,
+    /// No memory for the task's node of that tier (R1).
+    NoMemory,
+}
+
+/// Give `task` a real-time policy and priority, or `SCHED_OTHER` with
+/// `None`, and its reset-on-fork flag, and ask for a decision if that has
+/// changed which task should be running (`docs/SCHED-CLASSES.md` §9e,
+/// L.sched.112). The queue holding the task is found and locked as
+/// [`set_weight`] finds it. A task's first real-time policy allocates its
+/// node here, before any lock is taken (R1); refused for want of it,
+/// nothing has changed.
+///
+/// # Errors
+///
+/// [`PolicyRefused`], with nothing changed.
+pub fn set_policy(
+    task: &Arc<Task>,
+    params: Option<ferrix_sched_class::RtParams>,
+    reset_on_fork: bool,
+) -> Result<(), PolicyRefused> {
+    let mut node = None;
+    if params.is_some() {
+        if !stack::REALTIME {
+            return Err(PolicyRefused::NoTier);
+        }
+        if !task.owns_upper_node() {
+            node = Some(stack::new_upper_node().ok_or(PolicyRefused::NoMemory)?);
+        }
+    }
+    let saved = <arch::Irq as IrqControl>::disable();
+    let mut kick_cpu = None;
+    // A node another call gave the task first: freed as this returns, with
+    // no lock held.
+    let mut _spare = None;
+    loop {
+        let cpu = task.cpu();
+        let Some(lock) = queue_of(cpu) else {
+            if let Some(node) = node.take() {
+                _spare = task.give_upper_node(node).err();
+            }
+            task.store_policy(params, reset_on_fork);
+            break;
+        };
+        let mut queue = lock.lock();
+        // It may have moved between the read and the lock, as in `wake`.
+        if task.cpu() != cpu {
+            continue;
+        }
+        if let Some(node) = node.take() {
+            _spare = task.give_upper_node(node).err();
+        }
+        if queue.set_policy(task, params, reset_on_fork) {
+            kick_cpu = Some(cpu);
+        }
+        break;
+    }
+    // As `set_weight`.
+    let here = this_cpu();
+    let remote = match kick_cpu {
+        Some(cpu) if here == Some(cpu) => {
+            resched_here(cpu);
+            None
+        }
+        other => other,
+    };
+    <arch::Irq as IrqControl>::restore(saved);
+    if let Some(cpu) = remote {
+        kick(cpu);
+    }
+    Ok(())
 }
 
 /// A user task made and counted, on no queue yet.
@@ -1467,6 +1626,43 @@ impl Drop for PreparedTask {
         }
         self.thread.process().thread_gone(false);
     }
+}
+
+/// Start a kernel thread on `cpu`, able to run on `affinity`, under the
+/// real-time policy `params`, given before any queue sees it: for the
+/// real-time checks (`rt_check`). Refused in a build without a tier above
+/// fair.
+///
+/// # Errors
+///
+/// No tier above fair, no memory for its node, or no stack for it.
+pub(crate) fn spawn_rt_on(
+    name: &'static str,
+    entry: fn(usize),
+    argument: usize,
+    cpu: usize,
+    affinity: CpuSet,
+    params: ferrix_sched_class::RtParams,
+) -> Result<Arc<Task>, &'static str> {
+    let queue = queue_of(cpu).ok_or("no such processor")?;
+    let node = stack::new_upper_node().ok_or("no tier above fair, or no memory for its node")?;
+    let task = make_task(
+        name,
+        entry,
+        argument,
+        NICE_0_WEIGHT,
+        cpu,
+        affinity,
+        None,
+        None,
+        None,
+    )?;
+    if task.give_upper_node(node).is_err() {
+        return Err("a new task already had a real-time node");
+    }
+    task.store_policy(Some(params), false);
+    enqueue(&task, cpu, queue);
+    Ok(task)
 }
 
 /// Make a task and put it on `cpu`'s queue: the path every kernel task takes.
@@ -1769,7 +1965,12 @@ pub fn current_runtime() -> u64 {
 pub fn yield_now() {
     let saved = <arch::Irq as IrqControl>::disable();
     if let Some(lock) = this_cpu().and_then(queue_of) {
-        lock.lock().fair.yield_curr();
+        {
+            let mut queue = lock.lock();
+            <stack::Stack as ferrix_sched_class::SchedClass<Arc<Task>>>::yield_current(
+                &mut queue.stack,
+            );
+        }
     }
     <arch::Irq as IrqControl>::restore(saved);
     schedule();
@@ -1939,6 +2140,11 @@ enum Onto {
 /// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
 /// interrupts masked.
 fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
+    // A real-time task is woken where it is, never moved (R5, L.sched.110),
+    // as `place_on_idle` declines it.
+    if !task.is_fair() {
+        return Placed::Declined;
+    }
     // A pull's affinity and pinning were decided by `may_pull`.
     let Some(mine) = queue_of(here).filter(|_| how == Onto::Pull || may_place(task, here)) else {
         return Placed::Declined;
@@ -2013,7 +2219,7 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
 /// preemption and a warm cache (Linux's `wake_affine_idle`), a busy share
 /// not yet measured, or this processor's load average with the task's load
 /// added at 108% of the home's with it taken away or more
-/// (`ferrix_sched::pull_fits`, Linux's `wake_affine_weight`).
+/// (`ferrix_sched_class::pull_fits`, Linux's `wake_affine_weight`).
 fn refuses(how: Onto, here: &CpuQueue, home: &CpuQueue, task: &Task) -> bool {
     match how {
         Onto::Sync => here.waiting() != 0,
@@ -2026,7 +2232,7 @@ fn refuses(how: Onto, here: &CpuQueue, home: &CpuQueue, task: &Task) -> bool {
             };
             let load =
                 busy.saturating_mul(u64::from(task.base_weight())) / u64::from(NICE_0_WEIGHT);
-            !ferrix_sched::pull_fits(here.load_average(), home.load_average(), load)
+            !ferrix_sched_class::pull_fits(here.load_average(), home.load_average(), load)
         }
     }
 }
@@ -2079,7 +2285,7 @@ fn pull_onto_waker(task: &Arc<Task>) -> bool {
 /// never pulls. It records the wakee whatever the answer, as Linux's
 /// `record_wakee` does on every wake. Then the domain must steal work and
 /// hold both processors, the task must not be pinned and must be allowed
-/// here, the wake must not be wide (`ferrix_sched::wake_wide`, with the
+/// here, the wake must not be wide (`ferrix_sched_class::wake_wide`, with the
 /// domain's processor count as the factor), and no processor the task may
 /// run on other than its home may be idle: an idle one is L.sched.85's to
 /// take, as Linux's `select_idle_sibling` comes before stacking on the
@@ -2100,7 +2306,7 @@ fn pull_target(task: &Arc<Task>) -> Option<usize> {
         return None;
     }
     let factor = u32::try_from(domain.cpus().len()).unwrap_or(u32::MAX);
-    if ferrix_sched::wake_wide(waker_flips, task.wakee_flips(), factor) {
+    if ferrix_sched_class::wake_wide(waker_flips, task.wakee_flips(), factor) {
         return None;
     }
     if idle_allowed(task, domain) {
@@ -2290,19 +2496,22 @@ fn placed_on_wake(
 
 /// Queue `task` on processor `to`'s queue, `queue`, whose lock the caller
 /// holds with the lock of the queue `task` comes from: the one move between
-/// queues, made by a steal (`steal_from`, with the state the victim's queue
-/// let go) and by a wake's placement (`place_on_idle`, with none: the task
-/// was on no queue, and carries the state it stored when it blocked). Either
-/// way the lag it carries is placed against `queue`'s own virtual time, by
-/// the same `insert`.
-fn move_onto(
-    task: &Arc<Task>,
-    state: Option<ferrix_sched::EntityState>,
-    to: usize,
-    queue: &mut CpuQueue,
-) {
-    if let Some(state) = state {
-        task.store_entity_state(state);
+/// queues, made by a steal (`steal_from`, the task carrying the state the
+/// victim's queue let go, `CpuQueue::release`) and by a wake's placement
+/// (`place_on_idle`: the task was on no queue, and carries the state it
+/// stored when it blocked). Either way the lag it carries is placed against
+/// `queue`'s own virtual time, by the same `insert`. Never a real-time task
+/// (F8, L.sched.110): the fair class alone offers a steal, and a wake's
+/// placement declines one.
+fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
+    // A task a processor runs is never waiting in a queue to be moved: one
+    // that is means two processors would run one context (line 30, B1).
+    if task.is_on_cpu() {
+        crate::panic::fatal!(
+            crate::panic::catalog::RUNNING_TASK_QUEUED,
+            "a task a processor runs was moved to another as if it waited: task {}",
+            task.id
+        );
     }
     task.set_cpu(to);
     // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
@@ -2356,7 +2565,11 @@ pub(crate) fn placements() -> u64 {
 /// that found work of its own meanwhile is not taken; one that finds it
 /// after this runs `task` after its pick, as any queued task.
 fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
-    if task.is_pinned() {
+    // A real-time task stays on the processor its affinity and its last run
+    // give it, as `docs/SCHED-CLASSES.md` §9e has it (R5, L.sched.110): never
+    // pushed to another, so a higher priority waits for its own processor
+    // even while another is idle.
+    if task.is_pinned() || !task.is_fair() {
         return None;
     }
     let domain = DOMAIN.get()?;
@@ -2379,7 +2592,7 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
         if !queue.is_running_idle() || queue.waiting() != 0 {
             continue;
         }
-        move_onto(task, None, to, &mut queue);
+        move_onto(task, to, &mut queue);
         count_placed(home, to);
         return Some(to);
     }
@@ -2692,6 +2905,35 @@ fn pick_and_switch(interrupted_user: bool) {
     finish_switch();
 }
 
+/// The running task's place at a decision, before the pick: one that stopped
+/// being runnable leaves the queue (filed as a sleeper if it sleeps), and
+/// one still runnable whose policy changed moves to its new tier.
+fn settle_previous(queue: &mut CpuQueue, previous: &Arc<Task>) {
+    if previous.state() != RUNNABLE {
+        queue.detach_current();
+        // Taken either way, filed only for a task that can wake: a dead task
+        // in the sleeper set is a dead task the timer makes runnable.
+        if let Some(at) = previous.take_sleep_deadline()
+            && !previous.is_dead()
+            && !queue.file_sleeper(at, previous)
+        {
+            // No sleep slot to file it in: it runs on, and its sleep returns
+            // early and asks again. See `CpuQueue::file_sleeper`.
+            previous.set_state(RUNNABLE);
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+            queue.insert(previous);
+        }
+    }
+
+    // A running task whose policy changed moves to its new tier here, where
+    // the pick after this makes the stack's running entity this processor's
+    // task again under the same lock hold (`CpuQueue::set_policy`). Read
+    // again: a task the block above filed back as runnable is one too.
+    if previous.state() == RUNNABLE {
+        queue.requeue_if_moved(previous);
+    }
+}
+
 /// Choose what runs next, leaving the queue's lock held and returning where
 /// to save this context and what to resume — or releasing the lock and
 /// returning `None` when nothing has to change.
@@ -2712,22 +2954,9 @@ fn choose_next(
     wake_sleepers_placing(queue, cpu, now);
 
     let previous = queue.current.clone();
-    if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
-        queue.detach_current();
-        // Taken either way, filed only for a task that can wake: a dead task
-        // in the sleeper set is a dead task the timer makes runnable.
-        if let Some(at) = previous.take_sleep_deadline()
-            && !previous.is_dead()
-            && !queue.file_sleeper(at, previous)
-        {
-            // No sleep slot to file it in: it runs on, and its sleep returns
-            // early and asks again. See `CpuQueue::file_sleeper`.
-            previous.set_state(RUNNABLE);
-            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-            queue.insert(previous);
-        }
+    if let Some(previous) = previous.as_ref() {
+        settle_previous(queue, previous);
     }
-
     let next = queue.pick_next();
     if queue.stats.measuring {
         queue.note_pick(now);
@@ -2814,6 +3043,9 @@ fn switch_chosen(
     // Moved, not cloned (2f): the outgoing task into `previous`, which
     // `finish_switch` takes, and the pick into `current`. The rest reads both
     // where the queue holds them.
+    // The incoming task runs from here; the outgoing one until its context
+    // is saved, which `finish_switch` marks (FX-0537).
+    next.set_on_cpu(true);
     queue.previous = Some(previous);
     set_current(queue, cpu, next);
     let (Some(previous), Some(next)) = (queue.previous.as_ref(), queue.current.as_ref()) else {
@@ -2988,6 +3220,10 @@ fn finish_switch() {
         borrow::audit(borrow::Site::Switch, queue.current.as_ref());
     }
     let previous = queue.previous.take();
+    // Its context is saved: no processor runs it now (FX-0537).
+    if let Some(previous) = previous.as_ref() {
+        previous.set_on_cpu(false);
+    }
     let dead = previous.as_ref().is_some_and(|task| task.is_dead());
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
@@ -3218,9 +3454,10 @@ fn steal_from(me: usize, victim: usize) -> bool {
     // idle processor's look at the other queues.
     let keeps_its_last = theirs_queue.is_running_idle() && theirs_queue.waiting() <= 1;
     let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
-        Some(id) => match theirs_queue.release(id) {
-            Some((task, state)) => {
-                move_onto(&task, Some(state), me, mine_queue);
+        // The candidate is fair's: only fair offers one (F8).
+        Some(id) => match theirs_queue.release(id, false) {
+            Some(task) => {
+                move_onto(&task, me, mine_queue);
                 theirs_queue.stats.stolen_out += 1;
                 mine_queue.stats.stolen_in += 1;
                 true
@@ -3419,7 +3656,7 @@ pub(crate) fn open_window(tasks: &[Arc<Task>]) {
         // ahead by before this instant — including a host stall charged to
         // whichever spinner was running while its siblings were still being
         // made — is not the window's to repay. See `RunQueue::level`.
-        queue.fair.level();
+        <stack::Stack as ferrix_sched_fair::FairTier<Arc<Task>>>::level(&mut queue.stack);
         queue.stats.measuring = true;
         queue.stats.worst_lag = 0;
         queue.stats.worst_overrun = 0;
@@ -3626,7 +3863,7 @@ pub(crate) fn print_picks(cpu: usize) {
 /// One processor's run queue, for a check or the boot log.
 #[derive(Clone, Copy, Debug)]
 pub struct CpuReport {
-    /// Its decaying load average, out of `ferrix_sched::LOAD_SCALE`.
+    /// Its decaying load average, out of `ferrix_sched_class::LOAD_SCALE`.
     pub(crate) load: u64,
     /// The slice it is currently handing out.
     pub(crate) slice_ns: u64,

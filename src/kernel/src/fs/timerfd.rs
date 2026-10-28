@@ -515,7 +515,7 @@ fn timers_changed() {
         start
     };
     if start {
-        match sched::spawn("timerfds", run_clock, 0, ferrix_sched::NICE_0_WEIGHT) {
+        match sched::spawn("timerfds", run_clock, 0, ferrix_sched_fair::NICE_0_WEIGHT) {
             Ok(task) => {
                 let previous = CLOCK_TASK.lock().replace(task);
                 drop(previous);

@@ -16,7 +16,7 @@
 //!
 //! # What the nice value does
 //!
-//! It is the scheduler's weight, through [`apply_nice`]: `ferrix_sched`'s
+//! It is the scheduler's weight, through [`apply_nice`]: `ferrix_sched_fair`'s
 //! fair class has carried weights since stage 5 and `weight_of_nice` is
 //! Linux's own table, so a nice value has somewhere to go. Until it was
 //! plumbed through, nothing a program could say made the machine prefer one
@@ -78,7 +78,7 @@ use core::ops::Deref;
 use crate::sync::SpinLock;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::Syscall;
-use ferrix_sched::weight_of_nice;
+use ferrix_sched_fair::weight_of_nice;
 
 use crate::object::process::Host as _;
 use crate::sched::Task;
@@ -644,7 +644,7 @@ pub(crate) fn forget_robust_list(process: &Process) {
 
 /// The thread `get_robust_list` asks about: the caller for 0, else the thread
 /// numbered `pid`, in the caller's process or any other.
-fn robust_list_subject(
+pub(crate) fn robust_list_subject(
     process: &Process,
     pid: i32,
 ) -> Result<Arc<crate::syscall::thread::Thread>, Errno> {
@@ -830,7 +830,7 @@ pub(crate) fn sys_setpriority(
 }
 
 /// The task that runs `thread`, if it is still alive.
-fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
+pub(crate) fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
     thread.process().tasks().into_iter().find(|task| {
         crate::syscall::thread::of_task(task).is_some_and(|runs| core::ptr::eq(runs, thread))
     })

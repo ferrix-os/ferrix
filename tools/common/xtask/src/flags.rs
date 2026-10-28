@@ -267,6 +267,9 @@ pub(crate) struct Profile {
     /// Its image keys (`image = { .. }`), in the file's order: what the
     /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
     pub(crate) image: Vec<(String, String)>,
+    /// The board families its loader accepts a signed slot for
+    /// (`slot_families`, docs/SIGNING.md §1.4).
+    pub(crate) slot_families: Vec<String>,
 }
 
 impl Profile {
@@ -314,12 +317,17 @@ impl Profile {
                 .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
             image.push((key.clone(), value.to_owned()));
         }
+        let slot_families = root
+            .get("slot_families")
+            .and_then(Value::strings)
+            .unwrap_or_default();
         Ok(Profile {
             name: name.to_owned(),
             level,
             values,
             exceptions,
             image,
+            slot_families,
         })
     }
 }
@@ -406,7 +414,40 @@ impl Resolved {
 pub(crate) fn resolve(profile: Option<&str>, sets: &[(String, String)]) -> Result<Resolved> {
     let resolved = resolve_unbuilt(profile, sets)?;
     buildable(&resolved)?;
+    let families = read_toml(&paths::workspace_root().join(FAMILY_FILE))?;
+    let recorded = |name: &str| {
+        families
+            .get("family")
+            .and_then(|table| table.get(name))
+            .and_then(|family| family.get("recorded"))
+            .is_none_or(|value| matches!(value, Value::Bool(true)))
+    };
+    if let Some(why) = unnamed_boards(&Profile::load(&resolved.base)?, recorded) {
+        return Err(Error::new(why));
+    }
     Ok(resolved)
+}
+
+/// The hardware-family registry (`docs/SIGNING.md` §1.4).
+const FAMILY_FILE: &str = "tools/common/data/hardware-families.toml";
+
+/// Why a profile that boots only signed slots, and names no board family
+/// its loader can recognise (`recorded`), is not buildable: such an image
+/// boots nothing (docs/SCHED-CLASSES.md §9c; ledger lines 25 (2) and 26).
+fn unnamed_boards(profile: &Profile, recorded: impl Fn(&str) -> bool) -> Option<String> {
+    let required = profile
+        .image
+        .iter()
+        .any(|(key, value)| key == "slot_signing" && value == "required");
+    let known = profile.slot_families.iter().any(|family| recorded(family));
+    (required && !known).then(|| {
+        format!(
+            "profile {} is not yet buildable: it boots only signed slots and names no board \
+             family in slot_families whose recognition rule is recorded, so its image would \
+             boot nothing",
+            profile.name
+        )
+    })
 }
 
 /// [`resolve`] without the last check: whether the result builds today.
@@ -747,6 +788,23 @@ mod tests {
             .iter()
             .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn signed_slots_with_no_board_family_are_refused() {
+        let mut profile = super::Profile::load("max_plus").unwrap();
+        assert!(super::unnamed_boards(&profile, |_| true).is_none());
+        assert!(
+            super::unnamed_boards(&profile, |_| false).is_some_and(|why| why.contains("recorded"))
+        );
+        profile.slot_families.clear();
+        assert!(
+            super::unnamed_boards(&profile, |_| true)
+                .is_some_and(|why| why.contains("names no board"))
+        );
+        assert!(
+            super::unnamed_boards(&super::Profile::load("present").unwrap(), |_| false).is_none()
+        );
     }
 
     #[test]

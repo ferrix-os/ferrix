@@ -939,14 +939,26 @@ package FerrixStructure {
                  * firmware, the CPU and timer jitter. The block function is
                  * checked against RFC 8439 and OpenSSL's keystream. */
         }
-        #implemented part sched : LibraryCrate {
-            attribute :>> path = "src/lib/kernel/sched";
+        #implemented part schedClass : LibraryCrate {
+            attribute :>> path = "src/lib/kernel/sched-class";
             attribute :>> forbidsUnsafe = true;
-            attribute :>> hostTests = 77;
+            attribute :>> hostTests = 46;
             @stage { number = 5; }
-            doc /* The half of the scheduler that is arithmetic: the EEVDF
-                 * tree, weights, lag, the domain partition. cargo test drives
-                 * a run queue through hundreds of thousands of decisions. */
+            doc /* The scheduling-class interface (docs/SCHED-CLASSES.md): the
+                 * SchedClass trait every scheduler crate implements, the Over
+                 * stack and the Empty class; and what every class shares, the
+                 * domain partition, load tracking, placement and balancing.
+                 * Split from ferrix-sched on 2026-10-26. */
+        }
+        #implemented part schedFair : LibraryCrate {
+            attribute :>> path = "src/lib/kernel/sched-fair";
+            attribute :>> forbidsUnsafe = true;
+            attribute :>> hostTests = 52;
+            @stage { number = 5; }
+            doc /* The fair class: the EEVDF tree, weights, lag, the job fold,
+                 * the sleepers' timeline, and SchedClass as Eevdf. cargo test
+                 * drives a run queue through hundreds of thousands of
+                 * decisions. Split from ferrix-sched on 2026-10-26. */
         }
         #implemented part vma : LibraryCrate {
             attribute :>> path = "src/lib/kernel/vma";

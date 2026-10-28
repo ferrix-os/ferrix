@@ -23,7 +23,8 @@ use ferrix_kernel_core::arch::x86_64::paranoid as core_paranoid;
 use core::hint::spin_loop;
 use core::sync::atomic::Ordering;
 
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::IrqControl;
 
 use crate::console::println;

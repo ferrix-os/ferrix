@@ -12,7 +12,7 @@
 //! satisfy, rather than a scheduler to take apart to find where the policy
 //! was.
 
-use crate::SchedError;
+use crate::DomainError;
 
 /// How a domain schedules.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,14 +47,14 @@ impl Mode {
     ///
     /// # Errors
     ///
-    /// [`SchedError::ModeUnavailable`] for a mode that is not written yet —
+    /// [`DomainError::ModeUnavailable`] for a mode that is not written yet —
     /// which is a refusal, not a fallback. A domain asked to run hard
     /// real-time that quietly ran Throughput instead would be the kind of
     /// statement that gets believed.
-    pub const fn classes(self) -> Result<&'static [Class], SchedError> {
+    pub const fn classes(self) -> Result<&'static [Class], DomainError> {
         match self {
             Mode::Throughput => Ok(&THROUGHPUT),
-            Mode::SoftRt | Mode::HardRt => Err(SchedError::ModeUnavailable(self)),
+            Mode::SoftRt | Mode::HardRt => Err(DomainError::ModeUnavailable(self)),
         }
     }
 
@@ -116,8 +116,8 @@ impl CpuSet {
     ///
     /// # Errors
     ///
-    /// [`SchedError::NoSuchCpu`] if `count` is past [`MAX_CPUS`].
-    pub fn first(count: usize) -> Result<CpuSet, SchedError> {
+    /// [`DomainError::NoSuchCpu`] if `count` is past [`MAX_CPUS`].
+    pub fn first(count: usize) -> Result<CpuSet, DomainError> {
         let mut set = CpuSet::empty();
         for cpu in 0..count {
             set.insert(cpu)?;
@@ -129,12 +129,12 @@ impl CpuSet {
     ///
     /// # Errors
     ///
-    /// [`SchedError::NoSuchCpu`] past [`MAX_CPUS`].
-    pub fn insert(&mut self, cpu: usize) -> Result<(), SchedError> {
+    /// [`DomainError::NoSuchCpu`] past [`MAX_CPUS`].
+    pub fn insert(&mut self, cpu: usize) -> Result<(), DomainError> {
         let word = self
             .words
             .get_mut(cpu / 64)
-            .ok_or(SchedError::NoSuchCpu(cpu))?;
+            .ok_or(DomainError::NoSuchCpu(cpu))?;
         *word |= 1 << (cpu % 64);
         Ok(())
     }
@@ -182,11 +182,11 @@ impl Domain {
     ///
     /// # Errors
     ///
-    /// [`SchedError::EmptyDomain`] for no CPUs, and
-    /// [`SchedError::ModeUnavailable`] for a mode not written yet.
-    pub fn new(cpus: CpuSet, mode: Mode) -> Result<Domain, SchedError> {
+    /// [`DomainError::EmptyDomain`] for no CPUs, and
+    /// [`DomainError::ModeUnavailable`] for a mode not written yet.
+    pub fn new(cpus: CpuSet, mode: Mode) -> Result<Domain, DomainError> {
         if cpus.is_empty() {
-            return Err(SchedError::EmptyDomain);
+            return Err(DomainError::EmptyDomain);
         }
         let _ = mode.classes()?;
         Ok(Domain { cpus, mode })
@@ -211,9 +211,9 @@ impl Domain {
 /// # Errors
 ///
 /// The first CPU that is in none, or in two, or does not exist.
-pub fn check_partition(domains: &[Domain], online: usize) -> Result<(), SchedError> {
+pub fn check_partition(domains: &[Domain], online: usize) -> Result<(), DomainError> {
     if online > MAX_CPUS {
-        return Err(SchedError::NoSuchCpu(online));
+        return Err(DomainError::NoSuchCpu(online));
     }
     for cpu in 0..online {
         match domains
@@ -221,9 +221,9 @@ pub fn check_partition(domains: &[Domain], online: usize) -> Result<(), SchedErr
             .filter(|domain| domain.cpus.contains(cpu))
             .count()
         {
-            0 => return Err(SchedError::Uncovered(cpu)),
+            0 => return Err(DomainError::Uncovered(cpu)),
             1 => {}
-            _ => return Err(SchedError::Overlap(cpu)),
+            _ => return Err(DomainError::Overlap(cpu)),
         }
     }
     let stray = domains
@@ -231,7 +231,7 @@ pub fn check_partition(domains: &[Domain], online: usize) -> Result<(), SchedErr
         .flat_map(|domain| domain.cpus.iter())
         .find(|cpu| *cpu >= online);
     match stray {
-        Some(cpu) => Err(SchedError::NoSuchCpu(cpu)),
+        Some(cpu) => Err(DomainError::NoSuchCpu(cpu)),
         None => Ok(()),
     }
 }

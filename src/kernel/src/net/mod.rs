@@ -396,7 +396,7 @@ const MAX_PENDING: usize = 512;
 /// If the scheduler cannot take another task.
 pub fn start() -> Result<(), &'static str> {
     let _ = core();
-    let _ = crate::sched::spawn("net core", run, 0, ferrix_sched::NICE_0_WEIGHT)?;
+    let _ = crate::sched::spawn("net core", run, 0, ferrix_sched_fair::NICE_0_WEIGHT)?;
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 //!
 //! A kernel thread: a stack, a saved stack pointer, and the bookkeeping that
 //! says where it is. Everything about *choosing* between tasks is
-//! `ferrix_sched`'s; everything here is what the choice is made about.
+//! `ferrix_sched_fair`'s; everything here is what the choice is made about.
 //!
 //! # Where the saved stack pointer lives
 //!
@@ -22,7 +22,8 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
-use ferrix_sched::{CpuSet, EntityState, Node, Slot};
+use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell};
+use ferrix_sched_fair::{EntityState, Node, Slot, Split, StackTiers};
 use ferrix_sync::IrqControl;
 
 use crate::arch;
@@ -57,13 +58,13 @@ pub(crate) const BLOCKED: u8 = 1;
 /// Dead: it has returned or exited, and its stack is waiting to be freed.
 pub(crate) const DEAD: u8 = 2;
 
-/// A waker's record of its wakees, for `ferrix_sched::wake_wide`
+/// A waker's record of its wakees, for `ferrix_sched_class::wake_wide`
 /// (L.sched.91): written only by the task itself while it runs.
 #[derive(Debug)]
 struct Wakees {
     /// The last task it woke from a call, by id.
     last: AtomicU64,
-    /// How often it changed wakee, halved once a second (`ferrix_sched::flip`).
+    /// How often it changed wakee, halved once a second (`ferrix_sched_class::flip`).
     flips: AtomicU32,
     /// When `flips` was last halved, in nanoseconds.
     halved_at: AtomicU64,
@@ -146,6 +147,15 @@ pub struct Task {
     cpu: AtomicU64,
     /// Whether a run queue holds it, as a queued entity or as the running one.
     queued: AtomicBool,
+    /// Whether a processor runs it, or has not yet saved its context: set as
+    /// a switch to it commits (`switch_chosen`, under the lock of the queue
+    /// that runs it), cleared once the switch away from it has saved it
+    /// (`finish_switch`, under the lock of the queue it was switched away
+    /// from, which the switch hands over). A task moved between queues
+    /// carries it false: a move of one with it set, or a pick of one another
+    /// processor runs, stops the machine (FX-0537, docs/SCHED-CLASSES.md
+    /// §9e, line 30 B1).
+    on_cpu: AtomicBool,
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
@@ -224,6 +234,95 @@ pub struct Task {
     /// The node a processor's sleeper set, or the reaper's list, holds it
     /// in, while neither does. As `run_slot`, for sleeping and for dying.
     sleep_slot: SlotCell,
+    /// Its run slot while a tier above fair holds it: taken from `run_slot`
+    /// as it is queued there, so that `run_slot` is held exactly while no
+    /// queue holds the task whatever its tier (T11, `holds_slots`), and
+    /// given back as it leaves. Empty for every fair task.
+    parked: SlotCell,
+    /// Its scheduling policy, as [`RtWord`] packs it: `SCHED_OTHER` (zero
+    /// policy bits) or a real-time policy and priority, whether it owns a
+    /// node of the tier above fair, and its reset-on-fork flag. Read without
+    /// the queue's lock (`sched_getscheduler`); written only under it.
+    rt: AtomicU32,
+    /// The policy and priority bits of [`Task::rt`] its queue's entity was
+    /// built with (`Task::entity_with`): zero for a fair entity. A running
+    /// task whose policy changed differs here until its processor's next
+    /// decision moves it (`CpuQueue::requeue_if_moved`).
+    entity_rt: AtomicU32,
+    /// Its node in the tier above fair, while no queue holds it
+    /// (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): allocated once, when it
+    /// first asks for a real-time policy, and kept when it returns to fair.
+    /// Zero-sized in a build without that tier.
+    upper: super::stack::UpperCellOf,
+}
+
+/// A task's policy word: the priority in the low byte, the policy above it,
+/// then the two flags.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RtWord(u32);
+
+impl RtWord {
+    /// The policy's bits: zero for `SCHED_OTHER`.
+    const POLICY: u32 = 0x300;
+    /// `SCHED_FIFO`'s.
+    const FIFO: u32 = 0x100;
+    /// `SCHED_RR`'s.
+    const RR: u32 = 0x200;
+    /// It owns a node of the tier above fair, in its cell or lent to a queue.
+    const OWNS_SLOT: u32 = 1 << 16;
+    /// Its children start `SCHED_OTHER` (`SCHED_RESET_ON_FORK`).
+    const RESET_ON_FORK: u32 = 1 << 17;
+
+    /// Its real-time policy and priority, `None` under `SCHED_OTHER`.
+    #[must_use]
+    pub const fn params(self) -> Option<RtParams> {
+        let policy = match self.0 & Self::POLICY {
+            Self::FIFO => RtPolicy::Fifo,
+            Self::RR => RtPolicy::Rr,
+            _ => return None,
+        };
+        Some(RtParams {
+            policy,
+            priority: (self.0 & 0xff) as u8,
+        })
+    }
+
+    /// Whether its children start `SCHED_OTHER`.
+    #[must_use]
+    pub const fn resets_on_fork(self) -> bool {
+        self.0 & Self::RESET_ON_FORK != 0
+    }
+
+    /// The policy and priority bits alone: what places it in the stack.
+    const fn tier_bits(self) -> u32 {
+        self.0 & (Self::POLICY | 0xff)
+    }
+
+    /// Whether it owns a node of the tier above fair.
+    const fn owns_slot(self) -> bool {
+        self.0 & Self::OWNS_SLOT != 0
+    }
+
+    /// The word with `params` and `reset_on_fork`, the node kept as it was.
+    const fn with(self, params: Option<RtParams>, reset_on_fork: bool) -> RtWord {
+        let policy = match params {
+            Some(RtParams {
+                policy: RtPolicy::Fifo,
+                priority,
+            }) => Self::FIFO | priority as u32,
+            Some(RtParams {
+                policy: RtPolicy::Rr,
+                priority,
+            }) => Self::RR | priority as u32,
+            None => 0,
+        };
+        let reset = if reset_on_fork {
+            Self::RESET_ON_FORK
+        } else {
+            0
+        };
+        RtWord(policy | reset | (self.0 & Self::OWNS_SLOT))
+    }
 }
 
 /// One of a task's slots, while the task holds it: a node pointer, null
@@ -259,6 +358,11 @@ impl SlotCell {
     /// A cell holding `slot`.
     fn new(slot: TaskSlot) -> SlotCell {
         SlotCell(AtomicPtr::new(Box::into_raw(slot.into_box())))
+    }
+
+    /// A cell holding nothing yet.
+    const fn empty() -> SlotCell {
+        SlotCell(AtomicPtr::new(core::ptr::null_mut()))
     }
 
     /// Take the slot, if the cell holds it.
@@ -465,6 +569,7 @@ impl Task {
             state: AtomicU8::new(RUNNABLE),
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
+            on_cpu: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity,
@@ -491,6 +596,10 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            parked: SlotCell::empty(),
+            rt: AtomicU32::new(0),
+            entity_rt: AtomicU32::new(0),
+            upper: UpperCell::empty(),
         })
     }
 
@@ -517,6 +626,8 @@ impl Task {
             state: AtomicU8::new(RUNNABLE),
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
+            // An adopted context is running as it is made.
+            on_cpu: AtomicBool::new(true),
             in_call: AtomicBool::new(false),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
@@ -549,7 +660,143 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            parked: SlotCell::empty(),
+            rt: AtomicU32::new(0),
+            entity_rt: AtomicU32::new(0),
+            upper: UpperCell::empty(),
         })
+    }
+
+    /// What it is queued with, from `slot`, its run slot: the class stack's
+    /// entity (`sched::stack::StackEntity`, N2, F7). For a real-time task,
+    /// its policy and its node of the tier above fair, the run slot parked
+    /// meanwhile; otherwise its record and the run slot.
+    ///
+    /// Under the lock of the queue it goes on, the only taker of its node.
+    pub(crate) fn entity_with(&self, slot: TaskSlot) -> super::stack::StackEntity {
+        let word = self.rt_word();
+        if let Some(params) = word.params()
+            && let Some(node) = self.upper.take()
+        {
+            self.parked.put(slot);
+            self.entity_rt.store(word.tier_bits(), Ordering::Relaxed);
+            return super::stack::Stack::upper_entity(params, node);
+        }
+        self.entity_rt.store(0, Ordering::Relaxed);
+        // A real-time policy with no node cannot be: the node is put in its
+        // cell before the policy is stored (`sched::set_policy`,
+        // `sched::prepare_user`), and only a queue holding the task takes
+        // it. Queued fair otherwise, which is what it was before.
+        super::stack::Stack::fair_entity((self.entity_state(), slot))
+    }
+
+    /// Keep what a queue handed back as it let the task go: its node of the
+    /// tier above fair and its parked run slot, or its run slot and then
+    /// its record.
+    pub(crate) fn keep_entity(&self, entity: super::stack::StackEntity) {
+        match super::stack::Stack::split(entity) {
+            Split::Upper(node) => self.keep_upper(node),
+            Split::Fair((state, slot)) => {
+                self.return_run_slot(slot);
+                self.store_entity_state(state);
+            }
+        }
+    }
+
+    /// Take back an entity a queue refused, the record as it was (the
+    /// queue changed nothing).
+    pub(crate) fn keep_refused(&self, entity: super::stack::StackEntity) {
+        match super::stack::Stack::split(entity) {
+            Split::Upper(node) => self.keep_upper(node),
+            Split::Fair((_, slot)) => self.return_run_slot(slot),
+        }
+    }
+
+    /// Its node back in its cell, and its parked run slot back where it is
+    /// held while no queue holds the task.
+    fn keep_upper(&self, node: super::stack::UpperSlot) {
+        if self.upper.put(node).is_err() {
+            // The cell is empty while a queue holds the node, and only that
+            // queue's lock holder fills it: as a run slot given back twice.
+            crate::panic::fatal!(
+                crate::panic::catalog::TASK_SLOT_RETURNED_TWICE,
+                "a task's real-time node was given back while its cell held one"
+            );
+        }
+        if let Some(slot) = self.parked.take() {
+            self.return_run_slot(slot);
+        }
+    }
+
+    /// Its policy word.
+    pub fn rt_word(&self) -> RtWord {
+        RtWord(self.rt.load(Ordering::Acquire))
+    }
+
+    /// Its real-time policy and priority, `None` under `SCHED_OTHER`.
+    pub(crate) fn rt_params(&self) -> Option<RtParams> {
+        self.rt_word().params()
+    }
+
+    /// Whether it is scheduled by the fair class: `SCHED_OTHER`.
+    pub(crate) fn is_fair(&self) -> bool {
+        self.rt_params().is_none()
+    }
+
+    /// Whether its queue's entity was built with the policy and priority it
+    /// has now: false for a running task whose policy changed, until its
+    /// processor's next decision moves it.
+    pub(crate) fn entity_is_current(&self) -> bool {
+        self.entity_rt.load(Ordering::Relaxed) == self.rt_word().tier_bits()
+    }
+
+    /// Whether its run slot is parked: a tier above fair holds it, and
+    /// `run_slot` is lent meanwhile (L.sched.107's check).
+    pub(crate) fn run_slot_parked(&self) -> bool {
+        self.parked.holds() && !self.run_slot.holds()
+    }
+
+    /// Whether the entity its queue holds is the tier above fair's: what a
+    /// removal is routed by (`CpuQueue::release`, line 30, B3). Read under
+    /// that queue's lock, which `entity_with` writes it under.
+    pub(crate) fn queued_upper(&self) -> bool {
+        self.entity_rt.load(Ordering::Relaxed) != 0
+    }
+
+    /// Whether it owns a node of the tier above fair.
+    pub(crate) fn owns_upper_node(&self) -> bool {
+        self.rt_word().owns_slot()
+    }
+
+    /// Keep `node` as its node of the tier above fair, for a task that owns
+    /// none: under the lock of its home queue, or before any queue has seen
+    /// it. A task that owns one already hands `node` back, to be freed by a
+    /// caller holding no queue lock.
+    ///
+    /// # Errors
+    ///
+    /// `node`, not kept.
+    pub(crate) fn give_upper_node(
+        &self,
+        node: super::stack::UpperSlot,
+    ) -> Result<(), super::stack::UpperSlot> {
+        if self.owns_upper_node() {
+            return Err(node);
+        }
+        self.upper.put(node)?;
+        let _ = self.rt.fetch_or(RtWord::OWNS_SLOT, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// Store its policy and reset-on-fork flag: under the lock of its home
+    /// queue (`CpuQueue::set_policy`, which then moves it between tiers, or
+    /// leaves the running task to its processor's next decision), or before
+    /// any queue has seen it. A real-time policy only for a task that owns
+    /// its node. What its queue holds is unchanged: an entity is taken apart
+    /// by its own kind, whatever the word says now.
+    pub(crate) fn store_policy(&self, params: Option<RtParams>, reset_on_fork: bool) {
+        let word = self.rt_word().with(params, reset_on_fork);
+        self.rt.store(word.0, Ordering::Release);
     }
 
     /// Take the slot a run queue holds this task in, to queue it with.
@@ -861,6 +1108,18 @@ impl Task {
         self.queued.store(queued, Ordering::Release);
     }
 
+    /// Whether a processor runs it, or has not yet saved its context.
+    pub(crate) fn is_on_cpu(&self) -> bool {
+        self.on_cpu.load(Ordering::Acquire)
+    }
+
+    /// Say whether a processor runs it. Only under its queue's lock, by a
+    /// switch: set as one to it commits, cleared once one away from it has
+    /// saved its context.
+    pub(crate) fn set_on_cpu(&self, on: bool) {
+        self.on_cpu.store(on, Ordering::Release);
+    }
+
     /// Whether it holds both its slots: no run queue holds it, and no sleeper
     /// set or reaper's list does. What a task [`crate::sched::wake_with`] may
     /// move must be, since a set elsewhere still holding it would run it
@@ -912,7 +1171,7 @@ impl Task {
         if changed {
             self.wakees.last.store(wakee, Ordering::Relaxed);
         }
-        let (flips, halved_at) = ferrix_sched::flip(
+        let (flips, halved_at) = ferrix_sched_class::flip(
             flips,
             self.wakees.halved_at.load(Ordering::Relaxed),
             now(),
@@ -934,7 +1193,7 @@ impl Task {
         if at == 0 || window >= BUSY_WINDOW_NS {
             if at != 0 {
                 let since = ran.saturating_sub(self.wakees.sampled_ran.load(Ordering::Relaxed));
-                let share = ferrix_sched::utilisation(since, window).unwrap_or(UNMEASURED);
+                let share = ferrix_sched_class::utilisation(since, window).unwrap_or(UNMEASURED);
                 self.wakees.busy.store(share, Ordering::Relaxed);
             }
             self.wakees.sampled_at.store(now.max(1), Ordering::Relaxed);

@@ -59,7 +59,7 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_fallible::AllocError;
 use ferrix_heap::{Request, Reserve};
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 use ferrix_sync::IrqControl;
 
 use super::{KernelPages, with_heap};

@@ -48,11 +48,15 @@ use ferrix_kernel_load::*;
 // is named by the binary (`kernel-interface.py`).
 use ferrix_kernel_load::{CORE_FLAG_WORD, ITEM_FLAG_WORD, LOAD_FLAG_WORD};
 
-// The four crates compiled with one set of build flags (ledger line 3282,
-// (K4)): the build line is the item's `cfg`s, and the binary's, the core's
-// and the load's must be the same, or the image would run code its line does
-// not name.
+// The kernel's crates compiled with one set of build flags (ledger line 3282,
+// (K4)): the build line is the item's `cfg`s, and the binary's, the core's,
+// the load's and the scheduler selection's must be the same, or the image
+// would run code its line does not name.
 const BINARY_FLAG_WORD: u64 = flag_word(&build_flag_word!());
+const _: () = assert!(
+    ferrix_kernel_sched_select::SELECT_FLAG_WORD == BINARY_FLAG_WORD,
+    "ferrix-kernel-sched-select was compiled with other build flags than the binary"
+);
 const _: () = assert!(
     CORE_FLAG_WORD == BINARY_FLAG_WORD,
     "ferrix-kernel-core was compiled with other build flags than the binary"
@@ -1274,9 +1278,9 @@ fn start_scheduler(cpus: &'static smp::Topology) {
     println!(
         "  load     busy processor {} of {}, idle {} of {}",
         report.load_high,
-        ferrix_sched::LOAD_SCALE,
+        ferrix_sched_class::LOAD_SCALE,
         report.load_low,
-        ferrix_sched::LOAD_SCALE,
+        ferrix_sched_class::LOAD_SCALE,
     );
     println!(
         "  balance  {} tasks moved between processors that never went idle",

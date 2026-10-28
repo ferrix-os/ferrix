@@ -957,6 +957,17 @@ p50 2,287 ns against 2,427 ns without step 3, the median of five rounds,
 ratio 0.942 (`~/.local/share/ferrix/logs/queue/po7-ipcB-s3r-bench-1.log` on
 nazuna, on step 2f; OPAQUE-KERNEL.md §9.9).
 
+**The realtime tier's walk (step 4b, `desktop` alone).** `FifoRr`'s
+queue is a balanced tree: `pick`, an enqueue and the removal of the running
+entity are O(log n) or better in the processor's real-time tasks; `remove`
+of a waiting entity by identifier walks the tree, O(n), under the queue's
+spin lock. Every removal is routed by the task's tier
+(`StackTiers::remove_in`, the review's line 30, B3), so the removal of a
+fair task, a steal's among them, never walks this tree, and the walk serves
+one caller alone: a change of policy on a queued real-time task that does
+not run (L.sched.112), at the call or at its processor's next decision. A
+`present` build has no such tier, and its paths are as below.
+
 Two decisions the round trip's wakes defer are bounded, though no check
 times them (L.sched.7). A wake made inside a system call asks for no timer:
 the decision it wants is made when the call ends (`sched::call_left`), at

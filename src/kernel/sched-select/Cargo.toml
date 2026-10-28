@@ -1,0 +1,30 @@
+[package]
+name = "ferrix-kernel-sched-select"
+description = "The Ferrix kernel's scheduler stack, chosen by the build flags before the core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# The one build script of the kernel's crates: the build flags as cfgs
+# (docs/BUILD-FLAGS.md rule 6 b, docs/KERNEL-CRATES.md).
+build = "../build.rs"
+
+# The crate root sits beside the binary's main.rs, as the other kernel
+# crates' do (docs/KERNEL-CRATES.md): the arms file of
+# docs/SCHED-CLASSES.md §5 and §9a.
+[lib]
+path = "../src/sched_select.rs"
+
+[dependencies]
+ferrix-sched-class.workspace = true
+ferrix-sched-fair.workspace = true
+# SCHED_FIFO and SCHED_RR (SCHED-CLASSES.md §9e): named only by the
+# `fifo_rr` arm, so a build without it links none of it.
+ferrix-sched-fifo.workspace = true
+# The standing negative case (SCHED-CLASSES.md §9b, G1): a dependency no
+# file names, so no build links it.
+ferrix-sched-fixture.workspace = true
+
+[lints]
+workspace = true

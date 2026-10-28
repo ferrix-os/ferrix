@@ -249,7 +249,8 @@
         "trap/**",
         "user/**",
         "vmap.rs",
-        "kernel_core.rs"
+        "kernel_core.rs",
+        "sched_select.rs"
       ]
     },
     "item": {
@@ -770,10 +771,23 @@
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-qr": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
+      }
+    },
+    "ferrix-kernel-sched-select": {
+      "path": "src/kernel/sched-select",
+      "root": "sched_select.rs",
+      "rings": [
+        "core"
+      ],
+      "unclassified_deps": {
+        "ferrix-sched-class": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (the scheduler selection's class crates, docs/SCHED-CLASSES.md §9a; grown under the consultant's ledger line 20, D4; classified under S7)",
+        "ferrix-sched-fifo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (SCHED_FIFO and SCHED_RR, named only by the fifo_rr arm, docs/SCHED-CLASSES.md §9e; grown under the consultant's ledger line 29, R11; classified under S7)"
       }
     },
     "ferrix-kernel-item": {
@@ -795,7 +809,7 @@
         "ferrix-objects": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
-        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched-fair": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement (split from ferrix-sched, docs/SCHED-CLASSES.md; classified under S7)",
         "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-virtio": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
         "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
@@ -814,6 +828,48 @@
       "rings": [
         "load"
       ]
+    }
+  },
+  "class_crates": {
+    "//": [
+      "The scheduling-class crates (docs/SCHED-CLASSES.md section 9b; the",
+      "certification consultant's design review of step 3b, ledger line 22 of",
+      "the sched-classes container ledger, G1-G5). One entry a class crate under",
+      "src/lib/kernel/sched-*, the interface crate ferrix-sched-class excepted:",
+      "the tier flag and the value whose arm in sched_select.rs links it",
+      "(`present_when`), or `fixture: true` for the crate no value links, and the",
+      "`marker` a present one leaves in the release ELF (its check, kept out of",
+      "line), and the `name` its SchedClass::NAME gives the `sched    classes`",
+      "boot line, which check-boot-line.py composes from the profile. check-item-boundary.py holds rules (a)-(d) of section 9b over it;",
+      "check-removable-symbols.py --class judges test-removable's kernels by it.",
+      "`named_outside` lists the kernel crates that still name a class crate",
+      "outside the selection crate, each by its row of section 11's N7 table; it",
+      "may shrink freely and grows only with a ledger line."
+    ],
+    "ferrix-sched-fair": {
+      "rust_name": "ferrix_sched_fair",
+      "flag": "sched_fair",
+      "present_when": "eevdf",
+      "name": "eevdf",
+      "marker": "<ferrix_sched_fair::Eevdf as ferrix_sched_class::SchedClass<"
+    },
+    "ferrix-sched-fixture": {
+      "rust_name": "ferrix_sched_fixture",
+      "fixture": true
+    },
+    "ferrix-sched-fifo": {
+      "rust_name": "ferrix_sched_fifo",
+      "flag": "sched_realtime",
+      "present_when": "fifo_rr",
+      "name": "fifo_rr",
+      "marker": "<ferrix_sched_fifo::FifoRr as ferrix_sched_class::SchedClass<"
+    },
+    "named_outside": {
+      "ferrix-sched-fair": {
+        "ferrix-kernel-core": "N7: the NICE_ weights, carried_weight and the job fold, slice_for and Config, the sleepers' and the dead's Timeline, Node, Slot and EntityState, the steal's Option<EntityState>, FairEntity in stack.rs's const",
+        "ferrix-kernel-item": "N7: the NICE_ weights and weight_of_nice in the item's spawns and attributes",
+        "ferrix-kernel-load": "N7: the NICE_ weights in the load ring's spawns (interfaces/*, fs, net, discovery/devmgr.rs, the gs201 watchdog)"
+      }
     }
   },
   "raised_checks": {

@@ -49,7 +49,8 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::JOB_SPECULATION_DOMAIN;
 
 use ferrix_native_abi::handle::Handle;
-use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+use ferrix_sched_class::CpuSet;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::IrqControl;
 
 use super::check::Side;
