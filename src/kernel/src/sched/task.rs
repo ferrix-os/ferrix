@@ -254,6 +254,17 @@ pub struct Task {
     /// first asks for a real-time policy, and kept when it returns to fair.
     /// Zero-sized in a build without that tier.
     upper: super::stack::UpperCellOf,
+    /// The slot of the scheduling domain it runs in (docs/SCHED-CLASSES.md
+    /// §9f, `sched::domains`), or [`super::domains::EXEMPT`] for a
+    /// per-processor kernel task, which belongs to none: set once by its
+    /// constructor, and for any other task changed only by its job's
+    /// admission or dissolution and as it moves between jobs.
+    domain: AtomicU8,
+    /// Whether a decision took it off its processor, still runnable, for
+    /// running outside its domain (`sched::settle_previous`): the switch
+    /// away from it moves it into its domain once its context is saved
+    /// (`sched::finish_switch`, V4).
+    evicted: AtomicBool,
 }
 
 /// A task's policy word: the priority in the low byte, the policy above it,
@@ -530,6 +541,19 @@ pub(crate) struct NewTask {
     pub(crate) user_state: Option<arch::UserState>,
 }
 
+/// The domain slot a task starts in: a kernel thread confined to one
+/// processor serves that processor (its idle task, a pinned watcher), so
+/// it belongs to no domain and runs there whatever domain the processor is
+/// in (V7), the one place the mark is made; every other task, a user task
+/// always, starts in the boot domain.
+fn first_domain(kernel: bool, affinity: &CpuSet) -> u8 {
+    if kernel && affinity.len() == 1 {
+        super::domains::EXEMPT
+    } else {
+        super::domains::BOOT
+    }
+}
+
 impl Task {
     /// Its pending-work word, for `sched::work` alone, which owns every
     /// read and write of it.
@@ -572,6 +596,8 @@ impl Task {
             on_cpu: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
             wakees: Wakees::new(crate::timer::now_nanos()),
+            // Before `thread` and `affinity` move in.
+            domain: AtomicU8::new(first_domain(thread.is_none(), &affinity)),
             affinity,
             address_space,
             thread,
@@ -600,6 +626,7 @@ impl Task {
             rt: AtomicU32::new(0),
             entity_rt: AtomicU32::new(0),
             upper: UpperCell::empty(),
+            evicted: AtomicBool::new(false),
         })
     }
 
@@ -664,6 +691,9 @@ impl Task {
             rt: AtomicU32::new(0),
             entity_rt: AtomicU32::new(0),
             upper: UpperCell::empty(),
+            // A processor's own context belongs to no domain (V7).
+            domain: AtomicU8::new(super::domains::EXEMPT),
+            evicted: AtomicBool::new(false),
         })
     }
 
@@ -1085,6 +1115,43 @@ impl Task {
     /// Whether `cpu` is one of the processors it may run on.
     pub(crate) fn may_run_on(&self, cpu: usize) -> bool {
         self.affinity.contains(cpu)
+    }
+
+    /// The processors it may run on.
+    pub(crate) fn affinity(&self) -> &CpuSet {
+        &self.affinity
+    }
+
+    /// The slot of its scheduling domain, or `domains::EXEMPT`.
+    pub(crate) fn domain_slot(&self) -> u8 {
+        self.domain.load(Ordering::Acquire)
+    }
+
+    /// Whether it is a per-processor kernel task, in no domain (V7).
+    pub(crate) fn is_exempt(&self) -> bool {
+        self.domain_slot() == super::domains::EXEMPT
+    }
+
+    /// Put it in the domain of `slot`, answering whether that changed it:
+    /// never for an exempt task, whose mark its constructor set for good.
+    pub(crate) fn set_domain_slot(&self, slot: u8) -> bool {
+        self.domain
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+                (now != super::domains::EXEMPT && now != slot).then_some(slot)
+            })
+            .is_ok()
+    }
+
+    /// Mark it taken off its processor for running outside its domain,
+    /// under that processor's queue lock.
+    pub(crate) fn set_evicted(&self) {
+        self.evicted.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether it was so taken, clearing the mark: under the lock of the
+    /// queue it was taken off, in the switch away from it.
+    pub(crate) fn take_evicted(&self) -> bool {
+        self.evicted.swap(false, Ordering::Relaxed)
     }
 
     /// The queue that owns it.

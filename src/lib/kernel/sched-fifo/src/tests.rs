@@ -4,7 +4,7 @@ extern crate std;
 
 use std::vec::Vec;
 
-use ferrix_sched_class::{LOAD_UNIT, Refusal, SchedClass};
+use ferrix_sched_class::{LOAD_UNIT, RealtimeClass, Refusal, SchedClass};
 
 use super::{FifoQueue, FifoRr, FifoSlot, PERIOD_NS, Params, Policy, RR_QUANTUM_NS, RUNTIME_NS};
 
@@ -211,4 +211,26 @@ fn the_floor_throttles_and_the_period_refills() {
     FifoRr::elapse(&mut q, 1);
     assert!(FifoRr::ready(&q, true));
     assert!(FifoRr::check(&q).is_ok());
+}
+
+#[test]
+fn a_waiting_entity_is_found_by_its_payload_and_the_running_one_never() {
+    let mut q = queue();
+    for (id, priority) in [(1, 10), (2, 50), (3, 10), (4, 99)] {
+        FifoRr::enqueue(&mut q, id, id * 10, fifo(priority)).unwrap();
+    }
+    assert_eq!(FifoRr::pick(&mut q), Some(&40));
+    // The running entity's payload is 40: never answered.
+    assert_eq!(FifoRr::waiting_where(&q, |payload| *payload == 40), None);
+    for id in [1, 2, 3] {
+        assert_eq!(
+            FifoRr::waiting_where(&q, |payload| *payload == id * 10),
+            Some(id),
+            "waiting entity {id}"
+        );
+    }
+    assert_eq!(FifoRr::waiting_where(&q, |payload| *payload > 100), None);
+    let found = FifoRr::waiting_where(&q, |payload| *payload % 20 == 10);
+    assert!(matches!(found, Some(1 | 3)), "one of the two that match");
+    assert!(FifoRr::check(&q).is_ok(), "and the walk changed nothing");
 }

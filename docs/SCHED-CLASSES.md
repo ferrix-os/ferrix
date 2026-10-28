@@ -1304,7 +1304,7 @@ The audit of every other path that enqueues a task, by caller of
 * affinity: `sched_setaffinity` is validated and not applied, so no move.
 None puts a running task in a queue as a waiting one.
 
-## 9f. Step 5: a `SoftRt` domain made at run time (design, for review)
+## 9f. Step 5: a `SoftRt` domain made at run time (OK IF V1-V16, 2026-10-27)
 
 GAME-PATH.md's G1, as stage 14's first domain slice (REALTIME.md §3.1,
 §3.7, §4 items 2 and 3): a set of processors taken out of the boot
@@ -1478,6 +1478,83 @@ they differ:
 * **V16** where it stands names line 32, and so does the landing.
 * **C1** until G3 a `SoftRt` domain's processors take every device
   interrupt, said beside the guarantee in REALTIME.md.
+
+### Step 5a, as built (2026-10-28, ledger line 32)
+
+The scheduler half of the step: the partition, the switch, admission and
+dissolution inside the kernel, with no system call yet. Step 5b adds the
+authority object, `domain_create` and `domain_admit`, and the handle whose
+close dissolves (V1, V6's close and exit, V15's native program).
+
+* **The domains** (`sched/domains.rs`, V8): two slots, `BOOT` and
+  `SOFT`; a word a processor (`DOMAIN_OF`), `LEAVING` its transition
+  value; a slot a task (`Task::domain`), `EXEMPT` the per-processor
+  kernel tasks' mark, set by `Task::new` on a kernel task confined to one
+  processor and by `Task::adopt`, never changed (V7). One bit a slot in
+  `LIVE` says whether its domain exists; a word naming a slot not live
+  reads as the boot domain's, so that a dissolution is one store and
+  changes no answer from yes to no. `domains::admits` is D-1's question:
+  exempt, or the processor's domain is the task's; any other word admits
+  no task but the exempt (V2).
+* **When an answer may change.** From yes to no only under the lock of
+  the processor's queue (its word, `set_slots`) or of the queue owning the
+  task (its slot, `settle_task`), with `SWITCH` held as well; every
+  placement, steal, pull and wake asks again under the target's lock (V5),
+  so the pick (`require_admitted`), `move_onto` and the direct switch's
+  hand-over stop the machine on a task not admitted (FX-0538) only if a
+  path skipped the question.
+* **Moving a task** (V4): a task found outside its domain is taken off its
+  queue where it is and filed in `MOVING`, in its run slot: at a leaving
+  processor's decision for a waiting one (`rehome_waiting`), by the
+  admission for a queued member, at the switch away from it for a running
+  one (`settle_previous` marks it, `finish_switch` files it once its context
+  is saved), and by a wake whose home no longer admits it
+  (`sent_to_domain`, the sleeper path likewise, V11). `domains::drain`
+  places each on the least loaded processor of its domain, with no queue
+  lock held. Not migrated by the switching task under two locks (the
+  review's answer 2).
+* **D-2.** `may_place`, `may_pull`, `idle_allowed`, `place_on_idle`,
+  `steal_candidate`, `steal_work` and `balance` read the domains; only the
+  boot domain steals, pulls and balances (`domains::steals`).
+* **The switch** (`domains::create_soft`, V6, V9): refuses, before
+  anything changes, `Unavailable` without the tier (present), `TooFew`
+  below four processors, `Count` for none or more than all but two,
+  `Exists` while one exists; takes the highest-numbered processors, never
+  the boot processor; marks them leaving, asks each for a decision, and
+  waits in the calling task, sleeping, at most a second until each holds
+  only tasks it admits and nothing waits in `MOVING`; past that it gives
+  them back and refuses `Timeout`. Then `LIVE`, then the words.
+* **Admission** (V10): a job's `sched_domain` word holds the slot and the
+  generation of the domain it was admitted to; a job's domain is its own
+  word's or the nearest above it, so its descendants, made before or after,
+  follow it, and a word of a dissolved generation reads as the boot
+  domain's without a walk. A user task takes its job's domain as it is
+  made (`prepare_user`) and again under its queue's lock as it is queued
+  (`enqueue`), the lock the admission settles it under. A member whose
+  affinity keeps it off every processor of the domain refuses the
+  admission (`Unplaceable`) before anything changes.
+* **Dissolution** (D-4): `LIVE`'s bit cleared and the generation counted
+  up, then the words; members' stale slots are swept before the next
+  domain is made (`domains::sweep`).
+* **Checks** (`sched/domains_check.rs`, desktop, every boot): the
+  refusals; eight unpinned kernel spinners crowding the machine while a
+  domain of all but two processors is made under them never run on it
+  after; two admitted run only there, and run; a job of no processes
+  admitted and one made beneath it after are in the domain, and in the
+  boot domain after the dissolution; the boot domain's tasks run on the
+  former processors; nothing left in `MOVING`. Passed on AArch64 and
+  ARMv7-A (QEMU TCG); x86-64 is CI's (this container's QEMU lacks F-57's
+  patch). **Controls, run in this container on AArch64, each stopping the
+  machine with FX-0538**: the re-home skipped
+  (`if domains::slot_of(cpu) == domains::LEAVING && cpu == usize::MAX` in
+  `choose_next`), and the admission not taking a queued member off (`&& slot
+  == u8::MAX` in `settle_task`'s release branch). Owed as `gate.sh control`
+  rows on the gate host, with the dissolution's (the `LIVE` store
+  skipped, which the check's "still exists" catches).
+* **Owed** for the step as a whole: step 5b (V1, V3's boot check across
+  domains over a channel, V6's close and exit, V15's native program and
+  `present`'s refusal through the call); V14's ELF table and round trip
+  (the pick and the hand-over each gained one domain test); the gate rows.
 
 ## 10. The review's conditions (OK IF S1-S14, 2026-10-26)
 
@@ -1969,3 +2046,12 @@ in a core file, a declared value with no arm, a value with two arms,
 `build` line and check-boot-line passing, S5's round trip on the landing
 hash. Next: 3b; N4's measurement on the gate host. C3 decided by the
 customer on 2026-10-27: no fair tier in `max` (§7a).
+
+**Step 5a (2026-10-28), ledger line 32 (OK IF V1-V16).** The scheduler's
+half of the run-time `SoftRt` domain, §9f "Step 5a, as built": the
+partition (H.SCHED.21, FX-0538), the switch, admission and dissolution in
+the kernel, the exemption, the refusals (H.SCHED.23), L.sched.115
+restated and L.sched.118-128; booted on AArch64 and ARMv7-A with the
+domain check, two controls stopping the machine as they should. Owed:
+step 5b (the authority object, the calls, the handle, V3's check), the
+gate rows and V14's measurements.

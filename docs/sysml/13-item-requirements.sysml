@@ -706,6 +706,43 @@ package FerrixItemRequirements {
                 below it still running.";
             attribute :>> parent = "ASR-8";
         }
+        requirement <'H.SCHED.21'> aTaskRunsInItsDomain : ItemHighLevel {
+            attribute :>> statement = "A task shall run only on a processor of its
+                scheduling domain, the per-processor kernel tasks excepted; a
+                SoftRt domain's processors shall run none of the boot domain's
+                tasks, and its members none but its processors.";
+            attribute :>> criterion = "The stage-5 domain check on desktop, on
+                every architecture, with four processors or more: eight unpinned
+                kernel tasks spinning across the machine while a SoftRt domain of
+                all but two processors is made under them never run on its
+                processors after; two of them admitted run there and nowhere else;
+                and the pick, a move between queues and the direct switch stop the
+                machine on a task outside the processor's domain (FX-0538), whose
+                controls (the re-home at a leaving processor's decision skipped,
+                the admission not taking a queued member off) stop it so.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.22'> aDomainGivesItsProcessorsBack : ItemHighLevel {
+            attribute :>> statement = "A dissolved SoftRt domain's processors and
+                members shall be the boot domain's again at once, and a switch
+                that cannot empty its processors in time shall give them back and
+                refuse.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: after
+                the dissolution no SoftRt domain exists, a job admitted to it is in
+                the boot domain, and the boot domain's tasks run on its former
+                processors; review of create_soft's bounded wait and its
+                abandonment.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.23'> theBootDomainKeepsAFloor : ItemHighLevel {
+            attribute :>> statement = "A SoftRt domain shall be refused on a
+                machine of fewer than four processors, of no processors, of more
+                than all but two, in a build without the realtime tier, and while
+                another exists; it shall never take the boot processor.";
+            attribute :>> criterion = "The stage-5 domain check: each refusal on
+                desktop with four processors, ModeUnavailable's on present.";
+            attribute :>> parent = "ASR-8";
+        }
     }
 
     package Interrupts {

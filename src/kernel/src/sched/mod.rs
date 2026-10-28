@@ -44,6 +44,8 @@ mod borrow_check;
 mod check;
 mod deadline_check;
 pub mod direct;
+mod domains;
+mod domains_check;
 mod mark_check;
 mod preempt;
 mod preempt_check;
@@ -1219,8 +1221,8 @@ pub fn spawn(
     // Where it *should* go, not where it happens to be created. A burst of
     // tasks created on one processor used to queue behind each other there
     // until some other processor went idle and came looking; now each one is
-    // placed when it is made.
-    let cpu = choose_cpu(&anywhere, here).unwrap_or(here);
+    // placed when it is made: in the boot domain, a kernel thread's.
+    let cpu = choose_cpu(&domains::cpus_of(domains::BOOT, online()), here).unwrap_or(here);
     // Counted at the moment of the decision, which is the only place the
     // decision can be seen. Where a task *ends up* says nothing about
     // placement: an idle processor steals within microseconds of the spawn,
@@ -1233,9 +1235,86 @@ pub fn spawn(
     spawn_on(name, entry, argument, weight, cpu, anywhere)
 }
 
-/// The processors the machine's one domain covers.
+/// The processors the boot domain covered as the scheduler started: every
+/// one, and the affinity of a task not confined to one.
 fn domain_cpus() -> Option<&'static CpuSet> {
     DOMAIN.get().map(Domain::cpus)
+}
+
+/// How many processors the scheduler runs.
+fn online() -> usize {
+    QUEUES.get().map_or(0, Vec::len)
+}
+
+/// Ask `cpu` for a decision: this processor's flag and timer, another's
+/// interrupt.
+fn ask_decision(cpu: usize) {
+    let saved = <arch::Irq as IrqControl>::disable();
+    if this_cpu() == Some(cpu) {
+        resched_here(cpu);
+    } else {
+        kick(cpu);
+    }
+    <arch::Irq as IrqControl>::restore(saved);
+}
+
+/// Whether `cpu` runs and holds only tasks that may run there for their
+/// domains (the switch's wait, `domains::create_soft`).
+fn holds_only_admitted(cpu: usize) -> bool {
+    let Some(lock) = queue_of(cpu) else {
+        return true;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let only = lock.lock().holds_only_admitted(cpu);
+    <arch::Irq as IrqControl>::restore(saved);
+    only
+}
+
+/// Queue `task`, taken off a queue for running outside its domain, on a
+/// processor of its domain that it may run on, the least loaded, and ask
+/// that processor for a decision; `false`, with nothing done, when it has
+/// none now. Its domain is asked again under the target's lock, and
+/// `domains::drain`, the caller, holds the lock every change of it takes.
+fn place_moving(task: &Arc<Task>) -> bool {
+    let mut allowed = domains::cpus_of(task.domain_slot(), online());
+    if task.is_exempt() {
+        allowed = *task.affinity();
+    }
+    let mut inside = CpuSet::empty();
+    for cpu in allowed.iter().filter(|cpu| task.may_run_on(*cpu)) {
+        // NOALLOC: a `CpuSet` is a fixed bitmap.
+        let _ = inside.insert(cpu);
+    }
+    let here = this_cpu().unwrap_or(0);
+    let Some(to) = choose_cpu(&inside, here) else {
+        return false;
+    };
+    let Some(lock) = queue_of(to) else {
+        return false;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let placed = {
+        let mut queue = lock.lock();
+        let fits = domains::admits(task, to) && !task.is_on_cpu();
+        if fits {
+            move_onto(task, to, &mut queue);
+        }
+        fits.then(|| kick_after_wake(&mut queue, to, false))
+    };
+    <arch::Irq as IrqControl>::restore(saved);
+    let Some(decide) = placed else {
+        return false;
+    };
+    if let Some(cpu) = decide {
+        ask_decision(cpu);
+    }
+    true
+}
+
+/// The slot of the scheduling domain a job's word names (`Job`'s
+/// `sched_slot`).
+pub(crate) fn domain_slot_of_word(word: u32) -> u8 {
+    domains::slot_of_word(word)
 }
 
 /// Ask `ferrix_sched_class` where a task should go, given what every processor is
@@ -1389,9 +1468,15 @@ pub fn prepare_user(
 ) -> Result<PreparedTask, &'static str> {
     let here = this_cpu().ok_or("no processor to start a program on")?;
     let anywhere = *domain_cpus().ok_or("the scheduler has no domain")?;
+    // Placed in its job's domain (V10); `enqueue` reads the job's again
+    // under the queue's lock, for a job admitted meanwhile.
+    let slot = thread.process().core().job().sched_slot();
     let (cpu, affinity) = match cpu {
         Some(cpu) => (cpu, CpuSet::of(cpu)),
-        None => (choose_cpu(&anywhere, here).unwrap_or(here), anywhere),
+        None => {
+            let inside = domains::cpus_of(slot, online());
+            (choose_cpu(&inside, here).unwrap_or(here), anywhere)
+        }
     };
     // Resolved here, so that launching has nothing left to refuse.
     let queue = queue_of(cpu).ok_or("no such processor")?;
@@ -1415,6 +1500,7 @@ pub fn prepare_user(
     // Its process's job, for its share of the processor and for what it
     // charges; set before any queue can see it.
     task.set_group(thread.process().core().quota_slot());
+    let _ = task.set_domain_slot(slot);
     let prepared = PreparedTask {
         task,
         cpu,
@@ -1464,11 +1550,10 @@ pub fn current_resets_on_fork() -> bool {
 }
 
 /// A scheduling domain of `cpus` running `mode`, as this build can make
-/// one (docs/SCHED-CLASSES.md §9a, D9, and §9e, R9, L.sched.115): a mode
-/// whose tiers are not compiled in is `ModeUnavailable`, before the
-/// library's own refusal of a mode not written yet; `SoftRt`, compiled in
-/// on `desktop`, is `NotCreatable` until its own processors, a fully
-/// preemptible kernel and threaded interrupts land (REALTIME.md §4).
+/// one (docs/SCHED-CLASSES.md §9a, D9, §9e, R9, and §9f, L.sched.115): a
+/// mode whose tiers are not compiled in is `ModeUnavailable`, before the
+/// library's own refusal of a mode not written yet. `SoftRt`, compiled in
+/// on `desktop`, is made at run time (`domains::create_soft`).
 ///
 /// # Errors
 ///
@@ -1479,9 +1564,6 @@ pub(crate) fn make_domain(
 ) -> Result<Domain, ferrix_sched_class::DomainError> {
     if !ferrix_kernel_sched_select::mode_available(mode) {
         return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
-    }
-    if mode == Mode::SoftRt {
-        return Err(ferrix_sched_class::DomainError::NotCreatable(mode));
     }
     Domain::new(cpus, mode)
 }
@@ -1751,32 +1833,48 @@ fn make_task(
 /// it is noticed. Cannot fail: the queue was resolved before the task was made.
 fn enqueue(task: &Arc<Task>, cpu: usize, lock: &'static SpinLock<CpuQueue>) {
     let saved = <arch::Irq as IrqControl>::disable();
-    let (preempt, stealable) = {
+    let placed = {
         let mut queue = lock.lock();
-        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-        queue.insert(task);
-        // Three reasons to make the target reschedule, and the third is the
-        // one that cost a day. Either something better than what it is
-        // running has arrived; or it is not running anything at all and has
-        // to be woken to notice; or **this is the first task to be made to
-        // wait behind the one it is running**, which means its timer is
-        // currently switched off.
-        //
-        // That last case is not an optimisation, it is a hang. `arm_timer`
-        // deliberately leaves a processor alone when nothing is waiting —
-        // that is where tickless comes from — so a processor running one task
-        // has stopped its timer. Adding a second task from *another*
-        // processor does not re-arm it, because only its owner can, and if
-        // `should_preempt` says the newcomer should not go first then nothing
-        // else would have told it. The result is a processor that runs its
-        // one task forever with others queued behind it, which is exactly
-        // what the fairness check saw: one spinner with a switch count in the
-        // thousands and two with none.
-        let wake = queue.should_preempt() || queue.is_running_idle() || queue.waiting() == 1;
-        // More than the one task running means there is something here for an
-        // idle processor to take. Measured after the insert, so the first task
-        // to make the queue worth stealing from is the one that says so.
-        (wake, queue.len() > 1)
+        // A user task's domain is its job's as it is queued, read under the
+        // lock an admission settles it under (V10); a task that may not run
+        // here for it is placed in its domain instead (V5).
+        if let Some(thread) = task.thread() {
+            let _ = task.set_domain_slot(thread.process().core().job().sched_slot());
+        }
+        if !domains::admits(task, cpu) {
+            domains::push_moving(Arc::clone(task));
+            None
+        } else {
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+            queue.insert(task);
+            // Three reasons to make the target reschedule, and the third is the
+            // one that cost a day. Either something better than what it is
+            // running has arrived; or it is not running anything at all and has
+            // to be woken to notice; or **this is the first task to be made to
+            // wait behind the one it is running**, which means its timer is
+            // currently switched off.
+            //
+            // That last case is not an optimisation, it is a hang. `arm_timer`
+            // deliberately leaves a processor alone when nothing is waiting —
+            // that is where tickless comes from — so a processor running one task
+            // has stopped its timer. Adding a second task from *another*
+            // processor does not re-arm it, because only its owner can, and if
+            // `should_preempt` says the newcomer should not go first then nothing
+            // else would have told it. The result is a processor that runs its
+            // one task forever with others queued behind it, which is exactly
+            // what the fairness check saw: one spinner with a switch count in the
+            // thousands and two with none.
+            let wake = queue.should_preempt() || queue.is_running_idle() || queue.waiting() == 1;
+            // More than the one task running means there is something here for an
+            // idle processor to take. Measured after the insert, so the first task
+            // to make the queue worth stealing from is the one that says so.
+            Some((wake, queue.len() > 1))
+        }
+    };
+    let Some((preempt, stealable)) = placed else {
+        <arch::Irq as IrqControl>::restore(saved);
+        domains::drain();
+        return;
     };
     // Decided while still masked: a spawn onto this processor arms this
     // processor's timer, which is only this processor's while nothing can move
@@ -2102,9 +2200,10 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
 }
 
 /// Whether anything but its own placement may put `task` on `cpu`: a
-/// processor its affinity allows, in the domain.
+/// processor its affinity allows, in its domain (D-1). Asked again under
+/// `cpu`'s lock before anything is put there (V5).
 fn may_place(task: &Task, cpu: usize) -> bool {
-    task.may_run_on(cpu) && domain_cpus().is_some_and(|cpus| cpus.contains(cpu))
+    task.may_run_on(cpu) && domains::admits(task, cpu)
 }
 
 /// Whether `task`, blocked, is asleep at `home`, the queue that owns it, and
@@ -2177,7 +2276,7 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         if task.state() != task::BLOCKED {
             return Placed::NotBlocked;
         }
-        if refuses(how, here_queue, home_queue, task) || !asleep_at_home(task, home_queue) {
+        if declines(how, here, here_queue, home_queue, task) {
             return Placed::Declined;
         }
         // Whatever sleep it meant is over, as the wake at home ends it.
@@ -2211,6 +2310,22 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         }
         return Placed::Moved;
     }
+}
+
+/// Whether [`wake_onto`] declines to move `task` onto `here`, both queues
+/// locked: its domain, asked again under `here`'s lock (V5), then
+/// [`refuses`], then whether it is asleep at home (which takes it out of
+/// home's sleeper set).
+fn declines(
+    how: Onto,
+    here: usize,
+    here_queue: &CpuQueue,
+    home_queue: &mut CpuQueue,
+    task: &Arc<Task>,
+) -> bool {
+    !domains::admits(task, here)
+        || refuses(how, here_queue, home_queue, task)
+        || !asleep_at_home(task, home_queue)
 }
 
 /// Whether [`wake_onto`] declines to move `task`, `how` it moves it, with
@@ -2301,37 +2416,30 @@ fn pull_target(task: &Arc<Task>) -> Option<usize> {
             waker.record_wakee(task.id, crate::timer::now_nanos),
         )
     })?;
-    let domain = DOMAIN.get()?;
-    if waker == task.id || !may_pull(task, domain, here) {
+    if waker == task.id || !may_pull(task, here) {
         return None;
     }
-    let factor = u32::try_from(domain.cpus().len()).unwrap_or(u32::MAX);
+    let factor = u32::try_from(domains::count(task, online())).unwrap_or(u32::MAX);
     if ferrix_sched_class::wake_wide(waker_flips, task.wakee_flips(), factor) {
         return None;
     }
-    if idle_allowed(task, domain) {
+    if idle_allowed(task) {
         return None;
     }
     Some(here)
 }
 
-/// Whether `task` may be pulled onto `here` at all: `domain` steals work and
-/// holds both `here` and the task's home, which is another processor, and
-/// the task is not pinned and may run here (L.sched.90).
-fn may_pull(task: &Task, domain: &Domain, here: usize) -> bool {
-    let home = task.cpu();
-    domain.mode().steals_work()
-        && domain.cpus().contains(here)
-        && domain.cpus().contains(home)
-        && home != here
-        && !task.is_pinned()
-        && may_place(task, here)
+/// Whether `task` may be pulled onto `here` at all: `here`'s domain steals
+/// work and is the task's (D-2), its home is another processor, and the
+/// task is not pinned and may run here (L.sched.90).
+fn may_pull(task: &Task, here: usize) -> bool {
+    domains::steals(here) && task.cpu() != here && !task.is_pinned() && may_place(task, here)
 }
 
-/// Whether a processor of `domain` other than its home that `task` may run
-/// on is idle (`IDLE`): then the pull is not tried, and L.sched.85 takes it.
-/// An idle home is `refuses`'s, under the home's lock.
-fn idle_allowed(task: &Task, domain: &Domain) -> bool {
+/// Whether a processor of its domain other than its home that `task` may
+/// run on is idle (`IDLE`): then the pull is not tried, and L.sched.85 takes
+/// it. An idle home is `refuses`'s, under the home's lock.
+fn idle_allowed(task: &Task) -> bool {
     let home = task.cpu();
     let home_bit = u32::try_from(home)
         .ok()
@@ -2340,7 +2448,7 @@ fn idle_allowed(task: &Task, domain: &Domain) -> bool {
     while idle != 0 {
         let cpu = idle.trailing_zeros() as usize;
         idle &= idle - 1;
-        if task.may_run_on(cpu) && domain.cpus().contains(cpu) {
+        if may_place(task, cpu) {
             return true;
         }
     }
@@ -2395,6 +2503,7 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
     let saved = <arch::Irq as IrqControl>::disable();
     let here = this_cpu();
     let mut kick_cpu = None;
+    let mut moved = false;
     loop {
         let cpu = task.cpu();
         let Some(lock) = queue_of(cpu) else {
@@ -2422,6 +2531,10 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
         // the reaper was freeing.
         let _ = task.take_sleep_deadline();
         task.set_state(RUNNABLE);
+        if sent_to_domain(task, &queue, cpu) {
+            moved = true;
+            break;
+        }
         if let Some(to) = placed_on_wake(task, &mut queue, cpu, here == Some(cpu)) {
             kick_cpu = Some(to);
             break;
@@ -2447,6 +2560,22 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
     if let Some(cpu) = remote {
         kick(cpu);
     }
+    if moved {
+        domains::drain();
+    }
+}
+
+/// For a wake: file `task`, just made runnable at `cpu`, whose queue lock is
+/// held, to be placed in its domain when it may not run there (a processor
+/// that left its domain, or an admission since it blocked, V11), and say
+/// so. Not a task still queued or running there, which its processor's
+/// decision moves.
+fn sent_to_domain(task: &Arc<Task>, queue: &CpuQueue, cpu: usize) -> bool {
+    if domains::admits(task, cpu) || task.is_queued() || queue.is_current(task) {
+        return false;
+    }
+    domains::push_moving(Arc::clone(task));
+    true
 }
 
 /// `CpuQueue::wake_sleepers` for `choose_next` on processor `cpu`, whose
@@ -2459,6 +2588,11 @@ fn wake_sleepers_placing(queue: &mut CpuQueue, cpu: usize, now: u64) {
     let busy = !queue.is_running_idle();
     let mut placed = 0_u64;
     queue.wake_sleepers(now, |task| {
+        // Asleep outside its domain: placed in it (V11).
+        if !domains::admits(task, cpu) {
+            domains::push_moving(Arc::clone(task));
+            return true;
+        }
         busy && place_on_idle(task, cpu).is_some_and(|to| {
             placed |= 1_u64 << to;
             true
@@ -2511,6 +2645,15 @@ fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
             crate::panic::catalog::RUNNING_TASK_QUEUED,
             "a task a processor runs was moved to another as if it waited: task {}",
             task.id
+        );
+    }
+    // Every mover asked under `to`'s lock, which this holds (D-1, V2).
+    if !domains::admits(task, to) {
+        crate::panic::fatal!(
+            crate::panic::catalog::TASK_OUTSIDE_DOMAIN,
+            "a task was moved to a processor outside its domain: task {} to processor {}",
+            task.id,
+            to
         );
     }
     task.set_cpu(to);
@@ -2572,15 +2715,14 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
     if task.is_pinned() || !task.is_fair() {
         return None;
     }
-    let domain = DOMAIN.get()?;
-    if !domain.mode().steals_work() || !domain.cpus().contains(home) {
+    if !domains::steals(home) {
         return None;
     }
     let idle = IDLE.load(Ordering::SeqCst);
     let online = QUEUES.get()?.len().min(64);
     for step in 1..online {
         let to = (home + step) % online;
-        if idle & (1_u64 << to) == 0 || !task.may_run_on(to) || !domain.cpus().contains(to) {
+        if idle & (1_u64 << to) == 0 || !may_place(task, to) {
             continue;
         }
         let Some(lock) = queue_of(to) else {
@@ -2589,7 +2731,8 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
         let Some(mut queue) = lock.try_lock() else {
             continue;
         };
-        if !queue.is_running_idle() || queue.waiting() != 0 {
+        // Its domain, asked again under `to`'s lock (V5).
+        if !queue.is_running_idle() || queue.waiting() != 0 || !domains::admits(task, to) {
             continue;
         }
         move_onto(task, to, &mut queue);
@@ -2906,9 +3049,12 @@ fn pick_and_switch(interrupted_user: bool) {
 }
 
 /// The running task's place at a decision, before the pick: one that stopped
-/// being runnable leaves the queue (filed as a sleeper if it sleeps), and
-/// one still runnable whose policy changed moves to its new tier.
-fn settle_previous(queue: &mut CpuQueue, previous: &Arc<Task>) {
+/// being runnable leaves the queue (filed as a sleeper if it sleeps), one
+/// still runnable that may no longer run here for its domain leaves it to be
+/// placed in its domain once the switch away from it has saved its context
+/// (`finish_switch`, V4), and one still runnable whose policy changed moves
+/// to its new tier.
+fn settle_previous(queue: &mut CpuQueue, cpu: usize, previous: &Arc<Task>) {
     if previous.state() != RUNNABLE {
         queue.detach_current();
         // Taken either way, filed only for a task that can wake: a dead task
@@ -2925,12 +3071,47 @@ fn settle_previous(queue: &mut CpuQueue, previous: &Arc<Task>) {
         }
     }
 
+    if previous.state() == RUNNABLE && !domains::admits(previous, cpu) {
+        queue.detach_current();
+        previous.set_evicted();
+        return;
+    }
+
     // A running task whose policy changed moves to its new tier here, where
     // the pick after this makes the stack's running entity this processor's
     // task again under the same lock hold (`CpuQueue::set_policy`). Read
     // again: a task the block above filed back as runnable is one too.
     if previous.state() == RUNNABLE {
         queue.requeue_if_moved(previous);
+    }
+}
+
+/// At a decision on `cpu`, leaving its domain: every task waiting here that
+/// may no longer run here is taken off and filed to be placed in its domain
+/// (docs/SCHED-CLASSES.md §9f, the switch's step 3). One walk of the queue
+/// for each task taken, under its lock: bounded by the queue's length.
+fn rehome_waiting(queue: &mut CpuQueue, cpu: usize) {
+    while let Some((id, upper)) = queue.foreign_waiting(cpu) {
+        let Some(task) = queue.release(id, upper) else {
+            return;
+        };
+        domains::push_moving(task);
+    }
+}
+
+/// The task a pick chose on `cpu`, which may run there for its domain, or
+/// the machine stopped (D-1, V2): every task that may not was taken off
+/// before the pick, under the lock it is made under.
+fn require_admitted(next: Option<&Arc<Task>>, cpu: usize) {
+    if let Some(next) = next
+        && !domains::admits(next, cpu)
+    {
+        crate::panic::fatal!(
+            crate::panic::catalog::TASK_OUTSIDE_DOMAIN,
+            "a task outside processor {}'s domain was picked to run there: task {}",
+            cpu,
+            next.id
+        );
     }
 }
 
@@ -2955,9 +3136,13 @@ fn choose_next(
 
     let previous = queue.current.clone();
     if let Some(previous) = previous.as_ref() {
-        settle_previous(queue, previous);
+        settle_previous(queue, cpu, previous);
+    }
+    if domains::slot_of(cpu) == domains::LEAVING {
+        rehome_waiting(queue, cpu);
     }
     let next = queue.pick_next();
+    require_admitted(next.as_ref(), cpu);
     if queue.stats.measuring {
         queue.note_pick(now);
     }
@@ -2972,6 +3157,7 @@ fn choose_next(
         // SAFETY: (SHARED) taken above, and nothing was switched, so this context is
         // still the holder.
         unsafe { lock.force_unlock() };
+        domains::drain();
         return None;
     }
 
@@ -3224,6 +3410,9 @@ fn finish_switch() {
     if let Some(previous) = previous.as_ref() {
         previous.set_on_cpu(false);
     }
+    // Taken off for running outside its domain (`settle_previous`): placed
+    // in it now that its context is saved (V4).
+    let evicted = previous.as_ref().is_some_and(|task| task.take_evicted());
     let dead = previous.as_ref().is_some_and(|task| task.is_dead());
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
@@ -3239,12 +3428,15 @@ fn finish_switch() {
     // touched afterwards.
     unsafe { lock.force_unlock() };
 
-    if let Some(previous) = previous
-        && dead
-    {
-        // NOALLOC: `Zombies::push` files the task in its run slot.
-        ZOMBIES.lock().push(previous);
+    if let Some(previous) = previous {
+        if dead {
+            // NOALLOC: `Zombies::push` files the task in its run slot.
+            ZOMBIES.lock().push(previous);
+        } else if evicted {
+            domains::push_moving(previous);
+        }
     }
+    domains::drain();
 }
 
 /// Take a task from the busiest other processor in this domain, if one will
@@ -3257,14 +3449,12 @@ fn finish_switch() {
 /// too -- one that has been handed work and kicked, and has not yet woken --
 /// the last waiting task is never taken ([`steal_from`]).
 fn steal_work() -> bool {
-    let Some(domain) = DOMAIN.get().filter(|domain| domain.mode().steals_work()) else {
+    let Some(me) = this_cpu().filter(|me| domains::steals(*me)) else {
         return false;
     };
-    let Some(me) = this_cpu() else {
-        return false;
-    };
-    domain
-        .cpus()
+    // Its own domain's processors only (D-2): `steal_from` asks each task
+    // again under both locks.
+    domains::cpus_of(domains::slot_of(me), online())
         .iter()
         .filter(|cpu| *cpu != me)
         .any(|victim| steal_from(me, victim))
@@ -3314,9 +3504,11 @@ fn balance() {
         return;
     }
 
-    let Some(allowed) = domain_cpus() else {
+    // Within its own domain, and only one that steals (D-2).
+    if !domains::steals(me) {
         return;
-    };
+    }
+    let allowed = domains::cpus_of(domains::slot_of(me), online());
     let Some(queues) = QUEUES.get() else {
         return;
     };

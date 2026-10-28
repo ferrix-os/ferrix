@@ -337,6 +337,16 @@ fn find<T>(link: &Link<T>, id: u64) -> Option<Key> {
     find(&node.left, id).or_else(|| find(&node.right, id))
 }
 
+/// The identifier of a node in the subtree whose payload `matches`, by a
+/// walk.
+fn find_where<T>(link: &Link<T>, matches: &impl Fn(&T) -> bool) -> Option<u64> {
+    let node = link.as_ref()?;
+    if node.payload.as_ref().is_some_and(matches) {
+        return Some(node.id);
+    }
+    find_where(&node.left, matches).or_else(|| find_where(&node.right, matches))
+}
+
 /// The subtree's size, whether it is ordered and balanced, for `check`.
 fn audit<T>(link: &Link<T>, low: Option<Key>, high: Option<Key>) -> Result<usize, &'static str> {
     let Some(node) = link.as_ref() else {
@@ -612,6 +622,11 @@ impl<T> RealtimeClass<T> for FifoRr {
 
     fn into_slot((_, slot): FifoEntity<T>) -> FifoSlot<T> {
         slot
+    }
+    /// The waiting entities alone, by a walk of the tree, O(n) in the
+    /// processor's real-time tasks, under its queue's lock.
+    fn waiting_where(queue: &FifoQueue<T>, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        find_where(&queue.tree, &matches)
     }
 }
 

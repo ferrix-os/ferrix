@@ -1215,11 +1215,11 @@ package FerrixSchedRequirements {
         requirement <'L.sched.115'> softRtIsRefusedByName : ItemLowLevel {
             attribute :>> statement = "A scheduling domain shall be made only through
                 make_domain, which refuses a mode whose tiers are not compiled in
-                as ModeUnavailable, and SoftRt where they are as NotCreatable,
-                until its own processors, a fully preemptible kernel and threaded
-                interrupts land.";
+                as ModeUnavailable, and makes a SoftRt domain where they are; a
+                SoftRt domain is made at run time only (domains::create_soft).";
             attribute :>> criterion = "The stage-5 modes check: on desktop a SoftRt
-                domain is refused NotCreatable, and on present ModeUnavailable.";
+                domain is made with its mode, and on present it is refused
+                ModeUnavailable.";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("sched::make_domain", "sched::init");
         }
@@ -1236,6 +1236,171 @@ package FerrixSchedRequirements {
                 task fair.";
             attribute :>> parent = "H.SCHED.18";
             attribute :>> unit = ("sched::set_policy", "sched::realtime_built");
+        }
+        requirement <'L.sched.118'> theRunStopsOutsideTheDomain : ItemLowLevel {
+            attribute :>> statement = "A task shall be admitted to a processor only
+                if it is exempt or the processor's domain, read through the live
+                domains, is its own; a processor's word of no domain admits no
+                other task. The pick, a move between queues and the direct
+                switch's hand-over shall stop the machine (FX-0538) on a task not
+                admitted where it is to run.";
+            attribute :>> criterion = "The stage-5 domain check on desktop, every
+                pick and move of which asks it; its controls (the re-home skipped,
+                the admission not narrowing) stop the machine with FX-0538.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::domains::admits", "sched::domains::slot_of",
+                "sched::domains::effective", "sched::require_admitted",
+                "sched::move_onto", "sched::direct::Direct::hand_over");
+        }
+        requirement <'L.sched.119'> nothingCrossesADomain : ItemLowLevel {
+            attribute :>> statement = "A placement, a steal, a pull, a wake onto
+                the waker and the balance shall consider only processors of the
+                task's domain and ask its admission again under the target's queue
+                lock; only the boot domain's processors steal, pull or balance.";
+            attribute :>> criterion = "The stage-5 domain check: with eight
+                spinners crowding the boot domain's two processors and the SoftRt
+                domain's idle, none runs on the SoftRt processors; the wake
+                placement and wake-affine checks still pass beside it.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::may_place", "sched::may_pull",
+                "sched::idle_allowed", "sched::pull_target", "sched::wake_onto", "sched::declines",
+                "sched::place_on_idle", "sched::steal_work", "sched::balance",
+                "sched::queue::CpuQueue::steal_candidate", "sched::domains::steals",
+                "sched::domains::cpus_of", "sched::domains::count", "sched::spawn",
+                "sched::online");
+        }
+        requirement <'L.sched.120'> theSwitchEmptiesItsProcessors : ItemLowLevel {
+            attribute :>> statement = "A SoftRt domain shall be made by marking its
+                processors leaving under each one's queue lock, asking each for a
+                decision at which it takes off every task waiting there that it no
+                longer admits, waiting in a task that may sleep, bounded by one
+                second, until each holds only tasks it admits and every task taken
+                off is placed, and then marking the domain live before naming it
+                in any processor's word; past the bound the processors are given
+                back and the switch refused.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: the
+                domain is made under eight running spinners and none runs on it
+                after; its control, the re-home skipped, stops the machine with
+                FX-0538.";
+            attribute :>> parent = ("H.SCHED.21", "H.SCHED.22");
+            attribute :>> unit = ("sched::domains::create_soft",
+                "sched::domains::wait_until_empty", "sched::domains::set_slots",
+                "sched::rehome_waiting", "sched::choose_next",
+                "sched::queue::CpuQueue::foreign_waiting",
+                "sched::queue::CpuQueue::holds_only_admitted",
+                "sched::holds_only_admitted", "sched::ask_decision");
+        }
+        requirement <'L.sched.121'> aRunningTaskMovesWhenSaved : ItemLowLevel {
+            attribute :>> statement = "A running task a processor no longer admits
+                shall be taken off that processor at its next decision and placed
+                in its domain only once the switch away from it has saved its
+                context.";
+            attribute :>> criterion = "The stage-5 domain check on desktop, whose
+                spinners are running when the domain is made and when two of them
+                are admitted; FX-0537 stops the machine on a task moved while a
+                processor runs it.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::settle_previous", "sched::finish_switch",
+                "sched::task::Task::set_evicted", "sched::task::Task::take_evicted");
+        }
+        requirement <'L.sched.122'> aTaskTakenOffIsPlaced : ItemLowLevel {
+            attribute :>> statement = "A task taken off a queue for its domain shall
+                be filed in its own run slot and placed, with no queue lock held,
+                on the least loaded processor of its domain that its affinity
+                allows, its admission asked again under that processor's lock and
+                with every change of a slot excluded; one with none now waits for
+                a later placement.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: at its
+                end no task waits to be placed and none was lost.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::domains::push_moving",
+                "sched::domains::drain", "sched::domains::drain_held",
+                "sched::domains::moving", "sched::domains::moving_lost",
+                "sched::place_moving", "sched::enqueue");
+        }
+        requirement <'L.sched.123'> aWakeLandsInTheDomain : ItemLowLevel {
+            attribute :>> statement = "A task woken, by a waker or by its sleep's
+                end, on a processor that no longer admits it shall be placed in its
+                domain rather than queued there, unless it is still that
+                processor's running task or queued there, which the processor's
+                decision moves.";
+            attribute :>> criterion = "The stage-5 domain check on desktop, whose
+                checker and spinners sleep and wake across the switch; review of
+                wake_at_home and wake_sleepers_placing.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::sent_to_domain", "sched::wake_at_home",
+                "sched::wake_sleepers_placing");
+        }
+        requirement <'L.sched.124'> admissionMovesTheJob : ItemLowLevel {
+            attribute :>> statement = "Admitting a job to the SoftRt domain shall
+                put it and every job beneath it, made before or after, in the
+                domain, and each task of its live processes, under its home
+                queue's lock: a queued one taken off and placed, a running one
+                moved at its processor's next decision; a member its affinity
+                keeps off every processor of the domain refuses the admission
+                before anything changes. A user task takes its job's domain as it
+                is made and again as it is queued, under that queue's lock.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: a job
+                of no processes admitted, and a job made beneath it after, are in
+                the domain; two running kernel tasks admitted run only on its
+                processors; its control, a queued member not taken off, stops the
+                machine with FX-0538.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::domains::admit",
+                "sched::domains::admit_tasks", "sched::domains::placeable",
+                "sched::domains::settle_task", "sched::domains::members_of",
+                "sched::domains::word", "sched::domains::soft_exists",
+                "object::job::Job::sched_slot", "object::job::Job::set_sched_domain",
+                "sched::prepare_user", "sched::domain_slot_of_word");
+        }
+        requirement <'L.sched.125'> dissolutionIsOneStore : ItemLowLevel {
+            attribute :>> statement = "Dissolving the SoftRt domain shall first
+                mark it not live, so that every processor and task naming it reads
+                as the boot domain's at once, and a job admitted to it, by its
+                generation, too; then put its processors' words right. Its
+                members' slots are put right before another domain is made.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: after
+                the dissolution the domain does not exist, a job beneath one
+                admitted is in the boot domain, and the boot domain's tasks run on
+                its former processors.";
+            attribute :>> parent = "H.SCHED.22";
+            attribute :>> unit = ("sched::domains::dissolve",
+                "sched::domains::sweep", "sched::domains::slot_of_word");
+        }
+        requirement <'L.sched.126'> perProcessorTasksAreExempt : ItemLowLevel {
+            attribute :>> statement = "A kernel task confined to one processor,
+                and a processor's adopted context, shall be marked exempt from the
+                domains as it is made, and the mark never changed; every other
+                task shall start in the boot domain.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: the
+                idle tasks run on the SoftRt processors throughout, which the pick
+                allows only for the exempt; review of Task::new and Task::adopt.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = ("sched::task::Task::new", "sched::task::Task::adopt",
+                "sched::task::Task::is_exempt", "sched::task::Task::domain_slot",
+                "sched::task::Task::set_domain_slot", "sched::task::Task::affinity",
+                "sched::task::first_domain");
+        }
+        requirement <'L.sched.127'> theSoftDomainsRefusals : ItemLowLevel {
+            attribute :>> statement = "domains::create_soft shall refuse
+                Unavailable in a build without the realtime tier, TooFew below four
+                processors, Count for no processors or more than all but two, and
+                Exists while a domain exists or is being made, each before
+                anything changes; its processors are the highest-numbered.";
+            attribute :>> criterion = "The stage-5 domain check: on desktop with
+                four processors, a domain of none and of three refused Count and a
+                second refused Exists; on present, Unavailable.";
+            attribute :>> parent = "H.SCHED.23";
+            attribute :>> unit = "sched::domains::create_soft";
+        }
+        requirement <'L.sched.128'> theDirectSwitchStaysInside : ItemLowLevel {
+            attribute :>> statement = "The direct switch shall decline (T11) a
+                parked peer its processor does not admit, which the ordinary wake
+                then places in its domain.";
+            attribute :>> criterion = "Review of direct::begin, whose decline is
+                counted; L.sched.118's hand-over stop behind it.";
+            attribute :>> parent = "H.SCHED.21";
+            attribute :>> unit = "sched::direct::begin";
         }
     }
 }

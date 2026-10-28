@@ -694,9 +694,44 @@ impl CpuQueue {
         // idle 2 is. `is_pinned` stays because it says something different —
         // a task with exactly one home should not be moved even *to* that
         // home, since it is already there.
+        // And its domain, which is `to`'s (D-2): asked under both queues'
+        // locks, which `steal_from` holds.
         Stack::fair(&self.stack).latest_where(|task| {
-            !task.is_pinned() && task.may_run_on(to) && task.state() == RUNNABLE
+            !task.is_pinned()
+                && task.may_run_on(to)
+                && task.state() == RUNNABLE
+                && super::domains::admits(task, to)
         })
+    }
+
+    /// A task waiting here, not running, that may not run on `cpu`, this
+    /// queue's processor, for its domain (`sched::domains::admits`), with
+    /// whether it waits in the tier above fair: what a processor leaving its
+    /// domain moves off at its decision (docs/SCHED-CLASSES.md §9f, the
+    /// switch's step 3). One walk of each tier.
+    pub(crate) fn foreign_waiting(&self, cpu: usize) -> Option<(TaskId, bool)> {
+        let foreign = |task: &Arc<Task>| !super::domains::admits(task, cpu);
+        if let Some(id) = Stack::fair(&self.stack).latest_where(foreign) {
+            return Some((id, false));
+        }
+        <Stack as StackTiers<Arc<Task>>>::upper_waiting_where(&self.stack, foreign)
+            .map(|id| (id, true))
+    }
+
+    /// Whether everything here may run on `cpu`, this queue's processor:
+    /// the running task and every waiting one (the switch's wait, V5).
+    pub(crate) fn holds_only_admitted(&self, cpu: usize) -> bool {
+        self.current
+            .as_ref()
+            .is_none_or(|task| super::domains::admits(task, cpu))
+            && self.foreign_waiting(cpu).is_none()
+    }
+
+    /// Whether `task` is the one this queue runs.
+    pub(crate) fn is_current(&self, task: &Arc<Task>) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, task))
     }
 
     /// Take a queued task off this queue, for another one to run: from the

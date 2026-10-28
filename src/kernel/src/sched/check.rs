@@ -217,6 +217,8 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     super::deadline_check::run()?;
     let realtime = super::rt_check::run()?;
     crate::console::println!("  sched    realtime {realtime}");
+    let domains = super::domains_check::run()?;
+    crate::console::println!("  sched    domains {domains}");
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;

@@ -1510,6 +1510,11 @@ pub trait StackTiers<T>: FairTier<T> {
     fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> Self::Entity;
     /// A task's parts back out of the stack's entity.
     fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T>;
+    /// The identifier of a waiting entity of the tier above fair whose
+    /// payload `matches`, never the running one; `None` with no such tier.
+    /// For a scheduling domain's switch (docs/SCHED-CLASSES.md §9f), with
+    /// [`RunQueue::latest_where`] for the fair tier.
+    fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
 }
 
 impl<T> StackTiers<T> for Eevdf {
@@ -1542,6 +1547,9 @@ impl<T> StackTiers<T> for Eevdf {
     fn split(entity: FairEntity<T>) -> Split<core::convert::Infallible, T> {
         Split::Fair(entity)
     }
+    fn upper_waiting_where(_: &RunQueue<T>, _: impl Fn(&T) -> bool) -> Option<u64> {
+        None
+    }
 }
 
 impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
@@ -1572,6 +1580,9 @@ impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
             ferrix_sched_class::Tier::Upper(entity) => Split::Upper(U::into_slot(entity)),
             ferrix_sched_class::Tier::Lower(entity) => Split::Fair(entity),
         }
+    }
+    fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        U::waiting_where(&queue.upper, matches)
     }
 }
 

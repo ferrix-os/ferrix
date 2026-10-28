@@ -65,6 +65,7 @@ Causes are listed most likely first.
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
 | [FX-0537](#fx-0537) | a task a processor runs was found waiting in a run queue |
+| [FX-0538](#fx-0538) | a task was about to run outside its scheduling domain |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1277,6 +1278,33 @@ consultant's ledger line 30, B1).
 
 See: src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next;
 src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e.
+
+<a id="fx-0538"></a>
+
+## FX-0538 — a task was about to run outside its scheduling domain
+
+Each processor names the scheduling domain it is in, and each task the domain it
+runs in (docs/SCHED-CLASSES.md §9f): the boot domain, or the one `SoftRt` domain
+made at run time. A task runs only on a processor of its own domain (D-1), the
+per-processor kernel tasks excepted. Every placement, steal, pull and wake asks
+that under the target processor's queue lock, and a task's domain or a
+processor's changes only under that lock; so a pick, a move between queues or a
+direct switch that finds a task outside the processor's domain has found a
+placement that skipped the question, and the machine is stopped before the task
+runs where its domain's guarantee does not hold (V2).
+
+1. A path queued a task on a processor without asking `domains::admits` under
+   that processor's lock: a new placement, steal or wake that bypassed
+   `may_place`.
+2. A processor leaving the boot domain did not move what it held before its pick
+   (`sched::rehome_waiting`), or a running task outside its domain was picked
+   again rather than taken off (`sched::settle_previous`).
+3. A task's domain, or a processor's, was changed without the queue lock that
+   owns it (`domains::settle_task`, `domains::set_slots`).
+
+See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
+settle_previous and require_admitted; src/kernel/src/sched/direct.rs;
+docs/SCHED-CLASSES.md §9f.
 
 <a id="fx-0601"></a>
 

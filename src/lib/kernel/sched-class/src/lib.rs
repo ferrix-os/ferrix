@@ -40,10 +40,6 @@ pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
 pub enum DomainError {
     /// A scheduling mode that is named, and not written yet.
     ModeUnavailable(Mode),
-    /// A mode whose tiers are compiled in, whose domain cannot be made yet:
-    /// `SoftRt` before its own processors, a fully preemptible kernel and
-    /// threaded interrupts land (docs/SCHED-CLASSES.md §9e, R9).
-    NotCreatable(Mode),
     /// A domain with no CPUs in it.
     EmptyDomain,
     /// A CPU claimed by two domains.
@@ -60,9 +56,6 @@ impl fmt::Display for DomainError {
         match self {
             DomainError::ModeUnavailable(mode) => {
                 write!(f, "the {} mode is not written yet", mode.name())
-            }
-            DomainError::NotCreatable(mode) => {
-                write!(f, "the {} mode is compiled, not yet creatable", mode.name())
             }
             DomainError::EmptyDomain => f.write_str("a scheduling domain has no CPUs"),
             DomainError::Overlap(cpu) => write!(f, "CPU {cpu} is in two scheduling domains"),
@@ -291,6 +284,11 @@ pub trait RealtimeClass<T>: SchedClass<T> {
     fn entity(params: RtParams, slot: Self::Slot) -> Self::Entity;
     /// The node back out of an entity the queue let go.
     fn into_slot(entity: Self::Entity) -> Self::Slot;
+    /// The identifier of a waiting entity, never the running one, whose
+    /// payload `matches`: a walk of the queue, for the moves a scheduling
+    /// domain's switch makes off a processor (docs/SCHED-CLASSES.md §9f),
+    /// never a pick, a wake or the tick.
+    fn waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
 }
 
 /// Where a task keeps its node of the tiers above fair while it is off

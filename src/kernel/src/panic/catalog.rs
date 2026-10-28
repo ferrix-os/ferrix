@@ -2910,6 +2910,37 @@ pub(crate) static RUNNING_TASK_QUEUED: Explanation = Explanation {
           src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e",
 };
 
+/// For `sched::move_onto`, the pick (`sched::require_admitted`) and the
+/// direct switch (`sched::direct::Direct::hand_over`), when a task is about
+/// to run on, or be moved to, a processor outside its scheduling domain.
+pub(crate) static TASK_OUTSIDE_DOMAIN: Explanation = Explanation {
+    code: "FX-0538",
+    title: "a task was about to run outside its scheduling domain",
+    meaning: "Each processor names the scheduling domain it is in, and each task the \
+              domain it runs in (docs/SCHED-CLASSES.md §9f): the boot domain, or the one \
+              `SoftRt` domain made at run time. A task runs only on a processor of its \
+              own domain (D-1), the per-processor kernel tasks excepted. Every placement, \
+              steal, pull and wake asks that under the target processor's queue lock, and \
+              a task's domain or a processor's changes only under that lock; so a pick, a \
+              move between queues or a direct switch that finds a task outside the \
+              processor's domain has found a placement that skipped the question, and the \
+              machine is stopped before the task runs where its domain's guarantee does \
+              not hold (V2).",
+    causes: &[
+        "A path queued a task on a processor without asking `domains::admits` under \
+         that processor's lock: a new placement, steal or wake that bypassed \
+         `may_place`.",
+        "A processor leaving the boot domain did not move what it held before its pick \
+         (`sched::rehome_waiting`), or a running task outside its domain was picked \
+         again rather than taken off (`sched::settle_previous`).",
+        "A task's domain, or a processor's, was changed without the queue lock that \
+         owns it (`domains::settle_task`, `domains::set_slots`).",
+    ],
+    see: "src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto, \
+          settle_previous and require_admitted; src/kernel/src/sched/direct.rs; \
+          docs/SCHED-CLASSES.md §9f",
+};
+
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
 pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
@@ -3555,6 +3586,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &ENDPOINT_CLOSED_MASKED,
     &STAGE5_TASK_VIEW,
     &RUNNING_TASK_QUEUED,
+    &TASK_OUTSIDE_DOMAIN,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,
