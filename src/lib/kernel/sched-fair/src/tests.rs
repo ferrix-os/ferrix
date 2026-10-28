@@ -289,7 +289,7 @@ fn lag_survives_leaving_and_coming_back() {
     let sleeper = (1..=4).find(|id| *id != running).unwrap();
     let lag_before = queue.lag(sleeper).unwrap();
 
-    let (payload, state, _) = queue.remove(sleeper).unwrap();
+    let (payload, (state, _)) = queue.remove(sleeper).unwrap();
     assert_eq!(state.vlag, lag_before, "it leaves with the lag it had");
     check(&queue);
 
@@ -365,7 +365,7 @@ fn yielding_lets_the_next_deadline_go_first() {
 /// and 1.8 seconds of request was what the next arrival waited behind
 /// (FX-0502).
 ///
-/// Verifies: L.sched.2
+/// Verifies: L.sched.2, L.sched.106
 #[test]
 fn yielding_alone_leaves_the_request_as_it_was() {
     let mut queue = queue();
@@ -390,7 +390,7 @@ fn yielding_alone_leaves_the_request_as_it_was() {
 /// queue still asks for a decision within one slice. Armed for the whole
 /// request instead, the waiting entity sat out seconds (FX-0502).
 ///
-/// Verifies: L.sched.1
+/// Verifies: L.sched.1, L.sched.103
 #[test]
 fn something_waiting_is_decided_on_within_a_slice() {
     let mut queue = queue();
@@ -516,7 +516,7 @@ fn removing_the_running_entity_by_name_works_like_remove_curr() {
         .unwrap();
     let _ = queue.pick_next();
     let running = queue.current_id().unwrap();
-    let (payload, _, _) = queue.remove(running).unwrap();
+    let (payload, _) = queue.remove(running).unwrap();
     assert_eq!(payload, running * 10, "the running entity's payload");
     assert_eq!(queue.current(), None, "nothing running now");
     assert_eq!(queue.len(), 1, "one left");
@@ -643,11 +643,11 @@ fn random_operations_keep_every_invariant_and_pick_what_brute_force_picks() {
             }
             3 if queue.queued() > 0 => {
                 let target = queue.latest_where(|_| true).unwrap();
-                let (_, state, _) = queue.remove(target).unwrap();
+                let (_, (state, _)) = queue.remove(target).unwrap();
                 away.push((target, state));
             }
             4 => {
-                if let Some((id, _, state, _)) = queue.remove_curr() {
+                if let Some((id, _, (state, _))) = queue.remove_curr() {
                     away.push((id, state));
                 }
             }
@@ -912,631 +912,6 @@ fn a_weight_is_refused_for_nobody_and_for_zero() {
 }
 
 // ---------------------------------------------------------------------------
-// Domains and modes
-// ---------------------------------------------------------------------------
-
-#[test]
-fn throughput_is_fair_then_idle_and_steals() {
-    assert_eq!(
-        Mode::Throughput.classes(),
-        Ok(&[Class::Fair, Class::Idle][..]),
-        "the Throughput stack"
-    );
-    assert!(Mode::Throughput.steals_work(), "Throughput steals");
-}
-
-#[test]
-fn the_real_time_modes_are_named_and_refused() {
-    for mode in [Mode::SoftRt, Mode::HardRt] {
-        assert_eq!(
-            mode.classes(),
-            Err(SchedError::ModeUnavailable(mode)),
-            "{} is stage 14's",
-            mode.name()
-        );
-        assert!(!mode.steals_work(), "{} does not steal", mode.name());
-        assert_eq!(
-            Domain::new(CpuSet::first(1).unwrap(), mode),
-            Err(SchedError::ModeUnavailable(mode)),
-            "and no domain can be built in it"
-        );
-    }
-}
-
-#[test]
-fn a_cpu_set_holds_what_it_is_given_and_nothing_else() {
-    let mut set = CpuSet::empty();
-    assert!(set.is_empty(), "starts empty");
-    for cpu in [0, 1, 63, 64, 200, MAX_CPUS - 1] {
-        set.insert(cpu).unwrap();
-    }
-    assert_eq!(set.len(), 6, "six in");
-    assert_eq!(
-        set.iter().collect::<Vec<_>>(),
-        [0, 1, 63, 64, 200, MAX_CPUS - 1],
-        "lowest first"
-    );
-    assert!(!set.contains(2), "not given");
-    assert_eq!(
-        set.insert(MAX_CPUS),
-        Err(SchedError::NoSuchCpu(MAX_CPUS)),
-        "past the end"
-    );
-    assert!(!set.contains(MAX_CPUS), "and not there");
-}
-
-#[test]
-fn an_empty_domain_is_refused() {
-    assert_eq!(
-        Domain::new(CpuSet::empty(), Mode::Throughput),
-        Err(SchedError::EmptyDomain),
-        "no CPUs"
-    );
-}
-
-#[test]
-fn a_partition_must_hold_every_cpu_exactly_once() {
-    let everything = Domain::new(CpuSet::first(4).unwrap(), Mode::Throughput).unwrap();
-    assert_eq!(
-        check_partition(&[everything], 4),
-        Ok(()),
-        "one domain, all of them"
-    );
-
-    let low = Domain::new(CpuSet::first(2).unwrap(), Mode::Throughput).unwrap();
-    assert_eq!(
-        check_partition(&[low], 4),
-        Err(SchedError::Uncovered(2)),
-        "two CPUs in no domain"
-    );
-    assert_eq!(
-        check_partition(&[low, everything], 4),
-        Err(SchedError::Overlap(0)),
-        "two domains claiming CPU 0"
-    );
-    assert_eq!(
-        check_partition(&[everything], 3),
-        Err(SchedError::NoSuchCpu(3)),
-        "a domain naming a CPU the machine lacks"
-    );
-
-    let mut high = CpuSet::empty();
-    high.insert(2).unwrap();
-    high.insert(3).unwrap();
-    let high = Domain::new(high, Mode::Throughput).unwrap();
-    assert_eq!(check_partition(&[low, high], 4), Ok(()), "two halves");
-}
-
-// ---------------------------------------------------------------------------
-// Load tracking, placement and balancing
-// ---------------------------------------------------------------------------
-
-use crate::{
-    BALANCE_THRESHOLD, CpuLoad, LOAD_PERIOD_NS, LOAD_SCALE, Load, busiest, imbalance, place,
-    quietest, slice_for,
-};
-
-/// A set naming every CPU below `count`.
-fn all_cpus(count: usize) -> CpuSet {
-    CpuSet::first(count).expect("a set of that many CPUs")
-}
-
-/// A set naming exactly the CPUs listed.
-fn only(cpus: &[usize]) -> CpuSet {
-    let mut set = CpuSet::default();
-    for cpu in cpus {
-        set.insert(*cpu).expect("a CPU inside the set");
-    }
-    set
-}
-
-/// A busy processor with a given average.
-fn busy(average: u64, queued: usize) -> CpuLoad {
-    CpuLoad {
-        queued,
-        average,
-        idle: false,
-    }
-}
-
-#[test]
-fn a_load_that_is_always_busy_converges_on_full() {
-    let mut load = Load::new();
-    for _ in 0..512 {
-        load.accumulate(LOAD_PERIOD_NS, LOAD_SCALE);
-    }
-    // Within a percent of full: the series converges to LOAD_SCALE and this
-    // many periods is many half-lives.
-    assert!(
-        load.average() > LOAD_SCALE * 99 / 100,
-        "a permanently busy load read {} of {LOAD_SCALE}",
-        load.average()
-    );
-    assert!(load.average() <= LOAD_SCALE, "a load exceeded full");
-}
-
-#[test]
-fn a_load_that_is_never_busy_stays_at_zero() {
-    let mut load = Load::new();
-    for _ in 0..64 {
-        load.accumulate(LOAD_PERIOD_NS, 0);
-    }
-    assert_eq!(load.average(), 0, "an idle load drifted upwards");
-}
-
-#[test]
-fn a_half_busy_load_converges_on_half() {
-    // Half the time at full demand, half at none — a duty cycle, expressed
-    // as the level it actually is rather than as an amount.
-    let mut load = Load::new();
-    for _ in 0..512 {
-        load.accumulate(LOAD_PERIOD_NS / 2, LOAD_SCALE);
-        load.accumulate(LOAD_PERIOD_NS / 2, 0);
-    }
-    let half = LOAD_SCALE / 2;
-    assert!(
-        load.average().abs_diff(half) < LOAD_SCALE / 50,
-        "a half-busy load read {} rather than about {half}",
-        load.average()
-    );
-}
-
-#[test]
-fn how_finely_time_is_chopped_does_not_change_the_answer() {
-    // The property that lets the kernel call this from a tick, a context
-    // switch or an idle transition without the answer depending on which.
-    let mut coarse = Load::new();
-    let mut fine = Load::new();
-    for _ in 0..64 {
-        coarse.accumulate(LOAD_PERIOD_NS, LOAD_SCALE / 4);
-        for _ in 0..8 {
-            fine.accumulate(LOAD_PERIOD_NS / 8, LOAD_SCALE / 4);
-        }
-    }
-    assert_eq!(
-        coarse.average(),
-        fine.average(),
-        "the same history reported differently depending on how it was split"
-    );
-}
-
-#[test]
-fn a_load_decays_towards_zero_when_idle() {
-    let mut load = Load::new();
-    for _ in 0..256 {
-        load.accumulate(LOAD_PERIOD_NS, LOAD_SCALE);
-    }
-    let busy_average = load.average();
-    // Thirty-two periods is the half-life.
-    load.decay(LOAD_PERIOD_NS * 32);
-    assert!(
-        load.average() < busy_average * 55 / 100 && load.average() > busy_average * 45 / 100,
-        "after one half-life a load of {busy_average} read {}",
-        load.average()
-    );
-}
-
-#[test]
-fn decaying_for_a_very_long_time_reaches_zero_without_looping_forever() {
-    let mut load = Load::new();
-    load.accumulate(LOAD_PERIOD_NS, LOAD_SCALE);
-    load.decay(LOAD_PERIOD_NS * 1_000_000);
-    assert_eq!(load.average(), 0, "a long idle period left load behind");
-}
-
-/// A year, in nanoseconds: far more load periods than any loop should walk.
-const YEAR_NS: u64 = 365 * 24 * 3600 * 1_000_000_000;
-
-#[test]
-fn a_long_stretch_is_accounted_in_bounded_work() {
-    // The kernel folds time in under its run queue lock, with interrupts
-    // masked, and a processor that has been idle for an hour hands it an hour.
-    // A loop over every elapsed period is three and a half million iterations
-    // for that hour and thirty billion for this year, so the check is made on
-    // a thread with a deadline: without the bound this does not fail, it hangs.
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let _worker = std::thread::spawn(move || {
-        let mut load = Load::new();
-        load.accumulate(LOAD_PERIOD_NS * 64, LOAD_SCALE);
-        load.accumulate(YEAR_NS, LOAD_SCALE * 3);
-        let busy = load.average();
-        load.accumulate(YEAR_NS, 0);
-        let _ = sender.send((busy, load.average()));
-    });
-    let (busy, idle) = receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("accounting a year of load walked every period of it");
-    // Within one unit, which is as close as the per-period loop itself settles
-    // on a constant level: its truncating steps stop a unit short from below.
-    assert!(
-        busy.abs_diff(LOAD_SCALE * 3) <= 1,
-        "a year at three nice-0 entities read {busy}"
-    );
-    assert_eq!(idle, 0, "a year idle left load behind");
-}
-
-#[test]
-fn a_long_stretch_reads_as_the_same_stretch_in_short_pieces() {
-    // The bound must not change the answer: one call covering many thousands
-    // of periods reads as the same history handed over a few hundred periods
-    // at a time, which never reaches the bound and so walks every period.
-    let mut whole = Load::new();
-    let mut pieces = Load::new();
-    for load in [&mut whole, &mut pieces] {
-        for _ in 0..64 {
-            load.accumulate(LOAD_PERIOD_NS, LOAD_SCALE / 2);
-        }
-        load.accumulate(LOAD_PERIOD_NS / 3, LOAD_SCALE * 5);
-    }
-    whole.accumulate(LOAD_PERIOD_NS * 10_000, LOAD_SCALE * 2);
-    for _ in 0..20 {
-        pieces.accumulate(LOAD_PERIOD_NS * 500, LOAD_SCALE * 2);
-    }
-    assert!(
-        whole.average().abs_diff(pieces.average()) <= 1,
-        "one long call read {} where the same time in pieces read {}",
-        whole.average(),
-        pieces.average()
-    );
-}
-
-#[test]
-fn several_runnable_entities_read_as_more_than_one() {
-    // The property the balancer needs and a busy/idle signal cannot give:
-    // four runnable nice-0 entities are four times the demand of one, not
-    // the same "busy".
-    let mut one = Load::new();
-    let mut four = Load::new();
-    for _ in 0..512 {
-        one.accumulate(LOAD_PERIOD_NS, LOAD_SCALE);
-        four.accumulate(LOAD_PERIOD_NS, LOAD_SCALE * 4);
-    }
-    assert!(
-        four.average() > one.average() * 7 / 2,
-        "four runnable entities read {} against one entity's {}",
-        four.average(),
-        one.average()
-    );
-}
-
-#[test]
-fn placement_prefers_staying_put_when_the_preferred_cpu_is_idle() {
-    let loads = [CpuLoad::idle(), CpuLoad::idle(), CpuLoad::idle()];
-    assert_eq!(place(&loads, &all_cpus(3), 2), Some(2));
-}
-
-#[test]
-fn placement_takes_an_idle_cpu_over_a_busy_preferred_one() {
-    let loads = [busy(LOAD_SCALE, 4), CpuLoad::idle(), busy(LOAD_SCALE, 4)];
-    assert_eq!(
-        place(&loads, &all_cpus(3), 0),
-        Some(1),
-        "a task stayed on a busy processor while one sat idle"
-    );
-}
-
-#[test]
-fn placement_takes_the_least_loaded_when_none_is_idle() {
-    let loads = [
-        busy(LOAD_SCALE, 4),
-        busy(LOAD_SCALE / 2, 2),
-        busy(LOAD_SCALE / 4, 1),
-    ];
-    assert_eq!(place(&loads, &all_cpus(3), 0), Some(2));
-}
-
-#[test]
-fn placement_never_leaves_the_affinity_mask() {
-    let loads = [CpuLoad::idle(), CpuLoad::idle(), busy(LOAD_SCALE, 8)];
-    // Only CPU 2 is allowed, and it is the worst choice by every other
-    // measure. Affinity is not a preference.
-    assert_eq!(place(&loads, &only(&[2]), 0), Some(2));
-}
-
-#[test]
-fn placement_answers_nothing_when_the_mask_names_no_usable_cpu() {
-    let loads = [CpuLoad::idle(), CpuLoad::idle()];
-    assert_eq!(place(&loads, &only(&[7]), 0), None);
-    assert_eq!(place(&loads, &CpuSet::default(), 0), None);
-}
-
-#[test]
-fn placement_is_deterministic_on_a_tie() {
-    let loads = [busy(500, 2), busy(500, 2), busy(500, 2)];
-    // The lowest-numbered processor wins a tie, unless the tie includes the
-    // one the task would rather have.
-    assert_eq!(place(&loads, &all_cpus(3), 9), Some(0));
-    assert_eq!(place(&loads, &all_cpus(3), 2), Some(2));
-}
-
-#[test]
-fn a_processor_with_only_a_running_task_is_not_worth_taking_from() {
-    // The whole of stage 5's stealing rule, kept: taking the one task a
-    // processor is running is not balancing.
-    let from = busy(LOAD_SCALE, 1);
-    let to = CpuLoad::idle();
-    assert_eq!(imbalance(&from, &to), None);
-}
-
-#[test]
-fn a_small_difference_is_not_worth_a_migration() {
-    let from = busy(LOAD_SCALE * 4 + BALANCE_THRESHOLD / 2, 6);
-    let to = busy(LOAD_SCALE * 4, 3);
-    assert_eq!(
-        imbalance(&from, &to),
-        None,
-        "a difference below the threshold was judged worth moving"
-    );
-}
-
-#[test]
-fn a_large_difference_moves_half_of_it() {
-    let from = busy(LOAD_SCALE * 8, 9);
-    let to = busy(0, 1);
-    assert_eq!(
-        imbalance(&from, &to),
-        Some(LOAD_SCALE * 4),
-        "balancing moved something other than half the difference"
-    );
-}
-
-#[test]
-fn balancing_cannot_oscillate() {
-    // The property the threshold exists for: after moving half the
-    // difference, neither side wants to move it back.
-    let from = busy(LOAD_SCALE * 8, 9);
-    let to = busy(0, 1);
-    let moved = imbalance(&from, &to).expect("an imbalance worth moving");
-    let settled_from = busy(from.average - moved, 3);
-    let settled_to = busy(to.average + moved, 2);
-    assert_eq!(imbalance(&settled_from, &settled_to), None);
-    assert_eq!(imbalance(&settled_to, &settled_from), None);
-}
-
-#[test]
-fn the_busiest_processor_is_the_one_chosen() {
-    let loads = [
-        busy(0, 1),
-        busy(LOAD_SCALE * 2, 3),
-        busy(LOAD_SCALE * 8, 9),
-        busy(LOAD_SCALE, 2),
-    ];
-    assert_eq!(busiest(&loads, &all_cpus(4), 0), Some(2));
-}
-
-#[test]
-fn there_is_no_busiest_processor_when_everything_is_level() {
-    let loads = [busy(500, 2), busy(500, 2), busy(500, 2)];
-    assert_eq!(busiest(&loads, &all_cpus(3), 0), None);
-}
-
-#[test]
-fn a_slice_is_a_share_of_the_target_latency() {
-    let target = 24_000_000;
-    let minimum = 1_000_000;
-    assert_eq!(slice_for(target, minimum, 1), target);
-    assert_eq!(slice_for(target, minimum, 4), target / 4);
-    assert_eq!(slice_for(target, minimum, 8), target / 8);
-}
-
-#[test]
-fn a_slice_never_falls_below_the_floor() {
-    let target = 24_000_000;
-    let minimum = 1_000_000;
-    // A thousand runnable would ask for 24 microseconds, which is a machine
-    // that does nothing but switch.
-    assert_eq!(slice_for(target, minimum, 1000), minimum);
-    assert_eq!(slice_for(target, minimum, usize::MAX), minimum);
-}
-
-#[test]
-fn a_slice_is_defined_for_an_empty_queue() {
-    assert_eq!(slice_for(24_000_000, 1_000_000, 0), 24_000_000);
-}
-
-#[test]
-fn an_overloaded_processor_finds_somewhere_to_push_to() {
-    // The case a tickless kernel depends on: processors 1..3 each run one
-    // task and are never interrupted, so processor 0 is the only one awake to
-    // notice the imbalance, and pushing is the only thing that can fix it.
-    let loads = [
-        busy(LOAD_SCALE * 9, 10),
-        busy(LOAD_SCALE, 1),
-        busy(LOAD_SCALE, 1),
-        busy(LOAD_SCALE, 1),
-    ];
-    assert_eq!(busiest(&loads, &all_cpus(4), 0), None);
-    assert_eq!(quietest(&loads, &all_cpus(4), 0), Some(1));
-}
-
-#[test]
-fn a_processor_with_nothing_spare_pushes_nowhere() {
-    let loads = [busy(LOAD_SCALE, 2), busy(LOAD_SCALE, 2)];
-    assert_eq!(quietest(&loads, &all_cpus(2), 0), None);
-}
-
-#[test]
-fn pushing_goes_to_the_quietest_not_merely_a_quiet_one() {
-    let loads = [
-        busy(LOAD_SCALE * 9, 10),
-        busy(LOAD_SCALE * 3, 3),
-        busy(0, 0),
-        busy(LOAD_SCALE * 2, 2),
-    ];
-    assert_eq!(quietest(&loads, &all_cpus(4), 0), Some(2));
-}
-
-#[test]
-fn pushing_respects_the_mask() {
-    let loads = [busy(LOAD_SCALE * 9, 10), busy(0, 0), busy(0, 0)];
-    // Only processor 2 is allowed, so that is where it goes even though 1 is
-    // just as quiet and comes first.
-    assert_eq!(quietest(&loads, &only(&[0, 2]), 0), Some(2));
-}
-
-#[test]
-fn pushing_and_pulling_never_both_apply() {
-    // If they did, two processors could each decide to move a task to the
-    // other at the same moment.
-    let loads = [busy(LOAD_SCALE * 9, 10), busy(LOAD_SCALE, 1)];
-    for me in 0..2 {
-        let pull = busiest(&loads, &all_cpus(2), me);
-        let push = quietest(&loads, &all_cpus(2), me);
-        assert!(
-            pull.is_none() || push.is_none(),
-            "processor {me} would both pull and push"
-        );
-    }
-}
-
-#[test]
-fn a_queue_only_one_longer_is_not_worth_rebalancing() {
-    // The brake: five against four is already as level as moving one task can
-    // make it, whatever the averages say.
-    let from = busy(LOAD_SCALE * 9, 5);
-    let to = busy(0, 4);
-    assert_eq!(imbalance(&from, &to), None);
-}
-
-#[test]
-fn balancing_settles_rather_than_oscillating_on_counts() {
-    // Walk the actual loop: move one task at a time from a queue of ten to a
-    // queue of one, with the load average deliberately frozen — which is what
-    // it effectively is over the milliseconds a burst of moves takes. Without
-    // the count test this never terminates.
-    let mut from = busy(LOAD_SCALE * 9, 10);
-    let mut to = busy(0, 1);
-    let mut moves = 0;
-    while imbalance(&from, &to).is_some() {
-        from.queued -= 1;
-        to.queued += 1;
-        moves += 1;
-        assert!(moves <= 16, "balancing did not settle after {moves} moves");
-    }
-    assert!(
-        from.queued.abs_diff(to.queued) <= 1,
-        "balancing settled at {} against {}",
-        from.queued,
-        to.queued
-    );
-}
-
-#[test]
-fn a_burst_of_placements_does_not_all_land_on_one_processor() {
-    // The load average has a 33-millisecond half-life and a burst of spawns
-    // takes microseconds, so within one burst every average is stale. Ranking
-    // on it first sends the whole burst to whichever processor has been idle
-    // longest. Only the queue count moves fast enough to see the last
-    // decision, so it has to be ranked on first.
-    //
-    // Four processors, all equally and long idle by the average's reckoning,
-    // and four tasks placed one after another with only the counts updating.
-    let mut loads = [busy(0, 0), busy(0, 0), busy(0, 0), busy(0, 0)];
-    let mut landed = [0usize; 4];
-    for _ in 0..4 {
-        let cpu = place(&loads, &all_cpus(4), 0).expect("somewhere to put it");
-        landed[cpu] += 1;
-        loads[cpu].queued += 1;
-    }
-    assert_eq!(
-        landed,
-        [1, 1, 1, 1],
-        "a burst of four went {landed:?} across four processors"
-    );
-}
-
-#[test]
-fn placement_still_prefers_a_lighter_processor_when_counts_are_equal() {
-    // The count is the first key, not the only one: with the same number of
-    // tasks each, the less loaded processor still wins.
-    let loads = [busy(LOAD_SCALE * 4, 2), busy(LOAD_SCALE, 2)];
-    assert_eq!(place(&loads, &all_cpus(2), 0), Some(1));
-}
-
-/// The 128-bit formula `carried_weight` replaced, as the kernel's
-/// `quota::effective` computed it before 2f.
-fn carried_weight_128(base: u32, levels: &[(u32, i64)]) -> u128 {
-    let mut weight = u128::from(base);
-    let mut below = i64::from(base);
-    for &(own, load) in levels {
-        let load = load.max(below).max(1);
-        let own = i64::from(own);
-        weight = weight.saturating_mul(u128::try_from(own).unwrap_or(1))
-            / u128::try_from(load).unwrap_or(1);
-        below = own;
-    }
-    weight
-}
-
-/// A small generator, so the sweep is the same every run.
-struct Xorshift(u64);
-
-impl Xorshift {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-
-    /// A weight, often at a boundary.
-    fn weight(&mut self) -> u32 {
-        const EDGES: [u32; 8] = [0, 1, 2, 15, 1024, 88_761, u32::MAX - 1, u32::MAX];
-        let pick = self.next();
-        if pick.is_multiple_of(4) {
-            EDGES[(pick / 4 % 8) as usize]
-        } else {
-            (self.next() >> (self.next() % 33)) as u32
-        }
-    }
-
-    /// A load, often at a boundary, sometimes below what it must be at least.
-    fn load(&mut self) -> i64 {
-        const EDGES: [i64; 7] = [i64::MIN, -1, 0, 1, 2, u32::MAX as i64, i64::MAX];
-        let pick = self.next();
-        if pick.is_multiple_of(4) {
-            EDGES[(pick / 4 % 7) as usize]
-        } else {
-            (self.next() >> (self.next() % 64)) as i64
-        }
-    }
-}
-
-/// `carried_weight` in 64 bits equals the 128-bit formula, bit for bit, over
-/// random and boundary weights and loads at job depths 1 to 8: every entity
-/// weight below 2^32, as a `u32` is.
-///
-/// Verifies: L.object.160
-#[test]
-fn the_carried_weight_is_the_wide_formula() {
-    let mut random = Xorshift(0x9E37_79B9_7F4A_7C15);
-    for depth in 1..=8 {
-        for _ in 0..50_000 {
-            let base = random.weight();
-            let levels: Vec<(u32, i64)> = (0..depth)
-                .map(|_| (random.weight(), random.load()))
-                .collect();
-            let wide = carried_weight_128(base, &levels);
-            let narrow = carried_weight(base, levels.iter().copied());
-            assert_eq!(
-                u128::from(narrow),
-                wide,
-                "base {base}, levels {levels:?}: 64 bits gave {narrow}, 128 gave {wide}"
-            );
-        }
-    }
-    // The largest products the bound allows, at every depth.
-    for depth in 1..=8 {
-        let levels: Vec<(u32, i64)> = (0..depth).map(|_| (u32::MAX, 0_i64)).collect();
-        assert_eq!(
-            u128::from(carried_weight(u32::MAX, levels.iter().copied())),
-            carried_weight_128(u32::MAX, &levels),
-            "at depth {depth} with every weight u32::MAX"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 // The direct switch's hand-over (docs/OPAQUE-KERNEL.md §9.7, part 1)
 // ---------------------------------------------------------------------------
 
@@ -1658,8 +1033,8 @@ fn hand_over_is_the_general_sequence() {
 
         same_queue(&general, &direct, case);
         assert_eq!(
-            (left_general.0, left_general.1, left_general.2),
-            (left_direct.0, left_direct.1, left_direct.2),
+            (left_general.0, left_general.1, left_general.2.0),
+            (left_direct.0, left_direct.1, left_direct.2.0),
             "case {case}: the leaving entity"
         );
         check(&direct);
@@ -1772,7 +1147,7 @@ fn a_slot_taken_apart_and_put_together_serves_a_queue() {
         .map_err(|_| ())
         .expect("enqueued");
     assert_eq!(queue.pick_next().copied(), Some(10));
-    let (id, payload, _, slot) = queue.remove_curr().expect("it ran");
+    let (id, payload, (_, slot)) = queue.remove_curr().expect("it ran");
     assert_eq!((id, payload), (1, 10));
     let node = slot.into_box();
     assert!(
@@ -2056,98 +1431,269 @@ fn a_fold_settles_by_the_net_or_in_the_general_order() {
 }
 
 // ---------------------------------------------------------------------------
-// Wake-affine placement and the creation charge
+// The slice
 // ---------------------------------------------------------------------------
 
-/// A wake is wide only when the smaller flip count reaches the factor and
-/// the larger is the factor times it, either way round.
-/// Verifies: L.sched.91
 #[test]
-fn a_wake_is_wide_only_between_many_partners() {
-    use crate::wake_wide;
-    // A pair that wakes each other: no flips, never wide.
-    assert!(!wake_wide(0, 0, 4));
-    assert!(!wake_wide(1, 1, 4));
-    // A server of many and a client that flips at least `factor` times.
-    assert!(wake_wide(16, 4, 4));
-    assert!(wake_wide(4, 16, 4), "symmetric in waker and wakee");
-    // One short of either bound.
-    assert!(!wake_wide(15, 4, 4));
-    assert!(!wake_wide(100, 3, 4));
-    // The factor is the domain's processor count: two processors make the
-    // same counts wide that four do not.
-    assert!(wake_wide(6, 3, 2));
-    assert!(!wake_wide(6, 3, 4));
-    assert!(
-        wake_wide(u32::MAX, u32::MAX / 2, 2),
-        "no overflow at the top"
+fn a_slice_is_a_share_of_the_target_latency() {
+    let target = 24_000_000;
+    let minimum = 1_000_000;
+    assert_eq!(slice_for(target, minimum, 1), target);
+    assert_eq!(slice_for(target, minimum, 4), target / 4);
+    assert_eq!(slice_for(target, minimum, 8), target / 8);
+}
+
+#[test]
+fn a_slice_never_falls_below_the_floor() {
+    let target = 24_000_000;
+    let minimum = 1_000_000;
+    // A thousand runnable would ask for 24 microseconds, which is a machine
+    // that does nothing but switch.
+    assert_eq!(slice_for(target, minimum, 1000), minimum);
+    assert_eq!(slice_for(target, minimum, usize::MAX), minimum);
+}
+
+#[test]
+fn a_slice_is_defined_for_an_empty_queue() {
+    assert_eq!(slice_for(24_000_000, 1_000_000, 0), 24_000_000);
+}
+
+// ---------------------------------------------------------------------------
+// The carried weight
+// ---------------------------------------------------------------------------
+
+/// The 128-bit formula `carried_weight` replaced, as the kernel's
+/// `quota::effective` computed it before 2f.
+fn carried_weight_128(base: u32, levels: &[(u32, i64)]) -> u128 {
+    let mut weight = u128::from(base);
+    let mut below = i64::from(base);
+    for &(own, load) in levels {
+        let load = load.max(below).max(1);
+        let own = i64::from(own);
+        weight = weight.saturating_mul(u128::try_from(own).unwrap_or(1))
+            / u128::try_from(load).unwrap_or(1);
+        below = own;
+    }
+    weight
+}
+
+/// A small generator, so the sweep is the same every run.
+struct Xorshift(u64);
+
+impl Xorshift {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    /// A weight, often at a boundary.
+    fn weight(&mut self) -> u32 {
+        const EDGES: [u32; 8] = [0, 1, 2, 15, 1024, 88_761, u32::MAX - 1, u32::MAX];
+        let pick = self.next();
+        if pick.is_multiple_of(4) {
+            EDGES[(pick / 4 % 8) as usize]
+        } else {
+            (self.next() >> (self.next() % 33)) as u32
+        }
+    }
+
+    /// A load, often at a boundary, sometimes below what it must be at least.
+    fn load(&mut self) -> i64 {
+        const EDGES: [i64; 7] = [i64::MIN, -1, 0, 1, 2, u32::MAX as i64, i64::MAX];
+        let pick = self.next();
+        if pick.is_multiple_of(4) {
+            EDGES[(pick / 4 % 7) as usize]
+        } else {
+            (self.next() >> (self.next() % 64)) as i64
+        }
+    }
+}
+
+/// `carried_weight` in 64 bits equals the 128-bit formula, bit for bit, over
+/// random and boundary weights and loads at job depths 1 to 8: every entity
+/// weight below 2^32, as a `u32` is.
+///
+/// Verifies: L.object.160
+#[test]
+fn the_carried_weight_is_the_wide_formula() {
+    let mut random = Xorshift(0x9E37_79B9_7F4A_7C15);
+    for depth in 1..=8 {
+        for _ in 0..50_000 {
+            let base = random.weight();
+            let levels: Vec<(u32, i64)> = (0..depth)
+                .map(|_| (random.weight(), random.load()))
+                .collect();
+            let wide = carried_weight_128(base, &levels);
+            let narrow = carried_weight(base, levels.iter().copied());
+            assert_eq!(
+                u128::from(narrow),
+                wide,
+                "base {base}, levels {levels:?}: 64 bits gave {narrow}, 128 gave {wide}"
+            );
+        }
+    }
+    // The largest products the bound allows, at every depth.
+    for depth in 1..=8 {
+        let levels: Vec<(u32, i64)> = (0..depth).map(|_| (u32::MAX, 0_i64)).collect();
+        assert_eq!(
+            u128::from(carried_weight(u32::MAX, levels.iter().copied())),
+            carried_weight_128(u32::MAX, &levels),
+            "at depth {depth} with every weight u32::MAX"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The fair class through the class interface
+// ---------------------------------------------------------------------------
+
+/// The interface forwards: the same entities through `SchedClass` and
+/// through the queue itself are picked, charged and handed over alike, and a
+/// stack of the fair class over the empty one is the fair class.
+#[test]
+fn the_class_interface_is_the_queue() {
+    use ferrix_sched_class::{Empty, Over, SchedClass, Tier};
+    type Alone = Over<Eevdf, Empty>;
+    let mut direct = queue();
+    let mut through =
+        <Alone as SchedClass<u64>>::new_queue((Config { slice_ns: SLICE }, ())).unwrap();
+    for id in 1..=4 {
+        let state = EntityState::new(NICE_0_WEIGHT * id as u32);
+        direct.enqueue(id, id, state, slot()).unwrap();
+        Alone::enqueue(&mut through, id, id, Tier::Upper((state, slot()))).unwrap();
+    }
+    for _ in 0..200 {
+        assert_eq!(
+            direct.pick_next().copied(),
+            Alone::pick(&mut through).copied()
+        );
+        assert_eq!(
+            direct.update_curr(SLICE / 3),
+            Alone::charge(&mut through, SLICE / 3)
+        );
+        assert_eq!(direct.remaining_ns(), Alone::remaining_ns(&through));
+    }
+    let left = direct
+        .hand_over(9, 9, EntityState::new(NICE_0_WEIGHT), slot(), SLICE)
+        .unwrap();
+    let through_left = Alone::hand_over(
+        &mut through,
+        9,
+        9,
+        Tier::Upper((EntityState::new(NICE_0_WEIGHT), slot())),
+        SLICE,
+    )
+    .unwrap();
+    assert_eq!(left.map(|(id, ..)| id), through_left.map(|(id, ..)| id));
+    assert_eq!(direct.current().copied(), Alone::current(&through).copied());
+    check(&direct);
+    Alone::check(&through).unwrap();
+}
+
+/// The class interface hands back what the queue does, field for field:
+/// the leaving entity's whole state through the hand-over and through a
+/// removal, a refusal's reason as the interface names it, and a slice of
+/// zero refused when the queue is made (the code review of the split, C3;
+/// N4's hand-over on the stack type).
+#[test]
+fn the_class_interface_hands_back_what_the_queue_does() {
+    use ferrix_sched_class::{Refusal, SchedClass};
+    assert!(matches!(
+        <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: 0 }),
+        Err(Refusal::Invalid)
+    ));
+    let mut direct = queue();
+    let mut through = <Eevdf as SchedClass<u64>>::new_queue(Config { slice_ns: SLICE }).unwrap();
+    for id in 1..=3 {
+        let state = EntityState::new(NICE_0_WEIGHT + 100 * id as u32);
+        direct.enqueue(id, id, state, slot()).unwrap();
+        Eevdf::enqueue(&mut through, id, id, (state, slot())).unwrap();
+    }
+    for round in 0..50 {
+        let _ = direct.pick_next();
+        let _ = Eevdf::pick(&mut through);
+        let _ = direct.update_curr(SLICE / 4 + round);
+        let _ = Eevdf::charge(&mut through, SLICE / 4 + round);
+    }
+    // A removal: the same entity, the same state.
+    let (a, (sa, _)) = direct.remove(2).unwrap();
+    let (b, (sb, _)) = Eevdf::remove(&mut through, 2).unwrap();
+    assert_eq!((a, sa), (b, sb));
+    // The hand-over on a queue with something waiting, and then on one
+    // with nothing waiting: the leaving entity's state, field for field.
+    let _ = direct.pick_next();
+    let _ = Eevdf::pick(&mut through);
+    for arriving in [7, 8] {
+        let state = EntityState::new(NICE_0_WEIGHT);
+        let left = direct
+            .hand_over(arriving, arriving, state, slot(), SLICE)
+            .unwrap()
+            .unwrap();
+        let left_through =
+            Eevdf::hand_over(&mut through, arriving, arriving, (state, slot()), SLICE)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            (left.0, left.1, left.2.0),
+            (left_through.0, left_through.1, left_through.2.0)
+        );
+        assert_eq!(direct.current(), Eevdf::current(&through));
+        check(&direct);
+        Eevdf::check(&through).unwrap();
+    }
+    // Refusals, as the interface names them, the entity handed back whole.
+    let zero = EntityState {
+        weight: 0,
+        vlag: 0,
+        sum_exec: 0,
+    };
+    let back = Eevdf::enqueue(&mut through, 40, 40, (zero, slot())).unwrap_err();
+    assert_eq!(
+        (back.payload, back.entity.0, back.reason),
+        (40, zero, Refusal::Invalid)
+    );
+    let state = EntityState::new(NICE_0_WEIGHT);
+    let back = Eevdf::enqueue(&mut through, 8, 70, (state, slot())).unwrap_err();
+    assert_eq!((back.payload, back.reason), (70, Refusal::Duplicate(8)));
+    let back = Eevdf::hand_over(&mut through, 3, 80, (state, slot()), SLICE).unwrap_err();
+    assert_eq!(
+        (back.payload, back.entity.0, back.reason),
+        (80, state, Refusal::Duplicate(3))
     );
 }
 
-/// The flip count is halved once when more than a second has passed since
-/// the last halving, and a change of wakee adds one.
-/// Verifies: L.sched.91
+/// F11 and F1 of the consultant's ledger lines 26-27: every operation the
+/// kernel calls on its class stack, and every fair-only call it makes
+/// through [`FairTier`], compile and forward for a stack with a tier above
+/// fair (here the empty class, until step 4b's first real one).
+///
+/// Verifies: L.sched.105
 #[test]
-fn flips_halve_after_a_second_and_count_changes() {
-    use crate::{FLIP_DECAY_NS, flip};
-    assert_eq!(flip(0, 0, 10, true), (1, 0));
-    assert_eq!(flip(5, 0, 10, false), (5, 0), "the same wakee adds nothing");
+fn a_stack_with_a_tier_above_fair_reaches_the_fair_tier() {
+    use ferrix_sched_class::{Empty, Over, SchedClass, Tier};
+    type Two = Over<Empty, Eevdf>;
+    let mut q = <Two as SchedClass<u64>>::new_queue(((), Config { slice_ns: SLICE })).unwrap();
+    Two::enqueue(
+        &mut q,
+        1,
+        1u64,
+        Tier::Lower((EntityState::new(NICE_0_WEIGHT), slot())),
+    )
+    .unwrap();
+    assert_eq!(Two::pick(&mut q), Some(&1));
+    assert_eq!(<Two as FairTier<u64>>::fair(&q).current_id(), Some(1));
+    assert!(<Two as FairTier<u64>>::set_weight(&mut q, 1, 2 * NICE_0_WEIGHT).unwrap());
+    <Two as FairTier<u64>>::set_slice_ns(&mut q, 2_000_000).unwrap();
+    <Two as FairTier<u64>>::level(&mut q);
     assert_eq!(
-        flip(8, 0, FLIP_DECAY_NS, false),
-        (8, 0),
-        "a second exactly is not more"
+        <Two as FairTier<u64>>::fair(&q).config().slice_ns,
+        2_000_000
     );
-    assert_eq!(flip(8, 0, FLIP_DECAY_NS + 1, false), (4, FLIP_DECAY_NS + 1));
-    // Once however long the gap.
-    assert_eq!(
-        flip(8, 0, 100 * FLIP_DECAY_NS, true),
-        (5, 100 * FLIP_DECAY_NS)
-    );
-    assert_eq!(flip(u32::MAX, 0, 1, true), (u32::MAX, 0), "saturates");
-}
-
-/// The pull is allowed while the waker's side, the wakee's load added,
-/// reads below 108% of the home's, the wakee's load taken away; a wakee
-/// busy more than about 8% of the time stays home between two spinners.
-/// Verifies: L.sched.90
-#[test]
-fn the_pull_weighs_the_home_at_108_percent() {
-    use crate::pull_fits;
-    assert!(
-        pull_fits(1024, 1024, 0),
-        "equal loads: the waker's side wins"
-    );
-    assert!(pull_fits(1105, 1024, 0));
-    assert!(!pull_fits(1106, 1024, 0), "110,600 is not below 110,592");
-    assert!(!pull_fits(0, 0, 0), "two idle averages: no reason to move");
-    assert!(pull_fits(0, 1, 0));
-    // A spinner each side and the wakee's own load on top.
-    assert!(pull_fits(1024, 1024 + 30, 30), "3% busy: pulled");
-    assert!(!pull_fits(1024, 1024 + 92, 92), "9% busy: stays");
-    assert!(!pull_fits(1024, 1024 + 600, 600), "a wakee busy 60% stays");
-    assert!(
-        !pull_fits(0, 10, 20),
-        "more than home carries: the home side is zero"
-    );
-    assert!(
-        !pull_fits(u64::MAX, u64::MAX / 2, u64::MAX),
-        "no overflow at the top"
-    );
-}
-
-/// A task's busy share is its runtime over the window, capped at one
-/// processor, with no answer for an empty window.
-/// Verifies: L.sched.90
-#[test]
-fn utilisation_is_runtime_over_the_window() {
-    use crate::utilisation;
-    assert_eq!(utilisation(0, 0), None);
-    assert_eq!(utilisation(1_000, 1_000), Some(LOAD_SCALE));
-    assert_eq!(utilisation(30_000, 1_000_000), Some(30));
-    assert_eq!(
-        utilisation(5_000_000, 1_000_000),
-        Some(LOAD_SCALE),
-        "capped"
-    );
-    assert_eq!(utilisation(u64::MAX, 1), Some(LOAD_SCALE));
+    assert_eq!(Two::load_weight(&q), 2 * u64::from(NICE_0_WEIGHT));
+    assert!(!Two::should_preempt(&q));
+    assert_eq!(Two::decision_in_ns(&q), None);
+    Two::yield_current(&mut q);
+    assert!(Two::check(&q).is_ok());
 }

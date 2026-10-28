@@ -479,10 +479,11 @@ dependencies = [
  "ferrix-crng",
  "ferrix-elf",
  "ferrix-kernel-load",
+ "ferrix-kernel-sched-select",
  "ferrix-kernel-settings",
  "ferrix-linux-abi",
  "ferrix-paging",
- "ferrix-sched",
+ "ferrix-sched-class",
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-ustack",
@@ -503,6 +504,7 @@ dependencies = [
  "ferrix-fdt",
  "ferrix-frame",
  "ferrix-heap",
+ "ferrix-kernel-sched-select",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-native-abi",
@@ -510,7 +512,8 @@ dependencies = [
  "ferrix-paging",
  "ferrix-pci",
  "ferrix-qr",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-sync",
  "ferrix-vdso",
  "ferrix-vfs",
@@ -529,12 +532,13 @@ dependencies = [
  "ferrix-elf",
  "ferrix-fdt",
  "ferrix-kernel-core",
+ "ferrix-kernel-sched-select",
  "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-objects",
  "ferrix-paging",
  "ferrix-pci",
- "ferrix-sched",
+ "ferrix-sched-fair",
  "ferrix-smbios",
  "ferrix-sync",
  "ferrix-vfs",
@@ -577,7 +581,8 @@ dependencies = [
  "ferrix-pci",
  "ferrix-procfs",
  "ferrix-renderctl",
- "ferrix-sched",
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
  "ferrix-seccomp",
  "ferrix-smbios",
  "ferrix-sndctl",
@@ -587,6 +592,16 @@ dependencies = [
  "ferrix-vdso",
  "ferrix-vfs",
  "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-sched-select"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched-class",
+ "ferrix-sched-fair",
+ "ferrix-sched-fifo",
+ "ferrix-sched-fixture",
 ]
 
 [[package]]
@@ -844,10 +859,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrix-sched"
+name = "ferrix-sched-class"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sync",
+]
+
+[[package]]
+name = "ferrix-sched-fair"
 version = "0.1.0"
 dependencies = [
  "ferrix-fallible",
+ "ferrix-sched-class",
+]
+
+[[package]]
+name = "ferrix-sched-fifo"
+version = "0.1.0"
+dependencies = [
+ "ferrix-fallible",
+ "ferrix-sched-class",
+]
+
+[[package]]
+name = "ferrix-sched-fixture"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched-class",
 ]
 
 [[package]]

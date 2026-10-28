@@ -9,7 +9,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use ferrix_fallible as _;
-use ferrix_sched::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot, Timeline};
+use ferrix_sched_class as _;
+use ferrix_sched_fair::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot, Timeline};
 
 std::thread_local! {
     /// Allocations this thread has made while counting.
@@ -74,7 +75,7 @@ fn scheduling_with_lent_slots_allocates_nothing() {
             let _ = queue.pick_next();
             let _ = queue.update_curr(seed % 3_000_000);
             if round % 3 == 0
-                && let Some((id, _, state, slot)) = queue.remove_curr()
+                && let Some((id, _, (state, slot))) = queue.remove_curr()
             {
                 timeline.insert(round + 5, id, id, slot);
                 away.push((id, state));

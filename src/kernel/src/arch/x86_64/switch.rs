@@ -20,7 +20,7 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 use super::cpu;
 use super::gdt;

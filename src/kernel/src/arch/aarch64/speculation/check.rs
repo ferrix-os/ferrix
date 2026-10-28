@@ -11,7 +11,7 @@
 
 use core::sync::atomic::Ordering;
 
-use ferrix_sched::MAX_CPUS;
+use ferrix_sched_class::MAX_CPUS;
 
 use super::{
     Answer, BHB_LOOPS, Core, Defences, Exposure, Firmware, HARDENED, SEEN, Seen, applied_by,

@@ -1355,7 +1355,11 @@ struct Watched {
 /// reads the profile the command line named with a parser of its own --
 /// never this run's resolution of it (BF3 a) -- compares the line word for
 /// word, refuses a build `--set` changed unless `--no-claim` says the run is
-/// ad hoc (BF3 c), and ties the kernel's sha256 to the run.
+/// ad hoc (BF3 c), and ties the kernel's sha256 to the run. It also compares
+/// the `sched    classes` line with the classes the profile's tier flags
+/// compose (`docs/SCHED-CLASSES.md` §9b).
+///
+/// Verifies: L.sched.102
 fn boot_line(arch: Arch, log: &Path, kernel: &Path, args: &Args) -> Result<()> {
     let profile = args
         .kernel_profile

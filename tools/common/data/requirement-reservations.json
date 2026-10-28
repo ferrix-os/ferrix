@@ -195,6 +195,20 @@
       "branch": "driver-model-step1",
       "date": "2026-10-25",
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
+    },
+    {
+      "ids": ["L.sched.111", "L.sched.117"],
+      "owner": "sched-classes",
+      "branch": "claude/ferrix-roadmap-completion-hkxlpp",
+      "date": "2026-10-27",
+      "purpose": "Withdrawn, never to be reused: written for step 4b (docs/SCHED-CLASSES.md section 9e) as the Linux policy calls' permission rule (111) and argument checks (117), and dropped by the consultant's code review, ledger line 30 (B2), the behaviour being the load ring's, not the item's; test-rtsched still shows both (line 31, condition 2)"
+    },
+    {
+      "ids": ["L.sched.129-130"],
+      "owner": "sched-classes",
+      "branch": "feature/sched-softrt-domain",
+      "date": "2026-10-28",
+      "purpose": "docs/SCHED-CLASSES.md step 5b (stage 14): the domain authority object and the domain_create and domain_admit calls (section 9f, V1, V6's close and exit). H.SCHED.21-23 and L.sched.118-128 were written by step 5a. Released in the commits that write them"
     }
   ]
 }

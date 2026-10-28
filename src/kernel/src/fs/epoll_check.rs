@@ -990,15 +990,15 @@ fn with_a_waiter(
             "epoll-meet-waiter",
             ready_list_waiter,
             0,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             cpu,
-            ferrix_sched::CpuSet::of(cpu),
+            ferrix_sched_class::CpuSet::of(cpu),
         )?,
         None => crate::sched::spawn(
             "epoll-ready-waiter",
             ready_list_waiter,
             0,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
         )?,
     };
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);

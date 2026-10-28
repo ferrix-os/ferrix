@@ -622,7 +622,7 @@ package FerrixItemRequirements {
                 processor, nothing else waiting and no sleeper due.";
             attribute :>> criterion = "RunQueue::hand_over equals enqueue, the
                 rescale, remove_curr and pick_next field for field on 200,000 random
-                queues (the ferrix-sched host test); a spinner beside the trips keeps
+                queues (the ferrix-sched-fair host test); a spinner beside the trips keeps
                 its share, and an echo pinned to another processor never runs on the
                 caller's (the `fastcase` line).";
             attribute :>> parent = ("G.1", "ASR-8");
@@ -662,6 +662,86 @@ package FerrixItemRequirements {
                 quiet phases are within theirs; until a phase is asserted there, it
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
+        }
+        requirement <'H.SCHED.18'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
+            attribute :>> statement = "A kernel shall run the scheduling classes its
+                build flags select and no other, and shall name them as it starts.";
+            attribute :>> criterion = "cargo xtask test-removable's class-crate half,
+                on every architecture and buildable profile: the release ELF holds
+                the marker of each class the profile's flags select and no symbol
+                of any other, the fixture among them, and the map of the same link
+                with LTO alone turned off holds each selected class crate's code and
+                neither a member nor a symbol of any other (docs/SCHED-CLASSES.md
+                section 9b); and
+                L.sched.102's check on every boot.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.19'> aRealTimeTaskRunsFirst : ItemHighLevel {
+            attribute :>> statement = "In a build with the realtime tier, a runnable
+                task of a real-time policy shall run before every task of a lower
+                real-time priority and every fair task on its processor, tasks of one
+                priority in arrival order, a woken one preempting at once; except
+                while the floor (H.SCHED.20) holds the tier back, and with no bound
+                on an inversion through a user lock (FUTEX_LOCK_PI is ENOSYS).";
+            attribute :>> criterion = "The stage-5 real-time checks on desktop, on
+                every architecture (docs/SCHED-CLASSES.md section 9e, R12): behind a
+                priority-99 holder, priorities 10, 20 and 20 run 20, 20, 10 with no
+                fair task between; a task woken from another processor and from its
+                own runs within 100 ms while a fair task spins there; a preempted
+                SCHED_FIFO task keeps the head of its priority; two SCHED_RR tasks
+                share at the quantum and two SCHED_FIFO ones, the control, do not.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.20'> fairTasksKeepAFloor : ItemHighLevel {
+            attribute :>> statement = "While fair tasks are runnable on a processor,
+                its real-time tasks shall run at most 950 ms of every 1 s period
+                there, so that the fair tasks keep at least 50 ms of it; with no
+                fair task runnable, the real-time tasks may use all of it.";
+            attribute :>> criterion = "The stage-5 floor check on desktop, on every
+                architecture: over 2.1 s beside a spinning SCHED_FIFO task, a fair
+                task is given between 60 and 700 ms and the SCHED_FIFO task more
+                than one period's 950 ms, running again after each throttle; and
+                ferrix-sched-fifo's and ferrix-sched-class's host tests of the
+                throttle, its period's end armed, and a throttled tier with nothing
+                below it still running.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.21'> aTaskRunsInItsDomain : ItemHighLevel {
+            attribute :>> statement = "A task shall run only on a processor of its
+                scheduling domain, the per-processor kernel tasks excepted; a
+                SoftRt domain's processors shall run none of the boot domain's
+                tasks, and its members none but its processors.";
+            attribute :>> criterion = "The stage-5 domain check on desktop, on
+                every architecture, with four processors or more: eight unpinned
+                kernel tasks spinning across the machine while a SoftRt domain of
+                all but two processors is made under them never run on its
+                processors after; two of them admitted run there and nowhere else;
+                and the pick, a move between queues and the direct switch stop the
+                machine on a task outside the processor's domain (FX-0538), whose
+                controls (the re-home at a leaving processor's decision skipped,
+                the admission not taking a queued member off) stop it so.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.22'> aDomainGivesItsProcessorsBack : ItemHighLevel {
+            attribute :>> statement = "A dissolved SoftRt domain's processors and
+                members shall be the boot domain's again at once, and a switch
+                that cannot empty its processors in time shall give them back and
+                refuse.";
+            attribute :>> criterion = "The stage-5 domain check on desktop: after
+                the dissolution no SoftRt domain exists, a job admitted to it is in
+                the boot domain, and the boot domain's tasks run on its former
+                processors; review of create_soft's bounded wait and its
+                abandonment.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.23'> theBootDomainKeepsAFloor : ItemHighLevel {
+            attribute :>> statement = "A SoftRt domain shall be refused on a
+                machine of fewer than four processors, of no processors, of more
+                than all but two, in a build without the realtime tier, and while
+                another exists; it shall never take the boot processor.";
+            attribute :>> criterion = "The stage-5 domain check: each refusal on
+                desktop with four processors, ModeUnavailable's on present.";
+            attribute :>> parent = "ASR-8";
         }
     }
 

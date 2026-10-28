@@ -343,7 +343,7 @@ fn create(node: &Arc<DeviceNode>) -> Result<Arc<Endpoint>, Errno> {
         }
         starting.push(control);
     }
-    if sched::spawn("chardev", run, id, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn("chardev", run, id, ferrix_sched_fair::NICE_0_WEIGHT).is_err() {
         let _ = take_start(id);
         CLAIMS.release(node);
         return Err(status::NO_MEMORY);

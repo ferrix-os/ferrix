@@ -64,7 +64,10 @@ REGISTER = ROOT / "tools" / "common" / "data" / "kernel-formerly-crate-wide.json
 CLIPPY = ROOT / ".clippy.toml"
 BEGIN = "# BEGIN kernel-interface.py"
 END = "# END kernel-interface.py"
-RANK = {"core": 0, "item": 1, "load": 2, "bin": 3}
+# `select` is the scheduler selection (docs/SCHED-CLASSES.md §9a): a crate
+# of the core ring below the core itself, whose `pub` items the core names.
+RANK = {"select": -1, "core": 0, "item": 1, "load": 2, "bin": 3}
+SELECT = "ferrix-kernel-sched-select"
 ITEM_KINDS = {"fn", "struct", "enum", "union", "trait", "type", "const", "static", "mod"}
 TYPE_KINDS = {"struct", "enum", "union", "type", "trait"}
 ISAS = {"x86_64", "aarch64", "armv7a", "arm_common"}
@@ -357,7 +360,10 @@ def crates_of(manifest, files, read, exists):
     rank_of = {}
     for package, entry in entries.items():
         rings = entry.get("rings", [])
-        rank_of[package] = RANK[rings[0]] if len(rings) == 1 else RANK["bin"]
+        if package == SELECT:
+            rank_of[package] = RANK["select"]
+        else:
+            rank_of[package] = RANK[rings[0]] if len(rings) == 1 else RANK["bin"]
     ring_name = {v: k for k, v in RANK.items()}
     crate = {}
     for rel, crates in reached.items():
@@ -377,7 +383,7 @@ def analyse(manifest, files, read, exists, register=None):
     crate = crates_of(manifest, files, read, exists)
     entries: list[Entry] = []
     for rel in files:
-        if crate.get(rel) in ("core", "item"):
+        if crate.get(rel) in ("select", "core", "item"):
             entries += parse(rel, read(rel))
     marked = gate.checks_only_items(files, read)
     types_marked = set()

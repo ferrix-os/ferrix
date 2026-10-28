@@ -424,7 +424,14 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     start_program(&process, devmgr_end, &kernel_end)?;
 
     let (started, failed) = report(&kernel_end)?;
-    if sched::spawn("devmgr listener", listen, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
+    if sched::spawn(
+        "devmgr listener",
+        listen,
+        0,
+        ferrix_sched_fair::NICE_0_WEIGHT,
+    )
+    .is_err()
+    {
         return Err("no task to hear devmgr on");
     }
     Ok(Some(Report {
@@ -843,7 +850,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
         "devmgr listener",
         report_then_listen,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
     );
     if heard.is_err() {
         crate::console::println!("  devmgr   no task to hear devmgr on");

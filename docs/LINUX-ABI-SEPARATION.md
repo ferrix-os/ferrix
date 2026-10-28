@@ -378,8 +378,9 @@ gated.
   set `FERRIX_BUILD_FLAGS` to the `present` profile's words
   (`profile=present level=present personality=kernel fs=kernel
   mitigations=on partition_speculation=not_applicable ipc_fastpath=off
-  restricted_fastpath=not_applicable kernel_memory=heap schedule=fair
-  checks=on program_barrier=switch ssbd=always smt=stibp
+  restricted_fastpath=not_applicable kernel_memory=heap sched_dispatch=fixed
+  sched_windows=absent sched_deadline=absent sched_realtime=absent
+  sched_fair=eevdf checks=on program_barrier=switch ssbd=always smt=stibp
   runtime_trades=none`) and `FERRIX_FLAG_VALUES` to every declared flag's
   values (with `profile=none,present,fast,max,desktop` and
   `level=none,present,sc2,sc4`). Then run
@@ -845,7 +846,7 @@ rows, §11's ~100 points or §11.8's 20 to 30:
 | Owed for `sc4` | Why | Points (*guess*) | Done already |
 |---|---|---:|---|
 | `kernel_memory=retyped`: K12 (a job's reserved kernel memory) then K16 (no kernel heap after boot) | `heap` allows `present`, `sc2`, `none` only | K12 ~9 left; K16 25 to 40 (no design yet; part of M6's 70) | K12's design (OK IF 2550) on `main`, K12a/b code WIP on `mk/k12`, `mk/k12b` |
-| `schedule=windows`: K9's static windows with EDF inside, a server's time charged to its client, interrupt time bounded, on stage 14's HardRt | `fair` allows `present`, `none` only | stage 14 ≈ 40 (not started) + K9 15 to 25 | nothing |
+| `sched_windows=arinc` (once `schedule=windows`): K9's static windows with fixed priorities inside (SCHED-CLASSES.md C6), a server's time charged to its client, interrupt time bounded, on stage 14's HardRt | `eevdf` allows `present`, `none` only | stage 14 ≈ 40 (not started) + K9 15 to 25 | nothing |
 | `smt=off`: the kernel parks sibling threads | `stibp` does not allow `sc4` | 4 to 6 (with F-73, which it lands after) | design on `main` (OK IF 2563); code on `mk-m0rest/smt-off` and `smt-wip`, unlanded |
 | Ring-0 components at `sc4`: F-76's ~25 unclassified libraries the core links, the board glue, the device cores' native halves with item evidence at `sc4` (3220 (18)) | the profile rule reads each component's level | 15 to 30 | F-76's register (on `bs-a-s3b`) |
 | **Subtotal: the profile rule passes** | | **~110 to 150** | |

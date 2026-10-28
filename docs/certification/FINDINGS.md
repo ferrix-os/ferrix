@@ -3419,7 +3419,7 @@ moves functions between files carries their evidence by span and states
 the requirement-status comparison with `main` in its commit.
 `docs/BACKLOG.md` has the row.
 
-### F-76 — the core and the item link 25 first-party libraries no ring classifies
+### F-76 — the core and the item link 26 first-party libraries no ring classifies
 **Found 2026-10-15, open** (found by bs-a writing the manifests of the
 kernel split, `docs/KERNEL-CRATES.md` S3; confirmed in the code and
 reserved by the certification consultant, ledger line 1585; pre-existing).
@@ -3437,7 +3437,13 @@ classifies in no ring and does not allowlist -- 25 in all (`ferrix-acpi`,
 `ferrix-kmem`, `ferrix-linux-abi`, `ferrix-native-abi`, `ferrix-objects`,
 `ferrix-paging`, `ferrix-pci`, `ferrix-qr`, `ferrix-sched`, `ferrix-vdso`,
 `ferrix-vfs`, `ferrix-virtio`, `ferrix-vma`), the heap and frame
-allocators and the fair scheduler's logic among them. Their code runs in the
+allocators and the fair scheduler's logic among them. **Restated
+2026-10-26** (the consultant's code review of the scheduler split, ledger
+line 12 of the container's ledger, to be copied to the gate host's):
+`ferrix-sched` is now two crates, `ferrix-sched-class` (the
+scheduling-class interface, domains and balancing) and `ferrix-sched-fair`
+(EEVDF), `docs/SCHED-CLASSES.md` §11; so 26 in all, the core's files naming
+22 and the item's 16. Their code runs in the
 item, and none of the item-scoped gates -- unsafe, panic, complexity,
 fallible allocation, traceability, coverage -- reads it. Two of them break
 the core ring's own rule that nothing in it depends on a filesystem,

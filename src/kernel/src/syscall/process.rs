@@ -2542,6 +2542,11 @@ pub(crate) struct PreparedStart {
 }
 
 impl PreparedStart {
+    /// Its task, which nothing has run.
+    pub(crate) fn task(&self) -> &Arc<Task> {
+        self.task.task()
+    }
+
     /// Run the process with `argument` in its first argument register.
     ///
     /// The argument is written while the claim is held, so no other start can
@@ -2627,6 +2632,12 @@ pub(crate) fn start_thread(
     // away. Linux copies the creating thread's nice value into the new one.
     // Read now, after the task is listed: a `setpriority` that came since
     // stored a value this applies, and one that comes later finds the task.
+    // A creator with reset-on-fork set gives a thread no negative nice value,
+    // as Linux's `sched_fork` (L.sched.113); its policy `sched::prepare_user`
+    // has already left at `SCHED_OTHER`.
+    if sched::current_resets_on_fork() && made.nice() < 0 {
+        made.set_nice(0);
+    }
     attributes::apply_nice(made.nice(), &task);
     tell_a_new_task(&process, &task);
     drop(posting);

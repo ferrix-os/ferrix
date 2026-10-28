@@ -69,7 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "ferrix-kernel-core"
         | "ferrix-kernel-item"
         | "ferrix-kernel-load"
-        | "ferrix-kernel-settings" => {
+        | "ferrix-kernel-settings"
+        | "ferrix-kernel-sched-select" => {
             let _ = build_flags()?;
             println!("cargo::rerun-if-changed=../build.rs");
             return Ok(());

@@ -336,6 +336,10 @@ pub mod x86_64 {
     pub const SCHED_SETSCHEDULER: usize = 144;
     /// Read a thread's scheduling policy.
     pub const SCHED_GETSCHEDULER: usize = 145;
+    /// Set a thread's scheduling policy and attributes from a `sched_attr`.
+    pub const SCHED_SETATTR: usize = 314;
+    /// Read a thread's scheduling policy and attributes into a `sched_attr`.
+    pub const SCHED_GETATTR: usize = 315;
     /// Report the highest priority a scheduling policy allows.
     pub const SCHED_GET_PRIORITY_MAX: usize = 146;
     /// Report the lowest priority a scheduling policy allows.
@@ -769,6 +773,10 @@ pub mod aarch64 {
     pub const SCHED_SETSCHEDULER: usize = 119;
     /// Read a thread's scheduling policy.
     pub const SCHED_GETSCHEDULER: usize = 120;
+    /// Set a thread's scheduling policy and attributes from a `sched_attr`.
+    pub const SCHED_SETATTR: usize = 274;
+    /// Read a thread's scheduling policy and attributes into a `sched_attr`.
+    pub const SCHED_GETATTR: usize = 275;
     /// Read a thread's scheduling parameters.
     pub const SCHED_GETPARAM: usize = 121;
     /// Set a thread's processor affinity mask.
@@ -1246,6 +1254,10 @@ pub mod arm {
     pub const SCHED_SETSCHEDULER: usize = 156;
     /// Read a thread's scheduling policy.
     pub const SCHED_GETSCHEDULER: usize = 157;
+    /// Set a thread's scheduling policy and attributes from a `sched_attr`.
+    pub const SCHED_SETATTR: usize = 380;
+    /// Read a thread's scheduling policy and attributes into a `sched_attr`.
+    pub const SCHED_GETATTR: usize = 381;
     /// Yield the processor to another runnable thread.
     pub const SCHED_YIELD: usize = 158;
     /// Report the highest priority a scheduling policy allows.
@@ -1868,6 +1880,10 @@ pub mod i386 {
     pub const SCHED_SETSCHEDULER: usize = 156;
     /// Read a thread's scheduling policy.
     pub const SCHED_GETSCHEDULER: usize = 157;
+    /// Set a thread's scheduling policy and attributes from a `sched_attr`.
+    pub const SCHED_SETATTR: usize = 351;
+    /// Read a thread's scheduling policy and attributes into a `sched_attr`.
+    pub const SCHED_GETATTR: usize = 352;
     /// Report the highest priority a scheduling policy allows.
     pub const SCHED_GET_PRIORITY_MAX: usize = 159;
     /// Report the lowest priority a scheduling policy allows.
@@ -2780,6 +2796,10 @@ pub enum Syscall {
     SchedSetscheduler,
     /// Read a thread's scheduling policy.
     SchedGetscheduler,
+    /// Set a thread's scheduling policy and attributes from a `sched_attr`.
+    SchedSetattr,
+    /// Read a thread's scheduling policy and attributes into a `sched_attr`.
+    SchedGetattr,
     /// Set a thread's scheduling parameters.
     SchedSetparam,
     /// Report the highest priority a scheduling policy allows.
@@ -3081,6 +3101,8 @@ fn x86_64_metadata_and_ids(nr: usize) -> Option<Syscall> {
         x86_64::SCHED_GETPARAM => Syscall::SchedGetparam,
         x86_64::SCHED_SETSCHEDULER => Syscall::SchedSetscheduler,
         x86_64::SCHED_GETSCHEDULER => Syscall::SchedGetscheduler,
+        x86_64::SCHED_SETATTR => Syscall::SchedSetattr,
+        x86_64::SCHED_GETATTR => Syscall::SchedGetattr,
         x86_64::PRCTL => Syscall::Prctl,
         x86_64::ARCH_PRCTL => Syscall::ArchPrctl,
         x86_64::FLOCK => Syscall::Flock,
@@ -3418,6 +3440,8 @@ fn aarch64_signals_and_ids(nr: usize) -> Option<Syscall> {
         aarch64::CLOCK_NANOSLEEP => Syscall::ClockNanosleep,
         aarch64::SCHED_SETSCHEDULER => Syscall::SchedSetscheduler,
         aarch64::SCHED_GETSCHEDULER => Syscall::SchedGetscheduler,
+        aarch64::SCHED_SETATTR => Syscall::SchedSetattr,
+        aarch64::SCHED_GETATTR => Syscall::SchedGetattr,
         aarch64::SCHED_GETPARAM => Syscall::SchedGetparam,
         aarch64::SCHED_SETAFFINITY => Syscall::SchedSetaffinity,
         aarch64::SCHED_GETAFFINITY => Syscall::SchedGetaffinity,
@@ -3728,6 +3752,8 @@ fn arm_signals_and_mm(nr: usize) -> Option<Syscall> {
         arm::SCHED_GETPARAM => Syscall::SchedGetparam,
         arm::SCHED_SETSCHEDULER => Syscall::SchedSetscheduler,
         arm::SCHED_GETSCHEDULER => Syscall::SchedGetscheduler,
+        arm::SCHED_SETATTR => Syscall::SchedSetattr,
+        arm::SCHED_GETATTR => Syscall::SchedGetattr,
         arm::SCHED_YIELD => Syscall::SchedYield,
         arm::NANOSLEEP => Syscall::Nanosleep,
         arm::MREMAP => Syscall::Mremap,
@@ -4118,6 +4144,8 @@ fn i386_middle(nr: usize) -> Option<Syscall> {
         i386::SCHED_GETPARAM => Syscall::SchedGetparam,
         i386::SCHED_SETSCHEDULER => Syscall::SchedSetscheduler,
         i386::SCHED_GETSCHEDULER => Syscall::SchedGetscheduler,
+        i386::SCHED_SETATTR => Syscall::SchedSetattr,
+        i386::SCHED_GETATTR => Syscall::SchedGetattr,
         i386::SCHED_YIELD => Syscall::SchedYield,
         i386::SCHED_GET_PRIORITY_MAX => Syscall::SchedGetPriorityMax,
         i386::SCHED_GET_PRIORITY_MIN => Syscall::SchedGetPriorityMin,

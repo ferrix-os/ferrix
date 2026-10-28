@@ -53,7 +53,7 @@
 //! queued.
 //!
 //! ```
-//! use ferrix_sched::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot};
+//! use ferrix_sched_fair::{Config, EntityState, NICE_0_WEIGHT, RunQueue, Slot};
 //!
 //! let mut queue: RunQueue<&str> = RunQueue::new(Config { slice_ns: 3_000_000 }).unwrap();
 //! let state = EntityState::new(NICE_0_WEIGHT);
@@ -72,8 +72,6 @@
 
 extern crate alloc;
 
-mod balance;
-mod domain;
 mod timeline;
 mod tree;
 
@@ -83,12 +81,6 @@ mod tests;
 use alloc::boxed::Box;
 use core::fmt;
 
-pub use balance::{
-    BALANCE_THRESHOLD, Balance, CpuLoad, FLIP_DECAY_NS, LOAD_PERIOD_NS, LOAD_SCALE, Load,
-    Placement, busiest, flip, imbalance, place, pull_fits, quietest, slice_for, utilisation,
-    wake_wide,
-};
-pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
 pub use timeline::Timeline;
 use tree::{Key, Tree, before};
 pub use tree::{Node, Slot};
@@ -253,17 +245,6 @@ pub enum SchedError {
     ZeroWeight,
     /// An entity with this identifier is already on the queue.
     Duplicate(u64),
-    /// A scheduling mode that is named, and not written yet.
-    ModeUnavailable(Mode),
-    /// A domain with no CPUs in it.
-    EmptyDomain,
-    /// A CPU claimed by two domains.
-    Overlap(usize),
-    /// A CPU claimed by no domain.
-    Uncovered(usize),
-    /// A CPU number past the end of a [`CpuSet`], or a domain naming a CPU
-    /// the machine does not have.
-    NoSuchCpu(usize),
 }
 
 impl fmt::Display for SchedError {
@@ -272,13 +253,6 @@ impl fmt::Display for SchedError {
             SchedError::ZeroSlice => f.write_str("a run queue needs a slice longer than zero"),
             SchedError::ZeroWeight => f.write_str("an entity needs a weight above zero"),
             SchedError::Duplicate(id) => write!(f, "entity {id} is already queued"),
-            SchedError::ModeUnavailable(mode) => {
-                write!(f, "the {} mode is not written yet", mode.name())
-            }
-            SchedError::EmptyDomain => f.write_str("a scheduling domain has no CPUs"),
-            SchedError::Overlap(cpu) => write!(f, "CPU {cpu} is in two scheduling domains"),
-            SchedError::Uncovered(cpu) => write!(f, "CPU {cpu} is in no scheduling domain"),
-            SchedError::NoSuchCpu(cpu) => write!(f, "there is no CPU {cpu}"),
         }
     }
 }
@@ -340,7 +314,7 @@ pub struct Refused<T> {
 
 /// A running entity taken off its queue: its identifier, its data, what it
 /// carries away and its slot, as [`RunQueue::remove_curr`] answers it.
-pub type Left<T> = (u64, T, EntityState, Slot<T>);
+pub type Left<T> = (u64, T, FairEntity<T>);
 
 /// One entity, while it is on a queue.
 #[derive(Debug)]
@@ -812,12 +786,14 @@ impl<T> RunQueue<T> {
         Ok(Some((
             left_id,
             payload,
-            EntityState {
-                weight,
-                vlag,
-                sum_exec,
-            },
-            Slot(leaving),
+            (
+                EntityState {
+                    weight,
+                    vlag,
+                    sum_exec,
+                },
+                Slot(leaving),
+            ),
         )))
     }
 
@@ -833,6 +809,13 @@ impl<T> RunQueue<T> {
             .pick(|vruntime| self.is_eligible(vruntime))
             .or_else(|| self.tree.first())
             .map(Entity::key)
+    }
+
+    /// Return the running entity to the tree without choosing: what a class
+    /// stack does to this class when a class above it takes the CPU. The
+    /// entity stays counted in the virtual time.
+    pub fn put_back(&mut self) {
+        self.put_curr_back();
     }
 
     /// Return the running entity to the tree, still counted.
@@ -986,7 +969,7 @@ impl<T> RunQueue<T> {
     /// moving — and hand back what it needs to come back with.
     ///
     /// The slot it came in comes back with it.
-    pub fn remove_curr(&mut self) -> Option<(u64, T, EntityState, Slot<T>)> {
+    pub fn remove_curr(&mut self) -> Option<Left<T>> {
         let node = self.curr.take()?;
         self.detach(node)
     }
@@ -994,16 +977,16 @@ impl<T> RunQueue<T> {
     /// Take entity `id` off the queue, running or waiting, with its slot.
     ///
     /// A waiting entity is found by a walk: see [`RunQueue::contains`].
-    pub fn remove(&mut self, id: u64) -> Option<(T, EntityState, Slot<T>)> {
+    pub fn remove(&mut self, id: u64) -> Option<(T, FairEntity<T>)> {
         if self.curr.as_ref().is_some_and(|curr| curr.entity.id == id) {
             return self
                 .remove_curr()
-                .map(|(_, payload, state, slot)| (payload, state, slot));
+                .map(|(_, payload, entity)| (payload, entity));
         }
         let key = self.tree.find(id)?;
         let node = self.tree.remove(key)?;
-        let (_, payload, state, slot) = self.detach(node)?;
-        Some((payload, state, slot))
+        let (_, payload, entity) = self.detach(node)?;
+        Some((payload, entity))
     }
 
     /// Give entity `id` the weight `weight`, running or waiting, and say
@@ -1097,7 +1080,7 @@ impl<T> RunQueue<T> {
     /// statement about the queue it is leaving.
     ///
     /// `None` only for a node with no payload, which a queue never holds.
-    fn detach(&mut self, mut node: Box<Node<T>>) -> Option<(u64, T, EntityState, Slot<T>)> {
+    fn detach(&mut self, mut node: Box<Node<T>>) -> Option<Left<T>> {
         let entity = &node.entity;
         let limit = self.lag_limit(entity.weight);
         let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
@@ -1109,12 +1092,14 @@ impl<T> RunQueue<T> {
         Some((
             id,
             payload,
-            EntityState {
-                weight,
-                vlag,
-                sum_exec,
-            },
-            Slot(node),
+            (
+                EntityState {
+                    weight,
+                    vlag,
+                    sum_exec,
+                },
+                Slot(node),
+            ),
         ))
     }
 
@@ -1262,5 +1247,354 @@ impl<T> RunQueue<T> {
             return Err("the queue's base is not at its virtual time");
         }
         Ok(())
+    }
+}
+
+/// The slice each of `runnable` entities should ask for, given a target
+/// latency and a floor.
+///
+/// # Why a fixed slice is wrong
+///
+/// A slice is also a latency bound: the last of `n` runnable entities waits
+/// `n` slices before it runs. With a fixed slice that wait grows without limit
+/// — a thousand runnable tasks at a millisecond each is a second before the
+/// last one is looked at, and stage 5's own test ran exactly a thousand.
+///
+/// So the slice is a share of a target *period* instead, which is Linux's
+/// `sched_latency` divided by the number of runnable entities. Every entity
+/// still gets its weighted share of the processor; what changes is that it is
+/// delivered in smaller instalments.
+///
+/// # Why there is a floor
+///
+/// Taken to its conclusion the arithmetic asks for slices of nanoseconds, and
+/// then the machine does nothing but switch. Below `minimum_ns` the period is
+/// allowed to stretch instead — which is Linux's `sched_min_granularity`, and
+/// is the admission that beyond some number of runnable tasks, latency has to
+/// give.
+#[must_use]
+pub const fn slice_for(target_latency_ns: u64, minimum_ns: u64, runnable: usize) -> u64 {
+    let count = if runnable == 0 { 1 } else { runnable as u64 };
+    let share = target_latency_ns / count;
+    if share < minimum_ns {
+        minimum_ns
+    } else {
+        share
+    }
+}
+
+/// The fair class as a [`ferrix_sched_class::SchedClass`]: EEVDF, every
+/// operation forwarding to the [`RunQueue`] it is
+/// (`docs/SCHED-CLASSES.md` §3). A task off every queue carries its
+/// [`EntityState`] and the [`Slot`] it is queued in.
+#[derive(Debug)]
+pub struct Eevdf;
+
+/// What a task carries between fair queues.
+pub type FairEntity<T> = (EntityState, Slot<T>);
+
+impl<T> ferrix_sched_class::SchedClass<T> for Eevdf {
+    const NAME: &'static str = "eevdf";
+    type Queue = RunQueue<T>;
+    type Entity = FairEntity<T>;
+    type Config = Config;
+
+    fn new_queue(config: Config) -> Result<RunQueue<T>, ferrix_sched_class::Refusal> {
+        RunQueue::new(config).map_err(|_| ferrix_sched_class::Refusal::Invalid)
+    }
+
+    fn len(queue: &RunQueue<T>) -> usize {
+        queue.len()
+    }
+
+    fn enqueue(
+        queue: &mut RunQueue<T>,
+        id: u64,
+        payload: T,
+        (state, slot): FairEntity<T>,
+    ) -> Result<(), ferrix_sched_class::Back<T, FairEntity<T>>> {
+        queue
+            .enqueue(id, payload, state, slot)
+            .map_err(|refused| back(refused, state))
+    }
+
+    fn remove(queue: &mut RunQueue<T>, id: u64) -> Option<(T, FairEntity<T>)> {
+        queue.remove(id)
+    }
+
+    fn remove_current(
+        queue: &mut RunQueue<T>,
+    ) -> Option<ferrix_sched_class::Left<T, FairEntity<T>>> {
+        queue.remove_curr()
+    }
+
+    fn pick(queue: &mut RunQueue<T>) -> Option<&T> {
+        queue.pick_next()
+    }
+
+    fn put_back(queue: &mut RunQueue<T>) {
+        queue.put_back();
+    }
+
+    fn current(queue: &RunQueue<T>) -> Option<&T> {
+        queue.current()
+    }
+
+    fn hand_over(
+        queue: &mut RunQueue<T>,
+        id: u64,
+        payload: T,
+        (state, slot): FairEntity<T>,
+        slice_after: u64,
+    ) -> ferrix_sched_class::Handed<T, FairEntity<T>> {
+        queue
+            .hand_over(id, payload, state, slot, slice_after)
+            .map_err(|refused| back(refused, state))
+    }
+
+    fn charge(queue: &mut RunQueue<T>, ran_ns: u64) -> bool {
+        queue.update_curr(ran_ns)
+    }
+
+    fn remaining_ns(queue: &RunQueue<T>) -> Option<u64> {
+        queue.remaining_ns()
+    }
+
+    fn should_preempt(queue: &RunQueue<T>) -> bool {
+        queue.should_preempt()
+    }
+
+    fn decision_in_ns(queue: &RunQueue<T>) -> Option<u64> {
+        queue.decision_in_ns()
+    }
+
+    fn load_weight(queue: &RunQueue<T>) -> u64 {
+        queue.load_weight()
+    }
+
+    fn yield_current(queue: &mut RunQueue<T>) {
+        queue.yield_curr();
+    }
+
+    /// The fair class never throttles itself: work queued is work it may run.
+    fn ready(queue: &RunQueue<T>, _: bool) -> bool {
+        <Self as ferrix_sched_class::SchedClass<T>>::len(queue) > 0
+    }
+
+    /// No budget measured in real time.
+    fn elapse(_: &mut RunQueue<T>, _: u64) {}
+
+    fn steals_work(_: &RunQueue<T>) -> bool {
+        true
+    }
+
+    // Out of line: a present fair class shows in the image as this
+    // (SCHED-CLASSES.md S1).
+    #[inline(never)]
+    fn check(queue: &RunQueue<T>) -> Result<(), &'static str> {
+        queue.check_invariants()
+    }
+}
+
+/// The interface's load unit is this class's nice-0 weight, so a fair
+/// entity at nice 0 is one unit of load (docs/SCHED-CLASSES.md §9d).
+const _: () = assert!(
+    ferrix_sched_class::LOAD_UNIT == NICE_0_WEIGHT as u64,
+    "the class interface's load unit is not the fair class's nice-0 weight"
+);
+
+/// The fair tier of a class stack: the innermost one, wherever fair is in
+/// the stack (docs/SCHED-CLASSES.md §9d; the consultant's ledger lines 26
+/// and 27, F1 and F7). The fair-only calls the kernel makes -- weights, the
+/// picture the checks and `/proc` read, the slice, the levelling, the steal
+/// choice -- reach it through here, read-only but for the three named
+/// changes; every change of membership or of the running entity goes
+/// through the stack. A stack without a fair tier does not implement it,
+/// so a kernel that still calls the fair tier does not compile for it.
+pub trait FairTier<T>: ferrix_sched_class::SchedClass<T> {
+    /// The fair tier's queue, to read.
+    fn fair(queue: &Self::Queue) -> &RunQueue<T>;
+
+    /// [`RunQueue::set_weight`] on the fair tier.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::set_weight`].
+    fn set_weight(queue: &mut Self::Queue, id: u64, weight: u32) -> Result<bool, SchedError>;
+
+    /// [`RunQueue::set_slice_ns`] on the fair tier.
+    ///
+    /// # Errors
+    ///
+    /// As [`RunQueue::set_slice_ns`].
+    fn set_slice_ns(queue: &mut Self::Queue, slice_ns: u64) -> Result<(), SchedError>;
+
+    /// [`RunQueue::level`] on the fair tier.
+    fn level(queue: &mut Self::Queue);
+}
+
+impl<T> FairTier<T> for Eevdf {
+    fn fair(queue: &RunQueue<T>) -> &RunQueue<T> {
+        queue
+    }
+    fn set_weight(queue: &mut RunQueue<T>, id: u64, weight: u32) -> Result<bool, SchedError> {
+        queue.set_weight(id, weight)
+    }
+    fn set_slice_ns(queue: &mut RunQueue<T>, slice_ns: u64) -> Result<(), SchedError> {
+        queue.set_slice_ns(slice_ns)
+    }
+    fn level(queue: &mut RunQueue<T>) {
+        queue.level();
+    }
+}
+
+impl<T, U: ferrix_sched_class::SchedClass<T>, L: FairTier<T>> FairTier<T>
+    for ferrix_sched_class::Over<U, L>
+{
+    fn fair(queue: &Self::Queue) -> &RunQueue<T> {
+        L::fair(&queue.lower)
+    }
+    fn set_weight(queue: &mut Self::Queue, id: u64, weight: u32) -> Result<bool, SchedError> {
+        L::set_weight(&mut queue.lower, id, weight)
+    }
+    fn set_slice_ns(queue: &mut Self::Queue, slice_ns: u64) -> Result<(), SchedError> {
+        L::set_slice_ns(&mut queue.lower, slice_ns)
+    }
+    fn level(queue: &mut Self::Queue) {
+        L::level(&mut queue.lower);
+    }
+}
+
+/// What a stack's entity is made of, seen from a task: its fair record and
+/// run slot, or the node of a tier above fair (docs/SCHED-CLASSES.md §9e,
+/// R6: F6, F7).
+#[derive(Debug)]
+pub enum Split<U, T> {
+    /// A real-time task's node.
+    Upper(U),
+    /// A fair task's record and run slot.
+    Fair(FairEntity<T>),
+}
+
+/// The tiers of a class stack as the kernel's task sees them: whether there
+/// is one above fair, the node and the cell a task keeps for it, and how the
+/// stack's entity is built from a task's parts and taken apart again. The
+/// fair entity is the innermost of every stack's (F7): the fair-only stack's
+/// entity is exactly [`FairEntity`], and [`StackTiers::fair_entity`] is the
+/// identity there.
+pub trait StackTiers<T>: FairTier<T> {
+    /// Whether the stack has a tier above fair: whether a task may ask for a
+    /// real-time policy.
+    const REALTIME: bool;
+    /// The round-robin quantum of the tier above fair, in nanoseconds; zero
+    /// with no such tier.
+    const RR_QUANTUM_NS: u64;
+    /// A task's node in the tier above fair; no values for the fair-only
+    /// stack.
+    type UpperSlot;
+    /// Where a task keeps that node while off every queue; zero-sized for
+    /// the fair-only stack.
+    type Cell: ferrix_sched_class::UpperCell<Self::UpperSlot>;
+    /// A fresh node, `None` with no tier above fair or no memory (R1).
+    fn new_upper_slot() -> Option<Self::UpperSlot>;
+    /// The stack's configuration, from the fair tier's: the tiers above
+    /// fair take none.
+    fn stack_config(fair: Config) -> Self::Config;
+    /// [`SchedClass::remove`] from the tier the caller says the entity is
+    /// in: the one above fair with `upper`, fair's otherwise; no other
+    /// tier's queue is walked (line 30, B3).
+    fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)>;
+    /// The stack's entity for a fair task.
+    fn fair_entity(entity: FairEntity<T>) -> Self::Entity;
+    /// The stack's entity for a real-time task.
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: Self::UpperSlot) -> Self::Entity;
+    /// A task's parts back out of the stack's entity.
+    fn split(entity: Self::Entity) -> Split<Self::UpperSlot, T>;
+    /// The identifier of a waiting entity of the tier above fair whose
+    /// payload `matches`, never the running one; `None` with no such tier.
+    /// For a scheduling domain's switch (docs/SCHED-CLASSES.md §9f), with
+    /// [`RunQueue::latest_where`] for the fair tier.
+    fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
+}
+
+impl<T> StackTiers<T> for Eevdf {
+    const REALTIME: bool = false;
+    const RR_QUANTUM_NS: u64 = 0;
+    type UpperSlot = core::convert::Infallible;
+    type Cell = ferrix_sched_class::NoCell<core::convert::Infallible>;
+
+    fn new_upper_slot() -> Option<core::convert::Infallible> {
+        None
+    }
+    fn stack_config(fair: Config) -> Config {
+        fair
+    }
+    fn remove_in(queue: &mut RunQueue<T>, id: u64, upper: bool) -> Option<(T, FairEntity<T>)> {
+        if upper {
+            return None;
+        }
+        <Eevdf as ferrix_sched_class::SchedClass<T>>::remove(queue, id)
+    }
+    fn fair_entity(entity: FairEntity<T>) -> FairEntity<T> {
+        entity
+    }
+    fn upper_entity(
+        _: ferrix_sched_class::RtParams,
+        slot: core::convert::Infallible,
+    ) -> FairEntity<T> {
+        match slot {}
+    }
+    fn split(entity: FairEntity<T>) -> Split<core::convert::Infallible, T> {
+        Split::Fair(entity)
+    }
+    fn upper_waiting_where(_: &RunQueue<T>, _: impl Fn(&T) -> bool) -> Option<u64> {
+        None
+    }
+}
+
+impl<T, U: ferrix_sched_class::RealtimeClass<T, Config = ()>> StackTiers<T>
+    for ferrix_sched_class::Over<U, Eevdf>
+{
+    const REALTIME: bool = true;
+    const RR_QUANTUM_NS: u64 = U::RR_QUANTUM_NS;
+    type UpperSlot = U::Slot;
+    type Cell = ferrix_sched_class::LockedCell<U::Slot>;
+
+    fn new_upper_slot() -> Option<U::Slot> {
+        U::new_slot()
+    }
+    fn stack_config(fair: Config) -> ((), Config) {
+        ((), fair)
+    }
+    fn remove_in(queue: &mut Self::Queue, id: u64, upper: bool) -> Option<(T, Self::Entity)> {
+        ferrix_sched_class::Over::<U, Eevdf>::remove_from(queue, id, upper)
+    }
+    fn fair_entity(entity: FairEntity<T>) -> Self::Entity {
+        ferrix_sched_class::Tier::Lower(entity)
+    }
+    fn upper_entity(params: ferrix_sched_class::RtParams, slot: U::Slot) -> Self::Entity {
+        ferrix_sched_class::Tier::Upper(U::entity(params, slot))
+    }
+    fn split(entity: Self::Entity) -> Split<U::Slot, T> {
+        match entity {
+            ferrix_sched_class::Tier::Upper(entity) => Split::Upper(U::into_slot(entity)),
+            ferrix_sched_class::Tier::Lower(entity) => Split::Fair(entity),
+        }
+    }
+    fn upper_waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64> {
+        U::waiting_where(&queue.upper, matches)
+    }
+}
+
+/// A refusal as the class interface hands it back, with the state the
+/// entity arrived with (the queue had changed nothing).
+fn back<T>(refused: Refused<T>, state: EntityState) -> ferrix_sched_class::Back<T, FairEntity<T>> {
+    ferrix_sched_class::Back {
+        payload: refused.payload,
+        entity: (state, refused.slot),
+        reason: match refused.reason {
+            SchedError::Duplicate(id) => ferrix_sched_class::Refusal::Duplicate(id),
+            SchedError::ZeroSlice | SchedError::ZeroWeight => ferrix_sched_class::Refusal::Invalid,
+        },
     }
 }

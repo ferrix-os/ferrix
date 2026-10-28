@@ -197,7 +197,7 @@ single file across.
 |  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
 | 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ✓ done | month |
 |  | [Namespace and cgroup follow-ons](follow-ons.md) | ◐ in progress | unsized; built 2026-10-26, landing owed |
-| 14 | [Real-time domains](stage-14-real-time-domains.md) | ○ not started | month |
+| 14 | [Real-time domains](stage-14-real-time-domains.md) | ◐ in progress | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |
 | 17 | [Display and input](stage-17-display-input.md) | ✓ done | 74 points, spent |

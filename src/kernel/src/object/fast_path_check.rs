@@ -461,9 +461,9 @@ fn check_a_spinner_keeps_its_share(on: bool) -> Result<(), &'static str> {
         "fast path spinner",
         spin,
         0,
-        ferrix_sched::NICE_0_WEIGHT,
+        ferrix_sched_fair::NICE_0_WEIGHT,
         cpu,
-        ferrix_sched::CpuSet::of(cpu),
+        ferrix_sched_class::CpuSet::of(cpu),
     )?;
     let ran_before = spinner.runtime();
     let _ = trips_between(cpu, cpu, TRIPS * 10)?;
@@ -1361,9 +1361,9 @@ fn check_an_end_before_the_park() -> Result<(), &'static str> {
             "check-park-end",
             park_after_its_end,
             0,
-            ferrix_sched::NICE_0_WEIGHT,
+            ferrix_sched_fair::NICE_0_WEIGHT,
             here,
-            ferrix_sched::CpuSet::of(here),
+            ferrix_sched_class::CpuSet::of(here),
         )?;
         let deadline = crate::timer::now_nanos().saturating_add(PARK_PATIENCE_NANOS);
         let finished = wait_until(deadline, "", || {
@@ -1575,6 +1575,17 @@ fn job_case(
     caller_base: u32,
     echo_base: u32,
 ) -> Result<(JobSeen, JobSeen), &'static str> {
+    job_case_with(shape, caller_base, echo_base, false)
+}
+
+/// [`job_case`], with the echo made `SCHED_FIFO` while it waits when
+/// `fifo_echo` (docs/SCHED-CLASSES.md §9e, R6, F10).
+fn job_case_with(
+    shape: JobShape,
+    caller_base: u32,
+    echo_base: u32,
+    fifo_echo: bool,
+) -> Result<(JobSeen, JobSeen), &'static str> {
     let cpu = trip_processor();
     let root = super::job::Job::new_root().map_err(|_| "no memory for the job cases' jobs")?;
     let top = root
@@ -1621,6 +1632,14 @@ fn job_case(
     wait_until(deadline, "the job cases' echo never waited", || {
         theirs.reader_waiting()
     })?;
+    if fifo_echo {
+        let fifo = ferrix_sched_class::RtParams {
+            policy: ferrix_sched_class::RtPolicy::Fifo,
+            priority: 10,
+        };
+        crate::sched::set_policy(&echo, Some(fifo), false)
+            .map_err(|_| "the job cases' echo was refused SCHED_FIFO")?;
+    }
     drop(theirs);
     let (caller_process, handle) = holding_in(&mine, Some(caller_job))?;
     drop(mine);
@@ -1701,20 +1720,27 @@ fn job_loads_hold(shape: JobShape, seen: &JobSeen) -> Result<(), &'static str> {
 /// busy; once both are gone every load is 0. Four cases: one job with equal
 /// bases, one job with unequal bases (where a fold's net is not zero), two
 /// sibling jobs, and a job and its child. With the fast path on, the first
-/// two fold and the last two do not, and no fold ends unplanned.
+/// two fold and the last two do not, and no fold ends unplanned. Where the
+/// realtime tier is built, a fifth: one job with equal bases and the echo
+/// `SCHED_FIFO`, which does not fold, the fold being between fair tasks
+/// alone (docs/SCHED-CLASSES.md §9e, F10).
 ///
 /// Verifies: `L.sched.64`
 fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
-    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
-    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
-    for (shape, caller_base, echo_base, folds) in [
-        (JobShape::One, nice_0, nice_0, true),
-        (JobShape::One, nice_0, heavier, true),
-        (JobShape::Siblings, nice_0, heavier, false),
-        (JobShape::Nested, heavier, nice_0, false),
+    let nice_0 = ferrix_sched_fair::NICE_0_WEIGHT;
+    let heavier = ferrix_sched_fair::weight_of_nice(-5).unwrap_or(3121);
+    for (shape, caller_base, echo_base, folds, fifo_echo) in [
+        (JobShape::One, nice_0, nice_0, true, false),
+        (JobShape::One, nice_0, heavier, true, false),
+        (JobShape::Siblings, nice_0, heavier, false, false),
+        (JobShape::Nested, heavier, nice_0, false, false),
+        (JobShape::One, nice_0, nice_0, false, true),
     ] {
+        if fifo_echo && !crate::sched::realtime_built() {
+            continue;
+        }
         let before = direct::counts();
-        let (seen, echo_seen) = job_case(shape, caller_base, echo_base)?;
+        let (seen, echo_seen) = job_case_with(shape, caller_base, echo_base, fifo_echo)?;
         job_loads_hold(shape, &echo_seen)?;
         job_loads_hold(shape, &seen)?;
         if on {
@@ -1748,8 +1774,8 @@ fn check_the_direct_switch_job_loads(on: bool) -> Result<(), &'static str> {
 ///
 /// Verifies: `L.sched.65`
 fn check_the_direct_switch_weights() -> Result<(), &'static str> {
-    let nice_0 = ferrix_sched::NICE_0_WEIGHT;
-    let heavier = ferrix_sched::weight_of_nice(-5).unwrap_or(3121);
+    let nice_0 = ferrix_sched_fair::NICE_0_WEIGHT;
+    let heavier = ferrix_sched_fair::weight_of_nice(-5).unwrap_or(3121);
     let (seen, _) = job_case(JobShape::One, nice_0, heavier)?;
     let (handed, charged) = (seen.handed, seen.charged);
     if seen.own.1 != seen.base || (seen.weight != handed && seen.weight != charged) {

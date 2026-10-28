@@ -127,6 +127,9 @@ kernel_rule() {
 kernel_rule ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
 kernel_rule ferrix-kernel-load "the kernel's load ring" "ferrix-kernel|ferrix-boot"
+# The scheduler selection sits below the core (docs/SCHED-CLASSES.md §9a,
+# D4): it links only the class crates, never a kernel crate above it.
+kernel_rule ferrix-kernel-sched-select "the scheduler selection" "ferrix-kernel|ferrix-kernel-core|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 2. The host-testable libraries sit below both.
@@ -135,7 +138,11 @@ forbid ferrix-bootinfo "handoff ABI"  "$K|ferrix-boot|ferrix-elf|ferrix-frame"
 forbid ferrix-elf      "ELF64 reader" "$K|ferrix-boot"
 forbid ferrix-frame    "frame allocator" "$K|ferrix-boot"
 forbid ferrix-paging   "page tables"  "$K|ferrix-boot"
-forbid ferrix-sched    "scheduler logic" "$K|ferrix-boot"
+forbid ferrix-sched-class "scheduling-class interface" "$K|ferrix-boot|ferrix-sched-fair|ferrix-sched-fifo"
+# No class crate links another (docs/SCHED-CLASSES.md section 9d): a build
+# selecting one class links no other.
+forbid ferrix-sched-fair "fair scheduling class" "$K|ferrix-boot|ferrix-sched-fifo"
+forbid ferrix-sched-fifo "FIFO and round-robin scheduling class" "$K|ferrix-boot|ferrix-sched-fair"
 forbid ferrix-pci      "PCI configuration space" "$K|ferrix-boot"
 forbid ferrix-block    "block core" "$K|ferrix-boot"
 forbid ferrix-btrfs    "btrfs read path" "$K|ferrix-boot"

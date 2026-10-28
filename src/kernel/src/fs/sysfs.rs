@@ -1660,7 +1660,7 @@ fn render_cpus(out: &mut Vec<u8>, attr: Attr) {
             attr::cpu_list(out, &offline);
         }
         Attr::KernelMax => {
-            attr::decimal(out, (ferrix_sched::MAX_CPUS as u64).saturating_sub(1));
+            attr::decimal(out, (ferrix_sched_class::MAX_CPUS as u64).saturating_sub(1));
         }
         _ => {
             let all: Vec<u32> = (0..count).collect();

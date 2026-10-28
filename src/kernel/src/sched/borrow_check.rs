@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use ferrix_sched::NICE_0_WEIGHT;
+use ferrix_sched_fair::NICE_0_WEIGHT;
 use ferrix_sync::IrqControl;
 
 use super::Task;

@@ -957,6 +957,17 @@ p50 2,287 ns against 2,427 ns without step 3, the median of five rounds,
 ratio 0.942 (`~/.local/share/ferrix/logs/queue/po7-ipcB-s3r-bench-1.log` on
 nazuna, on step 2f; OPAQUE-KERNEL.md §9.9).
 
+**The realtime tier's walk (step 4b, `desktop` alone).** `FifoRr`'s
+queue is a balanced tree: `pick`, an enqueue and the removal of the running
+entity are O(log n) or better in the processor's real-time tasks; `remove`
+of a waiting entity by identifier walks the tree, O(n), under the queue's
+spin lock. Every removal is routed by the task's tier
+(`StackTiers::remove_in`, the review's line 30, B3), so the removal of a
+fair task, a steal's among them, never walks this tree, and the walk serves
+one caller alone: a change of policy on a queued real-time task that does
+not run (L.sched.112), at the call or at its processor's next decision. A
+`present` build has no such tier, and its paths are as below.
+
 Two decisions the round trip's wakes defer are bounded, though no check
 times them (L.sched.7). A wake made inside a system call asks for no timer:
 the decision it wants is made when the call ends (`sched::call_left`), at
@@ -1709,6 +1720,50 @@ ledger 3062; design in `docs/SCHED-WAKE-AFFINE.md`.
 * **The per-task bound.** Placement decides which queue a task waits on,
   not how a queue serves it. The EEVDF bound of H.SCHED.2 is per queue and
   unchanged (`SAFETY-MANUAL.md` FM-8).
+
+### 2.2za Scheduling domains made at run time (`sched::domains`, 2026-10-28)
+
+`H.SCHED.21`-`23`, `L.sched.118`-`128`; the certification consultant's
+design review, ledger line 32 (OK IF V1-V16); design in
+`docs/SCHED-CLASSES.md` §9f, step 5a as built.
+
+* **Memory.** None allocated on any scheduler path: a task taken off its
+  queue for its domain waits in `MOVING` in its own run slot, as a dead one
+  waits in `ZOMBIES`; one that cannot be filed is counted (`MOVING_LOST`,
+  zero on a correct kernel, which the domain check requires). The switch
+  and the admission allocate, in a task that may sleep and before anything
+  changes: one vector of the tasks of the live processes walked
+  (`domains::members_of`), refused as `NoMemory`.
+* **Time, every path that places a task** (a spawn, a wake, a pull, a
+  placement on an idle processor, a steal, the balance, the pick, the
+  direct switch): one load of the processor's word, one of the task's, one
+  of `LIVE` (`domains::admits`), under the lock the path already holds. A
+  steal and the balance walk their own domain's processors only; the
+  pull's factor is a count kept with the domain (`domains::count`).
+* **Time, a decision on a leaving processor** (`choose_next`, its own
+  queue's lock held, interrupts masked): `rehome_waiting` walks the fair
+  tree and the tier above it once for each task it takes off, so
+  O(waiting^2) under that lock, each task taken off filed in `MOVING` under
+  its own lock (a leaf, taken after any queue lock and never before one).
+  Only while a switch is under way; on any other decision, one load.
+* **Time, the placement of a task taken off** (`domains::drain`, with no
+  queue lock held, from `finish_switch` on any switch while one waits, from
+  `enqueue`, a wake, and the switch's own wait): `SWITCH` is only tried,
+  never waited for, so a switch away from a task never waits on a switch of
+  domains; under it, for each task filed, `choose_cpu`'s walk of every
+  queue's lock in turn and one lock of the target's queue. A task with no
+  processor of its domain now is filed again and looked at once a call.
+* **Time, the switch** (`domains::create_soft`, a task that may sleep): the
+  processors' words written each under its queue's lock, then a wait,
+  sleeping 1 ms between looks, bounded at 1 s (`PATIENCE_NANOS`), past which
+  the processors are given back and the switch refused (V6). Its length is
+  the kick's latency, the leaving queues' walk above, and the longest
+  non-preemptible section a leaving processor is in (F-95's, a reference
+  here and not a bound, C2). Dissolution is one store to `LIVE`, the
+  processors' words after it, and no wait.
+* **Lock order.** `SWITCH` (an interrupt-masking spin lock) before any
+  queue's lock; `MOVING` after any. No queue lock is taken while `MOVING`
+  is held, and `SWITCH` is only tried from a context that may hold none.
 
 ### 2.2w The power core (`arch::x86_64::powerctl`, 2026-10-22)
 

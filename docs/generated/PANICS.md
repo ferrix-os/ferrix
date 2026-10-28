@@ -64,6 +64,8 @@ Causes are listed most likely first.
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
 | [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
+| [FX-0537](#fx-0537) | a task a processor runs was found waiting in a run queue |
+| [FX-0538](#fx-0538) | a task was about to run outside its scheduling domain |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -940,8 +942,8 @@ slept or preempted until every processor is running tasks.
    between waking and joining.
 2. The machine has more processors than a scheduling domain's `CpuSet` can hold.
 3. The vmap arena had no stack left for the boot processor's idle task.
-4. `ferrix_sched` rejected the scheduler's slice constant when a run queue was
-   built.
+4. `ferrix_sched_fair` rejected the scheduler's slice constant when a run queue
+   was built.
 
 See: src/kernel/src/sched/mod.rs init; src/kernel/src/sched/mod.rs
 wait_for_processors; docs/ROADMAP.md stage 5.
@@ -1255,6 +1257,54 @@ the kernel from a /proc read.
 
 See: src/kernel/src/sched/inspect.rs; src/kernel/src/sched/inspect_check.rs;
 src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md.
+
+<a id="fx-0537"></a>
+
+## FX-0537 — a task a processor runs was found waiting in a run queue
+
+A task is marked as on a processor from the moment a switch to it commits until
+the switch away from it has saved its context, both under the lock of the queue
+that owns it. A run queue holds a running task only as its running entity, never
+as a waiting one, at every moment outside a decision; so a steal, a placement or
+a pick that finds a waiting task with the mark set has found one context about
+to run on two processors, or on one before it was saved, and the machine is
+stopped before it does (docs/SCHED-CLASSES.md §9e, the certification
+consultant's ledger line 30, B1).
+
+1. A path enqueued a running task as a waiting one outside a decision: a change
+   of policy that moved the running task at once, rather than at its processor's
+   next decision (`CpuQueue::requeue_if_moved`).
+2. A switch did not set or clear the mark (`switch_chosen`, `finish_switch`).
+
+See: src/kernel/src/sched/queue.rs CpuQueue::set_policy and pick_next;
+src/kernel/src/sched/mod.rs move_onto; docs/SCHED-CLASSES.md §9e.
+
+<a id="fx-0538"></a>
+
+## FX-0538 — a task was about to run outside its scheduling domain
+
+Each processor names the scheduling domain it is in, and each task the domain it
+runs in (docs/SCHED-CLASSES.md §9f): the boot domain, or the one `SoftRt` domain
+made at run time. A task runs only on a processor of its own domain (D-1), the
+per-processor kernel tasks excepted. Every placement, steal, pull and wake asks
+that under the target processor's queue lock, and a task's domain or a
+processor's changes only under that lock; so a pick, a move between queues or a
+direct switch that finds a task outside the processor's domain has found a
+placement that skipped the question, and the machine is stopped before the task
+runs where its domain's guarantee does not hold (V2).
+
+1. A path queued a task on a processor without asking `domains::admits` under
+   that processor's lock: a new placement, steal or wake that bypassed
+   `may_place`.
+2. A processor leaving the boot domain did not move what it held before its pick
+   (`sched::rehome_waiting`), or a running task outside its domain was picked
+   again rather than taken off (`sched::settle_previous`).
+3. A task's domain, or a processor's, was changed without the queue lock that
+   owns it (`domains::settle_task`, `domains::set_slots`).
+
+See: src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto,
+settle_previous and require_admitted; src/kernel/src/sched/direct.rs;
+docs/SCHED-CLASSES.md §9f.
 
 <a id="fx-0601"></a>
 

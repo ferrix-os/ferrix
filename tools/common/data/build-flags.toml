@@ -68,6 +68,10 @@ why = "`fast`: IEC 61508-3 SC 2 / ISO 26262 ASIL B; its Common Criteria target a
 targets = { iec61508_3 = "SC 4", iso26262 = "ASIL D", en50716 = "SIL 4", do178c = "DAL A", iec62304 = "Class C", common_criteria = "EAL6+" }
 why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A's objectives"
 
+[levels.sc4_plus]
+targets = { iec61508_3 = "SC 4", iso26262 = "ASIL D", en50716 = "SIL 4", do178c = "DAL A", iec62304 = "Class C", common_criteria = "EAL7" }
+why = "`max_plus`: sc4's targets with Common Criteria EAL 7 -- targets, not a claim held: there is no formal model of the security policy, no formal functional specification or design and no formal correspondence (ADV_SPM.1, ADV_FSP.6, ADV_TDS.6, ADV_IMP.2), and no evaluation behind it (SCHED-CLASSES.md section 9c, E1)"
+
 # ---------------------------------------------------------------------------
 # The flags, in the order the kernel's `build` boot line names them. Each
 # value says:
@@ -89,82 +93,131 @@ why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A'
 
 [flags.personality]
 why = "where the Linux ABI runs: as linuxd in user space, built into ring 0 through the shim (MICROKERNEL.md §4), or nowhere, with linux_abi=off (LINUX-ABI-SEPARATION.md §11.7: the Linux ABI's placement flag)"
+barest = "none"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no Linux personality anywhere
 values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes" }
 values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["linux_abi=off"] }
 
 [flags.fs]
 why = "btrfs as btrfsd, the btrfs crates in ring 0 with today's glue, or no filesystem in a kernel without the Linux ABI, whose VFS it is"
+barest = "none"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no filesystem in the kernel
 values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
 values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 [flags.mitigations]
 why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes leave it with DF6"
-values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "on"  # max_plus's (SCHED-CLASSES.md section 9c, E13): a countermeasure: the floor keeps it (E11)
+values.on = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.off = { allows = ["none"], lands = "M0", built = "yes" }
 
 [flags.partition_speculation]
 why = "the barriers at a restricted exit (`exit`) or only at partition switches (`partition`); not applicable to a hybrid kernel"
+barest = "not_applicable"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no restricted exit to put barriers on without the Linux personality
 values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
 values.partition = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
-values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
+values.not_applicable = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.ipc_fastpath]
 why = "the fast path for channel_write_read (0x1013); `on` allows sc4 and present only once the 2026-10-02 rule is met, recorded as a dated change here"
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "off"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no second path for channel_write_read
+values.off = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.on = { allows = ["sc2", "none"], lands = "M0", built = "stand-in", stands_in = "off" }
 
 [flags.restricted_fastpath]
 why = "K1's fast path for the restricted exit and re-entry; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
+barest = "not_applicable"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no restricted exit without the Linux personality
 values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "no", requires = ["personality=user"] }
-values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
+values.not_applicable = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
 [flags.kernel_memory]
 why = "K16's memory retyped from the job's own reservation, or today's fallible, charged shared heap"
-values.retyped = { allows = ["sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
+barest = "retyped"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no shared kernel heap after boot
+values.retyped = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M6", built = "no" }
 values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
-[flags.schedule]
-why = "K9's static windows with EDF inside them, stage 14's HardRt (partitioned EDF with CBS), or today's fair scheduler"
-values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
-values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
-values.fair = { allows = ["present", "none"], lands = "today", built = "yes" }
+# The scheduler (docs/SCHED-CLASSES.md §6, §9a; ledger line 20 of the
+# container's consultant ledger, D1): how the stack is dispatched, then one
+# flag a tier, outermost first, each value naming the crate that fills it.
+# The selection crate's arms file (src/kernel/src/sched_select.rs) is the
+# only code that reads them (D6). A value that succeeds one of `schedule`'s
+# keeps its allows; one with none starts at `none`; `absent` allows every
+# level, S1's absence evidence making it true in a claimed build (3b). No
+# `sched_ext` flag yet: a flag has two values at least, and ext has no
+# design to give it its second; it arrives with that design.
+[flags.sched_dispatch]
+why = "the scheduler stack compiled in, fixed (one implementation a tier), or switchable at run time among the ones compiled (desktop only, SCHED-CLASSES.md §5a)"
+barest = "fixed"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no run-time choice of scheduler
+values.fixed = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.switchable = { allows = ["none"], lands = "stage 14", built = "no" }
+
+[flags.sched_windows]
+why = "K9's static time windows, the outermost tier, with fixed-priority preemptive scheduling inside each window, the ARINC 653 shape (ferrix-sched-windows; SCHED-CLASSES.md C6), or none"
+barest = "arinc_table"  # max_plus's (SCHED-CLASSES.md section 9c, E13): the floor: a partitioned kernel needs its windows, and a static slot table inside them decides nothing at run time
+values.arinc = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
+values.absent = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.arinc_table = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
+
+[flags.sched_deadline]
+why = "stage 14's HardRt tier, partitioned EDF with CBS servers (ferrix-sched-edf), or none"
+barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
+values.edf_cbs = { allows = ["present", "sc2", "none"], lands = "M3", built = "no" }
+values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+
+[flags.sched_realtime]
+why = "stage 14's SoftRt tier, fixed priorities FIFO and round-robin (ferrix-sched-fifo), or none"
+barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
+values.fifo_rr = { allows = ["none"], lands = "stage 14, step 4b (ledger line 29, R11)", built = "yes" }
+values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+
+# eevdf's `present` stands under F-76 until S7 classifies ferrix-sched-fair.
+[flags.sched_fair]
+why = "the fair tier, EEVDF (ferrix-sched-fair), today's scheduler, or none"
+barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no tier
+values.eevdf = { allows = ["present", "none"], lands = "today", built = "yes" }
+values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.checks]
 why = "the in-kernel boot checks compiled in; with `on`, ferrix.checks still chooses whether they run. `off` is for ad-hoc builds alone, built by xtask check on every architecture (BF7)"
-values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "on"  # max_plus's (SCHED-CLASSES.md section 9c, E13): a countermeasure's check: the floor keeps it (E11)
+values.on = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.off = { allows = ["none"], lands = "M0", built = "yes" }
 
 [flags.program_barrier]
 why = "the barrier at every switch between programs not in one marked domain (`switch`), or between login sessions' domains only (`session`, BUILD-FLAGS.md §3.1)"
-values.switch = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "switch"  # max_plus's (SCHED-CLASSES.md section 9c, E13): a countermeasure: the floor keeps it (E11)
+values.switch = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.session = { allows = ["none"], lands = "M0", built = "stand-in", stands_in = "switch" }
 
 [flags.ssbd]
 why = "Speculative Store Bypass Disable for every program, or per thread for programs that ask (BUILD-FLAGS.md §3.1)"
-values.always = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "always"  # max_plus's (SCHED-CLASSES.md section 9c, E13): a countermeasure: the floor keeps it (E11)
+values.always = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.on_request = { allows = ["none"], lands = "M0", built = "stand-in", stands_in = "always" }
 
 [flags.smt]
 why = "one hardware thread per core, parked by the kernel (`off`), or sibling threads running under STIBP or eIBRS/AutoIBRS (`stibp`)"
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M0", built = "no" }
+barest = "off"  # max_plus's (SCHED-CLASSES.md section 9c, E13): a countermeasure, and one hardware thread a core
+values.off = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "M0", built = "no" }
 values.stibp = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.runtime_trades]
 why = "whether the image contains game mode's privileged, per-application run-time trades; with `none` their code is absent"
-values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "none"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no run-time trade
+values.none = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.game_mode = { allows = ["none"], lands = "game mode's design", built = "stand-in", stands_in = "none" }
 
 [flags.linux_abi]
 why = "whether the kernel offers the Linux ABI beside its native ABI (LINUX-ABI-SEPARATION.md §11.6-11.8); its levels are its placement's, `personality`. `off` is build-only today: it type-checks on every architecture and carries no claim, and boots nothing useful until §7's rows land (§11.11); it, personality=none and fs=none allow `none` alone until a profile carries them with its own evidence (ledger 3257 (1), 3208 (6)(g)), since the board glue stays in ring 0 with them"
+barest = "off"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no Linux ABI
 values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.off = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 [flags.runtime_settings]
 why = "whether the kernel contains the entries by which a program changes a system setting at run time (KERNEL-CRATES.md §6.2): `fixed` leaves the removable crate ferrix-kernel-settings out of the binary and each entry answers EPERM at its dispatch; `live` links it (ledger 3558 (5), (9)-(11); 3623)"
-values.fixed = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+barest = "fixed"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no setting changed at run time
+values.fixed = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.live = { allows = ["present", "none"], lands = "today", built = "yes" }
 
 # ---------------------------------------------------------------------------
@@ -175,17 +228,20 @@ values.live = { allows = ["present", "none"], lands = "today", built = "yes" }
 
 [image_keys.driver_updates]
 why = "whether the image carries drvupdated (DEVMGR.md §4.1)"
-values.absent = { allows = ["sc4", "present", "sc2", "none"] }
+barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no driver replaced at run time
+values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"] }
 values.test = { allows = ["none"] }
 
 [image_keys.slot_signing]
 why = "whether the UEFI loader starts unsigned slots: `off` boots header version 1 and the ESP's unsigned files, and verifies every version-2 slot; `required` starts only a version-2 slot whose manifest verifies, and reads only FERRIX/RESCUE.SLT as the rescue path (docs/SIGNING.md §10.6; ledger 4016)"
+barest = "required"  # max_plus's (SCHED-CLASSES.md section 9c, E13): the loader boots only a signed slot: off is a run-time choice (E12)
 values.off = { allows = ["sc4", "present", "sc2", "none"] }
-values.required = { allows = ["sc4", "present", "sc2", "none"] }
+values.required = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"] }
 
 [image_keys.settings_writer]
 why = "whether the image carries settingsd, settingsctl, the settings.* authd policies and lode reload's writer (SETTINGS-WRITER.md; ledger 3558 (6), (13), 3595 (C3))"
-values.absent = { allows = ["sc4", "present", "sc2", "none"] }
+barest = "absent"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no settings writer
+values.absent = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"] }
 values.present = { allows = ["present", "none"], requires = ["runtime_settings=live"] }
 
 # ---------------------------------------------------------------------------

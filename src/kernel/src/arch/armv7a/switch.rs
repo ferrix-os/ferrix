@@ -489,8 +489,8 @@ pub const FPEXC_EN: u32 = 1 << 30;
 /// What each processor's `FPEXC.EN` was last written to (§9.15, D2), by
 /// logical number. Exact, because only the kernel writes `FPEXC`: no program
 /// can name it (S2), unlike `TPIDRURW`, so this is not condition 8's case.
-static VFP_ON: [AtomicBool; ferrix_sched::MAX_CPUS] =
-    [const { AtomicBool::new(false) }; ferrix_sched::MAX_CPUS];
+static VFP_ON: [AtomicBool; ferrix_sched_class::MAX_CPUS] =
+    [const { AtomicBool::new(false) }; ferrix_sched_class::MAX_CPUS];
 
 /// This processor's record, once its per-CPU register is installed.
 fn vfp_record() -> Option<&'static AtomicBool> {
