@@ -195,6 +195,13 @@
       "branch": "driver-model-step1",
       "date": "2026-10-25",
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
+    },
+    {
+      "ids": ["H.SCHED.18-23", "L.sched.102-130"],
+      "owner": "sched-classes",
+      "branch": "feature/ferrix-roadmap-completion-hkxlpp",
+      "date": "2026-10-28",
+      "purpose": "docs/SCHED-CLASSES.md steps 3b to 5 (stage 14, the consultant's OK IF D1-D13, G1-G10, F1-F16, R1-R15 and V1-V16, ledger lines 26 to 32): H.SCHED.18-20 and L.sched.102-117 for the class-crate record, the stack of two tiers and SCHED_FIFO/SCHED_RR above fair, written on the branch (111 and 117 withdrawn there); H.SCHED.21-23 and L.sched.118-130 for step 5's SoftRt domain made at run time. Released in the commits that write them"
     }
   ]
 }
