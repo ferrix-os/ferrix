@@ -4537,3 +4537,76 @@ fn a_window_over_a_fullscreen_one_is_undecorated() {
     );
     assert!(asked.gradients.is_empty(), "{:?}", asked.gradients);
 }
+
+/// Yoru's decorations change with the focus beyond the border: the shadow
+/// is darker under the focused window (`shadow:color_inactive`) and the
+/// glow is the focused one's alone. A focus change drawn through the damage
+/// a compositor owes it -- what moved or recoloured grown by the shadow's
+/// and the glow's reach, as hyprix grows it, and the rings -- is the frame
+/// a full redraw makes. It was not when a focus change was owed only the
+/// two rings: the old focus's shadow and glow stayed on the screen as
+/// hard-edged slabs (the N150, 2026-10-28).
+#[test]
+fn a_focus_change_recolouring_shadow_and_glow_redraws_them() {
+    let (_, before) = two_clients();
+    let buffers = client_buffers(&before);
+    let surfaces = surfaces(&buffers);
+    let base = plain_style();
+    let shadow = crate::Shadow {
+        rounding: Rounding::circle(8),
+        range: 40,
+        power: 2,
+        color: Color(0x8C00_0000),
+        offset: (0, 16),
+    };
+    let style = Style {
+        rounding: Rounding::circle(8),
+        shadow: Some(shadow),
+        shadow_inactive: Some(Color(0x6600_0000)),
+        glow: Some(crate::Shadow {
+            range: 36,
+            power: 3,
+            color: Color(0x4091_84D9),
+            offset: (0, 0),
+            ..shadow
+        }),
+        ..base
+    };
+    let styles = Styles::plain(&style);
+    let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let _ = render(
+        &mut canvas,
+        &before,
+        (0, 0),
+        &style,
+        &surfaces,
+        &Damage::full(WIDTH, HEIGHT),
+    );
+    let mut after = before.clone();
+    for placed in &mut after.windows {
+        placed.focused = !placed.focused;
+    }
+    let (moved, rings) = crate::damage_between_parts(&before, &after, (0, 0), &styles);
+    // hyprix's margin: each side by the further of the shadow's and the
+    // glow's range and offset.
+    let mut damage: Damage = moved
+        .rects()
+        .iter()
+        .map(|rect| Rect::new(rect.x - 40, rect.y - 56, rect.width + 80, rect.height + 112))
+        .collect();
+    damage.extend(&rings);
+    let _ = render(&mut canvas, &after, (0, 0), &style, &surfaces, &damage);
+    let mut fresh = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let _ = render(
+        &mut fresh,
+        &after,
+        (0, 0),
+        &style,
+        &surfaces,
+        &Damage::full(WIDTH, HEIGHT),
+    );
+    assert!(
+        canvas.data() == fresh.data(),
+        "a focus change left the old focus's shadow or glow on the screen"
+    );
+}

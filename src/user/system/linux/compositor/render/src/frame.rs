@@ -1647,12 +1647,7 @@ pub fn damage_between_parts(
     // shows only where they overlap, shadows included. A focused window is
     // raised, so a focus change restacks; tiled windows do not overlap, and
     // for them the order changes no pixel at all.
-    let reach = styles.base.shadow.map_or(0, |shadow| {
-        shadow
-            .range
-            .saturating_add(shadow.offset.0.abs().max(shadow.offset.1.abs()))
-            .max(0)
-    });
+    let reach = decoration_reach(styles.base);
     let reached = |placed: &Placed| {
         let box_ = outer(placed);
         Rect::new(
@@ -1692,8 +1687,32 @@ pub fn damage_between_parts(
     (damage, rings)
 }
 
+/// How far outside a window's border box its shadow or its glow reaches,
+/// whichever is further, on any side.
+fn decoration_reach(style: &Style) -> i64 {
+    let reach = |shadow: &Shadow| {
+        shadow
+            .range
+            .saturating_add(shadow.offset.0.abs().max(shadow.offset.1.abs()))
+            .max(0)
+    };
+    style
+        .shadow
+        .as_ref()
+        .map_or(0, reach)
+        .max(style.glow.as_ref().map_or(0, reach))
+}
+
 /// Whether focusing or unfocusing `placed` changes nothing of it but its
-/// border: it shows as much of itself and is dimmed alike either way.
+/// border: it shows as much of itself and is dimmed alike either way, and
+/// its shadow and glow are the same colour either way.
+///
+/// The shadow and the glow reach far outside the ring: a focus change that
+/// recolours them -- `shadow:color_inactive`, or a glow round the focused
+/// window only, both Yoru's -- owes the window's whole decorated box, or
+/// the old focus's shadow stays on the screen beside the new one's (the
+/// N150, 2026-10-28: hard-edged dark slabs and stale strips under a window
+/// after the focus moved).
 fn focus_is_border_only(styles: &Styles<'_>, placed: &Placed) -> bool {
     let style = styles.base;
     let own = styles.of(placed.window);
@@ -1702,7 +1721,18 @@ fn focus_is_border_only(styles: &Styles<'_>, placed: &Placed) -> bool {
             .unwrap_or_else(|| style.opacity(focused, placed.fullscreen))
     };
     let dimmed = style.dim > 0.0 && own.dim;
-    opacity(true).to_bits() == opacity(false).to_bits() && !dimmed
+    let decorated = own.shadow && own.decorate && !fullscreen(placed);
+    let shadow_alike = style
+        .shadow
+        .as_ref()
+        .filter(|_| decorated)
+        .is_none_or(|shadow| style.shadow_inactive.unwrap_or(shadow.color) == shadow.color);
+    let glow_alike = style
+        .glow
+        .as_ref()
+        .filter(|_| decorated)
+        .is_none_or(|glow| style.glow_inactive == Some(glow.color));
+    opacity(true).to_bits() == opacity(false).to_bits() && !dimmed && shadow_alike && glow_alike
 }
 
 /// The part of `placed`'s box a change of its border's colour repaints:

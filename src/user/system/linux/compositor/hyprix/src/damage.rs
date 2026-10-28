@@ -477,12 +477,19 @@ impl Plan {
             .values()
             .filter_map(|style| style.border)
             .fold(0, i64::max);
-        let (wide, tall) = self.style.shadow.map_or((0, 0), |shadow| {
+        // The glow is drawn as the shadow is, round the focused window, and
+        // may reach further than it.
+        let reach = |shadow: &compositor_render::Shadow| {
             (
                 shadow.range.saturating_add(shadow.offset.0.abs()),
                 shadow.range.saturating_add(shadow.offset.1.abs()),
             )
-        });
+        };
+        let (shadow, glow) = (
+            self.style.shadow.as_ref().map_or((0, 0), reach),
+            self.style.glow.as_ref().map_or((0, 0), reach),
+        );
+        let (wide, tall) = (shadow.0.max(glow.0), shadow.1.max(glow.1));
         (
             wide.saturating_add(border).max(0),
             tall.saturating_add(border).max(0),
