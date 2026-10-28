@@ -175,6 +175,8 @@ struct Frame {
     damage: Damage,
     /// The first op that could not be drawn, and its code.
     bad: Option<(u32, String)>,
+    /// The client dmabufs the frame samples.
+    sampled: Vec<u64>,
 }
 
 /// Why the conversation ends.
@@ -197,6 +199,8 @@ pub struct Server {
     textures: HashMap<u64, Texture>,
     arenas: HashMap<u32, Arena>,
     frame: Option<Frame>,
+    /// The descriptors of the client dmabufs imported, by texture.
+    dmabufs: HashMap<u64, OwnedFd>,
     /// The driver's name, for `Ready`.
     driver: String,
     /// Whether a finished output's lines are flushed from the processor's
@@ -272,6 +276,7 @@ impl Server {
             textures: HashMap::new(),
             arenas: HashMap::new(),
             frame: None,
+            dmabufs: HashMap::new(),
             driver,
             flush_outputs: std::env::var_os("HYPRIX_GPU_OUTPUT_FLUSH").is_some_and(|v| v == "1"),
         }
@@ -347,14 +352,7 @@ impl Server {
                 planes,
             } => {
                 if let (Some(fd), Some(plane)) = (fds.next(), planes.first()) {
-                    self.import(
-                        texture,
-                        fd.as_fd(),
-                        (width, height),
-                        fourcc,
-                        modifier,
-                        *plane,
-                    );
+                    self.import(texture, fd, (width, height), fourcc, modifier, *plane);
                 }
                 Ok(())
             }
@@ -408,6 +406,7 @@ impl Server {
                     output,
                     damage,
                     bad: None,
+                    sampled: Vec::new(),
                 });
                 Ok(())
             }
@@ -589,7 +588,7 @@ impl Server {
     fn import(
         &mut self,
         texture: u64,
-        fd: BorrowedFd<'_>,
+        fd: OwnedFd,
         (width, height): (u32, u32),
         fourcc: u32,
         modifier: u64,
@@ -603,8 +602,11 @@ impl Server {
             offset: plane.offset,
             modifier,
         };
-        match self.device.import(fd, &layout) {
+        match self.device.import(fd.as_fd(), &layout) {
             Ok(Some(id)) => {
+                // Kept to wait on the client's writes before each frame that
+                // samples it (`implicit_fence`).
+                let _ = self.dmabufs.insert(texture, fd);
                 let _ = self.textures.insert(
                     texture,
                     Texture {
@@ -620,6 +622,7 @@ impl Server {
 
     /// Let texture `texture` go.
     fn forget(&mut self, texture: u64) {
+        let _ = self.dmabufs.remove(&texture);
         if let Some(gone) = self.textures.remove(&texture) {
             let _ = self.device.release(gone.image.id);
         }
@@ -651,6 +654,12 @@ impl Server {
             return;
         }
         let damage = frame.damage.clone();
+        if let Op::Composite { texture, .. } | Op::CompositeScaled { texture, .. } = op
+            && self.dmabufs.contains_key(texture)
+            && !frame.sampled.contains(texture)
+        {
+            frame.sampled.push(*texture);
+        }
         if let Op::Upload {
             texture,
             rect: r,
@@ -811,6 +820,14 @@ impl Server {
         };
         let (canvas_id, output) = (frame.canvas, frame.output);
         let mut why = frame.bad;
+        // A client's buffer is read once its writes are done: the fences
+        // its dmabuf holds, as Mesa's WSI waits for them, so a game's
+        // half-drawn frame is never composited.
+        for texture in &frame.sampled {
+            if let Some(fd) = self.dmabufs.get(texture) {
+                implicit_fence(fd.as_fd());
+            }
+        }
         if let Some(canvas) = self.canvases.get_mut(&canvas_id) {
             let flushed = into_output(&self.device, canvas, output, present, why.is_some())
                 .map_err(|failed| why = why.clone().or(Some(failed)))
@@ -890,6 +907,47 @@ impl Server {
             }
         }
     }
+}
+
+/// `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`: `_IOWR('b', 2, struct
+/// dma_buf_export_sync_file)`.
+const EXPORT_SYNC_FILE: libc::c_ulong = 0xc008_6202;
+
+/// `DMA_BUF_SYNC_READ`: the fences a reader waits for, the writers'.
+const SYNC_READ: u32 = 1;
+
+/// How long a client's writes are waited for before the frame is drawn
+/// anyway: a GPU that never signals must not stop the desktop.
+const FENCE_WAIT_MS: libc::c_int = 100;
+
+/// Wait, at most [`FENCE_WAIT_MS`], for the writes pending on the dmabuf
+/// `fd`: its implicit fence, exported as a sync file and polled. A kernel
+/// or a buffer that has none is not waited for.
+fn implicit_fence(fd: BorrowedFd<'_>) {
+    #[repr(C)]
+    struct Export {
+        flags: u32,
+        fd: i32,
+    }
+    let mut export = Export {
+        flags: SYNC_READ,
+        fd: -1,
+    };
+    // SAFETY: the ioctl writes a descriptor into `export`, which lives
+    // across the call.
+    let asked = unsafe { libc::ioctl(fd.as_raw_fd(), EXPORT_SYNC_FILE, &raw mut export) };
+    if asked != 0 || export.fd < 0 {
+        return;
+    }
+    // SAFETY: a new descriptor the kernel handed to us alone.
+    let fence = unsafe { <OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(export.fd) };
+    let mut wanted = libc::pollfd {
+        fd: fence.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one pollfd, living across the call.
+    let _ = unsafe { libc::poll(&raw mut wanted, 1, FENCE_WAIT_MS) };
 }
 
 /// The rows of an output written, its number and its stride.

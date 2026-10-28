@@ -397,11 +397,56 @@ fn a_frame_through_the_socket_lands_in_the_output() {
         matches!(refused, Message::Failed { .. }),
         "an unreleased output was drawn into: {refused:?}"
     );
-    // Output 1 was never handed out, and output 0 once it is back.
+    // Output 1 was never handed out, and output 0 once it is back. Where
+    // the outputs are dmabufs, output 0's -- the picture above -- is a
+    // client's dmabuf drawn whole into output 1: an import, sampled in
+    // place, after its writes are waited for.
+    let dmabufs = modifier == crate::vulkan::LINEAR;
+    let ops = if dmabufs {
+        send(
+            &wire,
+            &Message::ImportDmabuf {
+                texture: 8,
+                width: SIZE.0,
+                height: SIZE.1,
+                fourcc: protocol::XRGB8888,
+                modifier,
+                planes: vec![plane],
+            },
+            &[&fds[0]],
+        );
+        vec![
+            Op::Damage(vec![whole]),
+            Op::Composite {
+                texture: 8,
+                src: whole,
+                rect: whole,
+            },
+        ]
+    } else {
+        vec![Op::Clear(0xff00_0000)]
+    };
     assert!(matches!(
-        frame(&wire, 3, 1, &[Op::Clear(0xff00_0000)]),
+        frame(&wire, 3, 1, &ops),
         Message::Done { output: 1, .. }
     ));
+    if dmabufs {
+        let plane = planes[1];
+        let bytes = mapped(
+            &fds[1],
+            plane.offset as usize + plane.stride as usize * SIZE.1 as usize,
+        );
+        let mut copied = Vec::with_capacity(row * SIZE.1 as usize);
+        for y in 0..SIZE.1 as usize {
+            let start = plane.offset as usize + y * plane.stride as usize;
+            copied.extend_from_slice(&bytes[start..start + row]);
+        }
+        let (count, furthest) = difference(&copied, software.data(), STEP);
+        assert!(
+            count < 32,
+            "the imported dmabuf drawn: {count} pixels more than {STEP} apart, the furthest {furthest}"
+        );
+    }
     send(
         &wire,
         &Message::Release {
