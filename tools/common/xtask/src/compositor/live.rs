@@ -59,7 +59,17 @@ const LIVE_LINES: &str = "# The live session (cargo xtask iso): the installer op
 exec-once = /bin/ferrix-installer --autostart\n";
 
 /// The live session's words after the image's own command line.
-const LIVE_WORDS: &str = "ferrix.root=tmpfs ferrix.live";
+///
+/// `ferrix.efifb` lends the firmware's framebuffer to `efifb` where it is
+/// a GPU's memory, so a PC whose GPU Ferrix does not drive -- nearly every
+/// PC, and the display adapters of `VirtualBox` and `VMware` -- shows the desktop at the
+/// firmware's mode instead of the loader's last screen; where firmware's
+/// framebuffer is RAM, as virtio-gpu's in QEMU, it is not lent and nothing
+/// changes (`docs/DISPLAY.md` §8). `ferrix.fbcon` draws the boot log on that
+/// screen until then, which is the only log a person at a PC sees. The
+/// installer keeps both for the installed system and drops only the live
+/// root and `ferrix.live`. Neither is a configuration a claim is made of.
+const LIVE_WORDS: &str = "ferrix.root=tmpfs ferrix.live ferrix.efifb ferrix.fbcon";
 
 /// The units the installer brings, as `(name, text)`; each is wanted by
 /// `graphical.target`.
@@ -516,6 +526,10 @@ fn tzdata_version() -> Result<String> {
         .ok_or_else(|| Error::new(format!("{path} has no `# version` line")))
 }
 
+/// What Yoru, the desktop both the live session and the installed system
+/// start by default, says when its dock is up (`yoru-shell`).
+const YORU_DOCK: &str = "yoru-shell: the dock is up";
+
 /// `cargo xtask test-iso`: see the module documentation.
 pub(crate) fn test_iso(args: &Args) -> Result<()> {
     let built = build(args)?;
@@ -537,6 +551,10 @@ pub(crate) fn test_iso(args: &Args) -> Result<()> {
             (
                 "ferrix-installer: the window is up",
                 "the graphical installer never opened its window",
+            ),
+            (
+                YORU_DOCK,
+                "Yoru, the default desktop, never put up its dock",
             ),
         ] {
             if !said.iter().any(|line| line.contains(wanted)) {
@@ -690,6 +708,31 @@ fn answers_disk(path: &Path, text: &str) -> Result<()> {
         .map_err(|error| Error::new(format!("writing {}: {error}", path.display())))
 }
 
+/// What the installed disk's boot must say, each with what its absence means.
+const INSTALLED_SAYS: [(&str, &str); 6] = [
+    (
+        "/ is btrfs on vdd2; the system was installed on it",
+        "the installed disk did not put / on its root partition",
+    ),
+    (
+        "ferrix-setup: this system is kira's, named kiras-pc",
+        "the first boot did not apply the answers",
+    ),
+    (
+        "sessiond: seat0's session for kira (uid 1000)",
+        "the session did not start as the person's account",
+    ),
+    ("hyprlock: locked", "the session did not start locked"),
+    (
+        YORU_DOCK,
+        "the installed system's session is not Yoru (no dock)",
+    ),
+    (
+        "hyprlock: authenticated",
+        "the person's password did not open it",
+    ),
+];
+
 /// `cargo xtask test-iso-install`: the live ISO, attached as a disk Ferrix
 /// drives, installs onto a blank disk with the unattended answers of
 /// [`gate_answers`] -- the graphical installer's own daemon and engine,
@@ -730,6 +773,7 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
         ..args.clone()
     };
     let dump = dir.join("iso-installed-locked.ppm");
+    let unlocked = dir.join("iso-installed-desktop.ppm");
     let mut said = Vec::new();
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         watching.stop_when_done();
@@ -752,6 +796,9 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
         let _ = watching.read_more(Instant::now() + Duration::from_secs(90), |lines| {
             lines.iter().any(|line| line.contains("hyprlock: unlocked"))
         })?;
+        // The desktop behind the lock, for whoever reads the run: Yoru's.
+        std::thread::sleep(Duration::from_secs(5));
+        qmp.screendump(Some(DEVICE_ID), &unlocked)?;
         said = watching
             .lines()
             .iter()
@@ -768,25 +815,7 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
         super::EITHER,
         hook,
     )?;
-    for (wanted, problem) in [
-        (
-            "/ is btrfs on vdd2; the system was installed on it",
-            "the installed disk did not put / on its root partition",
-        ),
-        (
-            "ferrix-setup: this system is kira's, named kiras-pc",
-            "the first boot did not apply the answers",
-        ),
-        (
-            "sessiond: seat0's session for kira (uid 1000)",
-            "the session did not start as the person's account",
-        ),
-        ("hyprlock: locked", "the session did not start locked"),
-        (
-            "hyprlock: authenticated",
-            "the person's password did not open it",
-        ),
-    ] {
+    for (wanted, problem) in INSTALLED_SAYS {
         if !said.iter().any(|line| line.contains(wanted)) {
             return Err(Error::new(format!(
                 "{arch}: {problem} (no `{wanted}`); the serial log has the rest"
@@ -795,8 +824,9 @@ pub(crate) fn test_iso_install(args: &Args) -> Result<()> {
     }
     println!(
         "  {arch}: the installed disk booted alone to {GATE_USER}'s locked session, and \
-         {GATE_USER}'s password opened it ({})",
-        dump.display()
+         {GATE_USER}'s password opened it to Yoru ({}, {})",
+        dump.display(),
+        unlocked.display()
     );
     Ok(())
 }
