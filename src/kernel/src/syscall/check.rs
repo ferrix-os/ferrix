@@ -11881,7 +11881,7 @@ fn check_a_start_takes_its_makers_policy(program: &Arc<Process>) -> Result<(), &
             outcome = Err("a native start under a SCHED_FIFO maker could not be prepared");
             break;
         };
-        let got = prepared.task().rt_params();
+        let got = prepared.task().rt_word().params();
         drop(prepared);
         if got != want {
             outcome = Err(wrong);

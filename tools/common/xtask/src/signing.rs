@@ -765,7 +765,7 @@ mod tests {
         assert!(
             development[1]
                 .1
-                .starts_with("profile=255 claimed=0 families=257,258,513,514,769,770")
+                .starts_with("profile=255 claimed=0 families=257,258,513,514,516,769,770")
         );
         // The same profile at level none is not claimed.
         assert!(env("present", "none")[1].1.contains("claimed=0"));

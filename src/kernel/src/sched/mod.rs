@@ -1473,7 +1473,7 @@ pub fn current_resets_on_fork() -> bool {
 /// # Errors
 ///
 /// The [`ferrix_sched_class::DomainError`] of the refusal.
-pub fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
+pub(crate) fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
     if !ferrix_kernel_sched_select::mode_available(mode) {
         return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
     }
@@ -2902,6 +2902,35 @@ fn pick_and_switch(interrupted_user: bool) {
     finish_switch();
 }
 
+/// The running task's place at a decision, before the pick: one that stopped
+/// being runnable leaves the queue (filed as a sleeper if it sleeps), and
+/// one still runnable whose policy changed moves to its new tier.
+fn settle_previous(queue: &mut CpuQueue, previous: &Arc<Task>) {
+    if previous.state() != RUNNABLE {
+        queue.detach_current();
+        // Taken either way, filed only for a task that can wake: a dead task
+        // in the sleeper set is a dead task the timer makes runnable.
+        if let Some(at) = previous.take_sleep_deadline()
+            && !previous.is_dead()
+            && !queue.file_sleeper(at, previous)
+        {
+            // No sleep slot to file it in: it runs on, and its sleep returns
+            // early and asks again. See `CpuQueue::file_sleeper`.
+            previous.set_state(RUNNABLE);
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+            queue.insert(previous);
+        }
+    }
+
+    // A running task whose policy changed moves to its new tier here, where
+    // the pick after this makes the stack's running entity this processor's
+    // task again under the same lock hold (`CpuQueue::set_policy`). Read
+    // again: a task the block above filed back as runnable is one too.
+    if previous.state() == RUNNABLE {
+        queue.requeue_if_moved(previous);
+    }
+}
+
 /// Choose what runs next, leaving the queue's lock held and returning where
 /// to save this context and what to resume — or releasing the lock and
 /// returning `None` when nothing has to change.
@@ -2922,27 +2951,8 @@ fn choose_next(
     wake_sleepers_placing(queue, cpu, now);
 
     let previous = queue.current.clone();
-    if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
-        queue.detach_current();
-        // Taken either way, filed only for a task that can wake: a dead task
-        // in the sleeper set is a dead task the timer makes runnable.
-        if let Some(at) = previous.take_sleep_deadline()
-            && !previous.is_dead()
-            && !queue.file_sleeper(at, previous)
-        {
-            // No sleep slot to file it in: it runs on, and its sleep returns
-            // early and asks again. See `CpuQueue::file_sleeper`.
-            previous.set_state(RUNNABLE);
-            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-            queue.insert(previous);
-        }
-    }
-
-    // A running task whose policy changed moves to its new tier here, where
-    // the pick below makes the stack's running entity this processor's
-    // task again under the same lock hold (`CpuQueue::set_policy`).
-    if let Some(previous) = previous.as_ref().filter(|task| task.state() == RUNNABLE) {
-        queue.requeue_if_moved(previous);
+    if let Some(previous) = previous.as_ref() {
+        settle_previous(queue, previous);
     }
     let next = queue.pick_next();
     if queue.stats.measuring {

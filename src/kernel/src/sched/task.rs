@@ -734,12 +734,12 @@ impl Task {
     }
 
     /// Its real-time policy and priority, `None` under `SCHED_OTHER`.
-    pub fn rt_params(&self) -> Option<RtParams> {
+    pub(crate) fn rt_params(&self) -> Option<RtParams> {
         self.rt_word().params()
     }
 
     /// Whether it is scheduled by the fair class: `SCHED_OTHER`.
-    pub fn is_fair(&self) -> bool {
+    pub(crate) fn is_fair(&self) -> bool {
         self.rt_params().is_none()
     }
 
