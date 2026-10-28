@@ -1161,6 +1161,7 @@ impl<'r> Compositor<'r> {
             self.carried
                 .as_ref()
                 .is_some_and(crate::dragging::Carried::holding),
+            self.drag.is_some(),
         )
     }
 

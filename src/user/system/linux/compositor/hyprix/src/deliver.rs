@@ -360,7 +360,7 @@ pub struct Done {
 /// is the caller's. Everything else is sent as it goes.
 #[expect(
     clippy::too_many_arguments,
-    reason = "an action reaches the focus, the layout, every connection, the clock, one option and the drag"
+    reason = "an action reaches the focus, the layout, every connection, the clock, one option, the drag and the grab"
 )]
 pub fn deliver(
     actions: &[Action],
@@ -372,6 +372,7 @@ pub fn deliver(
     stamp: u64,
     follow_mouse: bool,
     dragging: bool,
+    grabbed: bool,
 ) -> Done {
     let placements = with_popups(placements(state, sources), slots, state, sources);
     let mut done = Done::default();
@@ -428,6 +429,17 @@ pub fn deliver(
                 // window is told, and a `wl_pointer.enter` mid-drag would
                 // look to it like a click.
                 if dragging {
+                    continue;
+                }
+                // Nor while a window is moved or resized by its title bar,
+                // its border or a mouse bind: the grabbed window keeps the
+                // pointer and the focus until the button goes up, whatever
+                // the pointer is over, as in Hyprland (a mouse bind's drag
+                // returns from `mouseMoveUnified` before any focus). A fast
+                // drag outruns the window it moves, and the window under
+                // the pointer for that moment was focused and raised over
+                // the one being dragged (the customer, N150, 2026-10-28).
+                if grabbed {
                     continue;
                 }
                 if let Some((local_x, local_y)) = focus.move_pointer(&placements, slots, (*x, *y))
@@ -701,6 +713,79 @@ mod tests {
     use super::{
         ObjectId, Placement, Source, WindowId, placements, surface_point, under_pointer, window_at,
     };
+
+    /// A fast drag by the title bar outruns the window: for a moment the
+    /// pointer is over the window behind. While the grab is on, that window
+    /// is not focused (and so not raised) and its client is not told the
+    /// pointer entered it; with no grab, the same motion focuses it.
+    #[test]
+    fn a_grabbed_window_keeps_the_focus_whatever_the_pointer_crosses() {
+        use compositor_layout::{Monitor, MonitorId, Rect};
+
+        use crate::seat::Action;
+
+        let text = "general:layout = floating\n";
+        let config =
+            compositor_config::parse("test", text, &mut compositor_config::NoSources).config;
+        let mut state = State::from_config(&config);
+        let _changes = state
+            .add_monitor(Monitor {
+                scale: 1.0,
+                transform: Default::default(),
+                name: "DVI-D-1".to_owned(),
+                id: MonitorId(1),
+                rect: Rect::new(0, 0, 1920, 1080),
+                reserved: compositor_layout::Gaps::all(0),
+                description: String::new(),
+                made: <(String, String, String)>::default(),
+            })
+            .unwrap();
+        let below = WindowId(1);
+        let dragged = WindowId(2);
+        let _changes = state
+            .open_floating(below, Rect::new(100, 100, 800, 600))
+            .unwrap();
+        let _changes = state
+            .open_floating(dragged, Rect::new(1000, 200, 600, 400))
+            .unwrap();
+        let _changes = state.focus_window(dragged).unwrap();
+        let sources: BTreeMap<WindowId, Source> = [
+            (
+                below,
+                Source {
+                    client: 0,
+                    surface: ObjectId(3),
+                },
+            ),
+            (
+                dragged,
+                Source {
+                    client: 1,
+                    surface: ObjectId(3),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        // One large step of the pointer, onto the window below.
+        let over_below = [Action::Pointer { x: 400.0, y: 300.0 }];
+        for (grabbed, wanted) in [(true, None), (false, Some(below))] {
+            let mut focus = super::Focus::new();
+            let done = super::deliver(
+                &over_below,
+                &mut focus,
+                &state,
+                &mut [],
+                &sources,
+                0,
+                0,
+                true,
+                false,
+                grabbed,
+            );
+            assert_eq!(done.focus, wanted, "grabbed {grabbed}");
+        }
+    }
 
     /// Chrome's surface is its window and 10 pixels of shadow all round;
     /// the frame draws only the window into the tile, so the pointer at the
