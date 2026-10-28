@@ -451,10 +451,11 @@ impl<B: Backend> Renderer<B> {
         &mut self.backend
     }
 
-    /// Draw a texture the caller made through [`Renderer::backend`] --
-    /// one moved into by the caller -- as a surface would be drawn:
-    /// stretched over `rect`, corners cut, at `opacity`. Its alpha is read
-    /// as one when `opaque` (an XRGB8888 buffer's).
+    /// Draw a texture the caller made through [`Renderer::backend`] -- one
+    /// it moved pixels into itself, or a dmabuf it imported -- as a surface
+    /// is drawn: the whole texture stretched over `across`, drawn only
+    /// inside `shape`'s rectangle with its corners cut, at `opacity`. Its
+    /// alpha is read as one when `opaque` (an XRGB8888 buffer's).
     #[expect(
         clippy::too_many_arguments,
         reason = "a surface's draw is its texture, its place, its shape and how it is mixed"
@@ -463,17 +464,17 @@ impl<B: Backend> Renderer<B> {
         &mut self,
         image: Image,
         opaque: bool,
-        rect: Rect,
-        rounding: Rounding,
+        across: Rect,
+        shape: (Rect, Rounding),
         opacity: f32,
         nearest: bool,
         damage: &Damage,
     ) {
         let opacity = opacity.clamp(0.0, 1.0);
-        if self.failed.is_some() || opacity == 0.0 || rect.width <= 0 || rect.height <= 0 {
+        if self.failed.is_some() || opacity == 0.0 || across.width <= 0 || across.height <= 0 {
             return;
         }
-        let quads = Self::clips(rect, damage, Painter::bounds(self));
+        let quads = Self::clips(shape.0, damage, Painter::bounds(self));
         if quads.is_empty() {
             return;
         }
@@ -487,12 +488,18 @@ impl<B: Backend> Renderer<B> {
             image,
             opaque,
             filter,
-            rect,
-            (rect, rounding),
+            across,
+            shape,
             opacity,
             Blend::Over,
             &quads,
         );
+    }
+
+    /// The texture the frame is drawn into.
+    #[must_use]
+    pub const fn target(&self) -> Image {
+        self.target
     }
 
     /// A descriptor for the frame's own texture that a card can be shown, if

@@ -206,3 +206,26 @@ impl<B: Backend> Renderer<B> {
         Some(blurred)
     }
 }
+
+impl<B: Backend> Renderer<B> {
+    /// Let go of every texture this renderer made, and those `backdrop`
+    /// holds: a backend that outlives its renderer -- one device drawing
+    /// several screens, one of them gone or made again at a new size --
+    /// would otherwise keep them.
+    pub fn dispose(mut self, backdrop: Option<&mut Backdrop>) -> B {
+        let mut images = vec![self.target];
+        images.append(&mut self.levels);
+        images.extend(self.blurred.take());
+        images.extend(self.surfaces.values().map(|kept| kept.image));
+        images.extend(self.imports.values().map(|kept| kept.image));
+        images.append(&mut self.spare);
+        images.extend(self.ramps.drain(..).map(|(_, image)| image));
+        if let Some((sharp, blurred)) = backdrop.and_then(|backdrop| backdrop.images.take()) {
+            images.extend([sharp, blurred]);
+        }
+        for image in images {
+            let _ = self.backend.release(image.id);
+        }
+        self.backend
+    }
+}
