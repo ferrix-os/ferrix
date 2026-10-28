@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3016 declarations in the core's files, 215 in the item's; 245 checks-only.
+2411 declarations in the core's files, 175 in the item's; 78 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2917,8 +2917,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `BASE_SLICE_NS` | const | load |  |
 | `REAPER_PATIENCE_NANOS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `ServiceRefusal` | enum | item, load |  |
-| `SyncPlaced` | enum | load (checks) | checks-only |
+| `PolicyRefused` | enum | load |  |
 | `ask_for_a_decision_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `bandwidth_walks` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `begin_leaving` | fn | load |  |
@@ -2928,6 +2927,7 @@ checks above is `pub` for raised checks (F3).
 | `cpu_times` | fn | load |  |
 | `current` | fn | item, load |  |
 | `current_id` | fn | load |  |
+| `current_resets_on_fork` | fn | load |  |
 | `current_runtime` | fn | load |  |
 | `decision_pending_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `drained` | fn | load |  |
@@ -2942,17 +2942,17 @@ checks above is `pub` for raised checks (F3).
 | `pending_group_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `preemption_held` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `prepare_user` | fn | load |  |
-| `reap` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `realtime_built` | fn | load |  |
+| `reap` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `rearm_timers` | fn | load |  |
 | `refusal_while_pinned` | fn | load (checks) | checks-only |
 | `regroup_current` | fn | item |  |
-| `rehomed` | fn | load |  |
-| `running_bare` | fn | item |  |
+| `rr_quantum_ns` | fn | load |  |
 | `running_group` | fn | item, load |  |
 | `running_restricted` | fn | item |  |
 | `set_current_group` | fn | item, load |  |
 | `set_in_call_masked` | fn | item |  |
-| `set_request` | fn | load |  |
+| `set_policy` | fn | load |  |
 | `set_weight` | fn | load |  |
 | `sleep_for` | fn | item, load |  |
 | `sleep_until` | fn | load |  |
@@ -3134,9 +3134,12 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Task` | struct | item, load, bin |  |
+| `RtWord` | struct | - |  |
+| `Task` | struct | item, load |  |
 | `UserThread` | trait | load |  |
 | `TaskId` | type | load |  |
+| `RtWord::params` | method | load |  |
+| `RtWord::resets_on_fork` | method | load |  |
 | `Task::id` | field | item, load, bin |  |
 | `Task::address_space` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::affinity` | method | load |  |
@@ -3151,10 +3154,10 @@ checks above is `pub` for raised checks (F3).
 | `Task::is_blocked` | method | load |  |
 | `Task::is_dead` | method | load |  |
 | `Task::is_queued` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Task::kernel_time` | method | item, load |  |
-| `Task::preemptions` | method | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
-| `Task::request_ns` | method | load |  |
-| `Task::runtime` | method | item, load |  |
+| `Task::kernel_time` | method | load |  |
+| `Task::preemptions` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Task::rt_word` | method | load |  |
+| `Task::runtime` | method | load |  |
 | `Task::state` | method | item, load, bin |  |
 | `Task::switches` | method | load, bin |  |
 | `Task::take_reply` | method | item |  |
