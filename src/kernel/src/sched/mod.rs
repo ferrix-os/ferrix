@@ -1599,7 +1599,7 @@ pub fn current_resets_on_fork() -> bool {
 /// # Errors
 ///
 /// The [`ferrix_sched_class::DomainError`] of the refusal.
-pub fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
+pub(crate) fn make_domain(cpus: CpuSet, mode: Mode) -> Result<Domain, ferrix_sched_class::DomainError> {
     if !ferrix_kernel_sched_select::mode_available(mode) {
         return Err(ferrix_sched_class::DomainError::ModeUnavailable(mode));
     }
@@ -3825,68 +3825,32 @@ fn pick_and_switch(interrupted_user: bool) {
     finish_switch();
 }
 
-/// The next task for `cpu`'s queue: its idle task whenever the processor
-/// is not fully in service -- asked to park, parked, or on its way back --
-/// which parks it or brings it back (L.sched.105); else the queue's pick.
-/// An interrupt that reschedules a parked processor so finds its idle task
-/// again, never a task queued there, which its drain moves off.
-fn pick_or_park(queue: &mut CpuQueue, cpu: usize) -> Option<Arc<Task>> {
-    if park_state(cpu) != ACTIVE_STATE {
-        queue.park_pick()
-    } else {
-        queue.pick_next()
-    }
-}
-
-/// [`pick_or_park`], with the pick push (L.sched.98): a queued task picked
-/// on `cpu` though its mask excludes it is moved to a processor it allows
-/// and the pick made again, at most once a queued task. `previous`, still
-/// this processor's, is never moved here.
-fn pick_inside(
-    queue: &mut CpuQueue,
-    cpu: usize,
-    previous: Option<&Arc<Task>>,
-) -> Option<Arc<Task>> {
-    loop {
-        let next = pick_or_park(queue, cpu)?;
-        let running = previous.is_some_and(|previous| Arc::ptr_eq(previous, &next));
-        if running || allowed(&next, cpu) {
-            return Some(next);
-        }
-        if !affinity::push_picked(queue, cpu, &next) {
-            return Some(next);
-        }
-    }
-}
-
-/// What `choose_next` does with the task that was running, `previous`,
-/// before it picks: taken off the queue if it leaves this processor with the
-/// switch, and off it and filed as a sleeper if it no longer runs.
-///
-/// Under `queue`'s lock, held manually by `choose_next`.
-fn depart(queue: &mut CpuQueue, cpu: usize, previous: &Arc<Task>) {
-    // Runnable and outside its mask here: it leaves this queue with the
-    // switch, and the switch's tail queues it where its mask allows
-    // (L.sched.99, `affinity::push_off`). Never queued here again first,
-    // where another processor could take it before its registers are saved.
-    if affinity::leaves_with_switch(queue, cpu, previous) {
+/// The running task's place at a decision, before the pick: one that stopped
+/// being runnable leaves the queue (filed as a sleeper if it sleeps), and
+/// one still runnable whose policy changed moves to its new tier.
+fn settle_previous(queue: &mut CpuQueue, previous: &Arc<Task>) {
+    if previous.state() != RUNNABLE {
         queue.detach_current();
+        // Taken either way, filed only for a task that can wake: a dead task
+        // in the sleeper set is a dead task the timer makes runnable.
+        if let Some(at) = previous.take_sleep_deadline()
+            && !previous.is_dead()
+            && !queue.file_sleeper(at, previous)
+        {
+            // No sleep slot to file it in: it runs on, and its sleep returns
+            // early and asks again. See `CpuQueue::file_sleeper`.
+            previous.set_state(RUNNABLE);
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+            queue.insert(previous);
+        }
     }
+
+    // A running task whose policy changed moves to its new tier here, where
+    // the pick after this makes the stack's running entity this processor's
+    // task again under the same lock hold (`CpuQueue::set_policy`). Read
+    // again: a task the block above filed back as runnable is one too.
     if previous.state() == RUNNABLE {
-        return;
-    }
-    queue.detach_current();
-    // Taken either way, filed only for a task that can wake: a dead task
-    // in the sleeper set is a dead task the timer makes runnable.
-    if let Some(at) = previous.take_sleep_deadline()
-        && !previous.is_dead()
-        && !queue.file_sleeper(at, previous)
-    {
-        // No sleep slot to file it in: it runs on, and its sleep returns
-        // early and asks again. See `CpuQueue::file_sleeper`.
-        previous.set_state(RUNNABLE);
-        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-        queue.insert(previous);
+        queue.requeue_if_moved(previous);
     }
 }
 
@@ -3911,14 +3875,7 @@ fn choose_next(
 
     let previous = queue.current.clone();
     if let Some(previous) = previous.as_ref() {
-        depart(queue, cpu, previous);
-    }
-
-    // A running task whose policy changed moves to its new tier here, where
-    // the pick below makes the stack's running entity this processor's
-    // task again under the same lock hold (`CpuQueue::set_policy`).
-    if let Some(previous) = previous.as_ref().filter(|task| task.state() == RUNNABLE) {
-        queue.requeue_if_moved(previous);
+        settle_previous(queue, previous);
     }
     let next = queue.pick_next();
     if queue.stats.measuring {

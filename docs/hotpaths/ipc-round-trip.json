@@ -42,7 +42,9 @@
       "src/kernel/src/sched/preempt.rs",
       "src/kernel/src/sched/borrow.rs",
       "src/kernel/src/user/space.rs",
-      "src/lib/kernel/sched",
+      "src/lib/kernel/sched-class",
+      "src/lib/kernel/sched-fair",
+      "src/lib/kernel/sched-fifo",
       "src/tests/loom",
       "tools/common/xtask/src/ipc.rs"
     ]
