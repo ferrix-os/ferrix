@@ -1013,6 +1013,9 @@ const LINUX_WORKSPACES: &[(&str, &str)] = &[
     // tole, the UI framework: a component (components.toml), checked out
     // beside the compositor's workspace.
     ("tole", "src/user/system/linux/tole"),
+    // The compositor's Vulkan helper (docs/GPU-COMPOSITOR.md): a glibc
+    // program, its tests on lavapipe where the host has it.
+    ("hyprix-gpu", "src/user/system/linux/hyprix-gpu"),
 ];
 
 /// `cargo xtask check-unit`: the one unit `FERRIX_CHECK_UNIT` names, as

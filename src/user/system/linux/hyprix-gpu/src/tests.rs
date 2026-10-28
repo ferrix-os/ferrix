@@ -28,13 +28,16 @@ const SIZE: (u32, u32) = (256, 192);
 /// How far apart a channel may be; the virgl painter's own step.
 const STEP: u8 = 3;
 
-/// lavapipe, or `None` with a line saying the test was skipped.
+/// lavapipe -- or the device whose name holds `HYPRIX_GPU_TEST_DEVICE`,
+/// which is how these tests run on a real GPU (anv on the N150) -- or
+/// `None` with a line saying the test was skipped.
 #[expect(
     clippy::print_stderr,
     reason = "a test that did not run says so where a person reading the run will see it"
 )]
 fn lavapipe(name: &str) -> Option<Vulkan> {
-    match tole::gpu::Core::new(false, Some("llvmpipe".to_owned()), None) {
+    let wanted = std::env::var("HYPRIX_GPU_TEST_DEVICE").unwrap_or_else(|_| "llvmpipe".to_owned());
+    match tole::gpu::Core::new(false, Some(wanted), None) {
         Ok(core) => Some(Vulkan::new(core).expect("the backend on lavapipe")),
         Err(why) => {
             eprintln!("{name}: no lavapipe ({why}); skipped");
