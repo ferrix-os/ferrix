@@ -125,6 +125,11 @@ What does not work, yet:
 - **Little hardware**: Ethernet only on virtio-net, the Motorcomm YT6801
   and some of Realtek's RTL8111/8168 family (no Intel Ethernet); no Wi-Fi,
   no Bluetooth; disks on AHCI SATA, NVMe and virtio.
+- **Very heavy programs.** Under heavy load the scheduler can run a driver
+  seconds late (F-95), so a very heavy program -- a large Windows game
+  under Proton, say -- can occasionally fail to start; and after such a
+  program is killed the system can stall for minutes, the network and
+  `ssh` not answering, before it recovers. Both were seen on the N150.
 - The dock's clock shows UTC whatever the time zone; programs (`date`, the
   lock screen's clock) follow the zone you chose.
 - The installer does not resize another system's partition, write a
