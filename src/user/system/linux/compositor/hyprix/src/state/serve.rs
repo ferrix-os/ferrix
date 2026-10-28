@@ -1362,5 +1362,8 @@ fn sampled_by_a_screen(
     screens
         .iter_mut()
         .filter_map(|screen| screen.gpu.as_mut())
-        .any(|gpu| gpu.canvas.imports(&surface))
+        .any(|gpu| match &mut gpu.canvas {
+            crate::gpu_canvas::GpuCanvas::Virgl(canvas) => canvas.imports(&surface),
+            crate::gpu_canvas::GpuCanvas::Helper(canvas) => canvas.imports(&surface),
+        })
 }

@@ -84,6 +84,9 @@ pub enum Renderer {
     /// virglrenderer's test server on this host, started by the compositor:
     /// the GPU's frames with no guest, which is how they are developed.
     Vtest,
+    /// hyprix-gpu (`docs/GPU-COMPOSITOR.md`), and it is an error for it not
+    /// to start: what a test of the helper's frames asks for.
+    Helper,
 }
 
 impl Default for Options {
@@ -123,7 +126,7 @@ usage: hyprix [options]
   --exec <command>    start this once the socket is listening, repeatable
   --deadline <ms>     give up after this long
   --instance <name>   bind hyprctl's socket under $XDG_RUNTIME_DIR/hypr/<name>
-  --renderer <which>  auto, software, gpu or vtest (default auto)
+  --renderer <which>  auto, software, gpu, vtest or helper (default auto)
   --settings <path>   the Settings app's file (default ~/.config/hypr/settings.conf)";
 
     /// Read the arguments.
@@ -171,9 +174,10 @@ usage: hyprix [options]
                         "software" => Renderer::Software,
                         "gpu" => Renderer::Gpu,
                         "vtest" => Renderer::Vtest,
+                        "helper" => Renderer::Helper,
                         other => {
                             return Err(format!(
-                                "--renderer takes auto, software, gpu or vtest, not {other}"
+                                "--renderer takes auto, software, gpu, vtest or helper, not {other}"
                             ));
                         }
                     };

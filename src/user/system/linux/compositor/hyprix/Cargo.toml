@@ -29,6 +29,10 @@ compositor-ipc = { path = "../ipc" }
 compositor-layout = { path = "../layout" }
 compositor-protocol = { path = "../protocol" }
 compositor-render = { path = "../render" }
+# What hyprix says to hyprix-gpu, the Vulkan helper (docs/GPU-COMPOSITOR.md).
+compositor-gpu-protocol = { path = "../gpu-protocol" }
+# The arena the helper reads clients' pixels from.
+compositor-shm = { path = "../shm" }
 # The title in a title bar the compositor draws (docs/DESKTOP.md §2.2).
 compositor-text = { path = "../text" }
 # The device a GPU frame's streams run on: the render node, or a host's

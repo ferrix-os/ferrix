@@ -558,6 +558,9 @@ impl<'r> Compositor<'r> {
             )],
             None => open_screens(&rules)?,
         };
+        crate::helper::set_mode(crate::helper::Mode::parse(
+            config.str("hyprix:gpu").unwrap_or("off"),
+        ));
         let screens = Screen::all(backends, &rules, options.renderer, report)?;
         // The `windowrule` lines, which are applied when a window maps.
         let window_rules = crate::rules::Rules::new(&config, report);
@@ -1781,6 +1784,9 @@ impl<'r> Compositor<'r> {
                 self.style = Style::from_config(&config);
                 let _ = self.state.set_settings(self.settings);
                 self.config = config;
+                crate::helper::set_mode(crate::helper::Mode::parse(
+                    self.config.str("hyprix:gpu").unwrap_or("off"),
+                ));
                 self.rebuild_animations();
                 (self.report)("hyprix: reloaded the configuration");
                 run_exec(
@@ -4443,6 +4449,11 @@ fn gpu_for(
     let mut drawn = crate::dmabuf::Drawn::Node;
     let device: Result<Box<dyn compositor_virgl::Device>, String> = match renderer {
         Renderer::Software => return Ok(None),
+        Renderer::Helper => {
+            return helper_for(screen, (width, height), report)
+                .map(Some)
+                .map_err(|why| format!("--renderer helper: {why}"));
+        }
         Renderer::Vtest => compositor_virgl::vtest::Vtest::start(&format!("hyprix-{screen}"))
             .map_err(|error| error.to_string())
             .and_then(|server| server.ok_or_else(|| "no virgl_test_server".to_owned()))
@@ -4461,10 +4472,26 @@ fn gpu_for(
         Ok(canvas) => {
             report(&format!("hyprix: {screen}: frames are drawn on the GPU"));
             Ok(Some(crate::frame::Gpu {
-                canvas,
-                backdrop: compositor_render::gpu::Backdrop::new(width, height),
+                canvas: crate::gpu_canvas::GpuCanvas::Virgl(canvas),
+                backdrop: crate::gpu_canvas::GpuBackdrop::Virgl(
+                    compositor_render::gpu::Backdrop::new(width, height),
+                ),
                 drawn,
             }))
+        }
+        Err(why) if renderer == Renderer::Auto && crate::helper::mode() != crate::helper::Mode::Off => {
+            match helper_for(screen, (width, height), report) {
+                Ok(gpu) => {
+                    report(&format!("hyprix: {screen}: no virgl GPU ({why})"));
+                    Ok(Some(gpu))
+                }
+                Err(helper) => {
+                    report(&format!(
+                        "hyprix: {screen}: no GPU to draw on ({why}; {helper}); drawing in software"
+                    ));
+                    Ok(None)
+                }
+            }
         }
         Err(why) if renderer == Renderer::Auto => {
             report(&format!(
@@ -4474,6 +4501,27 @@ fn gpu_for(
         }
         Err(why) => Err(format!("--renderer asked for a GPU: {why}")),
     }
+}
+
+/// A screen's frames drawn by hyprix-gpu (`docs/GPU-COMPOSITOR.md`).
+///
+/// # Errors
+///
+/// Why there is no helper to draw them.
+fn helper_for(
+    screen: &str,
+    (width, height): (u32, u32),
+    report: &mut dyn FnMut(&str),
+) -> Result<crate::frame::Gpu, String> {
+    let (canvas, device) = crate::helper::canvas(width, height)?;
+    report(&format!("hyprix: {screen}: frames are drawn by hyprix-gpu on {device}"));
+    Ok(crate::frame::Gpu {
+        canvas: crate::gpu_canvas::GpuCanvas::Helper(canvas),
+        backdrop: crate::gpu_canvas::GpuBackdrop::Helper(crate::helper::Backdrop::new(
+            width, height,
+        )),
+        drawn: crate::dmabuf::Drawn::Server(crate::helper::reported()),
+    })
 }
 
 /// The modifiers the test server's EGL imports both of a client's formats
