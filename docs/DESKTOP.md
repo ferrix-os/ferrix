@@ -125,6 +125,25 @@ the same folder. Left of part 2: pointer motion over a title bar still
 reaches the window under it, buttons have no hover state, tiled windows get
 no bar, and images do not yet carry the bar's configuration or start it.
 
+**A program's own title bar** (the customer, 2026-10-28): with
+`hyprix:titlebars` on, a window that asks through `xdg-decoration` to draw
+its own frame (`client_side`) is told yes and gets no bar from hyprix;
+one that asks for the compositor's, or says nothing and draws no frame of
+its own, gets the bar as before. Its border, shadow and rounding stay, as
+Hyprland draws them round a client-side-decorated window. A window rule
+decides over the window's wish: `windowrule = title_bar on|off, match:...`
+(hyprix's own) tells the window `server_side` and gives it the bar, or
+`client_side` and none. Such a window moves itself through
+`xdg_toplevel.move` and `resize`, which start hyprix's own grab (the
+snap and the kept focus with it). tole asks for the frame an app
+declares (`WindowOptions::decorations`, `Server` unless it says
+`Client`) and tells the app the answer (`Window::draws_own_frame`,
+`Event::Decorated`); the lode viewer and shelf declare their own, and
+show minimize, maximize and close only while it is theirs. Tests:
+`toolkit/tests/against_hyprix.rs` (the answer and the picture, with a
+rule each way), the server's decoration test, tole's
+`tests/decorations.rs`, and each app's header test in both modes.
+
 **Part 3 to 3g is built** (landing together):
 
 | Step | What |
@@ -342,7 +361,9 @@ Kernel lines: 0. Everything is in the compositor workspace
 Rounded corners (`decoration:rounding`), Hyprland's drop shadow and blur
 (`render/src/canvas.rs`, `blur.rs`), gradient borders, animations, and a
 GPU path for all of them. `xdg-decoration` and KDE's server-decoration are
-offered and always answered `server_side` -- but nothing is drawn: a client
+offered and answered `server_side` -- `client_side` where hyprix draws title
+bars and the client asked for it ("A program's own title bar" above) -- but
+without title bars nothing is drawn: a client
 that does not draw its own title bar (foot, an X program through yserver,
 Chrome without its own frame) has none. The top bar is `waybar`, ported
 (`docs/DESKTOP-CLIENTS.md`), reading the user's `config` and `style.css`.

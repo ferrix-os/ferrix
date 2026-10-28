@@ -139,6 +139,13 @@ pub enum Effect {
     /// `decorate <yes-or-no>`: whether it gets a border and a shadow at
     /// all.
     Decorate(bool),
+    /// `title_bar <yes-or-no>`, hyprix's own: whether the compositor draws
+    /// the window's title bar whatever the window asked through
+    /// `xdg-decoration` -- yes tells it `server_side` and gives it the
+    /// compositor's bar, no tells it `client_side`, to draw its own, and
+    /// gives it none. Without the rule the window's own wish is honoured
+    /// where hyprix draws title bars (`hyprix:titlebars`).
+    TitleBar(bool),
     /// `opaque <yes-or-no>`: it is drawn as if every pixel were opaque,
     /// whatever its buffer's alpha says.
     Opaque(bool),
@@ -621,6 +628,7 @@ fn effect(field: &str) -> Result<Effect, String> {
             .map_err(|why| format!("invalid field border_color: {why}")),
         "persistent_size" => Ok(Effect::PersistentSize(yes(value))),
         "decorate" => Ok(Effect::Decorate(yes(value))),
+        "title_bar" => Ok(Effect::TitleBar(yes(value))),
         "opaque" => Ok(Effect::Opaque(yes(value))),
         "nearest_neighbor" => Ok(Effect::NearestNeighbor(yes(value))),
         "monitor" => {

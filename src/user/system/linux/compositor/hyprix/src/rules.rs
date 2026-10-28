@@ -42,6 +42,9 @@ pub struct Rules {
     /// Every effect a rule asked for that this compositor does not carry
     /// out, so that it can be reported rather than silently dropped.
     unhandled: Vec<String>,
+    /// `title_bar <yes-or-no>`: whether the compositor draws each window's
+    /// title bar whatever it asked, for the windows a rule said so of.
+    title_bars: BTreeMap<WindowId, bool>,
     /// `persistent_size`: which windows asked for it, so that the size is
     /// kept when one of them closes.
     persistent: BTreeSet<WindowId>,
@@ -76,6 +79,7 @@ impl Rules {
             grouped: BTreeMap::new(),
             unhandled: Vec::new(),
             persistent: BTreeSet::new(),
+            title_bars: BTreeMap::new(),
             remembered: BTreeMap::new(),
         }
     }
@@ -165,6 +169,15 @@ impl Rules {
         let _ = self.closeable.remove(&window);
         let _ = self.grouped.remove(&window);
         let _ = self.persistent.remove(&window);
+        let _ = self.title_bars.remove(&window);
+    }
+
+    /// Whether a rule (`title_bar`) said the compositor draws `window`'s
+    /// title bar (`Some(true)`) or does not (`Some(false)`), whatever the
+    /// window asked; `None` where no rule said.
+    #[must_use]
+    pub fn title_bar(&self, window: WindowId) -> Option<bool> {
+        self.title_bars.get(&window).copied()
     }
 
     /// `persistent_size`: keep the size a window closed at, so the next
@@ -276,6 +289,10 @@ impl Rules {
                 Effect::Decorate(on) => {
                     style.decorate = *on;
                     styled = true;
+                }
+                Effect::TitleBar(on) => {
+                    let _ = self.title_bars.insert(window, *on);
+                    changed = true;
                 }
                 Effect::Opaque(on) => {
                     style.opaque = *on;

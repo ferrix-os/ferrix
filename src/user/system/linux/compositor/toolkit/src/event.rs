@@ -27,6 +27,18 @@ pub enum Event {
         /// Height.
         height: u32,
     },
+    /// Who draws a window's frame changed, or was first said: `own` is
+    /// true where the program draws its own title bar and buttons -- the
+    /// compositor answered `client_side`, or has no decoration manager --
+    /// and false where the compositor draws them. Sent for a window that
+    /// said who it wanted ([`crate::ToplevelOptions::own_frame`]), with
+    /// the configure that commits it ([`crate::Client::own_frame`]).
+    Decorated {
+        /// Which window.
+        surface: SurfaceId,
+        /// Whether the program draws its own frame.
+        own: bool,
+    },
     /// The compositor took a surface away: a layer surface's `closed`, a
     /// popup's `popup_done`. The program should forget it and
     /// [`crate::Client::destroy`] it.

@@ -1439,6 +1439,8 @@ fn the_effects_that_change_how_one_window_is_drawn() {
     // A bare word is true, which is Hyprland's `truthy`.
     assert_eq!(effects("decorate"), Ok(vec![Effect::Decorate(true)]));
     assert_eq!(effects("decorate false"), Ok(vec![Effect::Decorate(false)]));
+    assert_eq!(effects("title_bar on"), Ok(vec![Effect::TitleBar(true)]));
+    assert_eq!(effects("title_bar no"), Ok(vec![Effect::TitleBar(false)]));
     assert_eq!(effects("opaque"), Ok(vec![Effect::Opaque(true)]));
     assert_eq!(effects("opaque 0"), Ok(vec![Effect::Opaque(false)]));
 }

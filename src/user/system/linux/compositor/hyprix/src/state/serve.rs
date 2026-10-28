@@ -833,6 +833,12 @@ impl Compositor<'_> {
                 self.report,
             );
             let ruled = placed_rect(&self.state, window) != before;
+            // A rule's `title_bar` decides who draws the frame over what
+            // the client asked, told before the first configure commits it.
+            slot.client.force_frame(
+                toplevel,
+                self.window_rules.title_bar(window).map(|bar| !bar),
+            );
             configure_first(
                 &mut slot.client,
                 &mut slot.unsized_dialogs,

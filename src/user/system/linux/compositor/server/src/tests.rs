@@ -3002,6 +3002,53 @@ fn a_window_that_asks_about_its_decorations_is_told_the_compositor_draws_them() 
     );
     assert!(client.wants_server_frame(ObjectId(8)));
 
+    // A window rule (`title_bar`) decides over what the client asked, and
+    // the decoration is told at once: the compositor's frame for a client
+    // that asked for its own, its own for one that asked for the
+    // compositor's, and the client's wish again once the rule is gone.
+    let _ = mode_is(&mut client, zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE);
+    client.force_frame(ObjectId(8), Some(false));
+    let told = |client: &mut Client| {
+        sent(client)
+            .first()
+            .and_then(|event| event.args.first().cloned())
+    };
+    assert_eq!(
+        told(&mut client),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::SERVER_SIDE
+        ))
+    );
+    assert_eq!(client.frame_wish(ObjectId(8)), crate::FrameWish::Server);
+    assert_eq!(
+        mode_is(&mut client, zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::SERVER_SIDE
+        )),
+        "the rule holds through a later set_mode"
+    );
+    client.force_frame(ObjectId(8), Some(true));
+    assert_eq!(
+        told(&mut client),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+        ))
+    );
+    assert_eq!(client.frame_wish(ObjectId(8)), crate::FrameWish::Client);
+    client.force_frame(ObjectId(8), None);
+    assert_eq!(
+        told(&mut client),
+        Some(format!(
+            "Uint({})",
+            zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
+        )),
+        "the client asked for its own"
+    );
+    let _ = mode_is(&mut client, zxdg_toplevel_decoration_v1::mode::SERVER_SIDE);
+
     // A mode that is not one of the two is the interface's own error.
     let bytes = request(
         9,

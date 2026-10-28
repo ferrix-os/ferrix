@@ -322,6 +322,10 @@ pub struct Client {
     /// (a floating desktop that draws title bars, docs/DESKTOP.md §6) rather
     /// than `server_side` whatever was asked (a tiling one, the default).
     honour_client_frames: bool,
+    /// Who draws each toplevel's frame where a window rule decided it
+    /// (`title_bar`), over whatever the client asked: true for the
+    /// client's own ([`Client::force_frame`]).
+    forced_frames: BTreeMap<ObjectId, bool>,
     /// The `zwp_relative_pointer_v1`s this client has made.
     relative_pointers: Vec<ObjectId>,
     /// The pointer constraints it holds, by object.
@@ -475,6 +479,7 @@ impl Client {
             xdg_decorations: BTreeMap::new(),
             client_frames: BTreeSet::new(),
             honour_client_frames: false,
+            forced_frames: BTreeMap::new(),
             relative_pointers: Vec::new(),
             constraints: BTreeMap::new(),
             shortcut_inhibitors: BTreeMap::new(),

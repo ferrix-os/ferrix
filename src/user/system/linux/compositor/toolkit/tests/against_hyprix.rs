@@ -38,13 +38,24 @@ fn with_compositor<T: Send + 'static>(
     millis: u64,
     client: impl FnOnce(&Path) -> T + Send + 'static,
 ) -> (T, Vec<u8>) {
+    with_compositor_configured(name, millis, "", client)
+}
+
+/// [`with_compositor`], with `extra` added to the compositor's
+/// configuration.
+fn with_compositor_configured<T: Send + 'static>(
+    name: &str,
+    millis: u64,
+    extra: &str,
+    client: impl FnOnce(&Path) -> T + Send + 'static,
+) -> (T, Vec<u8>) {
     let work = workspace(name);
     let socket = work.join("wayland");
     let frames = work.join("frames");
     let config = work.join("hyprland.conf");
     std::fs::write(
         &config,
-        "decoration:blur:noise = 0\nanimations:enabled = false\n",
+        format!("decoration:blur:noise = 0\nanimations:enabled = false\n{extra}"),
     )
     .expect("a configuration");
     let options = Options {
@@ -1086,4 +1097,123 @@ fn a_damaged_draw_copies_what_changed_and_what_the_buffer_missed() {
         green,
         "between them, the first frame's green"
     );
+}
+
+/// A floating desktop that draws title bars, as Yoru's: no shadow, so what
+/// is above a window is the bar or the background and nothing between.
+const TITLE_BARS: &str = "general:layout = floating\nhyprix:titlebars = 1\n\
+                          decoration:shadow:enabled = false\ngeneral:border_size = 2\n";
+
+/// Open one window that says `own_frame` through `xdg-decoration`, under
+/// `config`; give back what the toolkit reported of who draws its frame
+/// (every [`Event::Decorated`], in order, and [`Client::own_frame`] at the
+/// end) and the last frame.
+fn decorated(
+    name: &str,
+    config: &str,
+    own_frame: Option<bool>,
+) -> ((Vec<bool>, Option<bool>), Vec<u8>) {
+    let config = config.to_owned();
+    let (answer, frame) = with_compositor_configured(name, 3000, &config, move |socket| {
+        let mut client = Client::connect_to(socket).map_err(|error| error.to_string())?;
+        let window = client
+            .toplevel(&ToplevelOptions {
+                title: "frame test".to_owned(),
+                app_id: "toolkit-frame".to_owned(),
+                size: (300, 200),
+                own_frame,
+                ..ToplevelOptions::default()
+            })
+            .map_err(|error| error.to_string())?;
+        let mut said = Vec::new();
+        let _ = until(&mut client, Duration::from_secs(2), |client, event| {
+            match event {
+                Event::Decorated { surface, own } if *surface == window => said.push(*own),
+                Event::Configure { surface, .. } if *surface == window => {
+                    let _ = client.draw(window, |pixmap| {
+                        pixmap.fill(tiny_skia::Color::from_rgba8(30, 160, 90, 255));
+                    });
+                    client.request_frame(window);
+                }
+                _ => {}
+            }
+            false
+        });
+        let own = client.own_frame(window);
+        // Kept open until the compositor stops, so its last frame has it.
+        let _ = until(&mut client, Duration::from_secs(5), |_, _| false);
+        Ok::<_, String>((said, own))
+    });
+    (answer.expect("the client worked"), frame)
+}
+
+/// The colour of the row above a window's top edge, `above` pixels up,
+/// in the middle of the window's width; the window found by its green.
+fn above_window(frame: &[u8], above: u32) -> (u8, u8, u8) {
+    let (x, y) = first(frame, (30, 160, 90)).expect("the window is drawn");
+    pixel(frame, x + 150, y.saturating_sub(above))
+}
+
+/// `xdg-decoration` as a program sees it through the toolkit: where the
+/// compositor draws title bars, a window asking to draw its own frame is
+/// told `client_side` and gets no bar, one asking for the compositor's is
+/// told `server_side` and gets one -- the lode viewer's own buttons and
+/// Settings' bar from hyprix. The answer is reported once, with the
+/// configure that commits it.
+#[test]
+fn a_window_asking_for_its_own_frame_is_told_yes_and_drawn_with_no_bar() {
+    let ((client_said, client_own), client_frame) = decorated("csd", TITLE_BARS, Some(true));
+    let ((server_said, server_own), server_frame) = decorated("ssd", TITLE_BARS, Some(false));
+    assert_eq!((client_said, client_own), (vec![true], Some(true)));
+    assert_eq!((server_said, server_own), (vec![false], Some(false)));
+    // Half a bar above the window: the bar's colour where the compositor
+    // draws it, the background where the window draws its own.
+    let background = pixel(&client_frame, 2, HEIGHT - 2);
+    assert_eq!(
+        above_window(&client_frame, 17),
+        background,
+        "no compositor title bar over a window that draws its own"
+    );
+    assert_ne!(
+        above_window(&server_frame, 17),
+        background,
+        "the compositor's title bar over a window that asked for it"
+    );
+}
+
+/// A window that said nothing through `xdg-decoration` hears nothing and
+/// gets the compositor's bar, as before.
+#[test]
+fn a_window_that_says_nothing_hears_nothing_and_gets_the_bar() {
+    let ((said, own), frame) = decorated("unsaid", TITLE_BARS, None);
+    assert_eq!((said, own), (Vec::new(), None));
+    assert_ne!(above_window(&frame, 17), pixel(&frame, 2, HEIGHT - 2));
+}
+
+/// A tiling desktop draws no title bars and tells every window
+/// `server_side`, whatever it asked: a tile has no room for the program's
+/// own bar.
+#[test]
+fn a_tiling_desktop_tells_a_window_the_compositor_draws_its_frame() {
+    let ((said, own), _) = decorated("tiled", "", Some(true));
+    assert_eq!((said, own), (vec![false], Some(false)));
+}
+
+/// A window rule decides over what the window asked: `title_bar on` gives
+/// a window that asked to draw its own the compositor's bar and tells it
+/// `server_side`, so it hides its own buttons; `title_bar off` takes the
+/// bar from one that asked for it and tells it `client_side`.
+#[test]
+fn a_title_bar_rule_decides_over_what_the_window_asked() {
+    let forced_on =
+        format!("{TITLE_BARS}windowrule = title_bar on, match:class ^(toolkit-frame)$\n");
+    let ((said, own), frame) = decorated("rule-on", &forced_on, Some(true));
+    assert_eq!((said, own), (vec![false], Some(false)));
+    assert_ne!(above_window(&frame, 17), pixel(&frame, 2, HEIGHT - 2));
+
+    let forced_off =
+        format!("{TITLE_BARS}windowrule = title_bar off, match:class ^(toolkit-frame)$\n");
+    let ((said, own), frame) = decorated("rule-off", &forced_off, Some(false));
+    assert_eq!((said, own), (vec![true], Some(true)));
+    assert_eq!(above_window(&frame, 17), pixel(&frame, 2, HEIGHT - 2));
 }

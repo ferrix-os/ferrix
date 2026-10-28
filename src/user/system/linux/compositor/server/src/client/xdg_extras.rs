@@ -1,10 +1,11 @@
 //! Three `xdg` extensions that say more about a window than `xdg-shell`
 //! does.
 //!
-//! * `xdg-decoration` -- who draws the title bar. The compositor, always:
-//!   a tiling layout draws a border and no title, and a toolkit told
-//!   `server_side` draws nothing of its own inside the rectangle it was
-//!   given.
+//! * `xdg-decoration` -- who draws the title bar. The compositor, unless
+//!   it draws title bars (hyprix's `hyprix:titlebars`) and the client asked
+//!   to draw its own, or a window rule decided (`title_bar`): a tiling
+//!   layout draws a border and no title, and a toolkit told `server_side`
+//!   draws nothing of its own inside the rectangle it was given.
 //! * `xdg-toplevel-icon` -- the icon a taskbar shows for a window, as a
 //!   name in an icon theme or as pixels. The name is kept and the pixels
 //!   are not, since nothing here draws them.
@@ -71,8 +72,16 @@ impl Client {
     /// (asked or told so through `xdg-decoration` or KDE's protocol), that
     /// it draws its own (asked for `client_side` and was told yes), or
     /// nothing at all.
+    ///
+    /// A window rule's word ([`Client::force_frame`]) comes before the
+    /// client's own.
     #[must_use]
     pub fn frame_wish(&self, toplevel: ObjectId) -> crate::FrameWish {
+        match self.forced_frames.get(&toplevel) {
+            Some(true) => return crate::FrameWish::Client,
+            Some(false) => return crate::FrameWish::Server,
+            None => {}
+        }
         let mut ours = self
             .xdg_decorations
             .iter()
@@ -99,6 +108,9 @@ impl Client {
     /// for (`docs/DESKTOP.md` §2.2).
     #[must_use]
     pub fn wants_server_frame(&self, toplevel: ObjectId) -> bool {
+        if let Some(own) = self.forced_frames.get(&toplevel) {
+            return !own;
+        }
         if self
             .xdg_decorations
             .iter()
@@ -119,6 +131,37 @@ impl Client {
     /// asked. hyprix turns it on where it draws title bars itself.
     pub const fn set_honour_client_frames(&mut self, on: bool) {
         self.honour_client_frames = on;
+    }
+
+    /// Decide who draws `toplevel`'s frame over what its client asks: a
+    /// window rule (`title_bar`), `Some(true)` for the client's own frame
+    /// and no title bar of the compositor's, `Some(false)` for the
+    /// compositor's, `None` to go back to the client's wish. Each of the
+    /// toplevel's decorations is told the mode at once, which the
+    /// toplevel's next configure commits: called as the window's rules are
+    /// applied, before its first configure, that is the first one.
+    pub fn force_frame(&mut self, toplevel: ObjectId, own: Option<bool>) {
+        let before = self.forced_frames.get(&toplevel).copied();
+        if before == own {
+            return;
+        }
+        match own {
+            Some(own) => {
+                let _ = self.forced_frames.insert(toplevel, own);
+            }
+            None => {
+                let _ = self.forced_frames.remove(&toplevel);
+            }
+        }
+        let decorations: Vec<ObjectId> = self
+            .xdg_decorations
+            .iter()
+            .filter(|(_, top)| **top == toplevel)
+            .map(|(decoration, _)| *decoration)
+            .collect();
+        for decoration in decorations {
+            self.configure_decoration(decoration);
+        }
     }
 
     /// `zxdg_toplevel_decoration_v1`: `set_mode` and `unset_mode`.
@@ -159,10 +202,16 @@ impl Client {
         }
     }
 
-    /// Tell a decoration who draws it: the client where it asked and that
-    /// is honoured, else the compositor.
+    /// Tell a decoration who draws it: what a window rule decided, else the
+    /// client where it asked and that is honoured, else the compositor.
     fn configure_decoration(&mut self, decoration: ObjectId) {
-        let mode = if self.client_frames.contains(&decoration) {
+        let forced = self
+            .xdg_decorations
+            .get(&decoration)
+            .and_then(|toplevel| self.forced_frames.get(toplevel))
+            .copied();
+        let own = forced.unwrap_or_else(|| self.client_frames.contains(&decoration));
+        let mode = if own {
             zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE
         } else {
             zxdg_toplevel_decoration_v1::mode::SERVER_SIDE

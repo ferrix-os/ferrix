@@ -797,7 +797,15 @@ takes a real-valued scale.
   clipboard, timers for animations and Live, the frame callback as the
   animation clock. The same code runs on Ferrix under hyprix and on a
   Linux development host on any Wayland desktop (`WAYLAND_DISPLAY`): the
-  toolkit is pure Rust over the socket, no libwayland.
+  toolkit is pure Rust over the socket, no libwayland. A toplevel asks
+  through `xdg-decoration` who draws its frame -- the compositor
+  (`Decorations::Server`, every window unless it says otherwise) or the
+  program (`Decorations::Client`, an app with a header of its own) -- and
+  `Window::draws_own_frame` says what the compositor decided: true where it
+  answered `client_side` or has no decoration manager. An app shows its own
+  minimize, maximize and close only then; its header moves the window
+  (`Window::start_move`, `xdg_toplevel.move`) and maximizes it on a double
+  click (`toggle_maximized`, from the state the compositor last gave).
 * **Headless:** the tree laid out and painted at a given size and scale
   into a PNG, with synthetic input. It is what the host tests and the
   screenshot comparisons use, and an app's `--render`.

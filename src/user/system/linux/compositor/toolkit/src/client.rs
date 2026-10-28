@@ -140,6 +140,9 @@ enum Role {
     Idle(IdleId),
     /// A buffer of a surface's.
     SurfaceBuffer(SurfaceId),
+    /// A window's `zxdg_toplevel_decoration_v1`, whose `configure` says who
+    /// draws its frame.
+    Decoration(SurfaceId),
     /// Something the program made; its events go back to it.
     User,
 }
@@ -180,7 +183,38 @@ enum Kind {
         /// The size the last `xdg_toplevel.configure` gave; a zero is the
         /// compositor leaving it to the program.
         pending: (u32, u32),
+        /// Who draws its frame and whether it is maximized, as the
+        /// compositor last said and as the last `xdg_surface.configure`
+        /// committed it.
+        look: Look,
     },
+}
+
+/// What the compositor said of a window beside its size: who draws its
+/// frame (`zxdg_toplevel_decoration_v1.configure`) and whether it is
+/// maximized (`xdg_toplevel.configure`'s states). Each is told first and
+/// takes effect with the `xdg_surface.configure` that follows, as the
+/// protocols say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Look {
+    /// Whether the program draws its own frame, as last told: `None`
+    /// before anything was said, or where the program asked nothing.
+    own_frame_told: Option<bool>,
+    /// The same, committed.
+    own_frame: Option<bool>,
+    /// Whether the window is maximized, as last told.
+    maximized_told: bool,
+    /// The same, committed.
+    maximized: bool,
+}
+
+/// Whether an `xdg_toplevel.configure`'s states -- 32-bit values in the
+/// machine's own order -- say `maximized`.
+fn is_maximized(states: &[u8]) -> bool {
+    states.chunks_exact(4).any(|state| {
+        <[u8; 4]>::try_from(state)
+            .is_ok_and(|bytes| u32::from_ne_bytes(bytes) == xdg_toplevel::state::MAXIMIZED)
+    })
 }
 
 /// One surface and what it needs to be drawn.
@@ -722,13 +756,16 @@ impl Client {
         // compositor's to keep for as long as the connection lasts. yserver
         // asks again on every pass of its loop while one fails, and on the
         // N150 box (2026-10-24) each one it left was another empty tile.
-        if let Err(error) = self.dress_toplevel(surface, toplevel, options) {
-            self.drop_frame(toplevel);
-            self.destroy_object(toplevel, xdg_toplevel::request::DESTROY);
-            self.destroy_object(xdg, xdg_surface::request::DESTROY);
-            self.destroy_object(surface, wl_surface::request::DESTROY);
-            return Err(error);
-        }
+        let own_frame_told = match self.dress_toplevel(id, surface, toplevel, options) {
+            Ok(told) => told,
+            Err(error) => {
+                self.drop_frame(toplevel);
+                self.destroy_object(toplevel, xdg_toplevel::request::DESTROY);
+                self.destroy_object(xdg, xdg_surface::request::DESTROY);
+                self.destroy_object(surface, wl_surface::request::DESTROY);
+                return Err(error);
+            }
+        };
         let _ = self.surfaces.insert(
             id,
             SurfaceState::new(
@@ -738,6 +775,10 @@ impl Client {
                     toplevel,
                     options: options.clone(),
                     pending: (0, 0),
+                    look: Look {
+                        own_frame_told,
+                        ..Look::default()
+                    },
                 },
             ),
         );
@@ -745,13 +786,17 @@ impl Client {
     }
 
     /// What a new window says before its first commit -- its parent, title,
-    /// app id and size limits -- and that commit.
+    /// app id, size limits and who draws its frame -- and that commit.
+    /// Gives who draws the frame where that is known without asking: the
+    /// program itself, where it said anything and the compositor has no
+    /// decoration manager to answer.
     fn dress_toplevel(
         &mut self,
+        id: SurfaceId,
         surface: ObjectId,
         toplevel: ObjectId,
         options: &ToplevelOptions,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<bool>, Error> {
         // Before the first commit, where a compositor decides whether the
         // window floats.
         if let Some(Kind::Toplevel {
@@ -781,15 +826,21 @@ impl Client {
         if options.min_size != (0, 0) || options.max_size != (0, 0) {
             send_size_limits(self, toplevel, options.min_size, options.max_size)?;
         }
-        if let Some(own) = options.own_frame {
-            self.say_frame(toplevel, own)?;
-        }
-        self.send(surface, wl_surface::request::COMMIT, &[])
+        let told = match options.own_frame {
+            Some(own) if !self.say_frame(id, toplevel, own)? => Some(true),
+            _ => None,
+        };
+        self.send(surface, wl_surface::request::COMMIT, &[])?;
+        Ok(told)
     }
 
     /// Say through `xdg-decoration` who draws `toplevel`'s frame, before its
-    /// first commit; nothing where the compositor has no decoration manager.
-    fn say_frame(&mut self, toplevel: ObjectId, own: bool) -> Result<(), Error> {
+    /// first commit, and give whether it could be said: not where the
+    /// compositor has no decoration manager, whose programs draw their own
+    /// (the protocol's fallback). The compositor's answer arrives as the
+    /// decoration's `configure`, and as [`Event::Decorated`] once the
+    /// window's next configure commits it.
+    fn say_frame(&mut self, id: SurfaceId, toplevel: ObjectId, own: bool) -> Result<bool, Error> {
         use compositor_protocol::xdg_decoration::{
             self, zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
         };
@@ -800,10 +851,14 @@ impl Client {
                     self.decorations = Some(manager);
                     manager
                 }
-                Err(_) => return Ok(()),
+                Err(_) => return Ok(false),
             },
         };
-        let decoration = self.make(&xdg_decoration::ZXDG_TOPLEVEL_DECORATION_V1, 1, Role::Quiet);
+        let decoration = self.make(
+            &xdg_decoration::ZXDG_TOPLEVEL_DECORATION_V1,
+            1,
+            Role::Decoration(id),
+        );
         let _ = self.frames.insert(toplevel, decoration);
         self.send(
             manager,
@@ -819,7 +874,8 @@ impl Client {
             decoration,
             zxdg_toplevel_decoration_v1::request::SET_MODE,
             &[Arg::Uint(mode)],
-        )
+        )?;
+        Ok(true)
     }
 
     /// Destroy `toplevel`'s decoration, which must go before the toplevel
@@ -843,6 +899,32 @@ impl Client {
     pub fn set_app_id(&mut self, window: SurfaceId, app_id: &str) {
         let result = self.toplevel_text(window, xdg_toplevel::request::SET_APP_ID, app_id);
         self.defer(result);
+    }
+
+    /// Whether `window` draws its own frame -- title bar, buttons -- as the
+    /// compositor last decided and the window's last configure committed:
+    /// `Some(true)` where it was told `client_side`, or where it asked
+    /// either way and the compositor has no decoration manager (the
+    /// protocol's fallback); `Some(false)` where the compositor draws it;
+    /// `None` before the first configure, for a window that asked nothing
+    /// ([`ToplevelOptions::own_frame`]), and for anything but a window.
+    #[must_use]
+    pub fn own_frame(&self, window: SurfaceId) -> Option<bool> {
+        match self.surfaces.get(&window).map(|state| &state.kind) {
+            Some(Kind::Toplevel { look, .. }) => look.own_frame,
+            _ => None,
+        }
+    }
+
+    /// Whether `window` is maximized, as its last configure said: what a
+    /// window's own maximize button toggles from. False for anything but a
+    /// window.
+    #[must_use]
+    pub fn is_maximized(&self, window: SurfaceId) -> bool {
+        match self.surfaces.get(&window).map(|state| &state.kind) {
+            Some(Kind::Toplevel { look, .. }) => look.maximized,
+            _ => false,
+        }
     }
 
     /// Hand a press on a window's own title bar or edge to the compositor,
@@ -2184,6 +2266,7 @@ impl Client {
                 Role::Toplevel(id) if id == from => Role::Toplevel(to),
                 Role::Frame(id) if id == from => Role::Frame(to),
                 Role::SurfaceBuffer(id) if id == from => Role::SurfaceBuffer(to),
+                Role::Decoration(id) if id == from => Role::Decoration(to),
                 other => other,
             };
         }
@@ -2534,6 +2617,7 @@ impl Client {
                     _ => (0, 0),
                 };
                 self.configured(surface, size.0, size.1);
+                self.commit_look(surface);
             }
             Role::XdgSurface(_) => {}
             Role::Popup(surface) => match opcode {
@@ -2550,20 +2634,39 @@ impl Client {
                 _ => {}
             },
             Role::Toplevel(surface) => match opcode {
-                // The size (and the states, which this does not keep) the
+                // The size, and whether it is maximized, that the
                 // `xdg_surface.configure` that follows commits to.
                 xdg_toplevel::event::CONFIGURE => {
+                    let maximized = args
+                        .get(2)
+                        .and_then(Arg::as_array)
+                        .is_some_and(is_maximized);
                     if let Some(SurfaceState {
-                        kind: Kind::Toplevel { pending, .. },
+                        kind: Kind::Toplevel { pending, look, .. },
                         ..
                     }) = self.surfaces.get_mut(&surface)
                     {
                         *pending = (nonnegative(signed(0)), nonnegative(signed(1)));
+                        look.maximized_told = maximized;
                     }
                 }
                 xdg_toplevel::event::CLOSE => self.pending.push(Event::CloseRequested(surface)),
                 _ => {}
             },
+            // Who draws the window's frame, as the compositor decided:
+            // committed by the `xdg_surface.configure` that follows.
+            Role::Decoration(surface) => {
+                use compositor_protocol::xdg_decoration::zxdg_toplevel_decoration_v1;
+                if opcode == zxdg_toplevel_decoration_v1::event::CONFIGURE
+                    && let Some(SurfaceState {
+                        kind: Kind::Toplevel { look, .. },
+                        ..
+                    }) = self.surfaces.get_mut(&surface)
+                {
+                    look.own_frame_told =
+                        Some(uint(0) == zxdg_toplevel_decoration_v1::mode::CLIENT_SIDE);
+                }
+            }
             Role::LayerSurface(surface) => match opcode {
                 zwlr_layer_surface_v1::event::CONFIGURE => {
                     self.send(
@@ -2659,6 +2762,25 @@ impl Client {
             }
         }
         Ok(())
+    }
+
+    /// Commit what the compositor said of a window beside its size, on its
+    /// `xdg_surface.configure`, and say a change of who draws its frame.
+    fn commit_look(&mut self, surface: SurfaceId) {
+        let Some(SurfaceState {
+            kind: Kind::Toplevel { look, .. },
+            ..
+        }) = self.surfaces.get_mut(&surface)
+        else {
+            return;
+        };
+        look.maximized = look.maximized_told;
+        if look.own_frame != look.own_frame_told {
+            look.own_frame = look.own_frame_told;
+            if let Some(own) = look.own_frame {
+                self.pending.push(Event::Decorated { surface, own });
+            }
+        }
     }
 
     fn configured(&mut self, surface: SurfaceId, width: u32, height: u32) {
