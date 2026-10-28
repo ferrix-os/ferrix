@@ -40,7 +40,7 @@ pub const LINEAR: u64 = 0;
 /// plain shared memory (a memfd): what a device without dmabuf export --
 /// lavapipe on Ferrix -- draws the frame into, and the card is handed
 /// as a copy, as a `wl_shm` buffer is.
-pub const MEMFD: u64 = 0x00ff_ffff_ffff_ffff;
+pub const MEMFD: u64 = compositor_gpu_protocol::MODIFIER_MEMFD;
 
 /// Bytes of the push constants: `to_clip`, then `u[4]`.
 const CONSTANT_BYTES: u32 = 80;

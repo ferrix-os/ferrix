@@ -76,6 +76,12 @@ pub const ARGB8888: u32 = u32::from_le_bytes(*b"AR24");
 /// DRM's `XRGB8888`: opaque, the X byte read as 255.
 pub const XRGB8888: u32 = u32::from_le_bytes(*b"XR24");
 
+/// [`Message::Outputs`]' modifier when the outputs are memfds, not dmabufs
+/// (`DRM_FORMAT_MOD_INVALID`): the compositor maps and copies them, as a
+/// `wl_shm` buffer. A device that exports no dmabufs -- lavapipe on Ferrix
+/// -- draws into these.
+pub const MODIFIER_MEMFD: u64 = 0x00ff_ffff_ffff_ffff;
+
 /// [`Message::Failed`]'s codes.
 pub mod failure {
     /// An op the helper could not draw: a texture it does not have, a
