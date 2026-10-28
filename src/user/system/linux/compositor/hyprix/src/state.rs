@@ -2569,6 +2569,7 @@ impl<'r> Compositor<'r> {
                                 from,
                                 lifted: false,
                                 edge: None,
+                                owed: (0, 0),
                             });
                         }
                     }

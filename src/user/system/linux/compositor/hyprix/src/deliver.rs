@@ -895,6 +895,7 @@ mod tests {
             from,
             lifted: false,
             edge: None,
+            owed: (0, 0),
         };
         let _moved = crate::act::dragged(&mut drag, &mut state, (from.0 - 150, from.1 + 100));
         let moved = rect(&state, settings);
