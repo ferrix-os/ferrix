@@ -49,3 +49,35 @@ pub(crate) fn flush_range(address: usize, len: usize) {
     #[cfg(not(target_arch = "x86_64"))]
     let _ = (address, len);
 }
+
+/// Evict every cache line of `[address, address + len)` with no fence:
+/// lines a device may have written past the caches, evicted so the next
+/// read goes to memory. Several ranges, then one [`fence`]. `clflush`, not
+/// `clflushopt`, whose evictions would overlap: Rust has no spelling of it
+/// but assembly, which this tree keeps to what runs before the first
+/// instruction (`docs/ASSEMBLY.md`).
+pub(crate) fn evict_range(address: usize, len: usize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let end = address.saturating_add(len);
+        let mut line = address & !63;
+        while line < end {
+            // SAFETY: `line` is in a mapping this process holds (the
+            // caller's range, rounded down to its cache line); `clflush`
+            // only evicts, and is allowed on a read-only mapping.
+            unsafe { core::arch::x86_64::_mm_clflush(line as *const u8) };
+            line += 64;
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (address, len);
+}
+
+/// Order every `clflush` before it ahead of every load after it.
+pub(crate) fn fence() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: `mfence` only orders; SSE2 is in every x86-64 part.
+    unsafe {
+        core::arch::x86_64::_mm_mfence();
+    }
+}

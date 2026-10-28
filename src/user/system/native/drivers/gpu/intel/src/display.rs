@@ -97,6 +97,9 @@ const PAGE: usize = 4096;
 /// Buffers known at once: a compositor's two, and a client's swap chain
 /// shown directly.
 const MAX_BUFFERS: usize = 16;
+/// How long after a GPU's write to a shared object copies evict their
+/// source: longer than any frame takes to land.
+const EVICT_WINDOW_NS: u64 = 500_000_000;
 /// The refresh the one timing is listed at.
 const REFRESH_HZ: u64 = 60;
 
@@ -208,6 +211,13 @@ pub(crate) struct Display {
     /// When the hotplug poll is due, in milliseconds; `u64::MAX` for never.
     hotplug_at: u64,
     tally: vblank::Tally,
+    /// The count of GPU writes to shared objects the last copy saw
+    /// (`ferrix_intel_xelp::frontend::shared_writes`).
+    shared_writes: u64,
+    /// Copies evict their source until then: a GPU write submitted before
+    /// one copy may land after it, and the lines that copy read would
+    /// otherwise be read again.
+    evict_until: u64,
 }
 
 /// What the second scanout starts with.
@@ -311,6 +321,8 @@ impl Display {
             flip_at: u64::MAX,
             hotplug_at: u64::MAX,
             tally: vblank::Tally::default(),
+            shared_writes: 0,
+            evict_until: 0,
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -899,6 +911,7 @@ impl Display {
         let Some(source) = self.buffer(buffer) else {
             return;
         };
+        let evicting = self.evicting();
         for output in self.outputs.iter_mut().flatten() {
             let Some((id, whole)) = output.shown else {
                 continue;
@@ -911,12 +924,27 @@ impl Display {
             } else {
                 rect
             };
-            copy(output, &source, changed);
+            let started = now_ns();
+            let evicted = copy(output, &source, changed, evicting);
+            self.tally.copied(now_ns().saturating_sub(started), evicted);
             self.flushes += 1;
             if self.flushes == 1 {
                 ferrix_rt::info!("intel: card0: the first frame is on the screen");
             }
         }
+    }
+
+    /// Whether a copy now evicts its source first: a GPU wrote an object
+    /// shared with other programs within [`EVICT_WINDOW_NS`]. A desktop
+    /// drawn in software with no GPU client copies as before, at no cost.
+    fn evicting(&mut self) -> bool {
+        let writes = ferrix_intel_xelp::frontend::shared_writes();
+        let now = now_ns();
+        if writes != self.shared_writes {
+            self.shared_writes = writes;
+            self.evict_until = now.saturating_add(EVICT_WINDOW_NS);
+        }
+        now < self.evict_until
     }
 
     fn attach(&mut self, attach: &Attach, vmo: &Vmo<Kernel>) -> Status {
@@ -1030,12 +1058,58 @@ fn copy_scaled(screen: &Output, scaler: &Scaler, buffer: &Buffer, shown: Rect, c
     }
 }
 
-/// `changed` of `buffer`, clipped as efifb clips it, copied into the
-/// plane's memory, then the barrier that makes it shown.
-fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
-    let Some((_, shown)) = screen.shown else {
+/// Evict `changed` of `buffer` from the processor's caches before a copy
+/// reads it, while a GPU writes shared objects (`Display::evicting`).
+///
+/// The buffer may be a GPU's frame: hyprix drawing on iris or a Vulkan
+/// helper on anv, or a game's buffer shown directly. Mesa writes an object
+/// it imported or exported with uncached MOCS, past the LLC, so a line this
+/// process read from the buffer for an earlier frame stays in its cache and
+/// is read again, stale: on 2026-10-28 hyprix's frames drawn on iris showed
+/// on the N150 as the previous frames' pixels, with the pointer leaving a
+/// trail. Evicting the lines first sends the copy's reads to memory. A line
+/// the processor wrote (a compositor's dumb buffer) is written back by the
+/// same `clflush`, so a frame drawn in software reads the same pixels.
+fn evict(buffer: &Buffer, changed: Rect) {
+    let Some((left, right, top, bottom)) = source_span(buffer, changed) else {
         return;
     };
+    let bytes = (right - left) * PIXEL;
+    for row in top..bottom {
+        let from = row * buffer.stride + left * PIXEL;
+        if from + bytes > buffer.length {
+            break;
+        }
+        crate::arch::evict_range(buffer.base + from, bytes);
+    }
+    crate::arch::fence();
+}
+
+/// The columns and rows of `buffer` inside `changed`, ends exclusive, or
+/// `None` when that is nothing.
+fn source_span(buffer: &Buffer, changed: Rect) -> Option<(usize, usize, usize, usize)> {
+    let left = (changed.x as usize).min(buffer.width);
+    let right = (changed.x as usize)
+        .saturating_add(changed.width as usize)
+        .min(buffer.width);
+    let top = (changed.y as usize).min(buffer.height);
+    let bottom = (changed.y as usize)
+        .saturating_add(changed.height as usize)
+        .min(buffer.height);
+    (left < right && top < bottom).then_some((left, right, top, bottom))
+}
+
+/// `changed` of `buffer`, clipped as efifb clips it, copied into the
+/// plane's memory, then the barrier that makes it shown.
+fn copy(screen: &Output, buffer: &Buffer, changed: Rect, evicting: bool) -> u64 {
+    let Some((_, shown)) = screen.shown else {
+        return 0;
+    };
+    let started = now_ns();
+    if evicting {
+        evict(buffer, changed);
+    }
+    let evicted = now_ns().saturating_sub(started);
     if let Some(scaler) = screen.scaler {
         copy_scaled(screen, &scaler, buffer, shown, changed);
     } else if let Some(area) = area(buffer, shown, changed, screen) {
@@ -1067,6 +1141,7 @@ fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
         }
     }
     ferrix_rt::device_barrier();
+    evicted
 }
 
 /// Tell the core a scanout's monitor is there or not, as virtio-gpu does

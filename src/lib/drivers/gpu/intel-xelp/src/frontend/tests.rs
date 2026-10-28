@@ -1891,6 +1891,69 @@ fn shared_objects_set_their_dmabuf_slot() {
     });
 }
 
+/// `card0` evicts the lines it copies only while a GPU writes shared
+/// objects: a write to an exported object moves the count, and a read of
+/// one, or a write to an object never exported, does not. Other tests in
+/// this process write no shared object.
+#[test]
+fn shared_writes_are_counted_for_the_card() {
+    big(|| {
+        let mut rig = Rig::new();
+        let shared = rig.create(4096);
+        let private = rig.create(4096);
+        let batch = rig.create(4096);
+        let mut prime = PrimeHandle {
+            handle: shared,
+            flags: drm::RDWR,
+            fd: -1,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::PRIME_HANDLE_TO_FD, &mut prime), 0);
+        let before = super::shared_writes();
+        let run = |rig: &mut Rig, objects: &[(u32, u64, u64)]| {
+            assert_eq!(rig.exec(ioctl::GEM_EXECBUFFER2, objects, 0, &[], 0).0, 0);
+            rig.frontend.service(&mut rig.host, true);
+        };
+        run(
+            &mut rig,
+            &[(shared, 0x10000, PINNED), (batch, 0x1000, PINNED)],
+        );
+        run(
+            &mut rig,
+            &[
+                (private, 0x20000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before);
+        run(
+            &mut rig,
+            &[
+                (shared, 0x10000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before + 1);
+        // Its dmabuf gone, a card may still show it: still counted.
+        let object = rig
+            .frontend
+            .state
+            .handles
+            .get((shared - 1) as usize)
+            .map_or(0, |handle| handle.object);
+        let cookie = rig.frontend.state.dmabuf_cookie(object);
+        crate::frontend::gem::dmabuf_released(&mut rig.frontend.state, cookie);
+        run(
+            &mut rig,
+            &[
+                (shared, 0x10000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before + 2);
+    });
+}
+
 /// A hang: the guilty request's fence carries `EIO`, `GET_RESET_STATS`
 /// counts it, and a context that is not recoverable is banned.
 #[test]
