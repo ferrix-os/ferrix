@@ -378,3 +378,39 @@ them.
    (`render/src/gpu/tests.rs`).
 5. **On the N150** with the option on: frame times against software, a
    helper killed by hand, a GPU hang (`intel` driver's engine reset).
+
+## 12. Where it stands (2026-10-29)
+
+**hyprix's side** (agent A): `helper::Canvas`, a third `Painter`, behind
+`hyprix:gpu = off | auto | on` (off). One helper for every screen,
+started on demand with the configuration's `env =` lines; a helper that
+times out, fails, loses its device or dies fails the frame as a GPU does
+and is given up for software after three, then started again 5-60 s
+later. Tests against a fake helper in `hyprix/src/helper/tests.rs`.
+
+**hyprix-gpu** (agent B, landed d71d5bd0b and c91bc141d). The helper draws
+`compositor_render::gpu::Renderer`'s shapes -- the virgl painter's quads,
+constants and GLSL, compiled to SPIR-V -- through a Vulkan backend on the
+device tole picks (`tole::gpu::Core`). Its outputs are linear exported
+dmabufs (`XR24`, modifier 0), or memfds (`MODIFIER_MEMFD`) where the
+device exports no dmabufs, which is lavapipe on Ferrix. Client dmabufs
+are imported in place and their implicit fences are waited for, at most
+100 ms, before a frame samples them. Tests: on lavapipe on the host
+(check's hyprix-gpu unit) every painter call matches the software painter
+(0 pixels more than 3 apart) and frames go through the socket into
+dmabuf and memfd outputs; `test-compositor --boot gpu-helper` runs those
+on Ferrix; `--boot helper-desktop` is hyprix end to end on lavapipe. On
+anv on the N150 (by hand, 2026-10-28) a whole 1080p desktop frame
+(wallpaper upload, backdrop, shadow, three-pass blur, a translucent
+window) took 9.1 ms median, against 17.7 ms on lavapipe on nazuna.
+Packaging is opt-in: `FERRIX_GPU_HELPER=1` at build carries
+`/usr/libexec/hyprix-gpu` with anv and 22 libraries from the pinned
+intel-uapi Mesa 25.0.7 under `/usr/lib/hyprix-gpu` (29 MiB,
+`docs/LICENSES.md`). The default image and the ISO do not carry it.
+
+**The card** (eb555dc28): `card0` evicts a GPU-written buffer's lines
+before copying them (§5.3).
+
+**Next:** the N150 desktop with `hyprix:gpu = on`; frames in flight
+(version 2, §6) and sync_file fences (caps bit 0); a state-level test of
+the give-up and restart; an Endfield window measured; then the default.
