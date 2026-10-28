@@ -45,6 +45,9 @@ pub struct Style {
     /// window that is not focused; `None` (the option's -1) is the
     /// focused one's.
     pub shadow_inactive: Option<Color>,
+    /// `decoration:shadow:ignore_window`, Hyprland's default true: the
+    /// shadow and the glow are drawn around a window and not under it.
+    pub shadow_ignore_window: bool,
     /// `decoration:glow:*`, or `None` when `glow:enabled` is off: a second
     /// shadow round the focused window, centred on it, in its own colour
     /// -- an accent's halo where the shadow is ambient darkness
@@ -185,6 +188,9 @@ impl Style {
                     offset: offset(config.str("decoration:shadow:offset").unwrap_or("")),
                 }),
             shadow_inactive: colour_or_unset(config, "decoration:shadow:color_inactive"),
+            shadow_ignore_window: config
+                .bool("decoration:shadow:ignore_window")
+                .unwrap_or(true),
             glow: config
                 .bool("decoration:glow:enabled")
                 .unwrap_or(false)
@@ -1284,12 +1290,20 @@ fn window<P: Painter>(
         || surfaces
             .get(&placed.window)
             .is_some_and(|surface| copied_opaque(surface, rect, &own, opacity));
-    let seen;
-    let shadowed = if overwritten {
-        seen = rim(damage, rect, rounding);
+    let seen = rim(damage, rect, rounding);
+    let shadowed = if overwritten { &seen } else { damage };
+    // `decoration:shadow:ignore_window`, on unless a configuration turns it
+    // off, as in Hyprland: the shadow and the glow are drawn around the
+    // window and not under it, under any window. Under one with alpha --
+    // a toolkit's, every tole window, Yoru's Settings and installer -- the
+    // shadow and the glow were blended under every pixel of it, all but
+    // the rim written over again by the window: 20 ms of a 900x640
+    // window's frame while it was dragged, on nazuna; a frame on the N150
+    // took three times that (the customer, 2026-10-28).
+    let shadowed_only = if style.shadow_ignore_window {
         &seen
     } else {
-        damage
+        shadowed
     };
     // A fullscreen window has no decoration at all, as in Hyprland: its
     // shadow is off the screen but for what shows through its own alpha,
@@ -1321,7 +1335,7 @@ fn window<P: Painter>(
                 color,
                 ..*shadow
             },
-            shadowed,
+            shadowed_only,
         );
     }
     // The glow over the shadow and under the window: the focused one's in
@@ -1341,7 +1355,7 @@ fn window<P: Painter>(
                     color,
                     ..*glow
                 },
-                shadowed,
+                shadowed_only,
             );
         }
     }
