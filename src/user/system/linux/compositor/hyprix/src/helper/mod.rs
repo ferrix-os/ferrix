@@ -52,6 +52,14 @@ thread_local! {
     static MODE: Cell<Mode> = const { Cell::new(Mode::Off) };
     static LINK: RefCell<Weak<RefCell<Link>>> = const { RefCell::new(Weak::new()) };
     static NEXT_CANVAS: Cell<u32> = const { Cell::new(0) };
+    static ENV: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The configuration's `env =` pairs, which the helper is started with as
+/// every program the compositor starts is: how a configuration points it at
+/// a Vulkan driver (`VK_ICD_FILENAMES`) or its libraries.
+pub fn set_env(pairs: &[(String, String)]) {
+    ENV.with(|env| pairs.clone_into(&mut env.borrow_mut()));
 }
 
 /// Set from the configuration, at start and at each reload.
@@ -84,7 +92,8 @@ fn link() -> Result<Rc<RefCell<Link>>, String> {
         return Err(format!("no {}", program.display()));
     }
     let node = render_node();
-    let started = Link::spawn(&program, node.as_deref())
+    let env = ENV.with(|env| env.borrow().clone());
+    let started = Link::spawn(&program, node.as_deref(), &env)
         .map_err(|error| format!("{} did not start: {error}", program.display()))?;
     let held = Rc::new(RefCell::new(started));
     LINK.with(|link| *link.borrow_mut() = Rc::downgrade(&held));

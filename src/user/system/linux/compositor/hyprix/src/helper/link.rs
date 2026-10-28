@@ -57,19 +57,20 @@ pub struct Link {
 }
 
 impl Link {
-    /// Start `program` with the socket's other end as descriptor 3 and
-    /// `node` as the render node to choose the device by, and wait for it
-    /// to be ready.
+    /// Start `program` with the socket's other end as descriptor 3, `node`
+    /// as the render node to choose the device by and `env` added to this
+    /// process's environment, and wait for it to be ready.
     ///
     /// # Errors
     ///
     /// No such program, or a helper that did not say it was ready in time.
-    pub fn spawn(program: &Path, node: Option<&str>) -> io::Result<Self> {
+    pub fn spawn(program: &Path, node: Option<&str>, env: &[(String, String)]) -> io::Result<Self> {
         use std::os::unix::process::CommandExt as _;
 
         let (socket, theirs) = Socket::pair()?;
         let raw = theirs.as_raw_fd();
         let mut command = Command::new(program);
+        let _ = command.envs(env.iter().map(|(name, value)| (name, value)));
         let _ = command.env("HYPRIX_GPU_FD", "3").stdin(Stdio::null());
         if let Some(node) = node {
             let _ = command.env("HYPRIX_GPU_NODE", node);
