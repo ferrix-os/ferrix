@@ -1,7 +1,9 @@
 //! The frame being drawn: a tiny-skia pixmap in the canvas byte order the
 //! crate docs describe, and the drawing operations clipped to damage.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use tiny_skia::{BlendMode, FilterQuality, Paint, Pattern, Pixmap, PixmapRef, Shader, SpreadMode};
 
@@ -684,9 +686,9 @@ impl Canvas {
             color: shadow.color,
             colour,
             inset,
-            inside: Blended::of(colour, alpha),
+            inside: Blended::kept(colour, alpha),
             rows: BTreeMap::new(),
-            columns: BTreeMap::new(),
+            columns: Vec::new(),
         };
         for clip in clips {
             for y in clip.y..clip.bottom() {
@@ -1485,11 +1487,12 @@ struct Shade {
     /// How far in the corners and the fade end.
     inset: i64,
     /// The middle's table, at the full alpha.
-    inside: Option<Blended>,
+    inside: Option<Rc<Blended>>,
     /// The top and bottom bands' tables, by canvas row.
-    rows: BTreeMap<i64, Option<Blended>>,
-    /// The side bands' tables, by canvas column.
-    columns: BTreeMap<i64, Option<Blended>>,
+    rows: BTreeMap<i64, Option<Rc<Blended>>>,
+    /// The side bands' tables, by column from the box's left edge: looked
+    /// up for every pixel of a side band, so by index, not by search.
+    columns: Vec<Option<Option<Rc<Blended>>>>,
 }
 
 impl Shade {
@@ -1525,14 +1528,17 @@ impl Shade {
                     let (shape, full, inset, alpha, colour) =
                         (self.shape, self.full, self.inset, self.alpha, self.colour);
                     let table = self.rows.entry(y).or_insert_with(|| {
-                        Blended::of(colour, shape.at(inset, y.saturating_sub(full.y)) * alpha)
+                        Blended::kept(colour, shape.at(inset, y.saturating_sub(full.y)) * alpha)
                     });
-                    through(table.as_ref(), canvas.pixmap.data_mut().get_mut(start..end));
+                    through(
+                        table.as_deref(),
+                        canvas.pixmap.data_mut().get_mut(start..end),
+                    );
                 }
                 // The middle: the full alpha.
                 (false, 1) => {
                     through(
-                        self.inside.as_ref(),
+                        self.inside.as_deref(),
                         canvas.pixmap.data_mut().get_mut(start..end),
                     );
                 }
@@ -1541,10 +1547,10 @@ impl Shade {
                     let (shape, full, inset, alpha, colour) =
                         (self.shape, self.full, self.inset, self.alpha, self.colour);
                     let make = |x: i64| {
-                        Blended::of(colour, shape.at(x.saturating_sub(full.x), inset) * alpha)
+                        Blended::kept(colour, shape.at(x.saturating_sub(full.x), inset) * alpha)
                     };
                     let pixels = canvas.pixmap.data_mut().get_mut(start..end);
-                    by_column(pixels, from, &mut self.columns, make);
+                    by_column(pixels, from, full.x, &mut self.columns, make);
                 }
             }
         }
@@ -1563,17 +1569,35 @@ fn through(table: Option<&Blended>, pixels: Option<&mut [u8]>) {
 fn by_column(
     pixels: Option<&mut [u8]>,
     from: i64,
-    tables: &mut BTreeMap<i64, Option<Blended>>,
-    make: impl Fn(i64) -> Option<Blended>,
+    left: i64,
+    tables: &mut Vec<Option<Option<Rc<Blended>>>>,
+    make: impl Fn(i64) -> Option<Rc<Blended>>,
 ) {
     let Some(pixels) = pixels else {
         return;
     };
     for (x, pixel) in (from..).zip(pixels.chunks_exact_mut(4)) {
-        if let Some(table) = tables.entry(x).or_insert_with(|| make(x)).as_ref() {
+        let Ok(at) = usize::try_from(x.saturating_sub(left)) else {
+            continue;
+        };
+        if tables.len() <= at {
+            tables.resize(at + 1, None);
+        }
+        let Some(slot) = tables.get_mut(at) else {
+            continue;
+        };
+        if let Some(table) = slot.get_or_insert_with(|| make(x)).as_deref() {
             table.apply(pixel);
         }
     }
+}
+
+/// [`Blended::kept`]'s tables, by colour and the alpha's bits.
+type Kept = BTreeMap<([u8; 3], u32), Rc<Blended>>;
+
+thread_local! {
+    /// [`Blended::kept`]'s tables.
+    static BLENDS: RefCell<Kept> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// What [`over`] makes of every byte a canvas pixel can hold, for one
@@ -1586,8 +1610,34 @@ struct Blended([[u8; 256]; 3]);
 impl Blended {
     /// The table for `colour` at `alpha`, or `None` where the alpha is
     /// nothing, which [`over`] is never called for.
-    fn of(colour: [u8; 3], alpha: f32) -> Option<Self> {
-        (alpha > 0.0).then(|| Self::new(colour, alpha))
+    /// The table for `colour` at `alpha`, or none at no alpha, kept from one shadow to the next on this thread.
+    ///
+    /// A table is a function of the colour and the alpha alone, and a
+    /// shadow's band tables are the same few dozen alphas every frame and
+    /// for every window of one style. Made afresh for each shadow drawn,
+    /// they were 256 blends each, some two hundred tables a window's shadow
+    /// and as many for its glow: on the N150 most of a frame dragged under
+    /// Yoru (2026-10-28). The bytes are the ones made afresh.
+    fn kept(colour: [u8; 3], alpha: f32) -> Option<Rc<Self>> {
+        if alpha <= 0.0 {
+            return None;
+        }
+        /// Tables kept at most: Yoru's shadow and glow, focused and not,
+        /// are a few hundred.
+        const KEPT: usize = 4096;
+        BLENDS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let key = (colour, alpha.to_bits());
+            if let Some(table) = kept.get(&key) {
+                return Some(Rc::clone(table));
+            }
+            if kept.len() >= KEPT {
+                kept.clear();
+            }
+            let table = Rc::new(Self::new(colour, alpha));
+            let _ = kept.insert(key, Rc::clone(&table));
+            Some(table)
+        })
     }
 
     fn new(colour: [u8; 3], alpha: f32) -> Self {
