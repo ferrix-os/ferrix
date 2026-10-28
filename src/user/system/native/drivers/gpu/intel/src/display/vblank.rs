@@ -148,6 +148,10 @@ pub(crate) struct Tally {
     over_66: u32,
     longest: u64,
     since: u64,
+    copies: u32,
+    copy_ns: u64,
+    longest_copy_ns: u64,
+    evict_ns: u64,
 }
 
 /// How often the tally is said.
@@ -174,6 +178,15 @@ impl Tally {
         self.last = Some(now);
     }
 
+    /// A copy into a plane that took `ns`, `evicted` of it evicting its
+    /// source from the caches.
+    pub(crate) fn copied(&mut self, ns: u64, evicted: u64) {
+        self.copies += 1;
+        self.evict_ns += evicted;
+        self.copy_ns += ns;
+        self.longest_copy_ns = self.longest_copy_ns.max(ns);
+    }
+
     /// The tally's line once [`REPORT_NS`] went by, and a new tally.
     pub(crate) fn report(&mut self, now: u64) -> Option<Self> {
         if self.since == 0 {
@@ -191,7 +204,7 @@ impl Tally {
 
     pub(crate) fn say(&self) {
         ferrix_rt::info!(
-            "intel: card0: flips {} in 10 s, {} waited for the blank (mean {} us, longest {} us), {} not in it; gaps over 50 ms {}, over 66 ms {}, longest {} ms",
+            "intel: card0: flips {} in 10 s, {} waited for the blank (mean {} us, longest {} us), {} not in it; gaps over 50 ms {}, over 66 ms {}, longest {} ms; copies {} (mean {} us, {} us of it evicting, longest {} us)",
             self.flips,
             self.waited,
             self.wait_ns / u64::from(self.waited.max(1)) / 1_000,
@@ -200,6 +213,10 @@ impl Tally {
             self.over_50,
             self.over_66,
             self.longest / 1_000_000,
+            self.copies,
+            self.copy_ns / u64::from(self.copies.max(1)) / 1_000,
+            self.evict_ns / u64::from(self.copies.max(1)) / 1_000,
+            self.longest_copy_ns / 1_000,
         );
     }
 }

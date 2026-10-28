@@ -49,6 +49,25 @@
 //! overlap one still in use answers `EAGAIN` rather than sleeping; userptr,
 //! the legacy mmap, pread, pwrite and perf are `ENODEV`.
 
+/// Requests that wrote an object a dmabuf of shares with other programs,
+/// counted from the driver's start: what `card0` asks before a copy
+/// whether a buffer it reads may hold a GPU's writes that went past the
+/// LLC (Mesa writes an exported or imported object with uncached MOCS). A
+/// screen drawn in software beside no GPU client never moves it.
+static SHARED_WRITES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Count a request that writes a shared object.
+pub(crate) fn note_shared_write() {
+    let _ = SHARED_WRITES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many requests have written a shared object since the driver
+/// started.
+#[must_use]
+pub fn shared_writes() -> u64 {
+    SHARED_WRITES.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 pub mod backend;
 pub mod drm;
 pub mod exec;
