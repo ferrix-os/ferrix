@@ -207,6 +207,12 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
         )
     })?;
     let args = &box_args(args, busybox);
+    // The initramfs's programs stripped, as the live ISO's are
+    // (`live::build`): unstripped, `/sbin/lode` was 21.5 MB and the native
+    // `process_create` refused it (TooBig), so the box's lode never started
+    // and its log viewer showed nothing (2026-10-28). The kernel's ELF with
+    // everything in it stays beside the image for a panic's addresses.
+    crate::fat::set_strip_kernel(true);
     // `--ssh` with no sshdt package made an image without a server, said in
     // one line of the build's output, and the box was out of reach until
     // somebody came to it. sshdt is a script app, which an image takes only
