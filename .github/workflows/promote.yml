@@ -74,7 +74,7 @@ jobs:
                   --jq "[.statuses[] | select(.context == \"$2\")][0].state // \"none\"")" = success ]
           }
           ci_state() { # ci_state BRANCH -> running|success|failed|none
-            gh run list --repo "$R" --workflow ci.yml --branch "$1" --limit 1 \
+            gh run list --repo "$R" --workflow ci.yml --branch "$1" --event workflow_dispatch --limit 1 \
               --json status,conclusion --jq '.[0] // empty | if .status != "completed" then "running" elif .conclusion == "success" then "success" else "failed" end'
           }
           running=0
