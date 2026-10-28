@@ -45,4 +45,4 @@ commit = "1cfd05471a6a16b0ba688107d0ab064d9024c8a7"
 [tole]
 path = "src/user/system/linux/tole"
 repo = "https://github.com/ferrix-os/tole"
-commit = "efa5e85490e59cf06544969ae77b558cc537ba39"
+commit = "7c530807ab1764afe527d57d11b3d6fa92868b13"
