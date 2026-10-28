@@ -284,6 +284,7 @@ pub(crate) fn build(args: &Args) -> Result<Built> {
     let cmdline = format!("{} {LIVE_WORDS}\n", crate::init::command_line().trim_end());
     let (loader_bytes, kernel_bytes, carried) =
         crate::fat::live_parts(arch, &loader, &kernel, &initramfs)?;
+    refuse_host_programs(&carried)?;
     let licences = notice(&build, &carried)?;
     let readme = README.replace('\n', "\r\n").into_bytes();
     let volume = build.join("ferrix-live.esp");
@@ -540,6 +541,61 @@ fn zones() -> Result<Vec<File>> {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     println!("  {} time zones from {ROOT}", files.len());
     Ok(files)
+}
+
+/// Words no part of the live ISO may be named for: the programs xtask merges
+/// into a developer's `--everything` desktop from volumes on the build host
+/// -- Endfield's launcher (Gryphlink), yserver, Steam, the Claude desktop app
+/// and Chrome -- none of which the release may carry. `iso` refuses the flags
+/// that merge them; this reads the image itself, so a path that merges a
+/// host's volume some other way fails the build on a machine that has one.
+const NOT_IN_THE_ISO: [&str; 7] = [
+    "gryphlink",
+    "endfield",
+    "yserver",
+    "steam",
+    "claude-desktop",
+    "claude_desktop",
+    "chrome",
+];
+
+/// Refuse a live image whose archive names a word of [`NOT_IN_THE_ISO`]: in
+/// an entry's name, a link's target, a launcher entry (`.desktop`) or the
+/// session's configuration, where a merged program would be started.
+fn refuse_host_programs(archive: &[u8]) -> Result<()> {
+    let entries = crate::initramfs::entries(archive)
+        .ok_or_else(|| Error::new("the live image's archive does not read as newc".to_owned()))?;
+    let found = host_programs_in(entries.iter().map(|entry| {
+        let read =
+            entry.link || entry.name.ends_with(".desktop") || entry.name == super::CONFIG_PATH;
+        (entry.name, read.then_some(entry.data))
+    }));
+    if found.is_empty() {
+        println!("  live image: none of {} in it", NOT_IN_THE_ISO.join(", "));
+        return Ok(());
+    }
+    Err(Error::new(format!(
+        "the live image carries what only a developer's desktop may: {} \
+         (a build host's volume merged into it?)",
+        found.join(", ")
+    )))
+}
+
+/// The entries among `entries` -- each a name, and the bytes read for it --
+/// that name a word of [`NOT_IN_THE_ISO`], each with the word.
+fn host_programs_in<'a>(entries: impl Iterator<Item = (&'a str, Option<&'a [u8]>)>) -> Vec<String> {
+    let mut found = Vec::new();
+    for (name, data) in entries {
+        let text = format!(
+            "{name}\n{}",
+            data.map(String::from_utf8_lossy).unwrap_or_default()
+        )
+        .to_ascii_lowercase();
+        if let Some(word) = NOT_IN_THE_ISO.iter().find(|word| text.contains(**word)) {
+            found.push(format!("{name} ({word})"));
+        }
+    }
+    found
 }
 
 /// The IANA release this machine's zones are, from `tzdata.zi`'s
@@ -1132,7 +1188,50 @@ fn install_unattended(
 
 #[cfg(test)]
 mod live_config_tests {
-    use super::{BOOT_TERMINAL, LIVE_LINES, live_config};
+    use super::{BOOT_TERMINAL, LIVE_LINES, NOT_IN_THE_ISO, host_programs_in, live_config};
+
+    /// The release's own entries pass; each host program is found by its
+    /// name, by a link's target, or by a launcher entry's or the session's
+    /// text, whatever its case; a program's bytes are not read.
+    #[test]
+    fn host_programs_are_found_in_names_links_and_launchers() {
+        let clean: [(&str, Option<&[u8]>); 4] = [
+            ("bin/yoru-shell", None),
+            (
+                "usr/share/applications/shelf.desktop",
+                Some(b"Exec=/bin/shelf\n"),
+            ),
+            (
+                "etc/hyprland.conf",
+                Some(b"exec-once = /bin/ferrix-installer --autostart\n"),
+            ),
+            ("bin/busybox", None),
+        ];
+        assert!(host_programs_in(clean.into_iter()).is_empty());
+        for word in NOT_IN_THE_ISO {
+            let name = format!("bin/{word}");
+            assert_eq!(
+                host_programs_in([(name.as_str(), None)].into_iter()).len(),
+                1,
+                "{word}"
+            );
+        }
+        let link: [(&str, Option<&[u8]>); 1] = [("bin/x", Some(b"/data/Steam/steam.sh"))];
+        assert_eq!(host_programs_in(link.into_iter()), ["bin/x (steam)"]);
+        let launcher: [(&str, Option<&[u8]>); 1] = [(
+            "usr/share/applications/game.desktop",
+            Some(b"Exec=/bin/GryphLink\n"),
+        )];
+        assert_eq!(
+            host_programs_in(launcher.into_iter()),
+            ["usr/share/applications/game.desktop (gryphlink)"]
+        );
+        let config: [(&str, Option<&[u8]>); 1] = [(
+            "etc/hyprland.conf",
+            Some(b"exec-once = /bin/claude-desktop\n"),
+        )];
+        assert_eq!(host_programs_in(config.into_iter()).len(), 1);
+    }
 
     /// The installer is the only window the live session opens at login:
     /// no other `exec-once` starts a program with a window beside it.

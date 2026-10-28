@@ -686,6 +686,45 @@ pub(crate) fn entry_of<'a>(archive: &'a [u8], name: &str) -> Option<&'a [u8]> {
     None
 }
 
+/// One entry of a newc archive as [`entries`] reads it back.
+pub(crate) struct Entry<'a> {
+    pub(crate) name: &'a str,
+    /// Whether it is a symbolic link, whose data is then its target.
+    pub(crate) link: bool,
+    pub(crate) data: &'a [u8],
+}
+
+/// Every entry of the newc archive `archive`, by its headers alone, up to
+/// the trailer; `None` for an archive that does not read as newc.
+pub(crate) fn entries(archive: &[u8]) -> Option<Vec<Entry<'_>>> {
+    let field = |header: &[u8], index: usize| -> Option<usize> {
+        let text = core::str::from_utf8(header.get(6 + 8 * index..14 + 8 * index)?).ok()?;
+        usize::from_str_radix(text, 16).ok()
+    };
+    let pad = |at: usize| at.div_ceil(4) * 4;
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(header) = archive.get(at..at + 110) {
+        if header.get(..6) != Some(MAGIC) {
+            return None;
+        }
+        let (mode, size, name_size) = (field(header, 1)?, field(header, 6)?, field(header, 11)?);
+        let name = archive.get(at + 110..at + 110 + name_size.checked_sub(1)?)?;
+        let name = core::str::from_utf8(name).ok()?;
+        let data = pad(at + 110 + name_size);
+        if name == "TRAILER!!!" {
+            return Some(out);
+        }
+        out.push(Entry {
+            name,
+            link: u32::try_from(mode).ok()? & 0o170_000 == S_IFLNK,
+            data: archive.get(data..data + size)?,
+        });
+        at = pad(data + size);
+    }
+    None
+}
+
 /// Keep the image manifest `initramfs` carries as `build/<arch>/image-manifest`,
 /// for `check-boot-line.py` to compare with the profile (docs/BUILD-FLAGS.md
 /// §5.1; ledger 3623 (R19)). An archive without one leaves no file, which
@@ -959,6 +998,30 @@ fn refuse_too_many_drivers(natives: &[native::Built]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`entries`] reads back every name, which are links, and their data,
+    /// up to the trailer, from an archive [`Newc`] wrote; bytes that are not
+    /// newc read as nothing.
+    #[test]
+    fn entries_read_back_what_was_written() {
+        let mut written = Newc::new();
+        written.directory("bin", 0o755).unwrap();
+        written.file("bin/a", 0o755, b"abc").unwrap();
+        written.symlink("bin/b", "/data/b").unwrap();
+        written.entry("TRAILER!!!", 0, 0, 1, ROOT, &[]).unwrap();
+        let read = entries(&written.bytes).expect("a newc archive");
+        let seen: Vec<(&str, bool, &[u8])> =
+            read.iter().map(|e| (e.name, e.link, e.data)).collect();
+        assert_eq!(
+            seen,
+            [
+                ("bin", false, &b""[..]),
+                ("bin/a", false, &b"abc"[..]),
+                ("bin/b", true, &b"/data/b"[..]),
+            ]
+        );
+        assert!(entries(&[b'x'; 200]).is_none());
+    }
 
     /// An image with more drivers than devmgr's protocol names is refused
     /// when it is built, and one with exactly that many is not.
