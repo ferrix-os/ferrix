@@ -3790,13 +3790,15 @@ fn rows(data: &[u8], rect: Rect) -> Vec<u8> {
 /// The blend written out ([`Canvas::composite_with`] on a premultiplied
 /// surface) against tiny-skia's pattern shader, which drew every expected
 /// image: every alpha, every colour a pixel of that alpha can have, over
-/// every byte a canvas can hold, at full opacity and at two others.
+/// every byte a canvas can hold, at full opacity and at three others --
+/// 0.9 is Yoru's see-through windows, drawn through [`crate::canvas`]'s
+/// fade table for every opaque pixel.
 #[test]
 fn a_translucent_surface_blends_as_tiny_skia_blends_it() {
     use tiny_skia::{BlendMode, FilterQuality, Paint, Pattern, PixmapMut, PixmapRef, SpreadMode};
 
     const SIDE: u32 = 256;
-    for opacity in [1.0_f32, 0.5, 0.8] {
+    for opacity in [1.0_f32, 0.5, 0.8, 0.9] {
         for alpha in 0..=255u32 {
             // Row `y` is colour `min(y, alpha)` in all three channels, over a
             // canvas whose column `x` is `x` in blue, `255 - x` in green, and

@@ -937,11 +937,13 @@ impl Canvas {
     /// `XRGB8888` surface drawn at less than full opacity is blended as
     /// opaque, its X byte read as a full alpha, as it always was.
     fn blend(&mut self, surface: &Surface<'_>, rect: Rect, opacity: f32, clips: &[Rect]) {
+        let fade = Fade::kept(opacity);
         let blend = Blend {
             surface,
             rect,
             opaque: surface.format() == Format::Xrgb8888,
             opacity,
+            fade: fade.as_deref(),
             width: index(i64::from(self.width())),
         };
         self.in_bands(clips, |band, top, local| {
@@ -1104,7 +1106,7 @@ pub fn blend_onto_target(
             ) else {
                 continue;
             };
-            over_row(dst, src, opaque, 1.0);
+            over_row(dst, src, opaque, 1.0, None);
         }
     }
 }
@@ -1676,6 +1678,8 @@ struct Blend<'a> {
     /// Whether it is `XRGB8888`, whose fourth byte is read as opaque.
     opaque: bool,
     opacity: f32,
+    /// [`Fade`]'s table for the opacity, where it is less than one.
+    fade: Option<&'a Fade>,
     /// The canvas's width in pixels.
     width: usize,
 }
@@ -1696,7 +1700,7 @@ impl Blend<'_> {
             if let (Some(pixels), Some(into)) =
                 (row.get(from..from + len), band.get_mut(start..start + len))
             {
-                over_row(into, pixels, self.opaque, self.opacity);
+                over_row(into, pixels, self.opaque, self.opacity, self.fade);
             }
         }
     }
@@ -1719,7 +1723,13 @@ impl Blend<'_> {
 /// and an empty one, whose blend is what is under it. Both are exact: the
 /// pipeline's result for them rounds to exactly those bytes, as the test
 /// against tiny-skia over every alpha, colour and background shows.
-fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
+///
+/// `fade` is [`Fade`]'s table for `opacity`, when it is less than one: an
+/// opaque pixel -- every pixel of an `XRGB8888` window, most of any other --
+/// is then four lookups rather than four channels of that arithmetic, and
+/// the same bytes, since the table is that arithmetic run once for every
+/// pair of bytes.
+fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32, fade: Option<&Fade>) {
     const FACTOR: f32 = 1.0 / 255.0;
     let whole = opacity >= 1.0;
     for (into, pixel) in into.chunks_exact_mut(4).zip(pixels.chunks_exact(4)) {
@@ -1730,6 +1740,12 @@ fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
         };
         if opaque {
             source[3] = 0xFF;
+        }
+        if let Some(fade) = fade.filter(|_| !whole && source[3] == 0xFF) {
+            for (out, from) in into.iter_mut().zip(source) {
+                *out = fade.over(*out, from);
+            }
+            continue;
         }
         if whole {
             if source[3] == 0xFF {
@@ -1748,6 +1764,75 @@ fn over_row(into: &mut [u8], pixels: &[u8], opaque: bool, opacity: f32) {
         for (out, from) in into.iter_mut().zip(source) {
             *out = unnorm((f32::from(*out) * FACTOR) * keep + load(from));
         }
+    }
+}
+
+/// What [`over_row`] makes of an opaque source pixel's channel over a canvas
+/// pixel's, at one opacity less than one: a byte for every pair, by the
+/// canvas byte and then the source byte.
+///
+/// A window drawn at `decoration:inactive_opacity` -- Yoru's see-through
+/// windows -- is blended whole, every frame it changes, and on a screen
+/// drawn in software the arithmetic for each channel of each pixel was most
+/// of a frame: a 1878x966 game window behind the focused one took 40 to 85
+/// ms on the N150. The table is 64 KiB, made once for each opacity and kept
+/// on the drawing thread.
+pub(crate) struct Fade(Box<[[u8; 256]; 256]>);
+
+thread_local! {
+    /// [`Fade::kept`]'s tables, by the opacity's bits: the few opacities a
+    /// configuration names.
+    static FADES: RefCell<Vec<(u32, Rc<Fade>)>> = const { RefCell::new(Vec::new()) };
+}
+
+impl Fade {
+    /// The table for `opacity`, kept from one frame to the next on this
+    /// thread; none at full opacity, where an opaque pixel is a copy.
+    fn kept(opacity: f32) -> Option<Rc<Self>> {
+        /// Tables kept at most: the active, inactive and fullscreen
+        /// opacities, and a window rule or two.
+        const KEPT: usize = 8;
+        if opacity >= 1.0 || opacity.is_nan() {
+            return None;
+        }
+        FADES.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let key = opacity.to_bits();
+            if let Some((_, table)) = kept.iter().find(|(bits, _)| *bits == key) {
+                return Some(Rc::clone(table));
+            }
+            if kept.len() >= KEPT {
+                kept.clear();
+            }
+            let table = Rc::new(Self::new(opacity));
+            kept.push((key, Rc::clone(&table)));
+            Some(table)
+        })
+    }
+
+    /// [`over_row`]'s arithmetic for an opaque source at `opacity`, for
+    /// every canvas byte and source byte.
+    fn new(opacity: f32) -> Self {
+        let mut table = Box::new([[0u8; 256]; 256]);
+        for (under, row) in (0..=255u8).zip(table.iter_mut()) {
+            for (from, slot) in (0..=255u8).zip(row.iter_mut()) {
+                let mut into = [under; 4];
+                over_row(&mut into, &[from, from, from, 0xFF], false, opacity, None);
+                let [blue, ..] = into;
+                *slot = blue;
+            }
+        }
+        Self(table)
+    }
+
+    /// The canvas byte `under` with the source byte `from` over it.
+    #[inline]
+    fn over(&self, under: u8, from: u8) -> u8 {
+        self.0
+            .get(usize::from(under))
+            .and_then(|row| row.get(usize::from(from)))
+            .copied()
+            .unwrap_or(under)
     }
 }
 
