@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.x86_64.214-220", "L.user.169-170"],
+      "owner": "pcid",
+      "branch": "feature/pcid",
+      "date": "2026-10-29",
+      "purpose": "PCIDs on x86-64, docs/PCID.md (the consultant's OK IF P1-P12, ledger 4734): the boot processor's decision, a secondary without PCID stopping the boot, the slot hit and its compare, the miss and its round robin, uninstall's PCID 0 flush, the off path's bare root, ERAPS never beside PCIDE (L.x86_64.214-220); the ordering's loom model and the stale read after a switch back (L.user.169-170)"
+    },
+    {
       "ids": [
         "H.QUOTA.18-21",
         "L.mm.83-90"
