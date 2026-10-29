@@ -29,10 +29,11 @@ tests run in QEMU.
 [Boot Ferrix](#boot-ferrix) · [Read the technical guide](docs/GUIDE.md) ·
 [Visit the website](https://ferrix-os.org/)
 
-![Ferrix's desktop on an Intel N150 mini PC: Arknights: Endfield in a window, ferrofetch and btop beside it](docs/brand/screenshots/hero-n150.png)
+![Ferrix's Yoru desktop on an Intel N150 mini PC: Arknights: Endfield in a window, btop and ferrofetch beside it](docs/brand/screenshots/hero-n150.png)
 
-*Ferrix on an Intel N150 mini PC: Arknights: Endfield from Steam, in a window,
-through Ferrix's own Intel GPU driver, with ferrofetch and btop beside it.*
+*Ferrix's desktop, Yoru, on an Intel N150 mini PC: Arknights: Endfield from
+Steam, in a window, through Ferrix's own Intel GPU driver, with btop and
+ferrofetch beside it.*
 
 ## Where it stands, 2026-10-23
 
@@ -150,9 +151,16 @@ the consultant's review is internal, not independent. Its findings register
 holds 28 open and 63 closed findings of 91
 ([docs/certification/](docs/certification/README.md)).
 
-<p align="center">
-  <img src="docs/brand/screenshots/desktop-hero.png" alt="Ferrix's Wayland desktop with btop, a zinc terminal and Chrome" width="100%">
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/brand/screenshots/live-installer.png" alt="The live ISO's Yoru desktop with the Ferrix installer's welcome page"></td>
+    <td width="50%"><img src="docs/brand/screenshots/installer-summary.png" alt="The installer's summary page before it erases the chosen disk"></td>
+  </tr>
+  <tr>
+    <td>The live ISO: Yoru and the installer.</td>
+    <td>The installer's last page, before anything is written.</td>
+  </tr>
+</table>
 
 [![On Ferrix's desktop, rustc compiles and runs a hello-world program in a terminal, then Chrome loads Wikipedia's article on Rust](docs/brand/screenshots/demo-loop.gif)](docs/brand/screenshots/demo.mp4)
 
@@ -225,6 +233,11 @@ this tree at the commits [`components.toml`](components.toml) names.
 </table>
 
 ## Try it without building
+
+From v0.2.0 on, each release also carries a live ISO: Yoru's desktop
+from a CD, a virtual disk or a USB stick, with an installer that puts
+Ferrix on a disk of its own. [Try Ferrix](docs/TRY-FERRIX.md) covers QEMU,
+VirtualBox, VMware and writing the stick.
 
 Each release carries the x86-64 desktop as one zip. You need QEMU and
 nothing else: no Rust, no build. On Linux or macOS:
