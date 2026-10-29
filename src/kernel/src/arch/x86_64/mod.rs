@@ -16,6 +16,7 @@ pub(crate) mod mmio;
 mod msi;
 mod msrlog;
 pub mod paranoid;
+mod pcid;
 mod powerctl;
 mod signal;
 mod smp;
@@ -429,6 +430,11 @@ fn enable_hwp_and_say() {
 ///
 /// Before the second processor starts and before the first program.
 pub(crate) fn init_speculation(_view: &BootView<'_>) {
+    // PCIDs first: the plan reads `CR4.PCIDE` to decide whether ERAPS may
+    // stand in for the return stack refill, `CpuStarter::new` copies `CR4`
+    // for the secondaries, and the bit is final from here.
+    pcid::init();
+    pcid::report();
     speculation::init();
 }
 
@@ -1703,11 +1709,16 @@ pub(crate) fn prepare_user_root(root: u64) {
     crate::arch::speculation::forget_root(root);
 }
 
-/// Translate this processor's user half through the tables at `root`.
+/// Translate this processor's user half through the tables at `root`, the
+/// tables of the space with id `space` whose shootdown count, read after
+/// processor `cpu` (this one) joined its set, is `begun`.
 ///
-/// One write to `CR3`, and nothing else. The flush is the architecture's: a
-/// write to `CR3` drops every cached translation that is not marked global,
-/// which is precisely the set that belongs to the address space being left.
+/// One write to `CR3`, and nothing else. Without PCIDs the flush is the
+/// architecture's: a write to `CR3` drops every cached translation that is
+/// not marked global, which is precisely the set that belongs to the address
+/// space being left. With them (`pcid`, `docs/PCID.md`) the write names the
+/// space's slot and keeps its translations unless a shootdown of the space
+/// has begun since the slot was last flushed, or the slot is new.
 /// The kernel's own translations are global — `CR4.PGE` is set by the loader
 /// and the kernel keeps it — so kernel text, the direct map and the device
 /// windows survive the switch and are not re-walked.
@@ -1723,13 +1734,33 @@ pub(crate) fn prepare_user_root(root: u64) {
 /// kernel instruction, and the trap taken if it did not translate would be a
 /// triple fault. The tables it roots must also stay alive until another root
 /// replaces this one on this processor.
-pub(crate) unsafe fn install_user_root(root: u64) {
+pub(crate) unsafe fn install_user_root(root: u64, space: u64, begun: u64, cpu: usize) {
     // SAFETY: (TRANSLATE) the caller guarantees the root carries the kernel's half, which
-    // is what maps the code and stack this returns onto.
-    unsafe { cpu::write_cr3(root) };
+    // is what maps the code and stack this returns onto, and masks interrupts
+    // on `cpu`, the processor running this.
+    let _ = unsafe { pcid::install(root, space, begun, cpu) };
     // `IBPB` and a return stack refill, if this is another program's space
     // than the one this processor last ran. See `speculation`.
     crate::arch::speculation::entered_space(root);
+}
+
+/// The value the last [`install_user_root`] on processor `logical` wrote to
+/// its root register, bit 63 included; that bit, which asks to keep a
+/// tag's translations; and whether the machine tags at all: for the boot's
+/// check of the PCID allocator.
+pub(crate) fn last_root_write(logical: usize) -> Option<(u64, u64, bool)> {
+    Some((pcid::last_write(logical), 1 << 63, pcid::on()))
+}
+
+/// The tag the running processor's root register holds now: its PCID.
+pub(crate) fn root_tag_now() -> u64 {
+    pcid::tag_now()
+}
+
+/// The PCID slot rule, on spaces described rather than installed: see
+/// `pcid::check::check_slot_rule`.
+pub(crate) fn check_root_tags() -> Result<(), &'static str> {
+    pcid::check::check_slot_rule()
 }
 
 /// Go back to translating nothing but the kernel's own tables.

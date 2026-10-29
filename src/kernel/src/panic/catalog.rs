@@ -2302,6 +2302,40 @@ pub(crate) static X2APIC_LOCKED: Explanation = Explanation {
           secondary_start; docs/NVIDIA.md section 12.3",
 };
 
+/// For `pcid::require_on_secondary`, when a secondary lacks the PCIDs the boot
+/// processor turned on.
+pub(crate) static SECONDARY_WITHOUT_PCID: Explanation = Explanation {
+    code: "FX-0410",
+    title: "a processor has no PCIDs and the boot processor turned them on",
+    meaning: "The boot processor decides from its own CPUID whether `CR3` writes are tagged \
+              with process-context identifiers, sets `CR4.PCIDE`, and every secondary adopts \
+              its `CR4` whole (`docs/PCID.md`). PCIDs are on only where every processor has \
+              them, so a secondary whose CPUID.1:ECX[17] is clear stops the boot here by name \
+              rather than fault on the bit or run with tags its neighbours keep.",
+    causes: &[
+        "A machine whose processors report different features: a hypervisor offering \
+         `pcid` to the first virtual processor only, or mismatched sockets.",
+    ],
+    see: "src/kernel/src/arch/x86_64/pcid.rs require_on_secondary; \
+          src/kernel/src/arch/x86_64/smp.rs secondary_start; docs/PCID.md",
+};
+
+/// For `AddressSpace::assemble`, when the address space ids run out.
+pub(crate) static SPACE_IDS_EXHAUSTED: Explanation = Explanation {
+    code: "FX-0011",
+    title: "the address space ids ran out",
+    meaning: "Every address space gets a 64-bit number from a counter that is never wound \
+              back, and a processor's PCID slot records that number, so a space made over a \
+              freed root's frame never finds a dead space's translations (`docs/PCID.md`). A \
+              number given twice would let a new space use another's stale translations, so \
+              the kernel stops rather than wrap.",
+    causes: &[
+        "2^64 - 1 address spaces made in one boot, which no machine reaches; or the counter \
+         overwritten.",
+    ],
+    see: "src/kernel/src/user/space.rs AddressSpace::assemble; docs/PCID.md",
+};
+
 /// For `check_path_calls` in `stages_check.rs`, when `syscall::check::run_paths` fails.
 pub static STAGE8_PATH_CALLS: Explanation = Explanation {
     code: "FX-0820",
@@ -3493,6 +3527,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &LOAD_REGISTRATION,
     &BOOT_OUT_OF_MEMORY,
     &ALLOCATION_ABORTED,
+    &SPACE_IDS_EXHAUSTED,
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,
@@ -3517,6 +3552,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE4_SMP,
     &X2APIC_LOCKED,
     &TABLES_NOT_NOTED,
+    &SECONDARY_WITHOUT_PCID,
     &SCHEDULER_BRING_UP,
     &STAGE5_SCHEDULER,
     &SCHEDULE_WITH_PREEMPTION_HELD,

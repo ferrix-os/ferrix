@@ -1173,13 +1173,29 @@ pub(crate) fn prepare_user_root(root: u64) {
 ///
 /// (TRANSLATE) `root` must root a live set of tables for the lower half, and they must
 /// stay live until another root replaces them on this processor.
-pub(crate) unsafe fn install_user_root(root: u64) {
+pub(crate) unsafe fn install_user_root(root: u64, _space: u64, _begun: u64, _cpu: usize) {
     // SAFETY: (TRANSLATE) the caller guarantees the tables are live.
     unsafe { cpu::write_ttbr0(root) };
     cpu::flush_user_tlb();
     // The branch predictor invalidated, if this is another program's space
     // than the one this core last ran and the core is one that needs it.
     crate::arch::speculation::entered_space(root);
+}
+
+/// The last root write and its keep bit: `None`, since every user
+/// translation here carries `ASID` zero and every install invalidates it.
+pub(crate) const fn last_root_write(_logical: usize) -> Option<(u64, u64, bool)> {
+    None
+}
+
+/// The tag the running processor's root register holds: none here.
+pub(crate) const fn root_tag_now() -> u64 {
+    0
+}
+
+/// The x86-64 PCID slot rule's check: nothing to check, no tags here.
+pub(crate) const fn check_root_tags() -> Result<(), &'static str> {
+    Ok(())
 }
 
 /// Stop translating the lower half at all.

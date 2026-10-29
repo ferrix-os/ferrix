@@ -700,12 +700,12 @@
     "user/space.rs": {
       "ring": "core",
       "lines": [
-        285,
-        595,
-        1260,
-        2472,
-        2476,
-        2477
+        298,
+        636,
+        1301,
+        2517,
+        2521,
+        2522
       ]
     },
     "object/oom.rs": {
@@ -876,7 +876,7 @@
     "arch/aarch64/mod.rs": {
       "ring": "core",
       "lines": [
-        1270
+        1286
       ]
     },
     "user/vmo.rs": {

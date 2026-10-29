@@ -226,7 +226,7 @@ package FerrixItemRequirements {
             attribute :>> statement = "A frame taken out of a translation, of a user
                 address space or of the kernel's, shall not return to the frame
                 allocator until the TLB invalidation that covers it has been made on
-                every processor that may hold the translation.";
+                every processor that may still use the translation.";
             attribute :>> criterion = "A frame an unmap, a decommit or a replace
                 takes out of a translation that another processor has cached is
                 still allocated until that processor's shootdown returns: 0 frames

@@ -2617,6 +2617,106 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::outw",
                 "arch::x86_64::cpu::inw");
         }
+        requirement <'L.x86_64.214'> pcidsOnByTheBootProcessorsCpuid : ItemLowLevel {
+            doc /* docs/PCID.md; the consultant's OK IF P1-P12, ledger line
+                4734, P1. By CPUID, never by vendor or part. */
+            attribute :>> statement = "pcid::init shall, on the boot processor and
+                before the speculation plan reads CR4 and the secondaries copy it,
+                set CR4.PCIDE and turn PCIDs on for the machine exactly where
+                CPUID.1:ECX[17] is set and CR3[11:0] is zero, and leave both off
+                otherwise.";
+            attribute :>> criterion = "The boot's slot check finds PCIDs on exactly
+                where the boot processor's CPUID offers them: off on every gated
+                row (QEMU's TCG offers no PCID, nazuna's KVM has none), on on the
+                N150 (the `pcid` boot line).";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::init",
+                "arch::x86_64::pcid::on",
+                "arch::x86_64::pcid::offered_here",
+                "arch::x86_64::pcid::invpcid_here",
+                "arch::x86_64::pcid::report",
+                "arch::x86_64::cpu::read_cr3",
+                "arch::x86_64::init_speculation");
+        }
+        requirement <'L.x86_64.215'> aSecondaryWithoutPcidsStopsTheBoot : ItemLowLevel {
+            doc /* P1: PCIDs only where every processor has them. */
+            attribute :>> statement = "A secondary processor shall, before it adopts
+                the boot processor's CR4, stop the boot with FX-0410 where that CR4
+                has PCIDE set and its own CPUID.1:ECX[17] is clear.";
+            attribute :>> criterion = "Argued: no emulated machine offers PCIDs,
+                and none offers different features to its processors; every boot
+                that comes up has passed the test on each secondary.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::require_on_secondary");
+        }
+        requirement <'L.x86_64.216'> aSlotHitKeepsOnlyWithoutAShootdownSince : ItemLowLevel {
+            attribute :>> statement = "With PCIDs on, installing a space whose id a
+                slot of the processor holds shall write CR3 with that slot's PCID
+                and bit 63 set only where the slot's recorded shootdown count is at
+                least the space's, read after the processor joined its set, and
+                otherwise with bit 63 clear, recording that count.";
+            attribute :>> criterion = "The slot rule on described spaces: a hit with
+                no shootdown since keeps, a hit after one flushes and keeps after,
+                every written value's bit 63 matching; and on PCID hardware the
+                switch back after a shootdown flushes and reads the moved page's
+                new frame. With the comparison taken out the boot fails.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::install",
+                "arch::x86_64::pcid::Slots::choose",
+                "arch::x86_64::pcid::Slots::flushed",
+                "arch::x86_64::pcid::tagged_root",
+                "arch::x86_64::install_user_root");
+        }
+        requirement <'L.x86_64.217'> aSlotMissTakesTheNextSlotAndFlushes : ItemLowLevel {
+            attribute :>> statement = "With PCIDs on, installing a space whose id no
+                slot holds shall take the processor's next slot round robin, record
+                the space's id in it, and write CR3 with that slot's PCID, 1 to 6,
+                and bit 63 clear; a slot shall match only the space whose id it
+                records, and no id shall be given twice.";
+            attribute :>> criterion = "The slot rule on described spaces: a new space
+                flushes, a seventh takes a slot and its owner flushes when it comes
+                back, every PCID in 1 to 6; a space made after another is dropped
+                keeps no slot. With the miss keeping, the boot fails.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::Slots::choose",
+                "user::space::next_id",
+                "user::space::AddressSpace::assemble");
+        }
+        requirement <'L.x86_64.218'> uninstallFlushesPcidZero : ItemLowLevel {
+            attribute :>> statement = "uninstall_user_root shall load the kernel's
+                root with PCID 0 and bit 63 clear; PCID 0 shall tag no user
+                space.";
+            attribute :>> criterion = "After every uninstall of the switch-back
+                check, CR3's PCID reads 0.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::uninstall_user_root",
+                "arch::x86_64::pcid::tag_now");
+        }
+        requirement <'L.x86_64.219'> withoutPcidsTheBareRoot : ItemLowLevel {
+            attribute :>> statement = "With PCIDs off, install_user_root shall write
+                the space's root to CR3 and nothing else.";
+            attribute :>> criterion = "On every gated x86-64 row the switch-back
+                check finds each install's written value equal to the space's root,
+                and the processor joining and leaving the space's set where it did
+                before PCIDs; the IPC round trip on nazuna within 1% of develop's.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("arch::x86_64::pcid::install",
+                "arch::x86_64::pcid::last_write",
+                "arch::x86_64::last_root_write");
+        }
+        requirement <'L.x86_64.220'> erapsNeverBesidePcids : ItemLowLevel {
+            doc /* Keeps ledger line 392's ERAPS guarantee unchanged. */
+            attribute :>> statement = "ERAPS shall stand in for the in-domain return
+                stack refill only on a machine where PCIDs are off, so that every
+                CR3 write a switch makes flushes.";
+            attribute :>> criterion = "The boot's speculation check finds the plan's
+                ERAPS and the machine's PCIDs never both on, and the ERAPS decision,
+                asked for a processor described as offering ERAPS, refusing it
+                where CR4.PCIDE is set.";
+            attribute :>> parent = "H.TRAP.17";
+            attribute :>> unit = ("arch::x86_64::speculation::eraps_empties_on_switch",
+                "arch::x86_64::speculation::switch_barrier_in_domain");
+        }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
                 after the console has drained.";
@@ -2719,8 +2819,8 @@ package FerrixX8664Requirements {
 
         requirement <'L.x86_64.108'> globalFlushReachesEveryProcessor : ItemLowLevel {
             attribute :>> statement = "flush_tlb_including_global shall drop every
-                cached translation on its processor, global ones included, by
-                toggling CR4.PGE and reloading CR3.";
+                cached translation on its processor, global ones included and
+                under every PCID, by toggling CR4.PGE and reloading CR3.";
             attribute :>> criterion = "20 remaps of a global kernel page to a new
                 frame are each seen by every online processor: 0 stale reads (the
                 `tlb` line). Under TCG a plain CR3 reload would pass as well; the

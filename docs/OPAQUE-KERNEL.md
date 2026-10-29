@@ -2979,6 +2979,9 @@ four things §9.5 assumed:
   eagerly or lazily. Second, the advisory on step 1: the Sync wake moves
   more tasks between processors, so the allocator must flush or tag a PCID
   for the processor a space arrives on.
+  *Since 2026-10-29* PCIDs are built (`docs/PCID.md`, the consultant's OK
+  IF P1-P12, ledger line 4734), switched on by `CPUID`, for hardware that
+  has them; nazuna and every gated row still run without.
 - *ERAPS*, global user pages and the rest of §9.6's *what seL4 does not do*:
   step 5, each with its own review.
 - *AArch64 and ARMv7-A* gain from step 2, whose pieces are written for all

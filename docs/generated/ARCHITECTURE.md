@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 7947 elements, 220 relations. Model digest `deec9304a3df4c75`.
+27 files, 149 packages, 7992 elements, 220 relations. Model digest `036f22ec1c970b4d`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -249,7 +249,7 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.14` | The kernel's own frame allocator, heap and address arena shall hand each frame, block and range to one holder at a time, and shall never hand out frame 0. | Stage 2's memory check finds two frames distinct, a 16-frame block 16-frame aligned, frame 0 neither managed nor handed out, a Box, a 4096-entry Vec and a 2048-key BTreeMap each holding what was put in it, and two arena ranges distinct, inside the arena and two guard pages apart. | `O.ISOLATE, ASR-1` |
 | `H.MEM.15` | A mapping the kernel makes in its own address space shall translate each page to the frame or register asked for, with the permissions and memory type asked for. | Each page of an 8-page arena range translates to a frame, none to its neighbour's; a page protected read-only reads back not writable in the descriptors and still translates; a device window at offset 0x40 translates to the register asked for, offset included, as device memory and not executable, and is gone once unmapped. | `O.ISOLATE, ASR-1` |
 | `H.MEM.16` | After a fork, a write by the child to a MAP_SHARED mapping shall be visible to the parent, and its write to a MAP_PRIVATE mapping shall not. | The `shared` program exits 62 (its MAP_SHARED write reached the parent and its MAP_PRIVATE write did not). | `O.ISOLATE, ASR-1` |
-| `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may hold the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
+| `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may still use the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
 | `H.MEM.18` | The kernel shall refuse to map a device window or a native VMO executable into a user address space, and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
 
@@ -4443,6 +4443,8 @@ flowchart LR
 | `L.user.104` | `aFaultIsResolvedWithNoPreemptionLockHeld` | — | — | — |
 | `L.user.105` | `anUnmapFreesNothingBeforeItsShootdown` | — | — | — |
 | `L.user.106` | `aCodePageIsReadAndRunAlone` | — | — | — |
+| `L.user.169` | `aSpaceIsLeftOnlyInAnOrderAShootdownSees` | — | — | — |
+| `L.user.170` | `aSpaceSwitchedBackToSeesItsShootdowns` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
@@ -4602,6 +4604,13 @@ flowchart LR
 | `L.x86_64.98` | `theMachinePowersItselfOff` | — | — | — |
 | `L.x86_64.212` | `theSoftOffIsRecordedWhole` | — | — | — |
 | `L.x86_64.213` | `theMachineEntersSoftOff` | — | — | — |
+| `L.x86_64.214` | `pcidsOnByTheBootProcessorsCpuid` | — | — | — |
+| `L.x86_64.215` | `aSecondaryWithoutPcidsStopsTheBoot` | — | — | — |
+| `L.x86_64.216` | `aSlotHitKeepsOnlyWithoutAShootdownSince` | — | — | — |
+| `L.x86_64.217` | `aSlotMissTakesTheNextSlotAndFlushes` | — | — | — |
+| `L.x86_64.218` | `uninstallFlushesPcidZero` | — | — | — |
+| `L.x86_64.219` | `withoutPcidsTheBareRoot` | — | — | — |
+| `L.x86_64.220` | `erapsNeverBesidePcids` | — | — | — |
 | `L.x86_64.99` | `theMachineResets` | — | — | — |
 | `L.x86_64.100` | `aStoppedProcessorStaysStopped` | — | — | — |
 | `L.x86_64.101` | `theVdsoExportsItsClocks` | — | — | — |

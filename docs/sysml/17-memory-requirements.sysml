@@ -1930,9 +1930,10 @@ package FerrixMemoryRequirements {
                  * interrupted and running INVLPG, waited for in
                  * invalidate_pages); a processor leaves a space's set only
                  * after AddressSpace::install or uninstall has loaded another
-                 * root into CR3. The interrupt, INVLPG and the CR3 load each
-                 * drain the write-combining buffers (SDM Vol. 3A 11.3.1), so
-                 * no buffered store reaches a frame after it is reused. */
+                 * root into CR3, with or without a PCID's flush (docs/PCID.md).
+                 * The interrupt, INVLPG and the CR3 load each drain the
+                 * write-combining buffers (SDM Vol. 3A 11.3.1), so no buffered
+                 * store reaches a frame after it is reused. */
             attribute :>> statement = "Every user mapping of a page of a
                 write-combining VMO shall be write-combining; each of its frames
                 shall have its cache lines written back and invalidated after
@@ -2559,6 +2560,37 @@ package FerrixMemoryRequirements {
                 page scenario, the `sweep` line).";
             attribute :>> parent = "H.MEM.18";
             attribute :>> unit = "user::space::AddressSpace::map_code_page";
+        }
+        requirement <'L.user.169'> aSpaceIsLeftOnlyInAnOrderAShootdownSees : ItemLowLevel {
+            doc /* docs/PCID.md section 3; the consultant's P2, ledger line 4734. */
+            attribute :>> statement = "begin_shootdown shall count a shootdown before
+                it reads the space's set, and install shall join the set before it
+                reads the count, both sequentially consistent, so that a processor
+                that left the set with the space's translations kept under a PCID
+                is either interrupted by a shootdown or flushes the PCID before it
+                uses the space again.";
+            attribute :>> criterion = "The loom model of the two orders
+                (src/tests/loom/tests/pcid.rs, `cargo xtask loom`) finds no
+                interleaving in which a processor uses a translation after the
+                shootdown that took it down has returned; with either order
+                reversed, or the slot's comparison left out, it finds one. The
+                switch-back check runs both orders on every boot.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("user::space::AddressSpace::install",
+                "user::space::AddressSpace::begin_shootdown");
+        }
+        requirement <'L.user.170'> aSpaceSwitchedBackToSeesItsShootdowns : ItemLowLevel {
+            attribute :>> statement = "A space installed again on a processor after
+                a shootdown of it began while it was installed elsewhere shall be
+                translated through its tables as they are, never through a
+                translation the shootdown took down.";
+            attribute :>> criterion = "A page moved to a new frame while its space
+                is not installed is read, after the switch back, as the new
+                frame's marker: decisive on PCID hardware (the N150), where a kept
+                tag would read the old frame.";
+            attribute :>> parent = "H.MEM.17";
+            attribute :>> unit = ("user::space::AddressSpace::install",
+                "user::space::AddressSpace::uninstall");
         }
     }
 }

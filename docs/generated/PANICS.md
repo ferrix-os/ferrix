@@ -26,6 +26,7 @@ Causes are listed most likely first.
 | [FX-0006](#fx-0006) | the load ring did not register what the item needs from it |
 | [FX-0007](#fx-0007) | memory ran out while the kernel was coming up |
 | [FX-0008](#fx-0008) | an allocation that cannot report failure found the heap empty |
+| [FX-0011](#fx-0011) | the address space ids ran out |
 | [FX-0101](#fx-0101) | the loader's hand-off is not what the kernel needs |
 | [FX-0201](#fx-0201) | the frame allocator could not be built |
 | [FX-0202](#fx-0202) | the kernel address arena could not be created |
@@ -50,6 +51,7 @@ Causes are listed most likely first.
 | [FX-0407](#fx-0407) | the processors failed to work together |
 | [FX-0408](#fx-0408) | a processor's local APIC is locked in x2APIC mode |
 | [FX-0409](#fx-0409) | a processor's record does not hold its GDT and RSP0 |
+| [FX-0410](#fx-0410) | a processor has no PCIDs and the boot processor turned them on |
 | [FX-0501](#fx-0501) | the scheduler could not be started |
 | [FX-0502](#fx-0502) | the scheduler failed its self-check |
 | [FX-0503](#fx-0503) | a task tried to block while holding a lock that disables preemption |
@@ -324,6 +326,21 @@ failure.
 
 See: docs/certification/MEMORY-AND-TIMING.md;
 tools/common/check/check-fallible-alloc.py; src/kernel/src/mm.rs.
+
+<a id="fx-0011"></a>
+
+## FX-0011 — the address space ids ran out
+
+Every address space gets a 64-bit number from a counter that is never wound
+back, and a processor's PCID slot records that number, so a space made over a
+freed root's frame never finds a dead space's translations (`docs/PCID.md`). A
+number given twice would let a new space use another's stale translations, so
+the kernel stops rather than wrap.
+
+1. 2^64 - 1 address spaces made in one boot, which no machine reaches; or the
+   counter overwritten.
+
+See: src/kernel/src/user/space.rs AddressSpace::assemble; docs/PCID.md.
 
 <a id="fx-0101"></a>
 
@@ -923,6 +940,22 @@ wrong address, or ask the processor at every switch after all.
 See: src/kernel/src/arch/x86_64/gdt.rs note_tables;
 src/kernel/src/arch/x86_64/gdt/check.rs require_tables_noted;
 docs/OPAQUE-KERNEL.md §9.11.
+
+<a id="fx-0410"></a>
+
+## FX-0410 — a processor has no PCIDs and the boot processor turned them on
+
+The boot processor decides from its own CPUID whether `CR3` writes are tagged
+with process-context identifiers, sets `CR4.PCIDE`, and every secondary adopts
+its `CR4` whole (`docs/PCID.md`). PCIDs are on only where every processor has
+them, so a secondary whose CPUID.1:ECX[17] is clear stops the boot here by name
+rather than fault on the bit or run with tags its neighbours keep.
+
+1. A machine whose processors report different features: a hypervisor offering
+   `pcid` to the first virtual processor only, or mismatched sockets.
+
+See: src/kernel/src/arch/x86_64/pcid.rs require_on_secondary;
+src/kernel/src/arch/x86_64/smp.rs secondary_start; docs/PCID.md.
 
 <a id="fx-0501"></a>
 

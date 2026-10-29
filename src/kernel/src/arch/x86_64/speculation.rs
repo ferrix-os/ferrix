@@ -1334,6 +1334,7 @@ pub(crate) fn check() -> Result<(), &'static str> {
             return Err("LSTAR is not the system call entry the BHI plan chose");
         }
     }
+    check::eraps_never_beside_pcids()?;
     check::vector_leak_decisions()?;
     check::rfds_decisions()?;
     check::bhi_decisions()?;

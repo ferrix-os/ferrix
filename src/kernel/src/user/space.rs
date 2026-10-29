@@ -32,10 +32,19 @@
 //!   no processor walks these tables and caches an entry while outside the
 //!   set.
 //! * It **leaves only after** the root write that took its translations out
-//!   of its TLB: [`AddressSpace::uninstall`]'s, or the `install` of the next
-//!   space. On x86-64 that is the `CR3` write — without `PCID` it drops every
-//!   entry not marked global, and no user mapping is ever global: every
-//!   `map_in` in this file passes `global: false`. On `AArch64` and ARMv7-A a
+//!   of its TLB, or out of use: [`AddressSpace::uninstall`]'s, or the
+//!   `install` of the next space. On x86-64 that is the `CR3` write — without
+//!   `PCID` it drops every entry not marked global, and no user mapping is
+//!   ever global: every `map_in` in this file passes `global: false`. With
+//!   `PCID` (`docs/PCID.md`) the write may keep them, tagged with a PCID that
+//!   is no longer current and so used for nothing; before that PCID is
+//!   current for this space again, `install` flushes it if a shootdown of
+//!   the space has begun since it was last flushed. That rests on two
+//!   sequentially consistent orders: a shootdown counts itself (`begun`)
+//!   before it reads the set, and `install` joins the set before it reads
+//!   the count. Either the set read sees the join, and the processor is
+//!   interrupted, or the count read sees the shootdown, and the slot is
+//!   flushed. On `AArch64` and ARMv7-A a
 //!   write to `TTBR0` drops nothing and `EPD0` stops walks rather than TLB
 //!   hits, so both `install_user_root` and `uninstall_user_root` invalidate
 //!   `ASID` zero, which every user translation carries and no kernel one does.
@@ -245,6 +254,10 @@ impl Inner {
 pub struct AddressSpace {
     /// Physical frame of the root table.
     root: Frame,
+    /// This space's number, never given to another: what a processor's PCID
+    /// slot records, so that a space made over a freed root's frame never
+    /// finds a dead space's translations (`docs/PCID.md`).
+    id: u64,
     /// This space, as the objects it maps record it.
     me: Weak<AddressSpace>,
     /// The processors whose TLB may still hold this space's translations.
@@ -353,7 +366,9 @@ impl AddressSpace {
     /// The processor joins this space's set before the root is loaded, and
     /// leaves `replacing`'s only after, for the reasons the module gives. A
     /// `replacing` that was not in fact installed here costs nothing: the
-    /// root write just made has dropped whatever of it this TLB held.
+    /// root write just made has dropped whatever of it this TLB held, or,
+    /// with PCIDs, left it under a PCID that is not current, which the
+    /// module's last rule covers.
     ///
     /// # Safety
     ///
@@ -377,10 +392,14 @@ impl AddressSpace {
         let cpu = this_logical_cpu();
         // NOALLOC: a `CpuMask` is a fixed bitmap; joining sets a bit.
         self.cpus.join(cpu);
+        // After the join, for the order the module gives: a shootdown whose
+        // set read missed the join is one whose count this read sees.
+        let begun = self.flushes.begun.load(Ordering::SeqCst);
         // SAFETY: (TRANSLATE) the root was made by `new`, so `prepare_user_root` has run
         // on it and the kernel is reachable through it on the architecture
-        // that needs that; the caller guarantees it outlives the installation.
-        unsafe { arch::install_user_root(self.root * PAGE_SIZE) };
+        // that needs that; the caller guarantees it outlives the installation,
+        // and masks interrupts on `cpu`, the processor running this.
+        unsafe { arch::install_user_root(self.root * PAGE_SIZE, self.id, begun, cpu) };
         crate::sched::trip::count(crate::sched::trip::Count::RootInstall);
         if let Some(previous) = replacing
             && !core::ptr::eq(previous, self)
@@ -393,7 +412,12 @@ impl AddressSpace {
     ///
     /// After this no user address translates here, which is the state a kernel
     /// thread runs in. The processor leaves the set after the root write,
-    /// which on every architecture drops the user translations it had cached.
+    /// which on every architecture drops the user translations it had cached
+    /// or, on x86-64 with PCIDs, takes them out of use: the kernel's root is
+    /// loaded with PCID 0, whose flush does not reach the space's own PCID,
+    /// and the space's translations stay under that PCID, used for nothing,
+    /// until `install` flushes it or keeps it by the rule the module gives
+    /// for a switch to another space (`docs/PCID.md` §3).
     ///
     /// # Safety
     ///
@@ -418,6 +442,7 @@ impl AddressSpace {
     fn assemble(root: Frame, me: &Weak<AddressSpace>, inner: Inner) -> AddressSpace {
         AddressSpace {
             root,
+            id: next_id(),
             me: me.clone(),
             cpus: CpuMask::new(),
             flushes: Flushes::new(),
@@ -425,6 +450,22 @@ impl AddressSpace {
             inner: SpinLock::new(inner),
             domain: AtomicU64::new(UNCLAIMED),
         }
+    }
+}
+
+/// The next [`AddressSpace`]'s id. From one: zero is a PCID slot holding no
+/// space.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A new space's id, never given before: the counter only moves up, and the
+/// kernel stops rather than wrap it to an id already given or to zero.
+fn next_id() -> u64 {
+    match NEXT_ID.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)) {
+        Ok(id) if id != 0 => id,
+        _ => crate::panic::fatal!(
+            crate::panic::catalog::SPACE_IDS_EXHAUSTED,
+            "no address space id is left that was never given"
+        ),
     }
 }
 
@@ -1871,13 +1912,16 @@ impl AddressSpace {
     /// translations it is for are out of the tables, never before.
     fn begin_shootdown(&self, _locked: &Inner) -> CpuSet {
         let _ = self.flushes.pending.fetch_add(1, Ordering::SeqCst);
-        let _ = self.flushes.begun.fetch_add(1, Ordering::Relaxed);
+        // Sequentially consistent, and before the set is read: what lets a
+        // processor leave the set with this space's translations still in
+        // its TLB under a PCID (`install`, and the module's last section).
+        let _ = self.flushes.begun.fetch_add(1, Ordering::SeqCst);
         self.cpus.snapshot()
     }
 
     /// How many shootdowns of this space have begun: see the field.
     pub(crate) fn shootdowns_begun(&self) -> u64 {
-        self.flushes.begun.load(Ordering::Relaxed)
+        self.flushes.begun.load(Ordering::SeqCst)
     }
 
     /// A shootdown [`AddressSpace::begin_shootdown`] or
@@ -1899,8 +1943,9 @@ impl AddressSpace {
 struct Flushes {
     /// Counted under the space's lock and not yet returned.
     pending: AtomicU64,
-    /// Ever begun, for the checks: what a change that should have taken
-    /// nothing down is held to.
+    /// Ever begun: what a change that should have taken nothing down is
+    /// held to, and what a PCID slot is compared with before it is kept
+    /// (`install`).
     begun: AtomicU64,
 }
 
@@ -3817,7 +3862,10 @@ impl Drop for AddressSpace {
 
         // Unwalked: no processor is in this space's set, and each left it
         // through the root write that dropped its entries, walk caches and
-        // all -- the module's second rule.
+        // all, or, with PCIDs, left them under a PCID that is not current --
+        // the module's second rule. Those are used for nothing: this space's
+        // id is never given again, so no install finds its slot, and the
+        // slot's next owner flushes it (`docs/PCID.md` §3).
         for region in inner.map.iter() {
             let _ = mm::unmap_unwalked(
                 self.root * PAGE_SIZE,

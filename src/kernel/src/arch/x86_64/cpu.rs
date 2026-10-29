@@ -551,11 +551,7 @@ pub(crate) fn flush_tlb_including_global() {
     // but this is the operation the rest of the kernel means by "flush" and
     // leaving it out would make the correctness of this function depend on a
     // footnote rather than on two instructions that plainly do it.
-    let cr3: u64;
-    // SAFETY: (TRANSLATE) reading CR3 has no side effects.
-    unsafe {
-        asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
-    }
+    let cr3 = read_cr3();
     // SAFETY: (TRANSLATE) writing back the value just read changes no mapping; its only
     // effect is to flush the TLB, which is the point.
     unsafe {
@@ -1205,6 +1201,17 @@ pub(crate) unsafe fn write_cr4(value: u64) {
     unsafe {
         asm!("mov cr4, {}", in(reg) value, options(nostack, preserves_flags));
     }
+}
+
+/// Read control register 3: the root and, with `CR4.PCIDE` set, the PCID
+/// in bits 11 to 0.
+pub(crate) fn read_cr3() -> u64 {
+    let value: u64;
+    // SAFETY: (SYSREG) reading `CR3` has no side effects.
+    unsafe {
+        asm!("mov {}, cr3", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
 }
 
 /// Switch to the page tables rooted at `root`.

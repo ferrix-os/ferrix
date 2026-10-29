@@ -102,12 +102,13 @@ pub use aarch64::{
 };
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
+    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "aarch64")]
@@ -136,12 +137,13 @@ pub use armv7a::{
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
+    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "arm")]
@@ -399,12 +401,13 @@ pub use x86_64::{
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
-    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
-    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, ipi_irq,
-    mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root,
-    report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts,
-    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    CpuStarter, PageEncoding, advance_past_breakpoint, check_root_tags, classify,
+    console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console,
+    enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
+    identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
+    permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
+    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
+    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "x86_64")]

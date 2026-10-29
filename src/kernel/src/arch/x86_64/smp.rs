@@ -465,6 +465,10 @@ extern "C" fn secondary_start(record: u64) -> ! {
     unsafe { cpu::write_cr3(crate::mm::root_table()) };
 
     let boot_cr4 = BOOT_CR4.load(Ordering::Relaxed);
+    // `PCIDE` comes with the copy where the boot processor set it, and a
+    // processor without PCIDs would fault on it: the boot stops by name
+    // instead, since PCIDs are on only where every processor has them.
+    super::pcid::require_on_secondary(boot_cr4);
     if cpu::read_cr4() != boot_cr4 {
         // SAFETY: (SYSREG) the boot processor's own `CR4`, on a processor of the same
         // kind that is now in the same mode, with a `CR3` whose low bits are
