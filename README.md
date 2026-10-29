@@ -25,7 +25,8 @@ Ferrix is experimental. Logins, `su` and the lock screen check passwords,
 but it is not ready to be your everyday operating system, and most of its
 tests run in QEMU.
 
-[See what works](#what-works) · [Try it without building](#try-it-without-building) ·
+[See what works](#what-works) · [Download the live ISO](https://github.com/ferrix-os/ferrix/releases/latest) ·
+[Try it without building](#try-it-without-building) ·
 [Boot Ferrix](#boot-ferrix) · [Read the technical guide](docs/GUIDE.md) ·
 [Visit the website](https://ferrix-os.org/)
 
@@ -223,8 +224,10 @@ this tree at the commits [`components.toml`](components.toml) names.
 
 From v0.2.0 on, each release also carries a live ISO: Yoru's desktop
 from a CD, a virtual disk or a USB stick, with an installer that puts
-Ferrix on a disk of its own. [Try Ferrix](docs/TRY-FERRIX.md) covers QEMU,
-VirtualBox, VMware and writing the stick.
+Ferrix on a disk of its own. Download it from
+[the latest release](https://github.com/ferrix-os/ferrix/releases/latest)
+and check it against `SHA256SUMS`. [Try Ferrix](docs/TRY-FERRIX.md) covers
+QEMU, VirtualBox, VMware and writing the stick.
 
 Each release carries the x86-64 desktop as one zip. You need QEMU and
 nothing else: no Rust, no build. On Linux or macOS:
