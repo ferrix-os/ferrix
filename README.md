@@ -36,22 +36,6 @@ tests run in QEMU.
 Steam, in a window, through Ferrix's own Intel GPU driver, with btop and
 ferrofetch beside it.*
 
-## A Windows game on a mini PC
-
-Arknights: Endfield runs on an Intel N150 mini PC under Ferrix, started from
-Steam through Proton and drawn by Mesa's Vulkan driver over Ferrix's own
-Intel GPU driver ([docs/INTEL-GPU.md](docs/INTEL-GPU.md)). That driver is not
-in the kernel: it is an ordinary process, written by following Linux's i915
-file by file. The game is playable, but not smooth yet.
-
-On the same machine the GPU driver can be killed with `kill -9` while the
-system runs. Ferrix starts it again within milliseconds, and Vulkan finds
-the GPU again afterwards
-([docs/INTEL-GPU.md](docs/INTEL-GPU.md) §11). Under QEMU the driver can also
-run as two processes, a keeper that holds what programs hold and a worker
-that drives the GPU, so that a worker can die and be replaced while a
-Vulkan program goes on (§12, step 1 of its plan).
-
 ## What works
 
 - **Linux programs, unchanged:** Chrome, `rustc`, `git`, `curl`, Valve's
