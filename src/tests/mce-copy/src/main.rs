@@ -104,7 +104,12 @@ fn copy_mode() -> ExitCode {
 /// The victim: a handler that keeps what it saw, the buffer, then writes.
 fn victim() -> ! {
     handle_sigbus(on_sigbus_keep);
-    let Some(buffer) = fill() else {
+    let buffer = if cfg!(feature = "file") {
+        file_buffer()
+    } else {
+        fill()
+    };
+    let Some(buffer) = buffer else {
         exit_with("mce-copy: FAILED mmap", 1);
     };
     // A memfd, not a file on the root: its pages stay in memory, so a write
@@ -182,6 +187,31 @@ fn fill() -> Option<*mut u64> {
         unsafe { words.add(index).write_volatile((MAGIC << 32) | page) };
     }
     Some(words)
+}
+
+/// The file mode's buffer: [`fill`]'s words written to a file on the
+/// writable disk, synced so its pages are clean, and mapped shared through a
+/// descriptor that cannot write.
+fn file_buffer() -> Option<*mut u64> {
+    let words = fill()?;
+    // SAFETY: `fill` mapped `LENGTH` bytes.
+    let bytes = unsafe { std::slice::from_raw_parts(words.cast::<u8>(), LENGTH) };
+    let path = "/mnt-rw/mce-copy-file";
+    std::fs::write(path, bytes).ok()?;
+    std::fs::File::open(path).ok()?.sync_all().ok()?;
+    let file = std::fs::File::open(path).ok()?;
+    // SAFETY: a shared read-only mapping of an open file of `LENGTH` bytes.
+    let at = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            LENGTH,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            std::os::unix::io::AsRawFd::as_raw_fd(&file),
+            0,
+        )
+    };
+    (at != libc::MAP_FAILED).then(|| at.cast::<u64>())
 }
 
 /// The environ mode: run the target, then read its environment in a loop.

@@ -320,8 +320,11 @@ Reserved on `develop` in 971dd7f2a and written in the model
 * Arm RAS (`ERR<n>STATUS`, SEI/SError): AArch64 and ARMv7-A keep their
   current behaviour.
 * Early kill and unmapping a poisoned page from every mapper: needs a
-  frame-to-mapper map (§3.4). Page-cache poison is the same: a clean
-  cached page could be dropped and read again from disk.
+  frame-to-mapper map (§3.4). Page-cache poison in a clean page is dropped
+  from every mapper and read again from the disk
+  (`MACHINE-CHECK-PAGECACHE.md`, H.FAIL.11), the cache list walked to find it;
+  a dirty page's is not, and btrfs writeback of it recovers and fails `EIO`
+  each round until the page is truncated or deleted.
 * **Residuals of late kill** (the consultant's M5; SAFETY-MANUAL AoU-36,
   VULNERABILITY-ANALYSIS T.EXHAUST path 8): the frame stays mapped in the
   consumer until it exits and in every other mapper. The kernel consuming
@@ -329,7 +332,8 @@ Reserved on `develop` in 971dd7f2a and written in the model
   read, a device's DMA -- is a ring-0 machine check and stops as FX-9005,
   as any poison does today. A handler that returns and touches the page
   again consumes it again on real memory.
-  (A system call's copy now fails the call instead: `MACHINE-CHECK-COPY.md`.)
+  (A system call's copy now fails the call instead: `MACHINE-CHECK-COPY.md`;
+  a page-cache read of a clean page is refilled: `MACHINE-CHECK-PAGECACHE.md`.)
 
 ## 7. Where it stands
 

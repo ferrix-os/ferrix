@@ -201,6 +201,7 @@ const TEST_MCE_COPY: &[&str] = &[
     "test-mce-copy-outside --arch x86_64 --accel kvm",
     "test-mce-copy-environ --arch x86_64 --accel kvm",
     "test-mce-copy-intel --arch x86_64 --accel kvm",
+    "test-mce-copy-file --arch x86_64 --accel kvm",
 ];
 
 /// Whether `path` reaches the copy's recovery: the copy, the decision and
@@ -218,6 +219,35 @@ fn reaches_mce_copy(path: &str) -> bool {
     ]
     .contains(&path)
         || path.starts_with("src/tests/mce-copy/")
+}
+
+/// Poison in the page cache (`docs/MACHINE-CHECK-PAGECACHE.md` §6, ledger
+/// 5294): a clean page's read and mapping under KVM with AMD's records, the
+/// dirty modes, the poll under TCG with Intel's UCNA record, and the copy
+/// from a clean file's mapping.
+const TEST_MCE_PAGECACHE: &[&str] = &[
+    "test-mce-pagecache --arch x86_64 --accel kvm",
+    "test-mce-pagecache --arch x86_64 --accel tcg",
+    "test-mce-pagecache-mapped --arch x86_64 --accel kvm",
+    "test-mce-pagecache-dirty --arch x86_64 --accel kvm",
+    "test-mce-pagecache-poll --arch x86_64 --accel tcg",
+    "test-mce-copy-file --arch x86_64 --accel kvm",
+];
+
+/// Whether `path` reaches the page cache's poison: the drop, the cache read,
+/// the fill loop, the ring-3 and poll paths, or the gate.
+fn reaches_mce_pagecache(path: &str) -> bool {
+    [
+        "src/kernel/src/user/cache.rs",
+        "src/kernel/src/user/vmo.rs",
+        "src/kernel/src/fs/pages.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/trap.rs",
+        "src/kernel/src/fs/btrfs_write_check/poison_check.rs",
+        "tools/common/xtask/src/mce_pagecache.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/mce-pagecache/")
 }
 
 /// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
@@ -438,6 +468,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if reaches_mce_pagecache(path) {
+        rows.add(TEST_MCE_PAGECACHE);
+        reason(
+            rows,
+            "the page cache's poison: test-mce-pagecache and its modes",
         );
     }
     if reaches_mce_copy(path) {

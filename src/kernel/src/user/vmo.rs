@@ -97,6 +97,64 @@ pub enum VmoError {
     },
     /// No frame was available to commit.
     OutOfMemory,
+    /// A read of the page consumed poison: a machine check stopped the copy
+    /// at this frame (`docs/MACHINE-CHECK-PAGECACHE.md` §3.2). The caller
+    /// must act on it -- `user::cache::drop_poisoned_at` -- never turn it
+    /// into a plain error, or the frame is never retired.
+    Poisoned(Frame),
+}
+
+/// The frame plus one whose next read [`Vmo::read_present`] answers as
+/// poisoned, for stage 12's poison check (QEMU's memory never fails a
+/// load); 0 for none. Check builds only.
+#[cfg(ferrix_checks = "on")]
+static INJECT_READ_POISON: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+/// Make the next read of `frame` through [`Vmo::read_present`] answer
+/// [`VmoError::Poisoned`], once (`docs/MACHINE-CHECK-PAGECACHE.md` §6).
+#[cfg(ferrix_checks = "on")]
+pub fn inject_read_poison(frame: Frame) {
+    INJECT_READ_POISON.store(frame + 1, Ordering::SeqCst);
+}
+
+/// Whether the check asked for this read of `frame` to be poisoned; the
+/// request is used up.
+#[cfg(ferrix_checks = "on")]
+fn injected_read_poison(frame: Frame) -> bool {
+    INJECT_READ_POISON
+        .compare_exchange(frame + 1, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+/// A product build has no injection: nothing is stored, and no read is ever
+/// answered as poisoned by it. The check that asks is not run there.
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+#[cfg(not(ferrix_checks = "on"))]
+pub const fn inject_read_poison(_frame: Frame) {}
+
+/// A product build has no injection.
+#[cfg(not(ferrix_checks = "on"))]
+const fn injected_read_poison(_frame: Frame) -> bool {
+    false
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+/// The frame page `index` of `vmo` holds, for the poison check.
+pub fn frame_for_check(vmo: &Vmo, index: u64) -> Option<Frame> {
+    vmo.pages.lock().frames.get(&index).copied()
+}
+
+/// What [`Vmo::take_poisoned`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PoisonTake {
+    /// The page left the object and every space mapping it.
+    Taken,
+    /// The page is not clean, not reclaimable, held, or written through a
+    /// shared mapping: it stays.
+    Kept,
+    /// The index no longer holds the frame.
+    Gone,
 }
 
 /// Why [`Vmo::commit_run`] refused.
@@ -121,6 +179,9 @@ impl fmt::Display for VmoError {
                 write!(f, "page {index} is outside a {pages}-page object")
             }
             VmoError::OutOfMemory => f.write_str("no frame available to commit"),
+            VmoError::Poisoned(frame) => {
+                write!(f, "a read of frame {frame:#x} consumed poison")
+            }
         }
     }
 }
@@ -1188,13 +1249,108 @@ impl Vmo {
         // Read through the write-back view: a write-combining object's
         // lines out of the caches first (`L.user.133`).
         self.flush_if_combining(frame, 1);
-        let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
+        let at = mm::direct_map(frame * PAGE_SIZE) + offset as u64;
+        // Through the copy a machine check can stop (`L.object.260`): poison
+        // in a cached page is the cache's to drop and read again, not a
+        // halt. No task record: the caller acts on the answer itself.
         // SAFETY: (FRAME) as in `read_page`: the object holds a reference on
         // `frame` while its lock is held, `check_span` kept the range inside
         // the page, and the direct map covers all of RAM.
-        let source = unsafe { core::slice::from_raw_parts(at as *const u8, out.len()) };
-        out.copy_from_slice(source);
-        Ok(true)
+        let copied = unsafe { crate::arch::copy_mc(out, at) };
+        drop(pages);
+        if injected_read_poison(frame) {
+            return Err(VmoError::Poisoned(frame));
+        }
+        match copied.poisoned() {
+            None => Ok(true),
+            Some(page) if page / PAGE_SIZE == frame => Err(VmoError::Poisoned(frame)),
+            Some(_) => crate::panic::fatal!(
+                crate::panic::catalog::MACHINE_CHECK,
+                "a cache read stopped by a machine check at a page it was not reading"
+            ),
+        }
+    }
+
+    /// The index of the page `frame` holds in this object, if it holds it: a
+    /// scan of the page map, at most [`CHUNK`] entries a hold of the pages
+    /// lock, let go between chunks (`L.object.259`). Run only after a
+    /// machine check, never under a spin lock.
+    pub(crate) fn index_of(&self, frame: Frame) -> Option<u64> {
+        let mut from = 0;
+        loop {
+            let pages = self.pages.lock();
+            let mut looked = 0;
+            for (&index, &held) in pages.frames.range(from..) {
+                if held == frame {
+                    return Some(index);
+                }
+                looked += 1;
+                if looked == CHUNK {
+                    from = index.checked_add(1)?;
+                    break;
+                }
+            }
+            if looked < CHUNK {
+                return None;
+            }
+        }
+    }
+
+    /// Take page `index` because its `frame` holds poison, as reclaim takes
+    /// a clean page (`L.object.259`): only while this object is reclaimable
+    /// and its source says the page is clean, and in the take's hold of the
+    /// pages lock only if `index` still holds `frame`, is not held, and no
+    /// shared mapping wrote the object. The frame must be retired first, so
+    /// that the release keeps it out. Must be called with no spin lock held.
+    pub(crate) fn take_poisoned(&self, index: u64, frame: Frame) -> PoisonTake {
+        if !self.reclaimable() {
+            return PoisonTake::Kept;
+        }
+        let Some(filler) = self.filler.as_ref() else {
+            return PoisonTake::Kept;
+        };
+        let mut picked = Vec::new();
+        if crate::fallible::try_push(&mut picked, index).is_err() {
+            return PoisonTake::Kept;
+        }
+        let mut outcome = PoisonTake::Kept;
+        let _ = filler.reclaim_clean(&mut picked, &mut |clean| {
+            if !clean.contains(&index) {
+                return 0;
+            }
+            let mut state = self.pages.lock();
+            if !self.unwritten_by_mappings() {
+                return 0;
+            }
+            match state.frames.get(&index) {
+                Some(&now) if now == frame => {}
+                _ => {
+                    outcome = PoisonTake::Gone;
+                    return 0;
+                }
+            }
+            if state.held.contains_key(&index) {
+                return 0;
+            }
+            let Ok(mut frames) = crate::fallible::try_filled((0, 0), 1) else {
+                return 0;
+            };
+            let (taken, _) = state.take_into(index, index.saturating_add(1), &mut frames);
+            drop(state);
+            frames.truncate(taken);
+            if taken == 1 {
+                outcome = PoisonTake::Taken;
+            }
+            self.retire(
+                Retired {
+                    frames,
+                    release: true,
+                },
+                None,
+            );
+            taken as u64
+        });
+        outcome
     }
 
     /// Copy `out.len()` bytes out of page `index`, starting `offset` into it.

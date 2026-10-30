@@ -157,6 +157,7 @@ mod lode_pstore;
 mod lode_remote;
 mod machine_check;
 mod mce_copy;
+mod mce_pagecache;
 mod n150;
 mod native;
 mod net;
@@ -593,6 +594,7 @@ const TASKS: &[&[Task]] = &[
     lode_remote::TASKS,
     machine_check::TASKS,
     mce_copy::TASKS,
+    mce_pagecache::TASKS,
     powerctl::TASKS,
     quarantine::TASKS,
     scrub::TASKS,

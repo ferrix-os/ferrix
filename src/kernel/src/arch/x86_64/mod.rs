@@ -223,8 +223,10 @@ pub(crate) const fn machine_check_marked(frame: &TrapFrame) -> bool {
 }
 
 /// The signal for a marked ring-3 machine check, with interrupts open:
-/// `(signal, si_code, si_addr, end the program)` (`L.x86_64.228`).
-pub(crate) fn machine_check_signal(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
+/// `(signal, si_code, si_addr, end the program)` (`L.x86_64.228`), or none
+/// where the poisoned page was a clean cached one, now dropped, which the
+/// program faults in again (`L.x86_64.247`).
+pub(crate) fn machine_check_signal(frame: &mut TrapFrame) -> Option<(u32, i32, u64, bool)> {
     mce::signal_for(frame)
 }
 

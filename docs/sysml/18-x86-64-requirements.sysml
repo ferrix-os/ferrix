@@ -2881,7 +2881,8 @@ package FerrixX8664Requirements {
                 si_code BUS_MCEERR_AR, si_addr the lowest address in the
                 program's half that maps the frame (0 past 2^18 leaves) and
                 si_addr_lsb 12, ending the program without its handler where RIPV
-                is clear.";
+                is clear -- but for a clean cached page dropped as L.x86_64.247
+                says, which raises nothing.";
             attribute :>> criterion = "test-mce-srar under KVM and TCG: the victim's
                 handler prints code=4, its own page's address, lsb=12 and err=0
                 (no physical address in its context), the frame is listed in
@@ -3175,6 +3176,35 @@ package FerrixX8664Requirements {
                 removed.";
             attribute :>> parent = "H.FAIL.10";
             attribute :>> unit = ("arch::x86_64::mce::on_kernel_stack", "arch::x86_64::mce::recover_copy");
+        }
+        requirement <'L.x86_64.247'> aDroppedCleanPageNeedsNoSignal : ItemLowLevel {
+            attribute :>> statement = "A ring-3 consumption shall be answered with no signal
+                exactly when the check was restartable, the running space mapped
+                the frame before cache::drop_poisoned, the drop answered Clean, and
+                the space maps the frame no more after it; the program then faults
+                the page in again from the disk. Anything else is L.x86_64.228's
+                SIGBUS.";
+            attribute :>> criterion = "mce/check.rs's unseen: each condition removed in turn
+                signals; test-mce-pagecache's mapped mode under KVM with AMD's
+                records: no SIGBUS, the disk's bytes read after, the frame retired
+                and the page dropped. Control: the after-drop test removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("arch::x86_64::mce::signal_for", "arch::x86_64::mce::dropped_unseen", "arch::x86_64::machine_check_signal");
+        }
+        requirement <'L.x86_64.248'> thePollDropsACleanCachedPage : ItemLowLevel {
+            attribute :>> statement = "The poll's retirement of an action-optional, no-action or
+                AMD deferred record, and a system call's poisoned copy at its way
+                out, shall go through cache::drop_poisoned, so a clean cached page
+                there is dropped and any other frame retired as before.";
+            attribute :>> criterion = "test-mce-pagecache's poll mode with Intel's UCNA record
+                under TCG, the one machine here whose Intel model reports
+                MCG_SER_P: the page dropped before it is read; test-mce-copy-file
+                under KVM: the copy's way out drops the clean file page. AMD's
+                deferred record by the stage 3 tables alone (retired only by
+                PhysAddrV, which no emulator sets) and the Intel-host BACKLOG
+                row.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("arch::x86_64::mce::retire", "arch::x86_64::retire_poisoned");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
@@ -3627,7 +3657,8 @@ package FerrixX8664Requirements {
                 recorded on the current task with no lock -- only inside a
                 program's system call, stopping as FX-9005 anywhere else, and a
                 second record in one call stopping -- and fail as Poisoned, which its caller treats
-                as a fault at that page; at the call's way out the frame shall be retired and,
+                as a fault at that page; at the call's way out the frame shall be retired --
+                and a clean cached page holding it dropped (L.x86_64.248) -- and,
                 where the memory was the task's own, SIGBUS BUS_MCEERR_AR raised
                 at its user page through the personality's fault_signal;
                 copy_cstr_from_user shall read no further than the 64-byte line

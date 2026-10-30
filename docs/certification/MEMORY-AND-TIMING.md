@@ -2028,6 +2028,18 @@ verdict of ledger line 3950.
   at the call's way out with no lock held, the retirement's `FRAMES` hold
   as above. A call with no poison pays one load of its task's record on its
   way out.
+* **Poison in a clean cached page** (`docs/MACHINE-CHECK-PAGECACHE.md`,
+  H.FAIL.11): `cache::drop_poisoned` walks the cache list under its walker
+  count (one hold of the list's lock per entry) and scans each object's page
+  map at most 32 entries a hold of its pages lock, let go between chunks: the
+  walk is bounded by the pages the cache holds, and runs only after a
+  machine check, with interrupts open and no spin lock held. The take is
+  reclaim's: one page out of the object and every space mapping it, one
+  shootdown. Every file read now copies a cached page through `copy_mc`'s
+  `rep movsb`: the same `rep` instruction class `copy_from_slice` reached
+  before, through compiler_builtins' `rep` path in this kernel built without
+  SSE (seen in test-mce-copy's TCG `rip` histogram), so no figure is owed
+  (ledger 5311 (6)).
 * **An address space's lock, then an object's pages lock**
   (`AddressSpace::resident_split`, `Vmo::committed_in`,
   `Vmo::committed_in_both`; L.user.171, L.user.172): whoever may read a

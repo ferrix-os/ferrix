@@ -574,7 +574,7 @@ fn make_all(
 
 /// Whether the monitor's `info registers` shows privilege level 3: its
 /// `CS =<selector>` line's low two bits.
-fn in_ring_3(registers: &str) -> bool {
+pub(crate) fn in_ring_3(registers: &str) -> bool {
     registers
         .split("CS =")
         .nth(1)

@@ -178,6 +178,8 @@ fn refused(error: VmoError) -> Errno {
     match error {
         VmoError::OutOfRange { .. } => Errno::EFBIG,
         VmoError::OutOfMemory => Errno::ENOSPC,
+        // Only a read answers it, and `read_piece` acts on it there.
+        VmoError::Poisoned(_) => Errno::EIO,
     }
 }
 
@@ -516,12 +518,20 @@ impl VmoPages {
             } else {
                 super::seam::served(1);
             }
-            if self
-                .vmo
-                .read_present(index, within, out)
-                .map_err(|_| Errno::EIO)?
-            {
-                return Ok(());
+            match self.vmo.read_present(index, within, out) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                // Poison in the cached page (`L.object.261`): a clean page
+                // is dropped and the loop fills it again from the source,
+                // as for a page reclaim took; one with no other copy fails
+                // the read. No lock is held here.
+                Err(VmoError::Poisoned(frame)) => {
+                    if !crate::user::cache::poisoned_read(&self.vmo, index, frame) {
+                        return Err(Errno::EIO);
+                    }
+                    continue;
+                }
+                Err(_) => return Err(Errno::EIO),
             }
             if !self.vmo.sourced(index) {
                 out.fill(0);

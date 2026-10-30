@@ -1540,6 +1540,8 @@ fn vmo_error(error: VmoError) -> Errno {
     match error {
         VmoError::OutOfRange { .. } => status::INVALID_ARGS,
         VmoError::OutOfMemory => status::NO_MEMORY,
+        // Only `Vmo::read_present` answers it, which no native call reaches.
+        VmoError::Poisoned(_) => status::FAULT,
     }
 }
 

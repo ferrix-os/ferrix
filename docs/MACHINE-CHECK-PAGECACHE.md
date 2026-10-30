@@ -76,7 +76,10 @@ AArch64 and ARMv7-A as today.
    space that maps it (`decommit_clean_range`: the reverse map per object,
    then a shootdown), and the release keeps the retired frame out;
 4. answer `Clean`, `NotClean` (found but kept: dirty, no source, written
-   through a shared mapping, held), `NotRetired` or `NotCache`.
+   through a shared mapping, held, or a clean page the source holds still at
+   that moment for a write, a truncation, a writeback or a reclaim of its
+   file -- its read then fails `EIO` and its mapper gets `SIGBUS`; a retry
+   would be a design point of its own), `NotRetired` or `NotCache`.
 
 It takes locks and may wait for a shootdown: never in the machine check,
 never under a spin lock, never under the lock a filesystem holds to keep a
@@ -162,19 +165,27 @@ cached page there is dropped, which costs a read and nothing else.
   with a `test-mce-copy` mode on a clean file mapping (5294 (9)).
 * Lines: `mce: frame <phys> retired` as today, then `mce: frame <phys> was a
   clean cached page, dropped` (or `... not clean, kept`) -- addresses only in
-  the kernel log, as today's line.
+  the kernel log, as today's line. Stage 12's poison check holds these lines back
+  while it names frames poisoned itself, so that a boot with the checks
+  announces no retirement of a frame nothing found bad (the lines first
+  confused test-mce-amd-deferred's and -corrected's judges, which look for
+  any `mce: frame`). A real machine check landing in that window, stage 12's
+  poison cases, would be silenced too, and its retirement forgotten with the
+  check's own by count: the same window, before the system runs anything.
 
 ## 4. What it does not do
 
 * A dirty page's data is lost (the read fails `EIO`, a mapper is signalled).
   Keeping it in place is stricter than Linux, which removes it and lets later
   reads see the disk's older bytes. **Writeback of a kept dirty page whose
-  frame is retired is a residual** (5294 (4), option (b)): writeback reads
-  the frame -- a ring-0 read, which stops the machine as FX-9005 -- and a
-  device's DMA of it could write the poison to the disk. AoU-36,
-  `MACHINE-CHECK.md` §6 and VULNERABILITY-ANALYSIS say so, and a BACKLOG row
-  asks for writeback to skip a retired frame (the page staying dirty,
-  `fsync` answering `EIO`).
+  frame is retired** (5294 (4), option (b); 5311 (4)): btrfs writeback reads
+  it through `read_present`'s recoverable copy, so each round recovers the
+  machine check, fails `EIO`, and leaves the page dirty for the next round
+  (first seen in test-mce-pagecache's first dirty run). A writeback read
+  outside that copy would halt and a device's DMA could put the poison on the
+  disk; btrfs has none today. AoU-36, `MACHINE-CHECK.md` §6 and
+  VULNERABILITY-ANALYSIS say so, and a BACKLOG row asks writeback to skip a
+  retired frame (the page staying dirty, `fsync` answering `EIO`).
 * The other readers of cached frames §3.2 names stay as they are.
 * A page a device DMA reads, anonymous memory, the kernel's own memory: as
   today.
@@ -235,13 +246,19 @@ L.object.253 stays released):
   kernel going on. **Mapped mode**: a program maps the file and loads from a
   page in a loop; the gate injects in ring 3 at that page; the program must
   get no `SIGBUS`, read the disk's bytes after, and the frame be retired and
-  dropped. **Dirty mode**: the same with a file on the writable btrfs disk,
-  written and not synced, the page asserted still dirty when the gate
-  injects so no writeback race decides it: the read fails `EIO`, the mapper
-  gets `SIGBUS`. **Poll mode**: AMD's deferred record at a clean cached page
-  drops it (`mce: ... dropped`) before anyone reads it; Intel's
-  action-optional record is shown by a host test, and the Intel-host BACKLOG
-  row (ledger 5283 (3)) is extended to it. TCG rows fail-closed only, and say
+  dropped. **Dirty mode**: the same with a page that has no other copy,
+  a `memfd`'s: the read fails `EIO`, the mapper gets `SIGBUS`. A disk page
+  written and not written back is covered by stage 12's check instead: on
+  the writable disk such a page is written back within seconds, so no gate
+  run could keep it dirty while it injects (the first run caught the disk's
+  writeback reading the page through the same copy, and kept it). **Poll mode**: Intel's no-action record (UCNA) at a clean
+  cached page, under TCG -- the one machine here whose Intel model reports
+  `MCG_SER_P`, without which every uncorrected record is a machine check that
+  stops -- drops it (`mce: ... dropped`) before anyone reads it. AMD's
+  deferred record cannot show it: it is retired only by `PhysAddrV`, which no
+  emulator's banks set (test-mce-amd-deferred pins that it is logged and
+  nothing retired). Intel's action-optional record is shown by the stage 3
+  tables, and the Intel-host BACKLOG row (ledger 5283 (3)) is extended to it. TCG rows fail-closed only, and say
   so, as `test-mce-copy`'s. **`test-mce-copy` file mode**: a system call
   copying from a mapped clean file page fails, raises `SIGBUS` and drops the
   page.
@@ -279,3 +296,14 @@ before/after read throughput figure in the code review); `MACHINE-CHECK.md`
   fill loop (§3.2), (9) the split ids and the copy path's amendment (§5,
   §3.5), (10) the checks (§6), (11) the controls (§6), (12) the docs and the
   code review (§7).
+* Code reviewed 2026-10-31 at 4cf8dde5d, ledger 5311: **OK IF (1)-(7)**:
+  the rows and controls on the landing hash, a clean page held still by its
+  file kept as not clean in the texts (§3.1), the writeback residual as the
+  build has it (§4), the criteria naming each mode's machine and record, the
+  throughput argument, and a clean final rebase with coverage carried.
+* Re-reviewed 2026-10-31 at b8832db4b, ledger 5324: **OK IF (A)-(C)**:
+  test-mce-copy-environ accepted on mcp9-r59 (4cf8dde5d) and the clean
+  rebase, its four pool failures on b8832db4b (a QMP close, QEMU gone with no
+  signal line, no stderr, no core, no OOM or kill in the host's journals)
+  cited and a BACKLOG flake row; the dirty read's criterion as the judge
+  reads it.

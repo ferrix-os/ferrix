@@ -1628,9 +1628,11 @@ package FerrixItemRequirements {
                 RIPV is clear or TCC set; on any other vendor's, corrected. It
                 shall then retire the frame of each uncorrected record with a
                 usable address (a deferred one only by PhysAddrV), never hand it
-                out again, and end or signal that program; a system call's copy
-                that consumed poison goes on as H.FAIL.10 says; every other
-                machine check stops as H.FAIL.1.";
+                out again, and end or signal that program -- a program whose
+                restartable load consumed a clean cached page goes on unsignalled,
+                as H.FAIL.11 says; a system call's copy that consumed poison goes
+                on as H.FAIL.10 says; every other machine check stops as
+                H.FAIL.1.";
             attribute :>> criterion = "L.x86_64.221-232 and L.mm.91-92 each
                 verified; test-mce and its five recovery modes pass under KVM and
                 TCG.";
@@ -1677,6 +1679,30 @@ package FerrixItemRequirements {
                 reports no recovery; Intel's model has no MCG_SER_P there), so
                 Intel's recovery is shown by stage 3's tables and frame;
                 L.x86_64.244-246 and L.syscall.25-26 each with its check.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294). */
+            attribute :>> statement = "On x86-64 with recovery on, poison in a clean
+                page-cache frame shall cost a disk read and nothing else: a read
+                that consumes it refilled from the disk and answered, a program
+                whose restartable load consumed it faulting the page in again
+                without a signal, the poll dropping it first; a page that is not
+                clean -- or a clean one held still at that moment by a write, a
+                truncation, a writeback or a reclaim of its file -- shall never be
+                dropped or refilled (its read fails EIO, its mapper is signalled
+                as H.FAIL.8 says), and a frame that cannot be retired shall never
+                be taken.";
+            attribute :>> criterion = "test-mce-pagecache's read and mapped modes under
+                KVM with AMD's records (the read answered with the disk's bytes,
+                the mapper unsignalled), its dirty modes on a memfd's pages under
+                KVM (the read failing EIO or ending short exactly at the poisoned
+                page, the mapper SIGBUS), its poll mode with Intel's
+                UCNA record under TCG (the page dropped before it is read), and
+                test-mce-copy-file under KVM (the copy fails, SIGBUS, the page
+                dropped), each frame retired; the TCG copy rows fail-closed only;
+                stage 12's poison check (the dirty disk page among its cases);
+                L.object.259-261 and L.x86_64.247-248 each with its check.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
     }

@@ -76,6 +76,7 @@ fn object<T>(result: Result<T, VmoError>, what: &'static str) -> Result<T, Refus
     result.map_err(|error| match error {
         VmoError::OutOfMemory => Refusal::NoMemory,
         VmoError::OutOfRange { .. } => Refusal::Wrong(what),
+        VmoError::Poisoned(_) => Refusal::Wrong("a read the check never makes consumed poison"),
     })
 }
 

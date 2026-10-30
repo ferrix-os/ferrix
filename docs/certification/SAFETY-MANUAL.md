@@ -755,8 +755,23 @@ not, the integrator shall boot with `ferrix.mce.recover=off`, under which
 every machine check halts (L.x86_64.231). Either way:
 
 * a retired frame stays mapped in every process that maps it and has not
-  touched it (late kill, as Linux's default); the kernel consuming it -- a
-  copy-on-write copy at `fork` or a write fault, a page-cache read, a
+  touched it (late kill, as Linux's default) -- but for a clean page of a
+  file on a disk, which is dropped from the cache and from every mapping and
+  read again from the disk when next touched (`docs/MACHINE-CHECK-PAGECACHE.md`,
+  H.FAIL.11): a read of it is refilled and answered, a program whose
+  restartable load consumed it is not signalled, and the poll drops it when
+  it finds the record first. A page with no other copy -- written and not
+  written back, a memory filesystem's -- is kept, and so is a clean one that
+  a write, a truncation, a writeback or a reclaim of its file holds still at
+  that moment: its read fails `EIO`, its mapper gets `SIGBUS`, and a dirty
+  page's data is lost. btrfs writeback reads a kept dirty page through the
+  same recoverable copy: it recovers, fails that round with `EIO`, and the
+  page stays dirty, so every later round consumes the poison again (one
+  recovered machine check and one `EIO` each; a BACKLOG row asks writeback
+  to skip a retired frame). A writeback read that did not go through that
+  copy would halt, and a device's DMA of such a page could put the poison on
+  the disk; no writeback in btrfs reads otherwise today. The kernel consuming
+  anything else -- a copy-on-write copy at `fork` or a write fault, a
   device's DMA, any read of kernel memory -- is a machine check in ring 0,
   which halts;
 * a system call's read of a program's memory that consumes poison fails the

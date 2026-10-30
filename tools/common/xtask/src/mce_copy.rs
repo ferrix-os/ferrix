@@ -81,6 +81,15 @@ pub(crate) const TASKS: &[Task] = &[
         run: |_, args| test_copy(args, Mode::Environ),
     },
     Task {
+        name: "test-mce-copy-file",
+        help_at: 245,
+        help: &[
+            "test-mce-copy-file  test-mce-copy with the buffer a shared mapping of a clean file: the call fails, SIGBUS,",
+            "                    and the cached page is dropped too (docs/MACHINE-CHECK-PAGECACHE.md §3.5)",
+        ],
+        run: |_, args| test_copy(args, Mode::File),
+    },
+    Task {
         name: "test-mce-copy-intel",
         help_at: 239,
         help: &[
@@ -151,6 +160,8 @@ enum Mode {
     Outside,
     /// Another process's space: retired, nobody signalled.
     Environ,
+    /// The buffer a clean file's shared mapping: as `Copy`, the page dropped.
+    File,
     /// Intel's records: recovered where `MCG_SER_P` is reported, else stops.
     Intel,
     /// Intel's, `EIPV` clear with `RIPV` set at the copy: another
@@ -165,6 +176,15 @@ impl Mode {
             self,
             Mode::Kill | Mode::Tcc | Mode::OtherPage | Mode::RecoverOff | Mode::Outside
         )
+    }
+
+    /// The guest's feature for the mode.
+    const fn feature(self) -> Option<&'static str> {
+        match self {
+            Mode::Environ => Some("environ"),
+            Mode::File => Some("file"),
+            _ => None,
+        }
     }
 
     /// Whether the mode's records are Intel's.
@@ -206,8 +226,7 @@ fn test_copy(args: &Args, mode: Mode) -> Result<()> {
         println!("  test-mce-copy ({mode:?}): x86_64 only; skipped");
         return Ok(());
     }
-    let feature = (mode == Mode::Environ).then_some("environ");
-    let program = crate::sem::build_test(TEST_PROGRAM, arch, feature, false)?;
+    let program = crate::sem::build_test(TEST_PROGRAM, arch, mode.feature(), false)?;
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel =
         crate::cargo::build_kernel_with_init(arch, args.release, &program, crate::shell::SCRIPT)?;
@@ -216,20 +235,7 @@ fn test_copy(args: &Args, mode: Mode) -> Result<()> {
         pinned(&kernel.elf).map_err(|why| Error::new(format!("{arch}: test-mce-copy: {why}")))?;
     }
     let natives = crate::native::build(arch, args.release)?;
-    // The environ mode's target is this program run again, and pid 1's own
-    // copy is gone once its inputs are released: a copy of its own.
-    let files = if mode == Mode::Environ {
-        let bytes = std::fs::read(&program)
-            .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
-        vec![crate::ports::File {
-            path: "bin/mce-copy".to_owned(),
-            mode: 0o755,
-            content: crate::ports::Content::Bytes(bytes),
-        }]
-    } else {
-        Vec::new()
-    };
-    let archive = crate::initramfs::build(None, &natives, None, &files)?;
+    let archive = crate::initramfs::build(None, &natives, None, &guest_files(mode, &program)?)?;
     let options = if mode == Mode::RecoverOff {
         "ferrix.mce.poll=1 ferrix.mce.recover=off nokaslr\n"
     } else {
@@ -307,8 +313,24 @@ fn test_copy(args: &Args, mode: Mode) -> Result<()> {
     Ok(())
 }
 
+/// The image's extra files for `mode`: the environ mode's target is this
+/// program run again, and pid 1's own copy is gone once its inputs are
+/// released, so it gets a copy of its own.
+fn guest_files(mode: Mode, program: &std::path::Path) -> Result<Vec<crate::ports::File>> {
+    if mode != Mode::Environ {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(program)
+        .map_err(|error| Error::new(format!("reading {}: {error}", program.display())))?;
+    Ok(vec![crate::ports::File {
+        path: "bin/mce-copy".to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(bytes),
+    }])
+}
+
 /// The address of `name` in the kernel's ELF, by `nm`.
-fn symbol(elf: &std::path::Path, name: &str) -> Result<u64> {
+pub(crate) fn symbol(elf: &std::path::Path, name: &str) -> Result<u64> {
     let output = std::process::Command::new("nm")
         .arg(elf)
         .output()
@@ -365,14 +387,14 @@ fn pinned(elf: &std::path::Path) -> std::result::Result<(), String> {
 }
 
 /// A register's value in the monitor's `info registers` answer: `RIP=...`.
-fn register(registers: &str, name: &str) -> Option<u64> {
+pub(crate) fn register(registers: &str, name: &str) -> Option<u64> {
     let at = registers.find(&format!("{name}="))? + name.len() + 1;
     u64::from_str_radix(registers.get(at..at + 16)?, 16).ok()
 }
 
 /// Whether `info registers` shows privilege level 0: `CS =<selector>`'s low
 /// two bits.
-fn in_ring_0(registers: &str) -> bool {
+pub(crate) fn in_ring_0(registers: &str) -> bool {
     registers
         .split("CS =")
         .nth(1)
@@ -381,7 +403,7 @@ fn in_ring_0(registers: &str) -> bool {
 }
 
 /// The eight bytes at the physical address `at`, by the monitor's `xp`.
-fn word_at(qmp: &mut Qmp, at: u64) -> Result<Option<u64>> {
+pub(crate) fn word_at(qmp: &mut Qmp, at: u64) -> Result<Option<u64>> {
     let reply = monitor(qmp, &format!("xp /1gx {at:#x}"), None)?;
     Ok(reply
         .split(": 0x")
@@ -499,7 +521,9 @@ fn most_seen(rips: &std::collections::BTreeMap<u64, usize>) -> String {
 /// `mode`'s record for the copy reading `page`: status, `MCG_STATUS`, address.
 const fn record(mode: Mode, page: u64) -> (u64, u64, u64) {
     match mode {
-        Mode::Copy | Mode::RecoverOff | Mode::Outside | Mode::Environ => (AMD_AR, CONSUMER, page),
+        Mode::Copy | Mode::RecoverOff | Mode::Outside | Mode::Environ | Mode::File => {
+            (AMD_AR, CONSUMER, page)
+        }
         Mode::Kill => (AMD_AR, UNRESTARTABLE, page),
         Mode::Tcc => (AMD_AR | TCC, CONSUMER, page),
         Mode::OtherPage => (AMD_AR, CONSUMER, page ^ 0x1000),
@@ -509,7 +533,7 @@ const fn record(mode: Mode, page: u64) -> (u64, u64, u64) {
 }
 
 /// One injection, refused by the monitor or made.
-fn make(qmp: &mut Qmp, cpu: usize, status: u64, mcg: u64, address: u64) -> Result<()> {
+pub(crate) fn make(qmp: &mut Qmp, cpu: usize, status: u64, mcg: u64, address: u64) -> Result<()> {
     let command = format!("mce {cpu} {BANK} {status:#x} {mcg:#x} {address:#x} {MISC_PAGE:#x}");
     let reply = monitor(qmp, &command, None)?;
     if let Some(problem) = refusal(&reply) {
@@ -556,7 +580,7 @@ fn judge(
         line.contains("/proc/ferrix-mce: ") && line.contains(&copies) && line.ends_with(" copies 1")
     });
     match mode {
-        Mode::Copy | Mode::Intel => {
+        Mode::Copy | Mode::Intel | Mode::File => {
             let signal = format!("mce-copy: SIGBUS code=4 addr={:#x} lsb=12", injected.user);
             // The write fails, or ends short exactly at the poisoned page:
             // the bytes before it stored, as for a fault there.
@@ -579,6 +603,13 @@ fn judge(
                     DONE,
                 ],
             )?;
+            let dropped = format!(
+                "mce: frame {:#x} was a clean cached page, dropped",
+                injected.page
+            );
+            if mode == Mode::File && !has(&dropped) {
+                return Err(format!("the boot never said `{dropped}`"));
+            }
             counted.then_some(()).ok_or_else(|| {
                 format!(
                     "/proc/ferrix-mce did not count the copy on cpu{}",

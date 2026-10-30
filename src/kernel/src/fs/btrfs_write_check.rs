@@ -33,6 +33,7 @@ use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
 mod clean_check;
+mod poison_check;
 mod reclaim_check;
 mod stuck_check;
 
@@ -366,6 +367,15 @@ pub fn run() -> Result<Report, &'static str> {
         reclaim.dirty,
         reclaim.stolen_at_max,
         reclaim.stolen_by_fill,
+    );
+    let poison = poison_check::run()?;
+    crate::console::println!(
+        "  poison   btrfs-rw: {} clean cached pages named poisoned dropped and read again from the \
+         disk, their frames retired and a mapping's page gone; {} not clean kept; a frame no \
+         page holds, one not retirable and a page asked for with another frame left alone; a \
+         dirty page's poisoned read failed",
+        poison.dropped,
+        poison.kept,
     );
     // The disk to itself for a mount of its own, then back at /mnt-rw.
     let place = ns

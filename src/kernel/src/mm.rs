@@ -684,8 +684,23 @@ fn holds_retired(frame: Frame, order: u8) -> bool {
     })
 }
 
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// The retired set's entries now, for a check that retires frames of its own
+/// and forgets them after ([`forget_retired_for_check`]).
+pub fn retired_for_check() -> usize {
+    RETIRED_COUNT.load(Ordering::Relaxed)
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// Forget the last `count` retirements, which the calling check made itself
+/// ([`forget_checked_retirements`]).
+pub fn forget_retired_for_check(count: usize) {
+    forget_checked_retirements(count);
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
 /// Whether `frame` is retired.
-pub(crate) fn is_retired(frame: Frame) -> bool {
+pub fn is_retired(frame: Frame) -> bool {
     with_frames(|_| holds_retired(frame, 0)).unwrap_or(false)
 }
 

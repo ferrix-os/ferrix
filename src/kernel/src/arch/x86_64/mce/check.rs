@@ -62,6 +62,7 @@ pub(in crate::arch::x86_64) fn run() -> Result<(), &'static str> {
          as the table says; no register read"
     );
     copy_actions()?;
+    unseen()?;
     copies()?;
     println!(
         "  mce      the copy's context, actions and fixup, copy_mc over 0 to 9000 bytes at \
@@ -686,6 +687,36 @@ fn copies() -> Result<(), &'static str> {
     super::recover_copy(&mut frame, 0x7000);
     if frame.rip != super::copy_mc::out_address() || frame.rdx != 0x7001 || frame.rcx != 40 {
         return Err("the machine check's fixup did not send the copy to its exit with its page");
+    }
+    Ok(())
+}
+
+/// A ring-3 consumption needs no signal only when the check was
+/// restartable, the running space mapped the frame before the drop, the page
+/// was dropped as a clean cached one, and the space maps it no more after
+/// (`docs/MACHINE-CHECK-PAGECACHE.md` §3.3); each removed in turn signals.
+///
+/// Verifies: `L.x86_64.247`
+fn unseen() -> Result<(), &'static str> {
+    use crate::user::cache::Dropped;
+    // (kill, mapped before, the drop, mapped after, no signal)
+    type Row = (bool, Option<u64>, Dropped, Option<u64>, bool);
+    let table: &[Row] = &[
+        (false, Some(0x4000), Dropped::Clean, None, true),
+        (true, Some(0x4000), Dropped::Clean, None, false),
+        (false, None, Dropped::Clean, None, false),
+        (false, Some(0x4000), Dropped::NotClean, None, false),
+        (false, Some(0x4000), Dropped::NotCache, None, false),
+        (false, Some(0x4000), Dropped::NotRetired, None, false),
+        (false, Some(0x4000), Dropped::Clean, Some(0x4000), false),
+    ];
+    for &(kill, before, dropped, after, quiet) in table {
+        if super::dropped_unseen(kill, before, dropped, after) != quiet {
+            return Err(
+                "a ring-3 consumption of a dropped page was signalled, or one that \
+                        needed it was not",
+            );
+        }
     }
     Ok(())
 }

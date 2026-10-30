@@ -934,19 +934,13 @@ const WARNING: u8 = 4;
 /// `LOG_KERN | LOG_ERR`.
 const ERROR: u8 = 3;
 
-/// Retire the frame holding `address`, and say what came of it.
+/// Retire the frame holding `address`, and drop the cached page it holds if
+/// that page is clean (`docs/MACHINE-CHECK-PAGECACHE.md` §3.4, §3.5,
+/// `L.x86_64.248`); the cache says what came of it. For the poll's deferred
+/// records and a system call's poisoned copy, with interrupts open and no
+/// lock held.
 pub(super) fn retire(address: u64) {
-    let frame = address / ferrix_bootinfo::PAGE_SIZE;
-    let outcome = crate::mm::retire_frame(frame);
-    let said = match outcome {
-        crate::mm::Retired::Claimed | crate::mm::Retired::Marked => "retired",
-        crate::mm::Retired::Already => "already retired",
-        crate::mm::Retired::Full | crate::mm::Retired::NotCovered => "not retired",
-    };
-    println!(
-        "mce: frame {:#x} {said}",
-        frame * ferrix_bootinfo::PAGE_SIZE
-    );
+    let _ = crate::user::cache::drop_poisoned(address / ferrix_bootinfo::PAGE_SIZE);
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,7 +1162,7 @@ const BUS_MCEERR_AR: i32 = 4;
 /// (`L.x86_64.228`): the mark taken off the frame, the frame retired, then `SIGBUS` with `BUS_MCEERR_AR`
 /// at the address the running program maps it at (0 when the walk finds
 /// none), and whether it must end the program rather than run a handler.
-pub(super) fn signal_for(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
+pub(super) fn signal_for(frame: &mut TrapFrame) -> Option<(u32, i32, u64, bool)> {
     let page = frame.error_code & !(ferrix_bootinfo::PAGE_SIZE - 1);
     let kill = frame.error_code & MARKED_KILL != 0;
     // The mark held a physical address, and the signal frame copies the
@@ -1176,17 +1170,37 @@ pub(super) fn signal_for(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
     // cleared before the signal is raised, as the processor's own 0 for a
     // machine check (the consultant's V1, `L.x86_64.228`).
     frame.error_code = 0;
-    retire(page);
-    let address = crate::sched::current()
-        .and_then(|task| task.address_space().cloned())
-        .and_then(|space| space.find_frame(page / ferrix_bootinfo::PAGE_SIZE))
-        .unwrap_or(0);
-    (
+    let poisoned = page / ferrix_bootinfo::PAGE_SIZE;
+    let space = crate::sched::current().and_then(|task| task.address_space().cloned());
+    let before = space.as_ref().and_then(|space| space.find_frame(poisoned));
+    let dropped = crate::user::cache::drop_poisoned(poisoned);
+    let after = space.as_ref().and_then(|space| space.find_frame(poisoned));
+    if dropped_unseen(kill, before, dropped, after) {
+        return None;
+    }
+    Some((
         ferrix_linux_abi::types::SIGBUS,
         BUS_MCEERR_AR,
-        address,
+        before.unwrap_or(0),
         kill,
-    )
+    ))
+}
+
+/// Whether a ring-3 consumption needs no signal (`L.x86_64.247`,
+/// `docs/MACHINE-CHECK-PAGECACHE.md` §3.3): the check restartable (not
+/// `kill`), the running space mapping the frame `before` the drop, the page
+/// dropped as a clean cached one, and the space mapping it no more `after`
+/// -- the program re-runs the load and faults the page in from the disk.
+/// Anything else is `SIGBUS`, so a record naming some other page, or a
+/// frame still reachable through a second holder, cannot loop the program
+/// on the same poison.
+pub(super) fn dropped_unseen(
+    kill: bool,
+    before: Option<u64>,
+    dropped: crate::user::cache::Dropped,
+    after: Option<u64>,
+) -> bool {
+    !kill && before.is_some() && dropped == crate::user::cache::Dropped::Clean && after.is_none()
 }
 
 // ---------------------------------------------------------------------------

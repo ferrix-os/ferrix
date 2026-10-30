@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2490 declarations in the core's files, 179 in the item's; 98 checks-only.
+2500 declarations in the core's files, 179 in the item's; 107 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1833,6 +1833,7 @@ checks above is `pub` for raised checks (F3).
 | `direct_map_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `drain_caches` | fn | load (checks) | checks-only |
 | `flags_in` | fn | item, load |  |
+| `forget_retired_for_check` | fn | load (checks) | checks-only |
 | `frame_references` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `free_frames` | fn | load, bin |  |
 | `give_back_initrd` | fn | load |  |
@@ -1842,12 +1843,14 @@ checks above is `pub` for raised checks (F3).
 | `initrd_frames` | fn | load (checks) | checks-only |
 | `initrd_readable` | fn | load (checks) | checks-only |
 | `initrd_span` | fn | load (checks) | checks-only |
+| `is_retired` | fn | load (checks) | checks-only |
 | `keep_initrd` | fn | load |  |
 | `managed_frames` | fn | load, bin |  |
 | `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
 | `reserved_in` | fn | load (checks) | checks-only |
+| `retired_for_check` | fn | load (checks) | checks-only |
 | `retired_frames` | fn | load |  |
 | `root_table` | fn | item |  |
 | `share_frame` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2927,7 +2930,11 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `ENTRY_HEAP` | const | load |  |
 | `Asked` | enum | load |  |
+| `drop_poisoned_at_for_check` | fn | load (checks) | checks-only |
+| `drop_poisoned_for_check` | fn | load (checks) | checks-only |
 | `install_shrinker` | fn | load |  |
+| `poisoned_read` | fn | load |  |
+| `quiet_for_check` | fn | load (checks) | checks-only |
 | `reclaim` | fn | load |  |
 | `reclaim_asked` | fn | load |  |
 | `resident` | fn | load |  |
@@ -3050,6 +3057,9 @@ checks above is `pub` for raised checks (F3).
 | `VmoError` | enum | item, load |  |
 | `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `disarm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `frame_for_check` | fn | load (checks) | checks-only |
+| `inject_read_poison` | fn | load (checks) | checks-only |
+| `inject_read_poison` | fn | load (checks) | checks-only |
 | `reclaim_hook_armed_by` | fn | bin |  |
 | `Held` | struct | item, load |  |
 | `ReclaimHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

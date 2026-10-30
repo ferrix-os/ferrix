@@ -706,14 +706,18 @@ pub(crate) const fn machine_check_marked(_frame: &TrapFrame) -> bool {
 /// [`machine_check_marked`] is never true; `SIGBUS` from the kernel if it
 /// were.
 #[cfg(not(target_arch = "x86_64"))]
-pub(crate) const fn machine_check_signal(_frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
-    (ferrix_linux_abi::types::SIGBUS, 0x80, 0, false)
+pub(crate) const fn machine_check_signal(_frame: &mut TrapFrame) -> Option<(u32, i32, u64, bool)> {
+    Some((ferrix_linux_abi::types::SIGBUS, 0x80, 0, false))
 }
 
-/// Retire a frame a copy consumed poison in: unreachable here, since no copy
-/// is ever stopped ([`Copied::poisoned`] is always `None`).
+/// Retire a frame a copy consumed poison in, dropping the cached page it
+/// holds if clean: unreachable here, since no copy is ever stopped
+/// ([`Copied::poisoned`] is always `None`), and the same as x86-64's if it
+/// were.
 #[cfg(not(target_arch = "x86_64"))]
-pub(crate) const fn retire_poisoned(_page: u64) {}
+pub(crate) fn retire_poisoned(page: u64) {
+    let _ = crate::user::cache::drop_poisoned(page / ferrix_bootinfo::PAGE_SIZE);
+}
 
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so

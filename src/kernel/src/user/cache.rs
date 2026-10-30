@@ -84,8 +84,9 @@
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-use super::vmo::Vmo;
+use super::vmo::{PoisonTake, Vmo};
 use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_frame::Frame;
 
 use crate::fallible;
 use crate::mm;
@@ -192,6 +193,151 @@ fn live() -> Vec<Arc<Vmo>> {
         }
     }
     out
+}
+
+/// What [`drop_poisoned`] did with a frame that holds poison
+/// (`docs/MACHINE-CHECK-PAGECACHE.md` §3.1, `L.object.259`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Dropped {
+    /// A clean page of a file on a disk: out of the cache and of every
+    /// space that mapped it; the next touch reads it from the disk again.
+    Clean,
+    /// A cached page that has no other copy -- written and not written
+    /// back, a memory filesystem's, written through a shared mapping, or
+    /// held -- kept where it is.
+    NotClean,
+    /// The frame could not be retired (the set full, or not the
+    /// allocator's): nothing taken, since a taken page's frame would go back
+    /// to the allocator.
+    NotRetired,
+    /// No cached page holds the frame.
+    NotCache,
+}
+
+/// Retire `frame`, then drop the cached page it holds if that page is
+/// clean, finding it by a walk of the list as reclaim walks it: the walker
+/// count held, no spin lock across an object, each object's map scanned a
+/// chunk at a time ([`Vmo::index_of`]). Says what came of it in the kernel
+/// log. Run only after a machine check, with no spin lock held: it may wait
+/// for a shootdown.
+pub(crate) fn drop_poisoned(frame: Frame) -> Dropped {
+    if !retire(frame) {
+        return Dropped::NotRetired;
+    }
+    let walk = Walk::begin();
+    let mut found = None;
+    for at in 0..walk.count {
+        let Some(vmo) = object_at(at) else {
+            continue;
+        };
+        if let Some(index) = vmo.index_of(frame) {
+            found = Some((vmo, index));
+            break;
+        }
+        // An object that went meanwhile is let go of here, with no lock held.
+        drop(vmo);
+    }
+    drop(walk);
+    let dropped = match found {
+        Some((vmo, index)) => take(&vmo, index, frame),
+        None => Dropped::NotCache,
+    };
+    say(frame, dropped);
+    dropped
+}
+
+/// [`drop_poisoned`] for a frame whose object and page the caller knows: a
+/// read that consumed it (`L.object.261`).
+pub(crate) fn drop_poisoned_at(vmo: &Vmo, index: u64, frame: Frame) -> Dropped {
+    if !retire(frame) {
+        return Dropped::NotRetired;
+    }
+    let dropped = take(vmo, index, frame);
+    say(frame, dropped);
+    dropped
+}
+
+impl Dropped {
+    /// The outcome's name, for the poison check raised above the core.
+    const fn name(self) -> &'static str {
+        match self {
+            Dropped::Clean => "Clean",
+            Dropped::NotClean => "NotClean",
+            Dropped::NotRetired => "NotRetired",
+            Dropped::NotCache => "NotCache",
+        }
+    }
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::cache
+/// [`drop_poisoned`] for stage 12's poison check, its outcome by name.
+pub fn drop_poisoned_for_check(frame: Frame) -> &'static str {
+    drop_poisoned(frame).name()
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::cache
+/// [`drop_poisoned_at`] for stage 12's poison check, its outcome by name.
+pub fn drop_poisoned_at_for_check(vmo: &Vmo, index: u64, frame: Frame) -> &'static str {
+    drop_poisoned_at(vmo, index, frame).name()
+}
+
+/// What a read of page `index` of `vmo` does when its copy consumed poison
+/// at `frame` (`L.object.261`, `docs/MACHINE-CHECK-PAGECACHE.md` §3.2):
+/// [`drop_poisoned_at`], then `true` -- go round the fill loop, filling the
+/// page again from the source -- for a clean page dropped or a page that no
+/// longer holds the frame, and `false` -- fail `EIO` -- for one that is not
+/// clean or a frame that could not be retired. With no lock held.
+pub fn poisoned_read(vmo: &Vmo, index: u64, frame: Frame) -> bool {
+    match drop_poisoned_at(vmo, index, frame) {
+        Dropped::Clean | Dropped::NotCache => true,
+        Dropped::NotClean | Dropped::NotRetired => false,
+    }
+}
+
+/// Whether the poison lines are held back: while stage 12's poison check
+/// names frames poisoned itself, so that a boot with the checks does not
+/// announce retirements of frames nothing found bad.
+static QUIET: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::cache
+/// Hold back, or let out again, the lines [`drop_poisoned`] says.
+pub fn quiet_for_check(quiet: bool) {
+    QUIET.store(quiet, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Retire `frame` and say so: whether it is retired now (`L.object.259`).
+fn retire(frame: Frame) -> bool {
+    let outcome = mm::retire_frame(frame);
+    let (retired, said) = match outcome {
+        mm::Retired::Claimed | mm::Retired::Marked => (true, "retired"),
+        mm::Retired::Already => (true, "already retired"),
+        mm::Retired::Full | mm::Retired::NotCovered => (false, "not retired"),
+    };
+    if !QUIET.load(core::sync::atomic::Ordering::Relaxed) {
+        crate::println!("mce: frame {:#x} {said}", frame * PAGE_SIZE);
+    }
+    retired
+}
+
+/// Take page `index` of `vmo`, which holds the retired `frame`.
+fn take(vmo: &Vmo, index: u64, frame: Frame) -> Dropped {
+    match vmo.take_poisoned(index, frame) {
+        PoisonTake::Taken => Dropped::Clean,
+        PoisonTake::Kept => Dropped::NotClean,
+        PoisonTake::Gone => Dropped::NotCache,
+    }
+}
+
+/// The kernel log's line for a dropped or kept cached page.
+fn say(frame: Frame, dropped: Dropped) {
+    let said = match dropped {
+        Dropped::Clean => "was a clean cached page, dropped",
+        Dropped::NotClean => "was a cached page that is not clean, kept",
+        Dropped::NotRetired | Dropped::NotCache => return,
+    };
+    if !QUIET.load(core::sync::atomic::Ordering::Relaxed) {
+        crate::println!("mce: frame {:#x} {said}", frame * PAGE_SIZE);
+    }
 }
 
 /// What [`reclaim`] did.

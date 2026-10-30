@@ -23,6 +23,9 @@ libc = "0.2"
 [features]
 # The environ mode: a reader copies another process's environment.
 environ = []
+# The file mode: the buffer is a shared mapping of a clean file on the
+# writable disk (docs/MACHINE-CHECK-PAGECACHE.md §3.5).
+file = []
 
 # ---------------------------------------------------------------------------
 # Lints

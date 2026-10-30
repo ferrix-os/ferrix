@@ -2133,6 +2133,51 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.FAIL.9";
             attribute :>> unit = ("init::give_memory_scrub");
         }
+        requirement <'L.object.259'> aPoisonedCachedPageIsDroppedOnlyClean : ItemLowLevel {
+            attribute :>> statement = "cache::drop_poisoned shall retire the frame before it
+                takes anything and take nothing unless the retirement answered
+                Claimed, Marked or Already; shall find the frame's page by a walk
+                of the cache list under the walker count, scanning each object's
+                page map at most 32 entries a hold of its pages lock; shall take
+                the page only through reclaim_clean's test, with the frame checked
+                again to be the page's in the take's hold of the pages lock, out of
+                the object and every space that maps it; and shall answer Clean,
+                NotClean (also for a clean page the source holds still at that
+                moment for a write, a truncation, a writeback or a reclaim of its
+                file), NotRetired or NotCache.";
+            attribute :>> criterion = "Stage 12's poison check: a clean mapped page dropped, its
+                frame retired, gone from the object and the mapping, read again
+                with the disk's bytes; a dirty and a held page NotClean and kept;
+                an unheld frame NotCache; a frame not retirable NotRetired; a page
+                asked for with another frame NotCache and kept. Controls: the
+                clean test, the retirement's answer and the frame check removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::cache::drop_poisoned", "user::cache::drop_poisoned_at", "user::cache::retire", "user::cache::take", "user::cache::say", "user::vmo::Vmo::index_of", "user::vmo::Vmo::take_poisoned");
+        }
+        requirement <'L.object.260'> aCacheReadAnswersItsPoison : ItemLowLevel {
+            attribute :>> statement = "Vmo::read_present shall copy through arch::copy_mc,
+                answer Poisoned(frame) for a copy a machine check stopped after
+                checking the page against the frame it read (stopping as FX-9005
+                on another), and write no task record.";
+            attribute :>> criterion = "Stage 12's poison check: a read whose copy is answered as
+                poisoned retires and drops the page; test-mce-pagecache's read
+                mode. Control: Poisoned turned into EIO.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::vmo::Vmo::read_present");
+        }
+        requirement <'L.object.261'> aPoisonedReadIsRefilledOrFails : ItemLowLevel {
+            attribute :>> statement = "cache::poisoned_read, which a read whose copy answered
+                Poisoned calls with no lock held, shall drop the page through
+                drop_poisoned_at and answer go round the fill loop again only
+                after Clean (or a page no longer holding the frame), and fail EIO
+                after NotClean or NotRetired.";
+            attribute :>> criterion = "Stage 12's poison check: a clean page's poisoned read
+                refilled and answered with the disk's bytes; a dirty page's fails;
+                test-mce-pagecache's read and dirty modes. Control: the refill on
+                Clean removed.";
+            attribute :>> parent = "H.FAIL.11";
+            attribute :>> unit = ("user::cache::poisoned_read");
+        }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state
                 word's NONEMPTY shall be set exactly when the inbox holds a message,

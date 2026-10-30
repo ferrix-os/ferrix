@@ -664,9 +664,14 @@ fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
     // so they are found with interrupts open (`docs/MACHINE-CHECK.md` §3.5).
     if arch::machine_check_marked(frame) {
         arch::enable_interrupts();
-        let (signal, code, address, end) = arch::machine_check_signal(frame);
+        let raised = arch::machine_check_signal(frame);
         arch::disable_interrupts();
-        user_fault_ending(frame, trap, (signal, code, address), end);
+        // None: a clean cached page, dropped, which the program faults in
+        // again from the disk when it re-runs the load
+        // (`docs/MACHINE-CHECK-PAGECACHE.md` §3.3).
+        if let Some((signal, code, address, end)) = raised {
+            user_fault_ending(frame, trap, (signal, code, address), end);
+        }
         return;
     }
     user_fault_as(frame, trap, arch::fault_signal(frame, trap));
