@@ -346,7 +346,7 @@ impl Before {
 /// machine (FX-1203) on what is not as it should be.
 ///
 /// Verifies: L.mm.71, L.mm.99, L.mm.100, L.init.5
-pub(crate) fn run() -> Option<Released> {
+pub fn run() -> Option<Released> {
     if let Err(problem) = arithmetic() {
         crate::panic::fatal!(
             catalog::RELEASE,
@@ -372,7 +372,7 @@ pub(crate) fn run() -> Option<Released> {
             mm::GIVE_BACK_BATCH,
         ),
         Err(problem) => {
-            crate::panic::fatal!(catalog::RELEASE, "the release self-check failed: {problem}")
+            crate::panic::fatal!(catalog::RELEASE, "the release self-check failed: {problem}");
         }
     }
     Some(released)

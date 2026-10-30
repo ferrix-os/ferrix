@@ -233,15 +233,15 @@ pub(crate) fn owner_of(ns: &Namespace) -> Arc<crate::syscall::userns::UserNamesp
 
 /// What [`release`] gave back.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Released {
+pub struct Released {
     /// Whether there was an archive to give back.
-    pub(crate) archive: bool,
+    pub archive: bool,
     /// The archive's frames given to the allocator, the managed frames and
     /// the watermark after.
-    pub(crate) given: mm::GivenBack,
+    pub given: mm::GivenBack,
     /// What the release took out of the tmpfs root after a switch; `None`
     /// when the tmpfs is kept.
-    pub(crate) removed: Option<Removed>,
+    pub removed: Option<Removed>,
 }
 
 /// Whether [`release`] has run: once a boot.
@@ -269,7 +269,7 @@ pub(crate) fn spared(name: &[u8]) -> bool {
 /// the kernel path after the boot's checks, and under `ferrix.devmgr=init`
 /// from the root's switch task on every way out of it; pid 1's inputs were
 /// copied out of the archive when they were taken (`init::set_inputs`).
-pub(crate) fn release() -> Option<Released> {
+pub fn release() -> Option<Released> {
     if RELEASED.swap(true, Ordering::AcqRel) {
         return None;
     }
@@ -288,13 +288,23 @@ pub(crate) fn release() -> Option<Released> {
     Some(released)
 }
 
-/// [`release`], under its boot check when the checks run (`release_check`),
-/// and said in one line either way.
+/// The release's boot check, which the composition root registers when the
+/// checks run ([`check_release_with`]): [`release`] between a look before it
+/// and a look after.
+static RELEASE_CHECK: Once<fn() -> Option<Released>> = Once::new();
+
+/// Have [`release_boot_copies`] release under `check`. The first
+/// registration stands.
+pub fn check_release_with(check: fn() -> Option<Released>) {
+    let _ = RELEASE_CHECK.call_once(|| check);
+}
+
+/// [`release`], under its boot check when one is registered
+/// ([`check_release_with`]), and said in one line either way.
 pub fn release_boot_copies() {
-    let released = if crate::checks::run() {
-        release_check::run()
-    } else {
-        release()
+    let released = match RELEASE_CHECK.get() {
+        Some(check) => check(),
+        None => release(),
     };
     let Some(released) = released else {
         return;

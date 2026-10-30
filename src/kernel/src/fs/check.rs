@@ -67,6 +67,9 @@ pub struct Report {
 
 /// Run them. `Err` names the first thing that was not true.
 pub fn run(built: &Built) -> Result<Report, &'static str> {
+    // The release of the boot's copies of the system comes at the end of
+    // boot; on a boot whose checks run, it is made under its own check.
+    super::check_release_with(super::release_check::run);
     let initramfs_verified = match built.unpacked {
         Some(_) => {
             check_the_archive_unpacked_intact()?;
