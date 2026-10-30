@@ -20,7 +20,7 @@ use super::objects::{FenceRef, KernelFence, RequestState, Slab, SyncFence, Table
 /// (`ferrix.intelgpu.uapitrace`): once, with its fences and the requests not
 /// done, the call a hung program is in.
 pub const STUCK_NS: u64 = 2_000_000_000;
-use super::{Backend, Frontend, Host, RequestId, gem, limits, syncobj, vm};
+use super::{Backend, Frontend, Host, RequestId, gem, limits, objects, syncobj, vm};
 
 /// A held wait's kind.
 #[derive(Clone, Copy, Debug)]
@@ -464,7 +464,11 @@ fn settle_once<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host:
     for _ in 0..limits::REQUESTS {
         let mut moved = false;
         backend.completed(&mut |id, completion| {
-            complete(state, id, completion);
+            if id & objects::DRIVER_REQUEST != 0 {
+                state.driver.finish(id, completion);
+            } else {
+                complete(state, id, completion);
+            }
             moved = true;
         });
         moved |= pump(backend, state);
@@ -475,7 +479,7 @@ fn settle_once<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host:
     retire(backend, state);
     backend.set_held(holds_queued(state));
     signal_kernel_fences(state, host);
-    backend.set_watched(!state.kernel_fences.is_empty());
+    backend.set_watched(!state.kernel_fences.is_empty() || state.driver.outstanding > 0);
     answer_waits(state, host);
     boost_waits(backend, state);
 }

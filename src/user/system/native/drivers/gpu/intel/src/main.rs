@@ -1302,21 +1302,40 @@ where
 {
     let apertures = device.info().map_or(0, |info| info.apertures);
     let mut card = display::Display::publish(device, apertures, location, plane, port);
-    let mut on_display = |key: u64, port: &Port<Kernel>| {
-        if display::ours(key)
-            && let Some(display) = card.as_mut()
-            && !display.on_key(key, port)
-        {
-            card = None;
-        }
-    };
-    let mut host = match serve::publish(device, location) {
+    let published = serve::publish(device, location);
+    if published.is_err()
+        && let Some(card) = card.as_mut()
+    {
+        // Nothing services the back end without the render node, so no
+        // blit of the card's would ever be seen to finish.
+        card.copy_on_processor();
+    }
+    let mut on_display =
+        |key: Option<u64>, port: &Port<Kernel>, served: Option<&mut serve::Served<'_, B>>| {
+            let Some(display) = card.as_mut() else {
+                return;
+            };
+            let mut none = display::NoGpu;
+            let gpu: &mut dyn display::Gpu = match served {
+                Some(served) => served,
+                None => &mut none,
+            };
+            let alive = match key {
+                Some(key) if display::ours(key) => display.on_key(key, port, gpu),
+                Some(_) => true,
+                None => display.on_service(gpu),
+            };
+            if !alive {
+                card = None;
+            }
+        };
+    let mut host = match published {
         Ok(host) => host,
         Err(stopped) => {
             ferrix_rt::warn!("intel: no render node ({stopped:?}); card0 alone is served");
             loop {
                 match port.wait(Deadline::Never) {
-                    Ok(packet) => on_display(packet.key, port),
+                    Ok(packet) => on_display(Some(packet.key), port, None),
                     Err(_) => return Err(Step::Serve),
                 }
             }

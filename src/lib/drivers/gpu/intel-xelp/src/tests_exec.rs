@@ -689,3 +689,61 @@ fn a_rectangle_is_blitted_into_a_wider_surface_and_back() {
     let src_page = gpu.pages[&0xd00_0000][..64].to_vec();
     assert_eq!(back_page, src_page);
 }
+
+/// card0's blit (H5): a rectangle addressed by coordinates in the command,
+/// both surfaces at page-aligned bases, lands at its place in the wider
+/// surface and nowhere else.
+#[test]
+fn a_rectangle_is_blitted_by_its_coordinates() {
+    use crate::commands::{Cs, emit_rect_copy_at};
+    let rig = Rig::new(ENGINES[1]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut context = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    // A "screen" two pages a row (8 KiB pitch), 4 rows; a source 64 bytes a
+    // row (16 pixels), 4 rows.
+    let (screen, src) = (0x70_0000_u64, 0x80_0000_u64);
+    let screen_pages: Vec<u64> = (0..8).map(|n| 0xc00_0000 + n * 4096).collect();
+    map(&rig, screen, &screen_pages);
+    map(&rig, src, &[0xd00_0000]);
+    {
+        let mut gpu = rig.gpu.borrow_mut();
+        for (i, word) in gpu
+            .pages
+            .get_mut(&0xd00_0000)
+            .expect("page")
+            .iter_mut()
+            .enumerate()
+            .take(64)
+        {
+            *word = 0x0066_0000 | i as u32;
+        }
+    }
+    // Source pixels (4, 1) to (11, 2), 8 by 2, to screen (100, 2).
+    let mut copy = [0_u32; 10];
+    {
+        let mut cs = Cs::new(&mut copy);
+        emit_rect_copy_at(&mut cs, screen, 8192, (100, 2), src, 64, (4, 1), (8, 2));
+    }
+    let (seqno, tail) = rig.emit(&mut context, Payload::Commands(&copy));
+    let _ = rig.submit(&mut state, &mut context, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let _ = rig.process(&mut state);
+    assert!(rig.complete(&context, seqno));
+    let mut gpu = rig.gpu.borrow_mut();
+    let vm = rig.vm;
+    // Screen (100, 2) holds source (4, 1); screen (107, 3) source (11, 2).
+    assert_eq!(
+        gpu.ppgtt_read(vm.pml4, screen + 2 * 8192 + 100 * 4),
+        0x0066_0000 | 20
+    );
+    assert_eq!(
+        gpu.ppgtt_read(vm.pml4, screen + 3 * 8192 + 107 * 4),
+        0x0066_0000 | 43
+    );
+    // Around the rectangle nothing was written.
+    assert_eq!(gpu.ppgtt_read(vm.pml4, screen + 2 * 8192 + 99 * 4), 0);
+    assert_eq!(gpu.ppgtt_read(vm.pml4, screen + 2 * 8192 + 108 * 4), 0);
+    assert_eq!(gpu.ppgtt_read(vm.pml4, screen + 8192 + 100 * 4), 0);
+    assert_eq!(gpu.ppgtt_read(vm.pml4, screen + 4 * 8192 + 100 * 4), 0);
+}

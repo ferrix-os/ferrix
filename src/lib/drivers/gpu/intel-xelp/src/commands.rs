@@ -185,3 +185,32 @@ pub fn emit_rect_copy(
     cs.push(src as u32);
     cs.push((src >> 32) as u32);
 }
+
+/// `XY_FAST_COPY_BLT` of a `width` by `height` rectangle of linear 32-bpp
+/// pixels from `(src_x, src_y)` of the surface at `src` to `(dst_x, dst_y)`
+/// of the one at `dst`, each surface addressed at its first pixel with a
+/// pitch of its own in bytes: the coordinates in the command, as the
+/// blitter takes them, so both bases stay page-aligned (card0's blit, H5 of
+/// `docs/GAME-MODE.md` §5.7). Coordinates and sizes are below 32768.
+#[allow(clippy::too_many_arguments, reason = "the command's own fields")]
+pub fn emit_rect_copy_at(
+    cs: &mut Cs<'_>,
+    dst: u64,
+    dst_pitch: u32,
+    (dst_x, dst_y): (u32, u32),
+    src: u64,
+    src_pitch: u32,
+    (src_x, src_y): (u32, u32),
+    (width, height): (u32, u32),
+) {
+    cs.push(gpu::GEN9_XY_FAST_COPY_BLT_CMD | (10 - 2));
+    cs.push(gpu::BLT_DEPTH_32 | (dst_pitch & 0xffff));
+    cs.push((dst_y << 16) | (dst_x & 0xffff));
+    cs.push(((dst_y + height) << 16) | ((dst_x + width) & 0xffff));
+    cs.push(dst as u32);
+    cs.push((dst >> 32) as u32);
+    cs.push((src_y << 16) | (src_x & 0xffff));
+    cs.push(src_pitch & 0xffff);
+    cs.push(src as u32);
+    cs.push((src >> 32) as u32);
+}

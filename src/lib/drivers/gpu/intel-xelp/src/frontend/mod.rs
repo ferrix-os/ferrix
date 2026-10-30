@@ -210,4 +210,30 @@ impl<B: Backend> Frontend<B> {
         self.backend.service(now, interrupt);
         fence::settle(self, host);
     }
+
+    /// Run `commands` in `context`'s ring as the driver's own request
+    /// ([`objects::DriverRequests`]); its id, whose completion
+    /// [`Frontend::driver_completion`] tells. The context is the driver's,
+    /// made on [`Frontend::backend`], never a client's.
+    ///
+    /// # Errors
+    ///
+    /// The back end's [`SubmitError`].
+    pub fn driver_submit(
+        &mut self,
+        context: HwContext,
+        commands: &[u32],
+    ) -> Result<RequestId, SubmitError> {
+        let id = self.state.driver.next;
+        self.backend.submit_commands(context, commands, id)?;
+        self.state.driver.next = id.wrapping_add(1) | objects::DRIVER_REQUEST;
+        self.state.driver.outstanding = self.state.driver.outstanding.saturating_add(1);
+        self.backend.set_watched(true);
+        Ok(id)
+    }
+
+    /// How the driver's own request `id` ended, once, if it has.
+    pub fn driver_completion(&mut self, id: RequestId) -> Option<Completion> {
+        self.state.driver.take(id)
+    }
 }

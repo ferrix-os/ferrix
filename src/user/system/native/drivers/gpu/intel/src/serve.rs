@@ -84,6 +84,26 @@ pub(crate) fn say(level: Level, arguments: fmt::Arguments<'_>) {
 pub(crate) trait AsVmo {
     /// The VMO.
     fn vmo(&self) -> &Vmo<Kernel>;
+
+    #[allow(
+        dead_code,
+        reason = "only the Intel driver's card0 asks; the keeper and intel-fake share this file"
+    )]
+    /// The random tag in the page past the object's end, for card0 to find
+    /// the object behind a buffer it is handed (`platform::Memory`); `None`
+    /// for an object without one.
+    fn tag(&self) -> Option<u64> {
+        None
+    }
+
+    #[allow(
+        dead_code,
+        reason = "only the Intel driver's card0 asks; the keeper and intel-fake share this file"
+    )]
+    /// The object's own bytes, without a tag page.
+    fn bytes(&self) -> usize {
+        0
+    }
 }
 
 /// Why serving stopped.
@@ -503,10 +523,31 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
     }
 }
 
+/// What the Intel driver's display card reaches of the render node while
+/// both are served: the front end, for the card's own work on the GT, and
+/// the host its services answer through.
+#[allow(
+    dead_code,
+    reason = "only the Intel driver's card0 reads it; the keeper and intel-fake share this file"
+)]
+pub(crate) struct Served<'a, B: Backend> {
+    /// The render node's host.
+    pub(crate) host: &'a mut ChardevHost,
+    /// The front end.
+    pub(crate) frontend: &'a mut Frontend<B>,
+}
+
+/// The display card's part of the loop: a packet's key (`None` after any
+/// other wake), the port, and what it reaches of the render node.
+pub(crate) type Other<'o, B> =
+    dyn FnMut(Option<u64>, &Port<Kernel>, Option<&mut Served<'_, B>>) + 'o;
+
 /// Serve the render node until the kernel takes it back. `port` is the
 /// loop's: the control's signals arrive on it with [`KEY_CONTROL`], the
 /// back end's interrupt, if it bound one, with [`KEY_INTERRUPT`], and
-/// every other key goes to `other` (the Intel driver's display card).
+/// every other key goes to `other` (the Intel driver's display card), which
+/// is also called with `None` after every other wake, to see what the back
+/// end finished of the card's own work.
 ///
 /// # Errors
 ///
@@ -516,7 +557,7 @@ pub(crate) fn serve<B: Backend>(
     host: &mut ChardevHost,
     port: &Port<Kernel>,
     frontend: &mut Frontend<B>,
-    other: &mut dyn FnMut(u64, &Port<Kernel>),
+    other: &mut Other<'_, B>,
 ) -> Result<core::convert::Infallible, Stopped>
 where
     B::Memory: AsVmo,
@@ -556,7 +597,7 @@ where
                 "the back end"
             }
             Ok(packet) => {
-                other(packet.key, port);
+                other(Some(packet.key), port, Some(&mut Served { host, frontend }));
                 "card0"
             }
             Err(Error::TimedOut) => {
@@ -565,6 +606,9 @@ where
             }
             Err(_) => return Err(Stopped::Port),
         };
+        if what != "card0" {
+            other(None, port, Some(&mut Served { host, frontend }));
+        }
         if let Some(stats) = host.stats.as_ref() {
             stats.awake_long(now_ns(), what);
         }

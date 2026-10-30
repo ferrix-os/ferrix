@@ -136,7 +136,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             .map_err(|_| Errno::ENOMEM)
     }));
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
-    match serve::serve(&mut host, &port, &mut frontend, &mut |_, _| {}) {
+    match serve::serve(&mut host, &port, &mut frontend, &mut |_, _, _| {}) {
         Ok(never) => match never {},
         Err(stopped) => {
             ferrix_rt::err!("intel-fake: serving stopped: {stopped:?}");

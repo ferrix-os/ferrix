@@ -141,6 +141,43 @@ pub fn gen12_emit_flush_rcs(engine: &EngineInfo, mode: u32, cs: &mut Cs<'_>) {
     }
 }
 
+/// `gen12_emit_flush_rcs(EMIT_INVALIDATE)` without the AUX table's
+/// invalidation and the flush that quiesces memory before it: the caches
+/// and TLBs invalidated, what a request needs when nothing changed the AUX
+/// table since the last (H4 of `docs/GAME-MODE.md` §5.7; measured, not
+/// used by the requests).
+pub fn gen12_emit_invalidate_rcs_without_aux(cs: &mut Cs<'_>) {
+    let flags = gpu::PIPE_CONTROL_COMMAND_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_TLB_INVALIDATE
+        | gpu::PIPE_CONTROL_INSTRUCTION_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_TEXTURE_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_VF_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_CONST_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_STATE_CACHE_INVALIDATE
+        | gpu::PIPE_CONTROL_STORE_DATA_INDEX
+        | gpu::PIPE_CONTROL_QW_WRITE
+        | gpu::PIPE_CONTROL_CS_STALL;
+    cs.push(preparser_disable(true));
+    gen8_emit_pipe_control(cs, flags, LRC_PPHWSP_SCRATCH_ADDR);
+    cs.push(preparser_disable(false));
+}
+
+/// `gen12_emit_flush_xcs(EMIT_INVALIDATE)` without the AUX table's
+/// invalidation (H4, measured only).
+pub fn gen12_emit_invalidate_xcs_without_aux(cs: &mut Cs<'_>) {
+    cs.push(preparser_disable(true));
+    cs.push(
+        (gpu::MI_FLUSH_DW + 1)
+            | gpu::MI_FLUSH_DW_STORE_INDEX
+            | gpu::MI_FLUSH_DW_OP_STOREDW
+            | gpu::MI_INVALIDATE_TLB,
+    );
+    cs.push(LRC_PPHWSP_SCRATCH_ADDR);
+    cs.push(0);
+    cs.push(0);
+    cs.push(preparser_disable(false));
+}
+
 /// `gen12_emit_flush_xcs`.
 pub fn gen12_emit_flush_xcs(engine: &EngineInfo, mode: u32, cs: &mut Cs<'_>) {
     if mode & EMIT_INVALIDATE != 0 {

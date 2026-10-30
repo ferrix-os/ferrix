@@ -408,19 +408,21 @@ impl Gpu {
         Some(next)
     }
 
-    /// `XY_FAST_COPY_BLT` with 32-bpp pixels: rows of `width` pixels at
-    /// the two pitches.
+    /// `XY_FAST_COPY_BLT` with 32-bpp pixels: the destination rectangle
+    /// from its top-left (DW2) to its bottom-right, exclusive (DW3), read
+    /// from the source's top-left (DW6), each surface at its own pitch.
     fn fast_copy(&mut self, cmd: &[u32], pml4: u64) {
         let dst_pitch = u64::from(cmd[1] & 0xffff);
-        let rows = u64::from(cmd[3] >> 16);
-        let width = u64::from(cmd[3] & 0xffff);
+        let (x1, y1) = (u64::from(cmd[2] & 0xffff), u64::from(cmd[2] >> 16));
+        let (x2, y2) = (u64::from(cmd[3] & 0xffff), u64::from(cmd[3] >> 16));
         let dst = u64::from(cmd[4]) | (u64::from(cmd[5]) << 32);
+        let (sx, sy) = (u64::from(cmd[6] & 0xffff), u64::from(cmd[6] >> 16));
         let src_pitch = u64::from(cmd[7] & 0xffff);
         let src = u64::from(cmd[8]) | (u64::from(cmd[9]) << 32);
-        for row in 0..rows {
-            for x in 0..width {
-                let value = self.ppgtt_read(pml4, src + row * src_pitch + 4 * x);
-                self.ppgtt_write(pml4, dst + row * dst_pitch + 4 * x, value);
+        for row in 0..y2.saturating_sub(y1) {
+            for x in 0..x2.saturating_sub(x1) {
+                let value = self.ppgtt_read(pml4, src + (sy + row) * src_pitch + 4 * (sx + x));
+                self.ppgtt_write(pml4, dst + (y1 + row) * dst_pitch + 4 * (x1 + x), value);
             }
         }
     }

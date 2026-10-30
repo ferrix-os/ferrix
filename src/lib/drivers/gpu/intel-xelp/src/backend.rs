@@ -167,6 +167,14 @@ pub trait Platform: Mmio + Clock + PtMemory {
     fn forcewake_due(&self) -> Option<u64> {
         None
     }
+    /// The device address GGTT entry `index` points at, for the driver's
+    /// own copies into memory the firmware bound (card0's lit plane, H5 of
+    /// `docs/GAME-MODE.md` §5.7); `None` where the entry is not present or
+    /// the platform cannot read the GGTT.
+    fn ggtt_page(&mut self, index: u64) -> Option<u64> {
+        let _ = index;
+        None
+    }
 }
 
 /// One line of the per-second frequency log.
@@ -833,6 +841,46 @@ impl<P: Platform> XelpBackend<P> {
         Ok(())
     }
 
+    /// Map `pages`, device addresses a 4 KiB page each, at `address` in
+    /// `vm`, consecutively, `pat_index` in each entry: memory the driver
+    /// itself reaches and no GEM object owns (card0's blit, H5).
+    ///
+    /// # Errors
+    ///
+    /// As [`XelpBackend::bind`].
+    pub fn bind_pages(
+        &mut self,
+        vm: usize,
+        address: u64,
+        pages: &[u64],
+        pat_index: u8,
+    ) -> Result<(), Error> {
+        if u32::from(pat_index) > crate::gtt::MAX_PAT_INDEX {
+            return Err(Error::Invalid);
+        }
+        let ppgtt = self.vms.get(vm).copied().flatten().ok_or(Error::Invalid)?;
+        let mut platform = self.platform.borrow_mut();
+        ppgtt
+            .alloc_va_range(&mut *platform, address, pages.len() as u64 * 4096)
+            .map_err(ppgtt_error)?;
+        for (page, device) in pages.iter().enumerate() {
+            ppgtt
+                .insert_entry(
+                    &mut *platform,
+                    *device,
+                    address + page as u64 * 4096,
+                    u32::from(pat_index),
+                )
+                .map_err(ppgtt_error)?;
+        }
+        Ok(())
+    }
+
+    /// The device address GGTT entry `index` points at ([`Platform::ggtt_page`]).
+    pub fn ggtt_page(&mut self, index: u64) -> Option<u64> {
+        self.platform.get_mut().ggtt_page(index)
+    }
+
     /// Unmap `bytes` at `address` in `vm`.
     pub fn unbind(&mut self, vm: usize, address: u64, bytes: u64) {
         if let Some(ppgtt) = self.vms.get(vm).copied().flatten() {
@@ -1040,6 +1088,23 @@ impl<P: Platform> XelpBackend<P> {
         self.unpark(now);
         self.dequeue(slot, now);
         Ok(())
+    }
+
+    /// Run `commands` in the context's ring itself as request `id`, with the
+    /// ring's privilege: the driver's own work (card0's blit), never a
+    /// client's.
+    ///
+    /// # Errors
+    ///
+    /// As [`XelpBackend::submit`].
+    pub fn submit_commands(
+        &mut self,
+        slot: usize,
+        context: usize,
+        commands: &[u32],
+        id: u64,
+    ) -> Result<(), SubmitError> {
+        self.emit(slot, context, Payload::Commands(commands), id)
     }
 
     /// `execlists_dequeue`, one context in the ports at a time: the running
@@ -1522,6 +1587,35 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
 
     fn timestamp(&mut self) -> u64 {
         XelpBackend::timestamp(self)
+    }
+
+    fn ggtt_page(&mut self, index: u64) -> Option<u64> {
+        XelpBackend::ggtt_page(self, index)
+    }
+
+    fn bind_pages(
+        &mut self,
+        vm: crate::frontend::VmId,
+        address: u64,
+        pages: &[u64],
+        pat_index: u8,
+    ) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        XelpBackend::bind_pages(self, vm.0 as usize, address, pages, pat_index).map_err(errno)
+    }
+
+    fn submit_commands(
+        &mut self,
+        context: crate::frontend::HwContext,
+        commands: &[u32],
+        request: crate::frontend::RequestId,
+    ) -> Result<(), crate::frontend::SubmitError> {
+        let (slot, context) = split(context);
+        XelpBackend::submit_commands(self, slot, context, commands, request).map_err(|error| {
+            match error {
+                SubmitError::Full => crate::frontend::SubmitError::Full,
+                SubmitError::Failed(error) => crate::frontend::SubmitError::Failed(errno(error)),
+            }
+        })
     }
 }
 

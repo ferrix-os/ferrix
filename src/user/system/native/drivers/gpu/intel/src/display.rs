@@ -11,8 +11,10 @@
 //! flushed rectangle of a compositor's buffer into the window, the processor
 //! doing the copy. Nothing of the display engine is touched: the plane, its
 //! GGTT entries and the mode stay the firmware's, and the window is the
-//! memory the plane already scans out of. A blit by BCS0 and flips are
-//! later steps.
+//! memory the plane already scans out of. Where the render node is served
+//! beside it, the copy into the lit plane is the GT's blitter's instead
+//! ([`blit`], H5 of `docs/GAME-MODE.md` §5.7), and the processor copies
+//! only what the blitter cannot take. Flips are a later step.
 //!
 //! The protocol's handling follows efifb's (`efifb/src/main.rs`): ATTACH maps
 //! a buffer's VMO read-only, SCANOUT says which buffer is shown and copies
@@ -67,10 +69,14 @@ use ferrix_rt::native::vmo::Vmo;
 
 use ferrix_intel_xelp::display::hotplug::Port as PortOf;
 use ferrix_intel_xelp::display::light;
+use ferrix_intel_xelp::frontend::Completion;
 use ferrix_intel_xelp::io::Mmio;
 
 use crate::m2::ScreenPlane;
 
+pub(crate) use blit::{Gpu, NoGpu};
+
+mod blit;
 mod hotplug;
 mod modeset;
 mod regs;
@@ -168,6 +174,8 @@ impl Output {
 #[derive(Clone, Copy)]
 struct Buffer {
     id: u32,
+    /// Where its range starts in its VMO.
+    offset: u64,
     base: usize,
     length: usize,
     stride: usize,
@@ -179,7 +187,7 @@ struct Buffer {
 const SCANOUTS: usize = 2;
 
 /// The display card.
-pub(crate) struct Display {
+pub(crate) struct Display<'d> {
     _window: IoMapping<Kernel>,
     /// The second scanout's memory, kept while the card runs.
     surface: Option<surface::Surface>,
@@ -218,6 +226,10 @@ pub(crate) struct Display {
     /// one copy may land after it, and the lines that copy read would
     /// otherwise be read again.
     evict_until: u64,
+    /// Each buffer slot's VMO, kept for the blitter to pin or find it.
+    vmos: [Option<Vmo<Kernel>>; MAX_BUFFERS],
+    /// The first scanout's copy on BCS0.
+    blit: blit::State<'d>,
 }
 
 /// What the second scanout starts with.
@@ -232,18 +244,18 @@ struct Second {
     watch: Option<hotplug::Watch>,
 }
 
-impl Display {
+impl<'d> Display<'d> {
     /// Publish `card0`: the lent window found and mapped, the plane checked
     /// as one a copy can fill (linear XRGB8888, the window large enough),
     /// HELLO said and READY taken. `None`, said, when any of it is missing:
     /// the render node is served alone then, as before.
     pub(crate) fn publish(
-        device: &Device<Kernel>,
+        device: &'d Device<Kernel>,
         apertures: u32,
         location: u32,
         plane: Option<ScreenPlane>,
         port: &Port<Kernel>,
-    ) -> Option<Display> {
+    ) -> Option<Display<'d>> {
         let Some(plane) = plane else {
             ferrix_rt::info!("intel: no card0: pipe A's plane is not lit");
             return None;
@@ -323,6 +335,8 @@ impl Display {
             tally: vblank::Tally::default(),
             shared_writes: 0,
             evict_until: 0,
+            vmos: [const { None }; MAX_BUFFERS],
+            blit: blit::State::new(plane, device),
         };
         if let Some(second) = second {
             if let (Some(size), Some(surface)) = (second.size, second.surface.as_ref()) {
@@ -604,19 +618,161 @@ fn vblank_off() -> bool {
     })
 }
 
-impl Display {
+impl Display<'_> {
     /// A packet under one of the card's keys ([`ours`]): the hotplug poll,
     /// or the control channel's. `false` when the card is gone.
-    pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>) -> bool {
+    pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>, gpu: &mut dyn Gpu) -> bool {
         if key == KEY_HOTPLUG {
-            if self.pending.is_some() && self.flip_due().is_err() {
+            if self.pending.is_some() && self.flip_due(gpu).is_err() {
                 return false;
             }
             let alive = now_ms() < self.hotplug_at || self.poll_hotplug();
             self.rearm();
             return alive;
         }
-        self.on_packet(port)
+        self.on_packet(port, gpu)
+    }
+
+    /// After the render node's loop serviced the back end: the blit that
+    /// finished answered. `false` when the card is gone.
+    pub(crate) fn on_service(&mut self, gpu: &mut dyn Gpu) -> bool {
+        match self.settle_blit(gpu, false) {
+            Ok(()) => true,
+            Err(why) => {
+                ferrix_rt::err!("intel: card0 stopped: {why}");
+                false
+            }
+        }
+    }
+
+    /// Every copy on the processor from now on: nothing services the back
+    /// end, so no blit would be seen to finish.
+    pub(crate) fn copy_on_processor(&mut self) {
+        self.blit = blit::State::Off;
+    }
+
+    /// The running blit, if any, answered: at once if `wait`, servicing
+    /// the back end until it ends, else only if it has. A blit that did
+    /// not end well is copied by the processor and the blitter turned off.
+    fn settle_blit(&mut self, gpu: &mut dyn Gpu, wait: bool) -> Result<(), &'static str> {
+        let Some(blitter) = self.blit.made() else {
+            return Ok(());
+        };
+        let Some(inflight) = blitter.inflight else {
+            return Ok(());
+        };
+        let done = if wait {
+            blitter.wait(gpu)
+        } else {
+            gpu.completion(inflight.request).map(|how| {
+                blitter.inflight = None;
+                (inflight, how)
+            })
+        };
+        let (inflight, how) = match done {
+            Some(done) => done,
+            None if wait => (inflight, Completion::Hung),
+            None => return Ok(()),
+        };
+        let now = now_ns();
+        if how == Completion::Ok {
+            self.tally.blitted(now.saturating_sub(inflight.started));
+        } else {
+            ferrix_rt::warn!(
+                "intel: card0: a blit ended {how:?}; frames are copied by the processor from now on"
+            );
+            self.blit = blit::State::Off;
+            if let Some(Some(buffer)) = self.buffers.get(inflight.slot).copied() {
+                if let Some(Some(output)) = self.outputs.first_mut() {
+                    output.owed_whole = true;
+                }
+                self.flush(buffer.id, Rect::default());
+            }
+        }
+        self.tally
+            .flip(now, now.saturating_sub(inflight.at), inflight.torn);
+        if let Some(done) = self.tally.report(now) {
+            done.say();
+        }
+        self.reply(Message::Flipped {
+            sequence: inflight.sequence,
+            status: Status::Ok,
+        })
+    }
+
+    /// The FLUSH copied by the blitter, if it can take it: `true` when its
+    /// blit was submitted, and FLIPPED is said once it ends.
+    fn blit_flush(&mut self, pending: vblank::Pending, torn: bool, gpu: &mut dyn Gpu) -> bool {
+        let Some(slot) = self
+            .buffers
+            .iter()
+            .position(|b| b.is_some_and(|b| b.id == pending.buffer))
+        else {
+            return false;
+        };
+        let Some(Some(buffer)) = self.buffers.get(slot).copied() else {
+            return false;
+        };
+        let [Some(first), second] = &mut self.outputs else {
+            return false;
+        };
+        if second
+            .as_ref()
+            .is_some_and(|o| o.shown.is_some_and(|(id, _)| id == pending.buffer))
+        {
+            return false;
+        }
+        let Some((id, whole)) = first.shown else {
+            return false;
+        };
+        if id != pending.buffer || first.scaler.is_some() {
+            return false;
+        }
+        let changed = if first.owed_whole {
+            whole
+        } else {
+            pending.rect
+        };
+        let Some(area) = area(&buffer, whole, changed, first) else {
+            return false;
+        };
+        let Some(vmo) = self.vmos.get(slot).and_then(Option::as_ref) else {
+            return false;
+        };
+        let Some(blitter) = self.blit.get(gpu) else {
+            return false;
+        };
+        if !blitter.prepare(
+            slot,
+            vmo,
+            buffer.offset,
+            buffer.length as u64,
+            buffer.stride,
+            gpu,
+        ) {
+            return false;
+        }
+        if blitter.written_by_processor(slot) {
+            // `clflush` writes a dirty line back as it evicts it.
+            write_back(&buffer, &area);
+        }
+        let Ok(request) = blitter.submit(slot, buffer.stride, &area, gpu) else {
+            return false;
+        };
+        blitter.inflight = Some(blit::Inflight {
+            request,
+            slot,
+            sequence: pending.sequence,
+            at: pending.at,
+            started: now_ns(),
+            torn,
+        });
+        first.owed_whole = false;
+        self.flushes += 1;
+        if self.flushes == 1 {
+            ferrix_rt::info!("intel: card0: the first frame is on the screen");
+        }
+        true
     }
 
     /// The loop's wake-up: the earlier of the hotplug poll and the blank a
@@ -632,11 +788,11 @@ impl Display {
 
     /// The FLUSH waiting for the blank, copied and answered if the blank
     /// is near enough to spin for; otherwise the wake-up set for it.
-    fn flip_due(&mut self) -> Result<(), &'static str> {
+    fn flip_due(&mut self, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
         let (Some(_), Some(beam), Some(regs)) =
             (self.pending, self.beam.as_mut(), self.regs.as_mut())
         else {
-            return self.finish_pending(false);
+            return self.finish_pending(false, gpu);
         };
         let mut left = beam.until_blank(regs, now_ns());
         if left > vblank::SPIN_NS {
@@ -650,15 +806,23 @@ impl Display {
             core::hint::spin_loop();
             left = beam.until_blank(regs, now_ns());
         }
-        self.finish_pending(left > 0)
+        self.finish_pending(left > 0, gpu)
     }
 
     /// Copy the FLUSH waiting for the blank and answer it; `torn` when it
-    /// is copied outside the blank.
-    fn finish_pending(&mut self, torn: bool) -> Result<(), &'static str> {
+    /// is copied outside the blank. A blit still running is answered
+    /// first; a FLUSH the blitter takes is answered when its blit ends.
+    fn finish_pending(&mut self, torn: bool, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
+        if self.pending.is_none() {
+            return Ok(());
+        }
+        self.settle_blit(gpu, true)?;
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
+        if self.blit_flush(pending, torn, gpu) {
+            return Ok(());
+        }
         self.flush(pending.buffer, pending.rect);
         let now = now_ns();
         self.tally.flip(now, now.saturating_sub(pending.at), torn);
@@ -757,8 +921,8 @@ impl Display {
     /// A packet under [`KEY_DISPLAY`]: every message taken and answered, the
     /// wait armed again. `false` when the core closed its end or sent what
     /// this card cannot act on; the card is then gone, the render node not.
-    pub(crate) fn on_packet(&mut self, port: &Port<Kernel>) -> bool {
-        match self.take_messages() {
+    pub(crate) fn on_packet(&mut self, port: &Port<Kernel>, gpu: &mut dyn Gpu) -> bool {
+        match self.take_messages(gpu) {
             Ok(true) => self
                 .control
                 .wait_async(port, Signals::READABLE | Signals::PEER_CLOSED, KEY_DISPLAY)
@@ -781,7 +945,7 @@ impl Display {
     }
 
     /// `Ok(true)` while the card goes on.
-    fn take_messages(&mut self) -> Result<bool, &'static str> {
+    fn take_messages(&mut self, gpu: &mut dyn Gpu) -> Result<bool, &'static str> {
         loop {
             let mut bytes = [0_u8; MAX_BYTES];
             let mut handles = [Handle::INVALID; Attach::HANDLES];
@@ -798,7 +962,15 @@ impl Display {
                     // waits for the blank, as it was sent after it: that
                     // one is copied now.
                     if self.pending.is_some() {
-                        self.finish_pending(true)?;
+                        self.finish_pending(true, gpu)?;
+                    }
+                    // What changes the plane or lets a buffer go waits for
+                    // the blit that may write or read it.
+                    if matches!(
+                        message,
+                        Message::Stop | Message::Detach { .. } | Message::SetMode { .. }
+                    ) {
+                        self.settle_blit(gpu, true)?;
                     }
                     match message {
                         Message::Stop if vmo.is_none() => {
@@ -807,7 +979,7 @@ impl Display {
                         }
                         Message::Attach(attach) => {
                             let vmo = vmo.ok_or("an ATTACH without its VMO")?;
-                            let status = self.attach(&attach, &vmo);
+                            let status = self.attach(&attach, vmo);
                             self.reply(Message::Attached {
                                 buffer: attach.buffer,
                                 status,
@@ -816,7 +988,7 @@ impl Display {
                         _ if vmo.is_some() => {
                             return Err("a handle on a message that carries none");
                         }
-                        other => self.act(other)?,
+                        other => self.act(other, gpu)?,
                     }
                 }
                 Err(ReadError::Failed(Error::PeerClosed)) => return Ok(false),
@@ -826,7 +998,7 @@ impl Display {
         }
     }
 
-    fn act(&mut self, message: Message) -> Result<(), &'static str> {
+    fn act(&mut self, message: Message, gpu: &mut dyn Gpu) -> Result<(), &'static str> {
         match message {
             // A GPU object as a scanout buffer is M6's flip; not yet.
             Message::AttachObject(attach) => self.reply(Message::Attached {
@@ -865,15 +1037,15 @@ impl Display {
                     at: now_ns(),
                 });
                 if shown_first && self.beam.is_some() {
-                    self.flip_due()?;
+                    self.flip_due(gpu)?;
                     self.rearm();
                     Ok(())
                 } else {
-                    self.finish_pending(false)
+                    self.finish_pending(false, gpu)
                 }
             }
             Message::Detach { buffer } => {
-                let status = self.detach(buffer);
+                let status = self.detach(buffer, gpu);
                 self.reply(Message::Detached { buffer, status })
             }
             // A mode of the list: the plane's own, or a smaller one shown
@@ -947,14 +1119,14 @@ impl Display {
         now < self.evict_until
     }
 
-    fn attach(&mut self, attach: &Attach, vmo: &Vmo<Kernel>) -> Status {
+    fn attach(&mut self, attach: &Attach, vmo: Vmo<Kernel>) -> Status {
         let Ok(vmo_bytes) = vmo.size() else {
             return Status::Invalid;
         };
         if attach.validate(vmo_bytes).is_err() || self.buffer(attach.buffer).is_some() {
             return Status::Invalid;
         }
-        let Some(slot) = self.buffers.iter_mut().find(|slot| slot.is_none()) else {
+        let Some(index) = self.buffers.iter().position(Option::is_none) else {
             return Status::OutOfMemory;
         };
         let Ok(length) = usize::try_from(attach.length) else {
@@ -963,8 +1135,15 @@ impl Display {
         let Ok(base) = vmo.map(None, length, Protection::Read, attach.offset) else {
             return Status::OutOfMemory;
         };
+        if let Some(kept) = self.vmos.get_mut(index) {
+            *kept = Some(vmo);
+        }
+        let Some(slot) = self.buffers.get_mut(index) else {
+            return Status::OutOfMemory;
+        };
         *slot = Some(Buffer {
             id: attach.buffer,
+            offset: attach.offset,
             base,
             length,
             stride: attach.stride as usize,
@@ -978,17 +1157,25 @@ impl Display {
         self.buffers.iter().flatten().find(|b| b.id == id).copied()
     }
 
-    fn detach(&mut self, id: u32) -> Status {
-        let Some(slot) = self
+    fn detach(&mut self, id: u32, gpu: &mut dyn Gpu) -> Status {
+        let Some(index) = self
             .buffers
-            .iter_mut()
-            .find(|slot| slot.is_some_and(|b| b.id == id))
+            .iter()
+            .position(|slot| slot.is_some_and(|b| b.id == id))
         else {
             return Status::Invalid;
         };
-        let Some(buffer) = slot.take() else {
+        let Some(buffer) = self.buffers.get_mut(index).and_then(Option::take) else {
             return Status::Invalid;
         };
+        // No blit runs (the caller settled it): the mapping and pin go
+        // before the core may give the pages back.
+        if let Some(blitter) = self.blit.made() {
+            blitter.forget(index, gpu);
+        }
+        if let Some(kept) = self.vmos.get_mut(index) {
+            *kept = None;
+        }
         for output in self.outputs.iter_mut().flatten() {
             if output.shown.is_some_and(|(shown, _)| shown == id) {
                 output.shown = None;
@@ -1077,6 +1264,20 @@ fn evict(buffer: &Buffer, changed: Rect) {
     let bytes = (right - left) * PIXEL;
     for row in top..bottom {
         let from = row * buffer.stride + left * PIXEL;
+        if from + bytes > buffer.length {
+            break;
+        }
+        crate::arch::evict_range(buffer.base + from, bytes);
+    }
+    crate::arch::fence();
+}
+
+/// Write `area` of `buffer` back from the processor's caches before the
+/// blitter reads it past them.
+fn write_back(buffer: &Buffer, area: &Area) {
+    let bytes = area.columns * PIXEL;
+    for row in area.source_y..area.source_y + area.rows {
+        let from = row * buffer.stride + area.source_x * PIXEL;
         if from + bytes > buffer.length {
             break;
         }

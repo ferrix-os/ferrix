@@ -48,10 +48,39 @@ struct Object {
 
 /// A client's object: a VMO, pinned into 00:02.0's domain at its first
 /// bind, its pages' device addresses kept in a VMO of their own.
+///
+/// An object of [`TAGGED_BYTES`] or more has one page more in its VMO than
+/// the object has, never pinned, mapped or bound, whose first eight bytes
+/// are a random tag (`AsVmo::tag`, read from the VMO when asked: a field
+/// here would cost every one of the front end's object slots, which the
+/// driver's stack holds): card0 reads it through the VMO an
+/// ATTACH hands it and so finds the object behind a client's buffer shown
+/// directly, whose pages it cannot pin a second time into this domain (H5
+/// of `docs/GAME-MODE.md` §5.7). A program that can read the tag can read
+/// the object; one that writes another tag into its own object's page
+/// makes the card show an object it could read anyway, or none.
 pub(crate) struct Memory {
     vmo: Vmo<Kernel>,
     pages: usize,
     pinned: OnceCell<Pinned>,
+}
+
+/// The smallest object whose VMO carries a tag page: smaller than any
+/// screen's buffer, large enough that the page is under half a percent.
+pub(crate) const TAGGED_BYTES: usize = 1 << 20;
+
+/// Eight random bytes from the kernel's generator, `None` if it refused.
+fn random_tag() -> Option<u64> {
+    let mut bytes = [0_u8; 8];
+    // SAFETY: `bytes` is this frame's own eight bytes, writable for the
+    // whole call, and the kernel writes at most its length into it.
+    let got = unsafe {
+        ferrix_rt::linux::call(
+            ferrix_rt::linux::numbers::GETRANDOM,
+            [bytes.as_mut_ptr().addr(), bytes.len(), 0, 0, 0, 0],
+        )
+    };
+    (got == Ok(bytes.len())).then(|| u64::from_ne_bytes(bytes))
 }
 
 struct Pinned {
@@ -70,6 +99,20 @@ impl Drop for Pinned {
 impl AsVmo for Memory {
     fn vmo(&self) -> &Vmo<Kernel> {
         &self.vmo
+    }
+
+    fn tag(&self) -> Option<u64> {
+        let bytes = (self.pages * PAGE) as u64;
+        if self.vmo.size().ok()? < bytes + PAGE as u64 {
+            return None;
+        }
+        let mut tag = [0_u8; 8];
+        self.vmo.read(&mut tag, bytes).ok()?;
+        Some(u64::from_ne_bytes(tag)).filter(|&tag| tag != 0)
+    }
+
+    fn bytes(&self) -> usize {
+        self.pages * PAGE
     }
 }
 
@@ -314,7 +357,19 @@ impl Platform for Real<'_> {
         if bytes == 0 || !bytes.is_multiple_of(PAGE) {
             return Err(Error::Invalid);
         }
-        let vmo = vmo::create(Kernel, bytes).map_err(|_| Error::NoMemory)?;
+        // A tag page only where the generator answered: an untagged object
+        // is copied by the processor when shown, as before.
+        let tag = if bytes >= TAGGED_BYTES {
+            random_tag().filter(|&tag| tag != 0)
+        } else {
+            None
+        };
+        let vmo_bytes = bytes + if tag.is_some() { PAGE } else { 0 };
+        let vmo = vmo::create(Kernel, vmo_bytes).map_err(|_| Error::NoMemory)?;
+        if let Some(tag) = tag {
+            vmo.write(&tag.to_ne_bytes(), bytes as u64)
+                .map_err(|_| Error::NoMemory)?;
+        }
         Ok(Memory {
             vmo,
             pages: bytes / PAGE,
@@ -501,5 +556,9 @@ impl Platform for Real<'_> {
 
     fn forcewake_due(&self) -> Option<u64> {
         self.forcewake.as_ref().and_then(AutoForcewake::due)
+    }
+
+    fn ggtt_page(&mut self, index: u64) -> Option<u64> {
+        ferrix_intel_xelp::gtt::gen8_ggtt_pte_decode(self.bar.ggtt_entry(index)?)
     }
 }
