@@ -681,6 +681,37 @@ impl Unit {
         self.invalidate_interrupt_entry(InterruptEntryScope::Index(index))
     }
 
+    /// Aim the present entry `index` at `destination` (from
+    /// `remap::destination`) instead (`docs/CORE-QUARANTINE.md` §3.3,
+    /// `L.iommu.101`): its low quadword alone, in one aligned store, so the
+    /// unit reads the old destination or the new one under the same source
+    /// check; cleaned on a unit that does not snoop, then invalidated index
+    /// by index and waited for. The one rewrite of a present entry there is.
+    ///
+    /// # Errors
+    ///
+    /// No table, an index past it, an entry not present, a write not
+    /// cleaned, or a failed invalidation.
+    pub(crate) fn retarget(&self, index: u16, destination: u32) -> Result<(), &'static str> {
+        if self.irt == 0 {
+            return Err("the unit has no interrupt remapping table");
+        }
+        if index >= remap::TABLE_ENTRIES {
+            return Err("an interrupt entry index past the unit's table");
+        }
+        let at = self.irt + u64::from(index) * 16;
+        let low = read_entry(at);
+        if !remap::is_present(low) {
+            return Err("an interrupt entry not present is not retargeted");
+        }
+        let mut writes = self.writes();
+        write_entry(at, remap::retargeted(low, destination), &mut writes);
+        self.publish(&mut writes);
+        settle(&writes);
+        require_published(&writes)?;
+        self.invalidate_interrupt_entry(InterruptEntryScope::Index(index))
+    }
+
     /// Turn the invalidation queue on: its frame, 256 descriptors of 128
     /// bits, at a tail of 0, with the completion event masked. No
     /// invalidation has been issued yet, so none is in flight.

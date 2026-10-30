@@ -189,6 +189,8 @@ pub const POWER_CONTROL_CREATE: usize = 0x1066;
 pub const POWER_SET: usize = 0x1067;
 /// [`NativeCall::PowerRead`].
 pub const POWER_READ: usize = 0x1068;
+/// [`NativeCall::CpuService`].
+pub const CPU_SERVICE: usize = 0x1069;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -643,10 +645,19 @@ pub enum NativeCall {
     /// `(claim, words: *[u64; POWER_READ_WORDS])`. The power core's
     /// readings (`types::POWER_READ_*`), read only. Renews the lease.
     PowerRead,
+    /// `(token, cpu, in_service)`. Take processor `cpu` out of service
+    /// (`in_service` 0) or bring it back (1), through the processor service
+    /// token with `MANAGE` (`docs/CORE-QUARANTINE.md` §4): `INVALID_ARGS`
+    /// for a processor past the count or a flag other than 0 or 1,
+    /// `ACCESS_DENIED` without `MANAGE`, `WRONG_TYPE` on another object or
+    /// where interrupts cannot be moved (AArch64, ARMv7-A), `BAD_STATE` for
+    /// a processor that may not go, `TIMED_OUT` for one that did not
+    /// answer. A processor already as asked is answered 0.
+    CpuService,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 68] = [
+pub const ALL: [NativeCall; 69] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -715,6 +726,7 @@ pub const ALL: [NativeCall; 68] = [
     NativeCall::PowerControlCreate,
     NativeCall::PowerSet,
     NativeCall::PowerRead,
+    NativeCall::CpuService,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -798,6 +810,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         POWER_CONTROL_CREATE => NativeCall::PowerControlCreate,
         POWER_SET => NativeCall::PowerSet,
         POWER_READ => NativeCall::PowerRead,
+        CPU_SERVICE => NativeCall::CpuService,
         _ => return None,
     };
     Some(call)
@@ -875,5 +888,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::PowerControlCreate => POWER_CONTROL_CREATE,
         NativeCall::PowerSet => POWER_SET,
         NativeCall::PowerRead => POWER_READ,
+        NativeCall::CpuService => CPU_SERVICE,
     }
 }

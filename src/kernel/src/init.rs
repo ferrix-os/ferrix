@@ -78,8 +78,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use ferrix_bootinfo::{BootView, option_in};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::bootstrap::{
-    AUDIT_MAGIC, DEVMGR_STARTER_MAGIC, ROOT_IN_MEMORY, ROOT_MAGIC, ROOT_SWITCHED, after_hello,
-    init_hello,
+    AUDIT_MAGIC, CPU_SERVICE_MAGIC, DEVMGR_STARTER_MAGIC, ROOT_IN_MEMORY, ROOT_MAGIC,
+    ROOT_SWITCHED, after_hello, init_hello,
 };
 use ferrix_native_abi::rights::Rights;
 use ferrix_sync::Once;
@@ -237,6 +237,7 @@ fn next_bootstrap() -> Option<Transfer> {
         }
     }
     give_audit(&kernel_end);
+    give_cpu_service(&kernel_end);
     let last = CHANNEL.lock().replace(kernel_end);
     // Through `dispose`, with the lock let go: what the last program sent the
     // kernel and nobody read may carry handles.
@@ -277,6 +278,60 @@ fn give_audit(kernel_end: &Arc<Endpoint>) {
         [0; 3],
     );
 }
+
+/// Give the first program -- pid 1 -- the processor service token after the
+/// audit record's handle (`docs/CORE-QUARANTINE.md` §4): kept by pid 1,
+/// which gives lode a copy, again whenever lode restarts. Given once.
+///
+/// Only in a build that has root's way back too -- the Linux personality's
+/// `cpuN/online` through the setters crate, which the composition root
+/// says with [`root_can_return`]: a build that can quarantine can always
+/// un-quarantine (the customer, 2026-10-30; ledger 4932 (B3)).
+fn give_cpu_service(kernel_end: &Arc<Endpoint>) {
+    if !ROOT_CAN_RETURN.load(Ordering::Acquire) {
+        return;
+    }
+    if CPU_SERVICE_GIVEN.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let written = fallible::try_to_vec(&after_hello(CPU_SERVICE_MAGIC, 1))
+        .and_then(|message| Ok((message, fallible::try_with_capacity(1)?)))
+        .map_err(|_| ())
+        .and_then(|(message, mut transfers): (Vec<u8>, Vec<Transfer>)| {
+            let _ = fallible::push_within(&mut transfers, (Object::CpuService, CPU_SERVICE_RIGHTS));
+            kernel_end
+                .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                .map_err(|_| ())
+        });
+    if written.is_err() {
+        println!(
+            "  init     the processor service token could not be written; no core is quarantined"
+        );
+    }
+}
+
+/// Whether root can bring a processor back: the composition root's word,
+/// given before pid 1 starts in a build that binds the run-time settings.
+static ROOT_CAN_RETURN: AtomicBool = AtomicBool::new(false);
+
+/// Say that root's way back is built in -- `cpuN/online` through the
+/// setters crate -- so pid 1 may be given the processor service token. The
+/// composition root calls it, in a `live` build with the Linux personality,
+/// and nothing else does (`docs/KERNEL-CRATES.md` §6.3).
+pub fn root_can_return() {
+    ROOT_CAN_RETURN.store(true, Ordering::Release);
+}
+
+/// Whether pid 1 has been given the processor service token.
+static CPU_SERVICE_GIVEN: AtomicBool = AtomicBool::new(false);
+
+// CHECKS-ONLY: syscall/native_check.rs; home: init
+/// The rights pid 1's processor service token carries: `MANAGE` to use it,
+/// `DUPLICATE` and `TRANSFER` to give lode a copy with `MANAGE` and
+/// `TRANSFER` alone, since a handle travels with its rights
+/// (`docs/CORE-QUARANTINE.md` §4).
+pub const CPU_SERVICE_RIGHTS: Rights =
+    Rights(Rights::MANAGE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0);
 
 /// Whether pid 1 has been given the audit record's handle.
 static AUDIT_GIVEN: AtomicBool = AtomicBool::new(false);

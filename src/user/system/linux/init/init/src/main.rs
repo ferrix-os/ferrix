@@ -202,6 +202,10 @@ struct Init {
 const DEVMGR_UNIT: &str = "devmgr.service";
 const DEVMGR_PROGRAM: &str = "/sbin/devmgr";
 
+/// lode's program, granted the processor service token at every start
+/// (`docs/CORE-QUARANTINE.md` §4).
+const LODE_PROGRAM: &str = "/sbin/lode";
+
 /// What a control connection is waiting for from the manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pending {
@@ -905,6 +909,13 @@ impl Init {
             Ok(given) => given,
             Err(error) => return fail(self, format!("no bootstrap channel: {error:?}")),
         };
+        // lode decides which cores to quarantine (docs/CORE-QUARANTINE.md
+        // §5): it starts with the token waiting, or without it and says so.
+        if spec.command.path == LODE_PROGRAM
+            && let Err(why) = directory.grant_cpu_service(unit)
+        {
+            say(&format!("{name}: no processor service token: {why}"));
+        }
         // As its User=, Group= and SupplementaryGroups= (P0b): a helper
         // that has become them makes the process, and needs the cgroup's
         // cgroup.procs for the length of the start, unless the unit is

@@ -456,6 +456,8 @@ control node has no mixer elements, `interfaces/audio/pcm.rs`).
 | `/proc/<pid>/comm`, `/proc/<pid>/task/<tid>/comm` | name | | | developer |
 | `/proc/<pid>/{uid_map,gid_map,setgroups}` | Linux's | user namespaces | | internal |
 | `/sys/bus/*/drivers/*/{bind,unbind}` | device address | a request to devmgr to bind or unbind | `fs/sysfs.rs:508` | admin |
+| `/sys/devices/system/cpu/cpuN/online` (x86-64, N > 0) | `0`, `1` | takes a processor out of service or back (core quarantine, `docs/CORE-QUARANTINE.md` §4); root in the first user namespace; through the setters seam | `settings/cpu_online.rs`, `smp/service.rs` | admin |
+| `CPU_SERVICE(token, cpu, flag)` | `0`, `1` | the same, lode's door, through the processor service token init grants it | `syscall/native.rs` `cpu_service` | internal (lode's policy, `/etc/ferrix/lode.d/quarantine.conf`) |
 | `/sys/fs/cgroup/**` writable: `cgroup.type`, `.procs`, `.threads`, `.subtree_control`, `.max.descendants`, `.max.depth`, `.freeze`, `.kill`, `cpu.weight`, `cpu.weight.nice`, `cpu.max`, `memory.{min,low,high,max}`, `io.max`, `pids.max` | Linux's | resource control (`svc set-property` writes these through init) | `src/lib/fs/common/cgroupfs/src/files.rs:91` | admin |
 | `clock_settime(CLOCK_REALTIME)`, `settimeofday` | | sets the clock (not persisted; `adjtimex` reports no discipline) | `syscall/time.rs:721` | **user-facing** (Date and time; no NTP client in the tree) |
 | `reboot(RESTART2, word)` | on the STM32MP1: `fastboot`, `ums`, `ums_mmc0` | U-Boot's boot mode at the next reset | `platform/st/stm32mp1.rs:778` | admin |

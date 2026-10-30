@@ -115,7 +115,7 @@ pub(super) fn cpuinfo(_: &Kernel) -> Result<Vec<u8>> {
     let Some(topology) = smp::topology() else {
         return Ok(out);
     };
-    let online = topology.cpus().iter().filter(|cpu| cpu.is_online());
+    let online = topology.cpus().iter().filter(|cpu| cpu.in_service());
     match arch::ARCH {
         Arch::X86_64 => {
             let processors: Vec<x86::Processor> = online
@@ -508,7 +508,7 @@ fn online_times() -> Result<Vec<(u32, sched::CpuTime)>> {
                 topology
                     .cpus()
                     .get(*logical)
-                    .is_some_and(smp::PerCpu::is_online)
+                    .is_some_and(smp::PerCpu::in_service)
             })
         })
         .map(|(logical, time)| (u32::try_from(logical).unwrap_or(u32::MAX), time))
@@ -632,6 +632,56 @@ pub(super) fn machine_check(_: &Kernel) -> Result<Vec<u8>> {
     let mut out = Sink(Vec::new());
     let _ = arch::render_machine_check(&mut out);
     Ok(out.0)
+}
+
+/// `/proc/ferrix-service`: each processor's service (`docs/CORE-QUARANTINE.md`
+/// §3) -- in or out, the tasks it drained while parked (expected 0) and the
+/// blocked tasks moved off it at their wake -- and the longest one move
+/// held its two queue locks. Not Linux's.
+pub(super) fn service(_: &Kernel) -> Result<Vec<u8>> {
+    use core::fmt::Write as _;
+    let mut out = alloc::string::String::new();
+    if let Some(topology) = smp::topology() {
+        for cpu in topology.cpus() {
+            let index = cpu.logical;
+            let _ = writeln!(
+                out,
+                "cpu{index} service {} drained {} rehomed {}",
+                if cpu.in_service() { "in" } else { "out" },
+                sched::drained(index),
+                sched::rehomed(index),
+            );
+        }
+    }
+    let _ = writeln!(out, "move-hold-max-ns {}", sched::move_hold_max());
+    Ok(out.into_bytes())
+}
+
+/// `/proc/interrupts`: per interrupt number with anything delivered, how
+/// many on each processor, in Linux's layout -- a header of `CPU<n>`, then
+/// `<number>:` and a count per processor. The source column is the
+/// kernel's number alone (`docs/CORE-QUARANTINE.md` §7).
+pub(super) fn interrupts(_: &Kernel) -> Result<Vec<u8>> {
+    use core::fmt::Write as _;
+    let mut out = alloc::string::String::new();
+    let cpus = smp::count();
+    out.push_str("    ");
+    for cpu in 0..cpus {
+        let _ = write!(out, " {:>10}", alloc::format!("CPU{cpu}"));
+    }
+    out.push('\n');
+    for irq in 0..irq::COUNTED as u32 {
+        let counts: Vec<u32> = (0..cpus).map(|cpu| irq::delivered_on(cpu, irq)).collect();
+        if counts.iter().all(|&count| count == 0) {
+            continue;
+        }
+        let _ = write!(out, "{irq:>3}:");
+        for count in counts {
+            let _ = write!(out, " {count:>10}");
+        }
+        out.push_str("  ferrix\n");
+    }
+    Ok(out.into_bytes())
 }
 
 /// `/proc/ferrix-mce-retired`: the frames retired for a hardware error, one

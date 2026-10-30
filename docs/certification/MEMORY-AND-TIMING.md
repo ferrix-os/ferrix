@@ -1175,6 +1175,36 @@ comparisons, a few thousand on any machine Ferrix boots, with no
 allocation and no wait. Placement at boot (`iommu::discover`) holds it the
 same way once per function.
 
+### 2.2e2 Core quarantine's walks (`docs/CORE-QUARANTINE.md`)
+
+Taking a processor out moves its tasks one at a time
+(`sched::move_one_off`), each move under the two run queues' locks taken
+lower first **with interrupts masked**. One move is not one detach and one
+insert: it first looks for a candidate on the parking processor's queue
+(`steal_candidate`, a walk of that queue for a task allowed on the
+receiver), and failing that for a movable sleeper
+(`take_movable_sleeper`, a walk of the sleeper timeline from its latest
+entry back), then detaches it and inserts it on the receiver. So one hold
+is bounded by one queue walk and one timeline walk of the parking
+processor -- both bounded by the tasks homed there, each a task's own slot
+-- plus one insert. The walk repeats, one hold at a time, until nothing
+moves.
+
+**Measured** (ledger 4932 (B4)): `/proc/ferrix-service`'s `move-hold-max-ns`
+is the longest such hold since boot. In `test-quarantine` -- four
+CPU-bound loops, 24 readers blocked on pipes, then fifty times processors
+1 to 3 out and back -- it read 3.0 to 31.2 µs across fourteen runs under
+KVM on nazuna (`-smp 4` and `-smp 2`, negative controls included); one
+run with debugging prints inside the hold, since removed, read 1 ms. That is the interval interrupts stay masked on the two
+processors for one move; it grows with the number of tasks homed on the
+parking processor, which the job quotas bound.
+
+The retarget after the park walks at most the 64 message vectors once,
+each a single entry store and an invalidation waited for, with no spin
+lock held across the wait (the vectors' routes are copied out first). Both
+run in the asking task, under the service's sleeping lock, never in an
+interrupt; the park itself runs in the idle task with interrupts on.
+
 ### 2.2f Device memory types (`user::memory_type::CLAIMS`)
 
 A spin lock over the physical ranges user mappings of device memory hold,

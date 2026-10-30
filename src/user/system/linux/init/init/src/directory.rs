@@ -36,10 +36,10 @@ use ferrix_native::{
     Deadline, Error, Handle, Object, OwnedHandle, Requested, Rights, Signals, vmo,
 };
 use ferrix_native_abi::bootstrap::{
-    AUDIT_MAGIC, DEVMGR_STARTER_MAGIC, ROOT_MAGIC, ROOT_SWITCHED, init_hello_version,
-    read_after_hello,
+    AUDIT_MAGIC, CPU_SERVICE_MAGIC, DEVMGR_STARTER_MAGIC, ROOT_MAGIC, ROOT_SWITCHED,
+    init_hello_version, read_after_hello,
 };
-use ferrix_native_abi::directory::{Kind, MAX_MESSAGE, Message};
+use ferrix_native_abi::directory::{self as wire, Kind, MAX_MESSAGE, Message};
 use ferrix_native_abi::types::{PACKET_SIGNAL, PROCESS_EXITED, PROCESS_KILLED};
 use ferrix_svc::event::{Event, Exit, Name, Pid, Token, UnitId};
 use ferrix_svc::value::Signal;
@@ -75,6 +75,9 @@ pub(crate) struct Directory {
     /// The audit record's handle, with `READ` alone, until the reader takes
     /// it (`docs/certification/AUDIT.md` §4).
     audit: Option<OwnedHandle<Native>>,
+    /// The processor service token, kept: lode is granted a copy at every
+    /// start (`docs/CORE-QUARANTINE.md` §4).
+    cpu_service: Option<OwnedHandle<Native>>,
     /// What the kernel said about `/`, until the caller takes it: whether
     /// it is the root volume now.
     root: Option<bool>,
@@ -131,6 +134,7 @@ impl Directory {
             own,
             starter: None,
             audit: None,
+            cpu_service: None,
             root: None,
             port,
             watched: BTreeMap::new(),
@@ -167,6 +171,7 @@ impl Directory {
             match (said, handle) {
                 (Some((DEVMGR_STARTER_MAGIC, _)), Some(starter)) => self.starter = Some(starter),
                 (Some((AUDIT_MAGIC, _)), Some(audit)) => self.audit = Some(audit),
+                (Some((CPU_SERVICE_MAGIC, _)), Some(token)) => self.cpu_service = Some(token),
                 (Some((ROOT_MAGIC, value)), None) => self.root = Some(value == ROOT_SWITCHED),
                 _ => {}
             }
@@ -177,6 +182,30 @@ impl Directory {
     /// has taken it yet.
     pub(crate) fn take_audit(&mut self) -> Option<OwnedHandle<Native>> {
         self.audit.take()
+    }
+
+    /// GRANT `unit` a copy of the processor service token, with `MANAGE`
+    /// and `TRANSFER` (`docs/CORE-QUARANTINE.md` §4): written into its new
+    /// bootstrap channel before it starts, so it is the first thing there.
+    /// init keeps its own, and grants again at every start.
+    pub(crate) fn grant_cpu_service(&self, unit: UnitId) -> Result<(), String> {
+        let token = self
+            .cpu_service
+            .as_ref()
+            .ok_or_else(|| "the kernel gave init no processor service token".to_owned())?;
+        let copy = token
+            .duplicate(Requested::Exactly(Rights::MANAGE | Rights::TRANSFER))
+            .map_err(|error| format!("copying the processor service token: {error:?}"))?;
+        let mut bytes = [0_u8; MAX_MESSAGE];
+        let len = Message::named(Kind::Grant, wire::CPU_SERVICE, "")
+            .encode(&mut bytes)
+            .ok_or_else(|| "a GRANT does not fit a message".to_owned())?;
+        let channel = self
+            .channel(unit)
+            .ok_or_else(|| "it has no bootstrap channel".to_owned())?;
+        channel
+            .write_with(bytes.get(..len).unwrap_or_default(), [copy])
+            .map_err(|(error, _)| format!("GRANT: {error:?}"))
     }
 
     /// Whether the kernel gave pid 1 devmgr's starter.

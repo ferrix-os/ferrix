@@ -1014,5 +1014,82 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::wait::WaitQueue::wait_until_deadline",
                 "sched::wait::WaitQueue::wait_sliced");
         }
+        requirement <'L.sched.102'> noPlacementOnAProcessorOutOfService : ItemLowLevel {
+            attribute :>> statement = "No placer -- choose_cpu, may_place,
+                place_on_idle, idle_allowed, a steal or a balance -- shall place a
+                task on a processor whose ACTIVE bit is clear, and a processor out
+                of service shall neither steal nor balance.";
+            attribute :>> criterion = "test-quarantine: with four CPU-bound loops
+                running, no task's /proc/<pid>/stat names the target once it
+                is out, and its drained count stays 0. Controls: every
+                placer's test removed at once (sched::placeable answering
+                true) -- tasks land on the target and are drained, and it
+                fires; the ACTIVE bit never cleared -- the native boot check
+                stops the boot.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::in_service", "sched::placeable", "sched::set_active",
+                "sched::choose_cpu", "sched::may_place", "sched::place_on_idle",
+                "sched::idle_allowed", "sched::steal_work", "sched::balance");
+        }
+        requirement <'L.sched.103'> aBlockedTaskIsReHomedAtItsWake : ItemLowLevel {
+            attribute :>> statement = "A blocked task whose home is out of service
+                when it is woken shall be moved, under both queues' locks taken
+                lower first, to a processor in service before it is queued.";
+            attribute :>> criterion = "test-quarantine: readers blocked on empty
+                pipes (WaitQueue::wait_trusting, on no list) are ended by a
+                signal while the target is out; its re-homed count is at least
+                1 and its drained count 0. Control: the re-home removed --
+                the woken readers are queued on the target and drained, and
+                it fires.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked");
+        }
+        requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
+            attribute :>> statement = "A processor parking shall move every
+                queued task and every sleeper of its own off to processors in
+                service, under the two queues' locks, keeping each sleeper's due
+                time; a task found there while parked shall be drained and
+                counted.";
+            attribute :>> criterion = "test-quarantine: /proc/ferrix-service says
+                service out drained 0 for the target after the CPU-bound
+                loops and the readers; the loops go on on the others; fifty
+                times out and back with the loops running, none lost, the
+                longest move's hold printed (MEMORY-AND-TIMING 2.2e2).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::evacuate", "sched::move_one_off",
+                "sched::queue::CpuQueue::take_movable_sleeper", "sched::park",
+                "sched::drained", "sched::pick_or_park", "sched::steal_from",
+                "sched::move_hold_max");
+        }
+        requirement <'L.sched.105'> theParkIsAHandshakeWithAnUndo : ItemLowLevel {
+            attribute :>> statement = "Taking a processor out shall check every
+                refusal before any state changes, clear its ACTIVE bit and wait a
+                grace period before asking the park, and move its park state
+                Active to Parking to Parked by compare-exchange; a park not made
+                by the deadline shall be cancelled by compare-exchange Parking to
+                Cancelled and the processor put back.";
+            attribute :>> criterion = "The native boot check
+                a_processor_leaves_service_through_its_token_alone: a park
+                whose deadline has passed, asked of nobody, is cancelled and
+                the processor left in service; test-quarantine's fifty
+                cycles each park and return. Control: the park loop with
+                interrupts left masked -- a shootdown is never answered and
+                the kernel stops, which fires.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::take_out_of_service",
+                "sched::service_refusal", "sched::park_transition");
+        }
+        requirement <'L.sched.106'> aReturnFlushesBeforeItIsUsed : ItemLowLevel {
+            attribute :>> statement = "A processor brought back shall flush its
+                whole TLB, global entries and every PCID included, and re-arm its
+                timer before its ACTIVE bit is set, last.";
+            attribute :>> criterion = "test-quarantine: root's echo 1 brings the
+                target back and online names it again; fifty times out and
+                back under load. The flush is CR4.PGE's toggle (SDM vol. 3A
+                4.10.4.1), argued.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::put_back_in_service", "sched::park",
+                "arch::x86_64::flush_tlb");
+        }
     }
 }

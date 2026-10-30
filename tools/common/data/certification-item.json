@@ -664,7 +664,8 @@
           "sysctl_hostname",
           "sysctl_domainname",
           "sysctl_memfd_noexec",
-          "driver_bind"
+          "driver_bind",
+          "cpu_online"
         ],
         "seam_symbols": [
           "__ferrix_setters_sethostname",
@@ -678,7 +679,8 @@
           "__ferrix_setters_sysctl_hostname",
           "__ferrix_setters_sysctl_domainname",
           "__ferrix_setters_sysctl_memfd_noexec",
-          "__ferrix_setters_driver_bind"
+          "__ferrix_setters_driver_bind",
+          "__ferrix_setters_cpu_online"
         ],
         "calls": [
           "fs/memfd_check.rs",

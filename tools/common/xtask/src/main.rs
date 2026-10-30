@@ -181,6 +181,7 @@ mod powerfail;
 mod procfs;
 mod pty;
 mod qemu;
+mod quarantine;
 mod remote;
 mod rename_crash;
 mod restart;
@@ -590,6 +591,7 @@ const TASKS: &[&[Task]] = &[
     lode_remote::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,
+    quarantine::TASKS,
     n150::TASKS,
     netboot::TASKS,
     nvidia::TASKS,

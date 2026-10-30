@@ -154,6 +154,32 @@ pub fn start_devmgr<S: Syscall>(
     )))
 }
 
+/// `cpu_service`: take processor `cpu` out of service, or with
+/// `in_service` bring it back, through the processor service token
+/// (`docs/CORE-QUARANTINE.md` §4).
+///
+/// # Errors
+///
+/// [`Error::AccessDenied`] without `MANAGE`, [`Error::WrongType`] for a
+/// handle that is not the token or where no processor goes out of service,
+/// [`Error::InvalidArgs`] for a processor past the count,
+/// [`Error::BadState`] for one that may not go, [`Error::TimedOut`] for one
+/// that did not answer.
+pub fn cpu_service<S: Syscall>(
+    sys: S,
+    token: &OwnedHandle<S>,
+    cpu: usize,
+    in_service: bool,
+) -> Result<(), Error> {
+    decode_unit(
+        Call::new(nr::CPU_SERVICE)
+            .value(register(token.raw()))
+            .value(cpu)
+            .value(usize::from(in_service))
+            .make(sys),
+    )
+}
+
 /// What one [`audit_read`] answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuditRead {

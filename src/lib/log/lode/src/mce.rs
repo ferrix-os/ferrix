@@ -19,6 +19,8 @@ pub struct MceLine<'a> {
     pub class: &'a str,
     /// The bank's block, where the line carries a known `ipid=`.
     pub bank_type: Option<&'static str>,
+    /// The bank's `status=`, where the line carries one.
+    pub status: Option<u64>,
 }
 
 /// `(HWID << 16 | McaType, name)`, as Linux's table.
@@ -100,15 +102,17 @@ pub fn read(text: &[u8]) -> Option<MceLine<'_>> {
     }
     let bank = words.next().filter(|bank| is_number(bank))?;
     let class = words.next().filter(|class| !class.contains('='))?;
-    let bank_type = words
-        .find_map(|word| word.strip_prefix("ipid=0x"))
-        .and_then(|digits| u64::from_str_radix(digits, 16).ok())
-        .and_then(bank_type);
+    let hex = |key: &str| {
+        rest.split(' ')
+            .find_map(|word| word.strip_prefix(key))
+            .and_then(|digits| u64::from_str_radix(digits, 16).ok())
+    };
     Some(MceLine {
         cpu,
         bank,
         class,
-        bank_type,
+        bank_type: hex("ipid=0x").and_then(bank_type),
+        status: hex("status=0x"),
     })
 }
 

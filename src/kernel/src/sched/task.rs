@@ -351,10 +351,50 @@ fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
 // that lock and never overlap.
 unsafe impl Sync for Task {}
 
+/// Program tasks pinned to each processor alone (`docs/CORE-QUARANTINE.md`
+/// §3.2): such a processor is refused going out of service, since its task
+/// could run nowhere else (L.smp.36). Counted at [`Task::new`], uncounted
+/// when it dies, or at drop for one that never did: a dead task a check
+/// still holds runs nowhere and vetoes nothing.
+static PINNED_PROGRAMS: [AtomicU32; 64] = [const { AtomicU32::new(0) }; 64];
+
+/// Run `body` with one more program task counted as pinned to `cpu`, for
+/// the native boot check of the refusal.
+pub(crate) fn with_pinned_for_check<T>(cpu: usize, body: impl FnOnce() -> T) -> T {
+    let count = PINNED_PROGRAMS.get(cpu);
+    if let Some(count) = count {
+        let _ = count.fetch_add(1, Ordering::AcqRel);
+    }
+    let result = body();
+    if let Some(count) = count {
+        let _ = count.fetch_sub(1, Ordering::AcqRel);
+    }
+    result
+}
+
+/// Program tasks pinned to `cpu` alone now.
+pub(crate) fn pinned_programs(cpu: usize) -> u32 {
+    PINNED_PROGRAMS
+        .get(cpu)
+        .map_or(0, |count| count.load(Ordering::Acquire))
+}
+
+/// The processor a program task's affinity pins it to, if it is one alone.
+fn pinned_program_cpu(affinity: &CpuSet, program: bool) -> Option<usize> {
+    if program && affinity.len() == 1 {
+        affinity.iter().next()
+    } else {
+        None
+    }
+}
+
 impl Drop for Task {
     /// Let go of the job it ran in. Its weight left the job's load when it
     /// died, so only the hold is left.
     fn drop(&mut self) {
+        if *self.state.get_mut() != DEAD {
+            self.uncount_pinned();
+        }
         let word = *self.group.get_mut();
         if counted_of(word) != 0 {
             quota::adjust(group_of(word), -i64::from(counted_of(word)));
@@ -427,6 +467,16 @@ pub(crate) struct NewTask {
 }
 
 impl Task {
+    /// Take it out of [`PINNED_PROGRAMS`], once: at its death, or at its
+    /// drop if it never died.
+    fn uncount_pinned(&self) {
+        if let Some(count) = pinned_program_cpu(&self.affinity, self.thread.is_some())
+            .and_then(|cpu| PINNED_PROGRAMS.get(cpu))
+        {
+            let _ = count.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
     /// Its pending-work word, for `sched::work` alone, which owns every
     /// read and write of it.
     pub(super) const fn work(&self) -> &AtomicU32 {
@@ -456,6 +506,11 @@ impl Task {
         } = new;
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
+        if let Some(count) =
+            pinned_program_cpu(&affinity, thread.is_some()).and_then(|cpu| PINNED_PROGRAMS.get(cpu))
+        {
+            let _ = count.fetch_add(1, Ordering::AcqRel);
+        }
         Ok(Task {
             id,
             name,
@@ -655,6 +710,9 @@ impl Task {
     pub(crate) fn set_state(&self, state: u8) {
         let saved = <arch::Irq as IrqControl>::disable();
         let before = self.state.swap(state, Ordering::AcqRel);
+        if state == DEAD && before != DEAD {
+            self.uncount_pinned();
+        }
         if before != RUNNABLE && state == RUNNABLE {
             self.join_group();
         } else if before == RUNNABLE && state != RUNNABLE {

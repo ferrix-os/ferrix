@@ -486,5 +486,81 @@ package FerrixSmpRequirements {
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = "smp::report_late";
         }
+        requirement <'L.smp.35'> oneFunctionBehindBothDoors : ItemLowLevel {
+            attribute :>> statement = "Every change of a processor's service shall
+                go through smp::service::set_in_service, one at a time under its
+                sleeping lock, whichever door asked; a processor already as asked
+                shall be left as it is.";
+            attribute :>> criterion = "The native boot check: lode's door (the
+                token) takes processor 1 out and back, with its kernel lines;
+                test-quarantine: root's door brings the target back, by root,
+                and an ask for what already is is answered without a record.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("smp::service::set_in_service", "smp::service::take_out",
+                "smp::service::bring_back", "smp::service::hardware_id",
+                "smp::service::Door::number", "smp::service::Door::name");
+        }
+        requirement <'L.smp.36'> theRefusals : ItemLowLevel {
+            attribute :>> statement = "A processor shall not go out of service if
+                it is the boot processor, the last in service, has a live program
+                task pinned to it alone, belongs to a domain that does not move
+                work, has a message aimed at it that cannot be moved, or is on an
+                architecture that cannot move interrupts; each refusal shall
+                leave it as it was.";
+            attribute :>> criterion = "The native boot check: the boot processor
+                refused (BAD_STATE, recorded with its number), a processor
+                with a program pinned to it refused, and on AArch64 and
+                ARMv7-A the call refused as unsupported; a dead pinned task
+                vetoes nothing (the fast-path check's echo tasks, which once
+                kept processor 1 in). The last-processor refusal is not
+                reachable while the boot processor never goes, argued.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("smp::service::Refusal::number", "smp::service::Refusal::reason",
+                "sched::service_refusal", "sched::task::pinned_programs");
+        }
+        requirement <'L.smp.37'> everyChangeIsAudited : ItemLowLevel {
+            attribute :>> statement = "Every change and every refusal through
+                either door shall make a CPU_SERVICE audit record naming the
+                subject, the processor, the direction, the door and the outcome,
+                and a kernel line saying the same.";
+            attribute :>> criterion = "The native boot check reads the three
+                records back from the high-value ring: the refusal of
+                processor 0 with status 4, the change out and the change back
+                of processor 1, each naming the checking process and lode's
+                door.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("audit::cpu_service", "smp::service::set_in_service");
+        }
+        requirement <'L.smp.38'> theTokenAndItsCall : ItemLowLevel {
+            attribute :>> statement = "The kernel shall make one processor service
+                token and give it to pid 1 after the audit handle, with MANAGE,
+                DUPLICATE and TRANSFER; cpu_service shall answer only a handle to
+                it with MANAGE, INVALID_ARGS for a processor past the count or a
+                flag other than 0 or 1; init shall grant lode a copy without
+                DUPLICATE at every start, which lode reduces to MANAGE.";
+            attribute :>> criterion = "The native boot check: pid 1's rights are
+                exactly MANAGE, DUPLICATE and TRANSFER; cpu_service refuses a
+                processor past the count, a flag of 2, a handle without
+                MANAGE and a channel end; test-quarantine: lode takes the
+                target out through the copy init granted it.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("init::give_cpu_service", "syscall::native::cpu_service");
+        }
+        requirement <'L.smp.39'> theLinuxSurfaceSaysInService : ItemLowLevel {
+            attribute :>> statement = "sysfs online, offline and cpuN/online,
+                /proc/cpuinfo, /proc/stat and sched_getaffinity shall name only
+                processors in service; a write to cpuN/online on x86-64 shall go
+                through the setters seam, CAP_SYS_ADMIN in the first user
+                namespace asked first, and only 0 or 1 taken.";
+            attribute :>> criterion = "test-quarantine: cpuN/online 0, online and
+                offline without and with the target, and nproc one fewer
+                while it is out, all again after; a user that is not root is
+                refused at open (EACCES) and root of a user namespace of its
+                own at the write (EPERM). Control: the capability asked in
+                the writer's own namespace -- the namespace's root takes
+                processor 1 out, and it fires.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("smp::PerCpu::in_service", "arch::x86_64::thread_core");
+        }
     }
 }

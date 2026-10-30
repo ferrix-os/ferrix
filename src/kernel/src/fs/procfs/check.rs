@@ -341,7 +341,7 @@ fn check_cpuinfo(ns: &Namespace) -> Result<(), &'static str> {
             topology
                 .cpus()
                 .iter()
-                .filter(|cpu| cpu.is_online())
+                .filter(|cpu| cpu.in_service())
                 .map(|cpu| cpu.logical)
                 .collect()
         },
@@ -401,7 +401,7 @@ fn check_stat(ns: &Namespace) -> Result<(u32, u64), &'static str> {
             topology
                 .cpus()
                 .iter()
-                .filter(|cpu| cpu.is_online())
+                .filter(|cpu| cpu.in_service())
                 .map(|cpu| u32::try_from(cpu.logical).unwrap_or(u32::MAX))
                 .collect()
         },

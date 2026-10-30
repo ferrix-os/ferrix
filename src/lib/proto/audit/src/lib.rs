@@ -158,6 +158,25 @@ pub const CGROUP_LIMIT: Event = Event::new(Class::Changed, 2);
 /// saturated.
 pub const DEVICE_LIMIT_SET: Event = Event::new(Class::Changed, 3);
 
+/// A processor taken out of service or brought back
+/// (`docs/CORE-QUARANTINE.md` §4): the target is the processor, by its
+/// logical number; the detail the direction (a [`cpu_service`] number), the
+/// door it came through, and 0. A refusal is recorded with its status, the
+/// processor left as it was.
+pub const CPU_SERVICE: Event = Event::new(Class::Changed, 4);
+
+/// The directions and doors a [`CPU_SERVICE`] record names.
+pub mod cpu_service {
+    /// Taken out of service.
+    pub const OUT: u32 = 0;
+    /// Brought back into service.
+    pub const BACK: u32 = 1;
+    /// Through root's write to `cpuN/online`.
+    pub const ROOT: u32 = 1;
+    /// Through lode's `CPU_SERVICE` call.
+    pub const LODE: u32 = 2;
+}
+
 /// A `device_set_limit` refused: as [`DEVICE_LIMIT_SET`], with the value
 /// asked for as the new one, and the status saying why -- `ACCESS_DENIED`
 /// without `SET_LIMIT`, `BAD_STATE` under live pins, `NO_MEMORY` past the
@@ -215,7 +234,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 26] = [
+pub const NAMED: [(Event, &str); 27] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -242,6 +261,7 @@ pub const NAMED: [(Event, &str); 26] = [
     (LIMIT_SET, "LIMIT_SET"),
     (CGROUP_LIMIT, "CGROUP_LIMIT"),
     (DEVICE_LIMIT_SET, "DEVICE_LIMIT_SET"),
+    (CPU_SERVICE, "CPU_SERVICE"),
 ];
 
 /// What a record's target names, in its `target_kind`.
@@ -260,6 +280,8 @@ pub mod target {
     pub const DEVICE: u32 = 4;
     /// A resource a job is charged for, by its number.
     pub const RESOURCE: u32 = 5;
+    /// A processor, by its logical number.
+    pub const CPU: u32 = 6;
 }
 
 /// Which item of the boot's configuration a [`CONFIG`] record states, in

@@ -9,17 +9,22 @@
 //! `vtd_interrupt_remap_msi`) and `hw/intc/ioapic.c`, which the boot tests
 //! run.
 //!
-//! # An entry is written while not present, and never edited
+//! # An entry is written while not present, and edited by one store
 //!
 //! The kernel writes an entry's high quadword (the source-ID check) first
 //! and its low quadword, with `P`, last, while the entry is not present,
 //! and invalidates it in the unit's interrupt entry cache before the
 //! message that names it is programmed. Vectors are minted once and kept
-//! for the life of the machine, so an entry is never retargeted or freed.
-//! **Any later change to a present entry must clear it first** -- mask the
-//! device, clear `P`, invalidate and wait, then rewrite as above -- or write
-//! it whole with a 128-bit `cmpxchg16b`; never two plain stores to a
-//! present entry.
+//! for the life of the machine, so an entry is never freed. The one edit
+//! of a present entry is core quarantine's retarget ([`retargeted`],
+//! `docs/CORE-QUARANTINE.md` §3.3): the low quadword alone, its
+//! destination changed and nothing else, in one aligned 64-bit store, so
+//! the unit reads the old entry or the new one with the same source check
+//! (the IRTE's layout, VT-d 9.10; the interrupt entry cache invalidation
+//! that follows, and its wait, 6.5.2.7). **Any other change to a present
+//! entry must clear it first** -- mask the device, clear `P`, invalidate
+//! and wait, then rewrite as above -- or write it whole with a 128-bit
+//! `cmpxchg16b`; never two plain stores to a present entry.
 //!
 //! # Posted interrupts are never used
 //!
@@ -108,6 +113,16 @@ pub const fn entry(remap: Remap) -> Entry {
             | (remap.destination as u64) << DESTINATION_SHIFT,
         remap.source as u64 | VERIFY_SOURCE,
     ]
+}
+
+/// The low quadword `low` of a present entry aimed at `destination` (from
+/// [`destination`]) instead, everything else kept: a retarget writes only
+/// this quadword, in one aligned store, so the unit reads either the old
+/// destination or the new one with the same source check
+/// (`docs/CORE-QUARANTINE.md` §3.3).
+#[must_use]
+pub const fn retargeted(low: u64, destination: u32) -> u64 {
+    (low & !((u32::MAX as u64) << DESTINATION_SHIFT)) | (destination as u64) << DESTINATION_SHIFT
 }
 
 /// Whether the low quadword of an entry says it is present.

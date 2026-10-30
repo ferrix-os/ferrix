@@ -166,6 +166,37 @@ pub use aarch64::speculation::midr_of;
 pub use armv7a::speculation::midr_of;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{cpuid, user_extended_state};
+// Core quarantine's interrupt moves (`docs/CORE-QUARANTINE.md` §3.3): on
+// x86-64 every message is a remapping entry that can be retargeted; on the
+// Arm pair moving one is `GICD_IROUTER` or `ITARGETSR`, a later step, so no
+// processor goes out of service there.
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::thread_core;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{immovable_aimed_at, move_messages};
+
+/// Whether interrupts can be moved off a processor, so that it may go out
+/// of service.
+pub const CAN_MOVE_INTERRUPTS: bool = cfg!(target_arch = "x86_64");
+
+/// No message can be moved off x86-64: every processor holds one that
+/// cannot.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn immovable_aimed_at(_hardware_id: u64) -> bool {
+    true
+}
+
+/// Nothing is moved off x86-64.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn move_messages(_from: u64, _to: u32) -> Result<usize, &'static str> {
+    Err("this architecture cannot move its interrupts")
+}
+
+/// No SMT topology is read off x86-64: each processor is a core of its own.
+#[cfg(not(target_arch = "x86_64"))]
+pub const fn thread_core(_hardware_id: u64) -> Option<(u64, u32)> {
+    None
+}
 
 /// No `CPUID` off x86-64.
 #[cfg(not(target_arch = "x86_64"))]

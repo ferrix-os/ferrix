@@ -21,7 +21,7 @@
 //! section, because it runs with interrupts masked, so taking a handler out of
 //! the table and then waiting a grace period leaves nothing still running it.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use ferrix_sync::IrqSpinLock;
 
@@ -191,12 +191,44 @@ pub(crate) fn dispatch(irq: u32) {
     match handler {
         Some(handler) => {
             let _ = DELIVERED.fetch_add(1, Ordering::Relaxed);
+            count_here(irq);
             handler(irq);
         }
         None => {
             let _ = UNCLAIMED.fetch_add(1, Ordering::Relaxed);
         }
     }
+}
+
+/// The interrupt numbers counted per processor: every message's, and the
+/// lines of the interrupt controllers the kernel serves.
+pub const COUNTED: usize = 128;
+
+/// Interrupts delivered, per processor and number: `/proc/interrupts`, which
+/// shows where a device's interrupts land (`docs/CORE-QUARANTINE.md` §7,
+/// that none lands on a processor out of service).
+static HERE: [AtomicU32; COUNTED * ferrix_sched::MAX_CPUS] =
+    [const { AtomicU32::new(0) }; COUNTED * ferrix_sched::MAX_CPUS];
+
+/// Count `irq` delivered on this processor.
+fn count_here(irq: u32) {
+    let Some(cpu) = crate::smp::this_cpu().map(|cpu| cpu.logical) else {
+        return;
+    };
+    if let Some(count) = Some(irq as usize)
+        .filter(|&irq| irq < COUNTED)
+        .and_then(|irq| HERE.get(cpu * COUNTED + irq))
+    {
+        let _ = count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Interrupts `irq` delivered on processor `cpu` since boot.
+pub fn delivered_on(cpu: usize, irq: u32) -> u32 {
+    Some(irq as usize)
+        .filter(|&irq| irq < COUNTED)
+        .and_then(|irq| HERE.get(cpu * COUNTED + irq))
+        .map_or(0, |count| count.load(Ordering::Relaxed))
 }
 
 /// How many interrupts reached a handler.

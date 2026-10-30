@@ -122,6 +122,43 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch armv7a --smp 2",
 ];
 
+/// The core quarantine row (`docs/CORE-QUARANTINE.md` §7, ledger 4932):
+/// lode takes a processor out, the surface says so, and root brings it
+/// back, on four processors and on two, under both accelerators; a
+/// compatibility-format message refuses (VT-d remapping off); and test-nvrm,
+/// whose unremapped boot runs the native check's refusal arm (ledger 4992).
+const TEST_QUARANTINE: &[&str] = &[
+    "test-quarantine --arch x86_64 --accel kvm",
+    "test-quarantine --arch x86_64 --accel tcg",
+    "test-quarantine-smp2 --arch x86_64 --accel kvm",
+    "test-quarantine-unremapped --arch x86_64 --accel kvm",
+    "test-nvrm --arch x86_64",
+];
+
+/// Whether `path` reaches core quarantine: the service, the scheduler's
+/// placement and park, the messages' aim and retarget, the doors, lode's
+/// policy, or the gate itself.
+fn reaches_quarantine(path: &str) -> bool {
+    [
+        "src/kernel/src/smp/service.rs",
+        "src/kernel/src/sched/mod.rs",
+        "src/kernel/src/sched/queue.rs",
+        "src/kernel/src/sched/task.rs",
+        "src/kernel/src/arch/x86_64/msi.rs",
+        "src/kernel/src/iommu/remapping.rs",
+        "src/kernel/src/iommu/vtd.rs",
+        "src/kernel/src/iommu/amdvi.rs",
+        "src/kernel/src/settings/cpu_online.rs",
+        "src/kernel/src/fs/sysfs.rs",
+        "src/kernel/src/init.rs",
+        "src/lib/log/lode/src/quarantine.rs",
+        "src/user/system/native/lode/src/quarantine.rs",
+        "tools/common/xtask/src/quarantine.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/quarantine/")
+}
+
 /// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
 /// check injected into every processor must stop the kernel as FX-9005, and
 /// the log's and recovery's modes must hold, under both accelerators. Under
@@ -215,6 +252,22 @@ pub(crate) fn rows(changed: &[String], image_crates: &BTreeSet<String>) -> Rows 
     rows
 }
 
+/// The machine check's and core quarantine's rows `path` reaches.
+fn machine_rows(path: &str, rows: &mut Rows) {
+    if reaches_machine_check(path) {
+        rows.add(TEST_MCE);
+        rows.reasons.push(format!(
+            "{path}: the machine check's code: test-mce under KVM and TCG"
+        ));
+    }
+    if reaches_quarantine(path) {
+        rows.add(TEST_QUARANTINE);
+        rows.reasons.push(format!(
+            "{path}: core quarantine's code: test-quarantine under KVM and TCG"
+        ));
+    }
+}
+
 /// What one path adds to `rows`.
 fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
@@ -287,10 +340,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     {
         rows.add(IMAGE_ROW);
         reason(rows, "in the image: the image row");
-        if reaches_machine_check(path) {
-            rows.add(TEST_MCE);
-            reason(rows, "the machine check's code: test-mce under KVM and TCG");
-        }
+        machine_rows(path, rows);
         rows.ask(
             "stage 7 or 8? then test-shell --arch x86_64 (zinc, --init ferrousli, the musl and \
              the glibc busybox) and test-vfs --arch x86_64 (ferrousli and musl busybox)",

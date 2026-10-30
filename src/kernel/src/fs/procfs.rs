@@ -395,7 +395,7 @@ static DRIVER_NVIDIA: [Entry<Kernel>; 2] = [
 ];
 
 /// `/proc`, less the process directories that follow these in a listing.
-pub(crate) static TOP: [Entry<Kernel>; 18] = [
+pub(crate) static TOP: [Entry<Kernel>; 20] = [
     Entry {
         name: b"self",
         permissions: 0o777,
@@ -415,7 +415,9 @@ pub(crate) static TOP: [Entry<Kernel>; 18] = [
         },
     },
     file(b"ferrix-seam", render::seam),
+    file(b"ferrix-service", render::service),
     file(b"filesystems", render::filesystems),
+    file(b"interrupts", render::interrupts),
     file(b"loadavg", render::loadavg),
     file(b"meminfo", render::meminfo),
     file(b"mounts", render::mounts),

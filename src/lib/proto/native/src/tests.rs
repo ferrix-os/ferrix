@@ -1155,6 +1155,7 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = pending::take_bootstrap(&sys);
     let _ = pending::start_devmgr(&handle(), &job);
     let _ = pending::audit_read(&sys, &handle(), 0, 0, &mut []);
+    let _ = pending::cpu_service(&sys, &handle(), 1, false);
     let _ = port.descriptor(true);
     let _ = interrupt.bind(&port, 0);
     let _ = interrupt.ack();

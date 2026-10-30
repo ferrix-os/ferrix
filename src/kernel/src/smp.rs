@@ -22,6 +22,7 @@
 //! handler in particular, which is told nothing at all.
 
 pub mod check;
+pub mod service;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -200,8 +201,16 @@ pub(crate) const RUNNING_WORD_OFFSET: usize =
 
 impl PerCpu {
     /// Whether this processor has said it is running.
-    pub fn is_online(&self) -> bool {
+    pub(crate) fn is_online(&self) -> bool {
         self.online.load(Ordering::Acquire)
+    }
+
+    /// Whether it is running and in service, eligible for tasks and
+    /// interrupts: what Linux's surface calls online
+    /// (`docs/CORE-QUARANTINE.md` §3). One out of service still answers
+    /// shootdowns and grace periods, which ask [`Self::is_online`].
+    pub fn in_service(&self) -> bool {
+        self.is_online() && crate::sched::in_service(self.logical)
     }
 
     /// How many inter-processor interrupts this processor has taken.

@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 8176 elements, 220 relations. Model digest `5fc307a19c0ff0c8`.
+27 files, 149 packages, 8250 elements, 220 relations. Model digest `00f5ea4b075b6f0a`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4160,6 +4160,11 @@ flowchart LR
 | `L.sched.90` | `aWakeeIsPulledOntoItsWakersProcessor` | — | — | — |
 | `L.sched.91` | `aWideWakePullsNothing` | — | — | — |
 | `L.sched.92` | `aWaitEndsAtItsDeadline` | — | — | — |
+| `L.sched.102` | `noPlacementOnAProcessorOutOfService` | — | — | — |
+| `L.sched.103` | `aBlockedTaskIsReHomedAtItsWake` | — | — | — |
+| `L.sched.104` | `evacuationLeavesNothingBehind` | — | — | — |
+| `L.sched.105` | `theParkIsAHandshakeWithAnUndo` | — | — | — |
+| `L.sched.106` | `aReturnFlushesBeforeItIsUsed` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
@@ -4258,6 +4263,10 @@ flowchart LR
 | `L.iommu.98` | `amdviOff` | — | — | — |
 | `L.iommu.99` | `theUnitsOwnFunctionIsTheUnit` | — | — | — |
 | `L.iommu.100` | `anUnnamedHostBridgeIsTheRootComplex` | — | — | — |
+| `L.iommu.101` | `aRetargetIsOneStore` | — | — | — |
+| `L.iommu.102` | `aRetargetIsInvalidatedAndWaitedFor` | — | — | — |
+| `L.iommu.103` | `everyMessageIsAccountedFor` | — | — | — |
+| `L.iommu.104` | `aMessageThatCannotMoveRefuses` | — | — | — |
 | `L.mm.1` | `initGivesTheAllocatorTheUsableRam` | — | — | — |
 | `L.mm.2` | `frameZeroIsNeverHandedOut` | — | — | — |
 | `L.mm.3` | `aFrameHasOneHolder` | — | — | — |
@@ -4862,6 +4871,11 @@ flowchart LR
 | `L.smp.32` | `aKickReachesItsTarget` | — | — | — |
 | `L.smp.33` | `aLateAnswerIsWaitedFor` | — | — | — |
 | `L.smp.34` | `aLateAnswerIsReportedAfterTheTurn` | — | — | — |
+| `L.smp.35` | `oneFunctionBehindBothDoors` | — | — | — |
+| `L.smp.36` | `theRefusals` | — | — | — |
+| `L.smp.37` | `everyChangeIsAudited` | — | — | — |
+| `L.smp.38` | `theTokenAndItsCall` | — | — | — |
+| `L.smp.39` | `theLinuxSurfaceSaysInService` | — | — | — |
 | `L.console.1` | `nothingBeforeThePort` | — | — | — |
 | `L.console.2` | `aLineIsWholeOnThePort` | — | — | — |
 | `L.console.3` | `aPollerGoesAfterTheRing` | — | — | — |

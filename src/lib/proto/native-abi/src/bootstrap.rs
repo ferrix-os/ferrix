@@ -45,6 +45,15 @@
 //! handle: the audit record's (`docs/certification/AUDIT.md` §4), with
 //! `READ` and nothing else, so it can never leave pid 1's table. Its `u32`
 //! is 1. Only the first program is given it.
+//!
+//! # The processor service token
+//!
+//! [`CPU_SERVICE_MAGIC`], written after the audit record's on every boot,
+//! carries one handle: the processor service token
+//! (`docs/CORE-QUARANTINE.md` §4), with `MANAGE`, `DUPLICATE` and
+//! `TRANSFER`, so pid 1 keeps it and gives lode a copy with `MANAGE` and
+//! `TRANSFER`, again whenever lode restarts. Its `u32` is 1. Only the first
+//! program is given it.
 
 /// The first four bytes of the message.
 pub const INIT_HELLO_MAGIC: [u8; 4] = *b"FXIN";
@@ -82,6 +91,9 @@ pub const DEVMGR_STARTER_MAGIC: [u8; 4] = *b"FXDS";
 
 /// The magic of the message carrying the audit record's handle.
 pub const AUDIT_MAGIC: [u8; 4] = *b"FXAU";
+
+/// The magic of the message carrying the processor service token.
+pub const CPU_SERVICE_MAGIC: [u8; 4] = *b"FXCS";
 
 /// The magic of the message saying where `/` is.
 pub const ROOT_MAGIC: [u8; 4] = *b"FXRT";

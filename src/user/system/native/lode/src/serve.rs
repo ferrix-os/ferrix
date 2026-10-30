@@ -157,6 +157,8 @@ const FRAMES_A_TURN: usize = 4;
 
 /// Run the service on init's channel.
 pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
+    // First, before anything is read from init: its GRANT waits there.
+    let cpu_service = crate::quarantine::Token::take(channel);
     let kmsg = sys::open(b"/dev/kmsg", sys::O_RDONLY | sys::O_NONBLOCK).map_err(|_| Step::Kmsg)?;
     let volatile = store_dir(&[b"/run/log"], store::VOLATILE).ok_or(Step::Store)?;
     let persistent = store_dir(&[b"/var", b"/var/log"], store::PERSISTENT);
@@ -183,6 +185,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         alerts,
         events,
         blob_quota,
+        quarantine,
     } = configuration(&mut said, now);
     let tombstones = ferrix_lode_core::tombstone::Tombstones::new(u64::from(
         events.count("tombstone").unwrap_or(5),
@@ -209,6 +212,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let mut first = ingest::own(if restarted { 4 } else { 6 }, id, &text, now);
     boot_facts(&mut first);
     said.insert(0, first);
+    crate::quarantine::say_if_ungranted(cpu_service.as_ref(), &mut said, now);
     if !dropped {
         said.push(ingest::own(
             4,
@@ -245,6 +249,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         tombstones,
         alerting,
         identities: alloc::collections::VecDeque::new(),
+        quarantine: crate::quarantine::Quarantine::new(quarantine, cpu_service),
     };
     service.serve(channel, restarted)
 }
@@ -293,6 +298,9 @@ struct Service {
     /// Who the processes a fault ended were, as the kernel said, until
     /// their crash records come.
     identities: alloc::collections::VecDeque<console::Identity>,
+    /// Core quarantine: its policy, and the processor service token init
+    /// granted, if it did (`docs/CORE-QUARANTINE.md` §4, §5).
+    quarantine: crate::quarantine::Quarantine,
 }
 
 /// What `/etc/ferrix/lode.d` says.
@@ -307,6 +315,8 @@ struct Configuration {
     events: Events,
     /// The blob container's quota.
     blob_quota: u64,
+    /// Core quarantine's policy (`quarantine.conf`).
+    quarantine: ferrix_lode_core::quarantine::Config,
 }
 
 /// The rules, the retention classes, the alerts and the events, with a
@@ -317,6 +327,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
     let mut classes = retention::defaults();
     let mut events = Events::default();
     let mut blob_quota = retention::BLOB_QUOTA;
+    let mut quarantine = ferrix_lode_core::quarantine::Config::DEFAULT;
     let Ok(dir) = Dir::open(CONFIG) else {
         return Configuration {
             rules,
@@ -324,6 +335,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
             alerts,
             events,
             blob_quota,
+            quarantine,
         };
     };
     let mut names = sys::list_dir(dir.fd).unwrap_or_default();
@@ -347,6 +359,24 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
             retention::parse(&text).map(|read| classes = read).err()
         } else if name == b"events.conf" {
             events.apply(&text, "/etc/ferrix/lode.d/events.conf").err()
+        } else if name == b"quarantine.conf" {
+            // Never quarantine on a file not read: warn instead, said once.
+            match ferrix_lode_core::quarantine::Config::parse(&text) {
+                Ok(read) => quarantine = read,
+                Err(why) => {
+                    quarantine = ferrix_lode_core::quarantine::Config::UNREAD;
+                    said.push(ingest::own(
+                        3,
+                        ferrix_lode_core::quarantine::MESSAGE_ID_QUARANTINE,
+                        &alloc::format!(
+                            "{}/quarantine.conf: {why}; cores are only warned about",
+                            String::from_utf8_lossy(CONFIG)
+                        ),
+                        now,
+                    ));
+                }
+            }
+            None
         } else {
             None
         };
@@ -371,6 +401,7 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
         alerts,
         events,
         blob_quota,
+        quarantine,
     }
 }
 
@@ -997,6 +1028,9 @@ impl Service {
                     // the crash record that follows.
                     if record.get("_TRANSPORT") == Some(b"kernel") {
                         self.remember_identity(&kernel.text);
+                        // The kernel's own lines alone: one root writes to
+                        // /dev/kmsg never has the kernel's facility.
+                        self.quarantine.heard(&kernel.text, now, batch);
                     }
                     if units::is_unit_copy(&record) {
                         let mut paired = self.pair(record, now, batch);

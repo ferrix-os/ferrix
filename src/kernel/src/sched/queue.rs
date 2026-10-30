@@ -525,6 +525,33 @@ impl CpuQueue {
         }
     }
 
+    /// What runs on a processor asked to park (`docs/CORE-QUARANTINE.md`
+    /// §3.2): its idle task, the running task, if it is another and still
+    /// runnable, put back on the queue first, to be moved off by the park.
+    pub(crate) fn park_pick(&mut self) -> Option<Arc<Task>> {
+        if let Some(current) = self.current.clone()
+            && !self.is_running_idle()
+            && current.state() == RUNNABLE
+        {
+            self.detach_current();
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
+            // which `detach_current` just gave back to it.
+            self.insert(&current);
+        }
+        self.idle.clone()
+    }
+
+    /// Take out one sleeper that may run on `to` and is not pinned: its
+    /// instant and the task, its sleep slot given back so that `to`'s
+    /// timeline can file it again (`docs/CORE-QUARANTINE.md` §3.2).
+    pub(crate) fn take_movable_sleeper(&mut self, to: usize) -> Option<(u64, Arc<Task>)> {
+        let (at, task, slot) = self
+            .sleepers
+            .take_last_where(|task| !task.is_pinned() && task.may_run_on(to))?;
+        task.return_sleep_slot(slot);
+        Some((at, task))
+    }
+
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
         if let Some(task) = self.fair.pick_next() {

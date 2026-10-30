@@ -663,6 +663,31 @@ package FerrixItemRequirements {
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
         }
+        requirement <'H.SCHED.18'> anUnstableCoreLeavesServiceWhole : ItemHighLevel {
+            doc /* docs/CORE-QUARANTINE.md (customer, 2026-10-30, item 6;
+                consultant OK IF Q1-Q14, ledger 4856). */
+            attribute :>> statement = "A processor taken out of service shall be
+                left by every task and every movable interrupt, with no task
+                stranded on it and none run there, no interrupt lost, none
+                delivered there once its messages are moved -- between the
+                park and the move it may still take one, and runs its handler
+                -- no stale translation kept when it returns, and a park it
+                never acknowledges undone by its deadline; only root, through
+                cpuN/online, and lode, through the processor service token,
+                may ask, each change audited.";
+            attribute :>> criterion = "cargo xtask test-quarantine and
+                test-quarantine-smp2 (KVM): lode takes the target out after
+                eleven core-scoped corrected records; nothing runs or is
+                drained there; a reader blocked on an empty pipe is re-homed
+                at its wake; its interrupts are moved and none lands there
+                under disk traffic; the surface says so; the refused writes
+                are refused; root brings it back; fifty times out and back
+                under load. Negative controls (ledger 4932): the ACTIVE bit
+                never cleared, the re-home removed, the retarget skipped,
+                the park loop with interrupts masked, the capability check in
+                the writer's own namespace -- each fires.";
+            attribute :>> parent = "ASR-8";
+        }
     }
 
     package Interrupts {

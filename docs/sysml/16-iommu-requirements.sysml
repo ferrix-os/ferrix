@@ -1428,5 +1428,64 @@ package FerrixIommuRequirements {
             attribute :>> parent = ("H.DMA.1", "H.DMA.9");
             attribute :>> unit = ("iommu::ivrs::exempt", "iommu::discover", "iommu::Counted::fmt", "iommu::place_ivrs");
         }
+        requirement <'L.iommu.101'> aRetargetIsOneStore : ItemLowLevel {
+            attribute :>> statement = "Retargeting a present interrupt remapping
+                entry shall change its destination field alone, in one aligned
+                store -- VT-d's low quadword, AMD-Vi's four-byte entry -- keeping
+                the vector, the trigger, presence and the source check.";
+            attribute :>> criterion = "ferrix-paging's host tests
+                retarget_changes_only_the_destination, for VT-d and AMD-Vi:
+                the destination alone changes, presence, vector, trigger and
+                source check kept (and a mask whose precedence wiped the
+                quadword was found by them).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("iommu::vtd::Unit::retarget", "iommu::amdvi::Unit::retarget");
+        }
+        requirement <'L.iommu.102'> aRetargetIsInvalidatedAndWaitedFor : ItemLowLevel {
+            attribute :>> statement = "A retargeted entry shall be cleaned on a
+                unit that does not snoop and invalidated -- VT-d's index, AMD-Vi's
+                table -- with the invalidation's completion waited for before the
+                processor is reported out of service.";
+            attribute :>> criterion = "test-quarantine under VT-d: at least one of
+                the target's messages moved, and under raw disk reads a moved
+                interrupt counts on the boot processor while the target's
+                count for every interrupt stays as it was. Control: the
+                entry's store skipped -- the interrupt lands on the target,
+                and it fires. AMD-Vi's by argument (BACKLOG).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("iommu::remapping::retarget_message", "iommu::vtd::Unit::retarget",
+                "iommu::amdvi::Unit::retarget");
+        }
+        requirement <'L.iommu.103'> everyMessageIsAccountedFor : ItemLowLevel {
+            attribute :>> statement = "Each message's destination shall be
+                recorded before the asking task can leave the processor it read
+                it on, and every message aimed at a parked processor moved, so a
+                message made while the processor was parking is moved too.";
+            attribute :>> criterion = "test-quarantine: messages are aimed at the
+                processors in service in turn, so the target holds some, and
+                every one of them is moved (none lands there after).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("arch::x86_64::msi::msi_allocate", "arch::x86_64::msi::aim",
+                "arch::x86_64::msi::next_in_service", "arch::x86_64::msi::aimed_at",
+                "arch::x86_64::msi::move_messages", "smp::service::move_messages");
+        }
+        requirement <'L.iommu.104'> aMessageThatCannotMoveRefuses : ItemLowLevel {
+            attribute :>> statement = "A processor with a message aimed at it in
+                compatibility format, or one whose entry is still being written,
+                shall be refused before the park, and put back if one is found
+                after it.";
+            attribute :>> criterion = "test-quarantine-unremapped (VT-d's interrupt
+                remapping off, devmgr starting drivers under ferrix.unisolated,
+                so messages are in compatibility format and aimed at the
+                processors in turn): root's take-out of each secondary holding
+                one is refused, each left in service; and the native boot
+                check's arm on that machine: lode's take-out of processor 1
+                refused, recorded with status 3, the processor in service.
+                Argued in the code review (ledger 4932, 4992): the race with
+                an entry still being written, which no emulator can time.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("arch::x86_64::msi::immovable_aimed_at",
+                "smp::service::take_out", "smp::service::immovable_aimed_at");
+        }
     }
 }

@@ -76,9 +76,11 @@ const _: () = assert!(
 // load's `Absent` in a `fixed` one, recorded in certification-item.json's
 // `composition_root.removable`. Each invocation defines the load's
 // `__ferrix_setters_*` symbols as calls into its type, so a build binds
-// exactly one or does not link. These, and the flag word's assert above, are
-// the only places the tree names `ferrix_runtime_settings` outside the flag
-// lists, and the only ones that name the crate.
+// exactly one or does not link. These, the flag word's assert above and
+// `register_load`'s word that root's way back is there (core quarantine's token,
+// ledger 4932 (B3)), are the only places the tree names
+// `ferrix_runtime_settings` outside the flag lists, and the only ones that
+// name the crate.
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
 ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
@@ -1557,6 +1559,10 @@ fn start_audit(view: &BootView<'_>) {
 /// that lost a registration would power off without committing its disks,
 /// which is not something to find out by losing them.
 fn register_load(view: &BootView<'_>) {
+    // Root's way back from core quarantine is the settings crate's
+    // `cpuN/online`: only a build that has it gives lode the way out.
+    #[cfg(ferrix_runtime_settings = "live")]
+    init::root_can_return();
     let registered = syscall::launch::install()
         .and_then(|()| fs::install())
         .and_then(|()| platform::st::stm32mp1::install(view))

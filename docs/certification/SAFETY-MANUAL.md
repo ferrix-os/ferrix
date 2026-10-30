@@ -749,9 +749,10 @@ every machine check halts (L.x86_64.231). Either way:
   touched it (late kill, as Linux's default); the kernel consuming it -- a
   system call's copy, a copy-on-write copy at `fork`, a page-cache read, a
   device's DMA -- is a machine check in ring 0, which halts;
-* the corrected-error lines are a symptom log, not a guarantee: no
-  threshold is applied, and a machine whose corrected counts grow is the
-  integrator's to take out of service;
+* the corrected-error lines are a symptom log, not a guarantee: the kernel
+  applies no threshold; lode's quarantine policy may take a core out of
+  service on them (AoU-37), and a machine whose corrected counts grow is
+  still the integrator's to take out of service;
 * CMCI is not used: corrected errors are found by a poll every
   `ferrix.mce.poll` seconds (5 by default), so a record a bank overwrites
   sooner is counted once with `OVER` set;
@@ -766,6 +767,21 @@ every machine check halts (L.x86_64.231). Either way:
   SMCA. On an SMCA processor the kernel sets `MCA_CONFIG.McaX` on every
   bank, which AMD requires before an uncorrectable error can be survived;
   `ferrix.mce.recover=off` halts on AMD as on Intel.
+
+### AoU-37 — core quarantine is an availability aid, not a safety mechanism (x86-64)
+lode takes a physical core out of service once it has reported enough
+corrected errors of its own (`docs/CORE-QUARANTINE.md`; `action =
+quarantine` by default, the customer's choice of 2026-10-30), and root
+can take a processor out or bring it back with `cpuN/online`. The
+integrator shall not count on it to prevent a failure: it acts on
+corrected errors after the fact, an uncorrected error still stops or
+recovers as H.FAIL.8 says, a quarantined core is never brought back
+automatically, and a machine left with fewer processors runs slower.
+The integrator shall decide whether the policy's defaults (ten records in
+ten minutes, at most half the processors, at least one kept) suit the
+system, set `action = warn` or `off` where they do not, and treat a
+quarantined core as a hardware fault to be serviced. AArch64 and ARMv7-A
+take no processor out of service.
 
 ## 5. Element failure analysis
 

@@ -998,6 +998,7 @@ comments; "code" counts lines that are neither blank nor comment (3623
 | `fs/procfs/render.rs` | `set_hostname`, `set_domainname`, whole | `sysctl.rs` | 28 (17) | `sysctl_hostname`, `sysctl_domainname` | `EINVAL` |
 | `syscall/memfd.rs` | `set_noexec`, whole | `memfd_noexec.rs` | 40 (19) | `sysctl_memfd_noexec` | `EPERM` without `CAP_SYS_ADMIN`, `EINVAL` |
 | `fs/sysfs.rs` | `write`'s checks and requests: the name, the device, the unbind's driver, `devmgr::request` | `driver_bind.rs` | 30 (17) | `driver_bind` | `ENODEV`, `devmgr`'s answer |
+| (new, `docs/CORE-QUARANTINE.md` §4) | a write to `cpuN/online`: the privilege check, `0` or `1`, `smp::service::set_in_service` | `cpu_online.rs` | 50 (32) | `cpu_online` | `EPERM` without `CAP_SYS_ADMIN` in the first user namespace, `EINVAL`, `EBUSY`, `ETIMEDOUT` |
 
 **The bodies.** `uts.rs`, `clock.rs`, `sysrq.rs`, `sysctl.rs` and
 `memfd_noexec.rs` hold their functions byte-identical to the removed

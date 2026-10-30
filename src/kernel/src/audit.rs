@@ -82,7 +82,7 @@ pub use ferrix_audit::{
     CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated,
 };
 pub(crate) use ferrix_audit::{
-    CONFIG, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
+    CONFIG, CPU_SERVICE, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
 };
 pub use ferrix_audit::{
     CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, JOB_KILLED, LIMIT_SET, Outcome, PROCESS_MADE,
@@ -741,6 +741,33 @@ pub fn device_limit(
     );
 }
 
+/// Record `subject` taking processor `cpu` out of service or bringing it
+/// back (`back`), through `door` (`ferrix_audit::cpu_service`): done, or
+/// refused with `status`, the refusal's number (`smp::service::Refusal`).
+pub(crate) fn cpu_service(subject: Subject, cpu: usize, back: bool, door: u32, status: i16) {
+    let direction = if back {
+        ferrix_audit::cpu_service::BACK
+    } else {
+        ferrix_audit::cpu_service::OUT
+    };
+    let outcome = if status == 0 {
+        Outcome::Done
+    } else {
+        Outcome::Refused
+    };
+    record(
+        CPU_SERVICE,
+        outcome,
+        status,
+        subject,
+        Target {
+            kind: target::CPU,
+            id: cpu as u64,
+        },
+        [direction, door, 0],
+    );
+}
+
 /// Record `subject` ending what `target` names, as `event` says.
 pub fn ended(event: Event, subject: Subject, target: Target, detail: [u32; 3]) {
     record(event, Outcome::Done, 0, subject, target, detail);
@@ -815,6 +842,13 @@ pub fn power(subject: Subject, action: u32) {
         );
         at = next;
     }
+}
+
+// CHECKS-ONLY: syscall/native_check.rs; home: audit
+/// The number the high-value ring gives its next record, for a check that
+/// reads back the records an action makes.
+pub fn high_next() -> u64 {
+    STORE.high.lock().ring.next
 }
 
 /// How far the reader has read the high-value ring, for the native boot

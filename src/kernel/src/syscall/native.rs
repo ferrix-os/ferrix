@@ -479,6 +479,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::ChardevDmabufFence => served(call, caller, &a),
         NativeCall::DevmgrStart => crate::discovery::devmgr::devmgr_start(caller, &a),
         NativeCall::AuditRead => audit_read(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::CpuService => cpu_service(process, handle(a[0]), a[1], a[2]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),
         NativeCall::ProcessStatus => process_status(process, handle(a[0]), a[1]),
         NativeCall::IoMappingCreate
@@ -1876,6 +1877,43 @@ fn audit_read(
     Ok(0)
 }
 
+/// `cpu_service(token, cpu, in_service)`: take processor `cpu` out of
+/// service or bring it back, through the processor service token with
+/// `MANAGE` -- lode's door (`docs/CORE-QUARANTINE.md` §4), ending in the
+/// same function as root's `cpuN/online`.
+fn cpu_service(process: &Process, token: Handle, cpu: u64, wanted: u64) -> Result<usize, Errno> {
+    process.with_handles(|table| match table.get(token) {
+        Ok((Object::CpuService, rights)) if rights.contains(Rights::MANAGE) => Ok(()),
+        Ok((Object::CpuService, _)) => Err(status::ACCESS_DENIED),
+        Ok(_) => Err(status::WRONG_TYPE),
+        Err(_) => Err(status::BAD_HANDLE),
+    })?;
+    let cpu = usize::try_from(cpu)
+        .ok()
+        .filter(|&cpu| cpu < crate::smp::count())
+        .ok_or(status::INVALID_ARGS)?;
+    let wanted = match wanted {
+        0 => false,
+        1 => true,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    use crate::smp::service::{self, Door};
+    service::set_in_service(cpu, wanted, Door::Lode, audit::Subject::of(process))
+        .map(|()| 0)
+        .map_err(service_status)
+}
+
+/// What `cpu_service` answers for each refusal.
+const fn service_status(refusal: crate::smp::service::Refusal) -> Errno {
+    use crate::smp::service::Refusal;
+    match refusal {
+        Refusal::NoSuchProcessor => status::INVALID_ARGS,
+        Refusal::Unsupported => status::WRONG_TYPE,
+        Refusal::Scheduler(crate::sched::ServiceRefusal::TimedOut) => status::TIMED_OUT,
+        Refusal::Interrupts | Refusal::Scheduler(_) => status::BAD_STATE,
+    }
+}
+
 /// The ring `which` names, if `handle` is the audit record's with `READ`.
 fn audit_ring(process: &Process, handle: Handle, which: u64) -> Result<audit::Which, Errno> {
     process.with_handles(|table| match table.get(handle) {
@@ -3202,7 +3240,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::IoMapping(_)
         | Object::Pin(_)
         | Object::Starter
-        | Object::Audit => None,
+        | Object::Audit
+        | Object::CpuService => None,
     }
 }
 

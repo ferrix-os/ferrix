@@ -9846,6 +9846,7 @@ fn check_absent_setters_refuse(process: &Process, page: u64) -> Result<(), &'sta
         <Absent as Setters>::sysctl_domainname(&(), b"check-host"),
         <Absent as Setters>::sysctl_memfd_noexec(process, b"2"),
         <Absent as Setters>::driver_bind(Bus::Pci, 0, false, b"0000:00:00.0"),
+        <Absent as Setters>::cpu_online(process, 1, b"0"),
     ];
     if answers.len() != ENTRIES {
         return Err("the absent setters' check does not call every entry");

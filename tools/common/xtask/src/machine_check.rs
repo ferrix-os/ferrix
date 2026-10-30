@@ -594,7 +594,7 @@ fn gpa(reply: &str) -> Option<u64> {
 }
 
 /// One human-monitor command, on processor `cpu` where it matters.
-fn monitor(qmp: &mut Qmp, command: &str, cpu: Option<usize>) -> Result<String> {
+pub(crate) fn monitor(qmp: &mut Qmp, command: &str, cpu: Option<usize>) -> Result<String> {
     let mut arguments = format!(
         "{{\"command-line\":{}",
         crate::display::json_string(command)
@@ -733,7 +733,7 @@ fn online(lines: &[String]) -> Option<usize> {
 
 /// What the monitor's reply to an injection says went wrong, if anything:
 /// its `return` string, which is empty when the injection was made.
-fn refusal(reply: &str) -> Option<String> {
+pub(crate) fn refusal(reply: &str) -> Option<String> {
     let text = reply
         .split_once("\"return\":")
         .map_or(reply, |(_, rest)| rest)
@@ -855,7 +855,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 /// The `-cpu` properties of Intel's modes.
-const INTEL: &str = "vendor=GenuineIntel";
+pub(crate) const INTEL: &str = "vendor=GenuineIntel";
 /// AMD's, with both recovery bits asked for. QEMU's TCG drops both
 /// ("TCG doesn't support requested feature"), KVM on an AMD host passes
 /// them: under TCG the guest reports no `SUCCOR`, and the kernel's rules

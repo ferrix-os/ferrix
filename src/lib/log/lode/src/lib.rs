@@ -36,6 +36,8 @@
 //!   console copy.
 //! * [`access`]: whose segments a record goes to, and how a user is handed
 //!   theirs.
+//! * [`quarantine`]: which machine checks count against a core, and when
+//!   it is taken out of service.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -60,6 +62,7 @@ pub mod lastkernel;
 pub mod limit;
 pub mod mce;
 pub mod protocols;
+pub mod quarantine;
 pub mod record;
 pub mod regex;
 pub mod retention;

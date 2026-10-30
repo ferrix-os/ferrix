@@ -7,7 +7,13 @@
 //! OPEN     service -> init   name; one handle: the client's end of a new channel
 //! CONNECT  init -> provider  name, the client unit; one handle: that end, forwarded
 //! REFUSED  init -> service   name; why
+//! GRANT    init -> service   name; one handle: a capability of init's, copied
 //! ```
+//!
+//! GRANT is written into a new bootstrap channel before the service is
+//! started, so it waits first in the service's queue: init gives lode the
+//! processor service token so (`docs/CORE-QUARANTINE.md` §4), named
+//! [`CPU_SERVICE`].
 //!
 //! Every message is little-endian on every target: a `u32` kind, then two
 //! strings, each a `u32` length and UTF-8 bytes -- the name and a second
@@ -23,6 +29,9 @@ pub const MAX_NAME: usize = 64;
 /// The longest message, in bytes.
 pub const MAX_MESSAGE: usize = 256;
 
+/// The name a GRANT of the processor service token carries.
+pub const CPU_SERVICE: &str = "cpu-service";
+
 /// What a message is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -36,15 +45,18 @@ pub enum Kind {
     Connect,
     /// Init refuses an OPEN.
     Refused,
+    /// Init hands a service a capability of its own.
+    Grant,
 }
 
 impl Kind {
-    const ALL: [Kind; 5] = [
+    const ALL: [Kind; 6] = [
         Kind::Ready,
         Kind::Offer,
         Kind::Open,
         Kind::Connect,
         Kind::Refused,
+        Kind::Grant,
     ];
 
     /// Its number on the wire.
@@ -56,6 +68,7 @@ impl Kind {
             Kind::Open => 3,
             Kind::Connect => 4,
             Kind::Refused => 5,
+            Kind::Grant => 6,
         }
     }
 
@@ -63,7 +76,7 @@ impl Kind {
     #[must_use]
     pub const fn handles(self) -> usize {
         match self {
-            Kind::Offer | Kind::Open | Kind::Connect => 1,
+            Kind::Offer | Kind::Open | Kind::Connect | Kind::Grant => 1,
             Kind::Ready | Kind::Refused => 0,
         }
     }
@@ -182,8 +195,8 @@ mod tests {
     }
 
     #[test]
-    fn only_offer_open_and_connect_carry_a_handle() {
-        let carrying: [usize; 5] = Kind::ALL.map(Kind::handles);
-        assert_eq!(carrying, [0, 1, 1, 1, 0]);
+    fn only_offer_open_connect_and_grant_carry_a_handle() {
+        let carrying: [usize; 6] = Kind::ALL.map(Kind::handles);
+        assert_eq!(carrying, [0, 1, 1, 1, 0, 1]);
     }
 }

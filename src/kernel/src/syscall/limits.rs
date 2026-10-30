@@ -286,13 +286,13 @@ fn mask_bytes() -> usize {
     smp::count().div_ceil(WORD * 8) * WORD
 }
 
-/// The logical numbers of the processors that are running.
+/// The logical numbers of the processors that are running and in service.
 fn online_cpus() -> Vec<usize> {
     match smp::topology() {
         Some(topology) => topology
             .cpus()
             .iter()
-            .filter(|cpu| cpu.is_online())
+            .filter(|cpu| cpu.in_service())
             .map(|cpu| cpu.logical)
             .collect(),
         None => vec![0],

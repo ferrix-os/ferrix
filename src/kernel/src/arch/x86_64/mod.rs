@@ -2129,6 +2129,38 @@ pub fn interrupts_enabled() -> bool {
 
 pub(crate) use apic::{ipi_irq, send_ipi_to_others};
 pub use msi::msi_allocate;
+pub(crate) use msi::{immovable_aimed_at, move_messages};
+
+/// The physical core the processor whose APIC ID is `hardware_id` is a
+/// thread of, as a key equal for its threads alone, and the core's number
+/// in its package (Linux's `core_id`): from `CPUID` leaf 0Bh, the APIC ID
+/// without its SMT bits, and the core bits below the package's. Subleaf 0
+/// is the SMT level and subleaf 1 the core level when the level types (ECX
+/// bits 15:8) say 1 and 2; EAX bits 4:0 are the shift to the next level's
+/// ID (SDM vol. 2A, CPUID leaf 0Bh). One core per processor where the leaf
+/// says no levels.
+pub fn thread_core(hardware_id: u64) -> Option<(u64, u32)> {
+    let shift = |subleaf: u32, kind: u32| {
+        cpuid(0x0B, subleaf)
+            .filter(|[_, ebx, ecx, _]| *ebx != 0 && (ecx >> 8) & 0xFF == kind)
+            .map_or(0, |[eax, ..]| eax & 0x1F)
+    };
+    let max_leaf = cpuid(0, 0).map_or(0, |[eax, ..]| eax);
+    let (threads, package) = if max_leaf >= 0x0B {
+        (shift(0, 1), shift(1, 2))
+    } else {
+        (0, 0)
+    };
+    let in_package = if package == 0 {
+        hardware_id
+    } else {
+        hardware_id & ((1_u64 << package) - 1)
+    };
+    Some((
+        hardware_id >> threads,
+        u32::try_from(in_package >> threads).unwrap_or(u32::MAX),
+    ))
+}
 
 /// The page a device's MSI writes land in, which an IOMMU that translates them
 /// must map into every domain. None here: VT-d leaves the local APIC's message

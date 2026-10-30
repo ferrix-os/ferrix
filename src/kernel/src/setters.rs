@@ -104,6 +104,14 @@ crate::seam! {
         unbind: bool,
         data: &[u8],
     ) -> Result<usize, ::ferrix_kernel_load::setters::Errno>;
+    /// A write to `/sys/devices/system/cpu/cpu<cpu>/online` by the process
+    /// given: processor `cpu` taken out of service or brought back
+    /// (`docs/CORE-QUARANTINE.md` §4).
+    fn cpu_online as __ferrix_setters_cpu_online(
+        process: &::ferrix_kernel_load::setters::Process,
+        cpu: u32,
+        data: &[u8],
+    ) -> Result<usize, ::ferrix_kernel_load::setters::Errno>;
 }
 
 /// The implementation of a build without the crate: every entry is refused
@@ -147,6 +155,9 @@ impl Setters for Absent {
         Err(Errno::EPERM)
     }
     fn driver_bind(_: Bus, _: u16, _: bool, _: &[u8]) -> Result<usize, Errno> {
+        Err(Errno::EPERM)
+    }
+    fn cpu_online(_: &Process, _: u32, _: &[u8]) -> Result<usize, Errno> {
         Err(Errno::EPERM)
     }
 }

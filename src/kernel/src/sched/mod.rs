@@ -56,7 +56,7 @@ pub mod work;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sched::{Balance, CpuSet, Domain, Mode, NICE_0_WEIGHT, Placement, check_partition};
 use ferrix_sync::{IrqControl, IrqSpinLock, Once, SpinLock};
@@ -464,6 +464,42 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// processor's look finds the task or the spawn finds the bit -- the same
 /// argument as a sleeping reader against a signalling writer.
 static IDLE: AtomicU64 = AtomicU64::new(0);
+
+/// The processors in service (`docs/CORE-QUARANTINE.md` §3.1,
+/// `L.sched.102`): a bit per processor, set for every processor at
+/// [`init`] and cleared only by [`take_out_of_service`]. Every placement --
+/// [`choose_cpu`], [`may_place`], [`place_on_idle`], the pull, the steal and
+/// the balance -- and every wake at a task's home asks it.
+static ACTIVE: [AtomicU64; ferrix_sched::MAX_CPUS / 64] =
+    [const { AtomicU64::new(0) }; ferrix_sched::MAX_CPUS / 64];
+
+/// Whether a placer may put a task on processor `cpu`, or `cpu` take one
+/// from another: whether it is in service (L.sched.102). Every placer asks
+/// this one function -- `choose_cpu`, `may_place`, `place_on_idle`,
+/// `idle_allowed`, `steal_work`, `steal_from` and `balance` -- so that one
+/// negative control removes the test from all of them at once.
+fn placeable(cpu: usize) -> bool {
+    in_service(cpu)
+}
+
+/// Whether `cpu` is in service: tasks may be placed there.
+pub(crate) fn in_service(cpu: usize) -> bool {
+    ACTIVE
+        .get(cpu / 64)
+        .is_some_and(|word| word.load(Ordering::Acquire) & (1 << (cpu % 64)) != 0)
+}
+
+/// Put `cpu` in service, or take it out.
+fn set_active(cpu: usize, active: bool) {
+    if let Some(word) = ACTIVE.get(cpu / 64) {
+        let bit = 1_u64 << (cpu % 64);
+        if active {
+            let _ = word.fetch_or(bit, Ordering::AcqRel);
+        } else {
+            let _ = word.fetch_and(!bit, Ordering::AcqRel);
+        }
+    }
+}
 
 /// [`set_idle`] at a switch: written only when `cpu`'s bit is not already
 /// `idle`, which is only at a switch to or from the idle task (2f). A switch
@@ -901,6 +937,9 @@ pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     check_partition(core::slice::from_ref(&domain), online)
         .map_err(|_| "the scheduling domains do not cover every processor exactly once")?;
     let _ = DOMAIN.call_once(|| domain);
+    for cpu in 0..online {
+        set_active(cpu, true);
+    }
 
     // FATAL-ALLOC: boot only: stage 5 makes each processor's scheduling state once, as the scheduler starts.
     let mut queues = Vec::with_capacity(online);
@@ -1103,6 +1142,12 @@ fn idle_loop() -> ! {
     // case; enabling here makes the first pass like every later one.
     arch::enable_interrupts();
     loop {
+        // Asked to go out of service: park here, in the idle task, never in
+        // a handler (L.sched.105).
+        if let Some(me) = cpu.filter(|&me| park_state(me) == PARKING) {
+            park(me);
+            continue;
+        }
         let reaped = reap_batch(false);
         // An interrupt that arrived while the stack was held was not allowed
         // to switch this task out. Make the decision it asked for now, through
@@ -1252,7 +1297,7 @@ fn choose_cpu(allowed: &CpuSet, prefer: usize) -> Option<usize> {
 
     let saved = <arch::Irq as IrqControl>::disable();
     for (cpu, lock) in queues.iter().enumerate() {
-        if !allowed.contains(cpu) {
+        if !allowed.contains(cpu) || !placeable(cpu) {
             continue;
         }
         let snapshot = lock.lock().snapshot();
@@ -1901,9 +1946,9 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
 }
 
 /// Whether anything but its own placement may put `task` on `cpu`: a
-/// processor its affinity allows, in the domain.
+/// processor its affinity allows, in the domain and in service.
 fn may_place(task: &Task, cpu: usize) -> bool {
-    task.may_run_on(cpu) && domain_cpus().is_some_and(|cpus| cpus.contains(cpu))
+    task.may_run_on(cpu) && domain_cpus().is_some_and(|cpus| cpus.contains(cpu)) && placeable(cpu)
 }
 
 /// Whether `task`, blocked, is asleep at `home`, the queue that owns it, and
@@ -2134,7 +2179,7 @@ fn idle_allowed(task: &Task, domain: &Domain) -> bool {
     while idle != 0 {
         let cpu = idle.trailing_zeros() as usize;
         idle &= idle - 1;
-        if task.may_run_on(cpu) && domain.cpus().contains(cpu) {
+        if task.may_run_on(cpu) && domain.cpus().contains(cpu) && placeable(cpu) {
             return true;
         }
     }
@@ -2191,6 +2236,13 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
     let mut kick_cpu = None;
     loop {
         let cpu = task.cpu();
+        // A home out of service: the task moves, blocked, to a processor in
+        // service, and the wake goes on there (L.sched.103). A task blocked
+        // on a channel, futex or port is on no list the evacuation walks;
+        // this is where it is found.
+        if !in_service(cpu) && rehome_blocked(task, cpu) {
+            continue;
+        }
         let Some(lock) = queue_of(cpu) else {
             break;
         };
@@ -2288,6 +2340,365 @@ fn placed_on_wake(
     place_on_idle(task, cpu)
 }
 
+/// [`PARK`]: in service, or back from a park.
+pub(crate) const ACTIVE_STATE: u8 = 0;
+/// [`PARK`]: asked to park; its idle task will.
+pub(crate) const PARKING: u8 = 1;
+/// [`PARK`]: parked, its tasks moved off, waiting in `hlt`.
+pub(crate) const PARKED: u8 = 2;
+/// [`PARK`]: the park was given up before it happened (the deadline).
+pub(crate) const CANCELLED: u8 = 3;
+/// [`PARK`]: asked to come back into service.
+pub(crate) const RETURNING: u8 = 4;
+
+/// Each processor's park state (`docs/CORE-QUARANTINE.md` §3.2,
+/// `L.sched.105`): one atomic, so that exactly one of the park and the
+/// waiter's cancel at its deadline wins, by compare-exchange.
+static PARK: [AtomicU8; 64] = [const { AtomicU8::new(ACTIVE_STATE) }; 64];
+
+/// Processor `cpu`'s park state.
+pub(crate) fn park_state(cpu: usize) -> u8 {
+    PARK.get(cpu)
+        .map_or(ACTIVE_STATE, |state| state.load(Ordering::Acquire))
+}
+
+/// Move processor `cpu`'s park state from `from` to `to`; whether it did.
+pub(crate) fn park_transition(cpu: usize, from: u8, to: u8) -> bool {
+    PARK.get(cpu).is_some_and(|state| {
+        state
+            .compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    })
+}
+
+/// Tasks a parked processor found on its queue and moved off: the backstop
+/// behind the re-home at every wake (L.sched.104), expected to stay 0.
+static DRAINED: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+
+/// Tasks parked processor `cpu` drained since boot.
+pub fn drained(cpu: usize) -> u64 {
+    DRAINED
+        .get(cpu)
+        .map_or(0, |count| count.load(Ordering::Relaxed))
+}
+
+/// Park this processor, `me`, from its idle task (L.sched.104, 105): move
+/// every task that may move -- run queue and sleepers -- to processors in
+/// service, then, unless the waiter gave up meanwhile, wait in `hlt` with
+/// interrupts on, answering IPIs, timer stopped, until asked back; then
+/// flush the whole TLB, re-arm, and say it is back. Never steals and never
+/// sets `IDLE` while parked.
+fn park(me: usize) {
+    let _ = evacuate(me);
+    if !park_transition(me, PARKING, PARKED) {
+        // Cancelled at the deadline: the waiter put this processor back.
+        return;
+    }
+    crate::timer::stop();
+    loop {
+        arch::disable_interrupts();
+        if park_state(me) == RETURNING {
+            break;
+        }
+        let drained = evacuate(me);
+        if drained > 0
+            && let Some(count) = DRAINED.get(me)
+        {
+            let _ = count.fetch_add(drained, Ordering::Relaxed);
+        }
+        arch::wait_for_work();
+    }
+    // The whole TLB, global entries and every PCID included: on x86-64 a
+    // write to `CR4` that changes `PGE` invalidates all of them (SDM vol. 3A
+    // 4.10.4.1), which `flush_tlb` does (L.sched.106).
+    arch::flush_tlb();
+    if let Some(lock) = queue_of(me) {
+        let saved = <arch::Irq as IrqControl>::disable();
+        lock.lock().arm_timer(crate::timer::now_nanos());
+        <arch::Irq as IrqControl>::restore(saved);
+    }
+    arch::enable_interrupts();
+    // In service again, last, by this processor itself: a waiter that gave
+    // up at its deadline does not strand it out of service.
+    set_active(me, true);
+    if let Some(state) = PARK.get(me) {
+        state.store(ACTIVE_STATE, Ordering::Release);
+    }
+}
+
+/// Why a processor could not go out of service (`L.smp.36`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ServiceRefusal {
+    /// The boot processor: the console's line and the boot processor's own
+    /// kernel threads.
+    BootProcessor,
+    /// It is the last processor in service.
+    Last,
+    /// A program task is pinned to it alone.
+    Pinned,
+    /// The domain does not steal work: evacuation would break its admission.
+    NoStealing,
+    /// No such processor, or one already out of service or still parking.
+    NotThere,
+    /// It did not park by the deadline; it was put back.
+    TimedOut,
+}
+
+/// Take processor `cpu` out of service (`docs/CORE-QUARANTINE.md` §3.2,
+/// `L.sched.102`, `104`, `105`, `L.smp.36`): every refusal before any state
+/// changes; then its bit cleared and a grace period waited for, so no placer
+/// that read the old bit is still placing; then the park asked of it, and
+/// waited for until `deadline` (nanoseconds on the kernel's clock), when the
+/// park is cancelled by compare-exchange and the processor put back. The
+/// caller has retargeted its interrupts first (`smp::set_in_service`).
+///
+/// # Errors
+///
+/// The refusal, or [`ServiceRefusal::TimedOut`].
+pub(crate) fn take_out_of_service(cpu: usize, deadline: u64) -> Result<(), ServiceRefusal> {
+    take_out_asking(cpu, deadline, true)
+}
+
+// CHECKS-ONLY: syscall/native_check.rs; home: sched
+/// [`take_out_of_service`] asking nothing of the processor -- no interrupt
+/// to park and no grace period, whose interrupt would wake its idle task
+/// to look -- for the native boot check of the deadline's undo: with a
+/// deadline already past, the waiter cancels before the processor looks,
+/// unless something else woke it in those microseconds, which the check
+/// tries again on.
+pub fn take_out_without_asking(cpu: usize, deadline: u64) -> Result<(), ServiceRefusal> {
+    take_out_asking(cpu, deadline, false)
+}
+
+/// [`take_out_of_service`], asking the processor to park with an interrupt
+/// when `ask`.
+fn take_out_asking(cpu: usize, deadline: u64, ask: bool) -> Result<(), ServiceRefusal> {
+    service_refusal(cpu)?;
+    if !park_transition(cpu, ACTIVE_STATE, PARKING) {
+        return Err(ServiceRefusal::NotThere);
+    }
+    set_active(cpu, false);
+    if ask {
+        crate::smp::synchronize();
+        kick(cpu);
+    }
+    loop {
+        match park_state(cpu) {
+            PARKED => return Ok(()),
+            PARKING if crate::timer::now_nanos() < deadline => sleep_for(1_000_000),
+            PARKING => {
+                if park_transition(cpu, PARKING, CANCELLED) {
+                    if let Some(state) = PARK.get(cpu) {
+                        state.store(ACTIVE_STATE, Ordering::Release);
+                    }
+                    set_active(cpu, true);
+                    return Err(ServiceRefusal::TimedOut);
+                }
+            }
+            _ => return Err(ServiceRefusal::NotThere),
+        }
+    }
+}
+
+// CHECKS-ONLY: syscall/native_check.rs; home: sched
+/// [`service_refusal`] with one more program task counted as pinned to
+/// `cpu`, for the native boot check of the refusal.
+pub fn refusal_while_pinned(cpu: usize) -> Result<(), ServiceRefusal> {
+    task::with_pinned_for_check(cpu, || service_refusal(cpu))
+}
+
+/// The refusals of [`take_out_of_service`], each before any state changes.
+pub(crate) fn service_refusal(cpu: usize) -> Result<(), ServiceRefusal> {
+    let count = QUEUES.get().map_or(0, Vec::len);
+    if cpu >= count || !in_service(cpu) {
+        return Err(ServiceRefusal::NotThere);
+    }
+    if cpu == 0 {
+        return Err(ServiceRefusal::BootProcessor);
+    }
+    if (0..count).filter(|&other| in_service(other)).count() <= 1 {
+        return Err(ServiceRefusal::Last);
+    }
+    if !DOMAIN
+        .get()
+        .is_some_and(|domain| domain.mode().steals_work())
+    {
+        return Err(ServiceRefusal::NoStealing);
+    }
+    if task::pinned_programs(cpu) != 0 {
+        return Err(ServiceRefusal::Pinned);
+    }
+    Ok(())
+}
+
+/// Bring processor `cpu` back into service (`L.sched.106`): it leaves its
+/// park, flushes its whole TLB, re-arms its timer and sets its own bit,
+/// last; this waits for it until `deadline`. A processor not parked is
+/// left as it is.
+///
+/// # Errors
+///
+/// [`ServiceRefusal::NotThere`] for a processor not parked;
+/// [`ServiceRefusal::TimedOut`] if it did not come back by `deadline`.
+pub(crate) fn put_back_in_service(cpu: usize, deadline: u64) -> Result<(), ServiceRefusal> {
+    if in_service(cpu) {
+        return Ok(());
+    }
+    if !park_transition(cpu, PARKED, RETURNING) {
+        return Err(ServiceRefusal::NotThere);
+    }
+    kick(cpu);
+    while park_state(cpu) != ACTIVE_STATE {
+        if crate::timer::now_nanos() >= deadline {
+            // It is on its way back and sets its own bit when it gets there.
+            return Err(ServiceRefusal::TimedOut);
+        }
+        sleep_for(1_000_000);
+    }
+    Ok(())
+}
+
+/// Move every movable task off processor `me` to processors in service,
+/// one at a time under both queues' locks, lower first; how many moved.
+fn evacuate(me: usize) -> u64 {
+    let mut tasks = 0;
+    let Some(count) = QUEUES.get().map(Vec::len) else {
+        return 0;
+    };
+    loop {
+        let mut moved = false;
+        for to in (0..count).filter(|&to| to != me && in_service(to)) {
+            if move_one_off(me, to) {
+                kick(to);
+                moved = true;
+                tasks += 1;
+            }
+        }
+        if !moved {
+            return tasks;
+        }
+    }
+}
+
+/// Move one task from `me` to `to`: a queued one, else a sleeper, due when
+/// it was. Whether one moved.
+fn move_one_off(me: usize, to: usize) -> bool {
+    let (Some(mine), Some(theirs)) = (queue_of(me), queue_of(to)) else {
+        return false;
+    };
+    let saved = <arch::Irq as IrqControl>::disable();
+    let (first, second) = if me < to {
+        (mine, theirs)
+    } else {
+        (theirs, mine)
+    };
+    let mut first_queue = first.lock();
+    let mut second_queue = second.lock();
+    let held = crate::timer::now_nanos();
+    let (mine_queue, theirs_queue) = if me < to {
+        (&mut *first_queue, &mut *second_queue)
+    } else {
+        (&mut *second_queue, &mut *first_queue)
+    };
+    let moved = if let Some((task, state)) = mine_queue
+        .steal_candidate(to)
+        .and_then(|id| mine_queue.release(id))
+    {
+        move_onto(&task, Some(state), to, theirs_queue);
+        true
+    } else if let Some((at, task)) = mine_queue.take_movable_sleeper(to) {
+        task.set_cpu(to);
+        if !theirs_queue.file_sleeper(at, &task) {
+            // No sleep slot after all: runnable there, its sleep returns
+            // early and asks again, as `choose_next` treats it.
+            task.set_state(RUNNABLE);
+            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+            theirs_queue.insert(&task);
+        }
+        true
+    } else {
+        false
+    };
+    let _ = MOVE_HOLD_MAX.fetch_max(
+        crate::timer::now_nanos().saturating_sub(held),
+        Ordering::Relaxed,
+    );
+    drop(first_queue);
+    drop(second_queue);
+    <arch::Irq as IrqControl>::restore(saved);
+    moved
+}
+
+/// The longest one move held its two queue locks, in nanoseconds, with
+/// interrupts masked: MEMORY-AND-TIMING's measured bound for the walk
+/// (`docs/CORE-QUARANTINE.md` §7, ledger 4932 (B4)).
+static MOVE_HOLD_MAX: AtomicU64 = AtomicU64::new(0);
+
+/// [`MOVE_HOLD_MAX`].
+pub fn move_hold_max() -> u64 {
+    MOVE_HOLD_MAX.load(Ordering::Relaxed)
+}
+
+/// Move `task`, blocked at `home`, a processor out of service, to a
+/// processor in service it may run on -- this one where it can -- under
+/// both queues' locks, lower processor first (L.sched.103). Its sleeper
+/// entry at `home`, if any, goes in [`asleep_at_home`], which takes it out
+/// of `home`'s sleeper set; the wake then files it at its new home.
+/// False where nothing moved: it is not blocked there any more, or no
+/// processor in service may take it (pinned), in which case the wake goes
+/// on at `home` and the parked processor's drain finds it.
+fn rehome_blocked(task: &Arc<Task>, home: usize) -> bool {
+    let here = this_cpu();
+    let to = here
+        .filter(|&cpu| cpu != home && may_place(task, cpu))
+        .or_else(|| {
+            QUEUES.get().and_then(|queues| {
+                (0..queues.len()).find(|&cpu| cpu != home && may_place(task, cpu))
+            })
+        });
+    let (Some(to), Some(theirs)) = (to, queue_of(home)) else {
+        return false;
+    };
+    let Some(mine) = queue_of(to) else {
+        return false;
+    };
+    let (first, second) = if to < home {
+        (mine, theirs)
+    } else {
+        (theirs, mine)
+    };
+    let mut first_queue = first.lock();
+    let mut second_queue = second.lock();
+    let home_queue = if to < home {
+        &mut *second_queue
+    } else {
+        &mut *first_queue
+    };
+    if task.cpu() != home || task.state() != task::BLOCKED || !asleep_at_home(task, home_queue) {
+        return false;
+    }
+    task.set_cpu(to);
+    count_rehomed(home);
+    true
+}
+
+/// Blocked tasks moved off each processor out of service at their wake.
+static REHOMED: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+
+/// Count one task moved off `home`.
+fn count_rehomed(home: usize) {
+    if let Some(count) = REHOMED.get(home) {
+        let _ = count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Blocked tasks moved off `cpu` at their wake since boot.
+pub fn rehomed(cpu: usize) -> u64 {
+    REHOMED
+        .get(cpu)
+        .map_or(0, |count| count.load(Ordering::Relaxed))
+}
+
 /// Queue `task` on processor `to`'s queue, `queue`, whose lock the caller
 /// holds with the lock of the queue `task` comes from: the one move between
 /// queues, made by a steal (`steal_from`, with the state the victim's queue
@@ -2367,7 +2778,11 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
     let online = QUEUES.get()?.len().min(64);
     for step in 1..online {
         let to = (home + step) % online;
-        if idle & (1_u64 << to) == 0 || !task.may_run_on(to) || !domain.cpus().contains(to) {
+        if idle & (1_u64 << to) == 0
+            || !task.may_run_on(to)
+            || !domain.cpus().contains(to)
+            || !placeable(to)
+        {
             continue;
         }
         let Some(lock) = queue_of(to) else {
@@ -2692,6 +3107,19 @@ fn pick_and_switch(interrupted_user: bool) {
     finish_switch();
 }
 
+/// The next task for `cpu`'s queue: its idle task whenever the processor
+/// is not fully in service -- asked to park, parked, or on its way back --
+/// which parks it or brings it back (L.sched.105); else the queue's pick.
+/// An interrupt that reschedules a parked processor so finds its idle task
+/// again, never a task queued there, which its drain moves off.
+fn pick_or_park(queue: &mut CpuQueue, cpu: usize) -> Option<Arc<Task>> {
+    if park_state(cpu) != ACTIVE_STATE {
+        queue.park_pick()
+    } else {
+        queue.pick_next()
+    }
+}
+
 /// Choose what runs next, leaving the queue's lock held and returning where
 /// to save this context and what to resume — or releasing the lock and
 /// returning `None` when nothing has to change.
@@ -2728,7 +3156,7 @@ fn choose_next(
         }
     }
 
-    let next = queue.pick_next();
+    let next = pick_or_park(queue, cpu);
     if queue.stats.measuring {
         queue.note_pick(now);
     }
@@ -3024,7 +3452,7 @@ fn steal_work() -> bool {
     let Some(domain) = DOMAIN.get().filter(|domain| domain.mode().steals_work()) else {
         return false;
     };
-    let Some(me) = this_cpu() else {
+    let Some(me) = this_cpu().filter(|&me| placeable(me)) else {
         return false;
     };
     domain
@@ -3053,7 +3481,7 @@ static NEXT_BALANCE: Once<Vec<AtomicU64>> = Once::new();
 /// processor, and it takes no lock at all in the common case where the
 /// interval has not elapsed.
 fn balance() {
-    let Some(me) = this_cpu() else {
+    let Some(me) = this_cpu().filter(|&me| placeable(me)) else {
         return;
     };
     let now = crate::timer::now_nanos();
@@ -3100,7 +3528,7 @@ fn balance() {
         Balance::new(queue.snapshot())
     };
     for (cpu, lock) in queues.iter().enumerate() {
-        if cpu == me || !allowed.contains(cpu) {
+        if cpu == me || !allowed.contains(cpu) || !placeable(cpu) {
             continue;
         }
         let snapshot = {
@@ -3182,8 +3610,13 @@ pub(crate) fn balanced_count() -> u64 {
     BALANCED.load(Ordering::Relaxed)
 }
 
-/// Move one task from `victim`'s queue to `me`'s.
+/// Move one task from `victim`'s queue to `me`'s: never onto a processor
+/// out of service, which a balance's push would otherwise choose as the
+/// least loaded (L.sched.102).
 fn steal_from(me: usize, victim: usize) -> bool {
+    if !placeable(me) {
+        return false;
+    }
     let (Some(mine), Some(theirs)) = (queue_of(me), queue_of(victim)) else {
         return false;
     };

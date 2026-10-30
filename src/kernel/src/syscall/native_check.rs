@@ -112,6 +112,7 @@ fn checks(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     a_delivery_without_memory_is_kept(side, report)?;
     a_write_without_memory_keeps_its_handles(side, report)?;
     the_audit_record_is_read_by_its_handle_alone(side, report)?;
+    a_processor_leaves_service_through_its_token_alone(side, report)?;
     Ok(())
 }
 
@@ -1070,4 +1071,206 @@ fn the_audit_record_is_read_by_its_handle_alone(
         "the audit record's handle was sent",
         report,
     )
+}
+
+/// The processor service token (`docs/CORE-QUARANTINE.md` §4): pid 1's
+/// rights pinned, `MANAGE`, `DUPLICATE` and `TRANSFER`; `cpu_service`
+/// refusing a processor past the count, a flag other than 0 or 1, a handle
+/// without `MANAGE` and another object's handle. On x86-64 with two
+/// processors or more: the boot processor refused, processor 1 taken out
+/// and brought back, an ask for what already is answered without a record,
+/// and the three records read back -- the refusal with its number, the
+/// change out and the change back, each naming processor 1 or 0 and lode's
+/// door; a park whose deadline has passed undone, the processor left in
+/// service; and a processor with a program pinned to it refused. Elsewhere
+/// the call is refused as unsupported.
+///
+/// Verifies: L.sched.105, L.smp.35, L.smp.36, L.smp.37, L.smp.38
+fn a_processor_leaves_service_through_its_token_alone(
+    side: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    if crate::init::CPU_SERVICE_RIGHTS != Rights::MANAGE | Rights::DUPLICATE | Rights::TRANSFER {
+        return Err("pid 1's processor service token is not MANAGE, DUPLICATE and TRANSFER");
+    }
+    let core = side.process.core();
+    let token = native::insert_new(core, Object::CpuService, crate::init::CPU_SERVICE_RIGHTS)
+        .ok()
+        .and_then(|value| u32::try_from(value).ok())
+        .map(Handle)
+        .ok_or("could not give the check a processor service token")?;
+    let waiter = native::insert_new(core, Object::CpuService, Rights::WAIT)
+        .ok()
+        .and_then(|value| u32::try_from(value).ok())
+        .map(Handle)
+        .ok_or("could not give the check a second processor service token")?;
+    let ask =
+        |handle: Handle, cpu: u64, flag: u64| side.call(nr::CPU_SERVICE, &[reg(handle), cpu, flag]);
+    let count = crate::smp::count() as u64;
+    refused(
+        ask(token, count, 0),
+        status::INVALID_ARGS,
+        "cpu_service past the processor count was answered",
+        report,
+    )?;
+    refused(
+        ask(token, 0, 2),
+        status::INVALID_ARGS,
+        "cpu_service with a flag other than 0 or 1 was answered",
+        report,
+    )?;
+    refused(
+        ask(waiter, 0, 1),
+        status::ACCESS_DENIED,
+        "cpu_service through a handle without MANAGE was answered",
+        report,
+    )?;
+    let (end, _other) = channel(side)?;
+    refused(
+        ask(end, 0, 1),
+        status::WRONG_TYPE,
+        "cpu_service through a channel end was answered",
+        report,
+    )?;
+    if count < 2 {
+        return Ok(());
+    }
+    if !arch::CAN_MOVE_INTERRUPTS {
+        return refused(
+            ask(token, 1, 0),
+            status::WRONG_TYPE,
+            "cpu_service took a processor out where interrupts cannot be moved",
+            report,
+        );
+    }
+    processor_one_out_and_back(side, report, token)
+}
+
+/// [`a_processor_leaves_service_through_its_token_alone`]'s second half, on
+/// x86-64 with two processors or more: the boot processor refused, processor
+/// 1 out and back with an ask for what already is between, the three audit
+/// records read back, the deadline's undo, and the pinned refusal.
+fn processor_one_out_and_back(
+    side: &Side,
+    report: &mut Report,
+    token: Handle,
+) -> Result<(), &'static str> {
+    use ferrix_audit::{CPU_SERVICE, Outcome, cpu_service, target};
+
+    let in_service = |cpu: usize| {
+        crate::smp::topology()
+            .and_then(|topology| topology.cpus().get(cpu))
+            .is_some_and(crate::smp::PerCpu::in_service)
+    };
+    let ask =
+        |handle: Handle, cpu: u64, flag: u64| side.call(nr::CPU_SERVICE, &[reg(handle), cpu, flag]);
+    let mark = crate::audit::high_next();
+    refused(
+        ask(token, 0, 0),
+        status::BAD_STATE,
+        "cpu_service took the boot processor out",
+        report,
+    )?;
+    // A message processor 1 cannot have moved -- in compatibility format,
+    // where no unit remaps (test-nvrm's unremapped boot) -- refuses it, the
+    // processor left in service and the refusal recorded with its number,
+    // 3 (L.iommu.104).
+    let first = ask(token, 1, 0);
+    let stayed = first == Err(status::BAD_STATE) && in_service(1);
+    if !stayed {
+        if first != Ok(0) || in_service(1) {
+            return Err("cpu_service did not take processor 1 out of service");
+        }
+        if ask(token, 1, 0) != Ok(0) {
+            return Err("cpu_service refused to leave processor 1 out of service as it was");
+        }
+        if ask(token, 1, 1) != Ok(0) || !in_service(1) {
+            return Err("cpu_service did not bring processor 1 back into service");
+        }
+    }
+    let mut records = [ferrix_audit::Record::EMPTY; 16];
+    let read = crate::audit::read(crate::audit::Which::High, mark, &mut records);
+    let kept: Vec<&ferrix_audit::Record> = records
+        .get(..read.copied)
+        .unwrap_or_default()
+        .iter()
+        .filter(|record| record.is(CPU_SERVICE))
+        .collect();
+    let lode = cpu_service::LODE;
+    let shaped = |record: &ferrix_audit::Record, outcome: Outcome, status: i16, cpu, way| {
+        record.outcome == outcome as u16
+            && record.status == status
+            && record.target_kind == target::CPU
+            && record.target() == cpu
+            && record.detail == [way, lode, 0]
+            && record.pid == side.process.pid()
+    };
+    let as_said = match kept.as_slice() {
+        [refusal, held] if stayed => {
+            shaped(refusal, Outcome::Refused, 4, 0, cpu_service::OUT)
+                && shaped(held, Outcome::Refused, 3, 1, cpu_service::OUT)
+        }
+        [refusal, out, back] if !stayed => {
+            shaped(refusal, Outcome::Refused, 4, 0, cpu_service::OUT)
+                && shaped(out, Outcome::Done, 0, 1, cpu_service::OUT)
+                && shaped(back, Outcome::Done, 0, 1, cpu_service::BACK)
+        }
+        _ => false,
+    };
+    if !as_said {
+        return Err(
+            "cpu_service's audit records were not the refusals and changes made, each as made",
+        );
+    }
+    if stayed {
+        // Nothing to park: the undo needs a processor that can go.
+        report.refusals += 1;
+        return Ok(());
+    }
+    the_undo_and_the_pinned_refusal(report)
+}
+
+/// The deadline's undo and the pinned refusal, on processor 1, which can
+/// go out of service.
+fn the_undo_and_the_pinned_refusal(report: &mut Report) -> Result<(), &'static str> {
+    use crate::sched::{self, ServiceRefusal};
+
+    let in_service = |cpu: usize| {
+        crate::smp::topology()
+            .and_then(|topology| topology.cpus().get(cpu))
+            .is_some_and(crate::smp::PerCpu::in_service)
+    };
+    // The deadline's undo: asked of nobody, with its deadline already past,
+    // the park is cancelled by compare-exchange and the processor put back.
+    // A processor something else woke in the microseconds between parks
+    // first: it is brought back and the undo tried again.
+    let mut undone = false;
+    for _ in 0..5 {
+        match sched::take_out_without_asking(1, crate::timer::now_nanos()) {
+            Err(ServiceRefusal::TimedOut) => {
+                undone = in_service(1);
+                break;
+            }
+            Ok(()) => {
+                let back = crate::smp::service::set_in_service(
+                    1,
+                    true,
+                    crate::smp::service::Door::Lode,
+                    crate::audit::Subject::KERNEL,
+                );
+                if back.is_err() {
+                    return Err("a processor parked by the undo's check did not come back");
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if !undone {
+        return Err("a park past its deadline was not undone, the processor left in service");
+    }
+    if sched::refusal_while_pinned(1) != Err(ServiceRefusal::Pinned) {
+        return Err("a processor with a program pinned to it alone was not refused");
+    }
+    report.refusals += 2;
+    Ok(())
 }

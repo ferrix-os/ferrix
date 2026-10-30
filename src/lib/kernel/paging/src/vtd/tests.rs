@@ -589,3 +589,32 @@ fn protected_regions_are_reported_exactly_where_plmr_or_phmr_is_set() {
         "QEMU has no PMR"
     );
 }
+
+/// A retarget changes the destination field alone: the vector, the trigger,
+/// the presence and the source check stay (`docs/CORE-QUARANTINE.md` §3.3).
+///
+/// Verifies: L.iommu.101
+#[test]
+fn retarget_changes_only_the_destination() {
+    let [low, high] = remap::entry(Remap {
+        vector: 0x47,
+        destination: remap::destination(2).unwrap(),
+        level: false,
+        source: 0x0030,
+    });
+    let moved = remap::retargeted(low, remap::destination(0).unwrap());
+    assert_eq!(
+        moved,
+        remap::entry(Remap {
+            vector: 0x47,
+            destination: remap::destination(0).unwrap(),
+            level: false,
+            source: 0x0030,
+        })[0]
+    );
+    assert_eq!(moved & 0xFFFF_FFFF, low & 0xFFFF_FFFF);
+    assert!(remap::is_present(moved));
+    let back = remap::retargeted(moved, remap::destination(0xFF).unwrap());
+    assert_eq!(back >> 32, 0xFF << 8);
+    assert_eq!(high, 0x0030 | 0b01 << 18);
+}
