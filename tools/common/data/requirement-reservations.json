@@ -209,6 +209,13 @@
       "branch": "feature/ram-scrubber",
       "date": "2026-10-30",
       "purpose": "docs/RAM-SCRUBBER.md, the idle-time RAM scrubber for memory without ECC (customer, 2026-10-30, item 7; consultant NOT YET B1-B6 ledger 5045, OK IF (1)-(9) ledger 5057): H.FAIL.9 the scrubber's failure modes; L.mm the claim and its skip rules, the uncounted release, the four patterns, the judgement and suspects, the bad frame kept and the share, the stand-down decision, the counts; one arch id each for the write-without-read and eviction facade; L.object the token and its rights; L.syscall MEMORY_SCRUB's arguments and answers"
+    },
+    {
+      "ids": ["L.object.254-258"],
+      "owner": "intel-large-pages",
+      "branch": "feature/intel-large-pages",
+      "date": "2026-10-30",
+      "purpose": "docs/INTEL-GPU.md §14.3, vmo_pin's PIN_BLOCKS (consultant OK IF (1)-(9), ledger 5088): L.object.254 the option word's refusals; 255 blocks naturally aligned in object and memory, at most the order, only over absent pages, committed frames unchanged; 256 the fallback (no retry above a refused order, a refused frame ends it, every page still pinned, a race only shrinks the order); 257 the budget read first and the failure rule; 258 a file's or bound object not pre-committed"
     }
   ]
 }
