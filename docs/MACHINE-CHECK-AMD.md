@@ -302,3 +302,30 @@ header.
   `-boot-armv7a-smp2`, `-threads`, `-shell-ferrousli`, `-ipc-equiv`, and
   under kvm and tcg `-mce-<accel>`, `-mce-<mode>-<accel>` and
   `-amd-<mode>-<accel>` for every mode.
+
+**Code review (87199c553): NOT YET B1-B4** (the consultant's ledger line
+4839, 2026-10-30; internal review, not independent verification, F-27).
+Design v2 checked as A1 asked; A1-A13 met except as below. The kernel of
+1bdb00dcf, where the 38 mode rows passed, is the tip's byte for byte; the
+controls on 0607e0a6a carry to it.
+
+* B1 the landing hash fails `check`: clippy's "this operation has no
+  effect" at `mce/check.rs:472` (`u64::MAX & !decode::CONFIG_MCAX`) in the
+  `mitigations=off` build (`amd-land-87199c553-check`).
+* B2 fail open against `L.x86_64.239`: an SMCA bank whose `MCA_CONFIG` or
+  `MCA_IPID` read was refused falls back to the `Poison` rule and the
+  `MCA_ADDR` 61:56 cut, although its cut location and `PhysAddrV` meaning
+  are unknown. Such a bank has no usable address; a refused `McaX` write
+  likewise; stage 3's rows and `L.x86_64.235` follow, with a control.
+* B3 A5(i)'s `McaX` control is missing (`with_mcax` sabotaged, stage 3).
+* B4 `check-device-access.py` allows `write_msr_checked(config, ...)` by
+  name anywhere in `mce.rs`; it is to hold only in `smca_bank_up`, with a
+  control.
+* Rulings: §6's correction accepted -- AMD recovery is shown under KVM on
+  nazuna's AMD host (`cpuid 80000007 ebx=0x3`, `SIGBUS code=4 ... lsb=12
+  err=0x0`), the fail-closed rules under TCG (`ebx=0x0`); it replaces
+  A10's "under TCG only". Controls firing at stage 3 count.
+* Owed for OK (a final check of the delta only): B1-B4 fixed; the seven
+  controls re-run on the fixed tip; rows there as 4795 V4 and A8 (every
+  Intel and AMD mode under KVM and TCG), the Arm boots from 87199c553
+  counting if they passed; coverage carried after the final rebase.
