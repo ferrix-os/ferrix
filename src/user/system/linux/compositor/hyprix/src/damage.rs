@@ -128,6 +128,11 @@ pub(crate) enum Landed {
     /// The same, for a layer surface under the windows: what it draws is
     /// part of what a window's blur is a blur of.
     Behind(Rect),
+    /// All of this rectangle, whatever the commit named: a fullscreen
+    /// window whose buffer is not drawn over the whole of it but scaled to
+    /// fit inside it ([`compositor_render::letterboxed`]), where a part of
+    /// the buffer does not land on the same part of the rectangle.
+    Whole(Rect),
     /// Somewhere this screen cannot place: a subsurface, a cursor surface
     /// that is not the one being drawn, a window that has not been mapped
     /// yet. The whole screen, then, which is the rule the module comment
@@ -201,6 +206,7 @@ impl Told {
                         behind.add(part);
                     }
                 }
+                Landed::Whole(rect) => region.add(rect),
             }
         }
         Heard {
@@ -457,10 +463,32 @@ impl Plan {
             .iter()
             .find(|placed| placed.window == *window)
             .map_or(Landed::Nowhere, |placed| {
-                Landed::In(placed.rect.translate(
+                let at = placed.rect.translate(
                     self.origin.0.saturating_neg(),
                     self.origin.1.saturating_neg(),
-                ))
+                );
+                let bounds = Rect::new(0, 0, i64::from(self.size.0), i64::from(self.size.1));
+                // The buffer's size, which a crop to the window's geometry
+                // may make larger than what is drawn: any difference from
+                // the rectangle is taken as fitted, and too much is only
+                // slow.
+                let fitted = painted.buffer.is_some_and(|(width, height)| {
+                    compositor_render::letterboxed(
+                        placed,
+                        at,
+                        bounds,
+                        (
+                            u32::try_from(width).unwrap_or(0),
+                            u32::try_from(height).unwrap_or(0),
+                        ),
+                    )
+                    .is_some()
+                });
+                if fitted {
+                    Landed::Whole(at)
+                } else {
+                    Landed::In(at)
+                }
             })
     }
 

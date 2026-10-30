@@ -4854,3 +4854,105 @@ fn the_scrim_is_read_from_the_configuration_and_off_by_default() {
     .config;
     assert_eq!(Style::from_config(&config).blur_scrim, Some(SCRIM));
 }
+
+// -- A fullscreen window whose surface is another shape -----------------------
+
+/// A 64x36 screen (16:9) with one window over all of it, fullscreen or
+/// maximized, drawn from a white `XRGB8888` surface `width` by `height`:
+/// the canvas's pixels after a whole frame.
+fn letterbox_frame(width: u32, height: u32, fullscreen: bool) -> Vec<u32> {
+    let rect = Rect::new(0, 0, 64, 36);
+    let layout = MonitorLayout {
+        monitor: MonitorId(1),
+        workspace: compositor_layout::WorkspaceId(1),
+        windows: vec![Placed {
+            window: WindowId(1),
+            rect,
+            border: if fullscreen { 0 } else { 2 },
+            focused: true,
+            floating: false,
+            fullscreen,
+        }],
+    };
+    let bytes = vec![0xFF; (width * height * 4) as usize];
+    let surface = Surface::new(&bytes, width, height, width * 4, Format::Xrgb8888).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let style = unshadowed();
+    let mut canvas = canvas(64, 36);
+    let _ = render_onto(
+        &mut canvas,
+        None,
+        &layout,
+        (0, 0),
+        &Styles::plain(&style),
+        &surfaces,
+        &[],
+        &Damage::full(64, 36),
+    );
+    pixels(&canvas)
+}
+
+/// A fullscreen game drawing 4:3 on a 16:9 screen -- 24x18 here, 1024x768
+/// on the N150's 1920x1080 -- is scaled to the screen's height with its
+/// aspect kept and centred, black on either side: what gamescope and
+/// Xwayland's emulated mode changes show. Stretched to the screen, as every
+/// other window's surface is, it was a picture pulled out of shape.
+#[test]
+fn a_fullscreen_surface_of_another_shape_is_scaled_to_fit_between_black_bars() {
+    let frame = letterbox_frame(24, 18, true);
+    let black = 0xFF00_0000;
+    let white = 0xFFFF_FFFF;
+    for y in 0..36 {
+        for x in 0..64 {
+            let want = if (8..56).contains(&x) { white } else { black };
+            assert_eq!(frame[y * 64 + x], want, "at {x},{y}");
+        }
+    }
+}
+
+/// The same shape of screen, smaller: 1280x720 on 1920x1080, here 32x18 on
+/// 64x36. Scaled to fit, it fills the screen, and no bar is drawn.
+#[test]
+fn a_fullscreen_surface_of_the_screens_shape_fills_it() {
+    let frame = letterbox_frame(32, 18, true);
+    assert!(
+        frame.iter().all(|&pixel| pixel == 0xFFFF_FFFF),
+        "{frame:x?}"
+    );
+}
+
+/// Only a fullscreen window: a maximized one keeps its border and has its
+/// surface stretched to its rectangle as before, no bars inside it.
+#[test]
+fn a_maximized_window_is_still_stretched() {
+    let frame = letterbox_frame(24, 18, false);
+    assert_eq!(
+        frame[18 * 64 + 4],
+        0xFFFF_FFFF,
+        "stretched to the left edge"
+    );
+    assert_eq!(frame[18 * 64 + 60], 0xFFFF_FFFF, "and to the right");
+}
+
+/// Where [`crate::fit_within`] puts a picture: the screen's own shape fills
+/// it, 4:3 on 16:9 stands between bars at the sides, 21:9 between bars
+/// above and below, and a fraction of a pixel off the screen's aspect is
+/// not worth a bar.
+#[test]
+fn a_picture_is_fitted_with_its_aspect_kept() {
+    let screen = Rect::new(0, 0, 1920, 1080);
+    assert_eq!(crate::fit_within(screen, (1280, 720)), screen);
+    assert_eq!(
+        crate::fit_within(screen, (1024, 768)),
+        Rect::new(240, 0, 1440, 1080)
+    );
+    assert_eq!(
+        crate::fit_within(screen, (2560, 1080)),
+        Rect::new(0, 135, 1920, 810)
+    );
+    assert_eq!(crate::fit_within(screen, (1366, 768)), screen);
+    assert_eq!(
+        crate::fit_within(Rect::new(1920, 0, 1920, 1200), (1600, 1200)),
+        Rect::new(2080, 0, 1600, 1200)
+    );
+}

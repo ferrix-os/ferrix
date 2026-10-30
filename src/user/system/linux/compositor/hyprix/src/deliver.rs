@@ -42,6 +42,11 @@ struct Placement {
     /// the client's surface. The frame is the window's for focus, and
     /// no client's for the pointer.
     frame: bool,
+    /// Whether this is a window in the fullscreen mode over its whole
+    /// monitor, whose surface the frame scales to fit inside `rect` with its
+    /// aspect kept ([`compositor_render::letterboxed`]) rather than
+    /// stretching it over all of it.
+    fits: bool,
 }
 
 impl Placement {
@@ -258,11 +263,21 @@ impl Focus {
         // drawn smaller than it is, and a pointer taken at the rectangle's
         // own scale drifted from what was under it, by nothing at the
         // top-left corner and by the whole difference at the bottom-right.
+        //
+        // A fullscreen window's surface of another shape than the screen is
+        // drawn scaled to fit between black bars, so the pointer is scaled
+        // back from where it is drawn: the game's 4:3 picture's left edge
+        // is the bar's right one, not the screen's.
         let local = over.map(|placed| {
             let window = slots
                 .get(placed.client)
                 .and_then(|slot| window_part(slot, placed.surface));
-            surface_point(at, placed.rect, window)
+            let rect = if placed.fits {
+                fitted(placed.rect, window)
+            } else {
+                placed.rect
+            };
+            surface_point(at, rect, window)
         });
 
         if wanted != self.pointer {
@@ -504,6 +519,10 @@ fn window_at(placements: &[Placement], (x, y): (f64, f64)) -> Option<WindowId> {
 fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placement> {
     let mut out = Vec::new();
     for output in state.layout() {
+        let screen = state
+            .monitors()
+            .find(|monitor| monitor.id == output.monitor)
+            .map(|monitor| monitor.rect);
         for placed in &output.windows {
             let Some(source) = sources.get(&placed.window) else {
                 continue;
@@ -519,6 +538,7 @@ fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placem
                     placed.rect.height,
                 ),
                 frame: false,
+                fits: screen.is_some_and(|screen| fills_screen(placed, screen)),
             };
             // The frame goes in under its window's own surface, and so
             // over every window drawn before it.
@@ -535,6 +555,21 @@ fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placem
     // The last window drawn is the one on top, so the pointer finds it first.
     out.reverse();
     out
+}
+
+/// Whether `placed` is drawn as a fullscreen window over the whole of
+/// `screen`, its monitor: in the fullscreen mode (not maximized, which keeps
+/// its border), or floating at exactly the monitor's rectangle, which the
+/// frame draws as fullscreen too (an X client's legacy fullscreen,
+/// `state/draw.rs`).
+pub(crate) fn fills_screen(
+    placed: &compositor_layout::Placed,
+    screen: compositor_layout::Rect,
+) -> bool {
+    let covers = compositor_render::intersect(placed.rect, screen) == Some(screen);
+    let fullscreen = placed.fullscreen && placed.border <= 0;
+    let legacy = placed.floating && !placed.fullscreen && placed.rect == screen;
+    covers && (fullscreen || legacy)
 }
 
 /// The rectangle a window's frame reaches, from its title bar's top to the
@@ -573,6 +608,29 @@ fn frame_of(state: &State, placed: &compositor_layout::Placed) -> Option<(i64, i
         rect.width + 2 * ring,
         rect.height + top + ring,
     ))
+}
+
+/// Where the frame draws a fullscreen window's `window` -- its part, in
+/// surface coordinates -- inside the window's `rect`: scaled to fit with its
+/// aspect kept, centred ([`compositor_render::fit_within`]); `rect` itself
+/// for a surface of its shape or of no known size.
+fn fitted(
+    rect: (i64, i64, i64, i64),
+    window: Option<(f64, f64, f64, f64)>,
+) -> (i64, i64, i64, i64) {
+    let Some((_, _, width, height)) = window else {
+        return rect;
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a surface's size, far inside i64; only its shape is read"
+    )]
+    let size = (width.round() as i64, height.round() as i64);
+    let fit = compositor_render::fit_within(
+        compositor_layout::Rect::new(rect.0, rect.1, rect.2, rect.3),
+        size,
+    );
+    (fit.x, fit.y, fit.width, fit.height)
 }
 
 /// The point `at` on the screen as a place in a surface whose `window` --
@@ -657,6 +715,7 @@ fn with_popups(
                 popup.rect.height,
             ),
             frame: false,
+            fits: false,
         })
         .collect();
     let layer = |wanted: compositor_server::Layer| -> Vec<Placement> {
@@ -672,6 +731,7 @@ fn with_popups(
                         surface,
                         rect: (rect.x, rect.y, rect.width, rect.height),
                         frame: false,
+                        fits: false,
                     })
             })
             .collect();
@@ -821,6 +881,59 @@ mod tests {
         );
     }
 
+    /// A fullscreen game drawing 1024x768 on a 1920x1080 screen is drawn
+    /// 1440x1080 between black bars 240 pixels wide, and the pointer is
+    /// scaled back through that: the picture's left edge, not the
+    /// screen's, is the surface's.
+    #[test]
+    fn the_pointer_is_scaled_back_through_a_fitted_fullscreen_surface() {
+        let screen = (0, 0, 1920, 1080);
+        let game = Some((0.0, 0.0, 1024.0, 768.0));
+        let fit = super::fitted(screen, game);
+        assert_eq!(fit, (240, 0, 1440, 1080));
+        assert_eq!(surface_point((240.0, 0.0), fit, game), (0.0, 0.0));
+        assert_eq!(surface_point((960.0, 540.0), fit, game), (512.0, 384.0));
+        // The screen's own shape is stretched over all of it, as before.
+        assert_eq!(
+            super::fitted(screen, Some((0.0, 0.0, 1280.0, 720.0))),
+            screen
+        );
+        assert_eq!(super::fitted(screen, None), screen);
+
+        // And only a window the frame draws so: fullscreen over its
+        // monitor, or floating at exactly its rectangle.
+        let monitor = compositor_layout::Rect::new(0, 0, 1920, 1080);
+        let placed = |rect, border, floating, fullscreen| compositor_layout::Placed {
+            window: WindowId(1),
+            rect,
+            border,
+            focused: true,
+            floating,
+            fullscreen,
+        };
+        assert!(super::fills_screen(
+            &placed(monitor, 0, false, true),
+            monitor
+        ));
+        assert!(super::fills_screen(
+            &placed(monitor, 0, true, false),
+            monitor
+        ));
+        let work_area = compositor_layout::Rect::new(0, 40, 1920, 1040);
+        assert!(!super::fills_screen(
+            &placed(work_area, 2, false, true),
+            monitor
+        ));
+        assert!(!super::fills_screen(
+            &placed(monitor, 2, false, true),
+            monitor
+        ));
+        assert!(!super::fills_screen(
+            &placed(monitor, 0, false, false),
+            monitor
+        ));
+    }
+
     #[test]
     fn a_point_is_on_a_window_from_its_corner_to_before_its_far_edges() {
         // The DK1's portrait terminal, as `hyprctl clients` reported it.
@@ -830,6 +943,7 @@ mod tests {
             surface: ObjectId(3),
             rect: (21, 21, 678, 613),
             frame: false,
+            fits: false,
         };
         assert!(terminal.contains(470.0, 413.0), "where the pointer was");
         assert!(terminal.contains(21.0, 21.0), "the corner");

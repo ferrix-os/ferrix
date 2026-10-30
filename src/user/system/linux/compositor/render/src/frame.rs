@@ -1053,18 +1053,96 @@ pub fn why_not_alone(
             .rect
             .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
         if i64::from(surface.width()) != rect.width || i64::from(surface.height()) != rect.height {
+            // Scaled to the window's size, or to fit inside it with its
+            // aspect kept where the two are not one shape (`letterboxed`).
+            let drawn = letterboxed(placed, rect, bounds, (surface.width(), surface.height()))
+                .unwrap_or(rect);
             return Some(format!(
-                "the fullscreen window's buffer is {}x{}, stretched to {}x{}",
+                "the fullscreen window's buffer is {}x{}, scaled to {}x{}",
                 surface.width(),
                 surface.height(),
-                rect.width,
-                rect.height
+                drawn.width,
+                drawn.height
             ));
         }
     }
     alone(output, origin, styles, surfaces, layers, damage, bounds)
         .is_none()
         .then(|| "not one window alone".to_owned())
+}
+
+/// `size` scaled to fit inside `rect` with its aspect kept, centred in it:
+/// where a picture of that size goes when it is shown as large as `rect`
+/// allows without being distorted. `rect` itself when the two have the same
+/// aspect to within a pixel, or when either has no size -- a stretch by a
+/// fraction of a pixel is not worth a black line at the edge.
+#[must_use]
+pub fn fit_within(rect: Rect, size: (i64, i64)) -> Rect {
+    let (width, height) = size;
+    if width <= 0 || height <= 0 || rect.width <= 0 || rect.height <= 0 {
+        return rect;
+    }
+    // Rounded to the nearest pixel, in whole numbers: which side the picture
+    // meets is the one its aspect is the narrower against.
+    let rounded = |value: i128, by: i128| -> i64 {
+        i64::try_from((value.saturating_mul(2).saturating_add(by)) / by.saturating_mul(2).max(1))
+            .unwrap_or(i64::MAX)
+    };
+    let (fit_width, fit_height) = if i128::from(height) * i128::from(rect.width)
+        <= i128::from(rect.height) * i128::from(width)
+    {
+        // As wide as `rect`: bars above and below.
+        (
+            rect.width,
+            rounded(
+                i128::from(height) * i128::from(rect.width),
+                i128::from(width),
+            ),
+        )
+    } else {
+        // As tall as `rect`: bars left and right.
+        (
+            rounded(
+                i128::from(width) * i128::from(rect.height),
+                i128::from(height),
+            ),
+            rect.height,
+        )
+    };
+    if (fit_width - rect.width).abs() <= 1 && (fit_height - rect.height).abs() <= 1 {
+        return rect;
+    }
+    Rect::new(
+        rect.x.saturating_add((rect.width - fit_width) / 2),
+        rect.y.saturating_add((rect.height - fit_height) / 2),
+        fit_width,
+        fit_height,
+    )
+}
+
+/// Where a window in the fullscreen mode draws a surface `size` big that is
+/// not the size of its rectangle, which covers `bounds`, the screen: scaled
+/// to fit with its aspect kept and centred, the rest of the rectangle black
+/// ([`fit_within`]). `None` -- the surface is stretched to the rectangle as
+/// any other window's is -- for a window that is not fullscreen, one that
+/// does not cover the screen (one on its way there, or back), and a surface
+/// of the rectangle's aspect, which fills it either way.
+///
+/// What a game gets from gamescope or from Xwayland's emulated mode
+/// changes: a game drawing 1024x768 on a 1920x1080 screen is shown 1440x1080
+/// between black bars, not pulled out to 16:9. A window at the screen's
+/// own size is not touched, which keeps its direct path ([`alone`]).
+#[must_use]
+pub fn letterboxed(placed: &Placed, rect: Rect, bounds: Rect, size: (u32, u32)) -> Option<Rect> {
+    if !fullscreen(placed) || intersect(rect, bounds) != Some(bounds) {
+        return None;
+    }
+    let size = (i64::from(size.0), i64::from(size.1));
+    if size == (rect.width, rect.height) {
+        return None;
+    }
+    let inner = fit_within(rect, size);
+    (inner != rect).then_some(inner)
 }
 
 /// Whether `placed` is in the fullscreen mode, not maximized: the layout
@@ -1431,6 +1509,25 @@ fn window<P: Painter>(
             (*surface).as_opaque()
         } else {
             *surface
+        };
+        // A fullscreen window whose surface is another shape than the
+        // screen: the surface as large as it goes with its aspect kept,
+        // centred, and black around it rather than whatever was there --
+        // nothing under a fullscreen window is drawn ([`hiding`]).
+        let rect = match letterboxed(
+            placed,
+            rect,
+            canvas.bounds(),
+            (surface.width(), surface.height()),
+        ) {
+            Some(inner) => {
+                let bars = damage.clipped(rect).without(inner);
+                if !bars.is_empty() {
+                    canvas.clear(Color(0xff00_0000), &bars);
+                }
+                inner
+            }
+            None => rect,
         };
         let exact =
             i64::from(surface.width()) == rect.width && i64::from(surface.height()) == rect.height;
