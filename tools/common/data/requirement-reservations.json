@@ -198,10 +198,10 @@
     },
     {
       "ids": ["L.mm.99-100", "L.init.5", "L.user.173-174"],
-      "owner": "ram-release",
-      "branch": "feature/ram-release",
+      "owner": "ram-release-r1",
+      "branch": "claude/ram-release-r1-ee0624",
       "date": "2026-10-30",
-      "purpose": "docs/RAM-RELEASE.md (consultant: R1 NOT YET B1-B4, ledger 4971): the initramfs archive's pages to the frame allocator, no reader outliving them (L.mm.99-100); pid 1's inputs surviving it (L.init.5); the tmpfs keeping the mount directories and devmgr's set, devmgr restarting from it (L.user.173-174). R2's L.user.175 and L.btrfs.119-121 are written"
+      "purpose": "docs/RAM-RELEASE.md §2 R1 (consultant OK IF 1-10, ledger 5022): the initramfs archive's whole pages to the frame allocator with the watermark recomputed (L.mm.99), no reader outliving them (L.mm.100), pid 1's inputs kept in buffers of their own (L.init.5), the tmpfs after a switch keeping only the mount points, their parents and /lib/firmware (L.user.173), devmgr's restart set kept by the kernel and every later start made from it (L.user.174)"
     },
     {
       "ids": ["H.FAIL.9", "L.mm.101-108", "L.x86_64.243", "L.aarch64.68", "L.armv7a.29", "L.object.252-253", "L.syscall.24"],
