@@ -505,35 +505,35 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "112-113",
+      "lines": "118-119",
       "category": "defensive",
       "match": "Err(Errno::ENOENT)",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "387-389",
+      "lines": "393-395",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "392",
+      "lines": "398",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "455",
+      "lines": "527",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1169",
+      "lines": "1285",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -575,21 +575,21 @@
     },
     {
       "file": "init.rs",
-      "lines": "635",
+      "lines": "691",
       "category": "absent-hardware",
       "match": "Refusal::Start(failure) => write!(f, \"{failure}\"),",
       "why": "A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm."
     },
     {
       "file": "init.rs",
-      "lines": "675",
+      "lines": "731",
       "category": "absent-hardware",
       "match": "Ok(status) => println!(\"  init     {} exited with {status}\",",
       "why": "/sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in."
     },
     {
       "file": "init.rs",
-      "lines": "677",
+      "lines": "733",
       "category": "absent-hardware",
       "match": "Err(why) => println!(",
       "why": "/sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in."
@@ -1142,231 +1142,231 @@
     },
     {
       "file": "main.rs",
-      "lines": "563",
+      "lines": "576",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "576",
+      "lines": "589",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILESYSTEM` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "598",
+      "lines": "611",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PIPES_AND_FILESYSTEM_CALLS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "612",
+      "lines": "625",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILE_MAPPINGS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "636",
+      "lines": "649",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PSEUDO_FILESYSTEMS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "769",
+      "lines": "782",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::NET_CORE, \"net core self-che",
       "why": "The failure arm in `check_net`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `NET_CORE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "797",
+      "lines": "810",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_driver`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DRIVER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "838",
+      "lines": "851",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_devmgr`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DEVMGR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "872",
+      "lines": "885",
       "category": "absent-hardware",
       "match": "println!(\"  btrfs-pf not run: {}\", report.skipped.unwrap_or_",
       "why": "A power-fail boot without the third disk it churns: `test-powerfail` always attaches it, and no other gate asks for the power-fail mode."
     },
     {
       "file": "main.rs",
-      "lines": "884",
+      "lines": "897",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "899",
+      "lines": "912",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1159",
+      "lines": "1172",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `PROCESSOR_DISCOVERY` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1192",
+      "lines": "1205",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::STAGE4_SMP, \"stage 4 self-ch",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1247",
+      "lines": "1260",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1601",
+      "lines": "1616",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1708",
+      "lines": "1723",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1715",
+      "lines": "1730",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1740",
+      "lines": "1755",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1849",
+      "lines": "1864",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1956",
+      "lines": "1971",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1964-1965",
+      "lines": "1979-1980",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "mm.rs",
-      "lines": "376",
+      "lines": "377",
       "category": "defensive",
       "match": "frames.insert_free(start / PAGE_SIZE, (hole - start) / PAGE_SIZE);",
       "why": "The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it."
     },
     {
       "file": "mm.rs",
-      "lines": "786, 788, 790, 796, 806",
+      "lines": "787, 789, 791, 797, 807",
       "category": "other-architecture",
       "match": "pub(crate) fn disown_frame(frame: Frame) {",
       "why": "`disown_frame`'s only caller is `object::pin`'s quarantine. ARMv7-A's kernel programs no IOMMU unit, by design: `bring_up_smmu` reads only the IORT, which ARMv7-A's firmware does not provide, and the SMMUv3 its `virt` describes is left alone, since U-Boot keeps its virtio devices from offering the platform's translation. Every device domain there is untranslated, and a pin's quarantine exists only for a translated domain (`Pin::map`, `Pin::drop`): the quarantine and its release are x86-64's and AArch64's code, compiled into ARMv7-A's kernel and never asked there. The pin budget's checks (`check_budget`) return at their first line on ARMv7-A, as they say they do with no translated domain."
     },
     {
       "file": "mm.rs",
-      "lines": "826",
+      "lines": "827",
       "category": "failure-path",
       "match": "fn print_frame_delta(check: &str, leaked: i64) {",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "832",
+      "lines": "833",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "835",
+      "lines": "836",
       "category": "failure-path",
       "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "1576",
+      "lines": "1577",
       "category": "absent-hardware",
       "match": "mapper.map_range(",
       "why": "The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them."
     },
     {
       "file": "mm.rs",
-      "lines": "1629",
+      "lines": "1630",
       "category": "absent-hardware",
       "match": ".translate(&KernelPhysMem, VirtAddr(iova))",
       "why": "The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them."
     },
     {
       "file": "mm.rs",
-      "lines": "1697",
+      "lines": "1698",
       "category": "credited-elsewhere",
       "match": "if !pages.make_room(page_bound) || !tables.make_room(table_bound) {",
       "why": "The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`."
     },
     {
       "file": "mm.rs",
-      "lines": "1790",
+      "lines": "1791",
       "category": "defensive",
       "match": "}",
       "why": "The return of a piece the kernel's tables refused to unmap. `unmap_range` refuses only a range that is not page aligned or that would cut a block mapping in half, and the arena maps every stack and buffer page by page at page-aligned addresses, so no piece is refused; the row on this build is that error's way out of the function."
     },
     {
       "file": "mm.rs",
-      "lines": "2253-2255",
+      "lines": "2456-2458",
       "category": "failure-path",
       "match": "fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "2271-2274",
+      "lines": "2474-2477",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2284-2290",
+      "lines": "2487-2493",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."

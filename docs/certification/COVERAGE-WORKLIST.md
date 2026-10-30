@@ -11,7 +11,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | Module | x86_64 | aarch64 | armv7a | Files |
 |---|---:|---:|---:|---:|
 | [`arch/x86_64`](#archx86_64) | 413 | - | - | 17 |
-| [`discovery`](#discovery) | 170 | 111 | 131 | 8 |
+| [`discovery`](#discovery) | 170 | 106 | 126 | 8 |
 | [`sched`](#sched) | 158 | 3 | 3 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 100 | - | - | 2 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1264** | **175** | **230** | 77 |
+| **Total** | **1264** | **170** | **225** | 77 |
 
 ---
 
@@ -139,7 +139,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 24 | 78 | 82 | 12 | 417, 597, 635, 642, 826, 856, 920, 924-925, 943, 948, 1159 |
+| `discovery/devmgr.rs` | `item` | 24 | 73 | 77 | 12 | 423, 707, 745, 752, 937, 967, 1031, 1035-1036, 1059, 1064, 1275 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 30 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495, 498-499, 506, 514, 529, 550, 558, 560, 569, 617, 622, 627, 655, 681, 686, 699, 706, 797 |
 | `discovery/firmware.rs` | `item` | 46 | - | - | 46 | 96, 104-107, 110-112, 123, 126, 128-129, 142, 151, 153, 160, 165-166, 170, 200-201, 204, 206, 214-215, 217-220, 224-227, 230-232, 237, 242-243, 245, 250-251, 253, 256, 258, 269 |
 | `discovery/board.rs` | `core` | 26 | - | - | 26 | 100, 102, 104, 115-119, 124-127, 130, 136-137, 146, 164, 175, 177, 183-186, 194-195, 197 |
@@ -201,7 +201,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 420, 866, 1542 |
+| `main.rs` | `item` | 65 | 6 | 4 | 3 | 420, 879, 1557 |
 
 ---
 
@@ -237,7 +237,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `init.rs` | `item` | 24 | 14 | 14 | 3 | 208, 407, 662 |
+| `init.rs` | `item` | 24 | 14 | 14 | 3 | 209, 408, 718 |
 
 ---
 
@@ -261,7 +261,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1225 |
+| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1226 |
 
 ---
 
