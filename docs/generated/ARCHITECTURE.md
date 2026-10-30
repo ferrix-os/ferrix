@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 8250 elements, 220 relations. Model digest `00f5ea4b075b6f0a`.
+27 files, 149 packages, 8270 elements, 220 relations. Model digest `44c9ac7733178ec0`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4310,6 +4310,8 @@ flowchart LR
 | `L.mm.96` | `theHeapCountLeavesTheCachesOut` | — | — | — |
 | `L.mm.97` | `theDrainEmptiesEveryCache` | — | — | — |
 | `L.mm.98` | `anInjectedRefusalIsNotRetried` | — | — | — |
+| `L.mm.99` | `theArchivesPagesComeBack` | — | — | — |
+| `L.mm.100` | `noReaderOutlivesTheArchive` | — | — | — |
 | `L.mm.71` | `theWatermarkIsSizedOnce` | — | — | — |
 | `L.mm.72` | `aProgramsFramesStopAtTheWatermark` | — | — | — |
 | `L.mm.73` | `aProgramsTablesStopAtTheWatermark` | — | — | — |
@@ -4465,6 +4467,7 @@ flowchart LR
 | `L.user.171` | `theResidentSetSplitsByKind` | — | — | — |
 | `L.user.172` | `aDiskFilesMappedPagesAreItsRss` | — | — | — |
 | `L.user.175` | `cleanBtrfsNodesAreAvailable` | — | — | — |
+| `L.user.174` | `devmgrStartsAgainFromTheKeptSet` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
@@ -5057,6 +5060,7 @@ flowchart LR
 | `L.init.1` | `pid1InItsOrder` | — | — | — |
 | `L.init.2` | `inputsFromTheBootArchiveOnly` | — | — | — |
 | `L.init.3` | `anInputThatCannotBeOneIsRefused` | — | — | — |
+| `L.init.5` | `theInputsOutliveTheArchive` | — | — | — |
 | `H.SIGN.1` | `acceptedOnlyUnderTheExpectedKindsAnchor` | — | — | — |
 | `H.SIGN.2` | `signedFieldsBind` | — | — | — |
 | `H.SIGN.3` | `notBelowTheFloor` | — | — | — |

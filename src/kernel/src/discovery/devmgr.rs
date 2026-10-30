@@ -10,6 +10,12 @@
 //! `devmgr` whenever a ring on a device accepts a HELLO, and DIED from it,
 //! which a task of the kernel's prints.
 //!
+//! Under `ferrix.devmgr=init` the files the first start read are kept, and
+//! every later start pid 1 asks for is made from those copies, never from a
+//! path: by then `/` may be on a disk whose driver died with the last
+//! `devmgr`, and the tmpfs the files came from given back (`KEPT`,
+//! `docs/RAM-RELEASE.md` §2).
+//!
 //! The kernel reads the images; it never runs them. An image is memory
 //! `process_create` loads, never a file mapping, which is what keeps a driver
 //! from ever faulting on the disk it serves (`docs/DEVMGR.md` §5).
@@ -416,11 +422,11 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let Some(files) = read_files()? else {
         return Ok(None);
     };
-    let drivers = files.names.len();
+    let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) =
         Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
-    let devices = write_devices(&kernel_end, files.images, drivers_job()?)?;
-    let process = load(&files.image)?;
+    let devices = write_devices(&kernel_end, files.images()?, drivers_job()?)?;
+    let process = load(&files.set.image)?;
     start_program(&process, devmgr_end, &kernel_end)?;
 
     let (started, failed) = report(&kernel_end)?;
@@ -437,31 +443,93 @@ pub fn start() -> Result<Option<Report>, &'static str> {
 
 /// What `devmgr` is started with: its own program, and every driver the
 /// manifest names, by name and in a VMO of its own.
-struct Files {
+struct Set {
     /// `/sbin/devmgr`.
     image: vmap::Buffer,
     /// The manifest's names, in its order.
     names: Vec<[u8; NAME_BYTES]>,
     /// Each named driver's image, in the same order.
     images: Vec<Arc<Vmo>>,
+    /// How many pages each image's VMO has, in the same order.
+    pages: Vec<u64>,
+    /// [`fingerprint`] of the program and the images, as they were read.
+    fingerprint: u64,
 }
 
+/// A start's [`Set`], and whether it came from [`KEPT`].
+struct Files {
+    /// The program, the names and the images.
+    set: Arc<Set>,
+    /// Whether this is a start after the first, from the kept set.
+    kept: bool,
+}
+
+impl Files {
+    /// The images, for a DEVICES message of their own.
+    fn images(&self) -> Result<Vec<Arc<Vmo>>, &'static str> {
+        fallible::try_to_vec(&self.set.images).map_err(|_| "no memory for the drivers' images")
+    }
+}
+
+/// The set the first `devmgr` pid 1 started was started with, kept for every
+/// start after it (`L.user.174`): what MINIX 3's reincarnation server keeps
+/// of a disk driver it may have to start again, and Fuchsia's bootfs of its
+/// driver manager. After the root's switch the tmpfs those files were read
+/// from is given back (`fs::release`), and the root disk's own driver dies
+/// with a `devmgr`'s job, so no later start could read them from either
+/// (`docs/RAM-RELEASE.md` §2). Only under `ferrix.devmgr=init`: on the
+/// kernel path nothing starts a second `devmgr`.
+///
+/// The images are VMOs the kernel wrote once and hands with `READ` and
+/// `TRANSFER` only, so nothing can change them; a start checks they have not
+/// changed all the same, by [`fingerprint`], and refuses if they have.
+static KEPT: SpinLock<Option<Arc<Set>>> = SpinLock::new(None);
+
 /// Read `devmgr`, the manifest and every driver it names through the
-/// registered reader, and note the names for sysfs. `Ok(None)` without
-/// `/sbin/devmgr`.
+/// registered reader -- or, after the first start under
+/// `ferrix.devmgr=init`, take the [`KEPT`] set -- and note the names for
+/// sysfs. `Ok(None)` without `/sbin/devmgr`.
 fn read_files() -> Result<Option<Files>, &'static str> {
+    let kept = KEPT.lock().clone();
+    let (set, kept) = match kept {
+        Some(set) => {
+            if fingerprint(&set.image, &set.images, &set.pages) != Some(set.fingerprint) {
+                crate::console::println!(
+                    "  devmgr   the kept set is not as it was kept: its fingerprint differs; \
+                     devmgr is not started"
+                );
+                return Err("devmgr's kept set changed after it was kept");
+            }
+            (set, true)
+        }
+        None => match read_set()? {
+            Some(set) => {
+                if by_init() {
+                    *KEPT.lock() = Some(Arc::clone(&set));
+                }
+                (set, false)
+            }
+            None => return Ok(None),
+        },
+    };
+    let mut bindings = BINDINGS.lock();
+    bindings.names.clear();
+    fallible::try_extend_from_slice(&mut bindings.names, &set.names)
+        .map_err(|_| "no memory for the drivers' names")?;
+    Ok(Some(Files { set, kept }))
+}
+
+/// [`read_files`]' first read, through the registered reader: the whole
+/// set or nothing, so a set is kept only once every file of it was read.
+fn read_set() -> Result<Option<Arc<Set>>, &'static str> {
     let read = READ_FILE.get().copied().unwrap_or(no_files);
     let Ok(image) = read(PROGRAM) else {
         return Ok(None);
     };
     let names = manifest(read)?;
-    {
-        let mut bindings = BINDINGS.lock();
-        bindings.names.clear();
-        fallible::try_extend_from_slice(&mut bindings.names, &names)
-            .map_err(|_| "no memory for the drivers' names")?;
-    }
     let mut images = fallible::try_with_capacity(names.len())
+        .map_err(|_| "no memory for the drivers' images")?;
+    let mut pages = fallible::try_with_capacity(names.len())
         .map_err(|_| "no memory for the drivers' images")?;
     for name in &names {
         let mut path = fallible::try_with_capacity(DRIVERS.len() + 1 + NAME_BYTES)
@@ -487,12 +555,54 @@ fn read_files() -> Result<Option<Files>, &'static str> {
             }
         };
         let _ = fallible::push_within(&mut images, vmo_of(&bytes)?);
+        let _ = fallible::push_within(&mut pages, pages_of(&bytes));
     }
-    Ok(Some(Files {
+    let fingerprint = fingerprint(&image, &images, &pages)
+        .ok_or("a driver's image could not be read back from its VMO")?;
+    let set = fallible::try_arc(Set {
         image,
         names,
         images,
-    }))
+        pages,
+        fingerprint,
+    })
+    .map_err(|_| "no memory for devmgr's files")?;
+    Ok(Some(set))
+}
+
+/// FNV-1a's 64-bit offset basis and prime.
+const FNV_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// `hash` carried over `bytes`, FNV-1a.
+fn fnv(hash: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(hash, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
+    })
+}
+
+/// One FNV-1a over `program` and every page of `images`, read back from
+/// the VMOs: what [`KEPT`] is checked against before each later start. Not a
+/// defence against a writer, of which there is none, but the evidence that
+/// none changed what a start hands on. `None` when a page does not read.
+fn fingerprint(program: &[u8], images: &[Arc<Vmo>], pages: &[u64]) -> Option<u64> {
+    const PIECE: usize = 512;
+    let mut hash = fnv(FNV_BASIS, program);
+    let mut piece = [0_u8; PIECE];
+    for (vmo, &count) in images.iter().zip(pages) {
+        for index in 0..count {
+            for offset in (0..PAGE_SIZE as usize).step_by(PIECE) {
+                vmo.read_page(index, offset, &mut piece).ok()?;
+                hash = fnv(hash, &piece);
+            }
+        }
+    }
+    Some(hash)
+}
+
+/// The pages [`vmo_of`] gives `bytes`.
+fn pages_of(bytes: &[u8]) -> u64 {
+    (bytes.len() as u64).div_ceil(PAGE_SIZE).max(1)
 }
 
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
@@ -730,9 +840,9 @@ static RUNNING: SpinLock<Option<Running>> = SpinLock::new(None);
 static REPORTED: AtomicBool = AtomicBool::new(false);
 static REPORTED_QUEUE: WaitQueue = WaitQueue::new();
 
-/// What a started `devmgr` was handed, for its REPORT line: device nodes and
-/// drivers.
-static HANDED: SpinLock<(usize, usize)> = SpinLock::new((0, 0));
+/// What a started `devmgr` was handed, for its REPORT line: device nodes,
+/// drivers, and whether they came from the [`KEPT`] set.
+static HANDED: SpinLock<(usize, usize, bool)> = SpinLock::new((0, 0, false));
 
 /// Wait until the `devmgr` pid 1 started has reported, or `deadline` passes.
 /// Whether it reported.
@@ -818,11 +928,12 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     let files = read_files()
         .map_err(|_| status::NO_MEMORY)?
         .ok_or(status::BAD_STATE)?;
-    let drivers = files.names.len();
+    let drivers = files.set.names.len();
     let (kernel_end, devmgr_end) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
-    let devices = write_devices(&kernel_end, files.images, Arc::clone(&job))
-        .map_err(|_| status::NO_MEMORY)?;
-    let process = load(&files.image).map_err(|_| status::BAD_STATE)?;
+    let images = files.images().map_err(|_| status::NO_MEMORY)?;
+    let devices =
+        write_devices(&kernel_end, images, Arc::clone(&job)).map_err(|_| status::NO_MEMORY)?;
+    let process = load(&files.set.image).map_err(|_| status::BAD_STATE)?;
     let kill = |process: &Arc<dyn Host>| process.kill(job::KILLED_STATUS);
     if process.core().move_new_to(&job).is_err() {
         kill(&process);
@@ -835,7 +946,7 @@ fn start_in(job: Arc<Job>) -> Result<Started, Errno> {
     };
     let end = Arc::clone(&devmgr_end);
     start_program(&process, devmgr_end, &kernel_end).map_err(|_| status::BAD_STATE)?;
-    *HANDED.lock() = (devices, drivers);
+    *HANDED.lock() = (devices, drivers, files.kept);
     REPORTED.store(false, Ordering::Release);
     let replaced = RUNNING.lock().replace(Running { exit, job });
     drop(replaced);
@@ -934,11 +1045,16 @@ fn report_then_listen(_: usize) {
     let Some(channel) = CHANNEL.lock().clone() else {
         return;
     };
-    let (devices, drivers) = *HANDED.lock();
+    let (devices, drivers, kept) = *HANDED.lock();
+    let from = if kept {
+        "; from the kept set, its fingerprint as when it was kept"
+    } else {
+        ""
+    };
     match report(&channel) {
         Ok((started, failed)) => crate::console::println!(
             "  devmgr   started by pid 1: {devices} devices, {drivers} drivers, {started} started, \
-             {failed} failed"
+             {failed} failed{from}"
         ),
         Err(why) => crate::console::println!("  devmgr   started by pid 1, and then: {why}"),
     }
@@ -1075,7 +1191,7 @@ fn name_bytes(name: &[u8; NAME_BYTES]) -> &[u8] {
 
 /// `bytes` in a VMO of its own: anonymous memory the kernel filled.
 fn vmo_of(bytes: &[u8]) -> Result<Arc<Vmo>, &'static str> {
-    let pages = (bytes.len() as u64).div_ceil(PAGE_SIZE).max(1);
+    let pages = pages_of(bytes);
     let vmo = Vmo::new_anonymous(pages).map_err(|_| "no memory for a driver's image")?;
     for (index, chunk) in bytes.chunks(PAGE_SIZE as usize).enumerate() {
         vmo.write_page(index as u64, 0, chunk)

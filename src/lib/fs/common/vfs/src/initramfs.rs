@@ -247,6 +247,85 @@ pub fn unpack_over(
     Ok((unpacker.made, unpacker.set_aside))
 }
 
+/// The names an unpack of `archive` makes, relative to the root and in the
+/// archive's order: every safe name but the root's and pid 1's inputs. What
+/// a check of [`remove`] looks for afterwards. Stops at the first entry that
+/// does not parse.
+pub fn unpacked_names(archive: &[u8]) -> impl Iterator<Item = &[u8]> {
+    Archive::new(archive)
+        .entries()
+        .map_while(Result::ok)
+        .filter(|entry| entry.is_safe_path() && !is_init_input(entry.name))
+        .map(|entry| normalise(entry.name))
+        .filter(|name| !name.is_empty())
+}
+
+/// What [`remove`] took out of a namespace, and what it left.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Removed {
+    /// Names removed: files, links, nodes and empty directories.
+    pub removed: u32,
+    /// Names left: those `spare` keeps, a directory something is mounted on
+    /// or that still holds a kept name, and any other the namespace refused.
+    pub kept: u32,
+}
+
+/// Remove from `ns` what unpacking `archive` there made: the archive's own
+/// names, so what was put there after the unpack is no concern of it.
+///
+/// Every file, link and node first, in the archive's order; then the
+/// directories in the reverse of it, so each one's contents go before it. A
+/// name `spare` keeps stays, and so does every directory above it, which
+/// the namespace refuses to remove (`ENOTEMPTY`), as it refuses one with a
+/// filesystem mounted on it (`EBUSY`). Pid 1's inputs, which nothing
+/// unpacked, are passed over. What the kernel gives the tmpfs root's pages
+/// back with once `/` is on a disk (`src/kernel/src/fs/mod.rs`); a file
+/// still open or mapped lives on as any removed file does.
+///
+/// # Errors
+///
+/// `EIO` for an archive that does not parse, which an unpack would already
+/// have refused; `ENOMEM` when the directories' list cannot be held.
+pub fn remove(
+    ns: &Namespace,
+    ctx: &Context,
+    archive: &[u8],
+    spare: &dyn Fn(&[u8]) -> bool,
+) -> crate::Result<Removed> {
+    let mut done = Removed::default();
+    let mut directories: Vec<&[u8]> = Vec::new();
+    let mut count = |result: crate::Result<()>| match result {
+        Ok(()) => done.removed = done.removed.saturating_add(1),
+        // A second name of a hard-linked file, or a name already gone.
+        Err(Errno::ENOENT) => {}
+        Err(_) => done.kept = done.kept.saturating_add(1),
+    };
+    for entry in Archive::new(archive).entries() {
+        let entry = entry.map_err(|_| Errno::EIO)?;
+        if !entry.is_safe_path() || is_init_input(entry.name) {
+            continue;
+        }
+        let path = normalise(entry.name);
+        if path.is_empty() {
+            continue;
+        }
+        if spare(path) {
+            count(Err(Errno::EBUSY));
+            continue;
+        }
+        if entry.file_type() == CpioType::Directory {
+            directories.try_reserve(1).map_err(|_| Errno::ENOMEM)?;
+            directories.push(path);
+        } else {
+            count(ns.unlink(ctx, Some(&ctx.root), path));
+        }
+    }
+    for path in directories.iter().rev() {
+        count(ns.rmdir(ctx, Some(&ctx.root), path));
+    }
+    Ok(done)
+}
+
 /// The name relative to the root: `./a/b/` becomes `a/b`, and `.` becomes
 /// empty, meaning the root itself.
 fn normalise(name: &str) -> &[u8] {

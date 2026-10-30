@@ -9,7 +9,10 @@
 //! `/dev`, `/dev/shm`, `/proc`, `/sys` and `/tmp` inside it, and from then
 //! on every process the kernel makes has that volume as its `/`
 //! ([`process_context`]). The
-//! kernel's own checks keep the tmpfs, where their fixtures are mounted.
+//! kernel's own checks keep the tmpfs, where their fixtures are mounted,
+//! until the boot's last check; then the archive's names in it go
+//! (`fs::release`), and the mount points, the directories above them and
+//! `/lib/firmware` stay.
 //!
 //! # Which disk, and when
 //!
@@ -52,7 +55,8 @@
 //! Under `ferrix.devmgr=init` (`docs/INIT.md` §7.3, L12) the disk's driver
 //! does not exist until pid 1 has started `devmgr`, so pid 1 starts on the
 //! tmpfs and the switch comes after it: [`switch_after_devmgr`] waits for
-//! `devmgr`'s REPORT, switches, mounts the data and home disks, and tells
+//! `devmgr`'s REPORT, switches, mounts the data and home disks, gives back
+//! the boot's copies of the system (`fs::release_boot_copies`), and tells
 //! pid 1 where `/` is (`init::notify_root`). Pid 1 is moved onto the volume
 //! by the switch itself: its root and working directory become the volume's
 //! in the step that publishes [`process_context`], under pid 1's own filesystem
@@ -100,6 +104,11 @@ static ROOT: Once<(Arc<dyn FileSystem>, Location)> = Once::new();
 
 /// The disk [`switch`] put `/` on.
 static ROOT_RDEV: Once<u64> = Once::new();
+
+/// Whether [`switch`] has put `/` on the root disk.
+pub(crate) fn switched() -> bool {
+    ROOT.get().is_some()
+}
 
 /// The disk `/` is on, once [`switch`] has put it there.
 pub(crate) fn root_rdev() -> Option<u64> {
@@ -294,11 +303,15 @@ pub(crate) fn schedule() -> alloc::string::String {
     )
 }
 
-/// Unpack the initramfs into the volume, unless it already has this one.
+/// Unpack the initramfs into the volume, unless it already has this one:
+/// the archive held for the whole of it (`mm::with_initrd`).
 fn install(inside: &Context) -> Result<Installed, &'static str> {
-    let Some(archive) = fs::initramfs_archive() else {
-        return Ok(Installed::Nothing);
-    };
+    crate::mm::with_initrd(|archive| install_from(inside, archive))
+        .unwrap_or(Ok(Installed::Nothing))
+}
+
+/// [`install`], from `archive`.
+fn install_from(inside: &Context, archive: &[u8]) -> Result<Installed, &'static str> {
     let stamp = alloc::format!("{:x} {:08x}\n", archive.len(), crc32c(archive));
     let ns = fs::namespace();
     if read_stamp(inside).as_deref() == Some(stamp.as_bytes()) {
@@ -440,6 +453,7 @@ const DEVMGR_PATIENCE_NANOS: u64 = 60_000_000_000;
 pub fn switch_after_devmgr() {
     if sched::spawn("root switch", after_devmgr, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
         println!("  root     no task to switch / on: it stays in memory");
+        fs::release_boot_copies();
         crate::init::notify_root(false);
     }
 }
@@ -449,6 +463,7 @@ fn after_devmgr(_: usize) {
     let deadline = crate::timer::now_nanos().saturating_add(DEVMGR_PATIENCE_NANOS);
     if !crate::discovery::devmgr::wait_reported(deadline) {
         println!("  root     devmgr did not report in time: / stays in memory");
+        fs::release_boot_copies();
         crate::init::notify_root(false);
         return;
     }
@@ -462,6 +477,9 @@ fn after_devmgr(_: usize) {
             "the root switch's self-check failed: {problem}"
         );
     }
+    // The root is final: the archive and, after a switch, the tmpfs's copy
+    // of it go before pid 1 hears where `/` is (`docs/RAM-RELEASE.md` §2).
+    fs::release_boot_copies();
     crate::init::notify_root(switched);
 }
 

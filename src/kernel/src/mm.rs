@@ -285,7 +285,8 @@ pub fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
 
 /// The watermark for a machine whose allocator manages `managed` frames
 /// (`L.mm.71`).
-pub(crate) const fn watermark_for(managed: u64) -> u64 {
+// CHECKS-ONLY: fs::release_check, besides `init` and `give_back_initrd` here.
+pub const fn watermark_for(managed: u64) -> u64 {
     let share = managed / WATERMARK_DIVISOR;
     if share < WATERMARK_LEAST {
         WATERMARK_LEAST
@@ -1961,6 +1962,9 @@ impl Reclaimed {
 /// Deliberately *not* reclaimed: [`MemKind::PageTables`], which the kernel is
 /// running on; [`MemKind::BootStack`], which it is running on too; and
 /// [`MemKind::BootInfo`], which `BootView` borrows for the life of the system.
+/// [`MemKind::Initrd`] is not reclaimed here either: the root's install reads
+/// it after this ([`with_initrd`]), and [`give_back_initrd`] gives it back
+/// once the root is final.
 ///
 /// # Safety
 ///
@@ -2002,6 +2006,205 @@ pub unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
     });
 
     reclaimed
+}
+
+/// What [`give_back_initrd`] did.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GivenBack {
+    /// Frames given to the allocator: the archive's whole pages it covers.
+    pub frames: u64,
+    /// The frames it manages after.
+    pub managed: u64,
+    /// The watermark after, computed from [`GivenBack::managed`].
+    pub watermark: u64,
+    /// The longest of its holds of the frame allocator's lock, in
+    /// nanoseconds.
+    pub longest_hold_nanos: u64,
+}
+
+/// How many frames one hold of the frame allocator's lock gives back, at
+/// most: 4 MiB, the allocator's largest block, so each batch is one block
+/// where the archive's pages allow it and no hold describes more frames
+/// than one block's (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
+const GIVE_BACK_BATCH: u64 = 1024;
+
+/// Where the loader put the initramfs: its physical base and its length,
+/// inside the direct map.
+#[derive(Clone, Copy, Debug)]
+struct Initrd {
+    /// The physical address of its first byte.
+    base: u64,
+    /// Its length in bytes.
+    len: usize,
+}
+
+/// The initramfs as the loader handed it over, kept for the root's unpack
+/// and the root disk's install until [`give_back_initrd`] gives its pages to
+/// the frame allocator (`docs/RAM-RELEASE.md` §2).
+///
+/// No reference into it outlives a hold of this lock (`L.mm.100`): the
+/// bytes are lent to a closure under it ([`with_initrd`]), and the give-back
+/// takes the archive out under it before a page goes. A sleeping lock, since
+/// the install holds it across an unpack of the whole system onto a disk.
+static INITRD: ferrix_sync::Once<ferrix_sync::SleepLock<Option<Initrd>>> = ferrix_sync::Once::new();
+
+/// Why the initramfs cannot be kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutsideDirectMap;
+
+/// Keep the initramfs `view` describes for [`with_initrd`]: its length, or
+/// `None` when the boot has none. Once; a later call keeps nothing new.
+///
+/// Its own checks, which [`with_initrd`]'s reading rests on: the range lies
+/// inside one region the memory map calls [`MemKind::Initrd`], which the
+/// frame allocator was never given (`MemKind::is_free_at_boot`) and nothing
+/// writes after the hand-off, and inside the direct map.
+///
+/// # Errors
+///
+/// [`OutsideDirectMap`] when the loader put it where the direct map does
+/// not reach, or outside an `Initrd` region, so it could not be read.
+pub fn keep_initrd(view: &BootView<'_>) -> Result<Option<u64>, OutsideDirectMap> {
+    let Some((base, len)) = view.initrd() else {
+        return Ok(None);
+    };
+    let described = view.regions().iter().any(|region| {
+        region.kind == MemKind::Initrd
+            && region.base <= base
+            && base.saturating_add(len) <= region.base.saturating_add(region.len)
+    });
+    if !described {
+        return Err(OutsideDirectMap);
+    }
+    let info = view.raw();
+    let end = base.checked_add(len).ok_or(OutsideDirectMap)?;
+    let map_end = info
+        .physmap_phys
+        .checked_add(info.physmap_len)
+        .ok_or(OutsideDirectMap)?;
+    if base < info.physmap_phys || end > map_end {
+        return Err(OutsideDirectMap);
+    }
+    let len_bytes = usize::try_from(len).map_err(|_| OutsideDirectMap)?;
+    let _ = INITRD.call_once(|| {
+        ferrix_sync::SleepLock::new(
+            Some(Initrd {
+                base,
+                len: len_bytes,
+            }),
+            &crate::sync::SchedParker,
+        )
+    });
+    Ok(Some(len))
+}
+
+/// Run `read` on the initramfs, holding it for the call: `None` if the boot
+/// had none, [`keep_initrd`] has not run, or [`give_back_initrd`] has given
+/// it back (`L.mm.100`). What `read` answers cannot borrow the bytes.
+///
+/// A task's call, or bring-up's before the scheduler runs: once it runs, a
+/// caller that may not block (an interrupt, a spin lock held) is refused
+/// with `None` rather than left to sleep on the lock. `read` must not call
+/// [`give_back_initrd`], which takes the same lock.
+pub fn with_initrd<T>(read: impl FnOnce(&[u8]) -> T) -> Option<T> {
+    if crate::sched::started() && !crate::sched::may_block() {
+        return None;
+    }
+    let held = INITRD.get()?.lock();
+    let initrd = (*held)?;
+    // SAFETY: (KMEM) the loader read the archive into memory the map reports
+    // as `Initrd`, which nothing writes after the hand-off, and
+    // `keep_initrd` checked all of it is inside the direct map. Its frames go
+    // to the allocator only once `give_back_initrd` has taken it out of this
+    // lock, which `held` keeps from happening until `read` has returned, and
+    // `read`'s answer cannot borrow the slice.
+    let bytes =
+        unsafe { core::slice::from_raw_parts(direct_map(initrd.base) as *const u8, initrd.len) };
+    Some(read(bytes))
+}
+
+/// The initramfs's physical base and length while it is kept: what the
+/// release check compares the frames given back with.
+// CHECKS-ONLY: fs::release_check
+#[doc(hidden)]
+pub fn initrd_span() -> Option<(u64, u64)> {
+    let held = INITRD.get()?.lock();
+    held.map(|initrd| (initrd.base, initrd.len as u64))
+}
+
+/// The frames of the archive at `[base, base + len)` that it fills whole and
+/// that the allocator describes: rounded inward, since a page the loader
+/// shares with anything at either end is not the archive's to give, and
+/// clipped to the frame array, which on a 32-bit board ends where the direct
+/// map does.
+// CHECKS-ONLY: fs::release_check, besides `give_back_initrd` here.
+pub fn initrd_frames(base: u64, len: u64) -> core::ops::Range<Frame> {
+    let first = base.div_ceil(PAGE_SIZE).max(FIRST_MANAGED_FRAME);
+    let end = base.saturating_add(len) / PAGE_SIZE;
+    with_frames(|frames| first.max(frames.base())..end.min(frames.end()))
+        .filter(|range| !range.is_empty())
+        .unwrap_or(0..0)
+}
+
+/// Give the frame allocator the initramfs's pages once the root is final
+/// (`L.mm.99`): the archive taken out of [`INITRD`] first, under the lock
+/// every reader holds, so no reader has its bytes and none can again
+/// (`L.mm.100`); then [`initrd_frames`], in batches of
+/// [`GIVE_BACK_BATCH`], the lock dropped between them, and the watermark
+/// computed again from the new managed count in the hold that inserts the
+/// last batch, so no allocation sees the new total with the old watermark.
+/// `None` when there is nothing to give: no archive, or it was given back,
+/// so a second call gives nothing. Between two batches the watermark is
+/// still the old one, a little lower than the new total asks for
+/// (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
+///
+/// `Frames::insert_free` takes only frames still `Reserved`: one the
+/// allocator already had is skipped, never inserted twice. Each hold is
+/// timed, and the longest is answered ([`GivenBack::longest_hold_nanos`]).
+pub fn give_back_initrd() -> Option<GivenBack> {
+    if crate::sched::started() && !crate::sched::may_block() {
+        return None;
+    }
+    let initrd = INITRD.get()?.lock().take()?;
+    let range = initrd_frames(initrd.base, initrd.len as u64);
+    let mut given = GivenBack::default();
+    let mut frame = range.start;
+    loop {
+        let next = ((frame / GIVE_BACK_BATCH + 1) * GIVE_BACK_BATCH).min(range.end);
+        let last = next >= range.end;
+        let _ = with_frames(|frames| {
+            let start = crate::timer::now_nanos();
+            let before = frames.managed_frames();
+            if frame < next {
+                frames.insert_free(frame, next - frame);
+            }
+            given.frames += frames.managed_frames() - before;
+            if last {
+                given.managed = frames.managed_frames();
+                given.watermark = watermark_for(given.managed);
+                WATERMARK.store(given.watermark, Ordering::Relaxed);
+            }
+            let held = crate::timer::now_nanos().saturating_sub(start);
+            given.longest_hold_nanos = given.longest_hold_nanos.max(held);
+        });
+        if last {
+            return Some(given);
+        }
+        frame = next;
+    }
+}
+
+/// How many frames of `range` the allocator still has `Reserved`: none of
+/// the archive's once it is given back.
+// CHECKS-ONLY: fs::release_check
+#[doc(hidden)]
+pub fn reserved_in(range: core::ops::Range<Frame>) -> u64 {
+    with_frames(|frames| {
+        range
+            .filter(|&frame| frames.state(frame) == Some(ferrix_frame::State::Reserved))
+            .count() as u64
+    })
+    .unwrap_or(0)
 }
 
 /// Clear a span of slots in the root page table.

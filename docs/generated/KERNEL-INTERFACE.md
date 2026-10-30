@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2440 declarations in the core's files, 177 in the item's; 85 checks-only.
+2454 declarations in the core's files, 178 in the item's; 91 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1639,7 +1639,7 @@ checks above is `pub` for raised checks (F3).
 | `try_format` | re-export | load |  |
 | `try_push` | re-export | item, load |  |
 | `try_reserve` | re-export | item, load |  |
-| `try_to_vec` | re-export | item |  |
+| `try_to_vec` | re-export | item, load |  |
 | `try_with_capacity` | re-export | item, load |  |
 
 ### `hooks`
@@ -1834,13 +1834,18 @@ checks above is `pub` for raised checks (F3).
 | `flags_in` | fn | item, load |  |
 | `frame_references` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `free_frames` | fn | load, bin |  |
+| `give_back_initrd` | fn | load |  |
 | `heap_pages` | fn | load |  |
 | `held_frames` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
+| `initrd_frames` | fn | load (checks) | checks-only |
+| `initrd_span` | fn | load (checks) | checks-only |
+| `keep_initrd` | fn | load |  |
 | `managed_frames` | fn | load, bin |  |
 | `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
+| `reserved_in` | fn | load (checks) | checks-only |
 | `retired_frames` | fn | load |  |
 | `root_table` | fn | item |  |
 | `share_frame` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1848,6 +1853,8 @@ checks above is `pub` for raised checks (F3).
 | `translate` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `translate_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `watermark` | fn | load, bin |  |
+| `watermark_for` | fn | load (checks) | checks-only |
+| `with_initrd` | fn | load |  |
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | load, bin |  |
 | `bypass_heap_in_sections` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1855,11 +1862,17 @@ checks above is `pub` for raised checks (F3).
 | `refuse_reserve_fills` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reserve_counts` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FrameWindow` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `GivenBack` | struct | load |  |
+| `OutsideDirectMap` | struct | load |  |
 | `Reclaimed` | struct | - |  |
 | `Stats` | struct | bin |  |
 | `FrameWindow::kept` | method | item, load, bin |  |
 | `FrameWindow::open` | method | item, load, bin |  |
 | `FrameWindow::report` | method | item, load, bin |  |
+| `GivenBack::frames` | field | item, load, bin |  |
+| `GivenBack::longest_hold_nanos` | field | load |  |
+| `GivenBack::managed` | field | load |  |
+| `GivenBack::watermark` | field | load, bin |  |
 | `Reclaimed::total` | method | load, bin |  |
 | `Stats::free_frames` | field | load, bin |  |
 | `Stats::managed_frames` | field | load, bin |  |
@@ -2295,6 +2308,7 @@ checks above is `pub` for raised checks (F3).
 | `PROCESSORS_MISSING` | static | bin |  |
 | `PROCESSOR_DISCOVERY` | static | bin |  |
 | `RANDOM_GENERATOR` | static | bin |  |
+| `RELEASE` | static | load (checks) | checks-only |
 | `ROOT_PID1` | static | load |  |
 | `SCHEDULER_BRING_UP` | static | bin |  |
 | `SECONDARY_START` | static | bin |  |
@@ -3220,6 +3234,7 @@ checks above is `pub` for raised checks (F3).
 | `Image` | enum | load |  |
 | `bootstrap_channel` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `has_launcher` | fn | bin |  |
+| `input_bytes` | fn | load (checks) | checks-only |
 | `notify_root` | fn | load |  |
 | `read_option` | fn | bin |  |
 | `register_launcher` | fn | load |  |

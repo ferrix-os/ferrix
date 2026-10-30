@@ -129,6 +129,7 @@ Causes are listed most likely first.
 | [FX-1152](#fx-1152) | AF_NETLINK did not answer the requests `ip` makes |
 | [FX-1201](#fx-1201) | a btrfs volume Ferrix wrote did not read back as it was written |
 | [FX-1202](#fx-1202) | pid 1 did not move onto the root volume with the switch |
+| [FX-1203](#fx-1203) | the boot's copies of the system were not given back as specified |
 | [FX-1301](#fx-1301) | cgroupfs did not show the job tree as cgroup v2 |
 | [FX-1302](#fx-1302) | seccomp's filter was not asked first at every entry, or not as the entry's own |
 | [FX-1303](#fx-1303) | a seccomp filter was not installed, judged, inherited, ordered or released as specified |
@@ -3319,6 +3320,29 @@ volume as /.
 
 See: src/kernel/src/fs/root_disk.rs; docs/INIT.md §7.3;
 docs/certification/ITEM.md.
+
+<a id="fx-1203"></a>
+
+## FX-1203 — the boot's copies of the system were not given back as specified
+
+Once the root is final the kernel gives the initramfs archive's whole pages to
+the frame allocator, recomputes the watermark from the new managed count, and
+after a switch to a root disk removes the archive's names from the tmpfs but for
+the mount points, the directories above them and /lib/firmware. The release's
+boot check looks before and after it: the managed frames up by exactly the
+archive's whole pages and none of them Reserved, the watermark watermark_for the
+new count, the archive answering nothing, pid 1's inputs unchanged and outside
+the released pages, and after a switch no other name of the archive left and a
+file held open and mapped across the release reading as before.
+
+1. `release` in src/kernel/src/fs/mod.rs or `give_back_initrd` in
+   src/kernel/src/mm.rs gave back other frames than the archive's whole pages,
+   or left the watermark as it was.
+2. `init::set_inputs` kept a slice of the archive instead of a copy.
+3. `ferrix_vfs::initramfs::remove` left a name of the archive, or removed a
+   spared one.
+
+See: src/kernel/src/fs/release_check.rs; docs/RAM-RELEASE.md §2.
 
 <a id="fx-1301"></a>
 

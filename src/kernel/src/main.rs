@@ -487,6 +487,19 @@ fn require_hooks_disarmed() {
     }
 }
 
+/// The root is final on the kernel path once the boot's checks, the last of
+/// which read the tmpfs, are done: the initramfs's pages go back, and after a
+/// switch the tmpfs's copy of the system with them (`docs/RAM-RELEASE.md`
+/// §2). Under `ferrix.devmgr=init` the root's switch task does it, after the
+/// install it waits for. Without the Linux ABI there is no root to build, and
+/// the archive stays where the loader put it.
+fn release_boot_copies() {
+    #[cfg(ferrix_linux_abi = "on")]
+    if !devmgr::by_init() {
+        fs::release_boot_copies();
+    }
+}
+
 /// The last line of boot before init: the success marker when every check
 /// ran, and the unchecked one, which no boot test accepts, when they were
 /// skipped.
@@ -1411,7 +1424,9 @@ fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
     }
     // Whatever `checks` says: the region a reset keeps must never be handed
     // out, and after the reclaim is when it could have been.
-    mm::check::check_pstore_never_free()
+    mm::check::check_pstore_never_free()?;
+    release_boot_copies();
+    Ok(())
 }
 
 #[cfg(ferrix_linux_abi = "on")]

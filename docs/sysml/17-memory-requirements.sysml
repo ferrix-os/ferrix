@@ -22,6 +22,11 @@
  * each, the package gives the file, and they are never renumbered once a
  * check names them.
  *
+ * L.user.173 was reserved for the tmpfs root's release after a switch to a
+ * root disk (docs/RAM-RELEASE.md §2) and released unwritten: that is
+ * fs/mod.rs and ferrix-vfs, the load ring and no ring, and no item code
+ * relies on what the tmpfs holds after it (consultant ruling, ledger 5038).
+ *
  * The frame, heap, paging and vma arithmetic itself is src/lib/kernel/frame,
  * heap, paging and vma, whose host tests verify it; nothing here restates
  * them. What is here is what the kernel does with them.
@@ -537,16 +542,51 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.11";
             attribute :>> unit = ("mm::heap_or_drain", "fallible::injected_failures");
         }
+        // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022).
+        requirement <'L.mm.99'> theArchivesPagesComeBack : ItemLowLevel {
+            attribute :>> statement = "Once the root is final, at most once a boot, the
+                frames the initramfs archive fills whole and the frame allocator
+                describes shall be given to it, in batches of at most 1024 frames a
+                hold, and MemTotal and the watermark shall be computed from the
+                frames managed after.";
+            attribute :>> criterion = "On every boot whose checks run, the frames
+                managed grow by exactly the archive's whole pages inside the frame
+                array, none of them is Reserved after, and the watermark is
+                watermark_for of the new count (the `release  checked` line); no
+                release, or the watermark left as it was, stops the boot there
+                (controls 1 and 4).";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("mm::give_back_initrd", "mm::initrd_frames");
+        }
+        requirement <'L.mm.100'> noReaderOutlivesTheArchive : ItemLowLevel {
+            attribute :>> statement = "The initramfs archive shall be kept only when it
+                lies in one Initrd region inside the direct map, read only under
+                its lock, lent to a closure whose answer cannot borrow it, and
+                give_back_initrd shall take it out under that lock before any of its
+                frames is given away; after that it shall answer nothing.";
+            attribute :>> criterion = "After the release with_initrd and initrd_span
+                answer None on every boot whose checks run (the `release  checked`
+                line); a release that leaves the archive kept stops the boot there
+                (control 3).";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("mm::keep_initrd", "mm::with_initrd", "mm::give_back_initrd");
+        }
+        // Restated by docs/RAM-RELEASE.md R1 (consultant ledger 5022, condition 1):
+        // the archive's release sets it a second time.
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
-            attribute :>> statement = "init shall set the watermark once, to the
-                frames the allocator manages divided by 128, and no fewer than 256
-                frames nor more than 8192.";
+            attribute :>> statement = "init shall set the watermark to the frames the
+                allocator manages divided by 128, and no fewer than 256 frames nor
+                more than 8192; give_back_initrd shall set it once more, the same
+                way, from the frames managed after the initramfs's release, in the
+                hold of the frame allocator that inserts the release's last frames.";
             attribute :>> criterion = "The watermark equals watermark_for of the
                 frames managed at init, and watermark_for gives 256 for 0 frames,
                 300 for 38400 and 8192 for the largest count (the `watermark`
-                line).";
+                line); after the release it equals watermark_for of the frames
+                managed then (the `release` line).";
             attribute :>> parent = "H.QUOTA.13";
-            attribute :>> unit = ("mm::init", "mm::watermark_for", "mm::watermark");
+            attribute :>> unit = ("mm::init", "mm::watermark_for", "mm::watermark",
+                "mm::give_back_initrd");
         }
         requirement <'L.mm.72'> aProgramsFramesStopAtTheWatermark : ItemLowLevel {
             attribute :>> statement = "allocate_user_frame and allocate_user_run
@@ -2755,6 +2795,21 @@ package FerrixMemoryRequirements {
                 volume's clean bytes (the `reclaim` line of test-btrfs).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = "ferrix_btrfs_write::volume::WriteVolume::clean_bytes";
+        }
+        // docs/RAM-RELEASE.md §2, R1 (consultant ledger 4971, 5022, 5038).
+        requirement <'L.user.174'> devmgrStartsAgainFromTheKeptSet : ItemLowLevel {
+            attribute :>> statement = "Under ferrix.devmgr=init every devmgr start
+                after the first shall be made from the program, names and driver
+                images the first start read, kept by the kernel, never from a path,
+                and shall be refused when their fingerprint is not the one taken
+                when they were kept.";
+            attribute :>> criterion = "After the release, svc restart
+                devmgr.service starts a second devmgr whose line says it came from
+                the kept set, and / written, synced and read back afterwards answers
+                what was written (test-init).";
+            attribute :>> parent = "H.DEV.4";
+            attribute :>> unit = ("discovery::devmgr::read_files",
+                "discovery::devmgr::read_set", "discovery::devmgr::fingerprint");
         }
     }
 }

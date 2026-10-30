@@ -197,13 +197,6 @@
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
     },
     {
-      "ids": ["L.mm.99-100", "L.init.5", "L.user.173-174"],
-      "owner": "ram-release-r1",
-      "branch": "claude/ram-release-r1-ee0624",
-      "date": "2026-10-30",
-      "purpose": "docs/RAM-RELEASE.md §2 R1 (consultant OK IF 1-10, ledger 5022): the initramfs archive's whole pages to the frame allocator with the watermark recomputed (L.mm.99), no reader outliving them (L.mm.100), pid 1's inputs kept in buffers of their own (L.init.5), the tmpfs after a switch keeping only the mount points, their parents and /lib/firmware (L.user.173), devmgr's restart set kept by the kernel and every later start made from it (L.user.174)"
-    },
-    {
       "ids": ["H.FAIL.9", "L.mm.101-108", "L.x86_64.243", "L.aarch64.68", "L.armv7a.29", "L.object.252-253", "L.syscall.24"],
       "owner": "ram-scrubber",
       "branch": "feature/ram-scrubber",

@@ -91,6 +91,7 @@ use crate::object::{Object, Transfer};
 use crate::sync::SpinLock;
 use crate::syscall;
 use crate::syscall::program::ProgramFile;
+use crate::vmap;
 
 /// A program opened to be started: its image, and the path it was read from
 /// with its links resolved, which `/proc/self/exe` names.
@@ -415,17 +416,18 @@ pub fn read_option(view: &BootView<'_>) {
 /// is read: by the item's dependency rules this file names no archive or
 /// filesystem crate.
 #[derive(Clone, Copy, Debug)]
-pub struct InputEntry {
+pub struct InputEntry<'a> {
     /// Its name relative to the root, without a leading `./` or `/`.
-    pub name: &'static [u8],
+    pub name: &'a [u8],
     /// Whether it is a regular file.
     pub regular: bool,
     /// Whether it is a directory.
     pub directory: bool,
     /// Its link count, as the archive gives it.
     pub links: u32,
-    /// Its bytes, in the archive the kernel keeps for the whole boot.
-    pub data: &'static [u8],
+    /// Its bytes, in the archive, which the kernel gives back once the root
+    /// is final: [`set_inputs`] keeps a copy of what it takes.
+    pub data: &'a [u8],
 }
 
 /// What pid 1 is started with when nothing is named on the command line:
@@ -433,18 +435,27 @@ pub struct InputEntry {
 /// empty when the image carries none, as an unset variable left it when
 /// `cargo xtask` compiled them into the kernel.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Inputs {
+pub(crate) struct Inputs<'a> {
     /// The program, `sh -i` or `sh -c` [`Inputs::script`].
-    pub(crate) program: &'static [u8],
+    pub(crate) program: &'a [u8],
     /// A script for the program's `sh -c`, or nothing for an interactive one.
-    pub(crate) script: &'static [u8],
+    pub(crate) script: &'a [u8],
     /// Commands to run in turn instead of the program; see
     /// [`run_commands`] for the encoding.
-    pub(crate) commands: &'static [u8],
+    pub(crate) commands: &'a [u8],
 }
 
-/// Pid 1's inputs, taken once from the boot initramfs by [`set_inputs`].
-static INPUTS: Once<Inputs> = Once::new();
+/// Pid 1's inputs, taken once from the boot initramfs by [`set_inputs`]:
+/// borrowed from [`KEPT`], never from the archive.
+static INPUTS: Once<Inputs<'static>> = Once::new();
+
+/// The copies [`set_inputs`] makes of the program, the script and the
+/// commands, kept for the boot: the archive they were read from goes back
+/// to the frame allocator once the root is final (`L.init.5`,
+/// `docs/RAM-RELEASE.md` §2). In `vmap` buffers, since a built-in program
+/// is megabytes, past what the heap serves; `None` for an input absent or
+/// refused.
+static KEPT: Once<[Option<vmap::Buffer>; 3]> = Once::new();
 
 /// The directories the inputs are carried under, which are expected and say
 /// nothing, and the three names an input may have.
@@ -463,29 +474,64 @@ pub(crate) const COMMANDS_INPUT: &[u8] = b".ferrix/init/commands";
 /// has more than one link, any other name, a script with a NUL in it, which
 /// cannot survive being an argument, and a list of commands that does not
 /// end its last command with an empty argument.
-pub fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
+///
+/// What it takes it copies ([`KEPT`]), so nothing it answers later points
+/// into `entries`' archive; an input there is no memory to copy is refused,
+/// said and taken as absent, as any other refusal.
+pub fn set_inputs<'a>(entries: impl Iterator<Item = InputEntry<'a>>) -> bool {
     if INPUTS.get().is_some() {
         return false;
     }
-    let inputs = judge(entries, &mut |name, why| refuse(name, why));
+    let found = judge(entries, &mut |name, why| refuse(name, why));
+    let copies = [
+        (PROGRAM_INPUT, found.program),
+        (SCRIPT_INPUT, found.script),
+        (COMMANDS_INPUT, found.commands),
+    ]
+    .map(|(name, bytes)| keep(name, bytes));
     let mut first = false;
-    let _ = INPUTS.call_once(|| {
+    let kept = KEPT.call_once(|| {
         first = true;
-        inputs
+        copies
     });
-    first
+    if !first {
+        return false;
+    }
+    let [program, script, commands] = kept
+        .each_ref()
+        .map(|copy| copy.as_deref().unwrap_or_default());
+    let _ = INPUTS.call_once(|| Inputs {
+        program,
+        script,
+        commands,
+    });
+    true
+}
+
+/// A copy of the input `name`'s `bytes` for [`KEPT`]: `None` for an absent
+/// one, and for one there is no memory to copy, which is said.
+fn keep(name: &[u8], bytes: &[u8]) -> Option<vmap::Buffer> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let Ok(mut copy) = vmap::Buffer::zeroed(bytes.len()) else {
+        refuse(name, "could not be kept: no memory for its copy");
+        return None;
+    };
+    copy.copy_from_slice(bytes);
+    Some(copy)
 }
 
 /// An input's name, what was found for it, and whether it was refused.
-type Slot = (&'static [u8], Option<&'static [u8]>, bool);
+type Slot<'a> = (&'static [u8], Option<&'a [u8]>, bool);
 
 /// [`set_inputs`]'s judgement, telling `refuse` of each entry refused and why.
-pub(crate) fn judge(
-    entries: impl Iterator<Item = InputEntry>,
+pub(crate) fn judge<'a>(
+    entries: impl Iterator<Item = InputEntry<'a>>,
     refuse: &mut dyn FnMut(&[u8], &str),
-) -> Inputs {
+) -> Inputs<'a> {
     // Each input's name, what was found for it, and whether it was refused.
-    let mut slots: [Slot; 3] = [
+    let mut slots: [Slot<'a>; 3] = [
         (PROGRAM_INPUT, None, false),
         (SCRIPT_INPUT, None, false),
         (COMMANDS_INPUT, None, false),
@@ -550,8 +596,18 @@ fn refuse(name: &[u8], why: &str) {
 }
 
 /// Pid 1's inputs, or none before [`set_inputs`] ran.
-pub(crate) fn inputs() -> Inputs {
+pub(crate) fn inputs() -> Inputs<'static> {
     INPUTS.get().copied().unwrap_or_default()
+}
+
+/// Pid 1's inputs' bytes, the program's, the script's and the commands':
+/// what the release's check compares across the archive's release
+/// (`L.init.5`).
+// CHECKS-ONLY: fs::release_check
+#[doc(hidden)]
+pub fn input_bytes() -> [&'static [u8]; 3] {
+    let inputs = inputs();
+    [inputs.program, inputs.script, inputs.commands]
 }
 
 /// What `/proc/self/exe` names for the built-in program, which has no file of
@@ -683,7 +739,7 @@ fn run_default(launcher: &Launcher) {
 
 /// Start the program built into the kernel: `sh -i`, or `sh -c` with the
 /// built-in script.
-fn run_built_in(launcher: &Launcher, inputs: Inputs) {
+fn run_built_in(launcher: &Launcher, inputs: Inputs<'static>) {
     let interactive: [&[u8]; 2] = [b"sh", b"-i"];
     let scripted: [&[u8]; 3] = [b"sh", b"-c", inputs.script];
     let (args, how): (&[&[u8]], _) = if inputs.script.is_empty() {

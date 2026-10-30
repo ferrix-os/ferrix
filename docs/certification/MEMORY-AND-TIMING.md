@@ -686,6 +686,38 @@ any superblock copy's stripe (`L.btrfs.16`, `L.btrfs.92`).
 
 ---
 
+### 1.9 The initramfs's release (docs/RAM-RELEASE.md §2)
+
+Once the root is final, `mm::give_back_initrd` gives the frame allocator
+the frames the initramfs archive fills whole (`L.mm.99`), once a boot: 23,343
+on the N150 box's image, 18,794 on `test-restart --boot blk`'s, 9,013 on
+`test-boot`'s. It takes the archive out of `INITRD` first, under the
+sleeping lock every reader holds (`mm::with_initrd`, `L.mm.100`), so no
+reader has the bytes when a frame goes.
+
+* **The hold.** The frames go in batches of at most 1024 (`GIVE_BACK_BATCH`,
+  the allocator's largest block, aligned to it), one hold of `FRAMES` each,
+  the lock dropped between them: a hold writes the state of at most 1024
+  frame entries and pushes at most a handful of free blocks. Measured, the
+  longest hold of a boot (the `release` line's "longest hold"): 1 us on
+  `test-boot x86_64 --accel kvm`, the release's 9,013 frames in nine holds.
+  `FRAMES` masks interrupts while held, so this is also the masked time.
+* **The watermark.** Recomputed from the new managed count in the hold that
+  inserts the last batch (`L.mm.71`). Between two batches the free count has
+  grown and the watermark is still the old one, computed from fewer frames:
+  lower by at most 23,343/128 = 182 frames on the box, and only for the few
+  microseconds the batches take; a program can take that much more before
+  it is refused, never less.
+* **The tmpfs.** After a switch the archive's names are removed from the
+  tmpfs root (`fs::release`, load ring, carrying no claim: `L.user.173` was
+  released unwritten, ledger 5038). Each removal is the namespace's own
+  `unlink` or `rmdir`, under the locks those take; a file still open or
+  mapped keeps its pages until its last reference goes (`H.MEM.9`).
+* **What it leaves.** On the kernel path nothing is kept for `devmgr`. Under
+  `ferrix.devmgr=init` the kernel keeps devmgr's program and its drivers'
+  images for the boot (`L.user.174`): 398 pages on the box's image, 378 of
+  them the driver images a running devmgr holds anyway.
+
 ## 2. Worst-case execution time — F-24
 
 ### 2.1 What is claimed

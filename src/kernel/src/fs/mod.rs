@@ -66,6 +66,7 @@ pub mod procaccess_check;
 pub mod procfs;
 pub(crate) mod pty;
 pub(crate) mod pty_check;
+pub mod release_check;
 pub mod root_disk;
 pub(crate) mod seam;
 pub(crate) mod signalfd;
@@ -84,12 +85,12 @@ pub(crate) mod wake;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use ferrix_bootinfo::BootView;
 use ferrix_sync::Once;
 use ferrix_vfs::access::MAY_EXEC;
-use ferrix_vfs::initramfs::{self, UnpackError, Unpacked, makedev};
+use ferrix_vfs::initramfs::{self, Removed, UnpackError, Unpacked, makedev};
 use ferrix_vfs::tmpfs::Tmpfs;
 use ferrix_vfs::{
     Clock, Context, Errno, FileType, Location, Namespace, OpenFile, OpenFlags, SetAttributes,
@@ -230,13 +231,95 @@ pub(crate) fn owner_of(ns: &Namespace) -> Arc<crate::syscall::userns::UserNamesp
         .unwrap_or_else(|| Arc::clone(crate::syscall::userns::first()))
 }
 
-/// The initramfs as the loader handed it over, kept for the root disk to
-/// install from.
-static ARCHIVE: Once<&'static [u8]> = Once::new();
+/// What [`release`] gave back.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Released {
+    /// Whether there was an archive to give back.
+    pub(crate) archive: bool,
+    /// The archive's frames given to the allocator, the managed frames and
+    /// the watermark after.
+    pub(crate) given: mm::GivenBack,
+    /// What the release took out of the tmpfs root after a switch; `None`
+    /// when the tmpfs is kept.
+    pub(crate) removed: Option<Removed>,
+}
 
-/// The initramfs archive, if the boot had one and [`init`] has run.
-pub(crate) fn initramfs_archive() -> Option<&'static [u8]> {
-    ARCHIVE.get().copied()
+/// Whether [`release`] has run: once a boot.
+static RELEASED: AtomicBool = AtomicBool::new(false);
+
+/// What stays in the tmpfs root when a switch lets the rest of it go
+/// (`L.user.173`), besides the directories mounts stand on and every
+/// directory above a kept name, which the namespace keeps by itself:
+/// `/lib/firmware`, where the display core reads `drm.edid_firmware`'s file
+/// through this namespace at any card's HELLO (`interfaces/display/edid.rs`),
+/// a driver restart's too, when the disk's own driver may be starting again.
+pub(crate) fn spared(name: &[u8]) -> bool {
+    name == b"lib/firmware" || name.starts_with(b"lib/firmware/")
+}
+
+/// Give back the boot's copies of the system once the root is final
+/// (`docs/RAM-RELEASE.md` §2): the initramfs archive's pages to the frame
+/// allocator (`L.mm.99`), and after a switch to a root disk the tmpfs's
+/// copy of it, the archive's names removed but for the mount points, the
+/// directories above them and [`spared`] (`L.user.173`). A root in memory --
+/// no root disk, `ferrix.root=tmpfs`, the live ISO, every test boot -- keeps
+/// its tmpfs: it is `/`, and the checks' fixtures are in it.
+///
+/// Once a boot: a second call does nothing and answers `None`. Called on
+/// the kernel path after the boot's checks, and under `ferrix.devmgr=init`
+/// from the root's switch task on every way out of it; pid 1's inputs were
+/// copied out of the archive when they were taken (`init::set_inputs`).
+pub(crate) fn release() -> Option<Released> {
+    if RELEASED.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let mut released = Released::default();
+    if root_disk::switched() {
+        let ns = namespace();
+        let ctx = ns.context();
+        released.removed = mm::with_initrd(|archive| {
+            initramfs::remove(ns, &ctx, archive, &spared).unwrap_or_default()
+        });
+    }
+    if let Some(given) = mm::give_back_initrd() {
+        released.archive = true;
+        released.given = given;
+    }
+    Some(released)
+}
+
+/// [`release`], under its boot check when the checks run (`release_check`),
+/// and said in one line either way.
+pub fn release_boot_copies() {
+    let released = if crate::checks::run() {
+        release_check::run()
+    } else {
+        release()
+    };
+    let Some(released) = released else {
+        return;
+    };
+    let tmpfs = match released.removed {
+        Some(removed) => alloc::format!(
+            "the tmpfs gave up {} names of it and kept {}",
+            removed.removed,
+            removed.kept
+        ),
+        None => alloc::string::String::from("the tmpfs stays: / is in memory"),
+    };
+    if released.archive {
+        crate::console::println!(
+            "  release  initramfs: {} pages ({} KiB) given to the frame allocator, MemTotal {} KiB, \
+             watermark {} frames, longest hold {} us; {tmpfs}",
+            released.given.frames,
+            released.given.frames * 4,
+            released.given.managed * 4,
+            released.given.watermark,
+            released.given.longest_hold_nanos / 1000,
+        );
+    } else {
+        crate::console::println!("  release  no initramfs to give back; {tmpfs}");
+    }
 }
 
 /// A device number no other filesystem has: `st_dev` for an in-memory one.
@@ -568,22 +651,25 @@ pub fn init(view: &BootView<'_>) -> Result<Report, InitError> {
         initramfs_bytes: None,
         unpacked: None,
     };
-    if let Some((phys, len)) = view.initrd() {
-        let archive = initrd(view, phys, len)?;
-        let _ = ARCHIVE.call_once(|| archive);
-        // Pid 1's inputs, which the unpack below leaves out of the root:
-        // read where the archive is, through the interface init defines.
-        let _ = crate::init::set_inputs(initramfs::init_entries(archive).map(|entry| {
-            crate::init::InputEntry {
-                name: entry.name,
-                regular: entry.regular,
-                directory: entry.directory,
-                links: entry.links,
-                data: entry.data,
-            }
-        }));
+    if let Some(len) = mm::keep_initrd(view).map_err(|_| InitError::OutsideDirectMap)? {
+        let unpacked = mm::with_initrd(|archive| {
+            // Pid 1's inputs, which the unpack below leaves out of the root:
+            // read where the archive is, through the interface init defines,
+            // which keeps a copy of each.
+            let _ = crate::init::set_inputs(initramfs::init_entries(archive).map(|entry| {
+                crate::init::InputEntry {
+                    name: entry.name,
+                    regular: entry.regular,
+                    directory: entry.directory,
+                    links: entry.links,
+                    data: entry.data,
+                }
+            }));
+            initramfs::unpack(ns, &ctx, archive)
+        })
+        .ok_or(InitError::OutsideDirectMap)?;
         report.initramfs_bytes = Some(len);
-        report.unpacked = Some(initramfs::unpack(ns, &ctx, archive).map_err(InitError::Unpack)?);
+        report.unpacked = Some(unpacked.map_err(InitError::Unpack)?);
         // AoU-24, checked on every boot: the unpacker left pid 1's inputs in
         // the archive. Fails closed: a root with a copy beside them is no root.
         if ns.resolve(&ctx, None, b"/.ferrix", false).is_ok() {
@@ -637,23 +723,4 @@ pub fn init(view: &BootView<'_>) -> Result<Report, InitError> {
     ns.set_attributes(&mounted, &sticky)
         .map_err(|errno| InitError::Mount("/dev/shm", errno))?;
     Ok(report)
-}
-
-/// The archive, as bytes the kernel can read.
-fn initrd(view: &BootView<'_>, phys: u64, len: u64) -> Result<&'static [u8], InitError> {
-    let info = view.raw();
-    let end = phys.checked_add(len).ok_or(InitError::OutsideDirectMap)?;
-    let map_end = info
-        .physmap_phys
-        .checked_add(info.physmap_len)
-        .ok_or(InitError::OutsideDirectMap)?;
-    if phys < info.physmap_phys || end > map_end {
-        return Err(InitError::OutsideDirectMap);
-    }
-    let len = usize::try_from(len).map_err(|_| InitError::OutsideDirectMap)?;
-    // SAFETY: the loader read the archive into memory the map reports as
-    // `Initrd`, which nothing reclaims and nothing writes after the hand-off,
-    // and the check above puts all of it inside the direct map. So the bytes
-    // stay valid and unaliased by a writer for the life of the system.
-    Ok(unsafe { core::slice::from_raw_parts(mm::direct_map(phys) as *const u8, len) })
 }

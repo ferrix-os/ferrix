@@ -1,6 +1,6 @@
 # Memory the kernel keeps after boot and after a game
 
-Status: R1 design revised for B1-B4 (§2); R2 built (§3, "How it was built"). The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
+Status: R1 built (§2; design OK IF 1-10, ledger 5022, ruling 5038); R2 built (§3, "How it was built"). The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
 
 ## 1. Why
 
@@ -43,8 +43,11 @@ time, are 24,639 pages (100,921,344 bytes). `lib/firmware` holds nothing.
 
 On devmgr's first start `read_files` reads `/sbin/devmgr` into a
 `vmap::Buffer`, the manifest, and every driver it names into a VMO of its
-own (`Files`). From now on the kernel keeps them: a `Kept` set in
-`discovery/devmgr.rs`, made by that first read, and every later start --
+own (`Files`). From now on the kernel keeps them: a `KEPT` set in
+`discovery/devmgr.rs`, made by that first read when it read every file,
+and only under `ferrix.devmgr=init` -- on the kernel path nothing starts a
+second devmgr, so nothing is kept there (the consultant's C1) -- and every
+later start --
 pid 1's `devmgr_start` after a `svc restart devmgr.service` or after devmgr
 died -- is handed the same names, a new `Arc` of the same VMOs and the same
 program bytes. No start after the first reads the tmpfs or the disk;
@@ -99,15 +102,19 @@ release on the kernel path comes after `finish_memory`.
 
 ### No reader outlives the archive (B2)
 
-`ARCHIVE` becomes `Once<SleepLock<Option<Initrd>>>`, `Initrd` the physical
-base and length; nothing `'static` points into it. `initrd()` and its SAFETY
-note ("for the life of the system") go. The one way in is
-`with_initramfs_archive(|bytes| ...)`, which holds the lock across the
-closure and makes the slice inside it (the new `unsafe`, `(KMEM)`: the
-frames are the loader's `Initrd`, never the buddy's while the `Option` is
-`Some`, and the release takes it out under the same lock before handing a
-frame back). The closure's borrow cannot leave it. A sleeping lock, since
-the install holds it across a 95 MB unpack onto btrfs.
+The archive is mm's to keep (core; the consultant's ruling, ledger 5038,
+M1-M4): `fs::init` calls `mm::keep_initrd(view)`, which itself checks the
+range lies in one `Initrd` region of the memory map and inside the direct
+map, and keeps it in `INITRD`, a `Once<SleepLock<Option<Initrd>>>`, the
+physical base and length; nothing `'static` points into it. `fs::initrd()`
+and its SAFETY note ("for the life of the system") are gone. The one way in
+is `mm::with_initrd(|bytes| ...)`, which holds the lock across the closure
+and makes the slice inside it (the one new `unsafe`, `(KMEM)`: the frames
+are the loader's `Initrd`, never the buddy's while the `Option` is `Some`,
+and the give-back takes it out under the same lock before handing a frame
+back). The closure's borrow cannot leave it. A sleeping lock, since the
+install holds it across a 95 MB unpack onto btrfs; once the scheduler runs,
+a caller that may not block is refused with `None`.
 
 Every reader, and where it runs:
 
@@ -123,18 +130,21 @@ Every reader, and where it runs:
    archive; `Image::BuiltIn` borrows the same. `InputEntry` keeps the
    archive's lifetime only for the call.
 4. The boot checks: `fs::check::run` reads the `Report` (counts), not the
-   archive; `init_check` judges entries it makes itself; nothing else names
-   `ARCHIVE` (`git grep initramfs_archive` before the change: `root_disk.rs`
+   archive; `init_check` judges entries it makes itself; nothing else read
+   it (`git grep initramfs_archive` before the change: `root_disk.rs`
    alone).
 5. The tmpfs release below reads the archive's names, under the lock, just
    before the archive goes.
 
-The release: take the `Option` under the lock, then
-`mm::give_back_initrd(base, len)`, which hands the whole pages inside
-`[base, base + len)` to the buddy under `FRAMES` with
+The release: `mm::give_back_initrd()`, a safe function, takes the `Option`
+under the lock, then hands the whole pages inside `[base, base + len)` that
+the frame array describes (`mm::initrd_frames`) to the buddy with
 `Frames::insert_free` (it takes only `Reserved` frames, so a page the
-loader shares with anything else at either end is not given), adds them to
-`managed`, and stores `watermark_for(managed)` in the same hold.
+loader shares with anything else at either end is not given), in batches
+of at most 1024 frames, one hold of `FRAMES` each, and stores
+`watermark_for(managed)` in the last batch's hold
+(`docs/certification/MEMORY-AND-TIMING.md` §1.9). A second call gives
+nothing.
 
 ### The tmpfs, after a switch (B3)
 
@@ -189,7 +199,7 @@ with the last.
 | MemTotal, MemFree, `sysinfo` | `procfs/render.rs`, `syscall/system.rs` | read live each call |
 | a tmpfs's `statfs` size, half the managed frames | `fs/pages.rs` `capacity` | read live each call |
 | the pin ceiling (a quarter) and the Intel GPU's pin budget | `object/pin.rs` `count_ceiling`, once at stage 10 | kept: up to 23,343/4 frames lower than it could be; a lower ceiling only refuses a pin sooner, and the GPU's budget may already be a domain's |
-| the `memory` boot line | `say_booted` | printed after the release, so it shows the new total |
+| the `memory` boot line | `say_booted` | on the kernel path printed after the release, so it shows the new total; under `ferrix.devmgr=init` printed before it (the release waits for devmgr, which pid 1 starts after `say_booted`), so it shows the total before, and the `release` line the one after |
 | quotas, `memory.max`, kmem defaults | `object/quota.rs`, `ferrix_kmem` | none derive from the managed frames (`git grep managed_frames`) |
 
 ### Requirements
@@ -204,9 +214,15 @@ The reserved ids, written in `docs/sysml` by the landing and released from
   is reached only under its lock, and answers nothing after the release.
 * **L.init.5**: pid 1's inputs survive the release unchanged, and none of
   them lies in the released pages.
-* **L.user.173**: after a switch the tmpfs keeps only the mount points, their
-  parents and `/lib/firmware`; a file open or mapped across the release
-  keeps its bytes.
+* **L.user.173**: reserved for the tmpfs's release and released unwritten
+  (the consultant's ruling, ledger 5038, U1-U3): that release is
+  `fs::release` (load ring) and `ferrix_vfs::initramfs::remove` (no ring),
+  and no item code relies on what the tmpfs holds after it. It is load-ring
+  behaviour and carries no claim; the ferrix-vfs host test and the release
+  check's tmpfs half on `test-restart --boot blk` are development evidence
+  only. **The assumption this rests on (U3):** no item-ring code resolves a
+  path in the kernel's first namespace after the release; a change that does
+  comes back for review.
 * **L.user.174**: every devmgr start after the first starts from the kept
   set, never from a path.
 
@@ -219,13 +235,13 @@ just after:
 
 * the managed count up by exactly the archive's whole pages, every one of
   them no longer `Reserved` in the frame array, the watermark equal to
-  `watermark_for(managed)`, `with_initramfs_archive` answering `None`
-  (L.mm.99-100);
+  `watermark_for(managed)`, `mm::with_initrd` and `mm::initrd_span`
+  answering `None` (L.mm.71, L.mm.99-100);
 * each input's CRC the same as before, and no input's bytes inside the
   released range (L.init.5);
 * on a switched boot: the tmpfs's root walked, holding only the spared set;
   a file opened and its VMO held before the release reading back the same
-  bytes after (L.user.173).
+  bytes after (development evidence, no claim: L.user.173 is unwritten).
 
 Gates:
 

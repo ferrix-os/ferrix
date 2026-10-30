@@ -902,8 +902,10 @@ fn test_files(shell: &[u8], busybox: &[u8], dirclient: &[u8]) -> Vec<File> {
     // `timeout` for the `/dev/tty` probe's read.
     // `hostname` for the filter checks: `sethostname`, outside
     // `@system-service`.
+    // `sync` for the commit after devmgr's restart, which only the disk
+    // driver the restarted devmgr started can carry to the disk.
     for applet in [
-        "su", "nc", "mkdir", "cat", "setsid", "stat", "timeout", "hostname",
+        "su", "nc", "mkdir", "cat", "setsid", "stat", "timeout", "hostname", "sync",
     ] {
         files.push(File {
             path: format!("bin/{applet}"),
@@ -2418,9 +2420,25 @@ fn judge_sandbox(said: &[String]) -> Vec<String> {
 /// a second `devmgr` once the first and its drivers have gone, with init
 /// removing the first's cgroup and not saying it could not.
 ///
+/// And the boot's copies of the system given back (`docs/RAM-RELEASE.md`
+/// §2): the release line before init hears where `/` is, so before the
+/// restart; the second `devmgr` started from the set the kernel kept, its
+/// fingerprint unchanged, since the tmpfs the first one's files came from
+/// is gone; and `/` written, synced and read back after the restart, which
+/// only a disk driver that second `devmgr` started serves.
+///
 /// Verifies: L.quiesce.4
+/// Verifies: L.user.174
 fn devmgr_by_init(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<()> {
     let all = everything(at);
+    let place = |text: &str| all.iter().position(|line| line.contains(text));
+    match (place(RELEASED), place("init     / is the root volume now")) {
+        (Some(released), Some(told)) if released < told => {}
+        (None, _) => failures.push("the boot's copies of the system were not given back".into()),
+        _ => failures.push(
+            "the boot's copies of the system were given back after init heard where / is".into(),
+        ),
+    }
     for (line, what) in [
         (
             "init     the kernel greeted init, version 1, and gave it devmgr's starter",
@@ -2465,6 +2483,15 @@ fn devmgr_by_init(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
     if started(at.after()) <= before {
         failures.push("svc restart devmgr.service did not start a second devmgr".into());
     }
+    let restarted = at
+        .after()
+        .get(restart..)
+        .unwrap_or_default()
+        .iter()
+        .any(|line| line.contains("devmgr   started by pid 1:") && line.contains(FROM_KEPT));
+    if !restarted {
+        failures.push("the second devmgr was not started from the set the kernel kept".into());
+    }
     match ask(at, "svc status devmgr.service\n", "Active: ")? {
         Some(line) if line.contains("Active: active") => {}
         other => failures.push(format!(
@@ -2477,8 +2504,28 @@ fn devmgr_by_init(at: &mut Watching<'_>, failures: &mut Vec<String>) -> Result<(
     if has(since, "devmgr.service: removing its cgroup") {
         failures.push("init could not remove devmgr.service's cgroup on its restart".into());
     }
+    // The root disk's driver died with the first devmgr's job; a commit
+    // reaches the disk only through the one the second started.
+    match ask(
+        at,
+        "echo kept-set > /restarted && sync && read v < /restarted && echo devmgr-'restart-file='$v\n",
+        "devmgr-restart-file=",
+    )? {
+        Some(line) if line.trim() == "devmgr-restart-file=kept-set" => {}
+        other => failures.push(format!(
+            "/ was not written, synced and read back after devmgr's restart: {other:?}"
+        )),
+    }
     Ok(())
 }
+
+/// The kernel's line when it has given back the boot's copies of the
+/// system (`fs::release_boot_copies`).
+const RELEASED: &str = "  release  initramfs: ";
+
+/// What the kernel adds to a `devmgr` start's line when it came from the set
+/// it kept (`discovery/devmgr.rs`).
+const FROM_KEPT: &str = "from the kept set, its fingerprint as when it was kept";
 
 /// Resources (L5, stage three): `hog.service`, in `test.slice` under a
 /// 16 MiB `MemoryMax=`, grows until the kernel's OOM kill takes it, and is

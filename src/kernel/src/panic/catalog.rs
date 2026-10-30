@@ -1918,6 +1918,30 @@ pub static ROOT_PID1: Explanation = Explanation {
     see: "src/kernel/src/fs/root_disk.rs; docs/INIT.md §7.3; docs/certification/ITEM.md",
 };
 
+/// For `fs::release_check`, when the boot's copies of the system were not
+/// given back as `docs/RAM-RELEASE.md` §2 says.
+// CHECKS-ONLY: for `run` in `fs/release_check.rs`.
+pub static RELEASE: Explanation = Explanation {
+    code: "FX-1203",
+    title: "the boot's copies of the system were not given back as specified",
+    meaning: "Once the root is final the kernel gives the initramfs archive's whole pages to the \
+              frame allocator, recomputes the watermark from the new managed count, and after a \
+              switch to a root disk removes the archive's names from the tmpfs but for the mount \
+              points, the directories above them and /lib/firmware. The release's boot check \
+              looks before and after it: the managed frames up by exactly the archive's whole \
+              pages and none of them Reserved, the watermark watermark_for the new count, the \
+              archive answering nothing, pid 1's inputs unchanged and outside the released \
+              pages, and after a switch no other name of the archive left and a file held open \
+              and mapped across the release reading as before.",
+    causes: &[
+        "`release` in src/kernel/src/fs/mod.rs or `give_back_initrd` in src/kernel/src/mm.rs gave \
+         back other frames than the archive's whole pages, or left the watermark as it was.",
+        "`init::set_inputs` kept a slice of the archive instead of a copy.",
+        "`ferrix_vfs::initramfs::remove` left a name of the archive, or removed a spared one.",
+    ],
+    see: "src/kernel/src/fs/release_check.rs; docs/RAM-RELEASE.md §2",
+};
+
 /// For `check_devmgr` in `main.rs`, when `devmgr::start` fails.
 pub static STAGE10_DEVMGR: Explanation = Explanation {
     code: "FX-1006",
@@ -3646,6 +3670,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &NETLINK,
     &STAGE12_WRITE,
     &ROOT_PID1,
+    &RELEASE,
     &STAGE13_CGROUPFS,
     &STAGE13_SECCOMP,
     &STAGE13_SECCOMP_FILTERS,
