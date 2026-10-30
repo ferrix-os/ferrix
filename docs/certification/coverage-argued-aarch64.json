@@ -946,42 +946,42 @@
     },
     {
       "file": "mm.rs",
-      "lines": "2456-2458",
+      "lines": "2493-2495",
       "category": "failure-path",
       "match": "fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "2474-2477",
+      "lines": "2511-2514",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2487",
+      "lines": "2524",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2489",
+      "lines": "2526",
       "category": "failure-path",
       "match": "routes(Route::Released),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2491",
+      "lines": "2528",
       "category": "failure-path",
       "match": "routes(Route::HeapReturned),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2493",
+      "lines": "2530",
       "category": "failure-path",
       "match": "routes(Route::KernelTables),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
