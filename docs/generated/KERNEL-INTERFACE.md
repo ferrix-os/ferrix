@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2422 declarations in the core's files, 175 in the item's; 80 checks-only.
+2421 declarations in the core's files, 175 in the item's; 79 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2962,7 +2962,6 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `COUNT_CHUNK` | const | load (checks) | checks-only |
 | `RunError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
 | `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

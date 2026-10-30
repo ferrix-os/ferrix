@@ -679,14 +679,10 @@ fn time_resident_count(process: &Process) -> Result<(), &'static str> {
     if split.anon < TIMED_PAGES {
         return Err("the timed mapping's pages were not counted");
     }
-    let holds = split.total().div_ceil(crate::user::vmo::COUNT_CHUNK as u64);
     crate::console::println!(
-        "  procfs   resident set of {} pages counted in {} ns: {} holds of at most {} entries, {} ns a hold on average",
+        "  procfs   resident set of {} pages counted in {} ns",
         split.total(),
         took,
-        holds,
-        crate::user::vmo::COUNT_CHUNK,
-        took / holds.max(1),
     );
     Ok(())
 }
@@ -752,9 +748,20 @@ fn check_resident_memory_file(
         let before = resident_lines(ns, ctx)?;
         let shared = map(true).map_err(|_| "the space refused a shared tmpfs mapping")?;
         let lines = resident_lines(ns, ctx)?;
+        // The same page mapped a second time: counted once per mapping.
+        let again = map(true);
+        let twice = resident_lines(ns, ctx);
+        if let Ok(again) = again {
+            let _ = process.space().unmap(again, PAGE_SIZE);
+        }
         let _ = process.space().unmap(shared, PAGE_SIZE);
+        let _ = again.map_err(|_| "the space refused a second shared tmpfs mapping")?;
+        let twice = twice?;
         if lines[3] != before[3] + page_kib || lines[1] != before[1] || lines[2] != before[2] {
             return Err("a tmpfs page mapped shared did not add one page to RssShmem alone");
+        }
+        if twice[3] != before[3] + 2 * page_kib {
+            return Err("a tmpfs page mapped twice was not counted once per mapping");
         }
         let private = map(false).map_err(|_| "the space refused a private tmpfs mapping")?;
         let read = resident_lines(ns, ctx)?;
@@ -774,6 +781,89 @@ fn check_resident_memory_file(
             return Err(
                 "a private tmpfs page written did not move from RssShmem to RssAnon, VmRSS unchanged",
             );
+        }
+        Ok(())
+    })();
+    drop(file);
+    let _ = ns.unlink(ctx, None, path);
+    outcome?;
+    check_resident_gap(ns, ctx, process)
+}
+
+/// The count over an object's regions less its gaps: a tmpfs file of eight
+/// pages with pages 0, 1 and 7 written, mapped as pages 0 and 2 to 7. Its
+/// regions span more pages than it holds, so it is counted as the pages it
+/// holds less those in the gap between them -- page 1 -- and adds exactly
+/// two pages to `RssShmem`.
+fn check_resident_gap(
+    ns: &Namespace,
+    ctx: &Context,
+    process: &Process,
+) -> Result<(), &'static str> {
+    use crate::user::space::{FileMapping, FilePlace};
+    use crate::user::vmo::Vmo;
+
+    let page_kib = PAGE_SIZE / 1024;
+    let path: &[u8] = b"/tmp/procfs-resident-gap";
+    let file = ns
+        .open(
+            ctx,
+            None,
+            path,
+            &OpenFlags {
+                create: true,
+                truncate: true,
+                ..read_write()
+            },
+            0o600,
+        )
+        .map_err(|_| "could not make a tmpfs file for the gap check")?;
+    let page = vec![0x3c_u8; PAGE_SIZE as usize];
+    for at in [0, 1, 7] {
+        let written = file
+            .write_at(at * PAGE_SIZE, &page)
+            .map_err(|_| "could not write the gap check's file")?;
+        if written != PAGE_SIZE as usize {
+            return Err("the gap check's file took less than was written");
+        }
+    }
+    let object = ns
+        .resolve(ctx, None, path, true)
+        .map_err(|_| "the gap check's file is gone")?
+        .inode()
+        .map_err(|_| "the gap check's file has no inode")?
+        .mapping()
+        .and_then(|object| object.downcast::<Vmo>().ok())
+        .ok_or("the gap check's file has no object to map")?;
+    let map = |offset: u64, pages: u64| {
+        process.space().map_file(
+            FilePlace::Anywhere(None),
+            pages * PAGE_SIZE,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ_WRITE
+            },
+            Arc::clone(&object),
+            offset * PAGE_SIZE,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn core::any::Any + Send + Sync>,
+                may_write: true,
+            },
+        )
+    };
+    let outcome = (|| {
+        let before = resident_lines(ns, ctx)?;
+        let low = map(0, 1).map_err(|_| "the space refused the gap check's first mapping")?;
+        let high = map(2, 6);
+        let after = resident_lines(ns, ctx);
+        if let Ok(high) = high {
+            let _ = process.space().unmap(high, 6 * PAGE_SIZE);
+        }
+        let _ = process.space().unmap(low, PAGE_SIZE);
+        let _ = high.map_err(|_| "the space refused the gap check's second mapping")?;
+        let after = after?;
+        if after[3] != before[3] + 2 * page_kib {
+            return Err("a file's pages in the gap between its mappings were counted");
         }
         Ok(())
     })();

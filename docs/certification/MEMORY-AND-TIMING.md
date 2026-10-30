@@ -1823,16 +1823,23 @@ verdict of ledger line 3950.
   every process -- holds that process's space lock for one pass over its
   regions, one entry each, into a list allocated fallibly first: the pass
   `/proc/<pid>/maps` already makes. The lock is let go before any page is
-  counted. Each object's pages lock is then held for at most `COUNT_CHUNK`
-  (256) entries of its page map's range walk, and let go between chunks;
+  counted. What is still walked page by page: for an object whose regions
+  do not overlap and are of one kind, the shorter of its regions' spans and
+  the gaps between them -- the gaps (its committed pages, one count, less
+  them) when its regions span at least as many pages as it holds, its
+  regions when they span fewer, as a disk file read with `read` and mapped
+  in part does; every region of an object whose regions overlap or are of
+  more than one kind; and every private file mapping's shadow, which holds
+  only the mapping's copies. Each object's pages lock is held for at
+  most `COUNT_CHUNK` (256) entries of a range walk, and let go between chunks;
   `committed_in_both` holds one object's for at most 64 entries, then the
   other's for one lookup at a time, never both. A program's own page count
   sets how many holds a read takes, never how long one is, so a fault on
   the program's objects waits behind at most one chunk. The order, space
   lock then pages lock, is `resident_pages`'s already; here the two are
   never held together. Measured under KVM on nazuna (the procfs check's
-  line, 2026-10-30): 4,098 pages in 17 holds, 164 µs in all, 9.6 µs a hold
-  on average. The worst case the review asks for -- an object of 1 GiB or
+  line, 2026-10-30): 4,098 pages counted in 5 µs, where the walk page by
+  page took 164 µs. The worst case the review asks for -- an object of 1 GiB or
   more mapped in part, `status` read in a loop, and the target's fault
   latency meanwhile -- is not measured yet: a row of `docs/backlog/p2.md`.
 

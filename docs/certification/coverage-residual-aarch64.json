@@ -882,7 +882,7 @@
     "user/vmo.rs": {
       "ring": "core",
       "lines": [
-        2070
+        2068
       ]
     },
     "arch/aarch64/signal.rs": {

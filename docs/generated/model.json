@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "94dc0423069116221afded03fdc5ba6bbf2859b9135b00b73212b71506225271",
+  "digest": "347dd58c1c696aadedf842b33bfadd11a6c443743dacd08a6af84cfb64eb2e8a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -56131,10 +56131,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"In the procfs check process, VmRSS equals the three parts; two stack pages written for the first time add exactly 8 kB to RssAnon and nothing to the others; one page of a shared anonymous mapping written adds exactly 4 kB to RssShmem alone; a page of a tmpfs file mapped shared adds 4 kB to RssShmem alone; mapped private and then written, it moves 4 kB from RssShmem to RssAnon with VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.\"",
+                  "value": "\"In the procfs check process, VmRSS equals the three parts; two stack pages written for the first time add exactly 8 kB to RssAnon and nothing to the others; one page of a shared anonymous mapping written adds exactly 4 kB to RssShmem alone; a page of a tmpfs file mapped shared adds 4 kB to RssShmem alone, and mapped shared twice 8 kB; a tmpfs file of eight pages with pages 0, 1 and 7 written, mapped as pages 0 and 2 to 7, adds 8 kB and not the page in the gap; mapped private and then written, it moves 4 kB from RssShmem to RssAnon with VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2647
+                    "line": 2650
                   }
                 },
                 {
@@ -56145,7 +56145,7 @@
                   "value": "\"H.MEM.9\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2648
+                    "line": 2651
                   }
                 },
                 {
@@ -56153,10 +56153,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"user::space::AddressSpace::resident_split\", \"user::space::Resident::total\", \"user::vmo::Vmo::committed_in\", \"user::vmo::Vmo::committed_in_both\")",
+                  "value": "(\"user::space::AddressSpace::resident_split\", \"user::space::Resident::total\", \"user::space::Resident::add\", \"user::space::Resident::take\", \"user::space::Counted::kind\", \"user::space::AddressSpace::list_counted\", \"user::space::count_object\", \"user::vmo::Vmo::committed_in\", \"user::vmo::Vmo::committed_in_both\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2652
+                    "line": 2660
                   }
                 }
               ]
@@ -56169,7 +56169,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2655
+                "line": 2663
               },
               "children": [
                 {
@@ -56180,7 +56180,7 @@
                   "value": "\"A disk file's pages inside a region's range shall count as RssFile, the file's other cached pages not at all, and a page a private mapping of it has written as RssAnon instead.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2658
+                    "line": 2666
                   }
                 },
                 {
@@ -56191,7 +56191,7 @@
                   "value": "\"With an eight-page file on the stage 12 disk all in the cache, a read-only mapping of pages 2 to 5 counts exactly 4 file pages and no others; a private mapping of page 0, written, counts 1 anonymous page and no file page.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2662
+                    "line": 2670
                   }
                 },
                 {
@@ -56202,7 +56202,7 @@
                   "value": "\"H.MEM.9\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2663
+                    "line": 2671
                   }
                 },
                 {
@@ -56213,7 +56213,7 @@
                   "value": "(\"user::space::AddressSpace::resident_split\", \"user::vmo::Vmo::is_disk_file\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2665
+                    "line": 2673
                   }
                 }
               ]

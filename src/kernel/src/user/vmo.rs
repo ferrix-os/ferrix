@@ -234,12 +234,10 @@ pub(crate) enum Commit {
     Unfilled,
 }
 
-// CHECKS-ONLY: fs/procfs/check.rs
 /// Committed pages a count looks at per hold of an object's pages lock
 /// ([`Vmo::committed_in`]): what a fault on the object may wait behind while
 /// `/proc/<pid>/status` counts it.
-#[doc(hidden)]
-pub const COUNT_CHUNK: usize = 256;
+pub(crate) const COUNT_CHUNK: usize = 256;
 
 /// Pages [`Vmo::committed_in_both`] takes per hold, kept on the stack.
 const OVERLAP_CHUNK: usize = 64;

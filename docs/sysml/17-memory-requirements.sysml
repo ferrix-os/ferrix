@@ -2642,12 +2642,20 @@ package FerrixMemoryRequirements {
                 three parts; two stack pages written for the first time add exactly 8
                 kB to RssAnon and nothing to the others; one page of a shared
                 anonymous mapping written adds exactly 4 kB to RssShmem alone; a page
-                of a tmpfs file mapped shared adds 4 kB to RssShmem alone; mapped
+                of a tmpfs file mapped shared adds 4 kB to RssShmem alone, and mapped
+                shared twice 8 kB; a tmpfs file of eight pages
+                with pages 0, 1 and 7 written, mapped as pages 0 and 2 to 7, adds 8 kB
+                and not the page in the gap; mapped
                 private and then written, it moves 4 kB from RssShmem to RssAnon with
                 VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.";
             attribute :>> parent = "H.MEM.9";
             attribute :>> unit = ("user::space::AddressSpace::resident_split",
                 "user::space::Resident::total",
+                "user::space::Resident::add",
+                "user::space::Resident::take",
+                "user::space::Counted::kind",
+                "user::space::AddressSpace::list_counted",
+                "user::space::count_object",
                 "user::vmo::Vmo::committed_in",
                 "user::vmo::Vmo::committed_in_both");
         }

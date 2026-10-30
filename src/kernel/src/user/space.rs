@@ -3952,6 +3952,59 @@ impl Drop for AddressSpace {
     }
 }
 
+/// One object's pages in [`AddressSpace::resident_split`], from its
+/// regions, `group`, lowest first: for regions that do not overlap and are
+/// of one kind, the shorter walk -- the regions when they span fewer pages
+/// than the object holds (a file read with `read` and mapped in part), else
+/// its pages less those in the gaps between them, which normally hold none;
+/// otherwise each region over its own range. Then each private file
+/// mapping's copies, by walking its shadow.
+fn count_object(group: &[Counted], resident: &mut Resident) {
+    let Some(head) = group.first() else {
+        return;
+    };
+    let kind = head.kind();
+    let disjoint = group.windows(2).all(|pair| {
+        pair.first()
+            .zip(pair.get(1))
+            .is_some_and(|(low, high)| low.end <= high.first)
+    }) && group.iter().all(|counted| counted.kind() == kind);
+    let spans = group.iter().fold(0u64, |sum, counted| {
+        sum.saturating_add(counted.end.saturating_sub(counted.first))
+    });
+    let committed = head.vmo.committed() as u64;
+    if !disjoint || spans < committed {
+        for counted in group {
+            resident.add(
+                counted.kind(),
+                counted.vmo.committed_in(counted.first, counted.end),
+            );
+        }
+    } else {
+        let mut outside = 0u64;
+        let mut from = 0u64;
+        for counted in group {
+            outside = outside.saturating_add(head.vmo.committed_in(from, counted.first));
+            from = counted.end;
+        }
+        outside = outside.saturating_add(head.vmo.committed_in(from, u64::MAX));
+        let inside = committed.saturating_sub(outside);
+        resident.add(kind, inside);
+    }
+    // A private file mapping's copies: anonymous, and no longer its file's.
+    // Counted by walking the shadow, which holds only them.
+    for counted in group {
+        if let Some(shadow) = &counted.shadow {
+            let (first, end) = (counted.first, counted.end);
+            resident.add(Kind::Anon, shadow.committed_in(first, end));
+            resident.take(
+                counted.kind(),
+                shadow.committed_in_both(&counted.vmo, first, end),
+            );
+        }
+    }
+}
+
 /// One region's part of an object, as [`AddressSpace::resident_split`]
 /// lists it under the space's lock to count after.
 struct Counted {
@@ -3980,7 +4033,53 @@ pub struct Resident {
     pub shmem: u64,
 }
 
+/// Which of [`Resident`]'s counts a region's pages go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// `RssAnon`.
+    Anon,
+    /// `RssFile`.
+    File,
+    /// `RssShmem`.
+    Shmem,
+}
+
+impl Counted {
+    /// Which count this region's own pages go to: private memory is
+    /// anonymous, shared anonymous memory and a memory filesystem's file
+    /// shared memory, a disk file's pages a file's.
+    fn kind(&self) -> Kind {
+        if !self.file {
+            if self.shared { Kind::Shmem } else { Kind::Anon }
+        } else if self.vmo.is_disk_file() {
+            Kind::File
+        } else {
+            Kind::Shmem
+        }
+    }
+}
+
 impl Resident {
+    /// Add `pages` to the count `kind` names.
+    fn add(&mut self, kind: Kind, pages: u64) {
+        let slot = match kind {
+            Kind::Anon => &mut self.anon,
+            Kind::File => &mut self.file,
+            Kind::Shmem => &mut self.shmem,
+        };
+        *slot = slot.saturating_add(pages);
+    }
+
+    /// Take `pages` off the count `kind` names.
+    fn take(&mut self, kind: Kind, pages: u64) {
+        let slot = match kind {
+            Kind::Anon => &mut self.anon,
+            Kind::File => &mut self.file,
+            Kind::Shmem => &mut self.shmem,
+        };
+        *slot = slot.saturating_sub(pages);
+    }
+
     /// All of it: `VmRSS`.
     #[must_use]
     pub const fn total(&self) -> u64 {
@@ -4060,58 +4159,61 @@ impl AddressSpace {
     /// [`fallible::AllocError`] when there is no memory to list the regions
     /// in.
     pub fn resident_split(&self) -> Result<Resident, fallible::AllocError> {
-        let listed = {
-            let inner = self.inner.lock();
-            let mut listed: Vec<Counted> = fallible::try_with_capacity(inner.map.iter().len())?;
-            for vma in inner.map.iter() {
-                let pages = (vma.range.end() - vma.range.start()) / PAGE_SIZE;
-                let (id, offset, file) = match vma.backing {
-                    Backing::Anonymous { id, offset } => (id, offset, false),
-                    Backing::File { id, offset } => (id, offset, true),
-                    Backing::Device { .. } => continue,
-                };
-                let Some(vmo) = inner.objects.get(&id) else {
-                    continue;
-                };
-                let first = offset / PAGE_SIZE;
-                let shadow = (file && !vma.flags.shared)
-                    .then(|| inner.shadows.get(&id).cloned())
-                    .flatten();
-                // NOALLOC: room for every region was had above.
-                listed.push(Counted {
-                    vmo: Arc::clone(vmo),
-                    shadow,
-                    first,
-                    end: first.saturating_add(pages),
-                    file,
-                    shared: vma.flags.shared,
-                });
-            }
-            listed
-        };
+        let mut listed = self.list_counted()?;
+        // Each object's regions together, lowest first: an object whose
+        // regions do not overlap and are of one kind is counted the shorter
+        // way rather than page by page (`count_object`). A program of
+        // gigabytes reads its own `stat` often (Wine does), and walking every
+        // page on each read was most of its kernel time (the N150,
+        // 2026-10-30).
+        listed.sort_unstable_by_key(|counted| (Arc::as_ptr(&counted.vmo) as usize, counted.first));
         let mut resident = Resident::default();
-        for counted in &listed {
-            let (first, end) = (counted.first, counted.end);
-            let mut held = counted.vmo.committed_in(first, end);
-            if let Some(shadow) = &counted.shadow {
-                let copied = shadow.committed_in(first, end);
-                resident.anon = resident.anon.saturating_add(copied);
-                held = held.saturating_sub(counted.vmo.committed_in_both(shadow, first, end));
-            }
-            let slot = if !counted.file {
-                if counted.shared {
-                    &mut resident.shmem
-                } else {
-                    &mut resident.anon
-                }
-            } else if counted.vmo.is_disk_file() {
-                &mut resident.file
-            } else {
-                &mut resident.shmem
-            };
-            *slot = slot.saturating_add(held);
+        let mut start = 0;
+        while let Some(head) = listed.get(start) {
+            let object = Arc::as_ptr(&head.vmo);
+            let count = listed
+                .get(start..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|counted| Arc::as_ptr(&counted.vmo) == object)
+                .count();
+            let group = listed.get(start..start + count).unwrap_or_default();
+            start += count;
+            count_object(group, &mut resident);
         }
         Ok(resident)
+    }
+
+    /// [`AddressSpace::resident_split`]'s list: one entry per region that
+    /// maps an object, made under the space's lock and nothing counted.
+    fn list_counted(&self) -> Result<Vec<Counted>, fallible::AllocError> {
+        let inner = self.inner.lock();
+        let mut listed: Vec<Counted> = fallible::try_with_capacity(inner.map.iter().len())?;
+        for vma in inner.map.iter() {
+            let pages = (vma.range.end() - vma.range.start()) / PAGE_SIZE;
+            let (id, offset, file) = match vma.backing {
+                Backing::Anonymous { id, offset } => (id, offset, false),
+                Backing::File { id, offset } => (id, offset, true),
+                Backing::Device { .. } => continue,
+            };
+            let Some(vmo) = inner.objects.get(&id) else {
+                continue;
+            };
+            let first = offset / PAGE_SIZE;
+            let shadow = (file && !vma.flags.shared)
+                .then(|| inner.shadows.get(&id).cloned())
+                .flatten();
+            // NOALLOC: room for every region was had above.
+            listed.push(Counted {
+                vmo: Arc::clone(vmo),
+                shadow,
+                first,
+                end: first.saturating_add(pages),
+                file,
+                shared: vma.flags.shared,
+            });
+        }
+        Ok(listed)
     }
 
     /// Pages the objects this space maps have committed: its resident set.
