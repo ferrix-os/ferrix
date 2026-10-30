@@ -357,3 +357,15 @@ stage 3's rows and L.x86_64.235 restated (B2); McaX's control (B3); the
 * coverage carried on the tip: every anchor carried, none dropped,
   `gen-coverage-justification --check` current (R7). Commits cite ledger
   4820 and 4839.
+
+**Final check (d3ce27ab1): OK** (the consultant's ledger line 4876,
+2026-10-30; internal review, not independent verification, F-27). B1-B4
+closed by 6deacfc3d: the clippy fix, with `check` run: PASSED on
+72724458b; an SMCA bank without all its bring-up accesses has no usable
+address and no cut (`amd-ctl-6deacfc3d-read-dropped` FIRED); the `McaX`
+control (`-mcax`) FIRED; the `config` write held to `smca_bank_up`
+(`-config-write-elsewhere` FIRED on the host). The seven earlier controls
+fired again on 6deacfc3d. Every row passed on 6deacfc3d and counts for the
+tip, since nothing under `src/`, `tools/` or `docs/sysml/` differs; the
+one `test-threads` failure (Arm only, no code of this branch) passed on
+72724458b and has its BACKLOG flake row. Coverage carried and current.
