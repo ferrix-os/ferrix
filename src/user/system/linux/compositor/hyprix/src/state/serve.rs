@@ -786,6 +786,16 @@ impl Compositor<'_> {
         let Some(slot) = self.slots.get_mut(index) else {
             return;
         };
+        // A new frame of the client's own, for the report's "client frames"
+        // line: a buffer attached for this commit, not a commit of state.
+        if change.attached {
+            let count = self
+                .tally
+                .client_frames
+                .entry((slot.serial, surface))
+                .or_insert(0);
+            *count = count.saturating_add(1);
+        }
         if change.buffer.is_none()
             && let Some((toplevel, window)) = slot
                 .windows

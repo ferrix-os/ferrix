@@ -1115,6 +1115,15 @@ impl Compositor<'_> {
                     self.tally.counted
                 ));
             }
+            // `frames` and `of the last` below count what the compositor
+            // drew and showed: a frame is drawn whenever anything changed,
+            // the pointer or another window included, and a client's frame
+            // shown again is counted again. That is NOT a client's frame
+            // rate -- a delta of 31 a second was once read as a game's 31
+            // fps while it made 10 to 25. The client's own is the line
+            // after, the new buffers it committed. The two lines' formats
+            // are read by tools (`tools/common/game/summarize.sh`, the
+            // xtask compositor gates, the box's scripts): keep them.
             (self.report)(&format!(
                 "hyprix: frames {drawn} slowest of the last {counted} {} us, all of them {} us ({}; drew {} px in {} rects, showed {} px; from layout {} commits {} backdrop {} blurs {}{})",
                 self.tally.since.as_micros(),
@@ -1134,6 +1143,10 @@ impl Compositor<'_> {
                 drawn = self.tally.drawn,
                 counted = self.tally.counted,
             ));
+            if let Some(line) = self.client_frames_line() {
+                (self.report)(&line);
+            }
+            self.tally.client_frames.clear();
             (
                 self.tally.since,
                 self.tally.spent,
@@ -1142,6 +1155,61 @@ impl Compositor<'_> {
             ) = (Duration::ZERO, Duration::ZERO, 0, Instant::now());
         }
     }
+}
+
+impl Compositor<'_> {
+    /// The report's line of a client's own frames, since the last report:
+    /// how many new buffers the window [`watched`] picks committed, beside
+    /// how many frames the compositor drew in the same time. `None` with no
+    /// window.
+    fn client_frames_line(&self) -> Option<String> {
+        let layouts = self.state.layout();
+        let window = watched(&layouts)?;
+        let source = self.sources.get(&window)?;
+        let slot = self.slots.get(source.client)?;
+        let new = self
+            .tally
+            .client_frames
+            .get(&(slot.serial(), source.surface))
+            .copied()
+            .unwrap_or(0);
+        let (title, app_id) = slot
+            .client()
+            .toplevels()
+            .find(|(_, top)| top.surface == source.surface)
+            .map(|(_, top)| (top.title.clone(), top.app_id.clone()))
+            .unwrap_or_default();
+        Some(client_frames_said(
+            new,
+            self.tally.counted,
+            self.tally.reported.elapsed(),
+            &title,
+            &app_id,
+        ))
+    }
+}
+
+/// The window whose own frames the report counts: the one fullscreen, or
+/// else the largest on any screen -- a game, a video, whatever someone
+/// asking about frame rates is looking at.
+fn watched(layouts: &[compositor_layout::MonitorLayout]) -> Option<WindowId> {
+    let windows = || layouts.iter().flat_map(|output| output.windows.iter());
+    windows()
+        .find(|placed| placed.fullscreen && placed.border <= 0)
+        .or_else(|| {
+            windows().max_by_key(|placed| placed.rect.width.saturating_mul(placed.rect.height))
+        })
+        .map(|placed| placed.window)
+}
+
+/// `hyprix: client frames K of the last M in T ms ("title", app id)`: the
+/// window's `new` buffers committed while the compositor drew `drawn`
+/// frames, over `took`.
+fn client_frames_said(new: u32, drawn: u32, took: Duration, title: &str, app_id: &str) -> String {
+    format!(
+        "hyprix: client frames {new} of the last {drawn} in {} ms ({title:?}, {app_id})",
+        took.as_millis()
+    )
 }
 
 /// `output` with every floating window whose client area is exactly the
@@ -1232,4 +1300,65 @@ struct Drew {
     /// clients' frame callbacks, so a client draws its next frame while
     /// the host shows this one.
     flips: Vec<(usize, compositor_render::Damage)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use compositor_layout::{MonitorId, MonitorLayout, Placed, Rect, WindowId, WorkspaceId};
+
+    use super::{client_frames_said, watched};
+
+    fn window(id: u64, rect: Rect, fullscreen: bool) -> Placed {
+        Placed {
+            window: WindowId(id),
+            rect,
+            border: if fullscreen { 0 } else { 2 },
+            focused: false,
+            floating: false,
+            fullscreen,
+        }
+    }
+
+    /// The window whose frames are counted is the fullscreen one -- the
+    /// game on one monitor, though a larger window is on the other -- and
+    /// with none fullscreen the largest.
+    #[test]
+    fn the_client_frames_counted_are_the_fullscreen_windows_or_the_largest() {
+        let game = window(1, Rect::new(0, 0, 1280, 720), true);
+        let browser = window(2, Rect::new(1280, 0, 2560, 1440), false);
+        let terminal = window(3, Rect::new(1280, 0, 800, 600), false);
+        let monitor = |id, windows| MonitorLayout {
+            monitor: MonitorId(id),
+            workspace: WorkspaceId(1),
+            windows,
+        };
+        let both = [monitor(1, vec![game]), monitor(2, vec![terminal, browser])];
+        assert_eq!(watched(&both), Some(WindowId(1)));
+        let windowed = [monitor(2, vec![terminal, browser])];
+        assert_eq!(watched(&windowed), Some(WindowId(2)));
+        assert_eq!(watched(&[monitor(1, Vec::new())]), None);
+    }
+
+    /// The line is its own, and says what it counts over what time: the
+    /// drawn-frames line's tools match `hyprix: frames ` and must not take
+    /// it for theirs.
+    #[test]
+    fn the_client_frames_line_is_not_the_drawn_frames_line() {
+        let line = client_frames_said(
+            14,
+            31,
+            Duration::from_millis(1004),
+            "Arknights: Endfield",
+            "endfield.exe",
+        );
+        assert_eq!(
+            line,
+            "hyprix: client frames 14 of the last 31 in 1004 ms (\"Arknights: Endfield\", endfield.exe)"
+        );
+        assert!(!line.contains("hyprix: frames "));
+        assert!(!line.contains("zero-copy frames"));
+        assert!(!line.contains("direct scanout frames"));
+    }
 }

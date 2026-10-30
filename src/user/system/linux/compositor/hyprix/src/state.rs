@@ -523,6 +523,10 @@ struct Tally {
     since_from: [i64; 4],
     /// The largest window surface the slowest of them drew, and how.
     since_surface: Option<compositor_render::timing::Drawn>,
+    /// How many commits that attached a buffer each surface made since the
+    /// last report, by its connection's serial and its `wl_surface`: the
+    /// client's own frames, which the frames drawn are not.
+    client_frames: BTreeMap<(u64, ObjectId), u32>,
     /// When the last report was: the line is a second apart at most, and
     /// silent while nothing is drawn.
     reported: Instant,
@@ -662,6 +666,7 @@ impl<'r> Compositor<'r> {
                 since_drew: (0, 0, 0),
                 since_from: [0; 4],
                 since_surface: None,
+                client_frames: BTreeMap::new(),
                 reported: Instant::now(),
             },
             config,

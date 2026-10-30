@@ -79,6 +79,7 @@ impl Client {
                     return;
                 };
                 surface.pending.buffer = (!buffer.is_null()).then_some(buffer);
+                surface.attached = true;
                 if let Some(orphan) = self.orphans.get_mut(&sender) {
                     orphan.replaced = true;
                 }

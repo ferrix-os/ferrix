@@ -1182,6 +1182,36 @@ fn the_same_buffer_committed_twice_is_not_released() {
     assert_eq!(released, [None, None]);
 }
 
+/// A commit says whether it carries a buffer attached for it: what a
+/// client's frame rate is counted from (hyprix's "client frames" line). The
+/// same buffer attached again is a new frame -- a client drawing into one
+/// buffer -- and a commit with no attach, or of the null buffer, is not.
+#[test]
+fn a_commit_says_whether_a_buffer_was_attached_for_it() {
+    let mut client = drawing_client();
+    let mut bytes = create_surface(3);
+    bytes.extend(create_pool(6, 4096));
+    bytes.extend(create_buffer(6, 7, 0, 16, 16, 64, 1));
+    bytes.extend(attach(3, 7, 0, 0));
+    bytes.extend(commit(3));
+    bytes.extend(commit(3));
+    bytes.extend(attach(3, 7, 0, 0));
+    bytes.extend(commit(3));
+    bytes.extend(attach(3, 0, 0, 0));
+    bytes.extend(commit(3));
+    assert_eq!(client.read(&bytes, &[Fd(3)]), bytes.len());
+
+    let attached: Vec<bool> = client
+        .take_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::SurfaceCommitted { change, .. } => Some(change.attached),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attached, [true, false, true, false]);
+}
+
 #[test]
 fn a_new_buffer_releases_the_one_it_replaced() {
     let mut client = drawing_client();
