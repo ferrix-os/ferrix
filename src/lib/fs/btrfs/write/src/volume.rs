@@ -453,7 +453,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         self.clean.insert(logical, node)
     }
 
-    /// Bring the clean nodes back to [`CLEAN_NODES`], the oldest going
+    /// Bring the clean nodes back to `CLEAN_NODES` (4,096), the oldest going
     /// first; a dirty node is never among them.
     ///
     /// Only between operations, by whoever holds the volume for them: never
@@ -470,7 +470,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     }
 
     /// Give up clean nodes, the oldest first, until `want` bytes of heap are
-    /// given or [`DROP_BATCH`] nodes are gone; answers the bytes given. A
+    /// given or `DROP_BATCH` (64) nodes are gone; answers the bytes given. A
     /// dirty node is never among them. Only between operations, as
     /// [`WriteVolume::trim_clean`].
     pub fn drop_clean(&mut self, want: u64) -> u64 {
