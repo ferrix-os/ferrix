@@ -310,11 +310,13 @@ pub fn release_boot_copies() {
     if released.archive {
         crate::console::println!(
             "  release  initramfs: {} pages ({} KiB) given to the frame allocator, MemTotal {} KiB, \
-             watermark {} frames, longest hold {} us; {tmpfs}",
+             watermark {} frames, {} holds of at most {} frames, the longest {} us; {tmpfs}",
             released.given.frames,
             released.given.frames * 4,
             released.given.managed * 4,
             released.given.watermark,
+            released.given.holds,
+            released.given.largest_batch,
             released.given.longest_hold_nanos / 1000,
         );
     } else {

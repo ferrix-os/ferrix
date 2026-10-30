@@ -699,7 +699,7 @@ reader has the bytes when a frame goes.
   the allocator's largest block, aligned to it), one hold of `FRAMES` each,
   the lock dropped between them: a hold writes the state of at most 1024
   frame entries and pushes at most a handful of free blocks. Measured, the
-  longest hold of a boot (the `release` line's "longest hold"): 1-2 us
+  longest hold of a boot (the `release` line's "the longest"): 1-2 us
   under KVM on x86-64 (`test-boot`, about 9,000 frames in nine or ten
   holds), and 87-93 us on armv7a under TCG, which emulates every
   instruction. `FRAMES` masks interrupts while held, so this is also the

@@ -2030,6 +2030,7 @@ pub struct GivenBack {
 /// most: 4 MiB, the allocator's largest block, so each batch is one block
 /// where the archive's pages allow it and no hold describes more frames
 /// than one block's (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
+// CHECKS-ONLY: fs::release_check, besides `give_back_initrd` here.
 pub const GIVE_BACK_BATCH: u64 = 1024;
 
 /// Where the loader put the initramfs: its physical base and its length,
@@ -2098,6 +2099,7 @@ pub fn keep_initrd(view: &BootView<'_>) -> Result<Option<u64>, OutsideDirectMap>
 /// inside the direct map at `physmap`'s base for its length. [`keep_initrd`]'s
 /// test, which [`with_initrd`]'s SAFETY argument rests on; pure, so the
 /// release check tries it on made-up maps (`L.mm.100`).
+// CHECKS-ONLY: fs::release_check, besides `keep_initrd` here.
 pub fn initrd_readable(
     regions: &[MemRegion],
     (base, len): (u64, u64),
