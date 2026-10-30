@@ -283,3 +283,22 @@ against Linux 6.18.54: its `mce_severity_amd` has no `TCC` test, and its
 
 Design v2 written (A1), carrying A2-A5 and A8, for the consultant's check
 at the code review.
+
+**Landing record (A12, A13).** Logs in
+`~/.local/share/ferrix/logs/queue/<tag>.log`, each with its `gate.sh`
+header.
+
+* Engineering, on 1bdb00dcf (the code before the squash, its kernel the
+  landing's): every Intel and AMD `test-mce` mode under KVM and TCG, 38
+  rows, `run: PASSED` (`amd-1bdb00dcf-*`); the `CPUID 8000_0007h`
+  measurement above is `amd-1bdb00dcf-amd-srar-kvm`.
+* Controls on 0607e0a6a, its decode.rs the landing's, each `control:
+  FIRED` at stage 3: `amd-ctl-0607e0a6a-succor-ignored`, `-vendor-intel`,
+  `-cut-removed`, `-tcc-resumable`, `-bystander-arm`, `-addrv-dropped`,
+  `-unknown-intel`.
+* Rows on the landing tip (4795 V4 and A8): `amd-land-<tip>-check` (with
+  `SENTRY-TRACE` unset, the P1 flake row), `-build-all`, `-boot-x86-kvm`,
+  `-boot-x86-tcg`, `-boot-x86-smp2`, `-boot-aarch64`, `-boot-armv7a`,
+  `-boot-armv7a-smp2`, `-threads`, `-shell-ferrousli`, `-ipc-equiv`, and
+  under kvm and tcg `-mce-<accel>`, `-mce-<mode>-<accel>` and
+  `-amd-<mode>-<accel>` for every mode.
