@@ -390,6 +390,14 @@ integrator shall not rebind such a device in a loop, and shall treat
 
 ---
 
+
+`vmo_pin`'s `PIN_BLOCKS` (ledger 5088) commits a pin's absent pages in
+naturally aligned blocks where the frame allocator has them, and is best
+effort: a pin with it is an ordinary pin, its pages wherever they ended
+up. No driver may rely on getting a block -- the Intel driver reads its
+pages' addresses and maps a large GPU page only where it finds one -- and
+an integrator's driver that needs one run asks `PIN_CONTIGUOUS`, which
+refuses rather than pin anything else.
 ### AoU-13 — the disk checks of stages 10 to 12 run only when the kernel starts devmgr
 Under `ferrix.devmgr=init` pid 1 starts `devmgr` (`docs/INIT.md` §7.3), so
 the kernel has no driver to read a disk through before pid 1 runs, and the

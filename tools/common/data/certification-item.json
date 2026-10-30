@@ -884,6 +884,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "object/blocks_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "object/check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"

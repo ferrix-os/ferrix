@@ -314,7 +314,22 @@ frames always took: clean cache reclaimed first, then the fault fails
   answers `ENOSPC`, as Linux's tmpfs does when it is full -- a memory
   filesystem's write finds nothing to reclaim and answers it at once; `Vmo::commit_run` behind `PIN_CONTIGUOUS`
   (`syscall/native.rs`) is a ring-3 driver's request and answers
-  `NO_MEMORY`. Faults, copy-on-write and a fork's copies (`user/space.rs`,
+  `NO_MEMORY`, and behind `PIN_BLOCKS` (`Vmo::commit_blocks`, since
+  2026-10-30, ledger 5088) it is asked once a block, best effort: a refusal
+  lowers the order for good and a refused single frame ends the pre-commit,
+  which the hold after it then answers as any pin's (`L.object.256`).
+  Its cost: for each block one probe of the range under the pages lock and
+  `commit_run`'s own probe and insert under it, the frames zeroed with no
+  spin lock held; at most `pages + MAX_ORDER + 1` asks of `commit_run`, and
+  at most `MAX_ORDER + 1` probes a page (a committed page is probed once
+  for each order down to 0), each one pages-lock hold of an O(log n)
+  range lookup, so the call's length is a plain hold of the
+  same range plus `(MAX_ORDER + 1) * pages` probes and those asks. Each ask
+  also takes the `BlockHook`'s leaf spin lock once to read it, as the
+  reclaim hook's is read, armed or not. The large blocks it takes are blocks no later `PIN_CONTIGUOUS` or
+  high-order kernel allocation gets, bounded by the device's pin budget
+  (for the Intel GPU at most a quarter of the usable RAM above the
+  watermark, and its cap). Faults, copy-on-write and a fork's copies (`user/space.rs`,
   `user/vmo.rs`) are a program's own demand. `quota::charging_nobody`
   changes whom a frame is charged to, not which route takes it, and its
   one user, the console's descriptor table, takes heap, not frames. Every

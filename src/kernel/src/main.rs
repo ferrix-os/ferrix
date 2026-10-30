@@ -480,6 +480,12 @@ fn require_hooks_disarmed() {
             "a check's hook was still armed after stage 12: {check}, in user::vmo's reclaim of clean pages"
         );
     }
+    if let Some(check) = user::vmo::block_hook_armed_by() {
+        fatal!(
+            catalog::CHECK_HOOK_LEFT_ARMED,
+            "a check's hook was still armed after its stage: {check}, in user::vmo's commit of blocks"
+        );
+    }
     if let Some(check) = arch::forget_hook_armed_by() {
         fatal!(
             catalog::CHECK_HOOK_LEFT_ARMED,

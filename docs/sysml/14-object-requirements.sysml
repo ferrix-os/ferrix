@@ -2364,5 +2364,79 @@ package FerrixObjectRequirements {
                 "object::quota::switched", "object::quota::leaving",
                 "object::quota::settle");
         }
+        requirement <'L.object.254'> pinBlocksOptionWord : ItemLowLevel {
+            attribute :>> statement = "vmo_pin shall refuse with INVALID_ARGS, before
+                any frame is taken, an option word with an order in bits 8-11 and
+                no PIN_BLOCKS, PIN_BLOCKS with order 0 or an order above the frame
+                allocator's largest, PIN_BLOCKS with PIN_CONTIGUOUS, and any bit
+                above bit 11 or bit 4 to 7.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: each of the four
+                words on a PCI function's node is INVALID_ARGS and the VMO commits
+                no page; the pin refusals check's unknown option 16 is
+                INVALID_ARGS.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("syscall::native::vmo_pin", "syscall::native::pin_block_order");
+        }
+        requirement <'L.object.255'> pinBlocksAreNaturallyAligned : ItemLowLevel {
+            attribute :>> statement = "With PIN_BLOCKS of order k, vmo_pin shall
+                commit each absent page of its range only as part of a block of
+                2^o pages, o at most k, that starts at a VMO page and at a frame
+                that are both multiples of 2^o, lies inside the range and held no
+                committed page when it was probed; a page committed before the
+                call shall keep its frame.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: over 1024 pages
+                with page 3 committed first, page 3 keeps its frame, pages 0-1, 2,
+                4-7, 8-15 up to 256-511 and 512-1023 are each one run of frames
+                from a multiple of its length, and pages 0-1023 are not one run
+                from a multiple of 1024.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks", "syscall::native::vmo_pin",
+                "syscall::native::commit_blocks_for_pin");
+        }
+        requirement <'L.object.256'> pinBlocksFallBack : ItemLowLevel {
+            attribute :>> statement = "Vmo::commit_blocks shall, where the frame
+                allocator refuses a block, try the next lower order and never again
+                an order above one refused in the same call; end at a refused
+                single frame; take a page committed between a block's probe and
+                its commit as a reason for a lower order, never a higher one, and
+                leave that page's frame as it is; and ask Vmo::commit_run at most
+                the range's pages plus the largest order plus one times.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: with every
+                32-frame region of free memory holding a kept frame, 512 pages
+                asked at order 9 are all committed, at least one ask was refused,
+                no 32 pages from a multiple of 32 are one run of frames from a
+                multiple of 32, and the refusals are at most five more than the
+                blocks; with the block hook committing page 100 at the first
+                block's commit, page 100 keeps the hook's frame and all 512 are
+                committed; in every case the asks stay within the bound.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks", "user::vmo::Vmo::block_at",
+                "user::vmo::run_block_hook");
+        }
+        requirement <'L.object.257'> pinBlocksBudgetAndFailure : ItemLowLevel {
+            attribute :>> statement = "vmo_pin with PIN_BLOCKS shall check the
+                device's pin budget before committing any page, refusing a range
+                past it with LIMIT_REACHED and nothing committed; and a PIN_BLOCKS
+                pin refused after its pre-commit shall leave committed exactly the
+                pages the pre-commit committed, each charged to the caller's job,
+                where the refusal is the job's memory limit.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: a pin of the
+                budget plus one page is LIMIT_REACHED with no page committed; a pin
+                of 512 pages by a job limited to 256 pages' memory is NO_MEMORY,
+                the VMO holds some pages and exactly that many are charged to the
+                job, and none once the VMO is gone.";
+            attribute :>> parent = ("H.DMA.3", "H.QUOTA.2");
+            attribute :>> unit = ("syscall::native::vmo_pin",
+                "syscall::native::commit_blocks_for_pin", "user::vmo::Vmo::commit_blocks");
+        }
+        requirement <'L.object.258'> pinBlocksLeaveFilesAlone : ItemLowLevel {
+            attribute :>> statement = "Vmo::commit_blocks shall commit no page of a
+                file's VMO.";
+            attribute :>> criterion = "Stage 10's PIN_BLOCKS check: on a VMO over a
+                source, commit_blocks asks commit_run never and the VMO holds no
+                page.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("user::vmo::Vmo::commit_blocks");
+        }
     }
 }

@@ -604,6 +604,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed.",
       "what": "Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing."
+    },
+    {
+      "landing": "vmo_pin's PIN_BLOCKS, the Intel GPU's 2 MiB blocks (docs/INTEL-GPU.md section 14.3, L.object.254-258; consultant ledger 5088)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet, and the lines of syscall/native.rs's vmo_pin option checks it changed.",
+      "what": "Reached by stage 10's PIN_BLOCKS check on every test-boot with a PCI function (object/blocks_check.rs): vmo_pin's option-word refusals, its budget check and pre-commit, user::vmo::Vmo::commit_blocks's probe, ask, fallback, race and file arms, and run_block_hook with and without a hook armed. Not reached: commit_blocks's arm for a VMO bound to a file's length, and a commit_run refusal other than Committed and OutOfMemory (both covered by the file arm's early return)."
     }
   ]
 }

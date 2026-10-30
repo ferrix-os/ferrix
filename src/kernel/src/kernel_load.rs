@@ -123,6 +123,8 @@ pub mod object {
     #[cfg(ferrix_linux_abi = "on")]
     pub mod alloc_check;
     #[cfg(ferrix_linux_abi = "on")]
+    pub mod blocks_check;
+    #[cfg(ferrix_linux_abi = "on")]
     pub mod check;
     #[cfg(ferrix_linux_abi = "on")]
     pub mod device_copy_check;

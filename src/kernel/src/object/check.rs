@@ -2243,6 +2243,7 @@ fn check_a_pin_gives_a_device_exactly_its_pages(counter: &mut Counter) -> Result
 
     check_pin_refusals(&side, handle, vmo, counter)?;
     check_a_coherent_pin_of_a_snooping_device_changes_nothing(&side, handle)?;
+    counter.refusals += object::blocks_check::run(&node)?;
 
     side.put(PAYLOAD, SECRET)?;
     side.put_offset(PAGE_SIZE)?;
@@ -2351,8 +2352,9 @@ fn check_pin_refusals(
             [0, 3 * PAGE_SIZE, 0],
             "a pin past the end of its VMO was taken",
         ),
-        // 1 PIN_READ_ONLY, 2 PIN_COHERENT, 4 PIN_CONTIGUOUS: 8 is unknown.
-        ([0, PAGE_SIZE, 8], "a pin with an unknown option was taken"),
+        // 1 PIN_READ_ONLY, 2 PIN_COHERENT, 4 PIN_CONTIGUOUS, 8 PIN_BLOCKS
+        // with its order in bits 8-11: 16 is unknown.
+        ([0, PAGE_SIZE, 16], "a pin with an unknown option was taken"),
         ([0, 0, 0], "an empty pin was taken"),
     ] {
         let [offset, length, options] = args;

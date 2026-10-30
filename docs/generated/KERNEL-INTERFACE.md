@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2500 declarations in the core's files, 179 in the item's; 107 checks-only.
+2508 declarations in the core's files, 179 in the item's; 110 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1822,6 +1822,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `GIVE_BACK_BATCH` | const | load (checks) | checks-only |
+| `MAX_ORDER` | const | item |  |
 | `RETIRED_CAPACITY` | const | load |  |
 | `MemoryError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `allocate_frame_run` | fn | load |  |
@@ -3055,21 +3056,28 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `RunError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
+| `arm_block_hook` | fn | load (checks) | checks-only |
 | `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `block_hook_armed_by` | fn | bin |  |
+| `disarm_block_hook` | fn | load (checks) | checks-only |
 | `disarm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `frame_for_check` | fn | load (checks) | checks-only |
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `inject_read_poison` | fn | load (checks) | checks-only |
 | `reclaim_hook_armed_by` | fn | bin |  |
+| `BlockHook` | struct | load (checks) | checks-only |
 | `Held` | struct | item, load |  |
 | `ReclaimHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo` | struct | item, load |  |
 | `Filler` | trait | load |  |
+| `BlockHook::armed_by` | field | load (checks) | pub for raised checks; type unobtainable from product API |
+| `BlockHook::run` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
 | `Held::frames` | method | item, load, bin |  |
 | `ReclaimHook::armed_by` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ReclaimHook::run` | field | item, load, bin |  |
 | `Vmo::commit` | method | item, load |  |
 | `Vmo::commit_and_write` | method | load |  |
+| `Vmo::commit_blocks` | method | item, load |  |
 | `Vmo::commit_run` | method | item |  |
 | `Vmo::committed` | method | load, bin |  |
 | `Vmo::cut_mappings` | method | load |  |
@@ -3084,7 +3092,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::is_coherent` | method | item |  |
 | `Vmo::is_combining` | method | item, load |  |
 | `Vmo::len_bytes` | method | item, load |  |
-| `Vmo::len_pages` | method | load |  |
+| `Vmo::len_pages` | method | item, load |  |
 | `Vmo::make_coherent` | method | item, load |  |
 | `Vmo::make_combining` | method | load |  |
 | `Vmo::mapper_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

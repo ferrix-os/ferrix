@@ -108,6 +108,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | memory.stat's anon and pagetables, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.182; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of mm.rs's deallocate_frames, release_frame, disown_frame and ChargedTables::allocate_table it changed. | Reached by stage 13's reclaim check on every test-boot: object::quota::charge_table and uncharge_table, mm::uncharge_owner's table and page arms, ChargedTables::allocate_table's marked charge, and reclaim_check.rs's tables_and_pages and faults. Not reached by any boot: allocate_table's two refusal arms, which uncharge a table's charge. |
 | time namespaces, stage 13's follow-on ported from park/stage13-timens (docs/NAMESPACES.md section 12.1, L.user.130; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and user/space.rs's map_shared_code (now map_shared_code_near's caller) and the syscall and procfs sites it changed. | Reached by stage 13's timens line on every test-boot: user::space::AddressSpace::replace_shared_code and map_shared_code_near (and vdso::retarget's swap, load ring). Not reached: retarget's refusal when the variant cannot be made, which a boot cannot provoke but its negative control showed. |
 | the dentry and inode caches' reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.186; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed. | Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing. |
+| vmo_pin's PIN_BLOCKS, the Intel GPU's 2 MiB blocks (docs/INTEL-GPU.md section 14.3, L.object.254-258; consultant ledger 5088) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of syscall/native.rs's vmo_pin option checks it changed. | Reached by stage 10's PIN_BLOCKS check on every test-boot with a PCI function (object/blocks_check.rs): vmo_pin's option-word refusals, its budget check and pre-commit, user::vmo::Vmo::commit_blocks's probe, ask, fallback, race and file arms, and run_block_hook with and without a hook armed. Not reached: commit_blocks's arm for a VMO bound to a file's length, and a commit_run refusal other than Committed and OutOfMemory (both covered by the file arm's early return). |
 
 ---
 
@@ -201,7 +202,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 880, 1558 |
+| `main.rs` | `item` | 65 | 6 | 4 | 3 | 421, 886, 1564 |
 
 ---
 
@@ -261,7 +262,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1242 |
+| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1245 |
 
 ---
 

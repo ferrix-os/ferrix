@@ -157,6 +157,15 @@ pub(crate) enum PoisonTake {
     Gone,
 }
 
+/// What [`Vmo::commit_blocks`] did so far.
+#[derive(Clone, Copy, Debug, Default)]
+struct Blocks {
+    /// The times it asked [`Vmo::commit_run`].
+    attempts: u64,
+    /// The blocks that went in.
+    blocks: u64,
+}
+
 /// Why [`Vmo::commit_run`] refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunError {
@@ -1694,6 +1703,92 @@ impl Vmo {
         inserted
     }
 
+    /// Commit the absent pages of `first..first + pages` with naturally
+    /// aligned blocks of fresh, zeroed, charged frames, best effort, for
+    /// `PIN_BLOCKS` (`docs/INTEL-GPU.md` §14.3, `L.object.255`-`257`).
+    ///
+    /// At each page the order tried is the largest at most `order` with the
+    /// page a multiple of the block, the block inside the range and, by a
+    /// probe under the pages lock, wholly absent; that block goes in through
+    /// [`Vmo::commit_run`], whose own check of the same range under the
+    /// same lock means a page committed between the two can only shrink the
+    /// order, never grow it. No order above one the allocator refused is
+    /// tried again; the allocator refusing a single frame ends it, as does a
+    /// file's or bound object, whose absent pages are not zeros, which it
+    /// commits nothing of. A committed page is skipped, its frame unchanged.
+    /// Whatever it committed stays committed, charged as any page is: the
+    /// hold after it reports what it could not commit.
+    ///
+    /// Says how many times it asked [`Vmo::commit_run`] and how many blocks
+    /// went in, in that order. The asks are at most `pages` plus one more than `order`: each
+    /// block commits at least one page and each race costs another program
+    /// at least one page of the range, while each refusal lowers the order
+    /// for good.
+    ///
+    /// Must not be called holding a spin lock.
+    pub fn commit_blocks(&self, first: u64, pages: u64, order: u8) -> (u64, u64) {
+        let mut done = Blocks::default();
+        if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
+            return (0, 0);
+        }
+        let end = first.saturating_add(pages).min(self.len_pages());
+        let mut cap = order.min(ferrix_frame::MAX_ORDER);
+        let mut index = first;
+        while index < end {
+            let mut o = cap;
+            while o > 0 && (!index.is_multiple_of(1 << o) || index + (1 << o) > end) {
+                o -= 1;
+            }
+            let Some((next, lowered)) = self.block_at(index, o, &mut done) else {
+                break;
+            };
+            if let Some(lowered) = lowered {
+                cap = lowered;
+            }
+            index = next;
+        }
+        (done.attempts, done.blocks)
+    }
+
+    /// One block of [`Vmo::commit_blocks`] at page `index`, from order `o`
+    /// down: the page to go on from, and the order the allocator's refusals
+    /// lowered the call's to, if they did; `None` to end the call.
+    fn block_at(&self, index: u64, mut o: u8, done: &mut Blocks) -> Option<(u64, Option<u8>)> {
+        let mut lowered = None;
+        loop {
+            let len = 1_u64 << o;
+            let absent = self
+                .pages
+                .lock()
+                .frames
+                .range(index..index + len)
+                .next()
+                .is_none();
+            if !absent {
+                if o == 0 {
+                    return Some((index + 1, lowered));
+                }
+                o -= 1;
+                continue;
+            }
+            run_block_hook(self, index, len);
+            done.attempts += 1;
+            match self.commit_run(index, len) {
+                Ok(_) => {
+                    done.blocks += 1;
+                    return Some((index + len, lowered));
+                }
+                Err(RunError::Committed) if o > 0 => o -= 1,
+                Err(RunError::Committed) => return Some((index + 1, lowered)),
+                Err(RunError::OutOfMemory) if o > 0 => {
+                    o -= 1;
+                    lowered = Some(o);
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
     /// Undo [`Vmo::commit_run`] of `pages` frames from `block` at `first`:
     /// take out each page that still holds the frame the run put there, and
     /// is not held, forget it in every space that maps it, and release it,
@@ -2489,6 +2584,48 @@ fn run_reclaim_hook(vmo: &Vmo) {
     let hook = *RECLAIM_HOOK.lock();
     if let Some(hook) = hook {
         (hook.run)(vmo);
+    }
+}
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// A check's hook in [`Vmo::commit_blocks`], between a block's probe and its
+/// [`Vmo::commit_run`], where `object::check`'s `PIN_BLOCKS` check commits a
+/// page of the block to make the race deterministic. Armed and disarmed as
+/// [`ReclaimHook`] is, and the boot stops (FX-0908) if it is left armed.
+#[derive(Debug)]
+pub struct BlockHook {
+    /// The check that armed it, for the boot check's message.
+    pub armed_by: &'static str,
+    /// What it does there: the object, the block's first page and its length.
+    pub run: fn(&Vmo, u64, u64),
+}
+
+/// The hook [`Vmo::commit_blocks`] calls, if a check armed one: a leaf lock,
+/// held to copy the `Option` out and never while the hook runs.
+static BLOCK_HOOK: SpinLock<Option<&'static BlockHook>> = SpinLock::new(None);
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// Arm `hook` in [`Vmo::commit_blocks`]: the `PIN_BLOCKS` check only.
+pub fn arm_block_hook(hook: &'static BlockHook) {
+    *BLOCK_HOOK.lock() = Some(hook);
+}
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// Disarm it.
+pub fn disarm_block_hook() {
+    *BLOCK_HOOK.lock() = None;
+}
+
+/// The check that armed the hook, if one still has (`require_hooks_disarmed`).
+pub fn block_hook_armed_by() -> Option<&'static str> {
+    BLOCK_HOOK.lock().map(|hook| hook.armed_by)
+}
+
+/// Run the hook, if armed, with no lock held.
+fn run_block_hook(vmo: &Vmo, first: u64, pages: u64) {
+    let hook = *BLOCK_HOOK.lock();
+    if let Some(hook) = hook {
+        (hook.run)(vmo, first, pages);
     }
 }
 

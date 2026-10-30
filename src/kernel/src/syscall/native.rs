@@ -2670,13 +2670,7 @@ fn vmo_pin(
 ) -> Result<usize, Errno> {
     use ferrix_native_abi::types::{PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY};
     let page = PAGE_SIZE;
-    if options & !(PIN_READ_ONLY | PIN_COHERENT | PIN_CONTIGUOUS) != 0
-        || length == 0
-        || !offset.is_multiple_of(page)
-        || !length.is_multiple_of(page)
-    {
-        return Err(status::INVALID_ARGS);
-    }
+    let order = pin_block_order(options, offset, length)?;
     let read_only = options & PIN_READ_ONLY != 0;
     let node = device_isolated_in(process, device)?;
     // A node nothing behind which reaches memory -- the firmware
@@ -2702,12 +2696,58 @@ fn vmo_pin(
     if options & PIN_CONTIGUOUS != 0 {
         return contiguous_pin(process, &node, &vmo, (first, pages), read_only, past_caches);
     }
+    if let Some(order) = order {
+        commit_blocks_for_pin(&node, &vmo, (first, pages), order)?;
+    }
     let held = vmo.hold(first, pages).map_err(vmo_error)?;
     if past_caches {
         coherent_for_device(&vmo, &held)?;
     }
     let pin = pin_through(&node, held, dma_flags(read_only), process.exit_record())?;
     insert_new(process, Object::Pin(pin), Rights::PIN)
+}
+
+/// `vmo_pin`'s options and range, checked before anything else: the
+/// largest block order `PIN_BLOCKS` asks for, if it does (L.object.254: an
+/// order is `PIN_BLOCKS`' alone, and `PIN_BLOCKS` has one, up to the
+/// allocator's largest block, and is no contiguous pin).
+fn pin_block_order(options: u64, offset: u64, length: u64) -> Result<Option<u8>, Errno> {
+    use ferrix_native_abi::types::{
+        PIN_BLOCK_ORDER_MASK, PIN_BLOCK_ORDER_SHIFT, PIN_BLOCKS, PIN_COHERENT, PIN_CONTIGUOUS,
+        PIN_READ_ONLY,
+    };
+    let known = PIN_READ_ONLY | PIN_COHERENT | PIN_CONTIGUOUS | PIN_BLOCKS | PIN_BLOCK_ORDER_MASK;
+    let order = (options & PIN_BLOCK_ORDER_MASK) >> PIN_BLOCK_ORDER_SHIFT;
+    let blocks = options & PIN_BLOCKS != 0;
+    if options & !known != 0
+        || blocks != (order != 0)
+        || order > u64::from(crate::mm::MAX_ORDER)
+        || (blocks && options & PIN_CONTIGUOUS != 0)
+        || length == 0
+        || !offset.is_multiple_of(PAGE_SIZE)
+        || !length.is_multiple_of(PAGE_SIZE)
+    {
+        return Err(status::INVALID_ARGS);
+    }
+    Ok(blocks.then_some(order as u8))
+}
+
+/// `PIN_BLOCKS`' pre-commit of `range` (first page, pages) of `vmo`, up to
+/// `order`: the budget before any frame is taken (ledger 5088 (2)), then
+/// `Vmo::commit_blocks` over a range inside the object (the hold after it
+/// refuses one that is not).
+fn commit_blocks_for_pin(
+    node: &DeviceNode,
+    vmo: &Vmo,
+    (first, pages): (u64, u64),
+    order: u8,
+) -> Result<(), Errno> {
+    let count = usize::try_from(pages).map_err(|_| status::INVALID_ARGS)?;
+    budget_allows(node, count)?;
+    if first.saturating_add(pages) <= vmo.len_pages() {
+        let _ = vmo.commit_blocks(first, pages, order);
+    }
+    Ok(())
 }
 
 /// A pin's IOMMU flags: read-only for the device, or read and write.

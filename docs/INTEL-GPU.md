@@ -468,6 +468,11 @@ allocate, and the box is reached over ssh (`fx.sh`).
   released buffer faults on every frame until the new driver reprograms
   it: refused DMA, not a leak (ledger 2388 C2). With K2 refused the box is
   as (a) to (c) say.
+* **Large pages** (§14, since 2026-10-30). A PPGTT entry may map 2 MiB or
+  64 KiB of a pin whose frames the kernel gave as aligned blocks
+  (`PIN_BLOCKS`). Under K2 an entry over pages the driver did not pin is
+  refused DMA as a 4 KiB one is; untranslated it is the same trusted-driver
+  fault as before, over more memory.
 * **Client to client.** Each VM is its own PPGTT, and batches run
   non-privileged from it (`MI_BATCH_BUFFER_START` with the PPGTT address
   space). The hardware itself refuses privileged commands and register
@@ -1909,9 +1914,9 @@ Tree rules (`ppgtt.rs`, whose own record is the hardware entries):
 * a level-1 entry with PS is a leaf: walks (`leaf`, `translate`,
   `alloc_level`, `clear_level`) never descend into it. Allocating over it
   is refused (`Range`, as an overlapping bind is); clearing it writes the
-  level's scratch entry and frees no table. A clear that covers only part
-  of a 2 MiB page is refused, which no unbind does (an unbind is a whole
-  binding);
+  level's scratch entry and frees no table. A clear that reaches any part
+  of a 2 MiB page clears all of it: one binding alone ever covers it, and
+  an unbind is a whole binding;
 * clearing any entry of a leaf table whose PDE has IPS first clears IPS, so
   the hardware reads the remaining PTEs as 4 KiB pages again. Every PTE of
   such a table is a correct 4 KiB entry, so dropping IPS never exposes a
@@ -1936,9 +1941,12 @@ allocator. The kernel already gives one block to `PIN_CONTIGUOUS`
 per 2 MiB would pass the 4096-handle limit (`object::HANDLE_LIMIT`) with a
 game's 2-3 GiB of objects.
 
-**Proposed: `PIN_BLOCKS`**, a `vmo_pin` option whose bits 8-11 name the
-largest block order the caller wants (`PIN_BLOCKS | order << 8`, order at
-most `MAX_ORDER`). Before the ordinary hold and pin, the kernel commits the
+**`PIN_BLOCKS`** (bit 3, value 8), a `vmo_pin` option whose bits 8-11 name
+the largest block order the caller wants (`PIN_BLOCKS | order << 8`, order
+1 to `MAX_ORDER`, 10). An order without `PIN_BLOCKS`, `PIN_BLOCKS` with
+order 0 or above 10, `PIN_BLOCKS` with `PIN_CONTIGUOUS`, and any other bit
+are `INVALID_ARGS` (`L.object.254`); the device's pin budget is checked
+before any frame is taken (`L.object.257`). Before the ordinary hold and pin, the kernel commits the
 range's **absent** pages with naturally aligned blocks, best effort:
 
 * at page `i` of the VMO, the order tried is the largest `o <= order` with
@@ -1946,6 +1954,9 @@ range's **absent** pages with naturally aligned blocks, best effort:
   absent; then `commit_run(i, 2^o)`, as `PIN_CONTIGUOUS` uses it (fresh
   zeroed frames, each charged to the caller's job, the program watermark
   kept, inserted under the pages lock or not at all);
+* the probe and `commit_run` look at the same range under the same lock,
+  so a page committed between them can only shrink the order, never grow
+  it;
 * on `OutOfMemory` the next lower order is tried, and no order above a
   failed one is tried again in this call (no retry storm once the allocator
   has no more large blocks); at order 0 a failure ends the pre-commit and
@@ -1996,6 +2007,27 @@ never take a 2 MiB page).
   them) falls back and still pins every page.
 * Negative control: with the order loop removed, the run check fails.
 * Done on the box when the probe reads ≈ 20.7 / 21.7 GB/s.
+
+Written as `object/blocks_check.rs` (stage 10, `L.object.254`-`258`): the
+option word, the budget first, the blocks over 1024 pages with page 3
+committed first, the fallback with one frame in every 32 of free memory
+held (so no block of 32 can form and the free count stays above the
+watermark), the race through the `BlockHook` (`user::vmo`, armed only by
+the check, FX-0908 if left armed), the failure rule under a job limited to
+half the range, and a file's object.
+
+### 14.6 Where it stands
+
+The consultant's design verdict: **OK IF (1)-(9)**, ledger line 5088
+(`~/.local/share/ferrix/cert-consultant/reviews.md`, 2026-10-30). The
+2 MiB/64 KiB tree rules of §14.2 are the driver's property, outside the
+item, and never cited as evidence (C1). The box probe's figure is product
+evidence only (`docs/BACKLOG.md`).
+
+The code verdict on fc1d5ccad: **OK IF (1)-(5)**, ledger line 5102: the
+fallback case asserts a refusal and no aligned block of 32, `L.object.258`
+covers a file's VMO only, M&T bounds the probes, the rows and controls on
+the landing hash, and coverage carried again after the final rebase.
 
 ## Appendix A: the probe that printed the numbers
 

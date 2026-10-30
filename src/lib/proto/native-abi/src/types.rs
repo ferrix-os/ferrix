@@ -83,6 +83,19 @@ pub const PIN_COHERENT: u64 = 2;
 /// holds is not one run. Combines with `PIN_READ_ONLY` and `PIN_COHERENT`.
 pub const PIN_CONTIGUOUS: u64 = 4;
 
+/// `vmo_pin`'s option: commit the range's absent pages, before they are
+/// held, in naturally aligned blocks of at most `2^order` pages, the order
+/// in [`PIN_BLOCK_ORDER_MASK`] (1 to the allocator's largest, 10), falling
+/// back to smaller blocks where none is free (`docs/INTEL-GPU.md` §14.3).
+/// Best effort: the pin is an ordinary one, its pages wherever they ended
+/// up, and nothing may rely on getting a block. Combines with
+/// `PIN_READ_ONLY` and `PIN_COHERENT`, never with `PIN_CONTIGUOUS`.
+pub const PIN_BLOCKS: u64 = 8;
+/// Where `PIN_BLOCKS`' order sits in `vmo_pin`'s options.
+pub const PIN_BLOCK_ORDER_SHIFT: u32 = 8;
+/// `PIN_BLOCKS`' order, bits 8-11.
+pub const PIN_BLOCK_ORDER_MASK: u64 = 0xf << PIN_BLOCK_ORDER_SHIFT;
+
 /// `device_clock`'s option: set the rate, rather than only say what it
 /// would be.
 pub const CLOCK_SET: u64 = 1;
