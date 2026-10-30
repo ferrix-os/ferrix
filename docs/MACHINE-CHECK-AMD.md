@@ -329,3 +329,31 @@ controls on 0607e0a6a carry to it.
   controls re-run on the fixed tip; rows there as 4795 V4 and A8 (every
   Intel and AMD mode under KVM and TCG), the Arm boots from 87199c553
   counting if they passed; coverage carried after the final rebase.
+
+**B1-B4 fixed** (6deacfc3d, the consultant's NOT YET at ledger 4839): the
+no-op mask gone from stage 3 (B1); an SMCA bank whose bring-up reads or
+McaX write failed keeps no configuration and has no usable address, with
+stage 3's rows and L.x86_64.235 restated (B2); McaX's control (B3); the
+`config` write allowed in `smca_bank_up` alone (B4).
+
+**Final landing record (R1-R7).** Logs in
+`~/.local/share/ferrix/logs/queue/<tag>.log`, each with its header:
+
+* on 6deacfc3d, `run: PASSED` with the accelerator named:
+  `amd-land-6deacfc3d-build-all`, `-boot-x86-kvm`, `-boot-x86-tcg`,
+  `-boot-x86-smp2`, `-boot-aarch64`, `-boot-armv7a`, `-boot-armv7a-smp2`,
+  `-shell-ferrousli`, `-ipc-equiv`, and under kvm and tcg `-mce-<accel>`,
+  `-mce-<mode>-<accel>` for the seven Intel modes and `-amd-<mode>-<accel>`
+  for the eleven AMD modes (47 rows);
+* on 6deacfc3d, `control: FIRED`: `amd-ctl-6deacfc3d-succor-ignored`,
+  `-vendor-intel`, `-cut-removed`, `-tcc-resumable`, `-bystander-arm`,
+  `-addrv-dropped`, `-unknown-intel` (R5), `-read-dropped` (R2), `-mcax`
+  (R3), `-config-write-elsewhere` (R4, check-device-access refusing the
+  write in `read_synd`);
+* on 72724458b (6deacfc3d plus the regenerated architecture document):
+  `amd-land-72724458b-check` `run: PASSED`, with `SENTRY-TRACE` unset (R1),
+  and `amd-land-72724458b-threads` `run: PASSED` after one failure under
+  ~60 jobs on 6deacfc3d (a P1 flake row, its log kept);
+* coverage carried on the tip: every anchor carried, none dropped,
+  `gen-coverage-justification --check` current (R7). Commits cite ledger
+  4820 and 4839.
