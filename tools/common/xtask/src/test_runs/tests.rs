@@ -130,6 +130,16 @@ fn every_way_a_binary_can_end_badly_is_a_failure() {
     .unwrap();
 }
 
+/// Whether `name` is a POSIX shell identifier: a letter or `_`, then
+/// letters, digits and `_`.
+fn shell_identifier(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|rest| rest.is_ascii_alphanumeric() || rest == '_')
+}
+
 #[test]
 fn a_binary_gets_cargo_s_environment_directory_and_arguments() {
     let directory = scratch("environment");
@@ -155,8 +165,12 @@ fn a_binary_gets_cargo_s_environment_directory_and_arguments() {
                 .any(|shell| entry.starts_with(shell))
         })
         .collect();
+    // The child here is a POSIX shell, which passes on only names that are
+    // shell identifiers: a parent variable like the Claude desktop app's
+    // `SENTRY-TRACE` never reaches `env` through it, whatever xtask passed.
     let mut parent: Vec<String> = std::env::vars_os()
         .filter(|(key, _)| key != VARIABLE && key != OWNER)
+        .filter(|(key, _)| shell_identifier(&key.to_string_lossy()))
         .map(|(key, value)| format!("{}={}", key.to_string_lossy(), value.to_string_lossy()))
         .filter(|entry| {
             !["PWD=", "SHLVL=", "_=", "OLDPWD="]
