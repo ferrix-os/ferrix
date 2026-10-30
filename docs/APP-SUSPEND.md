@@ -568,8 +568,43 @@ What landed:
 No kernel line, no init change, no certified-item file. Left for S1: the
 keeper's step 2 (INTEL-GPU §12.8), so that a game frozen across a GPU
 driver restart thaws intact; a menu entry or bind in the default
-configuration; and the box run on Endfield (§3.1's PoC), which needs the
-customer's agreement.
+configuration.
+
+### 3.1.2 Endfield on the N150 (2026-10-30, 23:20 to 23:45)
+
+The box ran develop 99382db29 (main-99382db29), Endfield from Steam in the
+world at The Hub, 1280x720, 42 ms to its server. Steam had been started
+over ssh and ran in `system.slice/sshd.service`, so before the test the
+root shell moved Steam's processes into `session-1.scope`, where a
+program started from the desktop is. Each round ran
+`hyprctl dispatch suspend pid:5743` (Steam's `reaper` for the game) as
+`ferrix`, held, then `resume pid:5743`.
+
+| Hold | What hyprix did | The game during the hold | After the resume |
+|---|---|---|---|
+| 30 s | reaper and 20 more (Endfield, wineserver, the prefix's services, UnityCrashHandler) moved into `session-1.scope/suspend-5743`, `frozen 1` within a second | 0 CPU ticks (460 in 5 s before); RSS 5.2 GB unchanged; 3 of 24 TCP connections closed | in the world, animating, 42 ms, 24 connections again |
+| 2 min | the same | 0 ticks | in the world, no dialog after 15 s or 60 s; the ping readout said 3 ms, then normal |
+| 10 min | the same | 0 ticks; 18 connections left | the game runs and draws, but its server had dropped the session: `[Network] Connection timed out. Please login again.` (Player.log) and a dialog saying so; the game connection on port 10012 now went to another host |
+
+What this shows:
+
+* S1 works on a real Proton game: the whole tree freezes in a second,
+  takes no CPU at all, and thaws where it stopped, GPU and swapchain
+  included (one boot, no driver restart).
+* Endfield's own server keeps a silent session at least 2 minutes and
+  less than 10. That is the server's limit (§2.7), not Ferrix's; the
+  client noticed it on its own at the thaw and said so. A shorter hold
+  than 10 minutes would find the exact limit.
+* The window is yserver's, so hyprix reported `(0 windows)` and did not
+  dim it; yserver kept showing the last frame for ten minutes and did
+  not drop the frozen client. The `steam_app_<id>` route (suspend the
+  window) would pick the same reaper; this run named the pid.
+* The dialog drew slowly after the 10-minute thaw: blank for two
+  minutes, then complete after one key press, and a click on its Confirm
+  did nothing in the minute watched. Whether that is the game or input
+  through yserver after a thaw was not followed up.
+* On Ferrix, a log file Unity and the SDK append to keeps its old mtime
+  (`u8sdk_pc.log` said 20:32 holding lines from 22:16, box clock).
 
 ### 3.2 S2: page the frozen application out to disk, same boot
 
@@ -828,7 +863,8 @@ an online game should be promised (§4).
 
 ## 5. Where it stands
 
-2026-10-30, later: **S1 is built** (§3.1.1), on the customer's go-ahead.
+2026-10-30, later: **S1 is built** (§3.1.1), on the customer's go-ahead,
+and ran on Endfield on the N150 (§3.1.2).
 S2 to S4 remain a design.
 
 The research, the same day: nothing was measured on any machine; every
@@ -846,7 +882,8 @@ code at develop 38b492f28:
 * Time namespaces and `clone3` `set_tid` exist; `FICLONE`, `ptrace`
   attach, CPUID faulting and `IA32_TSC_ADJUST` do not.
 
-Not checked: how yserver treats a frozen client; which scope a game Steam
-starts lands in; how long Endfield's server keeps a silent session; ACE's
-reaction to a pause or a restore. §3.1's proofs of concept answer the
-first three.
+The box run (§3.1.2) answered three of the open questions: yserver keeps
+a frozen client and its last frame; a game lands in Steam's cgroup (on
+the box, wherever Steam was started); Endfield's server drops a session
+silent for 10 minutes but not one silent for 2. Not checked: ACE's
+reaction to a pause or a restore, and the exact session limit.
