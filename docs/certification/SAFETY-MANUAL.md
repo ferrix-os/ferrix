@@ -136,7 +136,9 @@ One class of hardware error does not enter it (H.FAIL.8, AoU-36): on x86-64,
 a machine check whose records leave the kernel's own state intact -- a
 corrected error, an uncorrected one nothing has consumed, or one a ring-3
 program consumed -- is logged, the frame is retired, and the program is
-ended or signalled; every other machine check halts as before.
+ended or signalled; so is one a system call's copy of a program's memory
+consumed at the copy's one recoverable instruction, whose call then fails
+(H.FAIL.10); every other machine check halts as before.
 
 **AoU-2 below is the obligation this creates.** A halt is only a *safe* state in
 a system where stopping is safe. In a system where the controlled process must
@@ -747,8 +749,21 @@ every machine check halts (L.x86_64.231). Either way:
 
 * a retired frame stays mapped in every process that maps it and has not
   touched it (late kill, as Linux's default); the kernel consuming it -- a
-  system call's copy, a copy-on-write copy at `fork`, a page-cache read, a
-  device's DMA -- is a machine check in ring 0, which halts;
+  copy-on-write copy at `fork` or a write fault, a page-cache read, a
+  device's DMA, any read of kernel memory -- is a machine check in ring 0,
+  which halts;
+* a system call's read of a program's memory that consumes poison fails the
+  call with `EFAULT` (a native call with its fault status), retires the
+  frame and, where the memory is the caller's own, raises `SIGBUS`
+  `BUS_MCEERR_AR` at the page as a ring-3 consumption does
+  (`docs/MACHINE-CHECK-COPY.md`, H.FAIL.10); a read of another process's
+  memory (`/proc/<pid>/environ`) ends short and signals nobody. This holds
+  only under `ferrix.mce.recover`, only on x86-64, and only where the record
+  names the very page the copy was loading with both `RIPV` and `EIPV`
+  (on AMD with `SUCCOR` and `TCC` clear); anything else halts. Under QEMU the
+  injected record is believed and no real poison is loaded, so the gate shows
+  the decision and the fixup, not a real load (a BACKLOG row asks for a
+  hardware run);
 * the corrected-error lines are a symptom log, not a guarantee: the kernel
   applies no threshold; lode's quarantine policy may take a core out of
   service on them (AoU-37), and a machine whose corrected counts grow is

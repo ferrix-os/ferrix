@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1739,
+  "max_total_lines": 1753,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -72,9 +72,15 @@
     "not by shrinking the vector table. At today's ~1600 lines of assembly it",
     "needs the tree to pass roughly a million and a half lines of Rust, so treat it",
     "as the direction of travel that check-asm-budget.py prints every run.",
-    "1739 since 2026-10-30 (ram-scrubber, docs/RAM-SCRUBBER.md, consultant ledger 5045 and 5057, L.x86_64.243, L.aarch64.68): the RAM scrubber writes free frames with stores that read nothing, so it never reads memory it has not written (an ECC machine would halt on an uncorrectable error in what it read): x86-64 scrub.rs +2, MOVNTI and the SFENCE after it, which need SSE2 that the kernel target has off; AArch64 scrub.rs +3, the DCZID_EL0 read, DC ZVA and the DSB after it, system registers and cache maintenance with no Rust spelling. The tree went from 1734 to 1739."
+    "1739 since 2026-10-30 (ram-scrubber, docs/RAM-SCRUBBER.md, consultant ledger 5045 and 5057, L.x86_64.243, L.aarch64.68): the RAM scrubber writes free frames with stores that read nothing, so it never reads memory it has not written (an ECC machine would halt on an uncorrectable error in what it read): x86-64 scrub.rs +2, MOVNTI and the SFENCE after it, which need SSE2 that the kernel target has off; AArch64 scrub.rs +3, the DCZID_EL0 read, DC ZVA and the DSB after it, system registers and cache maintenance with no Rust spelling. The tree went from 1734 to 1739.",
+    "1753 since 2026-10-30 (mce-copy, docs/MACHINE-CHECK-COPY.md, consultant ledger 5216, L.x86_64.244): x86-64 copy_mc.rs +14, the copy a machine check can stop, whose one rep movsb must sit at a symbol the ring-0 handler compares rip with and whose exit must be a label it can send rip to, with rcx (the bytes left) untouched in between. The tree went from 1739 to 1753."
   ],
   "files": [
+    {
+      "file": "src/kernel/src/arch/x86_64/copy_mc.rs",
+      "max_lines": 14,
+      "reason": "A system call's copy of a program's memory that a machine check can stop (docs/MACHINE-CHECK-COPY.md section 3.1, L.x86_64.244): one rep movsb at the symbol ferrix_copy_mc_movs and an exit at ferrix_copy_mc_out. The ring-0 handler recovers only when rip is exactly that instruction, and resumes at the exit with rcx -- the bytes left, the processor's own on an interrupted rep movsb -- as the answer; what a machine check does to rip and rcx is the machine's, and no Rust spelling places an instruction at a known address or keeps rcx untouched to a label. Pinned by test-mce-copy's disassembly check."
+    },
     {
       "file": "src/kernel/src/arch/x86_64/scrub.rs",
       "max_lines": 2,

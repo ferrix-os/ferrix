@@ -187,6 +187,39 @@ fn reaches_scrub(path: &str) -> bool {
         || path.starts_with("src/user/system/native/memscrub/")
 }
 
+/// The machine check at a system call's copy (`docs/MACHINE-CHECK-COPY.md`
+/// §6, ledger 5216): the recovery under both accelerators and at two
+/// processors, and every mode that must stop or leave it alone.
+const TEST_MCE_COPY: &[&str] = &[
+    "test-mce-copy --arch x86_64 --accel kvm",
+    "test-mce-copy --arch x86_64 --accel tcg",
+    "test-mce-copy --arch x86_64 --accel kvm --smp 2",
+    "test-mce-copy-kill --arch x86_64 --accel kvm",
+    "test-mce-copy-tcc --arch x86_64 --accel kvm",
+    "test-mce-copy-page --arch x86_64 --accel kvm",
+    "test-mce-copy-off --arch x86_64 --accel kvm",
+    "test-mce-copy-outside --arch x86_64 --accel kvm",
+    "test-mce-copy-environ --arch x86_64 --accel kvm",
+    "test-mce-copy-intel --arch x86_64 --accel kvm",
+];
+
+/// Whether `path` reaches the copy's recovery: the copy, the decision and
+/// the handler, the readers of a program's memory, the poison record and
+/// its way out, or the gate.
+fn reaches_mce_copy(path: &str) -> bool {
+    [
+        "src/kernel/src/arch/x86_64/copy_mc.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/decode.rs",
+        "src/kernel/src/syscall/uaccess.rs",
+        "src/kernel/src/sched/task.rs",
+        "src/kernel/src/trap.rs",
+        "tools/common/xtask/src/mce_copy.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/tests/mce-copy/")
+}
+
 /// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
 /// check injected into every processor must stop the kernel as FX-9005, and
 /// the log's and recovery's modes must hold, under both accelerators. Under
@@ -405,6 +438,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if reaches_mce_copy(path) {
+        rows.add(TEST_MCE_COPY);
+        reason(
+            rows,
+            "the copy's machine-check recovery: test-mce-copy and its modes",
         );
     }
     if reaches_scrub(path) {
@@ -749,6 +789,25 @@ mod tests {
         }
         let rows = rows_of(&["src/kernel/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_BTRFS_PRESSURE));
+    }
+
+    #[test]
+    fn the_copys_recovery_adds_its_row() {
+        for path in [
+            "src/kernel/src/syscall/uaccess.rs",
+            "src/kernel/src/arch/x86_64/copy_mc.rs",
+            "src/tests/mce-copy/src/main.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                TEST_MCE_COPY
+                    .iter()
+                    .all(|row| rows.commands.iter().any(|c| c == row)),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_MCE_COPY[0]));
     }
 
     #[test]

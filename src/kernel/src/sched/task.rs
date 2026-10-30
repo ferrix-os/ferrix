@@ -113,6 +113,64 @@ impl Wakees {
     }
 }
 
+/// A [`PoisonRecord`] holds a copy that consumed poison.
+const POISON_SET: u64 = 1 << 0;
+/// A [`PoisonRecord`] asks for the program's signal: the memory was its own.
+const POISON_SIGNAL: u64 = 1 << 1;
+
+/// A task's system call copy that consumed poison, for the call's way out
+/// (`docs/MACHINE-CHECK-COPY.md` §3.3, `L.syscall.25`): the page with
+/// [`POISON_SET`] and maybe [`POISON_SIGNAL`], or 0, and the user page to
+/// signal at. Written with no lock by the copy, taken at the way out.
+#[derive(Debug)]
+pub(crate) struct PoisonRecord {
+    /// The page and the two bits, or 0.
+    word: AtomicU64,
+    /// The user page, where [`POISON_SIGNAL`] is set.
+    at: AtomicU64,
+}
+
+impl PoisonRecord {
+    /// An empty record.
+    pub(crate) const fn new() -> Self {
+        Self {
+            word: AtomicU64::new(0),
+            at: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a copy that consumed poison at the physical `page`, and the
+    /// user page `at` to signal the program at, if any: no lock. `false`
+    /// when a record is already there -- a second in one call -- which the
+    /// caller stops on.
+    pub(crate) fn record(&self, page: u64, at: Option<u64>) -> bool {
+        let signal = at.map_or(0, |at| {
+            self.at.store(at, Ordering::Relaxed);
+            POISON_SIGNAL
+        });
+        self.word
+            .compare_exchange(
+                0,
+                page | POISON_SET | signal,
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+    }
+
+    /// Take the record, leaving it empty: the physical page and the user
+    /// page to signal at, if it asked for it.
+    pub(crate) fn take(&self) -> Option<(u64, Option<u64>)> {
+        let word = self.word.swap(0, Ordering::Acquire);
+        if word & POISON_SET == 0 {
+            return None;
+        }
+        let page = word & !(POISON_SET | POISON_SIGNAL);
+        let at = (word & POISON_SIGNAL != 0).then(|| self.at.load(Ordering::Relaxed));
+        Some((page, at))
+    }
+}
+
 /// One kernel thread.
 #[derive(Debug)]
 pub struct Task {
@@ -162,6 +220,9 @@ pub struct Task {
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
+    /// A system call's copy that consumed poison, for the call's way out
+    /// (`docs/MACHINE-CHECK-COPY.md` §3.3).
+    copy_poison: PoisonRecord,
     /// Whom it woke last and how often it changed wakee (L.sched.91).
     wakees: Wakees,
     /// The processors it may run on, as stored: its spawn's, or the last
@@ -616,6 +677,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(crate::timer::now_nanos()),
             affinity: Affinity::new(affinity),
             spawn_pin,
@@ -670,6 +732,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
             // is the one thing that genuinely cannot move: it *is* that
@@ -1371,5 +1434,15 @@ impl Task {
     /// processor's flag has it.
     pub(crate) fn in_call(&self) -> bool {
         self.in_call.load(Ordering::Relaxed)
+    }
+
+    /// Record a system call's copy that consumed poison ([`PoisonRecord::record`]).
+    pub(crate) fn record_copy_poison(&self, page: u64, at: Option<u64>) -> bool {
+        self.copy_poison.record(page, at)
+    }
+
+    /// Take the poison record ([`PoisonRecord::take`]).
+    pub(crate) fn take_copy_poison(&self) -> Option<(u64, Option<u64>)> {
+        self.copy_poison.take()
     }
 }

@@ -2018,6 +2018,16 @@ verdict of ledger line 3950.
   hardware yet: a row of `docs/BACKLOG.md`.
 * **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
   most 32 bank reads and 32 lines; no lock while it reads a bank.
+* **A system call's copy that consumed poison** (`docs/MACHINE-CHECK-COPY.md`,
+  H.FAIL.10): the IST path adds one comparison of `rip` with the copy's
+  symbol, the RAM test of `rsi` (a scan of at most `MOST_RAM_RUNS` (128)
+  runs, atomics only) and two frame writes; still no lock. The copy itself
+  is the `rep movsb` the compiler emitted before, so a copy costs what it
+  did. The caller's record is one compare-and-swap under whatever lock it
+  holds (the space's, or futex's bucket); the retirement and the signal run
+  at the call's way out with no lock held, the retirement's `FRAMES` hold
+  as above. A call with no poison pays one load of its task's record on its
+  way out.
 * **An address space's lock, then an object's pages lock**
   (`AddressSpace::resident_split`, `Vmo::committed_in`,
   `Vmo::committed_in_both`; L.user.171, L.user.172): whoever may read a

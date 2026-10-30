@@ -178,6 +178,45 @@ pub(crate) use x86_64::scrub::{
     evict_to_coherency, fill_without_reading, hypervisor_seen, is_guest, scrub_ready,
 };
 
+// A copy a machine check can stop (`docs/MACHINE-CHECK-COPY.md` §3.1): on
+// x86-64 one `rep movsb` the ring-0 handler knows; elsewhere, where the item
+// recovers from no machine check, a plain copy that never stops.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::copy_mc::{Copied, copy_mc};
+
+/// What a copy did (x86-64's `Copied`): never stopped here.
+#[cfg(not(target_arch = "x86_64"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Copied {
+    /// Bytes not copied.
+    pub(crate) left: u64,
+    /// The poisoned page with bit 0 set; always 0 here.
+    pub(crate) page: u64,
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+impl Copied {
+    /// Never a poisoned page off x86-64.
+    pub(crate) const fn poisoned(self) -> Option<u64> {
+        None
+    }
+}
+
+/// Copy `out.len()` bytes from the kernel address `source` into `out`.
+///
+/// # Safety
+///
+/// (USER-COPY) `source..source + out.len()` is readable kernel memory that
+/// stays live for the call.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) unsafe fn copy_mc(out: &mut [u8], source: u64) -> Copied {
+    // SAFETY: (USER-COPY) the caller's range is readable and live for `out`'s
+    // length, which `out` itself is writable for.
+    let bytes = unsafe { core::slice::from_raw_parts(source as *const u8, out.len()) };
+    out.copy_from_slice(bytes);
+    Copied { left: 0, page: 0 }
+}
+
 /// ARMv7-A stands down: no write of a whole line reads nothing there.
 #[cfg(target_arch = "arm")]
 pub(crate) const fn scrub_ready() -> Result<(), &'static str> {
@@ -646,7 +685,7 @@ pub(crate) const fn check_machine_check_enabled() -> Result<(), &'static str> {
 // its entry marked a frame for `SIGBUS`, and the signal. The Arm
 // architectures take no machine check, so no frame is ever marked there.
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::{machine_check_marked, machine_check_signal};
+pub(crate) use x86_64::{machine_check_marked, machine_check_signal, retire_poisoned};
 
 /// `/proc/ferrix-mce`: nothing here, which has no machine check.
 #[cfg(not(target_arch = "x86_64"))]
@@ -670,6 +709,11 @@ pub(crate) const fn machine_check_marked(_frame: &TrapFrame) -> bool {
 pub(crate) const fn machine_check_signal(_frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
     (ferrix_linux_abi::types::SIGBUS, 0x80, 0, false)
 }
+
+/// Retire a frame a copy consumed poison in: unreachable here, since no copy
+/// is ever stopped ([`Copied::poisoned`] is always `None`).
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn retire_poisoned(_page: u64) {}
 
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so

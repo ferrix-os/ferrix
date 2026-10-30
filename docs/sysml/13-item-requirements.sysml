@@ -1628,8 +1628,9 @@ package FerrixItemRequirements {
                 RIPV is clear or TCC set; on any other vendor's, corrected. It
                 shall then retire the frame of each uncorrected record with a
                 usable address (a deferred one only by PhysAddrV), never hand it
-                out again, and end or signal that program; every other machine
-                check stops as H.FAIL.1.";
+                out again, and end or signal that program; a system call's copy
+                that consumed poison goes on as H.FAIL.10 says; every other
+                machine check stops as H.FAIL.1.";
             attribute :>> criterion = "L.x86_64.221-232 and L.mm.91-92 each
                 verified; test-mce and its five recovery modes pass under KVM and
                 TCG.";
@@ -1653,6 +1654,29 @@ package FerrixItemRequirements {
                 check (L.object.253 released unwritten, ledger 5140 (3)). An
                 ECC machine whose firmware reports Other or Unknown is the
                 SAFETY-MANUAL's residual.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.10'> aCopyThatConsumesPoisonFailsTheCall : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-COPY.md (customer, 2026-10-30, machine-check item 2; consultant OK IF ledger 5216). */
+            attribute :>> statement = "On x86-64 with recovery on, a system call's
+                read of a program's memory that consumes poison shall end with
+                the call failing (or, for a write that already stored the pages
+                before it, ending short at that page), the frame retired and,
+                where the memory is the
+                caller's own and it has signals, SIGBUS BUS_MCEERR_AR at the
+                page; the kernel shall resume only at the copy's own exit, never
+                inside the copy past the poison, and stop in every other ring-0
+                case it stops in under H.FAIL.8.";
+            attribute :>> criterion = "test-mce-copy under KVM with AMD's records (the
+                guest has SUCCOR), at one and two processors: the victim's write
+                fails EFAULT or ends short at the poisoned page, its handler gets
+                SIGBUS code 4 at the injected page's user address, the frame is
+                retired and the kernel goes on; its modes stop where they must;
+                the TCG rows and, on an AMD host, Intel's records are
+                fail-closed rows only (TCG runs rep movsb in one step and
+                reports no recovery; Intel's model has no MCG_SER_P there), so
+                Intel's recovery is shown by stage 3's tables and frame;
+                L.x86_64.244-246 and L.syscall.25-26 each with its check.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
     }

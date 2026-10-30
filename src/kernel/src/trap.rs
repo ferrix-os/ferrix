@@ -511,11 +511,35 @@ pub fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome
     // As on the way back from a trap: a call that moved its own process
     // (`echo $$ > cgroup.procs`) runs in the new job from here.
     if regs.is_some() {
+        copy_poisoned();
         crate::sched::regroup_current();
         crate::sched::throttle_current(must_attend);
         crate::sched::call_left();
     }
     outcome
+}
+
+/// `si_code` `BUS_MCEERR_AR`: a machine check, action required.
+const BUS_MCEERR_AR: i32 = 4;
+
+/// Act on a copy of the call that consumed poison (`L.syscall.25`,
+/// `docs/MACHINE-CHECK-COPY.md` §3.3), here at the call's way out, where no
+/// lock is held: retire the frame, then, where the memory was the program's
+/// own, raise `SIGBUS` `BUS_MCEERR_AR` at its page as a ring-3 consumption
+/// with `RIPV` set raises it -- through the personality's `fault_signal`, so
+/// a handler runs and a blocked or ignored one ends the program. One word
+/// read when there is none.
+fn copy_poisoned() {
+    let Some(Some((page, at))) = crate::sched::with_current(crate::sched::Task::take_copy_poison)
+    else {
+        return;
+    };
+    arch::retire_poisoned(page);
+    if let (Some(at), Some(path)) = (at, return_path()) {
+        // No instruction consumed it, the call did: `pc` 0, which only a
+        // fatal signal's crash line reads.
+        let _ = (path.fault_signal)(ferrix_linux_abi::types::SIGBUS, BUS_MCEERR_AR, at, 0);
+    }
 }
 
 /// What the way back to user mode does before the program runs again.

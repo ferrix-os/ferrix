@@ -80,6 +80,10 @@ pub enum UserError {
     Fault,
     /// There was no memory to copy into.
     NoMemory,
+    /// The copy consumed poison: a machine check stopped it at the page,
+    /// which is retired at the call's way out (`docs/MACHINE-CHECK-COPY.md`
+    /// §3.3, `L.syscall.25`). A program learns `EFAULT`, as for `Fault`.
+    Poisoned,
 }
 
 impl From<SpaceError> for UserError {
@@ -152,6 +156,79 @@ fn user_address(at: u64) -> Result<u64, UserError> {
     arch::nospec_below(at, USER_VIRT_END).ok_or(UserError::NotUserRange)
 }
 
+/// What a copy that consumed poison may do (`L.syscall.25`, ledger 5283 (1)):
+/// only inside a program's system call, whose way out acts on the record
+/// (`trap::copy_poisoned`), is it recorded -- with the signal when the
+/// memory is the caller's `own`; anywhere else (`rt_sigreturn`'s frame read,
+/// a seccomp filter's read before the call, a kernel thread) nothing would
+/// act on it, so it stops as a ring-0 machine check always did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PoisonAction {
+    /// Recorded for the call's way out, signalling the caller or not.
+    Record {
+        /// The memory was the caller's own.
+        signal: bool,
+    },
+    /// Stop as FX-9005.
+    Stop,
+}
+
+/// [`PoisonAction`] for a copy made `in_call` or not, of the caller's `own`
+/// memory or another's.
+pub(crate) const fn poison_action(in_call: bool, own: bool) -> PoisonAction {
+    if in_call {
+        PoisonAction::Record { signal: own }
+    } else {
+        PoisonAction::Stop
+    }
+}
+
+/// What a read of the program's memory does after [`arch::copy_mc`]: nothing
+/// for a finished copy; for one a machine check stopped (`L.syscall.25`,
+/// `26`), the poison recorded on the current task for the call's way out --
+/// with the user page of `at` to signal at when `space` is the task's own --
+/// and [`UserError::Poisoned`]. Takes no lock (the caller holds the space's,
+/// and futex's caller its bucket's). Stops as FX-9005 when the page the check
+/// named is not `source`'s, or when a record is already there.
+fn poisoned(
+    space: &AddressSpace,
+    source: u64,
+    copied: arch::Copied,
+    at: u64,
+) -> Result<(), UserError> {
+    let Some(page) = copied.poisoned() else {
+        return Ok(());
+    };
+    let frame = |address: u64| address & !(PAGE_SIZE - 1);
+    if crate::mm::ram_behind(source).map(frame) != Some(frame(page)) {
+        crate::panic::fatal!(
+            crate::panic::catalog::MACHINE_CHECK,
+            "a copy stopped by a machine check at a page it was not reading"
+        );
+    }
+    let own = crate::sched::with_current(|task| {
+        task.address_space()
+            .is_some_and(|mine| core::ptr::eq(&raw const **mine, space))
+    })
+    .unwrap_or(false);
+    let PoisonAction::Record { signal } = poison_action(crate::sched::in_call_here(), own) else {
+        crate::panic::fatal!(
+            crate::panic::catalog::MACHINE_CHECK,
+            "a copy outside a program's system call consumed poison"
+        );
+    };
+    let recorded = crate::sched::with_current(|task| {
+        task.record_copy_poison(frame(page), signal.then_some(frame(at)))
+    });
+    if recorded != Some(true) {
+        crate::panic::fatal!(
+            crate::panic::catalog::MACHINE_CHECK,
+            "a second copy consumed poison before the call's way out"
+        );
+    }
+    Err(UserError::Poisoned)
+}
+
 /// Copy `out.len()` bytes out of the program's memory at `from`.
 ///
 /// # Errors
@@ -213,17 +290,15 @@ fn copy_from_user_through(
             // stays live for the read; `chunk` was clamped to the remainder of
             // that page, so the whole read is inside it. The direct map is
             // readable for all of RAM.
-            let bytes = unsafe { core::slice::from_raw_parts(source as *const u8, chunk) };
-            target.copy_from_slice(bytes);
+            let copied = unsafe { arch::copy_mc(target, source) };
+            poisoned(space, source, copied, at)
         };
         match through {
-            Through::Faulting => resolve(space, at, Access::READ, read)?,
+            Through::Faulting => resolve(space, at, Access::READ, read)??,
             Through::Present => {
-                if space
-                    .with_present_page(user_address(at)?, Access::READ, read)?
-                    .is_none()
-                {
-                    return Ok(false);
+                match space.with_present_page(user_address(at)?, Access::READ, read)? {
+                    None => return Ok(false),
+                    Some(read) => read?,
                 }
             }
         }
@@ -380,14 +455,33 @@ pub fn copy_cstr_from_user(
         // Reserved before the page is held, so that extending `out` under the
         // space's lock never has to allocate.
         crate::fallible::try_reserve(out, span).map_err(|_| UserError::NoMemory)?;
+        // In pieces that end on 64-byte lines, each scanned as it lands, so
+        // that the copy reads no further than the line holding the terminator
+        // (`L.syscall.25`): poison past it on the page is never touched.
         let terminated = resolve(space, at, Access::READ, |source| {
-            // SAFETY: (USER-COPY) as `copy_from_user`. `span` stays inside the held page.
-            let bytes = unsafe { core::slice::from_raw_parts(source as *const u8, span) };
-            let end = bytes.iter().position(|&b| b == 0);
-            // NOALLOC: into the room reserved above.
-            out.extend_from_slice(bytes.get(..end.unwrap_or(span)).unwrap_or_default());
-            end.is_some()
-        })?;
+            let mut piece = [0u8; LINE];
+            let mut done = 0;
+            while done < span {
+                let from = source + done as u64;
+                let take = (LINE - (from % LINE as u64) as usize).min(span - done);
+                let Some(landed) = piece.get_mut(..take) else {
+                    return Err(UserError::Overflow);
+                };
+                // SAFETY: (USER-COPY) as `copy_from_user`. `done + take` stays
+                // inside `span`, which stays inside the held page.
+                let copied = unsafe { arch::copy_mc(landed, from) };
+                poisoned(space, from, copied, at + done as u64)?;
+                let end = landed.iter().position(|&b| b == 0);
+                // NOALLOC: into the room reserved above.
+                out.extend_from_slice(landed.get(..end.unwrap_or(take)).unwrap_or_default());
+                if end.is_some() {
+                    return Ok(true);
+                }
+                done += take;
+            }
+            Ok(false)
+        })?
+        .inspect_err(|_| out.clear())?;
         if terminated {
             return Ok(());
         }
@@ -397,6 +491,9 @@ pub fn copy_cstr_from_user(
     }
     Err(UserError::Fault)
 }
+
+/// The piece [`copy_cstr_from_user`] copies at a time: a cache line.
+const LINE: usize = 64;
 
 /// Bytes in a C `long`, `size_t` or pointer on this build: eight on the two
 /// 64-bit architectures, four on ARMv7-A.

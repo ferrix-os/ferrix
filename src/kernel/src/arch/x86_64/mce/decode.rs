@@ -135,22 +135,75 @@ pub(in crate::arch::x86_64) enum Action {
         /// `MCG_STATUS.RIPV` clear.
         kill: bool,
     },
+    /// A system call's copy consumed it at the copy's one recoverable
+    /// instruction: the copy is sent to its exit (`L.x86_64.245`, `246`;
+    /// `docs/MACHINE-CHECK-COPY.md` §3.2).
+    Recover,
     /// The kernel cannot go on (`L.x86_64.227`, `229`).
     Stop,
 }
 
+/// Where a machine check was taken, as the decision reads it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::arch::x86_64) enum Context {
+    /// In ring 3.
+    Ring3,
+    /// In ring 0, at the copy's `rep movsb` with bytes still to copy
+    /// ([`context`]).
+    Copy,
+    /// Anywhere else in ring 0.
+    Kernel,
+}
+
+/// The context of a machine check taken in ring 3 when `user`, else at
+/// `rip` with `rcx` in its frame, where `movs` is the relocated address of
+/// the copy's `rep movsb` (`L.x86_64.245`): `Copy` only at exactly that
+/// instruction with bytes left, since at 0 it loaded nothing.
+pub(in crate::arch::x86_64) const fn context(user: bool, rip: u64, rcx: u64, movs: u64) -> Context {
+    if user {
+        Context::Ring3
+    } else if rip == movs && rcx > 0 {
+        Context::Copy
+    } else {
+        Context::Kernel
+    }
+}
+
+/// The MCA error code of a data load, under Linux's mask that ignores the
+/// filtering bit 12 (its recoverable-kernel row, `MCACOD_DATA`).
+const MCACOD_DATA: u64 = 0x0134;
+/// Linux's `MCACOD` mask.
+const MCACOD_MASK: u64 = 0xefff;
+
+/// Whether a record's MCA code is a data load (`L.x86_64.245`).
+pub(in crate::arch::x86_64) const fn data_load(status: u64) -> bool {
+    status & MCACOD_MASK == MCACOD_DATA
+}
+
+/// Whether the page a copy's record names is the one the copy was loading
+/// from: `source`, the physical address of the frame's `rsi`, `None` when it
+/// lies outside the direct map (`L.x86_64.245`).
+pub(in crate::arch::x86_64) const fn same_page(record: u64, source: Option<u64>) -> bool {
+    match source {
+        Some(source) => record >> PAGE_SHIFT == source >> PAGE_SHIFT,
+        None => false,
+    }
+}
+
 /// The action for one bank of `class`, its `status` and `misc`, under
-/// `mcg_status`, taken from ring 3 when `user`.
+/// `mcg_status`, in `context`.
 pub(in crate::arch::x86_64) const fn action(
     class: Class,
     status: u64,
     misc: u64,
     mcg_status: u64,
-    user: bool,
+    context: Context,
     ser: bool,
 ) -> Action {
     let ripv = mcg_status & RIPV != 0;
     let eipv = mcg_status & EIPV != 0;
+    let user = matches!(context, Context::Ring3);
+    let copy = matches!(context, Context::Copy);
     match class {
         Class::Empty | Class::Corrected | Class::Ucna | Class::Deferred => Action::Leave,
         // AMD's class is [`amd_action`]'s: reaching here is a vendor mix-up,
@@ -161,6 +214,11 @@ pub(in crate::arch::x86_64) const fn action(
         Class::Srar if user && eipv && usable_address(status, misc, ser) => {
             Action::Signal { kill: !ripv }
         }
+        Class::Srar
+            if copy && eipv && ripv && data_load(status) && usable_address(status, misc, ser) =>
+        {
+            Action::Recover
+        }
         Class::Srao | Class::Srar | Class::Fatal => Action::Stop,
     }
 }
@@ -169,7 +227,9 @@ pub(in crate::arch::x86_64) const fn action(
 /// machine check, which the kernel cannot tell apart, stop it.
 pub(in crate::arch::x86_64) const fn fold(a: Action, b: Action) -> Action {
     match (a, b) {
-        (Action::Signal { .. }, Action::Signal { .. }) => Action::Stop,
+        (Action::Signal { .. } | Action::Recover, Action::Signal { .. } | Action::Recover) => {
+            Action::Stop
+        }
         _ if rank(a) >= rank(b) => a,
         _ => b,
     }
@@ -192,7 +252,7 @@ const fn rank(action: Action) -> u8 {
         Action::Leave => 0,
         Action::Unaffected => 1,
         Action::Defer => 2,
-        Action::Signal { .. } => 3,
+        Action::Signal { .. } | Action::Recover => 3,
         Action::Stop => 4,
     }
 }
@@ -413,24 +473,30 @@ pub(in crate::arch::x86_64) const fn cut_address(
     Some(address & mask & !((1 << PAGE_SHIFT) - 1))
 }
 
-/// The action for one AMD bank of `class` (`L.x86_64.236`-`238`): corrected
-/// and deferred left for the poll; an action-required record stops in ring
-/// 0, and in ring 3 stops with `EIPV` clear or no usable address, kills on
-/// `RIPV` clear or `TCC` (the consultant's ruling (b)), and otherwise
-/// signals. Never `Unaffected`: AMD's machine check is not broadcast.
+/// The action for one AMD bank of `class` (`L.x86_64.236`-`238`, `245`):
+/// corrected and deferred left for the poll; an action-required record stops
+/// in ring 0 but at the copy, where it recovers with `EIPV` and `RIPV` set, a
+/// usable address and `TCC` clear; in ring 3 it stops with `EIPV` clear or no
+/// usable address, kills on `RIPV` clear or `TCC` (the consultant's ruling
+/// (b)), and otherwise signals. Never `Unaffected`: AMD's machine check is
+/// not broadcast.
 pub(in crate::arch::x86_64) const fn amd_action(
     class: Class,
     status: u64,
     mcg_status: u64,
-    user: bool,
+    context: Context,
     usable: bool,
 ) -> Action {
     let ripv = mcg_status & RIPV != 0;
     let eipv = mcg_status & EIPV != 0;
-    match class {
-        Class::Empty | Class::Corrected | Class::Deferred => Action::Leave,
-        Class::AmdAr if !user || !eipv || !usable => Action::Stop,
-        Class::AmdAr => Action::Signal {
+    match (class, context) {
+        (Class::Empty | Class::Corrected | Class::Deferred, _) => Action::Leave,
+        (Class::AmdAr, Context::Copy) if eipv && ripv && usable && status & TCC == 0 => {
+            Action::Recover
+        }
+        (Class::AmdAr, Context::Copy | Context::Kernel) => Action::Stop,
+        (Class::AmdAr, Context::Ring3) if !eipv || !usable => Action::Stop,
+        (Class::AmdAr, Context::Ring3) => Action::Signal {
             kill: !ripv || status & TCC != 0,
         },
         _ => Action::Stop,

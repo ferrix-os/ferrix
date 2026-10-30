@@ -34,6 +34,11 @@
       "lines": 34,
       "recursive": false
     },
+    "arch/x86_64/mce/decode.rs::action": {
+      "complexity": 19,
+      "lines": 15,
+      "recursive": false
+    },
     "arch/x86_64/signal.rs::setup_signal_frame": {
       "complexity": 19,
       "lines": 30,
@@ -377,6 +382,11 @@
     "syscall/native.rs::vmo_pin": {
       "complexity": 20,
       "lines": 28,
+      "recursive": false
+    },
+    "syscall/uaccess.rs::copy_from_user_through": {
+      "complexity": 16,
+      "lines": 21,
       "recursive": false
     },
     "trap.rs::handle_page_fault": {

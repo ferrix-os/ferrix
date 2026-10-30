@@ -1359,6 +1359,16 @@ pub fn direct_map_ram(phys: u64) -> Option<u64> {
         .then(|| physmap(phys))
 }
 
+/// The RAM physical address behind the direct-map address `virt`, `None`
+/// outside the direct map or off RAM. Lock-free, as [`direct_map_ram`], so
+/// the machine check may ask it (`docs/MACHINE-CHECK-COPY.md` §3.2).
+pub(crate) fn ram_behind(virt: u64) -> Option<u64> {
+    let phys = virt
+        .checked_sub(PHYSMAP.load(Ordering::Relaxed))?
+        .checked_add(PHYSMAP_PHYS.load(Ordering::Relaxed))?;
+    direct_map_ram(phys).map(|_| phys)
+}
+
 /// Whether [`record_ram`] has run, so that [`direct_map_ram`]'s `None` means
 /// "not RAM" rather than "not known yet".
 pub(crate) fn ram_recorded() -> bool {

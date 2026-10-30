@@ -117,9 +117,13 @@ mismatch, then:
    word set with no lock: the page, whether to signal (the space is the
    current task's), and the user page of `at`. A record already full (a
    second poisoned copy in one call) stops as FX-9005: fail closed;
-2. answers `UserError::Poisoned`, a new variant. The call fails; no partial
-   count is reported, as Linux's does for a copy that consumed poison, and
-   the destination is never used (`copy_cstr_from_user` truncates `out`).
+2. answers `UserError::Poisoned`, a new variant. The copy reports no partial
+   count and its destination is never used (`copy_cstr_from_user` truncates
+   `out`). Its caller treats it as a fault at that page: most calls fail; a
+   write that copies page by page and has already stored the pages before
+   the poisoned one reports their count, as it does for any fault there and
+   as Linux's does (`test-mce-copy` sees the memfd write end exactly at the
+   poisoned page's offset).
 
 Nothing is retired or signalled there: `copy_from_user_present` runs under
 futex's bucket lock, and retiring takes the frame allocator's locks and
@@ -218,18 +222,31 @@ To reserve before code, in one docs-only landing (all free on origin/develop):
   and `rdx` from the frame is shown by `test-mce-copy`.
 * **`test-mce-copy`** (x86-64, KVM and TCG, and `--smp 2`; the gate alone
   boots `nokaslr`, so the symbol's address is the ELF's): a victim writes a
-  1 MiB buffer to a tmpfs file in a loop and prints the buffer's range. xtask
+  1 MiB buffer to a memfd in a loop (a file on the root spent its time in the
+  disk's device work) and prints the buffer's range. The modes use AMD's
+  records: under KVM on the AMD host the guest has `SUCCOR`, so the recovery
+  itself is shown, where Intel's model has no `MCG_SER_P`;
+  `test-mce-copy-intel` gives Intel's records (recovered where `MCG_SER_P` is
+  reported, the fail-closed stop where not, and the bystander). TCG runs a
+  `rep movsb` in one step -- no stop ever finds it partway -- and reports no
+  recovery, so under TCG the gate injects at the first stop in ring 0 and
+  requires the stop. xtask
   stops the machine until a processor's `rip` is `ferrix_copy_mc_movs` and its
   `rsi`, translated on that processor (`gva2gpa`), is a page of the victim's
   buffer; otherwise it resumes and retries, the tries bounded and reported.
   It injects an action-required data-load record with `EIPV|RIPV` at that
   page into that processor and resumes. The victim must see `write` fail
   `EFAULT` and its handler get `SIGBUS` code 4 at the user page matching the
-  injected frame; the kernel must say `mce: frame <that page> retired` and go
-  on (the victim exits 0 after writing a fresh buffer). AMD under KVM as
+  injected frame (or end short exactly at that page, as above); the kernel
+  must say `mce: frame <that page> retired` and go on (the victim exits 0
+  after writing a fresh buffer). AMD under KVM as
   `test-mce-amd-srar` does (TCG drops SUCCOR: the fail-closed stop).
 * **Modes** (each must stop as FX-9005 unless said): `RIPV` clear at the
-  copy; `EIPV` clear at the copy; the record at another page than `rsi`'s;
+  copy; `EIPV` clear at the copy with `RIPV` set -- on Intel the signature of
+  another processor's consumption, which H.FAIL.8 leaves alone
+  (`Unaffected`): nothing is recovered or retired, the copy goes on and the
+  kernel with it (`test-mce-copy-bystander`; on AMD the same flags stop, as
+  the host rows say); the record at another page than `rsi`'s;
   `ferrix.mce.recover=off`; AMD with `TCC` set (KVM); `rip` in the kernel
   outside the copy; and `/proc/<pid>/environ` read while the target's page is
   injected -- the read ends short, the frame is retired, no process
@@ -262,4 +279,32 @@ hardware run.
   (5) ring 3's `RIPV`-set signal (§3.3), (6) every match on `Poisoned`
   (§3.3), (7) `copy_cstr` in 64-byte pieces (§3.3), (8) the targeted
   injection and `--smp 2` (§6), (9) the modes and controls (§6), (10) the ids
-  (§5), (11) the docs (§7), (12) the pinned range (§6).
+  (§5), (11) the docs (§7), (12) the pinned range (§6). One reading of (9):
+  Intel's `EIPV` clear with `RIPV` set at the copy is the bystander's
+  signature and stays `Unaffected` (the review's own answer on bystanders),
+  so its mode requires nothing done rather than a stop; with both clear it
+  stops (the `RIPV`-clear mode).
+* Code (feature/mce-copy, 2026-10-30): `Poisoned` needed no new arm --
+  `fd.rs` and `memfd.rs` match `Fault` alone and send every other error to
+  `EFAULT`, and `native.rs`, `load.rs`, `signal_frame.rs` and environ map
+  any error as a fault or a short read; the gate's modes live in
+  `tools/common/xtask/src/mce_copy.rs`, the guest in `src/tests/mce-copy`.
+* Code reviewed 2026-10-30 at 260d35b97, ledger 5283: **OK IF (1)-(5)**. (1)
+  FOUND g -- `rt_sigreturn`'s frame read and a seccomp filter's read copy
+  outside `trap::system_call`'s way out -- closed by (b): a poisoned copy is
+  recorded only inside a program's system call (`uaccess::poison_action`,
+  the processor's `IN_CALL`), and stops as FX-9005 anywhere else, as every
+  ring-0 consumption did before (`sched/check.rs`'s `poison_record`, with its
+  control). (3) The TCG rows are fail-closed rows only, and on this AMD
+  host Intel's recovery is shown by stage 3's tables and frame; the
+  end-to-end evidence is the KVM rows with AMD's records. The controls and
+  the guard each checks: C1 the rip test (inverted, the copy mode stops), C2
+  the page test (removed, the other-page mode recovers; and the outside mode
+  still stops on that tree, the rip test holding alone), C3 the fixup's rip
+  write, C4 the signal, C5 the retirement, C6 the another-space test, C7
+  the in-call test, C8 the caller's re-check of the page (removed on C2b's
+  tree, where the handler's page test is gone too: the other-page mode then
+  goes on). C1 and C3 fire at stage 3's copy tables and fixup frame, before
+  any injection; the stop modes require the machine check's own stop, so
+  that the caller's re-check cannot hide a handler that recovered where it
+  must not (which is what C2 shows).

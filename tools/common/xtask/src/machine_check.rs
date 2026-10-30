@@ -513,7 +513,7 @@ fn inject(qmp: &mut Qmp, lines: &[String], mode: Mode, smp: u32) -> Result<Injec
 }
 
 /// Stop the machine, or let it go on.
-fn stopped(qmp: &mut Qmp, stop: bool) -> Result<()> {
+pub(crate) fn stopped(qmp: &mut Qmp, stop: bool) -> Result<()> {
     let _ = qmp.execute(if stop { "stop" } else { "cont" }, None)?;
     Ok(())
 }
@@ -583,7 +583,7 @@ fn in_ring_3(registers: &str) -> bool {
 }
 
 /// The physical address in the monitor's `gva2gpa` answer, `gpa: 0x...`.
-fn gpa(reply: &str) -> Option<u64> {
+pub(crate) fn gpa(reply: &str) -> Option<u64> {
     let at = reply.find("gpa: 0x")? + "gpa: 0x".len();
     let digits: String = reply
         .get(at..)?
@@ -860,7 +860,7 @@ pub(crate) const INTEL: &str = "vendor=GenuineIntel";
 /// ("TCG doesn't support requested feature"), KVM on an AMD host passes
 /// them: under TCG the guest reports no `SUCCOR`, and the kernel's rules
 /// then stop on every uncorrected record.
-const AMD: &str = "vendor=AuthenticAMD,+succor,+overflow-recov";
+pub(crate) const AMD: &str = "vendor=AuthenticAMD,+succor,+overflow-recov";
 /// AMD's, without `SUCCOR`.
 const AMD_NO_SUCCOR: &str = "vendor=AuthenticAMD,-succor,+overflow-recov";
 /// AMD's, without `OverflowRecov`.

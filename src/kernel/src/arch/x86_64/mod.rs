@@ -3,6 +3,7 @@
 pub mod apic;
 pub mod clock;
 pub mod console;
+pub(crate) mod copy_mc;
 pub mod cpu;
 pub(crate) use cpu::clean_for_walker;
 /// The region the kernel log is kept in across a reset, written back before
@@ -225,6 +226,12 @@ pub(crate) const fn machine_check_marked(frame: &TrapFrame) -> bool {
 /// `(signal, si_code, si_addr, end the program)` (`L.x86_64.228`).
 pub(crate) fn machine_check_signal(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
     mce::signal_for(frame)
+}
+
+/// Retire the frame a system call's copy consumed poison in, at the call's
+/// way out (`docs/MACHINE-CHECK-COPY.md` §3.3, `L.syscall.25`).
+pub(crate) fn retire_poisoned(page: u64) {
+    mce::retire(page);
 }
 
 /// Stage 10's question for the power node (`L.device.51`).

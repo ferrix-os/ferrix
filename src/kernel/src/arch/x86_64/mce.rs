@@ -32,10 +32,10 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use ferrix_bootinfo::BootView;
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 
-use super::cpu;
 use super::trap::TrapFrame;
+use super::{copy_mc, cpu};
 use crate::console::println;
-use decode::{Action, BankConfig, Class, Vendor};
+use decode::{Action, BankConfig, Class, Context, Vendor};
 
 /// `IA32_MCG_CAP`.
 const MCG_CAP: u32 = 0x179;
@@ -144,6 +144,9 @@ struct Counts {
     left: AtomicU64,
     /// Poll rounds run.
     polls: AtomicU64,
+    /// Of the recovered, ones at a system call's copy
+    /// (`docs/MACHINE-CHECK-COPY.md` §3.4).
+    copies: AtomicU64,
 }
 
 static COUNTS: [Counts; PROCESSORS] = [const {
@@ -156,6 +159,7 @@ static COUNTS: [Counts; PROCESSORS] = [const {
         deferred: AtomicU64::new(0),
         left: AtomicU64::new(0),
         polls: AtomicU64::new(0),
+        copies: AtomicU64::new(0),
     }
 }; PROCESSORS];
 
@@ -931,7 +935,7 @@ const WARNING: u8 = 4;
 const ERROR: u8 = 3;
 
 /// Retire the frame holding `address`, and say what came of it.
-fn retire(address: u64) {
+pub(super) fn retire(address: u64) {
     let frame = address / ferrix_bootinfo::PAGE_SIZE;
     let outcome = crate::mm::retire_frame(frame);
     let said = match outcome {
@@ -953,21 +957,21 @@ fn retire(address: u64) {
 /// [`decode::amd_action`] with its usable, cut address, else Intel's
 /// [`decode::action`] (no-recovery vendors' uncorrected records are fatal
 /// by then). Reads only.
-fn bank_action(proc: Proc, bank: usize, status: u64, mcg_status: u64, user: bool) -> Action {
+fn bank_action(proc: Proc, bank: usize, status: u64, mcg_status: u64, context: Context) -> Action {
     let class = proc.class(status);
     match proc.vendor {
         Vendor::Amd { smca, .. } => {
             let config = proc.config(bank);
             let usable = decode::usable_address_amd(status, smca, config)
                 && decode::cut_address(address_of(bank, status), status, smca, config).is_some();
-            decode::amd_action(class, status, mcg_status, user, usable)
+            decode::amd_action(class, status, mcg_status, context, usable)
         }
         Vendor::Intel | Vendor::NoRecovery => decode::action(
             class,
             status,
             misc_of(bank, status),
             mcg_status,
-            user,
+            context,
             proc.ser,
         ),
     }
@@ -983,10 +987,10 @@ fn signal_page(proc: Proc, bank: usize, status: u64) -> Option<u64> {
     }
 }
 
-/// Read and classify every bank of this processor under `mcg_status`, from
-/// ring 3 when `user`: the folded action, and the bank a `Signal` names.
+/// Read and classify every bank of this processor under `mcg_status`, in
+/// `context`: the folded action, and the bank a `Signal` or `Recover` names.
 /// Reads only.
-fn decide(proc: Proc, mcg_status: u64, user: bool) -> (Action, Option<usize>) {
+fn decide(proc: Proc, mcg_status: u64, context: Context) -> (Action, Option<usize>) {
     let mut folded = Action::Leave;
     let mut signalled = None;
     for bank in 0..proc.banks {
@@ -994,8 +998,8 @@ fn decide(proc: Proc, mcg_status: u64, user: bool) -> (Action, Option<usize>) {
         if proc.class(status) == Class::Empty {
             continue;
         }
-        let action = bank_action(proc, bank, status, mcg_status, user);
-        if matches!(action, Action::Signal { .. }) {
+        let action = bank_action(proc, bank, status, mcg_status, context);
+        if matches!(action, Action::Signal { .. } | Action::Recover) {
             signalled = Some(bank);
         }
         folded = decode::fold(folded, action);
@@ -1006,10 +1010,10 @@ fn decide(proc: Proc, mcg_status: u64, user: bool) -> (Action, Option<usize>) {
 /// Hand every action-optional bank to the poll and clear it; false when a
 /// slot ran out, which stops the kernel (`L.x86_64.226`). Only Intel's rules
 /// defer: AMD's never ask for it.
-fn defer_banks(proc: Proc, mcg_status: u64, user: bool) -> bool {
+fn defer_banks(proc: Proc, mcg_status: u64, context: Context) -> bool {
     for bank in 0..proc.banks {
         let status = read_bank(bank, 1);
-        if bank_action(proc, bank, status, mcg_status, user) != Action::Defer {
+        if bank_action(proc, bank, status, mcg_status, context) != Action::Defer {
             continue;
         }
         let record = Record {
@@ -1028,10 +1032,11 @@ fn defer_banks(proc: Proc, mcg_status: u64, user: bool) -> bool {
 }
 
 /// A machine check taken in ring 0, on its IST stack (`L.x86_64.226`,
-/// `227`, `229`): returns when every bank's action lets the kernel go on,
-/// with the action-optional ones handed to the poll and `MCIP` clear; stops
-/// as FX-9005 with the banks printed otherwise. Takes no lock, allocates
-/// nothing, prints nothing before it stops.
+/// `227`, `229`, `246`): returns when every bank's action lets the kernel go
+/// on, with the action-optional ones handed to the poll and `MCIP` clear --
+/// a consumption at the system call's copy sent to the copy's exit with the
+/// page in `rdx`; stops as FX-9005 with the banks printed otherwise. Takes no
+/// lock, allocates nothing, prints nothing before it stops.
 pub(super) fn on_kernel_stack(frame: &mut TrapFrame) {
     let Some(index) = here() else {
         stop(frame);
@@ -1048,19 +1053,42 @@ pub(super) fn on_kernel_stack(frame: &mut TrapFrame) {
     }
     // SAFETY: (SYSREG) this processor has `MCG_STATUS`: its bring-up read it.
     let mcg_status = unsafe { cpu::read_msr(MCG_STATUS) };
-    match decide(proc, mcg_status, false).0 {
-        Action::Leave | Action::Unaffected => {
+    let context = decode::context(false, frame.rip, frame.rcx, copy_mc::movs_address());
+    match decide(proc, mcg_status, context) {
+        (Action::Leave | Action::Unaffected, _) => {
             let _ = counts.spurious.fetch_add(1, Ordering::Relaxed);
         }
-        Action::Defer => {
-            if !defer_banks(proc, mcg_status, false) {
+        (Action::Defer, _) => {
+            if !defer_banks(proc, mcg_status, context) {
                 stop(frame);
             }
         }
-        Action::Signal { .. } | Action::Stop => stop(frame),
+        (Action::Recover, Some(bank)) => {
+            let page = signal_page(proc, bank, read_bank(bank, 1));
+            match page {
+                Some(page) if decode::same_page(page, crate::mm::ram_behind(frame.rsi)) => {
+                    recover_copy(frame, page);
+                }
+                _ => stop(frame),
+            }
+            clear_bank(bank);
+            if !defer_banks(proc, mcg_status, context) {
+                stop(frame);
+            }
+            let _ = counts.copies.fetch_add(1, Ordering::Relaxed);
+        }
+        (Action::Recover, None) | (Action::Signal { .. } | Action::Stop, _) => stop(frame),
     }
     let _ = counts.recovered.fetch_add(1, Ordering::Relaxed);
     end_machine_check();
+}
+
+/// Send a system call's copy stopped at its `rep movsb` to its exit, with
+/// the poisoned `page` and bit 0 in `rdx` (`L.x86_64.246`): `rcx`, the bytes
+/// left, is the processor's own and stays.
+pub(super) fn recover_copy(frame: &mut TrapFrame, page: u64) {
+    frame.rip = copy_mc::out_address();
+    frame.rdx = page | 1;
 }
 
 /// [`TrapFrame::error_code`] of a ring-3 machine check marked for `SIGBUS`:
@@ -1093,7 +1121,7 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
     }
     // SAFETY: (SYSREG) as in `on_kernel_stack`.
     let mcg_status = unsafe { cpu::read_msr(MCG_STATUS) };
-    let (action, signalled) = decide(proc, mcg_status, true);
+    let (action, signalled) = decide(proc, mcg_status, Context::Ring3);
     let marked = match (action, signalled) {
         (Action::Stop, _) => stop(frame),
         (Action::Signal { kill }, Some(bank)) => {
@@ -1104,14 +1132,14 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
             clear_bank(bank);
             true
         }
-        (Action::Signal { .. }, None) => stop(frame),
+        (Action::Signal { .. } | Action::Recover, None) | (Action::Recover, Some(_)) => stop(frame),
         (Action::Leave | Action::Unaffected, _) => {
             let _ = counts.spurious.fetch_add(1, Ordering::Relaxed);
             false
         }
         (Action::Defer, _) => false,
     };
-    if !defer_banks(proc, mcg_status, true) {
+    if !defer_banks(proc, mcg_status, Context::Ring3) {
         stop(frame);
     }
     let _ = counts.recovered.fetch_add(1, Ordering::Relaxed);
@@ -1233,7 +1261,7 @@ pub(crate) fn render(out: &mut impl Write) -> core::fmt::Result {
         writeln!(
             out,
             "cpu{index} banks {banks} checks {} recovered {} spurious {} corrected {} ucna {} \
-             deferred {} left {} polls {}",
+             deferred {} left {} polls {} copies {}",
             counts.checks.load(Ordering::Relaxed),
             counts.recovered.load(Ordering::Relaxed),
             counts.spurious.load(Ordering::Relaxed),
@@ -1242,6 +1270,7 @@ pub(crate) fn render(out: &mut impl Write) -> core::fmt::Result {
             counts.deferred.load(Ordering::Relaxed),
             counts.left.load(Ordering::Relaxed),
             counts.polls.load(Ordering::Relaxed),
+            counts.copies.load(Ordering::Relaxed),
         )?;
     }
     Ok(())

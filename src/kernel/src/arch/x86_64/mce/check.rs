@@ -7,7 +7,9 @@
 //! fields (`L.x86_64.233`-`236`, `240`-`242`). Nothing here reads or writes
 //! a machine-check register.
 
-use super::decode::{self, ADDRV, AR, Action, Class, EIPV, EN, MISCV, OVER, PCC, RIPV, S, UC, VAL};
+use super::decode::{
+    self, ADDRV, AR, Action, Class, Context, EIPV, EN, MISCV, OVER, PCC, RIPV, S, UC, VAL,
+};
 use super::{EMPTY, FULL, Kind, Record, SLOTS, Slot, WRITING, put, take};
 use crate::console::println;
 
@@ -24,6 +26,18 @@ const MISC_LINEAR: u64 = 1 << 6;
 const SRAR: u64 = VAL | UC | EN | S | AR | ADDRV | MISCV;
 /// The record SRAO makes: a patrol scrub's find.
 const SRAO: u64 = VAL | UC | EN | S | ADDRV | MISCV;
+
+/// A data load's consumption at a page: SRAR with MCA code `0x0134`.
+const SRAR_LOAD: u64 = SRAR | 0x0134;
+
+/// The tables' rings: ring 3, or ring 0 outside the copy.
+const fn ring(user: bool) -> Context {
+    if user {
+        Context::Ring3
+    } else {
+        Context::Kernel
+    }
+}
 
 /// Stage 3's checks.
 ///
@@ -46,6 +60,12 @@ pub(in crate::arch::x86_64) fn run() -> Result<(), &'static str> {
     println!(
         "  mce      vendor table, AMD's classifier, actions, address cut, McaX and line fields \
          as the table says; no register read"
+    );
+    copy_actions()?;
+    copies()?;
+    println!(
+        "  mce      the copy's context, actions and fixup, copy_mc over 0 to 9000 bytes at \
+         every alignment, as the table says; no register read"
     );
     Ok(())
 }
@@ -137,7 +157,7 @@ fn actions() -> Result<(), &'static str> {
         (Class::Fatal, SRAR | PCC, both, true, Action::Stop),
     ];
     for &(class, status, mcg_status, user, action) in table {
-        if decode::action(class, status, MISC_PAGE, mcg_status, user, true) != action {
+        if decode::action(class, status, MISC_PAGE, mcg_status, ring(user), true) != action {
             return Err("the machine check chose the wrong action for a bank");
         }
     }
@@ -456,13 +476,13 @@ fn amd_actions() -> Result<(), &'static str> {
         (Class::Fatal, AMD_AR | PCC, both, true, true, Action::Stop),
     ];
     for &(class, status, mcg_status, user, usable, action) in table {
-        let got = decode::amd_action(class, status, mcg_status, user, usable);
+        let got = decode::amd_action(class, status, mcg_status, ring(user), usable);
         if got == Action::Unaffected || got != action {
             return Err("AMD's machine check chose the wrong action for a bank");
         }
     }
     // Intel's action never acts on AMD's class.
-    if decode::action(Class::AmdAr, AMD_AR, 0, RIPV, true, true) != Action::Stop {
+    if decode::action(Class::AmdAr, AMD_AR, 0, RIPV, Context::Ring3, true) != Action::Stop {
         return Err("Intel's rules acted on AMD's action-required class");
     }
     Ok(())
@@ -535,4 +555,137 @@ impl core::fmt::Write for Fields {
         self.len = end;
         Ok(())
     }
+}
+
+/// The `Copy` context (`docs/MACHINE-CHECK-COPY.md` §3.2): only at the
+/// relocated `rep movsb` with bytes left; `Recover` for an Intel data load
+/// with `EIPV`, `RIPV` and a usable address, and for an AMD consumption under
+/// ring 3's rules with `TCC` clear, each condition removed in turn stopping;
+/// the page test; `Recover` folds as a consumption.
+///
+/// Verifies: `L.x86_64.245`
+fn copy_actions() -> Result<(), &'static str> {
+    let movs = super::copy_mc::movs_address();
+    let contexts: &[(bool, u64, u64, Context)] = &[
+        (false, movs, 1, Context::Copy),
+        (false, movs, 0, Context::Kernel),
+        (false, movs + 1, 1, Context::Kernel),
+        (false, movs.wrapping_sub(1), 1, Context::Kernel),
+        (true, movs, 1, Context::Ring3),
+    ];
+    for &(user, rip, rcx, context) in contexts {
+        if decode::context(user, rip, rcx, movs) != context {
+            return Err("the machine check placed a copy's context wrongly");
+        }
+    }
+    let both = RIPV | EIPV;
+    let intel: &[(u64, u64, u64, Action)] = &[
+        (SRAR_LOAD, MISC_PAGE, both, Action::Recover),
+        (SRAR_LOAD, MISC_PAGE, RIPV, Action::Unaffected),
+        (SRAR_LOAD, MISC_PAGE, EIPV, Action::Stop),
+        (SRAR_LOAD & !ADDRV, MISC_PAGE, both, Action::Stop),
+        (SRAR_LOAD, MISC_COARSE, both, Action::Stop),
+        // Not a data load: an instruction fetch's code (0x0150).
+        (SRAR | 0x0150, MISC_PAGE, both, Action::Stop),
+        // The filtering bit 12 does not count.
+        (SRAR_LOAD | 0x1000, MISC_PAGE, both, Action::Recover),
+    ];
+    for &(status, misc, mcg_status, action) in intel {
+        let class = decode::classify(status, true);
+        if decode::action(class, status, misc, mcg_status, Context::Copy, true) != action {
+            return Err("the machine check chose the wrong action for a copy's bank");
+        }
+        // Outside the copy, the same record never recovers.
+        if decode::action(class, status, misc, mcg_status, Context::Kernel, true) == Action::Recover
+        {
+            return Err("the machine check recovered a ring-0 consumption outside the copy");
+        }
+    }
+    let amd: &[(u64, u64, bool, Action)] = &[
+        (AMD_AR, both, true, Action::Recover),
+        (AMD_AR, RIPV, true, Action::Stop),
+        (AMD_AR, EIPV, true, Action::Stop),
+        (AMD_AR, both, false, Action::Stop),
+        (AMD_AR | decode::TCC, both, true, Action::Stop),
+    ];
+    for &(status, mcg_status, usable, action) in amd {
+        if decode::amd_action(Class::AmdAr, status, mcg_status, Context::Copy, usable) != action
+            || decode::amd_action(Class::AmdAr, status, mcg_status, Context::Kernel, usable)
+                != Action::Stop
+        {
+            return Err("AMD's machine check chose the wrong action for a copy's bank");
+        }
+    }
+    let pages: &[(u64, Option<u64>, bool)] = &[
+        (0x5000, Some(0x5000), true),
+        (0x5000, Some(0x5ff8), true),
+        (0x5000, Some(0x6000), false),
+        (0x5000, Some(0x4fff), false),
+        (0x5000, None, false),
+    ];
+    for &(record, source, same) in pages {
+        if decode::same_page(record, source) != same {
+            return Err("the machine check matched a copy's page wrongly");
+        }
+    }
+    let kill = Action::Signal { kill: false };
+    if decode::fold(Action::Recover, Action::Defer) != Action::Recover
+        || decode::fold(Action::Recover, Action::Recover) != Action::Stop
+        || decode::fold(Action::Recover, kill) != Action::Stop
+        || decode::fold(Action::Recover, Action::Stop) != Action::Stop
+    {
+        return Err("the machine check folded a copy's action wrongly");
+    }
+    Ok(())
+}
+
+/// `copy_mc` over lengths 0 to 9000 at every source and destination
+/// alignment 0 to 7 copies exactly and answers `(0, 0)`; the fixup on a
+/// frame the check builds sends it to the exit with the page and bit 0
+/// (the poison record is `sched/check.rs`'s).
+///
+/// Verifies: `L.x86_64.244`
+/// Verifies: `L.x86_64.246`
+fn copies() -> Result<(), &'static str> {
+    const MOST: usize = 9000;
+    let mut source = [0u8; MOST + 8];
+    for (at, byte) in source.iter_mut().enumerate() {
+        *byte = (at as u8).wrapping_mul(31).wrapping_add(7);
+    }
+    let mut out = [0u8; MOST + 8];
+    let lengths = (0..=64).chain([255, 4095, 4096, 4097, 8191, MOST]);
+    for len in lengths {
+        for from in 0..8 {
+            for to in 0..8 {
+                out.fill(0xa5);
+                let Some(target) = out.get_mut(to..to + len) else {
+                    return Err("the copy check's buffer is short");
+                };
+                let start = source.as_ptr() as u64 + from as u64;
+                // SAFETY: (USER-COPY) `start..start + len` lies inside
+                // `source`, which lives for the call.
+                let copied = unsafe { super::copy_mc::copy_mc(target, start) };
+                let same = source.get(from..from + len) == out.get(to..to + len);
+                let untouched = out
+                    .get(..to)
+                    .is_some_and(|head| head.iter().all(|&b| b == 0xa5))
+                    && out
+                        .get(to + len..)
+                        .is_some_and(|tail| tail.iter().all(|&b| b == 0xa5));
+                if copied != (super::copy_mc::Copied { left: 0, page: 0 }) || !same || !untouched {
+                    return Err("copy_mc did not copy exactly what it was asked");
+                }
+            }
+        }
+    }
+    let mut frame = super::TrapFrame {
+        rip: super::copy_mc::movs_address(),
+        rcx: 40,
+        ..Default::default()
+    };
+    super::recover_copy(&mut frame, 0x7000);
+    if frame.rip != super::copy_mc::out_address() || frame.rdx != 0x7001 || frame.rcx != 40 {
+        return Err("the machine check's fixup did not send the copy to its exit with its page");
+    }
+    Ok(())
 }

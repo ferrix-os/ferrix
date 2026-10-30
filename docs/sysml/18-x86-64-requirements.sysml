@@ -2916,7 +2916,8 @@ package FerrixX8664Requirements {
                 whether recovery is on and, for every processor, its bank count
                 and its counts of machine checks taken, recovered, spurious,
                 corrected and uncorrected-no-action records, records left from
-                before the boot and poll rounds, and no physical address.";
+                before the boot, poll rounds and copies recovered, and no
+                physical address.";
             attribute :>> criterion = "test-mce-srar prints the file before and
                 after: checks and recovered go from 0 to 1 on the consumer; the
                 file's text holds no 0x.";
@@ -3127,6 +3128,53 @@ package FerrixX8664Requirements {
                 the N150 (BACKLOG).";
             attribute :>> parent = "H.FAIL.9";
             attribute :>> unit = ("arch::x86_64::scrub::fill_without_reading", "arch::x86_64::scrub::evict_to_coherency", "arch::x86_64::scrub::is_guest", "arch::x86_64::scrub::hypervisor_seen");
+        }
+        requirement <'L.x86_64.244'> copyMcIsOneRepMovsb : ItemLowLevel {
+            attribute :>> statement = "copy_mc shall copy len bytes from the source to the
+                destination with one rep movsb at ferrix_copy_mc_movs, touching
+                no other memory and calling nothing, and answer left 0 and page
+                0; resumed at ferrix_copy_mc_out it shall answer rcx as left
+                and rdx as page.";
+            attribute :>> criterion = "mce/check.rs's copies: lengths 0 to 9000 at every source and
+                destination alignment 0 to 7 copied exactly with the bytes
+                around untouched and (0, 0) answered; xtask's pinned
+                disassembly of ferrix_copy_mc_movs to ferrix_copy_mc_out.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::copy_mc::copy_mc", "arch::x86_64::copy_mc::Copied::poisoned", "arch::x86_64::copy_mc::movs_address", "arch::x86_64::copy_mc::out_address");
+        }
+        requirement <'L.x86_64.245'> aCopysConsumptionRecoversOnlyWhenSafe : ItemLowLevel {
+            attribute :>> statement = "A ring-0 machine check shall be in the copy's context only
+                with rip at the relocated ferrix_copy_mc_movs and rcx above 0,
+                and shall recover there only for an Intel action-required data
+                load (MCA code 0x0134 under mask 0xefff) with EIPV, RIPV and a
+                usable address, or an AMD consumption with EIPV, RIPV, a usable
+                cut address and TCC clear, whose page is the RAM page behind the
+                frame's rsi; every other record in the copy's context shall be
+                acted on as anywhere else in ring 0, and two consumptions shall
+                stop.";
+            attribute :>> criterion = "mce/check.rs's copy_actions: the context at the symbol, one
+                byte off and with rcx 0; each condition removed in turn stops;
+                the page test; the fold (Intel's rules shown here alone on an
+                AMD host). test-mce-copy's modes under KVM with AMD's records:
+                RIPV clear, TCC, another page, recovery off and outside stop;
+                TCG rows fail-closed only. Controls: the
+                rip test and the page test removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::mce::decode::context", "arch::x86_64::mce::decode::data_load", "arch::x86_64::mce::decode::same_page", "arch::x86_64::mce::decode::action", "arch::x86_64::mce::decode::amd_action", "mm::ram_behind");
+        }
+        requirement <'L.x86_64.246'> theCopyIsSentToItsExit : ItemLowLevel {
+            attribute :>> statement = "On a copy's recovery the ring-0 handler shall move the frame's
+                rip to ferrix_copy_mc_out, write the page with bit 0 set into
+                its rdx and leave its rcx, clear that bank, defer the
+                action-optional ones, count the check recovered and as a copy,
+                and clear MCG_STATUS last, with no lock, allocation or print.";
+            attribute :>> criterion = "mce/check.rs's copies: the fixup on a frame the check builds;
+                test-mce-copy under KVM with AMD's records: the copy returns,
+                the call fails, /proc/ferrix-mce counts copies 1 on the
+                consumer. Control: the rip write
+                removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("arch::x86_64::mce::on_kernel_stack", "arch::x86_64::mce::recover_copy");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
@@ -3571,6 +3619,40 @@ package FerrixX8664Requirements {
                 can apply; test-scrub: memscrub's batches answered.";
             attribute :>> parent = "H.FAIL.9";
             attribute :>> unit = ("syscall::native::memory_scrub");
+        }
+        requirement <'L.syscall.25'> aPoisonedCopyFailsAndSignalsItsOwner : ItemLowLevel {
+            attribute :>> statement = "uaccess's reads of a program's memory shall copy through
+                arch::copy_mc; a copy a machine check stopped shall be checked
+                against the frame it read (stopping as FX-9005 on another),
+                recorded on the current task with no lock -- only inside a
+                program's system call, stopping as FX-9005 anywhere else, and a
+                second record in one call stopping -- and fail as Poisoned, which its caller treats
+                as a fault at that page; at the call's way out the frame shall be retired and,
+                where the memory was the task's own, SIGBUS BUS_MCEERR_AR raised
+                at its user page through the personality's fault_signal;
+                copy_cstr_from_user shall read no further than the 64-byte line
+                holding the terminator.";
+            attribute :>> criterion = "sched/check.rs's poison_record: recorded only in a call,
+                signalling only the caller's own memory, stopping elsewhere;
+                sched/check.rs's poison_record: the record holds one, refuses a second
+                and empties; test-mce-copy: write fails EFAULT or ends short at
+                the poisoned page under KVM with AMD's records, SIGBUS code 4 at
+                the injected page's user address, mce: frame retired. Controls:
+                the signal not raised; the frame not retired.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("syscall::uaccess::poisoned", "syscall::uaccess::poison_action", "syscall::uaccess::copy_from_user_through", "syscall::uaccess::copy_cstr_from_user", "sched::task::PoisonRecord::record", "sched::task::PoisonRecord::take", "sched::task::Task::record_copy_poison", "sched::task::Task::take_copy_poison", "trap::copy_poisoned");
+        }
+        requirement <'L.syscall.26'> anotherSpacesPoisonSignalsNobody : ItemLowLevel {
+            attribute :>> statement = "A copy of another process's space a machine check stopped
+                shall retire the frame and fail the read, signalling neither the
+                reader nor the space's owner.";
+            attribute :>> criterion = "sched/check.rs's poison_record (the actions); test-mce-copy's environ mode
+                under KVM with AMD's records: /proc/<pid>/environ read while
+                the target's page is injected ends short, the frame is retired,
+                no process is signalled, the kernel goes on. Control: the
+                another-space test removed.";
+            attribute :>> parent = "H.FAIL.10";
+            attribute :>> unit = ("syscall::uaccess::poisoned", "syscall::uaccess::poison_action");
         }
         requirement <'L.trap.5'> noEntryMeansEnosys : ItemLowLevel {
             attribute :>> statement = "system_call shall answer ENOSYS with no entry

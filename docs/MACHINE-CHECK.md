@@ -315,7 +315,8 @@ Reserved on `develop` in 971dd7f2a and written in the model
 * CMCI (step 2, real hardware).
 * AMD's deferred errors and SMCA's per-bank `MCA_IPID` decoding: the
   raw values are printed; decoding is lode's.
-* Recovery from kernel-mode SRAR (`copy_mc` fixups).
+* Recovery from kernel-mode SRAR, but for a system call's read of a
+  program's memory, which `docs/MACHINE-CHECK-COPY.md` recovers (H.FAIL.10).
 * Arm RAS (`ERR<n>STATUS`, SEI/SError): AArch64 and ARMv7-A keep their
   current behaviour.
 * Early kill and unmapping a poisoned page from every mapper: needs a
@@ -328,6 +329,7 @@ Reserved on `develop` in 971dd7f2a and written in the model
   read, a device's DMA -- is a ring-0 machine check and stops as FX-9005,
   as any poison does today. A handler that returns and touches the page
   again consumes it again on real memory.
+  (A system call's copy now fails the call instead: `MACHINE-CHECK-COPY.md`.)
 
 ## 7. Where it stands
 
