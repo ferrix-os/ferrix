@@ -288,6 +288,7 @@ code, not Mesa's.
 | G7 | **The processors' traffic out of the GPU's way** | every neighbour's misses share the channel | A: what F1 frees, in bandwidth as well as cores; judge E1 by fps too | F1 | none |
 | G8 | **The GPU's clock held at RP0** in a session | i915's up/down policy; warm-up swings 300 to 1000 MHz at ~62% busy (M, 2026-10-30 profile) | none in steady play (already at 1000 MHz); some in warm-up and first-sight stalls | a session setting in the driver's RPS | ring 3 |
 | G9 | **Less work a frame**: a newer Mesa than 25.0.7 (Xe-LP's compiler), an Endfield driconf profile (settings only, never replaced shaders: anti-cheat), the game's own settings | — | ? measured one by one (`endfield-levers-after-fsr3`, 3 and 6) | volumes and configuration | none |
+| G11 | **VT-d superpages for the GPU's pins**: an aligned 2 MiB pin run mapped by one second-level entry in the IOMMU | 4 KiB entries for every pinned page | M: read 18.2 to 20.0, copy 19.0 to 21.0 GB/s, near Linux's 20.7 / 21.7 (below); fps not yet measured | the IOMMU's mapping of pin runs and its unpin inside a block; a design review | core (`iommu/**`), its own review |
 | G10 | **The frame's GPU work first.** The driver knows the game's contexts; anything else submitted (a browser, a video) waits behind them, by execlist priority, while the session lasts | no priority between contexts | A: nothing today (hyprix draws in software, the game is the GPU's only client); matters when a second client appears | the driver's queue | ring 3 |
 
 **What decided between them** (endfield-60fps, 2026-10-30, notes
@@ -311,8 +312,29 @@ code, not Mesa's.
 * **G1, G2: no gaps at 720p.** The GPU is 99.9% busy; completion latency
   and the `EAGAIN` refusal show only below 720p, where the GPU idles.
 
-G4 is the GPU-path lever with a measured gap behind it, and the one item
-endfield-60fps left as a design task.
+**G4 built and measured, and the cause is elsewhere** (intel-large-pages,
+2026-10-30, `gpb` on the box at `ferrix.intelgpu.freq=1000`, desktop up,
+three runs each; read / copy GB/s):
+
+| Image | Read | Copy | FMA GFLOPS |
+|---|---|---|---|
+| stock develop 18f63a9bd | 18.2 to 18.3 | 18.9 to 19.0 | 340 |
+| `PIN_BLOCKS` and 2 MiB/64 KiB PPGTT pages, 5c14350f7 | 17.2 to 18.4 | 19.1 to 19.3 | 340 |
+| the same and **VT-d 2 MiB superpages**, aed12e018 (never land) | 19.9 to 20.1 | 21.0 to 21.1 | 306 |
+| Linux's i915 (endfield-60fps) | 20.7 | 21.7 | 340 |
+
+Every 2 MiB window of the probe's buffers was shown to be an aligned run, so
+the GPU's own page tables did map 2 MiB pages and gained nothing. The limit
+is the IOMMU: dmar0 maps every pinned page with a 4 KiB second-level entry,
+and 2 MiB superpages there recover most of the gap to Linux (read +1.8,
+copy +2.1 GB/s), with the DMA isolation kept. That run's FMA reached 306
+rather than 340, unexplained. The superpage build leaks a block's frames on
+unpin (safe for a measurement only); a real one needs its own design review
+(ledger 5208 records the withdrawn request and four notes for the next).
+Not yet measured: `ferrix.vtd=off`, and Endfield's fps on each image.
+
+So the GPU-path lever is **G11, VT-d superpages for the GPU's pinned
+runs**, ahead of G4; §7.4 weighs it against turning the IOMMU off.
 
 Only G7, G8 and G10 are game mode in the sense of §1 (they are what a
 session switches); G1 to G6 and G9 make every program's frames cheaper and
@@ -587,6 +609,34 @@ unchanged (SETTINGS.md §7.7, ledger 690 and 698). SETTINGS.md
 §7 stays the design for sharing a driver's domain; on this box the driver
 is the Intel one, and §7's reasoning holds for it unchanged.
 
+### 7.4 The GPU's DMA isolation (the IOMMU)
+
+The customer, 2026-10-30, through endfield-60fps: *"if its the IOMMU then
+its for the game mode to disable it"*. So turning off DMA remapping for the
+iGPU is in game mode's scope, as a protection trade.
+
+What it trades is not speculation but **DMA isolation of a ring-3 driver**.
+With translation off, the Intel driver's device can reach all of memory,
+and the driver joins what must be trusted. The customer's rule of
+2026-10-24 (`docs/DMA-GATE.md` §0) gates every bus master on
+`DMA_TRANSLATED` in claimed images, with a named, loudly announced opt-out
+only in dev images; `gpu::hand_over` already requires the bit. So the trade
+exists only in the `desktop` profile, through that opt-out, audited, never
+in `present`, `max` or `fast`.
+
+It is also not a switch inside a game: a device with live mappings cannot
+change domain. "Off for a session" means devmgr restarts the GPU driver in
+a pass-through domain before the game starts and again after it ends, so
+in practice per launch or per boot (`ferrix.vtd=off`, `iommu.rs`, today
+leaves every unit alone).
+
+**Recommended: G11 first, off only for what G11 leaves.** Superpages keep
+the isolation and recovered 1.8 of the 2.5 GB/s read gap and 2.1 of the
+2.7 GB/s copy gap on the probe. Whether the rest (and the probe's FMA dip)
+is worth an isolation trade waits on the `ferrix.vtd=off` run and on
+Endfield's fps for all three images. Either way the figure decides a
+`desktop`-only trade; the consultant reviews it as a change to the DMA gate.
+
 ## 8. Authority and scope
 
 ### 8.1 Who may turn it on
@@ -671,11 +721,12 @@ By gain against cost and risk. Points are this design's estimates.
 | Tier | What | Gain | Cost | Item | Build when |
 |---|---|---|---|---|---|
 | **T0** | Measure: done for E1 to E4 (§11); left E5's CCS check and the scanout-resolution run; the term's poll fixed (apps) | the figures every tier below rests on | box time; 1 point for the term | none | now |
-| **T0g** | The GPU path's driver and display work (§4.1, G1 to G6, G9): completion by interrupt, the idle gaps, CCS shown working, large GPU pages, plane scanout, scan-out at the game's resolution | where the box is bound: up to the GPU's idle share plus whatever bandwidth buys; E5 decides the order | G1 3, G2 endfield-60fps's, G3 1 to check, G4 8, G5 and G6 the display driver | ring 3 (G4's `PIN_BLOCKS` is core ring, reviewed on its own branch) | now, by endfield-60fps and the display design; not gated on game mode |
+| **T0g** | The GPU path's driver and display work (§4.1, G1 to G6, G9, G11): VT-d superpages for the GPU's pins first, completion by interrupt, the idle gaps, CCS shown working, large GPU pages, plane scanout, scan-out at the game's resolution | where the box is bound: up to the GPU's idle share plus whatever bandwidth buys; E5 decides the order | G1 3, G2 endfield-60fps's, G3 1 to check, G4 8, G5 and G6 the display driver | ring 3 (G4's `PIN_BLOCKS` is core ring, reviewed on its own branch) | now, by endfield-60fps and the display design; not gated on game mode |
 | **T0h** | The fixed-hardware tricks of §5.7 that are cheap: H3 pipeline caches replayed before play, H5 the card's copy on the blitter, H8 the volumes built for Gracemont with PGO, H4 the driver's per-batch commands trimmed | warm-up and first-sight stalls, ~5 ms of a processor a frame, the processor-side work | ~14 points | ring 3 | now, beside T0g |
 | **T1** | Layer A: the session service; freeze the user's scopes; throttle lode and lode-upload; defer the polls; quiet the log lines; the user's list honoured, the administrator's list for the system part | M: no fps at 720p on the bare box; ~7% of a core freed; a gain where the processors co-limit or the desktop runs more | ~13 points (service 8, lode settings 3, hyprix's request 2) | none | when a game on the box co-limits on the processors, or as the frame for T2 |
 | **T2** | Layer B, the cheap half: H2's recorded page-ins replayed, applied affinity (F3), per-task slices (F7), the mark given by the service from hyprix's and the driver's knowledge (§5.2, steps 1 and 2), the wake-up tail (F6) | A: evenness on four cores; E2 and E3 bound it | ~25 points, core ring, design review, ids | core | after T1, on E2/E3 |
 | **T3** | Layer B, the deep half: lends through channels and futexes (§5.3), aimed wake-ups on the path (§5.4), idle-gap class (§5.5), deadlines from the frame (§5.2 step 3, = GAME-PATH G1/G2) | where Ferrix beats any Linux; unmeasured | ~50 points and stage 14's question | core | after T2 measures, and GAME-PATH question 3 |
+| **T4i** | Layer C's DMA trade: the iGPU's IOMMU off per launch through DMA-GATE's opt-out, `desktop` only (§7.4) | what G11 leaves, if anything: unmeasured | devmgr's restart in a pass-through domain; the consultant | core and devmgr policy | only after G11 and the `vtd=off` run |
 | **T4** | Layer C: the program barrier and SSBD per application, `desktop` only | M: ~1% of one core on the N150, no frame at 720p (§7.2) | ~20 points, F-64 first, SPECULATION's desktop section | core, level `none` | not for the N150; only on a machine where the same measurement shows more |
 | — | Not offered: the entry defences per application; `mitigations=off` at run time | — | — | — | never as a run-time trade (BUILD-FLAGS §3.1) |
 
@@ -835,4 +886,8 @@ trades not on this machine. The certification consultant reviewed it as a
 design (OK IF (1) to (12), carried; ledger line 5115; §13): no code of
 layer B, C or H2, or of any core item §13 lists, without its own design
 review. The customer chose T0g, T0h and T2/T3 the same day (§10,
-question 1); nothing is built yet.
+question 1), and put the iGPU's IOMMU in scope (§7.4). The same evening
+intel-large-pages built G4 and found the bandwidth limit in the IOMMU's
+4 KiB entries, not the GPU's (§4.1): G11, VT-d superpages, recovered most
+of the gap to Linux with the isolation kept. Nothing of game mode is
+landed as code yet.
