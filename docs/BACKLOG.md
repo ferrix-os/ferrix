@@ -496,6 +496,7 @@ when you take P2 work, or before touching an area to see what is owed there
 | hypridle (`docs/DESKTOP-CLIENTS.md` §6): the hypridle app (ferrix-os/apps), which builds `/bin/hypridle` and `/bin/loginctl` over the foundation's hyprlang and toolkit, and the `idle` and `idle-user` boots. Green on x86_64 and aarch64 on 2026-09-26. Left for Ferrix: a suspend for the sleep hooks, and D-Bus inhibitors. Owner: clients-hypridle. Estimated 5 points | 19 |
 | tole negotiates `zxdg_decoration_manager_v1` and tells an app whether the compositor draws its title bar, so an app with window buttons of its own (lode-viewer) draws them only where none does. Until then the viewer has none (apps 1cfd054, 2026-10-28: under Yoru it had two rows); under a compositor without server-side bars it has no buttons at all | 19 |
 | Moving wallpapers on nazuna were never looked at since the AV1 change: only two of 17 are `.ivf`, an orphaned `.fxvid` remains, ten `.fxwall` are single frames. Re-run `cargo xtask wallpapers --from <dir>`, check the 64 KB clip, delete the `.fxvid`, boot and look; no gate covers it. 1 point, wants whoever has nazuna's display [more](backlog/desktop.md#dg-014) | 19 |
+| A cpuset controller, so game mode keeps other processes *off* the game's processors; `sched_setaffinity` only keeps a task on its own. Core ring, own design review [more](backlog/desktop.md#dg-015) | 24 |
 
 ### P3 — hardware variants and later stages
 

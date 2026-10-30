@@ -87,3 +87,9 @@ Done; removed from the backlog on 2026-10-16.
 | Item | Stage |
 |---|---|
 | Moving wallpapers on nazuna have never been looked at since the AV1 landing changed the format (2026-09-19 finding, restated 2026-10-03, still so on 2026-10-11). `~/.local/share/ferrix/wallpapers` holds 17 `.fxwall` and only two `.ivf`, what `wallpaper::file` looks for (`MOVIE_KIND`): `blue-archive` (925 KB) and an Amiya clip of 64 KB, whose 15 MB `.fxvid` beside it is orphaned under the name the landing replaced and read by nothing. Ten of the `.fxwall` were cut from `.mp4` or `.webm` sources before c5806e59, so they are single still frames of videos. What it wants: re-run `cargo xtask wallpapers --from <directory>` so every video is kept as `.ivf`, check the 64 KB one is a whole clip, delete the `.fxvid`, then boot one and look at it, since no gate covers the moving path; a gate would be better than a look, and the first question is whether one can afford a video in the initramfs. 1 point, wants whoever next has nazuna's display | 19 |
+
+### dg-015
+
+| Item | Stage |
+|---|---|
+| A cpuset cgroup controller (`cpuset.cpus`, `cpuset.cpus.effective`, a partition root), so that game mode's "three processors for the game, one for the rest" keeps the rest *off* the game's processors for every process, also those started during a session. `sched_setaffinity` applied (F3, p1-036) only keeps a task *on* its own; until this exists the frame mark's holder confines the system's Linux processes one by one and restores them from its record (`docs/GAME-MODE-SCHED.md` §2.1). Out of scope of p1-036 by the consultant's (D12), ledger 4446. Core ring (`sched/**`) and the cgroup core: its own design review, ids reserved first. Owner: open | 24 |
