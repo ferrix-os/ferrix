@@ -13,7 +13,7 @@ Five pieces, in the order they are built, each a review of its own:
 
 | § | Piece | Levers | Ids |
 |---|---|---|---|
-| 2 | Applied affinity and per-task slice requests | F3, F7 (F6 stays the lag stream's) | L.sched.96-101 (taken over), L.sched.107-109 |
+| 2 | Applied affinity and per-task slice requests | F3, F7 (F6 stays the lag stream's) | L.sched.96-101 (taken over), L.sched.107-109, L.sched.123 |
 | 3 | The frame mark: its right, its holder, its lifetime, its order | §5.2 points 1 and 2 | H.SCHED.19, L.sched.110-114 |
 | 4 | Lends: through a served request, through the wake history, NT sync | §5.3 | L.sched.115-118 |
 | 5 | The idle-gap class | §5.5 | L.sched.119-120 |
@@ -70,20 +70,32 @@ What has changed since 2026-10-25, and how F3 uses it:
   It added `sched::placeable` to every placer and a re-home of a blocked
   task at its wake (`rehome_blocked`, L.sched.103) and of every queued
   task at a park (L.sched.104). (D5)'s "every placement path re-homes an
-  excluded task before it is queued" is the same walk with a wider
-  predicate: a home is unusable when it is out of service **or outside the
-  task's mask**. So (D5) is built by widening that one predicate at the
-  sites §3.1 of CORE-QUARANTINE.md lists, not by a second walk.
+  excluded task before it is queued" reaches the same sites, but **beside
+  `placeable`, not inside it** (ledger 5156 (A4)): `placeable(cpu)` stays
+  the in-service test with L.sched.102's own control, and the mask is a
+  second conjunct, `allowed(task, cpu)` over the effective mask below,
+  asked at `placeable`'s call sites and at `wake_at_home`, the Sync wake,
+  `Onto::Pull`, `rehome_blocked` and the park's evacuation (L.sched.103,
+  104). So each control removes one test. L.sched.97's units name every
+  site.
+* **The mask at set time** is the given mask ∩ the in-service set ∩ the
+  domain, `EINVAL` when empty (Linux's `cpu_active_mask`; (A1)).
 * **Quarantine's ruling (g)** said that an applied `sched_setaffinity`
   would make a user's pin an unprivileged veto on parking a processor.
-  So F3 adds one rule to (D3): **a mask never vetoes a park.** When no
-  processor of a task's mask is in service, the task is placed on the
-  in-service processors of its domain, and its stored mask is kept, so
-  that it applies again once one of its processors returns (Linux's
+  So F3 adds one rule, **L.sched.123: a mask never vetoes a park** (A2).
+  It is one function, the task's **effective mask**: the stored mask ∩
+  in service, or the domain's in-service set while that is empty. Every
+  placer, the pick push (98), the move before user code (99: no user
+  instruction runs outside the effective mask), the setter's wait (100)
+  and `sched_getaffinity` use it. The stored mask is kept, so that it
+  applies again once one of its processors returns (Linux's
   `select_fallback_rq` widens the mask for good and logs it; keeping it is
-  the narrower change). `sched_getaffinity` answers stored ∩ in service,
-  or the domain's in-service set while that is empty. Kernel threads keep
-  their spawn-time pins and their veto (D4).
+  the narrower change). At a return to service nothing walks: a task
+  outside its effective mask moves at its next placement, pick or return
+  to user. In the same landing CORE-QUARANTINE.md §3.2's refusal of "a
+  processor running a task pinned to it alone" becomes kernel threads
+  only, whose spawn-time pins keep their veto (D4), and L.sched.105's
+  statement and criterion say so (A3).
 * **What F3 does not do for game mode.** A mask keeps a task *on* its
   processors; it does not keep anything else *off* them. GAME-MODE's
   "three cores for the game, one for the system" needs every other task
@@ -92,7 +104,11 @@ What has changed since 2026-10-25, and how F3 uses it:
   a session's start, writes each mask it changes with the value before to
   its record under `/run` before the write, and restores from the record
   at its end and at its own start (as ledger 5115 (7) asks of freezing).
-  Threads made later inherit their creator's mask (D8). Native tasks and
+  Threads and processes made during the session by a confined process
+  inherit its confinement mask (D8) and are not in the record; at the
+  session's end, and at its own restart, the holder restores every Linux
+  process whose mask is exactly the confinement mask it set, record or
+  not, to all processors (A11). Native tasks and
   kernel threads are not confined: the GPU driver is on the path, and the
   per-processor kernel tasks stay where they are (GAME-MODE.md §5.6).
   A cpuset controller is backlog row dg-015.
@@ -119,34 +135,51 @@ same share as before, because its weight is unchanged.
   effective request is the queue's slice when `r` is zero and
   `min(r, the queue's slice)` otherwise. `r` is never below
   `MIN_REQUEST_NS`, Linux's 0.1 ms floor, which the setter enforces.
+  It is one function, `effective_request(r, slice)` in `ferrix-sched`,
+  used at those six sites; `vslice`, `lag_limit`, `placement_lag` and
+  `decision_in_ns`'s cap keep the queue's slice, and a host test holds
+  `lag_limit` and `placement_lag` bit-identical for every `r` (A6). `r`
+  lives in the task and in `EntityState` (carried across a dequeue and an
+  enqueue, never in `Config`), written under the home queue's lock by
+  (D1)'s rule; a changed `r` takes effect at the entity's next new
+  request (A5).
 * **R7.2 (L.sched.108).** **No request is longer than the queue's
   slice**, so the lag limit (two of the queue's slices, `lag_limit`), the
   decision bound (`decision_in_ns`) and H.SCHED.2's bound are unchanged.
   This is narrower than Linux, which grants up to 100 ms and widens the
   lag limit with it; a longer request would change a claim the item
-  makes, and nothing in game mode wants one.
+  makes, and nothing in game mode wants one. A task can make its
+  processor decide at most once per `MIN_REQUEST_NS` (a constant,
+  100 µs) by its request: a bound on decisions, stated in
+  MEMORY-AND-TIMING, no figure claimed (A7).
 * **R7.3 (L.sched.109).** A task's request is set only by
   `sched_setattr` on that task, under Linux's permission (D9's), or by the
-  frame mark's holder through the mark (§3.3, M6). A clone, fork or vfork
-  child starts with none, as Linux 6.12's `__sched_fork` resets
-  `se.slice` (to be confirmed against the source in the code review);
-  `execve` keeps it, as it keeps every scheduling attribute.
+  frame mark's holder through the mark (§3.3, M6). **A clone, fork or
+  vfork child inherits the task's own request**, and `execve` keeps it.
+  That is Linux 7.0's rule, read in the source on 2026-10-30 (A8):
+  `dup_task_struct` copies `se.slice` and `se.custom_slice`, and
+  `sched_fork` resets them only under `SCHED_RESET_ON_FORK`
+  (`kernel/sched/core.c` 4647-4658), which Ferrix refuses. A request
+  that a mark set (M6) is not the task's own and is not inherited, as the
+  mark is not (M4).
 
 **The system calls** (load ring, `syscall/limits.rs`; no L id, as ledger
 3538 and (D10) put the syscall surface):
 
 * `sched_setattr(pid, attr, 0)` with `SCHED_OTHER` or `SCHED_BATCH`:
   `sched_nice` applied as `setpriority` applies it today, and
-  `sched_runtime` stored as `r` when it is zero or within 0.1 to 100 ms,
-  `EINVAL` outside (Linux's `__checkparam_dl`-free fair check). Every other
+  `sched_runtime` zero for none, otherwise clamped to 0.1 to 100 ms and
+  stored as `r`, as Linux 7.0's `__setparam_fair` clamps it
+  (`kernel/sched/fair.c` 5148-5161; no `EINVAL` for the range). Every other
   policy, `SCHED_FLAG_RESET_ON_FORK`, the utilisation clamps and any
   unknown flag: `EINVAL`, as `sched_setscheduler` refuses all but
   `SCHED_OTHER` today ("a promise the scheduler has no class to keep").
   `attr.size` handled as Linux's `sched_copy_attr` (`E2BIG` with the size
   written back for a larger unknown tail that is not zero).
 * `sched_getattr` answers the policy, the nice value and `sched_runtime`
-  as the stored `r`, or the queue's current slice when `r` is zero (as
-  Linux answers `se.slice`).
+  as the stored `r`, or the queue's current slice when `r` is zero (Linux
+  answers `se.slice`, its base slice when none was asked; so the parity
+  lines print no slice value, C1).
 
 **What F7 does not do alone.** A task woken with negative lag is not
 eligible, and waits for the next decision whatever its request
@@ -175,20 +208,43 @@ and without F6 if F6 lands first.
   slice"; the cap removed: "a request longer than the queue's slice was
   granted". Both through `gate.sh control --expect`, FIRED.
 * **test-threads steps (L.sched.109 and the load surface):**
-  `sched_setattr` and `sched_getattr` round trip; `EINVAL` at 99 µs,
-  100.001 ms, `SCHED_FIFO` and `RESET_ON_FORK`; a fork child reads the
-  queue's slice; an exec keeps the request; another user's task `EPERM`.
-  Lines compared with Linux 7.0 on the same processor count (D12's
-  practice). Control: the child inherits the request.
+  `sched_setattr` and `sched_getattr` round trip; 99 µs read back as
+  100 µs and 101 ms as 100 ms; `EINVAL` for `SCHED_FIFO` and
+  `RESET_ON_FORK`; a fork child reads its parent's request; an exec keeps
+  it; another user's task `EPERM`. Lines compared with Linux 7.0 on the
+  same processor count (D12's practice). Control: the child given no
+  request.
 
-F3's checks and controls are (D11)'s, plus a quarantine case: a task
-masked to the processor being parked runs elsewhere while it is out and
-back on it after (control: the fallback removed, the park refused).
+F3's checks and controls are (D11)'s, as (A9) assigns them to ids: 96
+the kernel-thread refusal (a canary in `check.rs`; control: the refusal
+removed); 97 every placement obeys the effective mask (a mask changed
+while asleep at home, then woken, runs inside; control: `wake_at_home`'s
+mask test skipped); 98 the pick push (a mask changed while queued;
+control: the push skipped); 99 before user code (test-threads `getcpu`,
+and RDTSCP on x86-64, right after the call, on three architectures at
+`--smp 2` and 4; control: the work bit not posted); 100 the setter's wait
+(the target spinning on another processor; control: the wait removed);
+101 inheritance (the child's mask, and after exec). And **L.sched.123**,
+the fallback: a task masked to the processor being parked runs elsewhere
+while it is out, `sched_getaffinity` reads stored ∩ in service during the
+park and the stored mask after, and the task is back inside its mask at
+its next placement (control: the fallback removed, FIRED). Every control
+through `gate.sh control --expect`.
+
+The code review gets (A12): `check`, `build --arch all`, test-boot x86_64
+kvm, tcg and `--smp 2`, aarch64, armv7a and armv7a `--smp 2`, test-threads
+on all three architectures at `--smp 2` and 4, and test-quarantine, run:
+PASSED with the accelerator named on the landing hash; (D12)'s parity
+lines in the commit; coverage carried; `docs/sysml/05-scheduling.sysml`'s
+affinity attribute and TRACEABILITY's L.sched.8 row updated; the commits
+cite ledger 4446 and 5156. MEMORY-AND-TIMING's new §2.2 section (D2)
+covers F7 (no new lock; `r` under the home queue's lock) and the fallback
+(no walk at a return to service) (A10).
 
 ### 2.4 Ids
 
-L.sched.96-101 as (D10) assigns them; L.sched.107-109, parents H.SCHED.2
-(107, 108) and H.SCHED.1 (109).
+L.sched.96-101 as (D10) assigns them, and L.sched.123 for the fallback
+(A2); L.sched.107-109, parents H.SCHED.2 (107, 108) and H.SCHED.1 (109).
 
 ## 3. The frame mark
 
@@ -250,39 +306,71 @@ A character device of the chardev core (load ring), `0600 root`, made by
 the kernel, as `/dev/ferrix-crashes` is. **The open description is the
 right**: every mark is given through one and belongs to it.
 
-* `open` needs uid 0 and is refused (`EBUSY`) while another description is
-  open, so the right has one holder at a time and a restarted sessiond
-  gets it once its predecessor's is closed.
-* `ioctl(FRAME_MARK, {tid, request_ns})` marks the task the number names
-  in the holder's pid namespace, with a slice request for F7 (zero for
-  none, otherwise F7's range); `ioctl(FRAME_UNMARK, {tid})` ends one mark;
-  `read` lists the marks the description holds. A kernel thread is
-  refused (`EINVAL`); a native task is accepted by its process-table
-  number (the GPU driver is native; question Q4).
+* `open` needs euid 0 in the initial user namespace (a namespaced root is
+  refused) and is refused (`EBUSY`) while another description is open, so
+  the right has one holder at a time and a restarted sessiond gets it
+  once its predecessor's is closed.
+* **The check is made again at every call** (K3): `FRAME_MARK`,
+  `FRAME_UNMARK` and `FRAME_CLOCK` each check that the caller's euid is 0
+  in the initial user namespace, `EPERM` otherwise, so a leaked
+  descriptor gives a user program nothing. sessiond opens it `O_CLOEXEC`
+  and never passes it on (its code review).
+* `ioctl(FRAME_MARK, {tid, request_ns})` marks the Linux task the number
+  names in the holder's pid namespace, with a slice request for F7 (zero
+  for none, otherwise F7's range); `FRAME_MARK_NATIVE` names a native task
+  by its own id, never a number tried first as a Linux tid and then as a
+  native one (K5); `ioctl(FRAME_UNMARK, ...)` ends one mark; `read` lists
+  the marks the description holds. A kernel thread is refused (`EINVAL`).
+  Native tasks are markable because M5 changes no placement, so
+  `sched_setaffinity`'s `ESRCH` for them is no conflict; sessiond finds
+  the GPU driver's tasks itself, through init's unit for the driver and
+  the process table, a lookup its code review names (K5).
+* **Identity** (K6): the description holds references to its marked tasks
+  (weak references or generation-checked ids), never bare tids; a task's
+  mark word holds the description's id, from a 64-bit counter never
+  reused within a boot; exit and exec take the task off the giver's list,
+  so dead tasks never hold `MAX_MARKS` slots. The window between
+  sessiond's scope check and `FRAME_MARK`, in which a tid could be
+  reused, is closed by sessiond reading the marked task's scope again
+  after the mark and unmarking a mismatch.
 * A description holds at most `MAX_MARKS` marks (a constant, 64),
   `ENOSPC` past it: the list close walks is bounded.
 
 ### 3.3 The rules
 
 * **M1 (L.sched.110), only the right marks.** A task is marked only by a
-  `FRAME_MARK` on an open description of `/dev/ferrix-frame`, and only uid
-  0 can open one. No task can mark itself, and no other call sets the
+  `FRAME_MARK` on an open description of `/dev/ferrix-frame`, made by a
+  caller with euid 0 in the initial user namespace, which only such a
+  caller can open. No task can mark itself, and no other call sets the
   mark.
 * **M2 (L.sched.111), the order.** Among a fair queue's **eligible**
   entities, a marked one is picked before an unmarked one; among each,
   the earliest virtual deadline, as now. A woken or arriving marked entity
-  that is eligible preempts a running unmarked one. Eligibility itself,
+  that is eligible preempts a running unmarked one, except as M3 (b) and
+  (c) say. When nothing in either tree is eligible, the fallback is
+  today's, the earliest deadline over both trees, not marked first.
+  `hand_over` is taken only with nothing else queued, so M3 counts nothing
+  there (K8). Eligibility itself,
   the virtual time and every lag are computed as without marks: a marked
   entity that has had its share is not eligible and is not picked before
   anything (ledger 5115 (6): never strict priority).
-* **M3 (L.sched.112), the kernel's bound for the unmarked.** A queue
-  counts its consecutive decisions in which M2 picked a marked entity over
-  an eligible unmarked one with an earlier deadline. After `MARK_PASSES`
-  such decisions (a constant, 2), its next decision is plain EEVDF, and
-  the count starts again. So an eligible unmarked task waits for at most
-  `MARK_PASSES` decisions it would have won, each at most one of the
-  queue's slices long (R7.2). The bound is in decisions, not in time, and
-  holds whatever the holder does. Lent marks (§4) count as marks here.
+* **M3 (L.sched.112), the kernel's bound for the unmarked** (K1). It
+  bounds service, not only decisions:
+  (a) the queue counts, in `choose`, every decision (a timer's, a wake
+  preemption's, a yield's, a block's) at which the marked-first order
+  picks a marked entity where plain EEVDF over both trees would have
+  picked an unmarked one; a decision where they agree resets the count;
+  (b) when the count reaches `MARK_PASSES` (a constant, 2; changing it is
+  a requirement change, K11), the decision is plain EEVDF, and the
+  unmarked entity it picks is preempted only by plain EEVDF's
+  `should_preempt`, never by M2's cross-tree rule, until its request is
+  renewed or it blocks;
+  (c) M2's cross-tree preemption is off while the count stands at
+  `MARK_PASSES`.
+  So no more than `MARK_PASSES` consecutive decisions pick a marked entity
+  where EEVDF would pick an unmarked one, and the unmarked one then picked
+  keeps its request. The bound is in decisions, not in time, and holds
+  whatever the holder does. Lent marks (§4) count as marks here.
 * **M4 (L.sched.113), the end.** A mark ends, before the call that ends it
   returns:
   (a) when the description that gave it is closed, by `close`, by the
@@ -299,19 +387,27 @@ right**: every mark is given through one and belongs to it.
   under that queue's lock. Placement stays Rule A's (`docs/SCHED-WAKE-
   AFFINE.md` §2) and F3's masks.
 * **M6, the request.** A mark given with a request sets F7's `r` for as
-  long as it lasts; its end restores the request the task had before
-  (R7.3's own, or none). Covered by L.sched.107's check and M4's.
+  long as it lasts; its end restores the task's own request (R7.3's, or
+  none). A `sched_setattr` on a marked task sets its own request, which
+  is kept beside the mark's and in force once the mark ends; while the
+  mark lasts the mark's request applies (K8). Covered by L.sched.107's
+  check and M4's.
 
-**H.SCHED.19** (item level): *a task the frame mark's holder marks is
-picked before unmarked eligible tasks of its queue, an unmarked eligible
-task waits for at most a stated number of decisions because of marks, and
-no mark outlives its holder's right, its task's exec or the task.*
+**H.SCHED.19** (item level, parent of L.sched.110-114; K12): *a task the
+frame mark's holder marks is picked before unmarked eligible tasks of its
+queue; no more than `MARK_PASSES` consecutive decisions pick a marked
+entity where EEVDF would pick an unmarked one, and the unmarked one then
+picked keeps its request; and no mark outlives its holder's right, its
+task's exec or the task.*
 
-**What M3 does to H.SCHED.2.** With marks on a queue, an unmarked
-entity's positive lag can grow by up to `MARK_PASSES` decisions' worth of
-the queue's slices beyond what plain EEVDF allows. H.SCHED.2's statement
-gains that sentence, and `RunQueue::check_invariants` holds the wider
-bound on queues with a marked entity and the old one on queues without.
+**H.SCHED.2 is not widened** (K2). Its statement gains a scope: *on a
+queue holding no marked or lent-marked entity*, which is every queue in
+`max` and `fast` (K4) and every queue the `fair` line measures. On a
+marked queue the bound claimed is M3's, under H.SCHED.19. Picking any
+eligible entity bounds an entity's positive lag only by the others'
+negative lags, which grows with their number, so no lag bound for marked
+queues is claimed without a written proof here and a property test over
+many entities of mixed weights.
 
 ### 3.4 How it is built (for the code review)
 
@@ -323,23 +419,34 @@ bound on queues with a marked entity and the old one on queues without.
   tree's for any sequence (a property test over random operations).
 * The task holds its mark as one word (the giver's description id, zero
   for none) written under its home queue's lock (D1's rule); the
-  description holds the list of tids it marked. Close walks the list:
-  each task looked up, its mark cleared under its queue's lock, the
-  entity moved between trees. Exec clears it at the point of no return
+  description holds references to the tasks it marked (K6). Close walks
+  the list: each task looked up, its mark cleared under its queue's lock,
+  the entity moved between trees. Exec clears it at the point of no return
   on the exec path that already resets signal handlers.
-* Profiles (GAME-MODE.md §8.4, the choice it left here): the device exists
-  in every profile and **no program holds it in `max` and `fast`**, which
-  carry no desktop and so no sessiond; the safety manual names M1 to M6's
-  code deactivated there, and a `max` boot check reads that no mark was
-  ever given. A build flag that compiles it out is the alternative
-  (question Q3).
+* **Lock order** (K7), in MEMORY-AND-TIMING: `FRAME_MARK` takes the task
+  lookup, then the task's home queue lock with (D1)'s re-read and retry;
+  close walks at most `MAX_MARKS` (64) entries taking one queue lock at a
+  time, never two, and never takes the description's list lock under a
+  queue lock; exec clears under the home queue lock at the point of no
+  return.
+* **Profiles** (GAME-MODE.md §8.4; K4): "held by no program" is no
+  mechanism, since any root program could open the device. So **the
+  right is compiled out by a build flag** declared in `build-flags.toml`
+  through BUILD-FLAGS' review, absent in `max` and `fast`. The scheduler's
+  mark code (the two trees, M2, M3, M5) stays in every profile with the
+  item's full evidence: its host tests and boot checks run everywhere,
+  the boot checks marking through check code. A `max` and `fast` boot
+  check reads that the device is absent and no mark was given, and the
+  safety manual says so.
 
 ### 3.5 Checks and controls
 
-* **Host tests:** M2's order over random queues; M3's count (a marked
-  entity with a 0.1 ms request and a full lag against an unmarked eligible
-  one: at most `MARK_PASSES` passes, then the unmarked is picked); M5's
-  sums.
+* **Host tests:** M2's order over random queues; M3 (K1) by a property
+  test over random operation sequences against a shadow plain-EEVDF pick
+  (a marked entity with a 0.1 ms request and a full lag against an
+  unmarked eligible one: at most `MARK_PASSES` passes, then the unmarked
+  one is picked and not cut by the cross-tree rule); M5's sums against
+  one tree's.
 * **Boot check (`sched/frame_check.rs`, L.sched.111-112, 114):** on one
   processor, a marked spinner with the minimum request and owed lag
   (it slept), and an unmarked spinner: the unmarked one runs within
@@ -348,16 +455,20 @@ bound on queues with a marked entity and the old one on queues without.
   while both are eligible. Marking and unmarking leave both lags as
   `inspect` read them before.
 * **test-frame (a root user program in `src/tests/`, L.sched.110, 113):**
-  open as uid 1000 `EACCES`; a second open `EBUSY`; mark a sleeping
-  child and read the mark through `read`; close and read it gone through a
-  fresh open; mark, then the child execs: gone; a marked task forks: the
-  child unmarked; `MAX_MARKS + 1` gives `ENOSPC`; a kernel thread's number
+  open as uid 1000 `EACCES`; open as root in a user namespace refused; a
+  uid-1000 process handed the descriptor by `SCM_RIGHTS` gets `EPERM` on
+  `FRAME_MARK`; a second open `EBUSY`; mark a sleeping child and read the
+  mark through `read`; close and read it gone through a fresh open; mark,
+  then the child execs: gone; a marked task forks: the child unmarked;
+  unmark; exit; `MAX_MARKS + 1` gives `ENOSPC`; a kernel thread's number
   `EINVAL`.
-* **Controls, each FIRED:** close leaves marks ("a mark outlived its
-  giver's close"); exec keeps the mark ("a mark survived exec"); clone
-  copies it ("a child was born marked"); M3's count removed ("an unmarked
-  task was passed over more than MARK_PASSES times"); the uid check
-  removed ("a user opened the frame right").
+* **Controls, each FIRED by `gate.sh control --expect`:** close leaves
+  marks ("a mark outlived its giver's close"); exec keeps the mark ("a
+  mark survived exec"); clone copies it ("a child was born marked"); M3's
+  count removed, and M3 (b) removed ("an unmarked task was passed over
+  more than MARK_PASSES times"); the marked-first order removed (111);
+  marking moves the virtual runtime (114); the open's uid check removed
+  ("a user opened the frame right"); the per-call check removed (K3).
 
 ## 4. Lends: the mark carried through a wait
 
@@ -391,14 +502,22 @@ A futex word names no owner, so the kernel cannot know who will wake a
 waiter; it can know who **did** (scx_lavd's graph, measured edge by edge
 instead of inferred).
 
-* **L2 (L.sched.116).** Every wake records, in the woken task, the waker
-  (its task id) and a streak: incremented when the waker is the same as
-  last time, reset to one when not. Written only on wakes of marked tasks,
-  so an unmarked machine pays nothing. When a marked task blocks on a
+* **L2 (L.sched.116).** A futex wake -- `FUTEX_WAKE`, `WAKE_BITSET`,
+  `WAKE_OP`, `REQUEUE`, `CMP_REQUEUE` and `futex_waitv`'s wake -- made by a
+  user task in its own system call records, in the woken task, the waker
+  and a streak: incremented when the waker is the same as last time, reset
+  to one when not. Wakes from an interrupt, a timer, a signal, a channel,
+  a pipe or any other kernel path record nothing (N1). Written only on
+  wakes of marked tasks, so an unmarked machine pays nothing. The waker is
+  held as a reference or a generation-checked id, never a bare tid, so an
+  exited waker whose number was reused is not lent to (N3). When a marked task blocks on a
   futex or `futex_waitv` and its recorded waker's streak is at least
   `LEND_STREAK` (a constant, 3), that waker is lent the mark until the
   marked task is woken, by anyone, or its wait ends, or its mark ends, or
-  the lendee exits; the same `MAX_LENDS` cap holds.
+  the lendee exits; the same `MAX_LENDS` cap holds. **A wake-history lend
+  goes only to a waker in the marked task's own process or its own job**
+  (cgroup), both of which the kernel knows; any other waker gets none, and
+  the refusal is counted. L1 is the only lend across processes (N2).
 * **L3 (L.sched.117), no chains.** A task holding only lent marks lends
   nothing: its own blocks make no lend. One hop, from a marked task to the
   task that answers it. A longer chain is a later design with a
@@ -406,6 +525,17 @@ instead of inferred).
 * **L4 (L.sched.118).** A lent mark is a mark for M2, M3 and M5, and for
   nothing else: it sets no request (M6), it is not listed by the right's
   `read`, and the holder cannot end it except by ending the lender's mark.
+  Lent marks count in M3 as (K1) counts them; nothing in L1 to L4 bypasses
+  it (N7).
+* **Built without allocation** (N5): a lendee's lends are a fixed array of
+  `MAX_LENDS` (8) lender references in the task; the overflow is counted
+  and tested. **L1 names its paths** in its requirement's units (the
+  chardev core's forward, the render core's forward,
+  `channel_write_read`'s taken message); an unlisted path makes no lend
+  (N4). **Lock order** in MEMORY-AND-TIMING per path (N6): a lend's start
+  and end take only the lendee's home queue lock ((D1)'s retry), never
+  nested with the lender's queue lock, and under a futex bucket's or a
+  channel's lock only where the existing wake already nests that way.
 
 ### 4.3 NT sync objects: not yet
 
@@ -422,12 +552,16 @@ change to this section with its own id, not reserved now.
   as an unmarked one; a signal to the caller ends the lend. L2: a marked
   task woken three times by one waker then blocking on a futex: the waker
   holds the lend until the marked task's wake; a different waker's wake
-  ends it too. L3: a lendee blocking makes no lend. Each read through
-  `inspect` and the queue's mark counts.
+  ends it too. L3: a lendee blocking makes no lend. Each of L1's ends
+  (reply, the caller's wait ending, the caller's mark ending, the server's
+  exit) a case of its own (N4). Each read through `inspect` and the
+  queue's mark counts.
 * **Controls, each FIRED:** the reply not ending the lend ("a lend
   outlived its reply"); a wake not ending a futex lend ("a lend outlived
   its waiter's wake"); a lendee's block lending ("a lent mark was lent
-  on"); the cap removed ("a task held more than MAX_LENDS lends").
+  on"); the cap removed ("a task held more than MAX_LENDS lends"); an
+  interrupt-context wake recorded (N1); a cross-job lend made (N2). All
+  by `gate.sh control --expect`. No code of §4 before §3 has landed (N8).
 
 ## 5. The idle-gap class
 
@@ -436,28 +570,35 @@ runs where no marked task is runnable. Ferrix already has the weight half
 of it: a cgroup with `cpu.idle` 1 runs at the entity weight 3
 (`docs/CGROUPS.md`, L.object.185). What it lacks is the order.
 
-* **I1 (L.sched.119).** On a queue with a runnable marked entity, an
-  entity whose job is `cpu.idle` is picked only when no other entity on
-  the queue is eligible, or by M3's bound, which counts it as unmarked.
-  On a queue with no marked entity, nothing changes.
-* **I2 (L.sched.120).** An idle-class entity picked under I1 asks for at
-  most the queue's slice (R7.2), and for less when §6 gives the queue a
-  due time: its request then ends no later than that time.
+The idle class is ordered **below marked entities only**, not below
+unmarked ones, so M3's bound covers it whole (ledger 5194 (G1), its second
+option). The first draft put it below unmarked work as well, and then
+"nothing is starved" was false against unmarked load: M3 counts only
+marked-over-unmarked passes.
 
-Nothing is starved for good: I1 is an order among the eligible with M3's
-bound under it. What is put in the class is ring 3's (lode's segment
-compression, a deferred poll; never the btrfs commit, the audit reader or
-the machine-check poll, ledger 5115 (5)), by the holder's writes of
-`cpu.idle` on their cgroups, recorded and restored as §2.1's masks.
+* **I1 (L.sched.119).** An entity whose job is `cpu.idle` is never marked
+  and never lent a mark: `FRAME_MARK` refuses it (`EINVAL`), L1 and L2
+  make no lend to it, and a marked task moved into such a job loses its
+  mark. So M2 orders every marked entity before it, and M3 bounds that
+  order exactly as for any unmarked entity.
+* **I2 (L.sched.120).** An idle-class entity's request ends no later than
+  the next due time when §6 gives the queue one, and never falls below
+  `MIN_REQUEST_NS`: when the due time is nearer than that, it gets
+  `MIN_REQUEST_NS` (G4).
 
-Checks: a boot check with a marked spinner, an unmarked spinner and an
-idle-class spinner on one processor: the idle-class one runs only when the
-other two are not eligible, or by the bound. Control: I1 removed ("an
-idle-class task ran before an eligible one while a mark was runnable").
+What is put in the class is ring 3's (lode's segment compression, a
+deferred poll), by sessiond's writes of `cpu.idle` on their cgroups,
+recorded and restored as §2.1's masks. The btrfs commit, the audit
+reader and the machine-check poll are never put there (ledger 5115 (5)),
+a rule sessiond's code review checks (G3).
 
-**Recommended**: build I1 after §3 measures, and only if the box shows
-neighbours in the frame's gaps once the mark is on; the weight alone may
-be enough.
+Checks: a boot check marking a task in a `cpu.idle` job (refused), a
+marked task moved into one (unmarked), and a futex lend to one (not
+made). Control: I1's refusal removed, FIRED. I2's check is §6's.
+
+**No code of §5** until §3 has landed and §7's measurement, recorded in
+GAME-MODE.md §11, shows neighbours in the frame's gaps once the mark is
+on; then its own code review (G2). The weight alone may be enough.
 
 ## 6. Deadlines from the frame
 
@@ -466,26 +607,32 @@ open stage 14 early). This design **does not open stage 14**: it adds no
 class, no domain, no admission and no EDF. It gives the mark one more
 word, inside the fair class.
 
-* **D1 (L.sched.121).** The holder may give its right a frame period and
+(Named FD1 and FD2 so as not to be read as ledger 4446's D1 to D12; E5.)
+
+* **FD1 (L.sched.121).** The holder may give its right a frame period and
   phase (`FRAME_CLOCK`, from hyprix's vblank, which GAME-PATH §4.1 makes
   the real flip time), and the kernel computes the next due time itself,
-  so no call is made per frame. Clearing it, or the right's close, ends
-  it.
-* **D2 (L.sched.122).** While a due time is set, an idle-class entity's
-  request ends no later than the next due time (I2), and a marked entity's
-  request does not change: all marked tasks share one due time, so it
-  orders nothing among them.
+  so no call is made per frame. The period is 1 ms to 1 s, `EINVAL`
+  outside; the arithmetic is overflow-free across the clock's wrap (E2).
+  `FRAME_CLOCK` is under (K3)'s per-call check, and clearing it or the
+  right's close ends it (E4).
+* **FD2 (L.sched.122).** While a due time is set, an idle-class entity's
+  request ends at or before the next due time, never below
+  `MIN_REQUEST_NS` (I2). A rule only: nothing claims that any work is done
+  by that time (E3). A marked entity's request does not change: all marked
+  tasks share one due time, so it orders nothing among them.
 
 So the due time is the idle-gap class's bound and nothing more, until a
 machine runs two frames at once. GAME-PATH's G1 and G2 (a `SoftRt` domain
 and a fixed-priority class with budgets) stay stage 14's, and question 3
-stays the customer's. **Recommended**: no code of §6 until I1 is built
-and measured; the ids are reserved so the design is complete.
+stays the customer's. **No code of §6 until §5 is built and measured**
+(E1); the ids are reserved so the design is complete.
 
 Checks, when built: the due time computed from period and phase against
-the clock at each decision (host test of the arithmetic, boot check that
-an idle-class request ends at or before the due time; control: the cap
-removed).
+the clock at each decision (host test of the arithmetic across the wrap;
+boot check that an idle-class request ends at or before the due time and
+never below `MIN_REQUEST_NS`, and that the right's close clears the clock;
+control: the cap removed).
 
 ## 7. Measuring on the box
 
@@ -510,41 +657,50 @@ lows, not the mean, are where a CPU lever can show. Each result goes into
 GAME-MODE.md §11 and §9 below, with the raw files under
 `~/.local/share/ferrix/logs/game-mode/`.
 
-## 8. Questions for the review
+## 8. Questions for the review, and their answers
 
-* **Q1 (F3).** Does ledger 4446 stand for this design with the
-  reservation's owner changed, its (D5) built by widening quarantine's
-  predicate, and the fallback rule (a mask never vetoes a park; the stored
-  mask kept)?
-* **Q2 (F7).** Is the cap (R7.2: no request longer than the queue's
-  slice, narrower than Linux's 100 ms) the right price for leaving
-  H.SCHED.2 unchanged? Is `sched_setattr` acceptable unprivileged for a
-  task's own threads, as Linux has it, given the request only shortens?
-* **Q3 (the mark).** sessiond as holder; the open description as the
-  right; and for `max` and `fast`, deactivated code (no program holds the
-  right) rather than a build flag?
-* **Q4 (the mark).** Native tasks markable by their process-table number
-  (the GPU driver is on the path), when `sched_setaffinity` refuses them
-  (`ESRCH`, (D4))?
-* **Q5 (the mark).** M3's bound in decisions with `MARK_PASSES` = 2, and
-  H.SCHED.2's statement widened on queues with a mark: acceptable, or
-  should a marked queue keep the old bound by a tighter rule?
-* **Q6 (lends).** One hop only (L3), the wake history written only for
-  marked wakees (L2), and NT sync left until ntsync is served?
-* **Q7 (idle-gap, deadlines).** Both designed and reserved, recommended
-  built only on the mark's measurement: acceptable as a design now?
+The consultant answered each (ledger 5154 to 5201, 2026-10-30):
+
+* **Q1 (F3).** Does ledger 4446 stand with the owner changed, (D5) built
+  by widening quarantine's predicate, and the fallback rule? *Yes, amended:
+  (D3) takes the in-service set, the fallback is its own id (L.sched.123),
+  and the mask test sits beside `placeable`, not inside it (5156 (A1) to
+  (A4)).*
+* **Q2 (F7).** The cap narrower than Linux, and `sched_setattr`
+  unprivileged under Linux's permission? *Both accepted (A7).*
+* **Q3 (the mark).** sessiond as holder and the open description as the
+  right: *accepted, with the check made at every call (K3).* Deactivated
+  code in `max` and `fast`: *refused; the right is compiled out by a
+  build flag (K4).*
+* **Q4.** Native tasks markable: *accepted, by a distinct ioctl (K5).*
+* **Q5.** H.SCHED.2 widened on marked queues: *refused; its scope is
+  narrowed to unmarked queues and the marked-queue bound is M3's, which
+  bounds service, not only decisions (K1, K2).*
+* **Q6 (lends).** *Accepted, with the history written only for futex wakes
+  in a user's own call and lends only inside the process or job (N1,
+  N2).*
+* **Q7 (idle-gap, deadlines).** *Accepted as designs, no code until the
+  mark measures (G2, E1).*
 
 ## 9. Where it stands
 
 2026-10-30: written in one session (`great-greider-debf91`) from the tree,
 GAME-MODE.md, SCHED-WAKE-AFFINE.md, GAME-PATH.md §5, CORE-QUARANTINE.md,
-p1-036 and ledger 4446. No code. Ids reserved with this note
-(`tools/common/data/requirement-reservations.json`).
+p1-036 and ledger 4446. Ids reserved with this note
+(`tools/common/data/requirement-reservations.json`). The consultant's
+design reviews the same day, internal and not independent verification
+(F-27), each verdict's conditions carried into its section above:
 
-| § | Piece | Verdict | Built |
-|---|---|---|---|
-| 2 | F3 applied affinity, F7 slice requests | awaiting review | no |
-| 3 | The frame mark | awaiting review | no |
-| 4 | Lends | awaiting review | no |
-| 5 | Idle-gap class | awaiting review | no |
-| 6 | Deadlines | awaiting review | no |
+| § | Piece | Verdict | Ledger | Built |
+|---|---|---|---|---|
+| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | no |
+| 3 | The frame mark | OK IF (K1)-(K12) | 5170 | no |
+| 4 | Lends | OK IF (N1)-(N8); no code before §3 lands | 5184 | no |
+| 5 | Idle-gap class | OK IF (G1)-(G5), design only | 5194 | no |
+| 6 | Deadlines | OK IF (E1)-(E5), design only | 5201 | no |
+
+What each piece still owes before its code review: §2 the list of every
+reader of the mask and of `r` with the lock it holds (A5), and the
+MEMORY-AND-TIMING section (A10); §3 the build flag through BUILD-FLAGS'
+review (K4) and sessiond's own code review (K10); §4 to §6 the landing of
+the piece before them.
