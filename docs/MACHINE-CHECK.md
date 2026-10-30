@@ -409,3 +409,26 @@ injects SRAR with `MCG_STATUS` 0x6 and requires the victim killed by
 signal 7 with its handler not run; P2 rows for `find_frame`'s timing,
 CMCI, AMD recovery and the coverage run, and BACKLOG's machine-check
 gate row extended.
+
+**Landing record (V4, V5, V7).** Rows by `gate.sh`, logs in
+`~/.local/share/ferrix/logs/queue/<tag>.log`, each with its header:
+
+* on b60911804 (the change and its coverage carry), every one `run:
+  PASSED`: `mce-land-build-all`; `mce-land-boot-x86-kvm`, `-x86-tcg`,
+  `-x86-smp2` (kvm), `-aarch64`, `-armv7a`, `-armv7a-smp2`;
+  `mce-land-threads` (all arches); `mce-land-shell-ferrousli` (x86_64
+  kvm); `mce-land-ipc-equiv` (kvm); and under kvm and under tcg
+  `mce-land-mce-<accel>` and `mce-land-mce-<mode>-<accel>` for corrected,
+  srar, broadcast, srao, left, recover-off and kill;
+* `check` on adf5329b8, the landing tip: `mce-land-check-7`, `run:
+  PASSED`, run with `SENTRY-TRACE` unset (the desktop app's variable
+  breaks an xtask environment test, a P1 flake row since adf5329b8;
+  `mce-land-check-5` shows that test alone failing). Between b60911804 and
+  the tip: the generated architecture document, `expect(dead_code)` off
+  x86-64 on three items by `cfg_attr` with `rustfmt`'s wrapping (no code
+  on x86-64, none generated on Arm), the coverage carry past those lines,
+  and the flake row;
+* controls, each `control: FIRED`: `mce-ctl-mark-kept` (b60911804, the
+  mark left in the frame: `err=0x0` missing) and, on b74ee2423 with their
+  targets unchanged since, `mce-ctl-srar-fatal-2`, `mce-ctl-poll-clear`,
+  `mce-ctl-retired-test`, `mce-ctl-unaffected`, `mce-ctl-vector-18`.
