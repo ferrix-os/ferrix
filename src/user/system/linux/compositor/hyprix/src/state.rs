@@ -1408,9 +1408,18 @@ impl<'r> Compositor<'r> {
         // after (the customer's stash, 2026-10-25: a pick over a window's
         // bar opened nothing). With a drag or a swallowed press under way
         // the release still goes to what began it.
+        // Not a bar or a dock a fullscreen window hides, which is not drawn
+        // and covers nothing.
+        let fullscreen = crate::deliver::fullscreen_screens(&self.state);
+        let shown: Vec<crate::frame::Placed> = self
+            .placed_layers
+            .iter()
+            .copied()
+            .filter(|layer| !crate::frame::hidden_by_fullscreen(layer, &fullscreen))
+            .collect();
         let covered = self.drag.is_none()
             && !self.bars.swallow_release
-            && crate::frame::above_at(&self.placed_layers, self.seat.pointer(), |layer, (x, y)| {
+            && crate::frame::above_at(&shown, self.seat.pointer(), |layer, (x, y)| {
                 self.slots
                     .get(layer.client)
                     .and_then(|slot| slot.client().surface(layer.surface))
@@ -6823,6 +6832,7 @@ pub(crate) fn placed_popups(
                     i64::from(at.3),
                 ),
                 above: true,
+                overlay: false,
                 rules: crate::frame::LayerRules::default(),
             });
         }
@@ -7503,6 +7513,12 @@ fn place_layers(
         slot.layer_rects.clear();
     }
     for (index, id, surface, above, rules, rect) in placed {
+        // The overlay layer is the one drawn over a fullscreen window too
+        // (`crate::frame::hidden_by_fullscreen`).
+        let overlay = slots
+            .get(index)
+            .and_then(|slot| slot.client.layer_surface(id))
+            .is_some_and(|layer| layer.layer == compositor_server::Layer::Overlay);
         if let Some(slot) = slots.get_mut(index) {
             let _ = slot.layer_rects.insert(id, rect);
             let width = u32::try_from(rect.width).unwrap_or(0);
@@ -7520,6 +7536,7 @@ fn place_layers(
             surface,
             rect,
             above,
+            overlay,
             rules,
         });
     }

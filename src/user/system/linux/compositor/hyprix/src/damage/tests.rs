@@ -100,6 +100,7 @@ fn heard_of(buffer: (i64, i64), fullscreen: bool) -> super::Heard {
         plane: None,
         blurred: Vec::new(),
         overlay: None,
+        hidden: Vec::new(),
     };
     let sources = std::collections::BTreeMap::from([(
         WindowId(1),

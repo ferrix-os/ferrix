@@ -382,6 +382,10 @@ pub(crate) struct Plan {
     /// Where `debug:overlay`'s counter is and which rewrite of its numbers
     /// it shows, on the screen that draws it.
     pub(crate) overlay: Option<crate::overlay::Stamp>,
+    /// The layer surfaces a fullscreen window hides, by connection and
+    /// `wl_surface`: drawn nowhere on this screen, so what they paint lands
+    /// nowhere either, rather than anywhere.
+    pub(crate) hidden: Vec<(usize, ObjectId)>,
 }
 
 /// One surface a frame draws a blur behind.
@@ -429,6 +433,13 @@ impl Plan {
             } else {
                 Landed::Behind(at)
             };
+        }
+        if self
+            .hidden
+            .iter()
+            .any(|&(client, surface)| named(client, surface))
+        {
+            return Landed::Nowhere;
         }
         if let Some((_, at)) = self
             .drag_icon

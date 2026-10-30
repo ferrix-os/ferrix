@@ -244,6 +244,11 @@ pub struct Placed {
     pub rect: Rect,
     /// Whether it is drawn above the windows.
     pub above: bool,
+    /// Whether it is in the overlay layer, the one drawn over a fullscreen
+    /// window too: a layer surface in the top layer -- a bar, a dock -- is
+    /// drawn over the windows but under a fullscreen one, as in Hyprland
+    /// ([`hidden_by_fullscreen`]).
+    pub overlay: bool,
     /// What its `layerrule` lines gave it.
     pub rules: LayerRules,
 }
@@ -1291,6 +1296,50 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     })
 }
 
+/// Whether `placed` is drawn as a fullscreen window over the whole of
+/// `screen`, its monitor's rectangle: in the fullscreen mode (not
+/// maximized, which keeps its border and the work area), or floating at
+/// exactly the monitor's rectangle, which the frame draws as fullscreen too
+/// (an X client's legacy fullscreen, `state/draw.rs`).
+#[must_use]
+pub(crate) fn fills_screen(placed: &compositor_layout::Placed, screen: Rect) -> bool {
+    let covers = compositor_render::intersect(placed.rect, screen) == Some(screen);
+    let fullscreen = placed.fullscreen && placed.border <= 0;
+    let legacy = placed.floating && !placed.fullscreen && placed.rect == screen;
+    covers && (fullscreen || legacy)
+}
+
+/// Whether `output`, a monitor whose rectangle is `screen`, shows a window
+/// fullscreen over the whole of it ([`fills_screen`]).
+#[must_use]
+pub(crate) fn shows_fullscreen(output: &MonitorLayout, screen: Rect) -> bool {
+    output
+        .windows
+        .iter()
+        .any(|placed| fills_screen(placed, screen))
+}
+
+/// Whether the layer surface `layer` is hidden by a fullscreen window: it
+/// is above the windows but not in the overlay layer, and it is on one of
+/// `screens`, the monitors that show a window fullscreen
+/// ([`shows_fullscreen`]).
+///
+/// Hyprland's rule: a fullscreen window covers the background, the bottom
+/// and the top layers, and only the overlay layer -- with the popups and
+/// the lock -- is drawn over it. A dock or a bar in the top layer drawn
+/// over a fullscreen game is neither what the game asked for nor free: it
+/// is also what kept the game's buffer from being shown directly. The two
+/// layers under the windows are covered anyway, and are left to the frame.
+#[must_use]
+pub(crate) fn hidden_by_fullscreen(layer: &Placed, screens: &[Rect]) -> bool {
+    let (x, y) = (layer.rect.x, layer.rect.y);
+    layer.above
+        && !layer.overlay
+        && screens.iter().any(|screen| {
+            x >= screen.x && x < screen.right() && y >= screen.y && y < screen.bottom()
+        })
+}
+
 /// Whether a layer surface drawn above the windows covers `at`, a point in
 /// the global space, where `takes` says its input region takes a point in
 /// its own coordinates: a press there is that surface's, not a title bar's
@@ -1330,7 +1379,7 @@ pub fn above_at(
 
 #[cfg(test)]
 mod tests {
-    use super::{LayerRules, Placed, above_at, unseen};
+    use super::{LayerRules, Placed, above_at, hidden_by_fullscreen, shows_fullscreen, unseen};
     use compositor_layout::Rect;
     use compositor_wire::ObjectId;
 
@@ -1340,6 +1389,7 @@ mod tests {
             surface: ObjectId(surface),
             rect,
             above,
+            overlay: false,
             rules: LayerRules::default(),
         }
     }
@@ -1418,5 +1468,57 @@ mod tests {
         let unsized_yet = layer(10, Rect::new(0, 0, 0, 0), false);
         let game = [Rect::new(0, 0, 1920, 1080)];
         assert!(unseen(&[unsized_yet], &game, (0, 0), 1.0).is_empty());
+    }
+
+    /// Two monitors side by side, the left one showing a game fullscreen:
+    /// its bar in the top layer is hidden, its overlay surface and the
+    /// bar on the right monitor are not, and nothing is hidden while the
+    /// game is only maximized or has not grown to the screen yet.
+    #[test]
+    fn a_fullscreen_window_hides_its_monitors_top_layer_and_not_its_overlay() {
+        use compositor_layout::{
+            MonitorId, MonitorLayout, Placed as Window, WindowId, WorkspaceId,
+        };
+        let left = Rect::new(0, 0, 1920, 1080);
+        let right = Rect::new(1920, 0, 1920, 1080);
+        let shown = |rect, border, fullscreen| MonitorLayout {
+            monitor: MonitorId(1),
+            workspace: WorkspaceId(1),
+            windows: vec![Window {
+                window: WindowId(1),
+                rect,
+                border,
+                focused: true,
+                floating: false,
+                fullscreen,
+            }],
+        };
+        assert!(shows_fullscreen(&shown(left, 0, true), left));
+        assert!(!shows_fullscreen(
+            &shown(Rect::new(0, 40, 1920, 1040), 2, true),
+            left
+        ));
+        assert!(!shows_fullscreen(
+            &shown(Rect::new(200, 100, 1200, 800), 0, true),
+            left
+        ));
+        assert!(!shows_fullscreen(&shown(right, 0, true), left));
+
+        let dock = layer(7, Rect::new(660, 1000, 600, 80), true);
+        let overlay = Placed {
+            overlay: true,
+            ..layer(8, Rect::new(1600, 20, 300, 100), true)
+        };
+        let wallpaper = layer(9, left, false);
+        let other_dock = layer(10, Rect::new(2580, 1000, 600, 80), true);
+        let covered = [left];
+        assert!(hidden_by_fullscreen(&dock, &covered));
+        assert!(!hidden_by_fullscreen(&overlay, &covered));
+        assert!(
+            !hidden_by_fullscreen(&wallpaper, &covered),
+            "left to the frame"
+        );
+        assert!(!hidden_by_fullscreen(&other_dock, &covered));
+        assert!(!hidden_by_fullscreen(&dock, &[]));
     }
 }

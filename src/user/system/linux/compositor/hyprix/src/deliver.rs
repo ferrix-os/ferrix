@@ -538,7 +538,7 @@ fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placem
                     placed.rect.height,
                 ),
                 frame: false,
-                fits: screen.is_some_and(|screen| fills_screen(placed, screen)),
+                fits: screen.is_some_and(|screen| crate::frame::fills_screen(placed, screen)),
             };
             // The frame goes in under its window's own surface, and so
             // over every window drawn before it.
@@ -555,21 +555,6 @@ fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placem
     // The last window drawn is the one on top, so the pointer finds it first.
     out.reverse();
     out
-}
-
-/// Whether `placed` is drawn as a fullscreen window over the whole of
-/// `screen`, its monitor: in the fullscreen mode (not maximized, which keeps
-/// its border), or floating at exactly the monitor's rectangle, which the
-/// frame draws as fullscreen too (an X client's legacy fullscreen,
-/// `state/draw.rs`).
-pub(crate) fn fills_screen(
-    placed: &compositor_layout::Placed,
-    screen: compositor_layout::Rect,
-) -> bool {
-    let covers = compositor_render::intersect(placed.rect, screen) == Some(screen);
-    let fullscreen = placed.fullscreen && placed.border <= 0;
-    let legacy = placed.floating && !placed.fullscreen && placed.rect == screen;
-    covers && (fullscreen || legacy)
 }
 
 /// The rectangle a window's frame reaches, from its title bar's top to the
@@ -739,12 +724,41 @@ fn with_popups(
         found.reverse();
         found
     };
+    // A bar or a dock in the top layer on a monitor showing a fullscreen
+    // window is not drawn (`crate::frame::hidden_by_fullscreen`), and the
+    // pointer does not find it there either: it goes under the windows.
+    let covered = fullscreen_screens(state);
+    let (shown, hidden): (Vec<Placement>, Vec<Placement>) = layer(compositor_server::Layer::Top)
+        .into_iter()
+        .partition(|placed| {
+            let (x, y, _, _) = placed.rect;
+            !covered.iter().any(|screen| {
+                x >= screen.x && x < screen.right() && y >= screen.y && y < screen.bottom()
+            })
+        });
     out.extend(layer(compositor_server::Layer::Overlay));
-    out.extend(layer(compositor_server::Layer::Top));
+    out.extend(shown);
     out.extend(windows);
+    out.extend(hidden);
     out.extend(layer(compositor_server::Layer::Bottom));
     out.extend(layer(compositor_server::Layer::Background));
     out
+}
+
+/// The monitors, by their rectangles, that show a window fullscreen over
+/// the whole of them ([`crate::frame::shows_fullscreen`]).
+pub(crate) fn fullscreen_screens(state: &State) -> Vec<compositor_layout::Rect> {
+    state
+        .layout()
+        .iter()
+        .filter_map(|output| {
+            let screen = state
+                .monitors()
+                .find(|monitor| monitor.id == output.monitor)?
+                .rect;
+            crate::frame::shows_fullscreen(output, screen).then_some(screen)
+        })
+        .collect()
 }
 
 /// A pixel position as Wayland's 24.8 fixed point.
@@ -911,24 +925,24 @@ mod tests {
             floating,
             fullscreen,
         };
-        assert!(super::fills_screen(
+        assert!(crate::frame::fills_screen(
             &placed(monitor, 0, false, true),
             monitor
         ));
-        assert!(super::fills_screen(
+        assert!(crate::frame::fills_screen(
             &placed(monitor, 0, true, false),
             monitor
         ));
         let work_area = compositor_layout::Rect::new(0, 40, 1920, 1040);
-        assert!(!super::fills_screen(
+        assert!(!crate::frame::fills_screen(
             &placed(work_area, 2, false, true),
             monitor
         ));
-        assert!(!super::fills_screen(
+        assert!(!crate::frame::fills_screen(
             &placed(monitor, 2, false, true),
             monitor
         ));
-        assert!(!super::fills_screen(
+        assert!(!crate::frame::fills_screen(
             &placed(monitor, 0, false, false),
             monitor
         ));

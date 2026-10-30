@@ -264,7 +264,21 @@ impl Compositor<'_> {
         // Wayland -- has the drawing's time too for its next frame, which at
         // 120 Hz's 8.3 ms it needs.
         self.say_bare_surfaces(&outputs);
-        let unseen = self.unseen_layers(&outputs, &drawn_with, millis);
+        let mut unseen = self.unseen_layers(&outputs, &drawn_with, millis);
+        // And the bars and docks a fullscreen window hides, which are not
+        // drawn at all: told nothing until it goes, as a wallpaper under an
+        // opaque window is. Not while a window is on its way somewhere, for
+        // the same reason as there.
+        if self.lock.is_none() && !self.animations.busy(millis) {
+            for screen in &self.screens {
+                if let Some(output) = outputs
+                    .iter()
+                    .find(|output| output.monitor == screen.monitor)
+                {
+                    unseen.extend(self.hidden_on(output, screen.rect));
+                }
+            }
+        }
         frames_done(
             &mut self.slots,
             &self.sources,
@@ -404,12 +418,16 @@ impl Compositor<'_> {
     /// keyboard, which is the whole reason that rule exists, because a
     /// compositor that drew nothing over the lock would leave a person with
     /// no way to type the password.
+    ///
+    /// Not a layer surface `hidden` names: a bar or a dock in the top layer
+    /// on a screen showing a fullscreen window ([`Self::hidden_on`]).
     fn over_windows(
         &self,
         which: usize,
         rect: Rect,
         dark: bool,
         popups: &[crate::frame::Placed],
+        hidden: &[(usize, ObjectId)],
     ) -> Vec<crate::frame::Placed> {
         if dark || self.prompts.up() {
             Vec::new()
@@ -421,6 +439,7 @@ impl Compositor<'_> {
                     surface: *surface,
                     rect,
                     above: true,
+                    overlay: false,
                     rules: crate::frame::LayerRules::default(),
                 })
                 .into_iter()
@@ -447,9 +466,31 @@ impl Compositor<'_> {
             self.placed_layers
                 .iter()
                 .copied()
+                .filter(|placed| !hidden.contains(&(placed.client, placed.surface)))
                 .chain(popups.iter().copied())
                 .collect()
         }
+    }
+
+    /// The layer surfaces a fullscreen window on the screen at `screen`
+    /// hides, `output` being what that screen shows: those above the
+    /// windows and not in the overlay layer, when a window is drawn
+    /// fullscreen over the whole screen
+    /// ([`crate::frame::hidden_by_fullscreen`]). Hyprland draws only the
+    /// overlay layer, the popups and the lock over a fullscreen window.
+    fn hidden_on(
+        &self,
+        output: &compositor_layout::MonitorLayout,
+        screen: Rect,
+    ) -> Vec<(usize, ObjectId)> {
+        if !crate::frame::shows_fullscreen(output, screen) {
+            return Vec::new();
+        }
+        self.placed_layers
+            .iter()
+            .filter(|placed| crate::frame::hidden_by_fullscreen(placed, &[screen]))
+            .map(|placed| (placed.client, placed.surface))
+            .collect()
     }
 
     /// Say once, for each window and layer surface placed with a size,
@@ -632,7 +673,12 @@ impl Compositor<'_> {
         // before the lock and before the windows: that is what
         // turning a screen off means.
         let dark = self.dpms.get(&screen.name).copied().unwrap_or(false);
-        let over = self.over_windows(which, screen.rect, dark, with.popups);
+        // The bars and docks under a fullscreen window, which this frame
+        // does not draw: by where each window *is*, so a window still
+        // growing to the screen's size leaves the bar drawn until it is
+        // there.
+        let hidden = self.hidden_on(output, screen.rect);
+        let over = self.over_windows(which, screen.rect, dark, with.popups, &hidden);
         // The surface a drag is carrying, drawn at the pointer:
         // that is what makes a drag look like one.
         let drag_icon = self
@@ -645,6 +691,7 @@ impl Compositor<'_> {
                     surface: held.icon?,
                     rect: Rect::new(with.cursor_at.0, with.cursor_at.1, 0, 0),
                     above: true,
+                    overlay: false,
                     rules: crate::frame::LayerRules::default(),
                 })
             });
@@ -747,6 +794,7 @@ impl Compositor<'_> {
                 ))
             }),
             overlay: picture.as_ref().map(|picture| picture.stamp),
+            hidden,
             plane: screen
                 .plane
                 .on
