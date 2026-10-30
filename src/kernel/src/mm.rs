@@ -576,6 +576,9 @@ pub fn deallocate_frames(frame: Frame, order: u8) {
     count(Route::Freed, 1 << order);
     let owner = with_frames(|frames| {
         let owner = frames.owner(frame);
+        if holds_retired(frame, order) {
+            return keep_retired(frames, frame, order).then_some(owner);
+        }
         frames.deallocate(frame, order).map(|()| owner).ok()
     });
     // After the allocator's lock: an uncharge is atomics, but nothing needs
@@ -606,6 +609,12 @@ pub fn release_frame(frame: Frame) -> bool {
     // the two mean different things -- a page table given back versus a frame.
     let freed = with_frames(|frames| {
         let owner = frames.owner(frame);
+        // The last reference to a retired frame keeps it (`L.mm.91`): it
+        // leaves its job's charge as a freed frame would, and goes nowhere.
+        // NOALLOC: the frame allocator's per-frame record, looked up.
+        if holds_retired(frame, 0) && frames.entry(frame).map_or(0, PageEntry::refcount) == 1 {
+            return keep_retired(frames, frame, 0).then_some(owner);
+        }
         matches!(frames.release(frame), Ok(ferrix_frame::Released::Freed)).then_some(owner)
     })
     .flatten();
@@ -616,6 +625,156 @@ pub fn release_frame(frame: Frame) -> bool {
         uncharge_owner(owner);
     }
     freed.is_some()
+}
+
+// ---------------------------------------------------------------------------
+// Retired frames (`docs/MACHINE-CHECK.md` §3.4)
+// ---------------------------------------------------------------------------
+
+/// The most frames the kernel retires. A machine with this many bad pages
+/// has failing memory its log has already named; later ones are logged and
+/// left (`L.mm.92`).
+pub const RETIRED_CAPACITY: usize = 256;
+
+/// The retired frames, each stored as its number plus one so that 0 is an
+/// empty slot. Written only under [`FRAMES`], in slot order, and never
+/// cleared: a retired frame stays retired until the machine restarts.
+static RETIRED: [AtomicU64; RETIRED_CAPACITY] = [const { AtomicU64::new(0) }; RETIRED_CAPACITY];
+/// How many of [`RETIRED`]'s slots are filled; 0 on a healthy machine, which
+/// is the whole cost of the test on the free paths.
+static RETIRED_COUNT: AtomicUsize = AtomicUsize::new(0);
+/// How many of [`RETIRED`]'s slots may be filled: [`RETIRED_CAPACITY`], but
+/// for stage 2's check, which lowers it to reach the full set without
+/// retiring 256 frames (`L.mm.92`).
+static RETIRED_ROOM: AtomicUsize = AtomicUsize::new(RETIRED_CAPACITY);
+/// Whether [`retire_frame`] has said that the set is full.
+static RETIRED_FULL_SAID: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// What [`retire_frame`] did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Retired {
+    /// The frame was free, and is now held for good.
+    Claimed,
+    /// The frame is in use, and will not be freed when its last user lets go.
+    Marked,
+    /// It was retired before.
+    Already,
+    /// The set is full (`L.mm.92`): nothing changed.
+    Full,
+    /// The allocator does not cover the frame (the kernel image, a hole, a
+    /// device): nothing to retire.
+    NotCovered,
+}
+
+/// Whether a block of `2^order` frames at `frame` holds a retired frame.
+/// Called under [`FRAMES`], so the set cannot grow under it.
+fn holds_retired(frame: Frame, order: u8) -> bool {
+    let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+    if filled == 0 {
+        return false;
+    }
+    let end = frame.saturating_add(1 << order);
+    RETIRED.iter().take(filled).any(|slot| {
+        let stored = slot.load(Ordering::Relaxed);
+        stored != 0 && (frame..end).contains(&(stored - 1))
+    })
+}
+
+/// Whether `frame` is retired.
+pub(crate) fn is_retired(frame: Frame) -> bool {
+    with_frames(|_| holds_retired(frame, 0)).unwrap_or(false)
+}
+
+/// Free a block that holds a retired frame, frame by frame, keeping every
+/// retired one allocated and charged to nobody. Under [`FRAMES`]. Whether the
+/// block was the allocator's to give back.
+fn keep_retired(frames: &mut Frames<'static>, frame: Frame, order: u8) -> bool {
+    if order > 0 && frames.split(frame, order).is_err() {
+        return false;
+    }
+    for each in frame..frame.saturating_add(1 << order) {
+        if holds_retired(each, 0) {
+            let _ = frames.set_owner(each, crate::object::quota::NONE);
+        } else {
+            let _ = frames.deallocate(each, 0);
+        }
+    }
+    true
+}
+
+/// Retire `frame`: never hand it out again (`L.mm.91`). A free frame is taken
+/// off the free lists now; an allocated one stays with its user and is kept,
+/// not freed, when its last reference goes. The insert and the claim are one
+/// hold of [`FRAMES`], so no free path can slip between them. Not callable
+/// from a machine check's own stack: it takes the allocator's lock.
+pub(crate) fn retire_frame(frame: Frame) -> Retired {
+    let outcome = with_frames(|frames| {
+        if frames
+            .state(frame)
+            .is_none_or(|state| state == ferrix_frame::State::Reserved)
+        {
+            return Retired::NotCovered;
+        }
+        if holds_retired(frame, 0) {
+            return Retired::Already;
+        }
+        let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+        let room = RETIRED_ROOM.load(Ordering::Relaxed).min(RETIRED_CAPACITY);
+        let Some(slot) = RETIRED.get(filled).filter(|_| filled < room) else {
+            return Retired::Full;
+        };
+        slot.store(frame + 1, Ordering::Relaxed);
+        RETIRED_COUNT.store(filled + 1, Ordering::Release);
+        if frames.claim(frame).is_some() {
+            Retired::Claimed
+        } else {
+            Retired::Marked
+        }
+    })
+    .unwrap_or(Retired::NotCovered);
+    if outcome == Retired::Full && !RETIRED_FULL_SAID.swap(true, Ordering::Relaxed) {
+        crate::console::println!(
+            "mce: the set of retired frames is full ({}); later frames are logged and not \
+             retired",
+            RETIRED_COUNT.load(Ordering::Relaxed)
+        );
+    }
+    outcome
+}
+
+/// Undo stage 2's check: forget the last `count` retired frames, which the
+/// check retired itself, and free each; give the set its room back and its
+/// "full" line. Nothing else ever un-retires a frame.
+fn forget_checked_retirements(count: usize) {
+    let freed = with_frames(|frames| {
+        let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+        let keep = filled.saturating_sub(count);
+        for slot in RETIRED.iter().take(filled).skip(keep) {
+            let stored = slot.swap(0, Ordering::Relaxed);
+            if stored != 0 {
+                let _ = frames.deallocate(stored - 1, 0);
+            }
+        }
+        RETIRED_COUNT.store(keep, Ordering::Release);
+    });
+    let _ = freed;
+    RETIRED_ROOM.store(RETIRED_CAPACITY, Ordering::Relaxed);
+    RETIRED_FULL_SAID.store(false, Ordering::Relaxed);
+}
+
+/// The retired frames, in the order they were retired, into `out`; how many.
+pub fn retired_frames(out: &mut [Frame]) -> usize {
+    let filled = RETIRED_COUNT.load(Ordering::Acquire).min(RETIRED_CAPACITY);
+    let mut written = 0;
+    for (slot, place) in RETIRED.iter().take(filled).zip(out.iter_mut()) {
+        let stored = slot.load(Ordering::Relaxed);
+        if stored != 0 {
+            *place = stored - 1;
+            written += 1;
+        }
+    }
+    written
 }
 
 /// Take a frame's charge off the job it was charged to, and charge it to
@@ -974,6 +1133,15 @@ pub fn translate_in(root: u64, virt: u64) -> Option<u64> {
     mapper
         .translate(&KernelPhysMem, VirtAddr(virt))
         .map(|at| at.0)
+}
+
+/// Visit the leaves of the tree rooted at `root` in address order, until
+/// `visit` returns false. Takes no lock, as [`translate_in`]: the caller holds
+/// the address space's own across it.
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn for_each_leaf_in(root: u64, visit: impl FnMut(ferrix_paging::Leaf) -> bool) {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    let _ = mapper.for_each_leaf(&KernelPhysMem, visit);
 }
 
 /// The flags of the leaf mapping `virt` in the tree rooted at `root`, as

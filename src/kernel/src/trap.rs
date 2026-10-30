@@ -574,6 +574,11 @@ pub struct ReturnPath {
     /// `SIGSEGV` is the personality's policy, but deciding that a fault *is*
     /// the program's problem is the trap path's, and the trap path is core.
     pub fault_signal: fn(u32, i32, u64, u64) -> FaultOutcome,
+    /// End the running program with a signal it took for a fault, running no
+    /// handler: for a fault the instruction cannot be restarted after (a
+    /// machine check with `RIPV` clear, `L.x86_64.228`). Arguments as
+    /// [`ReturnPath::fault_signal`]'s.
+    pub fault_end: fn(u32, i32, u64, u64) -> FaultOutcome,
 }
 
 /// The registered return path, or null until the personality registers one.
@@ -627,14 +632,35 @@ pub(crate) fn return_path() -> Option<&'static ReturnPath> {
 /// it or ends with it as its status. Never a kernel panic -- a program cannot
 /// be allowed to stop the machine with `hlt` -- unless the kernel entered user
 /// mode with no process to blame.
-fn user_fault(frame: &arch::TrapFrame, trap: &Trap) {
+fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
+    // x86-64's machine check from ring 3, marked by its entry for `SIGBUS`:
+    // the frame's retirement and the program's address for it take locks,
+    // so they are found with interrupts open (`docs/MACHINE-CHECK.md` §3.5).
+    if arch::machine_check_marked(frame) {
+        arch::enable_interrupts();
+        let (signal, code, address, end) = arch::machine_check_signal(frame);
+        arch::disable_interrupts();
+        user_fault_ending(frame, trap, (signal, code, address), end);
+        return;
+    }
     user_fault_as(frame, trap, arch::fault_signal(frame, trap));
 }
 
 /// [`user_fault`] with the signal, `si_code` and address already decided, for
 /// a fault the architecture cannot classify alone: a touch of a file mapping
 /// past the end of its file is `SIGBUS`, which only the address space knows.
-fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): (u32, i32, u64)) {
+fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, raised: (u32, i32, u64)) {
+    user_fault_ending(frame, trap, raised, false);
+}
+
+/// [`user_fault_as`], ending the program without a handler when `end`
+/// ([`ReturnPath::fault_end`]).
+fn user_fault_ending(
+    frame: &arch::TrapFrame,
+    trap: &Trap,
+    (signal, code, address): (u32, i32, u64),
+    end: bool,
+) {
     let Some(path) = return_path() else {
         // No personality registered, so nothing can turn a fault into a
         // signal. A kernel built that way has no user programs to fault.
@@ -653,7 +679,12 @@ fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): 
     // the personality's return path open them from this same dispatch; they
     // are masked again before anything else here runs.
     arch::enable_interrupts();
-    let outcome = (path.fault_signal)(signal, code, address, frame.instruction_pointer());
+    let raise = if end {
+        path.fault_end
+    } else {
+        path.fault_signal
+    };
+    let outcome = raise(signal, code, address, frame.instruction_pointer());
     arch::disable_interrupts();
     match outcome {
         FaultOutcome::NoProcess => fatal(

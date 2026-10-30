@@ -614,6 +614,34 @@ pub(super) fn cmdline_file(_: &Kernel) -> Result<Vec<u8>> {
 /// `/proc/version`: the release and version `uname` reports, in the sentence
 /// Linux writes them in, with the compiler it names being the one that built
 /// this kernel.
+/// `/proc/ferrix-mce`: the machine check's counts per processor
+/// (`L.x86_64.230`). Not Linux's; empty where there is no machine check.
+pub(super) fn machine_check(_: &Kernel) -> Result<Vec<u8>> {
+    struct Sink(Vec<u8>);
+    impl fmt::Write for Sink {
+        fn write_str(&mut self, text: &str) -> fmt::Result {
+            self.0.extend_from_slice(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut out = Sink(Vec::new());
+    let _ = arch::render_machine_check(&mut out);
+    Ok(out.0)
+}
+
+/// `/proc/ferrix-mce-retired`: the frames retired for a hardware error, one
+/// physical address a line (`L.mm.91`). Root's alone: an address is a fact
+/// about the machine's memory a program has no use for.
+pub(super) fn retired_frames(_: &Kernel) -> Result<Vec<u8>> {
+    let mut frames = [0_u64; mm::RETIRED_CAPACITY];
+    let count = mm::retired_frames(&mut frames);
+    let mut out = Vec::new();
+    for frame in frames.iter().take(count) {
+        put(&mut out, format_args!("{:#x}\n", frame * PAGE_SIZE));
+    }
+    Ok(out)
+}
+
 /// `/proc/ferrix-seam`: what crosses the seam (`fs::seam`). Not Linux's.
 pub(super) fn seam(_: &Kernel) -> Result<Vec<u8>> {
     Ok(fs::seam::render())

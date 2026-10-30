@@ -252,6 +252,14 @@ why = "x86-64 only, ignored on aarch64 and armv7a: a read-only log of the RAPL p
 values = ["*"]
 why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without it or for a value not understood, which the log says (L.x86_64.187)"
 
+[boot_options."ferrix.mce.poll"]
+values = ["*"]
+why = "x86-64 only, ignored on aarch64 and armv7a: seconds between each processor's poll of its machine-check banks, 1 to 3600 by ferrix.msrlog's chooser; 5 without it, or for 0 or a value not understood, which the log says (arch/x86_64/mce.rs, docs/MACHINE-CHECK.md, L.x86_64.223)"
+
+[boot_options."ferrix.mce.recover"]
+values = ["off"]
+why = "x86-64 only, ignored on aarch64 and armv7a: off makes every machine check stop as FX-9005, as before recovery existed; without it a machine check H.FAIL.8 names is logged and recovered from (arch/x86_64/mce.rs, L.x86_64.231, SAFETY-MANUAL AoU-36); any other value is ignored"
+
 [boot_options."ferrix.powerctl"]
 kind = "flag"
 why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 48 A, at most 23 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"

@@ -395,7 +395,7 @@ static DRIVER_NVIDIA: [Entry<Kernel>; 2] = [
 ];
 
 /// `/proc`, less the process directories that follow these in a listing.
-pub(crate) static TOP: [Entry<Kernel>; 16] = [
+pub(crate) static TOP: [Entry<Kernel>; 18] = [
     Entry {
         name: b"self",
         permissions: 0o777,
@@ -404,6 +404,16 @@ pub(crate) static TOP: [Entry<Kernel>; 16] = [
     file(b"cmdline", render::cmdline_file),
     file(b"cpuinfo", render::cpuinfo),
     reporting_directory(b"driver", &DRIVER),
+    file(b"ferrix-mce", render::machine_check),
+    // Physical addresses: root's alone (`docs/MACHINE-CHECK.md` §3.6).
+    Entry {
+        name: b"ferrix-mce-retired",
+        permissions: 0o400,
+        content: Content::File {
+            render: render::retired_frames,
+            write: None,
+        },
+    },
     file(b"ferrix-seam", render::seam),
     file(b"filesystems", render::filesystems),
     file(b"loadavg", render::loadavg),

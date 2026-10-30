@@ -1585,6 +1585,25 @@ package FerrixItemRequirements {
                 line.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        requirement <'H.FAIL.8'> machineChecksThatDoNotStop : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK.md (customer, 2026-10-30; consultant M10).
+                H.FAIL.1 stops on every failed consistency check; these are the
+                hardware errors that are not one: the kernel's own state is
+                intact, and only a program's page or nothing at all is lost. */
+            attribute :>> statement = "On x86-64 with recovery on, the kernel
+                shall go on after a machine check only where every record is
+                corrected, uncorrected with no action required, action-optional
+                with the interrupted code restartable, another processor's
+                action-required record, or one action-required record a ring-3
+                program consumed at a usable address; it shall then retire the
+                frame of each uncorrected record with a usable address, never hand
+                it out again, and end or signal that program; every other machine
+                check stops as H.FAIL.1.";
+            attribute :>> criterion = "L.x86_64.221-232 and L.mm.91-92 each
+                verified; test-mce and its five recovery modes pass under KVM and
+                TCG.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
     }
 
     package Storage {

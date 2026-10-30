@@ -132,6 +132,12 @@ a failed invariant, an allocation failure at bring-up or in the uncertified
 load (§4, AoU-5), or an unhandled kernel fault. The report names the condition
 and carries a catalogued explanation.
 
+One class of hardware error does not enter it (H.FAIL.8, AoU-36): on x86-64,
+a machine check whose records leave the kernel's own state intact -- a
+corrected error, an uncorrected one nothing has consumed, or one a ring-3
+program consumed -- is logged, the frame is retired, and the program is
+ended or signalled; every other machine check halts as before.
+
 **AoU-2 below is the obligation this creates.** A halt is only a *safe* state in
 a system where stopping is safe. In a system where the controlled process must
 keep being controlled — a moving train, an infusion in progress — the
@@ -727,6 +733,30 @@ running and the task's own read of its CPU time included) to its return, and on 
 reading taken from another processor counts kernel time up to the task's
 last return to user mode or its processor's last decision, which a task
 alone on a processor with no tick may not make for as long as it runs.
+
+### AoU-36 — recovery from a hardware error is the integrator's choice (x86-64)
+With recovery on, the default (customer, 2026-10-30), the kernel goes on
+after the machine checks H.FAIL.8 names: a corrected or no-action error is
+logged and counted, an action-optional one's frame retired, and a ring-3
+program that consumed poison receives `SIGBUS` (`BUS_MCEERR_AR`) or is
+ended (`docs/MACHINE-CHECK.md`). The integrator shall decide, in the
+system hazard analysis, whether a program losing a page and going on, or
+being ended, is acceptable for every program the system runs; where it is
+not, the integrator shall boot with `ferrix.mce.recover=off`, under which
+every machine check halts (L.x86_64.231). Either way:
+
+* a retired frame stays mapped in every process that maps it and has not
+  touched it (late kill, as Linux's default); the kernel consuming it -- a
+  system call's copy, a copy-on-write copy at `fork`, a page-cache read, a
+  device's DMA -- is a machine check in ring 0, which halts;
+* the corrected-error lines are a symptom log, not a guarantee: no
+  threshold is applied, and a machine whose corrected counts grow is the
+  integrator's to take out of service;
+* CMCI is not used: corrected errors are found by a poll every
+  `ferrix.mce.poll` seconds (5 by default), so a record a bank overwrites
+  sooner is counted once with `OVER` set;
+* AArch64 and ARMv7-A make no such claim: their external aborts and
+  SErrors halt as before.
 
 ## 5. Element failure analysis
 

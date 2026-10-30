@@ -249,6 +249,12 @@ impl Inner {
     }
 }
 
+/// The most leaves [`AddressSpace::find_frame`] visits: a gibibyte of
+/// four-kilobyte pages. A program that maps more, and consumed poison past
+/// them, is told address 0.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const FIND_FRAME_LEAVES: usize = 1 << 18;
+
 /// One process's address space.
 #[derive(Debug)]
 pub struct AddressSpace {
@@ -342,6 +348,36 @@ impl AddressSpace {
     /// end, or a 32-bit program's lower ceiling.
     pub fn ceiling(&self) -> u64 {
         self.inner.lock().map.high()
+    }
+
+    /// The lowest address in this space's program half at which `frame` is
+    /// mapped, or `None` (`docs/MACHINE-CHECK.md` §3.5): where a program
+    /// consumed a poisoned frame, for its `SIGBUS`. The tables have no map
+    /// from a frame back to its pages, so the walk visits the program's
+    /// leaves in address order under the space's own lock, stopping at the
+    /// first match, at the program half's end, or after [`FIND_FRAME_LEAVES`]
+    /// leaves -- the bound its hold of the lock has (MEMORY-AND-TIMING).
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) fn find_frame(&self, frame: Frame) -> Option<u64> {
+        let wanted = frame * PAGE_SIZE;
+        let inner = self.inner.lock();
+        let end = inner.map.high();
+        let mut found = None;
+        let mut visited = 0_usize;
+        mm::for_each_leaf_in(self.root * PAGE_SIZE, |leaf| {
+            visited += 1;
+            if leaf.virt.0 >= end || visited > FIND_FRAME_LEAVES {
+                return false;
+            }
+            let start = leaf.phys.0;
+            if (start..start + leaf.bytes()).contains(&wanted) {
+                found = Some(leaf.virt.0 + (wanted - start));
+                return false;
+            }
+            true
+        });
+        drop(inner);
+        found
     }
 
     /// The physical address of the root table, for whoever installs it.

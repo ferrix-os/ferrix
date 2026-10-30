@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2406 declarations in the core's files, 175 in the item's; 78 checks-only.
+2415 declarations in the core's files, 175 in the item's; 78 checks-only.
 
 ## ferrix-kernel-core
 
@@ -77,7 +77,9 @@ checks above is `pub` for raised checks (F3).
 | `power_unserved` | fn | item |  |
 | `program_memory_types` | fn | bin |  |
 | `read_boot_options` | fn | bin |  |
+| `render_machine_check` | fn | load |  |
 | `sigpage_code` | fn | load |  |
+| `start_machine_check_log` | fn | bin |  |
 | `start_msr_log` | fn | bin |  |
 | `user_combining` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `user_extended_state` | fn | load |  |
@@ -335,6 +337,7 @@ checks above is `pub` for raised checks (F3).
 | `read_console_byte` | re-export | load |  |
 | `refill_wanted_in_domain` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `refills_in_domain_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `render_machine_check` | re-export | load |  |
 | `report_speculation` | re-export | bin |  |
 | `reset` | re-export | item, load |  |
 | `reset` | re-export | item, load |  |
@@ -364,6 +367,7 @@ checks above is `pub` for raised checks (F3).
 | `shutdown` | re-export | load |  |
 | `shutdown` | re-export | load |  |
 | `sigpage_code` | re-export | load |  |
+| `start_machine_check_log` | re-export | bin |  |
 | `start_msr_log` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
@@ -892,9 +896,11 @@ checks above is `pub` for raised checks (F3).
 | `program_memory_types` | fn | bin |  |
 | `read_boot_options` | fn | bin |  |
 | `read_console_byte` | fn | load |  |
+| `render_machine_check` | fn | load |  |
 | `reset` | fn | item, load, bin |  |
 | `ring3_reads_counter` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `shutdown` | fn | load |  |
+| `start_machine_check_log` | fn | bin |  |
 | `start_msr_log` | fn | bin |  |
 | `start_watchdogs` | fn | bin |  |
 | `sync_instructions` | fn | load |  |
@@ -1808,6 +1814,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `RETIRED_CAPACITY` | const | load |  |
 | `MemoryError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `allocate_frame_run` | fn | load |  |
 | `allocate_frames` | fn | item, load |  |
@@ -1826,6 +1833,7 @@ checks above is `pub` for raised checks (F3).
 | `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
+| `retired_frames` | fn | load |  |
 | `root_table` | fn | item |  |
 | `share_frame` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `split_frames` | fn | load |  |
@@ -2802,6 +2810,7 @@ checks above is `pub` for raised checks (F3).
 | `FastWriteRead` | type | bin |  |
 | `FilterQuiet` | type | bin |  |
 | `SyscallFilter` | type | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `ReturnPath::fault_end` | field | load |  |
 | `ReturnPath::fault_signal` | field | load |  |
 | `ReturnPath::needs_attention` | field | load |  |
 | `ReturnPath::return_to_user` | field | load |  |

@@ -199,11 +199,17 @@ pub const fn write_combining_processors() -> Option<usize> {
 
 // `ferrix.msrlog`, x86-64's read-only MSR log (`L.x86_64.187`); none on Arm.
 #[cfg(target_arch = "x86_64")]
+pub use x86_64::start_machine_check_log;
+#[cfg(target_arch = "x86_64")]
 pub use x86_64::start_msr_log;
 
 /// No MSRs: the Arm kernels have no such log.
 #[cfg(not(target_arch = "x86_64"))]
 pub const fn start_msr_log(_view: &ferrix_bootinfo::BootView<'_>) {}
+
+/// The machine-check log: nothing here, which has no machine-check banks.
+#[cfg(not(target_arch = "x86_64"))]
+pub const fn start_machine_check_log(_view: &ferrix_bootinfo::BootView<'_>) {}
 
 // The power core, x86-64's VR current limit through typed calls on a claim
 // (`docs/POWERCTL.md`, `L.x86_64.194`-`208`, `L.device.51`-`53`); none on
@@ -565,6 +571,35 @@ pub(crate) use x86_64::check_machine_check_enabled;
 )]
 pub(crate) const fn check_machine_check_enabled() -> Result<(), &'static str> {
     Ok(())
+}
+
+// x86-64's machine check from ring 3 (`docs/MACHINE-CHECK.md` §3.5): whether
+// its entry marked a frame for `SIGBUS`, and the signal. The Arm
+// architectures take no machine check, so no frame is ever marked there.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{machine_check_marked, machine_check_signal};
+
+/// `/proc/ferrix-mce`: nothing here, which has no machine check.
+#[cfg(not(target_arch = "x86_64"))]
+pub fn render_machine_check(_out: &mut impl core::fmt::Write) -> core::fmt::Result {
+    Ok(())
+}
+
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::render_machine_check;
+
+/// Whether a trap frame is a machine check marked for `SIGBUS`: never here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn machine_check_marked(_frame: &TrapFrame) -> bool {
+    false
+}
+
+/// The signal for a marked machine check: unreachable here, since
+/// [`machine_check_marked`] is never true; `SIGBUS` from the kernel if it
+/// were.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn machine_check_signal(_frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
+    (ferrix_linux_abi::types::SIGBUS, 0x80, 0, false)
 }
 
 // Cache maintenance for a device that does not snoop the caches: the

@@ -12,6 +12,7 @@ pub(crate) use cpu::clean_for_walker as write_back_for_reset;
 pub use cpu::dma_barrier;
 pub(crate) use cpu::{gs_xadd, read_gs_at};
 pub mod gdt;
+mod mce;
 pub(crate) mod mmio;
 mod msi;
 mod msrlog;
@@ -185,6 +186,9 @@ pub fn check_machine() -> Result<(), &'static str> {
     // And `ferrix.msrlog`'s checked MSR read, decoder and period
     // (`L.x86_64.187`-`189`).
     msrlog::check::run()?;
+    // And the machine check's classifier, its pending slots and the retired
+    // frames (`L.x86_64.224`-`226`, `L.mm.91`-`92`).
+    mce::check::run()?;
     // And the power core's decisions, its claims over a fake register file
     // and every interleaving of a write with a restore, none of which
     // writes a register the processor has (`L.x86_64.194`-`208`); and the
@@ -197,6 +201,29 @@ pub fn check_machine() -> Result<(), &'static str> {
 /// (`L.x86_64.187`); nothing at all otherwise.
 pub fn start_msr_log(view: &BootView<'_>) {
     msrlog::start(view);
+}
+
+/// Start the machine-check log's poll on every processor
+/// (`docs/MACHINE-CHECK.md` §3.2), and read `ferrix.mce.recover`.
+pub fn start_machine_check_log(view: &BootView<'_>) {
+    mce::start(view);
+}
+
+/// `/proc/ferrix-mce` (`L.x86_64.230`).
+pub fn render_machine_check(out: &mut impl core::fmt::Write) -> core::fmt::Result {
+    mce::render(out)
+}
+
+/// Whether `frame` is a ring-3 machine check marked for `SIGBUS`
+/// (`L.x86_64.228`).
+pub(crate) const fn machine_check_marked(frame: &TrapFrame) -> bool {
+    mce::marked(frame)
+}
+
+/// The signal for a marked ring-3 machine check, with interrupts open:
+/// `(signal, si_code, si_addr, end the program)` (`L.x86_64.228`).
+pub(crate) fn machine_check_signal(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
+    mce::signal_for(frame)
 }
 
 /// Stage 10's question for the power node (`L.device.51`).
@@ -270,6 +297,8 @@ fn take_machine_check() {
     let firmware_mce = cpu::machine_check_enabled();
     let mce = if cpu::enable_machine_check() {
         let _ = MACHINE_CHECK_ENABLED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        // Its banks are brought up by `mce::start`, once this processor has
+        // its record (`docs/MACHINE-CHECK.md` §3.1).
         if firmware_mce {
             "CR4.MCE set, as firmware had left it"
         } else {

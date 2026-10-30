@@ -429,6 +429,42 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.14";
             attribute :>> unit = "mm::reclaim_boot_memory";
         }
+        requirement <'L.mm.91'> aRetiredFrameIsNeverAllocatedAgain : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK.md §3.4: retirement by late kill; the
+                insert, the claim and the free paths' test are under the frame
+                allocator's lock (the consultant's M4). */
+            attribute :>> statement = "retire_frame shall, in one hold of the
+                frame allocator's lock, record the frame and take it off the free
+                lists if it is free; release_frame and deallocate_frames shall,
+                under that lock, keep a recorded frame allocated and charged to
+                nobody instead of freeing it, freeing the rest of a block that
+                holds one frame by frame; and a frame the allocator does not
+                cover shall not be recorded.";
+            attribute :>> criterion = "Stage 2: a frame retired while shared stays
+                allocated after both releases and cannot be claimed; one retired
+                inside a two-frame block stays allocated when the block is freed
+                and its neighbour is free; one retired while free is allocated at
+                once; a second retirement answers already. Negative control: the
+                free paths' test removed, stage 2 stops.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("mm::retire_frame",
+                "mm::holds_retired",
+                "mm::keep_retired",
+                "mm::is_retired",
+                "mm::release_frame",
+                "mm::deallocate_frames",
+                "mm::retired_frames");
+        }
+        requirement <'L.mm.92'> theRetiredSetRefusesWhenFull : ItemLowLevel {
+            attribute :>> statement = "Once 256 frames are retired, retire_frame
+                shall record no further frame and change nothing, answering full,
+                and shall print the set's fullness once.";
+            attribute :>> criterion = "Stage 2, the set's room lowered to what the
+                check has used: a further frame is refused twice and not retired,
+                and the line was printed; the room and the line are given back.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("mm::retire_frame");
+        }
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
             attribute :>> statement = "init shall set the watermark once, to the
                 frames the allocator manages divided by 128, and no fewer than 256

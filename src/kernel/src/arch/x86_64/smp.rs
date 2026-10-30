@@ -536,6 +536,7 @@ extern "C" fn secondary_start(record: u64) -> ! {
     // TSS the stack the gate names, and before it runs a program (F-73).
     if cpu::enable_machine_check() {
         let _ = super::MACHINE_CHECK_ENABLED.fetch_add(1, Ordering::AcqRel);
+        super::mce::bring_up();
     }
     apic::init_this_cpu();
     crate::smp::secondary_main(record)

@@ -106,7 +106,7 @@
     },
     "main.rs::kmain": {
       "complexity": 11,
-      "lines": 80,
+      "lines": 81,
       "recursive": false
     },
     "main.rs::start_scheduler": {
@@ -334,6 +334,31 @@
       "lines": 64,
       "recursive": false
     },
+    "src/lib/proto/slots/src/gpt.rs::find": {
+      "complexity": 26,
+      "lines": 48,
+      "recursive": false
+    },
+    "src/lib/proto/slots/src/gpt.rs::find_one": {
+      "complexity": 19,
+      "lines": 30,
+      "recursive": false
+    },
+    "src/lib/proto/slots/src/gpt.rs::parse_header": {
+      "complexity": 31,
+      "lines": 39,
+      "recursive": false
+    },
+    "src/lib/proto/slots/src/record.rs::decode": {
+      "complexity": 18,
+      "lines": 31,
+      "recursive": false
+    },
+    "src/lib/proto/slots/src/slot.rs::decode": {
+      "complexity": 24,
+      "lines": 46,
+      "recursive": false
+    },
     "syscall/native.rs::answer": {
       "complexity": 30,
       "lines": 82,
@@ -387,31 +412,6 @@
     "user/space.rs::resolve": {
       "complexity": 20,
       "lines": 82,
-      "recursive": false
-    },
-    "src/lib/proto/slots/src/gpt.rs::find": {
-      "complexity": 26,
-      "lines": 48,
-      "recursive": false
-    },
-    "src/lib/proto/slots/src/gpt.rs::find_one": {
-      "complexity": 19,
-      "lines": 30,
-      "recursive": false
-    },
-    "src/lib/proto/slots/src/gpt.rs::parse_header": {
-      "complexity": 31,
-      "lines": 39,
-      "recursive": false
-    },
-    "src/lib/proto/slots/src/record.rs::decode": {
-      "complexity": 18,
-      "lines": 31,
-      "recursive": false
-    },
-    "src/lib/proto/slots/src/slot.rs::decode": {
-      "complexity": 24,
-      "lines": 46,
       "recursive": false
     }
   }

@@ -223,6 +223,19 @@ pub(crate) const SYS_SECCOMP: i32 = 1;
 /// `si_code` for a system call Syscall User Dispatch dispatched.
 pub(crate) const SYS_USER_DISPATCH: i32 = 2;
 
+/// `si_code` `BUS_MCEERR_AR`: a machine check, action required.
+pub(crate) const BUS_MCEERR_AR: i32 = 4;
+/// `si_code` `BUS_MCEERR_AO`: a machine check, action optional.
+pub(crate) const BUS_MCEERR_AO: i32 = 5;
+/// `_addr_lsb` for a poisoned page: its low twelve bits are lost with it.
+const ADDR_LSB_PAGE: i16 = 12;
+
+/// Whether `signal` and `code` are a machine check's `SIGBUS`, the one fault
+/// whose `siginfo` carries `_addr_lsb`.
+fn is_machine_check_bus(signal: u32, code: i32) -> bool {
+    signal == SIGBUS && matches!(code, BUS_MCEERR_AR | BUS_MCEERR_AO)
+}
+
 /// Bytes in `siginfo_t` on every architecture.
 pub(crate) use crate::signal_frame::SIGINFO_BYTES;
 
@@ -279,6 +292,14 @@ impl Origin {
             }
             Origin::Fault { code, address } => {
                 let _ = put_word(&mut info, union, address, WORD);
+                // A machine check's `SIGBUS` says how much of the address is
+                // poisoned: `_addr_lsb`, a `short` after it -- a page
+                // (`docs/MACHINE-CHECK.md` §3.5). No other fault writes it.
+                if is_machine_check_bus(signal, code)
+                    && let Some(slot) = info.get_mut(union + WORD..union + WORD + 2)
+                {
+                    slot.copy_from_slice(&ADDR_LSB_PAGE.to_le_bytes());
+                }
                 code
             }
         };
@@ -325,6 +346,12 @@ impl Origin {
             Origin::Fault { code, address } => {
                 if let Some(slot) = info.get_mut(72..80) {
                     slot.copy_from_slice(&address.to_le_bytes());
+                }
+                // `ssi_addr_lsb`, for a machine check's `SIGBUS` alone.
+                if is_machine_check_bus(signal, code)
+                    && let Some(slot) = info.get_mut(80..82)
+                {
+                    slot.copy_from_slice(&ADDR_LSB_PAGE.to_le_bytes());
                 }
                 code
             }

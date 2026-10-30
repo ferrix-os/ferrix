@@ -122,16 +122,34 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch armv7a --smp 2",
 ];
 
-/// The machine-check row (F-73): a machine check injected into every
-/// processor must stop the kernel as FX-9005, under both accelerators.
+/// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
+/// check injected into every processor must stop the kernel as FX-9005, and
+/// the log's and recovery's modes must hold, under both accelerators. Under
+/// KVM on a host whose processor model has no `MCG_SER_P` (nazuna's AMD) the
+/// recovery modes require the fail-closed stop instead.
 const TEST_MCE: &[&str] = &[
     "test-mce --arch x86_64 --accel kvm",
     "test-mce --arch x86_64 --accel tcg",
+    "test-mce-corrected --arch x86_64 --accel kvm",
+    "test-mce-corrected --arch x86_64 --accel tcg",
+    "test-mce-srar --arch x86_64 --accel kvm",
+    "test-mce-srar --arch x86_64 --accel tcg",
+    "test-mce-broadcast --arch x86_64 --accel kvm",
+    "test-mce-broadcast --arch x86_64 --accel tcg",
+    "test-mce-srao --arch x86_64 --accel kvm",
+    "test-mce-srao --arch x86_64 --accel tcg",
+    "test-mce-left --arch x86_64 --accel kvm",
+    "test-mce-left --arch x86_64 --accel tcg",
+    "test-mce-recover-off --arch x86_64 --accel kvm",
+    "test-mce-recover-off --arch x86_64 --accel tcg",
+    "test-mce-kill --arch x86_64 --accel kvm",
+    "test-mce-kill --arch x86_64 --accel tcg",
 ];
 
 /// Whether a change to `path` reaches the machine check: x86-64's `CR4`
-/// setup, its paranoid entry and their check, the trap gates and the
-/// secondaries' start (`docs/BACKLOG.md`, *What a landing runs*).
+/// setup, its paranoid entry and their check, the trap gates, the
+/// secondaries' start, the machine-check log and recovery, and their gate
+/// and guest program (`docs/BACKLOG.md`, *What a landing runs*).
 fn reaches_machine_check(path: &str) -> bool {
     [
         "src/kernel/src/arch/x86_64/cpu.rs",
@@ -139,8 +157,13 @@ fn reaches_machine_check(path: &str) -> bool {
         "src/kernel/src/arch/x86_64/paranoid/check.rs",
         "src/kernel/src/arch/x86_64/trap.rs",
         "src/kernel/src/arch/x86_64/smp.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/check.rs",
+        "src/kernel/src/arch/x86_64/mce/decode.rs",
+        "tools/common/xtask/src/machine_check.rs",
     ]
     .contains(&path)
+        || path.starts_with("src/tests/mce/")
 }
 
 /// Whether `path` is documentation only: under `docs/`, or a Markdown file

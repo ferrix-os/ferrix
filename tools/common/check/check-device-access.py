@@ -207,7 +207,15 @@ POWER_FILE = "src/kernel/src/arch/x86_64/powerctl.rs"
 POWER_DIR = "src/kernel/src/arch/x86_64/powerctl/"
 CHECK_FILE = "src/kernel/src/arch/x86_64/cpu/check.rs"
 CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*))?")
-CHECKED_WRITE_ARGUMENT = {POWER_FILE: "VR_CURRENT_CONFIG", CHECK_FILE: "ABSENT"}
+# And the machine check's bring-up (L.x86_64.232, docs/MACHINE-CHECK.md
+# §3.1, the consultant's M12): IA32_MCG_CTL and the banks' registers alone,
+# named through MCG_CTL and bank_msr.
+MCE_FILE = "src/kernel/src/arch/x86_64/mce.rs"
+CHECKED_WRITE_ARGUMENT = {
+    POWER_FILE: {"VR_CURRENT_CONFIG"},
+    CHECK_FILE: {"ABSENT"},
+    MCE_FILE: {"MCG_CTL", "bank_msr"},
+}
 OTHER_MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
 ANY_MSR_ACCESS = re.compile(r"\b(read|write)_msr\w*|\brdmsr\b|\bwrmsr\w*\b")
 ASM_WRMSR = re.compile(r'"wrmsr"')
@@ -226,8 +234,8 @@ def checked_write_problems(root: pathlib.Path) -> list[str]:
                 wanted = CHECKED_WRITE_ARGUMENT.get(relative)
                 if wanted is None:
                     problems.append(f"{relative}:{number}: write_msr_checked outside the power core (L.x86_64.192)")
-                elif match.group(2) != wanted:
-                    problems.append(f"{relative}:{number}: write_msr_checked of {match.group(2) or 'no register'}, not {wanted} (L.x86_64.192)")
+                elif match.group(2) not in wanted:
+                    problems.append(f"{relative}:{number}: write_msr_checked of {match.group(2) or 'no register'}, not {' or '.join(sorted(wanted))} (L.x86_64.192)")
     power = root / POWER_FILE
     if power.exists():
         text = power.read_text(encoding="utf-8")

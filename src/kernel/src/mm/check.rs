@@ -292,6 +292,7 @@ pub fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     }
 
     check_frames()?;
+    check_retired()?;
 
     // The heap must come back to where it started, and "where it started" is
     // not zero: the vmap arena below is a live `Vec` and a live `BTreeMap`,
@@ -729,6 +730,101 @@ fn check_stacks() -> Result<(), &'static str> {
 /// window that rounded that away would work perfectly for the GIC and silently
 /// address the wrong register here.
 ///
+/// A retired frame is never handed out again (`docs/MACHINE-CHECK.md`
+/// §3.4): one retired while shared stays allocated when both references
+/// go; one retired inside a two-frame block stays allocated when the block
+/// is freed, and its neighbour is free; one retired while free is taken off
+/// the free lists. And the set refuses a frame once full, saying so once
+/// (here with its room lowered to what the check has used). Everything the
+/// check retired is forgotten and freed at the end.
+///
+/// Verifies: L.mm.91, L.mm.92
+fn check_retired() -> Result<(), &'static str> {
+    use ferrix_frame::State;
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    let checked = retire_three();
+    let retired = super::RETIRED_COUNT
+        .load(Ordering::Relaxed)
+        .saturating_sub(before);
+    super::forget_checked_retirements(retired);
+    let (shared, block, free) = checked?;
+    // The block's free half, claimed back by the check; the rest the
+    // forgetting freed.
+    mm::deallocate_frames(block + 1, 0);
+    if [shared, block, block + 1, free]
+        .iter()
+        .any(|&frame| !matches!(mm::frame_state(frame), Some(State::Free | State::FreeTail)))
+    {
+        return Err("a frame the retirement check retired was not free once forgotten");
+    }
+    println!(
+        "  retired  a retired frame shared, in a block and free never came back; a full set \
+         refused"
+    );
+    Ok(())
+}
+
+/// [`check_retired`]'s body: three frames retired and their outcomes
+/// checked, then the full set. The frames, for the caller to free once they
+/// are forgotten.
+fn retire_three() -> Result<(super::Frame, super::Frame, super::Frame), &'static str> {
+    use ferrix_frame::State;
+    let allocated = |frame| mm::frame_state(frame) == Some(State::Allocated);
+
+    let shared = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    if mm::share_frame(shared) != Some(2) || mm::retire_frame(shared) != mm::Retired::Marked {
+        return Err("a shared frame was not marked retired");
+    }
+    if mm::retire_frame(shared) != mm::Retired::Already {
+        return Err("a retired frame was retired twice");
+    }
+    let _ = mm::release_frame(shared);
+    let _ = mm::release_frame(shared);
+    if !allocated(shared) || mm::claim_frame(shared).is_some() {
+        return Err("a retired frame went back to the allocator with its last reference");
+    }
+
+    let block = mm::allocate_frames(1).ok_or("no block for the retirement check")?;
+    if mm::retire_frame(block) != mm::Retired::Marked {
+        return Err("a frame in a block was not marked retired");
+    }
+    mm::deallocate_frames(block, 1);
+    if !allocated(block)
+        || !matches!(
+            mm::frame_state(block + 1),
+            Some(State::Free | State::FreeTail)
+        )
+    {
+        return Err("a block holding a retired frame was freed whole, or not at all");
+    }
+    // Back to the caller as a single allocated frame, freed after the
+    // forgetting.
+    if mm::claim_frame(block + 1).is_none() {
+        return Err("the free half of a retired block could not be claimed");
+    }
+
+    let free = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    mm::deallocate_frames(free, 0);
+    if mm::retire_frame(free) != mm::Retired::Claimed || !allocated(free) {
+        return Err("a free frame retired was not taken off the free lists");
+    }
+
+    let spare = mm::allocate_frames(0).ok_or("no frame for the retirement check")?;
+    super::RETIRED_ROOM.store(
+        super::RETIRED_COUNT.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    let full = mm::retire_frame(spare);
+    let said = super::RETIRED_FULL_SAID.load(Ordering::Relaxed);
+    let again = mm::retire_frame(spare);
+    let refused = !mm::is_retired(spare);
+    mm::deallocate_frames(spare, 0);
+    if full != mm::Retired::Full || again != mm::Retired::Full || !said || !refused {
+        return Err("a full set of retired frames took one more, or did not say it was full");
+    }
+    Ok((shared, block, free))
+}
+
 /// Verifies: L.mm.49
 fn check_device_windows(aperture: u64) -> Result<(), &'static str> {
     const OFFSET: u64 = 0x40;

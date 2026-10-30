@@ -321,6 +321,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // processor that reads the power-limit MSRs, once every processor is up
     // and there is a scheduler to sleep in (`L.x86_64.187`).
     arch::start_msr_log(view);
+    // The machine-check log's poll, a task on each processor with banks, and
+    // `ferrix.mce.recover` (`docs/MACHINE-CHECK.md` §3.2). x86-64 only.
+    arch::start_machine_check_log(view);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's

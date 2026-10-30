@@ -195,13 +195,6 @@
       "branch": "driver-model-step1",
       "date": "2026-10-25",
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
-    },
-    {
-      "ids": ["H.FAIL.8", "L.x86_64.221-232", "L.mm.91-92"],
-      "owner": "mce-log",
-      "branch": "feature/mce-log",
-      "date": "2026-10-30",
-      "purpose": "docs/MACHINE-CHECK.md, the x86-64 machine-check log and recovery from a ring-3 SRAR (customer, 2026-10-30; consultant OK IF M1-M14, ledger 4772): H.FAIL.8 which machine checks do not stop; L.x86_64 for bank bring-up, the record the boot before left, the poll, the classifier, the unaffected/spurious rule, the deferred ring-0 check, the fatal report's banks, SIGBUS on ring-3 SRAR, ring-0 SRAR stopping, /proc/ferrix-mce, ferrix.mce.recover=off, the bank cap; L.mm for retired frames never allocated again and the full set"
     }
   ]
 }

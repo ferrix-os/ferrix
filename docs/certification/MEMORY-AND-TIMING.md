@@ -1794,6 +1794,29 @@ processor ending a task at once, whether or not any processor is idle, and
 its checks are `docs/PREEMPTIBLE-WAITS.md`'s, under the consultant's
 verdict of ledger line 3950.
 
+### 2.2z2 The machine check (`arch::x86_64::mce`, 2026-10-30)
+
+* **On the IST stack** (`on_kernel_stack`, and `from_user` before its
+  frame's interrupts open): no lock, no allocation, no print except on the
+  way to a halt. Two passes over at most 32 banks, each an `rdmsr` of
+  `MCi_STATUS` and, where valid, `MCi_MISC` and `MCi_ADDR`; at most 32
+  `wrmsr`s clearing banks and one clearing `MCG_STATUS`; 8 compare-and-swaps
+  at most to find a pending slot.
+* **The frame allocator's lock** (`FRAMES`): `retire_frame` holds it for one
+  look at the frame's state, a scan of at most 256 retired entries and one
+  `claim`, which is a walk down at most `MAX_ORDER` splits. The free paths'
+  added test is one relaxed load while nothing is retired, and a scan of
+  at most 256 entries per frame after; a block freed with a retired frame
+  in it is split and freed frame by frame, at most `2^MAX_ORDER` frees.
+* **An address space's lock** (`AddressSpace::find_frame`): held across a
+  walk of the program half's leaves in address order, stopping at the
+  first match, at the half's end or after `FIND_FRAME_LEAVES` (2^18)
+  leaves. Run only after a ring-3 machine check, with interrupts open. Its
+  worst case is the walk of 2^18 leaves and their tables, measured on no
+  hardware yet: a row of `docs/BACKLOG.md`.
+* **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
+  most 32 bank reads and 32 lines; no lock while it reads a bank.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
