@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2421 declarations in the core's files, 175 in the item's; 79 checks-only.
+2423 declarations in the core's files, 175 in the item's; 81 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1823,6 +1823,7 @@ checks above is `pub` for raised checks (F3).
 | `deallocate_frames` | fn | item, load |  |
 | `direct_map` | fn | item, load |  |
 | `direct_map_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `drain_caches` | fn | load (checks) | checks-only |
 | `flags_in` | fn | item, load |  |
 | `frame_references` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `free_frames` | fn | load, bin |  |
@@ -1863,6 +1864,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_a_large_block_goes_back_with_the_section` | fn | load (checks) | checks-only |
+| `check_heap_caches` | fn | load (checks) | checks-only |
 | `check_pstore_never_free` | fn | bin |  |
 | `check_w_xor_x` | fn | bin |  |
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

@@ -210,6 +210,22 @@ pub static BOOT_OUT_OF_MEMORY: Explanation = Explanation {
           src/kernel/src/fallible.rs",
 };
 
+/// For `mm::drain_caches` entered with this processor's cache lock held.
+pub(crate) static HEAP_DRAIN_UNDER_CACHE_LOCK: Explanation = Explanation {
+    code: "FX-0012",
+    title: "the heap caches were drained with a cache lock held",
+    meaning: "Each processor keeps free heap objects of every size class in a cache of its \
+              own behind its own lock (`docs/HEAP-CACHES.md`). A refusal drains every \
+              cache back into the heap, taking each cache lock in turn, and must start \
+              with none held: this processor's would be taken a second time and never \
+              come free. The drain looks before it starts and stops the machine instead.",
+    causes: &[
+        "A path that holds this processor's cache lock -- a refill, an overflow -- \
+         reached a refusal's drain without first letting the lock go.",
+    ],
+    see: "docs/HEAP-CACHES.md; src/kernel/src/mm.rs",
+};
+
 /// For the panic the standard library's allocation error handler raises,
 /// recognised by `panic.rs`.
 pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
@@ -3528,6 +3544,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &BOOT_OUT_OF_MEMORY,
     &ALLOCATION_ABORTED,
     &SPACE_IDS_EXHAUSTED,
+    &HEAP_DRAIN_UNDER_CACHE_LOCK,
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,

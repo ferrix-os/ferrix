@@ -264,6 +264,14 @@ fn arm(task: TaskId, period: u32, once: bool, frames: bool) {
     ferrix_fallible::arm(true);
 }
 
+/// How many allocations the injection has failed since it was last armed:
+/// what the allocator reads before an attempt, so that a refusal the
+/// injection made is answered as it stands, never retried after a drain of
+/// the heap caches (`mm::heap_or_drain`, L.mm.98).
+pub(crate) fn injected_failures() -> u64 {
+    FAILED.load(Ordering::Relaxed)
+}
+
 /// Stop failing allocations, and say how many were failed.
 pub fn stop_injecting() -> u64 {
     ferrix_fallible::arm(false);

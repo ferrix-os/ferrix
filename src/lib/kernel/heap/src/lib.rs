@@ -682,5 +682,157 @@ impl Reserve {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A processor's cache in front of the heap
+// ---------------------------------------------------------------------------
+
+/// Objects a [`CpuCache`] keeps of each size class.
+pub const CACHE_DEPTH: usize = 16;
+
+/// Objects a refill takes from the heap, and a full cache gives back to it
+/// with the one freed, under one hold of the heap.
+pub const REFILL: usize = 8;
+
+/// One processor's free objects of each size class: what lets an allocation
+/// and a free of a class skip the heap and its lock (`docs/HEAP-CACHES.md`).
+///
+/// A plain value: the kernel keeps one per processor behind a lock of its
+/// own, and takes the heap's lock only to [`CpuCache::refill`],
+/// [`CpuCache::overflow`] or [`CpuCache::drain`]. Every object held is an
+/// ordinary heap object of its class, allocated and not handed out, so the
+/// heap counts it as allocated: [`CpuCache::held_bytes`] is what a count of
+/// what callers hold takes off.
+#[derive(Debug)]
+pub struct CpuCache {
+    /// Each class's held objects, `held[class]` of them from the front.
+    objects: [[u64; CACHE_DEPTH]; CLASSES],
+    /// How many each class holds.
+    held: [usize; CLASSES],
+}
+
+impl Default for CpuCache {
+    fn default() -> Self {
+        CpuCache::new()
+    }
+}
+
+impl CpuCache {
+    /// An empty cache.
+    #[must_use]
+    pub const fn new() -> CpuCache {
+        CpuCache {
+            objects: [[END; CACHE_DEPTH]; CLASSES],
+            held: [0; CLASSES],
+        }
+    }
+
+    /// An object of `class` the cache holds, taken out of it.
+    pub fn take(&mut self, class: usize) -> Option<u64> {
+        let held = self.held.get_mut(class)?;
+        let top = held.checked_sub(1)?;
+        let object = *self.objects.get(class)?.get(top)?;
+        *held = top;
+        Some(object)
+    }
+
+    /// Hold `address`, an object of `class`; `false`, and nothing held, when
+    /// the class is full.
+    pub fn keep(&mut self, class: usize, address: u64) -> bool {
+        let (Some(held), Some(objects)) = (self.held.get_mut(class), self.objects.get_mut(class))
+        else {
+            return false;
+        };
+        let Some(slot) = objects.get_mut(*held) else {
+            return false;
+        };
+        *slot = address;
+        *held += 1;
+        true
+    }
+
+    /// Take up to [`REFILL`] objects of `class` from `heap`: hold all but
+    /// one and return that one. The heap refusing after the first is a
+    /// refill all the same; refusing the first is the heap's error.
+    ///
+    /// # Errors
+    ///
+    /// The heap's, when it gave not one object.
+    pub fn refill(
+        &mut self,
+        heap: &mut Heap,
+        backing: &mut impl Backing,
+        class: usize,
+    ) -> Result<u64, HeapError> {
+        let size = CLASS_SIZES
+            .get(class)
+            .copied()
+            .ok_or(HeapError::TooLarge(0))?;
+        let request = Request::new(size, size);
+        let first = heap.allocate(backing, request)?;
+        for _ in 1..REFILL {
+            let Ok(object) = heap.allocate(backing, request) else {
+                break;
+            };
+            if !self.keep(class, object) {
+                heap.deallocate(backing, object, request);
+                break;
+            }
+        }
+        Ok(first)
+    }
+
+    /// Give [`REFILL`] held objects of `class`, and `address`, an object of
+    /// `class` the cache had no room for, back to `heap`.
+    pub fn overflow(
+        &mut self,
+        heap: &mut Heap,
+        backing: &mut impl Backing,
+        class: usize,
+        address: u64,
+    ) {
+        let Some(&size) = CLASS_SIZES.get(class) else {
+            return;
+        };
+        let request = Request::new(size, size);
+        for _ in 0..REFILL {
+            let Some(object) = self.take(class) else {
+                break;
+            };
+            heap.deallocate(backing, object, request);
+        }
+        heap.deallocate(backing, address, request);
+    }
+
+    /// Give everything held back to `heap`. Returns how many objects.
+    pub fn drain(&mut self, heap: &mut Heap, backing: &mut impl Backing) -> usize {
+        let mut given = 0;
+        for (class, &size) in CLASS_SIZES.iter().enumerate() {
+            let request = Request::new(size, size);
+            while let Some(object) = self.take(class) {
+                heap.deallocate(backing, object, request);
+                given += 1;
+            }
+        }
+        given
+    }
+
+    /// Objects held of `class`.
+    #[must_use]
+    pub fn held(&self, class: usize) -> usize {
+        self.held.get(class).copied().unwrap_or(0)
+    }
+
+    /// Bytes the held objects take: what the heap counts allocated and no
+    /// caller holds.
+    #[must_use]
+    pub fn held_bytes(&self) -> usize {
+        self.held
+            .iter()
+            .zip(CLASS_SIZES)
+            .map(|(&held, size)| held * size)
+            .sum()
+    }
+}
+
 #[cfg(test)]
 mod tests;

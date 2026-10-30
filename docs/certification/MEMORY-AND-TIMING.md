@@ -18,12 +18,14 @@ the second half, time, is unchanged.
 
 ### 1.1 What the item allocates
 
-The item carries four allocators:
+The item carries four allocators, and in front of the heap one cache per
+processor (§1.8):
 
 | Allocator | Role |
 |---|---|
 | Buddy (`src/lib/kernel/frame`) | physical frames |
 | Kernel heap (`src/lib/kernel/heap`) | `GlobalAlloc` behind `Box`, `Vec`, `Arc`, the maps |
+| Per-processor heap caches (`mm::CACHES`, `ferrix_heap::CpuCache`) | free heap objects of each size class kept by each processor, in front of the heap's lock; `MAX_CPUS` `IrqSpinLock`s of static storage, about 300 KiB |
 | `vmap` arena | kernel virtual address space for device windows and stacks |
 | Demand paging / CoW (`user/vmo.rs`) | a program's pages, on first touch |
 
@@ -111,9 +113,12 @@ stable parts, in two kinds:
   section* (`src/kernel/src/mm/reserve.rs`). Entering the section masks this
   processor's interrupts, then fills its reserve to 16 objects of every heap
   size class, plus one block for an `Arc` too large for a class. It fails
-  with `AllocError` if the heap cannot supply them, and that failure is the
-  one the caller reports. Inside the section, an allocation the heap refuses
-  is served from the reserve. So the operation either never starts, or it
+  with `AllocError` if the heap cannot supply them even after the
+  processors' heap caches are drained into it (§1.8), and that failure is
+  the one the caller reports; that drain runs with this processor's
+  interrupts masked across every cache (§1.8). Inside the section, an
+  allocation the heap refuses -- after a drain of its own -- is served from
+  the reserve. So the operation either never starts, or it
   runs to the end on memory set aside for it. The depth argument: an `Arc` is
   one allocation of `arc_layout::<T>()`, and a B-tree insert is at most height
   + 2 nodes of at most `btree_node_bound`. The host tests measure both against
@@ -498,6 +503,51 @@ alternated, under KVM). Every boot's `quota` line drives each limit to its
 refusal and back to zero, and its `kmem` line fills a limited job with each
 kind of heap in turn until `ENOMEM`, with a sibling unrefused and every
 byte given back.
+
+### 1.8 The per-processor heap caches (docs/HEAP-CACHES.md)
+
+Each processor keeps up to `CACHE_DEPTH` (16) free objects of each of the 9
+size classes in a `CpuCache` behind an `IrqSpinLock` of its own. An
+allocation or free of a class takes that lock, not the heap's; an empty cache
+refills `REFILL` (8) objects under one hold of the heap's lock, a full one
+gives back 8 and the freed one under one hold. Every heap refusal -- a
+refill, a large request, a reserve's fill -- drains every cache into the
+heap and tries once more before it refuses (L.mm.95); a refusal the failure
+injection made is answered as it stands (L.mm.98), so the sweep's runs still
+reach their refusals. `heap_allocated()` and the held-memory window count
+what callers hold: the heap's allocated bytes less the cached bytes (L.mm.96).
+
+* **Lock order.** A processor's cache lock, then the heap's, then `FRAMES`
+  (a refill or a large request reaches the buddy). Never the other way. The
+  drain (`mm::drain_caches`) starts with no cache lock held -- one held on
+  this processor stops the machine, FX-0012 -- and takes one cache lock at
+  a time with the heap's under it.
+* **Pages held.** At most 144 objects a processor; in the worst case each
+  keeps a slab page of its own from going back: 144 pages, 576 KiB a
+  processor, 2.25 MiB on the N150's four. They are heap pages, as a slab
+  page with free objects in it always was, and only a heap refusal drains
+  them: a program's frame, a page table or a VMO commit refused at the
+  watermark (L.mm.71) does not. So a program can be refused up to 144 pages
+  a processor sooner than with no caches -- more than `WATERMARK_LEAST`'s
+  256 frames on a machine of four processors or more. That is memory a
+  program does not get, never memory the kernel cannot get: the watermark
+  keeps frames for the kernel's own allocations, the heap's pages among
+  them, and every heap refusal drains the caches before it refuses. On the
+  N150 it is under 1 % of the watermark's 8,192 frames.
+* **The heap lock's hold.** A refill is up to 8 allocations under one hold:
+  each a free-list pop, and when the class's list is empty a page take from
+  the buddy under `FRAMES` -- at most 4 page takes for the 2 KiB class, two
+  objects a page. An overflow is 9 frees under one hold; a free that empties
+  a page walks its class's free list to unlink it (`give_back_if_empty`), as
+  every free that empties a page always has.
+* **A cache lock's hold.** One push or pop, or a refill or overflow above.
+* **The drain's masked time.** `MAX_CPUS` cache locks, one at a time, each
+  with interrupts masked for at most 144 frees under the heap's lock, each
+  of which may walk a free list as above. A drain runs only after a refusal,
+  and in the boot and sweep checks. Entering a reserved section masks
+  interrupts first (§1.2), so a drain a section's fill or large hold makes
+  runs masked from end to end: every processor's share in turn, at most
+  `MAX_CPUS` times 144 frees, before the retry.
 
 ### 1.7 The audit record — F-21b
 

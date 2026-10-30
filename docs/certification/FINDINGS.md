@@ -3123,6 +3123,14 @@ hardware row with the canary figures (the consultant's (I4) and (23)).
 These cannot be closed by engineering. They are recorded because an audit that
 omits them is not an audit.
 
+**A note, not a closure** (2026-10-30, docs/HEAP-CACHES.md, L.mm.93-98):
+the kernel heap's lock is one of the spin locks a task waits for with
+preemption off. Since the per-processor heap caches, an allocation or free
+of a size class takes its processor's cache lock and reaches the heap's
+only to refill or give back eight objects at a time, so the heap lock is
+taken an eighth as often from a busy processor and its waits are shorter.
+Nothing here changes how a spin lock is waited for; F-95 stays open.
+
 ### F-27 — no independence
 **Blocking** for formal certification at any level. No independent verifier,
 validator or assessor. EN 50716 at SIL 2 is permissive — roles may be combined
@@ -3437,7 +3445,10 @@ classifies in no ring and does not allowlist -- 25 in all (`ferrix-acpi`,
 `ferrix-kmem`, `ferrix-linux-abi`, `ferrix-native-abi`, `ferrix-objects`,
 `ferrix-paging`, `ferrix-pci`, `ferrix-qr`, `ferrix-sched`, `ferrix-vdso`,
 `ferrix-vfs`, `ferrix-virtio`, `ferrix-vma`), the heap and frame
-allocators and the fair scheduler's logic among them. Their code runs in the
+allocators and the fair scheduler's logic among them. `ferrix-heap` holds the
+per-processor heap cache too since 2026-10-30 (`CpuCache`,
+docs/HEAP-CACHES.md), safe Rust and run under Miri; which ring it belongs
+in is the customer's decision. Their code runs in the
 item, and none of the item-scoped gates -- unsafe, panic, complexity,
 fallible allocation, traceability, coverage -- reads it. Two of them break
 the core ring's own rule that nothing in it depends on a filesystem,

@@ -186,15 +186,21 @@ fn enter(large: Option<Layout>) -> Result<(), AllocError> {
     // it allocates through the global allocator, which is the only other
     // place that reaches the slot.
     let here = unsafe { &mut *cell.get() };
+    // A refusal drains the processors' heap caches and asks again before it
+    // fails the section (L.mm.95).
     if !here.full {
-        with_heap(|heap| here.reserve.fill(heap, &mut KernelPages, RESERVE_DEPTH))
-            .map_err(|_| AllocError)?;
+        super::heap_or_drain(|| {
+            with_heap(|heap| here.reserve.fill(heap, &mut KernelPages, RESERVE_DEPTH)).ok()
+        })
+        .ok_or(AllocError)?;
         here.full = true;
     }
     if let Some(layout) = large {
         let request = Request::new(layout.size(), layout.align());
-        with_heap(|heap| here.reserve.hold_large(heap, &mut KernelPages, request))
-            .map_err(|_| AllocError)?;
+        super::heap_or_drain(|| {
+            with_heap(|heap| here.reserve.hold_large(heap, &mut KernelPages, request)).ok()
+        })
+        .ok_or(AllocError)?;
     }
     here.sections = here.sections.saturating_add(1);
     Ok(())
@@ -276,6 +282,39 @@ fn this_cpu_tag() -> Option<u64> {
 pub fn refuse_reserve_fills(on: bool) {
     let tag = if on { this_cpu_tag().unwrap_or(0) } else { 0 };
     REFUSE_FILL.store(tag, Ordering::Release);
+}
+
+/// Take one object of `request`'s class out of this processor's reserve,
+/// leaving it not full, so the next section must fill it again: for the
+/// check that a fill the heap refuses drains the heap caches
+/// (`mm/check.rs`). Outside any section only, with preemption off.
+pub(super) fn take_from_reserve(request: Request) -> Option<u64> {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let object = slot().and_then(|cell| {
+        // SAFETY: (SHARED) as in `enter`, with interrupts masked just above.
+        let here = unsafe { &mut *cell.get() };
+        if here.sections != 0 {
+            return None;
+        }
+        let object = here.reserve.take(&KernelPages, request)?;
+        here.full = false;
+        Some(object)
+    });
+    <arch::Irq as IrqControl>::restore(saved);
+    object
+}
+
+/// Whether this processor's reserve is full and holds no large block,
+/// outside any section: for the same check.
+pub(super) fn full_here() -> bool {
+    let saved = <arch::Irq as IrqControl>::disable();
+    let full = slot().is_some_and(|cell| {
+        // SAFETY: (SHARED) as in `enter`, with interrupts masked just above.
+        let here = unsafe { &*cell.get() };
+        here.sections == 0 && here.full && !here.reserve.holds_large()
+    });
+    <arch::Irq as IrqControl>::restore(saved);
+    full
 }
 
 /// Allocations served from a reserve, and sections refused, since boot.

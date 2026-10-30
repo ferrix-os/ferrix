@@ -27,6 +27,7 @@ Causes are listed most likely first.
 | [FX-0007](#fx-0007) | memory ran out while the kernel was coming up |
 | [FX-0008](#fx-0008) | an allocation that cannot report failure found the heap empty |
 | [FX-0011](#fx-0011) | the address space ids ran out |
+| [FX-0012](#fx-0012) | the heap caches were drained with a cache lock held |
 | [FX-0101](#fx-0101) | the loader's hand-off is not what the kernel needs |
 | [FX-0201](#fx-0201) | the frame allocator could not be built |
 | [FX-0202](#fx-0202) | the kernel address arena could not be created |
@@ -341,6 +342,21 @@ the kernel stops rather than wrap.
    counter overwritten.
 
 See: src/kernel/src/user/space.rs AddressSpace::assemble; docs/PCID.md.
+
+<a id="fx-0012"></a>
+
+## FX-0012 — the heap caches were drained with a cache lock held
+
+Each processor keeps free heap objects of every size class in a cache of its own
+behind its own lock (`docs/HEAP-CACHES.md`). A refusal drains every cache back
+into the heap, taking each cache lock in turn, and must start with none held:
+this processor's would be taken a second time and never come free. The drain
+looks before it starts and stops the machine instead.
+
+1. A path that holds this processor's cache lock -- a refill, an overflow --
+   reached a refusal's drain without first letting the lock go.
+
+See: docs/HEAP-CACHES.md; src/kernel/src/mm.rs.
 
 <a id="fx-0101"></a>
 

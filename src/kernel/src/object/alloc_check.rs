@@ -110,6 +110,7 @@ pub struct Report {
 pub fn run() -> Result<Report, &'static str> {
     let drawn = check_a_section_completes_on_the_reserve()?;
     mm::check::check_a_large_block_goes_back_with_the_section()?;
+    mm::check::check_heap_caches()?;
     let drawn = drawn.saturating_add(check_a_library_insert_runs_in_a_section()?);
     let mut report = check_the_native_calls_survive()?;
     report.drawn = drawn;

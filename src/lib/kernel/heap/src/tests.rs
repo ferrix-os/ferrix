@@ -744,3 +744,89 @@ fn a_misaligned_request_is_not_served_from_the_reserve() {
     reserve.fill(&mut heap, &mut pages, 1).unwrap();
     assert_eq!(reserve.take(&pages, Request::new(16, 3)), None);
 }
+
+/// A cache hands its objects back last in, first out, and holds no more than
+/// its depth: the object it had no room for stays the caller's.
+#[test]
+fn a_cache_keeps_its_depth_and_gives_back_the_last_kept() {
+    let mut cache = CpuCache::new();
+    assert_eq!(cache.take(3), None);
+    for n in 0..CACHE_DEPTH as u64 {
+        assert!(cache.keep(3, 0x1000 + n * 64));
+    }
+    assert!(!cache.keep(3, 0x9000), "a full class holds no more");
+    assert_eq!(cache.held(3), CACHE_DEPTH);
+    assert_eq!(cache.held_bytes(), CACHE_DEPTH * CLASS_SIZES[3]);
+    assert_eq!(cache.take(3), Some(0x1000 + (CACHE_DEPTH as u64 - 1) * 64));
+    assert_eq!(cache.held(2), 0);
+    assert!(!cache.keep(CLASSES, 0x1000), "no class past the last");
+}
+
+/// A refill takes REFILL objects from the heap in one go, keeps all but the
+/// one it returns; a full cache's overflow gives REFILL and the freed one
+/// back; a drain gives back everything, and the heap is where it began.
+#[test]
+fn a_refill_an_overflow_and_a_drain_move_whole_batches() {
+    let mut pages = Pages::with_budget(64);
+    let mut heap = Heap::new();
+    let mut cache = CpuCache::new();
+    let class = 4;
+    let size = CLASS_SIZES[class];
+
+    let first = cache.refill(&mut heap, &mut pages, class).unwrap();
+    assert_eq!(heap.allocated_bytes(), REFILL * size);
+    assert_eq!(cache.held(class), REFILL - 1);
+    let mut out = Vec::from([first]);
+    while let Some(object) = cache.take(class) {
+        out.push(object);
+    }
+    assert_eq!(out.len(), REFILL);
+
+    // Fill the class to its depth, then free one more: the overflow.
+    for _ in 0..CACHE_DEPTH {
+        let more = cache.refill(&mut heap, &mut pages, class).unwrap();
+        out.push(more);
+        while let Some(object) = cache.take(class) {
+            out.push(object);
+        }
+    }
+    for &object in out.iter().take(CACHE_DEPTH) {
+        assert!(cache.keep(class, object));
+    }
+    let allocated = heap.allocated_bytes();
+    let spare = out[CACHE_DEPTH];
+    cache.overflow(&mut heap, &mut pages, class, spare);
+    assert_eq!(cache.held(class), CACHE_DEPTH - REFILL);
+    assert_eq!(heap.allocated_bytes(), allocated - (REFILL + 1) * size);
+
+    let request = Request::new(size, size);
+    for &object in out.iter().skip(CACHE_DEPTH + 1) {
+        heap.deallocate(&mut pages, object, request);
+    }
+    assert_eq!(cache.drain(&mut heap, &mut pages), CACHE_DEPTH - REFILL);
+    assert_eq!(cache.held_bytes(), 0);
+    assert_eq!(heap.allocated_bytes(), 0);
+}
+
+/// A refill the heap can serve only part of still hands out an object; one
+/// it cannot serve at all is the heap's refusal, and holds nothing.
+#[test]
+fn a_partial_refill_serves_and_an_empty_heap_refuses() {
+    // One page of the 2 KiB class holds two objects.
+    let mut pages = Pages::with_budget(1);
+    let mut heap = Heap::new();
+    let mut cache = CpuCache::new();
+    let class = CLASSES - 1;
+    assert!(cache.refill(&mut heap, &mut pages, class).is_ok());
+    assert_eq!(
+        cache.held(class),
+        1,
+        "the page's second object, and no more"
+    );
+    let _ = cache.take(class);
+    assert_eq!(
+        cache.refill(&mut heap, &mut pages, class),
+        Err(HeapError::OutOfMemory)
+    );
+    assert_eq!(cache.held(class), 0);
+}

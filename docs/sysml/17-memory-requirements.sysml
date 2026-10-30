@@ -465,6 +465,78 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("mm::retire_frame");
         }
+        // docs/HEAP-CACHES.md: each processor's cache of free heap objects in
+        // front of the heap's lock (the consultant's OK IF 1-10, ledger 4914).
+        requirement <'L.mm.93'> anAllocationIsServedByItsProcessorsCache : ItemLowLevel {
+            attribute :>> statement = "An allocation of a size class shall take an
+                object its processor's cache holds without the heap's lock, and an
+                empty cache shall refill REFILL objects of the class under one hold of
+                it.";
+            attribute :>> criterion = "On one processor with its 2 KiB cache drained,
+                the first allocation raises the heap's count by exactly REFILL objects
+                and the next REFILL - 1 do not move it.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::allocate_through_caches", "mm::with_cache");
+        }
+        requirement <'L.mm.94'> aFreeGoesToItsProcessorsCache : ItemLowLevel {
+            attribute :>> statement = "A free of a size class shall go to its
+                processor's cache while the cache has room; a full cache shall give
+                back REFILL of its objects and the freed one under one hold of the
+                heap's lock.";
+            attribute :>> criterion = "REFILL frees into an empty 2 KiB cache leave
+                the heap's count unchanged and the cache holding REFILL; with the
+                cache full, one more free lowers the count by exactly REFILL + 1
+                objects and leaves CACHE_DEPTH - REFILL held.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::KernelAllocator::dealloc";
+        }
+        requirement <'L.mm.95'> aRefusalDrainsTheCachesFirst : ItemLowLevel {
+            attribute :>> statement = "Every refusal of the heap -- a refill, a large
+                request, a reserve's fill -- shall drain every processor's cache and
+                try once more before it refuses; a reserved section then draws on its
+                reserve as before.";
+            attribute :>> criterion = "With every free frame held and this
+                processor's cache holding 2 KiB objects made one after another, whole
+                pages of them, an allocation of one page is served, and the cached
+                bytes have fallen; so is a reserved section whose fill needs one 2 KiB
+                object, every free one of that class taken from the heap, and one
+                that holds a page, each with the cached bytes fallen and the reserve
+                full after it.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_drain", "mm::reserve::enter");
+        }
+        requirement <'L.mm.96'> theHeapCountLeavesTheCachesOut : ItemLowLevel {
+            attribute :>> statement = "heap_allocated() and the held-memory window's
+                heap bytes shall be the heap's allocated bytes less the bytes the
+                processors' caches hold.";
+            attribute :>> criterion = "With a 2 KiB cache full, heap_allocated() is
+                the heap's own count less the cached bytes, and the cached bytes are
+                at least CACHE_DEPTH objects.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::heap_allocated";
+        }
+        requirement <'L.mm.97'> theDrainEmptiesEveryCache : ItemLowLevel {
+            attribute :>> statement = "The drain shall give every processor's cached
+                objects back to the heap, taking one cache lock at a time, and shall
+                stop the machine (FX-0012) when entered with this processor's cache
+                lock held.";
+            attribute :>> criterion = "After a drain this processor's cache holds
+                nothing and the heap's count is where it was before the objects were
+                cached; every processor allocating, freeing across processors and
+                draining at once finishes within 20 s with no allocation refused, every
+                object they made freed and the caches empty after a drain.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = "mm::drain_caches";
+        }
+        requirement <'L.mm.98'> anInjectedRefusalIsNotRetried : ItemLowLevel {
+            attribute :>> statement = "A refusal the failure injection made shall be
+                answered without a drain or a retry.";
+            attribute :>> criterion = "With warm caches, an injection refusing the
+                next frame makes the next allocation of one page return null, and the
+                injection counts exactly one failure.";
+            attribute :>> parent = "H.MEM.11";
+            attribute :>> unit = ("mm::heap_or_drain", "fallible::injected_failures");
+        }
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
             attribute :>> statement = "init shall set the watermark once, to the
                 frames the allocator manages divided by 128, and no fewer than 256

@@ -168,6 +168,9 @@ fn sweep(
     report: &mut Report,
 ) -> Result<(), &'static str> {
     for nth in 1..=MOST_RUNS {
+        // Every run from the same heap, whatever the processors' caches held
+        // after the last (docs/HEAP-CACHES.md, condition 2).
+        let _ = mm::drain_caches();
         fallible::inject_once(task, nth, true);
         let outcome = scenario();
         let failed = fallible::stop_injecting() > 0;

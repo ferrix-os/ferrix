@@ -50,13 +50,15 @@
 
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::{BootView, MemKind, MemRegion, PAGE_SIZE, direct_map_runs};
 use ferrix_frame::{Frame, Frames, PageEntry};
-use ferrix_heap::{Backing, Heap, Request};
+use ferrix_heap::{Backing, CpuCache, Heap, Request};
 use ferrix_paging::coherence::{Clean, Unpublished, Walked};
 use ferrix_paging::{Encoding, MapFlags, Mapper, PhysAddr, PhysMem, Released, VirtAddr};
+use ferrix_sched::MAX_CPUS;
+use ferrix_sync::IrqControl;
 use ferrix_sync::IrqSpinLock;
 
 use crate::fallible;
@@ -648,8 +650,7 @@ static RETIRED_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// retiring 256 frames (`L.mm.92`).
 static RETIRED_ROOM: AtomicUsize = AtomicUsize::new(RETIRED_CAPACITY);
 /// Whether [`retire_frame`] has said that the set is full.
-static RETIRED_FULL_SAID: core::sync::atomic::AtomicBool =
-    core::sync::atomic::AtomicBool::new(false);
+static RETIRED_FULL_SAID: AtomicBool = AtomicBool::new(false);
 
 /// What [`retire_frame`] did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -838,9 +839,10 @@ pub fn managed_frames() -> u64 {
     with_frames(|frames| frames.managed_frames()).unwrap_or(0)
 }
 
-/// Bytes currently out on the kernel heap.
+/// Bytes currently out on the kernel heap to its callers: the heap's
+/// allocated bytes less what the processors' caches hold (L.mm.96).
 pub(crate) fn heap_allocated() -> usize {
-    with_heap(|heap| heap.allocated_bytes())
+    with_heap(|heap| heap.allocated_bytes()).saturating_sub(CACHED.load(Ordering::Relaxed))
 }
 
 /// Pages the heap has out as large blocks: those too big for a size class.
@@ -915,9 +917,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
         {
             return address as *mut u8;
         }
-        let address = with_heap(|heap| heap.allocate(&mut KernelPages, request).ok())
-            // Refused: inside a reserved section, the reserve serves it
-            // instead (`mm/reserve.rs`, finding F-23).
+        let address = heap_or_drain(|| allocate_through_caches(request))
+            // Refused even after the drain: inside a reserved section, the
+            // reserve serves it instead (`mm/reserve.rs`, finding F-23).
             .or_else(|| reserve::draw(request));
         // A null return is how `GlobalAlloc` reports failure. A fallible
         // caller -- `try_reserve`, `ferrix_fallible` -- turns it into an
@@ -934,8 +936,161 @@ unsafe impl GlobalAlloc for KernelAllocator {
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         let request = Request::new(layout.size(), layout.align());
-        with_heap(|heap| heap.deallocate(&mut KernelPages, pointer as u64, request));
+        let address = pointer as u64;
+        let freed = Heap::class_of(request).and_then(|class| {
+            with_cache(|cache| {
+                if !cache.keep(class, address) {
+                    // Full: REFILL of its objects and this one go back under one
+                    // hold of the heap (L.mm.94).
+                    let before = cache.held_bytes();
+                    with_heap(|heap| cache.overflow(heap, &mut KernelPages, class, address));
+                    let _ = CACHED
+                        .fetch_sub(before.saturating_sub(cache.held_bytes()), Ordering::Relaxed);
+                    return;
+                }
+                let _ = CACHED.fetch_add(class_bytes(class), Ordering::Relaxed);
+            })
+        });
+        if freed.is_none() {
+            with_heap(|heap| heap.deallocate(&mut KernelPages, address, request));
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-processor heap caches (docs/HEAP-CACHES.md)
+// ---------------------------------------------------------------------------
+
+/// Each processor's cache of free heap objects, behind a lock of its own:
+/// taken by its processor for every allocation and free of a size class, and
+/// by [`drain_caches`] from any.
+static CACHES: [IrqSpinLock<CpuCache, crate::arch::Irq>; MAX_CPUS] =
+    [const { IrqSpinLock::new(CpuCache::new()) }; MAX_CPUS];
+
+/// Whether each processor holds its cache lock: what [`drain_caches`] stops
+/// on, since it takes every cache lock (L.mm.97).
+static HOLDING: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+
+/// Bytes the caches hold: the heap counts them allocated, and no caller holds
+/// them. Changed under the lock of the cache it is about.
+static CACHED: AtomicUsize = AtomicUsize::new(0);
+
+/// Run `body` on this processor's cache, under its lock, with interrupts
+/// masked before the processor's number is read so the task cannot move
+/// between the read and the lock. `None` before the processor's own register
+/// is installed: the caller goes to the heap.
+fn with_cache<T>(body: impl FnOnce(&mut CpuCache) -> T) -> Option<T> {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let cpu = crate::smp::this_cpu().map(|cpu| cpu.logical);
+    let done = cpu
+        .and_then(|cpu| Some((cpu, CACHES.get(cpu)?)))
+        .map(|(cpu, lock)| {
+            let mut cache = lock.lock();
+            if let Some(flag) = HOLDING.get(cpu) {
+                flag.store(true, Ordering::Relaxed);
+            }
+            let done = body(&mut cache);
+            if let Some(flag) = HOLDING.get(cpu) {
+                flag.store(false, Ordering::Relaxed);
+            }
+            done
+        });
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    done
+}
+
+/// An allocation of `request` from this processor's cache, refilled from the
+/// heap when empty (L.mm.93); a request no class serves, or one made before
+/// the caches are reachable, from the heap.
+fn allocate_through_caches(request: Request) -> Option<u64> {
+    let class = Heap::class_of(request).filter(|_| request.align.is_power_of_two());
+    let cached = class.and_then(|class| {
+        with_cache(|cache| {
+            if let Some(object) = cache.take(class) {
+                let _ = CACHED.fetch_sub(class_bytes(class), Ordering::Relaxed);
+                return Some(object);
+            }
+            let before = cache.held_bytes();
+            let object = with_heap(|heap| cache.refill(heap, &mut KernelPages, class).ok());
+            let _ = CACHED.fetch_add(cache.held_bytes().saturating_sub(before), Ordering::Relaxed);
+            object
+        })
+    });
+    match cached {
+        Some(object) => object,
+        None => with_heap(|heap| heap.allocate(&mut KernelPages, request).ok()),
+    }
+}
+
+/// The size of a class's objects; zero for no class, which no caller asks.
+fn class_bytes(class: usize) -> usize {
+    ferrix_heap::CLASS_SIZES.get(class).copied().unwrap_or(0)
+}
+
+/// `attempt`, and if the heap refused it, every cache drained and `attempt`
+/// once more (L.mm.95) -- unless the refusal was the failure injection's,
+/// which is answered as it stands (L.mm.98). Called with no cache lock and
+/// no heap lock held, as the drain must be; `reserve::enter` calls it with
+/// interrupts masked as well, so a section's drain runs masked over every
+/// cache in turn.
+pub(crate) fn heap_or_drain<T>(mut attempt: impl FnMut() -> Option<T>) -> Option<T> {
+    let injected = fallible::injected_failures();
+    attempt().or_else(|| {
+        // The injection's count is global: one armed on another processor
+        // in the same window also keeps this refusal from its retry. Only
+        // checks arm it, and a refusal not retried fails closed.
+        if fallible::injected_failures() != injected {
+            return None;
+        }
+        let _ = drain_caches();
+        attempt()
+    })
+}
+
+/// The heap's own count of bytes out, the caches' objects included: what
+/// the cache checks hold the caches' moves to.
+pub(crate) fn heap_raw_allocated() -> usize {
+    with_heap(|heap| heap.allocated_bytes())
+}
+
+/// Objects of `class` this processor's cache holds, or `None` before the
+/// caches are reachable.
+pub(crate) fn cached_here(class: usize) -> Option<usize> {
+    with_cache(|cache| cache.held(class))
+}
+
+/// Bytes the caches hold, as [`heap_allocated`] takes them off.
+pub(crate) fn cached_bytes() -> usize {
+    CACHED.load(Ordering::Relaxed)
+}
+
+// CHECKS-ONLY: user/alloc_check.rs
+/// Give everything every processor's cache holds back to the heap, one
+/// cache lock at a time with the heap's under it (L.mm.97). Entered with no
+/// cache lock held on this processor: one held here would be taken again,
+/// so that stops the machine (FX-0012). Returns the objects given back.
+#[doc(hidden)]
+pub fn drain_caches() -> usize {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let here = crate::smp::this_cpu().map(|cpu| cpu.logical);
+    let held = here
+        .and_then(|cpu| HOLDING.get(cpu))
+        .is_some_and(|flag| flag.load(Ordering::Relaxed));
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    if held {
+        crate::panic::fatal!(
+            crate::panic::catalog::HEAP_DRAIN_UNDER_CACHE_LOCK,
+            "the heap caches were drained with this processor's cache lock held"
+        );
+    }
+    let mut given = 0;
+    for lock in &CACHES {
+        let mut cache = lock.lock();
+        let before = cache.held_bytes();
+        given += with_heap(|heap| cache.drain(heap, &mut KernelPages));
+        let _ = CACHED.fetch_sub(before, Ordering::Relaxed);
+    }
+    given
 }
 
 #[global_allocator]
@@ -1999,7 +2154,10 @@ impl Held {
                 (
                     heap.slab_pages(),
                     heap.large_pages(),
-                    heap.allocated_bytes(),
+                    // What callers hold: the caches' objects are the heap's
+                    // allocated bytes no caller has (L.mm.96).
+                    heap.allocated_bytes()
+                        .saturating_sub(CACHED.load(Ordering::Relaxed)),
                 )
             });
             Held {
