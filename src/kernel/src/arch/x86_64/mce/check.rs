@@ -318,13 +318,16 @@ fn amd_addresses() -> Result<(), &'static str> {
     let usable: &[(u64, bool, decode::BankConfig, bool)] = &[
         (AMD_AR, false, 0, true),
         (AMD_AR & !ADDRV, false, 0, false),
+        // On SMCA, a bank whose bring-up reads failed has no usable address.
+        (AMD_AR, true, 0, false),
         (AMD_AR & !decode::POISON, false, 0, false),
         (AMD_AR, true, read, true),
         (AMD_AR, true, paddrv, false),
         (AMD_AR | decode::PADDRV, true, paddrv, true),
         ((AMD_AR | decode::PADDRV) & !ADDRV, true, paddrv, false),
-        // PADDRV is read only where the bank's CONFIG read succeeded.
-        (AMD_AR, true, decode::BANK_PADDRV, true),
+        // Nor does one with bit 11 but no successful read.
+        (AMD_AR, true, decode::BANK_PADDRV, false),
+        (AMD_AR | decode::PADDRV, true, decode::BANK_PADDRV, false),
     ];
     for &(status, smca, config, want) in usable {
         if decode::usable_address_amd(status, smca, config) != want {
@@ -385,6 +388,8 @@ fn amd_addresses() -> Result<(), &'static str> {
             Some(0x0112_3456_7890_1000),
         ),
         (address, 13 << 24, true, in_status, None),
+        // An SMCA bank whose configuration was not read: no known cut.
+        ((12 << 56) | address, 0, true, 0, None),
     ];
     for &(raw, status, smca, config, want) in cuts {
         if decode::cut_address(raw, status, smca, config) != want {
@@ -469,7 +474,7 @@ fn amd_actions() -> Result<(), &'static str> {
 /// Verifies: `L.x86_64.240`
 /// Verifies: `L.x86_64.241`
 fn smca_values() -> Result<(), &'static str> {
-    for raw in [0, 0x0000_0020_0000_0900, u64::MAX & !decode::CONFIG_MCAX] {
+    for raw in [0, 0x0000_0020_0000_0900, !decode::CONFIG_MCAX] {
         let set = decode::with_mcax(raw);
         if set != raw | decode::CONFIG_MCAX {
             return Err("McaX was not set, or another MCA_CONFIG bit changed");

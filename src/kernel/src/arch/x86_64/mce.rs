@@ -507,9 +507,11 @@ fn smca_bank_up(index: usize, banks: usize) {
         // the SMCA registers, without which uncorrectable errors are fatal
         // (Linux 6.18's `smca_configure`); the value is the one just read
         // with that bit set, so nothing else in the bank's configuration
-        // changes. Refused, the bank keeps its configuration.
+        // changes. Refused, the bank keeps its configuration, and its
+        // address stays unusable: nothing is kept for it (B2).
         if !unsafe { cpu::write_msr_checked(config, decode::with_mcax(raw)) } {
             refused += 1;
+            continue;
         }
         let Some(ipid) = cpu::read_msr_checked(smca_msr(bank, SMCA_IPID)) else {
             refused += 1;

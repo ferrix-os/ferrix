@@ -317,7 +317,8 @@ pub(in crate::arch::x86_64) const fn classify_amd(
 /// An SMCA bank's `MCA_CONFIG` as bring-up kept it: [`BANK_CONFIG_READ`]
 /// and the two bits read from it.
 pub(in crate::arch::x86_64) type BankConfig = u8;
-/// [`BankConfig`]: bring-up's checked read of `MCA_CONFIG` succeeded.
+/// [`BankConfig`]: bring-up's checked reads of `MCA_CONFIG` and `MCA_IPID`
+/// and its `McaX` write all succeeded.
 pub(in crate::arch::x86_64) const BANK_CONFIG_READ: BankConfig = 1 << 0;
 /// [`BankConfig`]: `MCA_CONFIG` bit 8.
 pub(in crate::arch::x86_64) const BANK_LSB_IN_STATUS: BankConfig = 1 << 1;
@@ -351,14 +352,17 @@ const fn paddrv_supported(smca: bool, config: BankConfig) -> bool {
 }
 
 /// Whether an AMD record's address names a frame (`L.x86_64.235`): `ADDRV`
-/// first, always; then `PhysAddrV` where the bank supports it (Linux
-/// 821f5fe4dbcb), else `Poison` (Linux 6.18's `amd_mce_usable_address`).
+/// first, always; on SMCA, only on a bank whose bring-up reads and `McaX`
+/// write succeeded, since its cut and `PhysAddrV`'s meaning are otherwise
+/// unknown (the consultant's B2, ledger 4839); then `PhysAddrV` where the
+/// bank supports it (Linux 821f5fe4dbcb), else `Poison` (Linux 6.18's
+/// `amd_mce_usable_address`).
 pub(in crate::arch::x86_64) const fn usable_address_amd(
     status: u64,
     smca: bool,
     config: BankConfig,
 ) -> bool {
-    if status & ADDRV == 0 {
+    if status & ADDRV == 0 || (smca && config & BANK_CONFIG_READ == 0) {
         return false;
     }
     if paddrv_supported(smca, config) {
@@ -392,6 +396,10 @@ pub(in crate::arch::x86_64) const fn cut_address(
 ) -> Option<u64> {
     if !smca {
         return Some(address & !((1 << PAGE_SHIFT) - 1));
+    }
+    // A bank whose configuration bring-up could not read has no known cut.
+    if config & BANK_CONFIG_READ == 0 {
+        return None;
     }
     let (lsb, top) = if config & BANK_LSB_IN_STATUS != 0 {
         ((status >> 24) & 0x3f, 56)

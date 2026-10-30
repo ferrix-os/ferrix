@@ -2993,8 +2993,9 @@ package FerrixX8664Requirements {
                 and smca_extract_err_addr; PhysAddrV from Linux 821f5fe4dbcb
                 (Zen 6 on). */
             attribute :>> statement = "An AMD record's address shall be usable
-                only with ADDRV and then, on an SMCA bank whose MCA_CONFIG
-                bring-up read with bit 11 set, PhysAddrV (bit 54), otherwise
+                only with ADDRV and, on SMCA, only on a bank whose bring-up
+                reads and McaX write succeeded; then, where that bank's
+                MCA_CONFIG has bit 11 set, PhysAddrV (bit 54), otherwise
                 Poison (bit 43); on SMCA it shall be cut to bits 56:lsb with
                 lsb from MCA_STATUS 29:24 where the bank's MCA_CONFIG bit 8 is
                 set, else bits 55:lsb with lsb from MCA_ADDR 61:56, an lsb above

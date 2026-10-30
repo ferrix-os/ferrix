@@ -210,14 +210,16 @@ CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*)
 # And the machine check's bring-up (L.x86_64.232, docs/MACHINE-CHECK.md
 # §3.1, the consultant's M12): IA32_MCG_CTL and the banks' registers alone,
 # named through MCG_CTL and bank_msr; and on an AMD SMCA part (L.x86_64.240,
-# docs/MACHINE-CHECK-AMD.md §3, the consultant's A6) MCA_CONFIG, named
-# `config` in smca_bank_up, the one function that writes it.
+# docs/MACHINE-CHECK-AMD.md §3, the consultant's A6 and B4) MCA_CONFIG, named
+# `config`, in smca_bank_up alone, the one function that writes it.
 MCE_FILE = "src/kernel/src/arch/x86_64/mce.rs"
 CHECKED_WRITE_ARGUMENT = {
     POWER_FILE: {"VR_CURRENT_CONFIG"},
     CHECK_FILE: {"ABSENT"},
     MCE_FILE: {"MCG_CTL", "bank_msr", "config"},
 }
+# An argument allowed in one function only: (file, argument) -> function.
+CHECKED_WRITE_FUNCTION = {(MCE_FILE, "config"): "smca_bank_up"}
 
 # AMD's SMCA registers (L.x86_64.239-240, the consultant's A6): every
 # smca_msr in mce.rs is inside smca_bank_up -- MCA_CONFIG (4) read and
@@ -258,8 +260,16 @@ def checked_write_problems(root: pathlib.Path) -> list[str]:
     problems = []
     for path in sorted((root / KERNEL).rglob("*.rs")):
         relative = path.relative_to(root).as_posix()
+        function = None
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            named = FUNCTION.match(line)
+            if named:
+                function = named.group(1)
             for match in CHECKED_WRITE_CALL.finditer(line):
+                home = CHECKED_WRITE_FUNCTION.get((relative, match.group(2)))
+                if home is not None and function != home:
+                    problems.append(f"{relative}:{number}: write_msr_checked of {match.group(2)} in {function}, not {home} (L.x86_64.240)")
+                    continue
                 if relative == CPU_FILE:
                     if match.group(1) and not re.search(r"\bfn write_msr_checked\(", line):
                         problems.append(f"{relative}:{number}: write_msr_checked called inside cpu.rs (L.x86_64.192)")
