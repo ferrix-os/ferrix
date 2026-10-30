@@ -1360,3 +1360,9 @@ game read 114 of 121 motions as the mouse's step under the lock, 0 of 114
 without it (the control). From fork ac2485ea a warp sends no XI2 raw motion,
 as in Xorg, so the game reads one raw motion a motion (121 for 121; 243 at
 the old pin), and a motion keeps its stamped time into X's events.
+
+2026-10-30: [GAME-MODE.md](GAME-MODE.md) designs game mode around §5's game
+session: the session service of §5.4, G0 to G5 as its tiers T1 to T3, and the
+2026-10-30 box measurements (Endfield GPU-bound at 720p; freezing, nice
+values and the protections buy no frame there). No question of §10 is
+decided by it.
