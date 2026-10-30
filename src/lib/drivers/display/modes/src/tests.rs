@@ -533,3 +533,64 @@ fn a_change_reaches_exactly_the_screen_pixels_that_read_it() {
         );
     }
 }
+
+#[test]
+fn a_pointer_pixel_is_blended_as_premultiplied_over_the_frame() {
+    use crate::pointer::over;
+    // Opaque covers, clear leaves the frame, and the X byte is zero.
+    assert_eq!(over(0xff10_2030, 0xffaa_bbcc), 0x0010_2030);
+    assert_eq!(over(0x0000_0000, 0xffaa_bbcc), 0x00aa_bbcc);
+    // Half black over white is half grey; half white over black is the
+    // image's own channels.
+    assert_eq!(over(0x8000_0000, 0x00ff_ffff), 0x007f_7f7f);
+    assert_eq!(over(0x8080_8080, 0x0000_0000), 0x0080_8080);
+    // Every alpha over every value of one channel, against the exact sum.
+    for alpha in 0..=255_u32 {
+        for below in (0..=255_u32).step_by(5) {
+            let top = alpha / 2;
+            let want = top + (below * (255 - alpha) + 127) / 255;
+            let got = over(alpha << 24 | top, below) & 0xff;
+            assert!(got.abs_diff(want) <= 1, "{alpha} {below}: {got} {want}");
+        }
+    }
+    // A channel brighter than its alpha is held at full.
+    assert_eq!(over(0x10ff_ffff, 0x00ff_ffff), 0x00ff_ffff);
+}
+
+#[test]
+fn a_pointer_is_clipped_to_the_mode_and_found_on_a_scaled_plane() {
+    use crate::pointer::{bounds, image_at, on_plane, shown_at};
+    let rect = |x, y, width, height| Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+    assert_eq!(bounds((10, 20), (1920, 1080)), Some(rect(10, 20, 64, 64)));
+    assert_eq!(bounds((-10, -60), (1920, 1080)), Some(rect(0, 0, 54, 4)));
+    assert_eq!(
+        bounds((1900, 1070), (1920, 1080)),
+        Some(rect(1900, 1070, 20, 10))
+    );
+    assert_eq!(bounds((-64, 0), (1920, 1080)), None);
+    assert_eq!(bounds((1920, 0), (1920, 1080)), None);
+    // At the plane's own mode the plane's pixels are the mode's.
+    let plane = (1920, 1080);
+    assert_eq!(
+        on_plane(None, rect(1900, 0, 64, 64), plane),
+        Some(rect(1900, 0, 20, 64))
+    );
+    assert_eq!(shown_at(None, 7, 9), (7, 9));
+    // 960x540 on 1920x1080: each mode pixel is two plane pixels a side.
+    let scaler = Scaler::new((960, 540), plane).expect("a scaler");
+    let area = on_plane(Some(&scaler), rect(100, 50, 64, 64), plane).expect("on the plane");
+    assert_eq!(area, rect(200, 100, 128, 128));
+    assert_eq!(shown_at(Some(&scaler), 201, 101), (100, 50));
+    assert_eq!(shown_at(Some(&scaler), 327, 227), (163, 113));
+    // The image's pixel under a mode pixel, and none past its edges.
+    assert_eq!(image_at((100, 50), (64, 64), 100, 50), Some((0, 0)));
+    assert_eq!(image_at((100, 50), (64, 64), 163, 113), Some((63, 63)));
+    assert_eq!(image_at((100, 50), (64, 64), 164, 60), None);
+    assert_eq!(image_at((100, 50), (64, 64), 99, 60), None);
+    assert_eq!(image_at((-5, 0), (64, 64), 0, 0), Some((5, 0)));
+}

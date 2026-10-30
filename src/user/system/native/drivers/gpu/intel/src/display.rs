@@ -27,6 +27,12 @@
 //! frame's only one. Every copy ends
 //! with the device barrier that drains the write-combining buffers.
 //!
+//! HELLO says the card has a cursor, though no cursor plane is programmed:
+//! CURSOR and MOVE place a pointer the card blends into the plane itself
+//! after each copy ([`Display::repaint`]), so that a compositor leaves the
+//! pointer out of its frames and shows a game's buffer directly with a
+//! pointer over it (`docs/DISPLAY.md` §8.2).
+//!
 //! Its modes (displayctl v11, `docs/DISPLAY.md` §9.4): the plane's own,
 //! preferred, and every smaller standard size, shown scaled -- the pipe is
 //! the firmware's and nothing here retimes it, so a smaller mode is the
@@ -128,6 +134,22 @@ struct Output {
     /// second surface, mapped cached, which the display engine reads past
     /// them. The lent window is write-combining and needs only the barrier.
     flush: bool,
+    /// The cursor CURSOR and MOVE gave it, which the card blends in itself.
+    pointer: Pointer,
+}
+
+/// A scanout's cursor: a copying card has no plane for it, so the pointer
+/// is put into the plane after each copy ([`Display::repaint`],
+/// `ferrix_display_modes::pointer`).
+#[derive(Clone, Copy)]
+struct Pointer {
+    /// The image's buffer, 0 for none.
+    image: u32,
+    /// Its top-left corner, in the mode's pixels.
+    at: (i32, i32),
+    /// Where it is in the plane now, in the mode's pixels: what is copied
+    /// from the buffer shown again before it is drawn anywhere else.
+    drawn: Option<Rect>,
 }
 
 impl Output {
@@ -142,6 +164,11 @@ impl Output {
             owed_whole: false,
             scaler: None,
             flush: false,
+            pointer: Pointer {
+                image: 0,
+                at: (0, 0),
+                drawn: None,
+            },
         }
     }
 
@@ -167,6 +194,12 @@ impl Output {
 
     const fn size(&self) -> (u32, u32) {
         (self.width as u32, self.height as u32)
+    }
+
+    /// The mode's size: the plane's, or the scaled mode's.
+    fn mode(&self) -> (u32, u32) {
+        self.scaler
+            .map_or_else(|| self.size(), |scaler| scaler.source)
     }
 }
 
@@ -677,6 +710,8 @@ impl Display<'_> {
         let now = now_ns();
         if how == Completion::Ok {
             self.tally.blitted(now.saturating_sub(inflight.started));
+            // The blit wrote over the pointer, or moved under it.
+            self.repaint(0);
         } else {
             ferrix_rt::warn!(
                 "intel: card0: a blit ended {how:?}; frames are copied by the processor from now on"
@@ -960,15 +995,19 @@ impl Display<'_> {
                         .map_err(|_| "a message that does not decode")?;
                     // Whatever comes next is acted on after the FLUSH that
                     // waits for the blank, as it was sent after it: that
-                    // one is copied now.
-                    if self.pending.is_some() {
+                    // one is copied now. A MOVE is not worth a torn frame:
+                    // the pointer is drawn where it is once that one lands.
+                    if self.pending.is_some() && !matches!(message, Message::Move { .. }) {
                         self.finish_pending(true, gpu)?;
                     }
                     // What changes the plane or lets a buffer go waits for
                     // the blit that may write or read it.
                     if matches!(
                         message,
-                        Message::Stop | Message::Detach { .. } | Message::SetMode { .. }
+                        Message::Stop
+                            | Message::Detach { .. }
+                            | Message::SetMode { .. }
+                            | Message::Cursor { .. }
                     ) {
                         self.settle_blit(gpu, true)?;
                     }
@@ -1061,6 +1100,8 @@ impl Display<'_> {
                 }
                 output.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
                 clear(output);
+                // Cleared with the rest, and drawn again at the next copy.
+                output.pointer.drawn = None;
                 ferrix_rt::info!(
                     "intel: card0: scanout {scanout} mode {}x{}{}",
                     size.0,
@@ -1073,7 +1114,117 @@ impl Display<'_> {
                 );
                 Ok(())
             }
-            _ => Err("a message a copying card without a cursor takes no part in"),
+            Message::Cursor {
+                scanout,
+                buffer,
+                sequence,
+                x,
+                y,
+                ..
+            } => self.cursor(scanout as usize, buffer, sequence, (x, y)),
+            Message::Move { scanout, x, y } => {
+                self.move_pointer(scanout as usize, (x, y));
+                Ok(())
+            }
+            _ => Err("a message a copying card takes no part in"),
+        }
+    }
+
+    /// CURSOR: `buffer`'s image, or none, as `scanout`'s pointer with its
+    /// corner at `at`, drawn into the plane and answered. The blit that may
+    /// write where it goes has been waited for (`take_messages`).
+    fn cursor(
+        &mut self,
+        scanout: usize,
+        buffer: u32,
+        sequence: u64,
+        at: (i32, i32),
+    ) -> Result<(), &'static str> {
+        let known = buffer == 0 || self.buffer(buffer).is_some();
+        if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+            output.pointer.image = if known { buffer } else { 0 };
+            output.pointer.at = at;
+        }
+        if !self.behind(scanout) {
+            self.repaint(scanout);
+        }
+        self.reply(Message::Flipped {
+            sequence,
+            status: if known { Status::Ok } else { Status::Invalid },
+        })
+    }
+
+    /// MOVE: `scanout`'s pointer drawn at `at` at once, unless the plane
+    /// is behind the buffer shown ([`Display::behind`]): the copy that
+    /// brings it level draws the pointer where it is by then.
+    fn move_pointer(&mut self, scanout: usize, at: (i32, i32)) {
+        let Some(Some(output)) = self.outputs.get_mut(scanout) else {
+            return;
+        };
+        output.pointer.at = at;
+        if !self.behind(scanout) {
+            self.repaint(scanout);
+        }
+    }
+
+    /// Whether `scanout`'s plane does not yet hold the buffer it shows: a
+    /// SCANOUT not yet copied, a FLUSH waiting for the blank, or a blit
+    /// still writing the first plane. What [`Display::repaint`] copies back
+    /// from the buffer would then be part of a frame not yet on the screen.
+    fn behind(&mut self, scanout: usize) -> bool {
+        let Some(Some(output)) = self.outputs.get(scanout) else {
+            return false;
+        };
+        let shown = output.shown.map(|(id, _)| id);
+        let waiting = self
+            .pending
+            .is_some_and(|pending| Some(pending.buffer) == shown);
+        let owed = output.owed_whole;
+        let blitting = scanout == 0
+            && self
+                .blit
+                .made()
+                .is_some_and(|blitter| blitter.inflight.is_some());
+        owed || waiting || blitting
+    }
+
+    /// `scanout`'s pointer put into its plane where it is now: what is
+    /// under its last place copied again from the buffer shown, then the
+    /// image blended over the buffer's pixels at its new one. The plane is
+    /// otherwise the buffer's copy, so the two rectangles are all that a
+    /// pointer moving, or a frame copied over it, has to put right.
+    fn repaint(&mut self, scanout: usize) {
+        let Some(Some(output)) = self.outputs.get(scanout) else {
+            return;
+        };
+        let pointer = output.pointer;
+        let Some((shown_id, shown)) = output.shown else {
+            if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+                output.pointer.drawn = None;
+            }
+            return;
+        };
+        let Some(buffer) = self.buffer(shown_id) else {
+            return;
+        };
+        let image = (pointer.image != 0)
+            .then(|| self.buffer(pointer.image))
+            .flatten();
+        let now =
+            image.and_then(|_| ferrix_display_modes::pointer::bounds(pointer.at, output.mode()));
+        if let Some(old) = pointer.drawn
+            && now != Some(old)
+        {
+            paint(output, &buffer, shown, None, old);
+        }
+        if let (Some(image), Some(rect)) = (image.as_ref(), now) {
+            paint(output, &buffer, shown, Some((image, pointer.at)), rect);
+        }
+        if pointer.drawn.is_some() || now.is_some() {
+            ferrix_rt::device_barrier();
+        }
+        if let Some(Some(output)) = self.outputs.get_mut(scanout) {
+            output.pointer.drawn = now;
         }
     }
 
@@ -1084,13 +1235,18 @@ impl Display<'_> {
             return;
         };
         let evicting = self.evicting();
-        for output in self.outputs.iter_mut().flatten() {
+        let mut copied = [false; SCANOUTS];
+        for (output, copied) in self.outputs.iter_mut().zip(copied.iter_mut()) {
+            let Some(output) = output else {
+                continue;
+            };
             let Some((id, whole)) = output.shown else {
                 continue;
             };
             if id != buffer {
                 continue;
             }
+            *copied = true;
             let changed = if core::mem::take(&mut output.owed_whole) {
                 whole
             } else {
@@ -1102,6 +1258,11 @@ impl Display<'_> {
             self.flushes += 1;
             if self.flushes == 1 {
                 ferrix_rt::info!("intel: card0: the first frame is on the screen");
+            }
+        }
+        for (scanout, copied) in copied.into_iter().enumerate() {
+            if copied {
+                self.repaint(scanout);
             }
         }
     }
@@ -1173,12 +1334,23 @@ impl Display<'_> {
         if let Some(blitter) = self.blit.made() {
             blitter.forget(index, gpu);
         }
+        // A pointer whose image goes is taken out of the plane first.
+        for scanout in 0..SCANOUTS {
+            let Some(Some(output)) = self.outputs.get_mut(scanout) else {
+                continue;
+            };
+            if output.pointer.image == id {
+                output.pointer.image = 0;
+                self.repaint(scanout);
+            }
+        }
         if let Some(kept) = self.vmos.get_mut(index) {
             *kept = None;
         }
         for output in self.outputs.iter_mut().flatten() {
             if output.shown.is_some_and(|(shown, _)| shown == id) {
                 output.shown = None;
+                output.pointer.drawn = None;
             }
         }
         if ferrix_rt::linux::munmap(buffer.base, buffer.length).is_err() {
@@ -1345,6 +1517,77 @@ fn copy(screen: &Output, buffer: &Buffer, changed: Rect, evicting: bool) -> u64 
     evicted
 }
 
+/// `rect` of the mode, as `screen` shows it, written into the plane from
+/// `buffer` -- the buffer shown, `shown` of it on the screen -- with
+/// `image`, the pointer at its corner, blended over it where it reaches.
+/// No image is the buffer's pixels alone: what puts back what the pointer
+/// covered. The caller drains the writes with the device barrier.
+///
+/// The buffer's pixels are read rather than the plane's: the plane is
+/// write-combining memory, which reads uncached, and the buffer holds what
+/// it shows. Its lines there are evicted first, as a copy's are while a GPU
+/// writes it (`evict`): a client's buffer shown directly is a GPU's.
+fn paint(
+    screen: &Output,
+    buffer: &Buffer,
+    shown: Rect,
+    image: Option<(&Buffer, (i32, i32))>,
+    rect: Rect,
+) {
+    use ferrix_display_modes::pointer::{image_at, on_plane, over, shown_at};
+    let scaler = screen.scaler.as_ref();
+    let Some(area) = on_plane(scaler, rect, screen.size()) else {
+        return;
+    };
+    evict(
+        buffer,
+        Rect {
+            x: rect.x.saturating_add(shown.x),
+            y: rect.y.saturating_add(shown.y),
+            ..rect
+        },
+    );
+    let pixel_of = |from: &Buffer, x: usize, y: usize| {
+        let at = y * from.stride + x * PIXEL;
+        (x < from.width && y < from.height && at + PIXEL <= from.length).then(|| {
+            // SAFETY: `at` is a pixel inside the buffer's read-only
+            // mapping, which lives until its DETACH takes it from the
+            // card; bounds-checked just above and four-byte aligned.
+            unsafe { ptr::read_volatile((from.base + at) as *const u32) }
+        })
+    };
+    for y in area.y..area.y + area.height {
+        let line = (y as usize) * screen.pitch;
+        for x in area.x..area.x + area.width {
+            let (mode_x, mode_y) = shown_at(scaler, x, y);
+            let source_x = (mode_x + shown.x) as usize;
+            let source_y = (mode_y + shown.y) as usize;
+            let to = line + (x as usize) * PIXEL;
+            let Some(under) = pixel_of(buffer, source_x, source_y) else {
+                continue;
+            };
+            if to + PIXEL > screen.len {
+                continue;
+            }
+            let pixel = image
+                .and_then(|(image, at)| {
+                    let size = (image.width as u32, image.height as u32);
+                    let (column, row) = image_at(at, size, mode_x, mode_y)?;
+                    pixel_of(image, column as usize, row as usize)
+                })
+                .map_or(under, |top| over(top, under));
+            // SAFETY: `to` is a pixel inside the plane's memory mapped for
+            // this process, bounds-checked just above and four-byte
+            // aligned.
+            unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
+        }
+        screen.written(
+            line + (area.x as usize) * PIXEL,
+            (area.width as usize) * PIXEL,
+        );
+    }
+}
+
 /// Tell the core a scanout's monitor is there or not, as virtio-gpu does
 /// when its host window comes or goes: `MODES` with every scanout as it is
 /// now, and on a plug the scanout's mode list again, which the core counts
@@ -1440,7 +1683,11 @@ fn introduce(
         capsets: 0,
         capset: 0,
         capset_bytes: 0,
-        cursor: false,
+        // No cursor plane is programmed: the card blends the pointer into
+        // the plane after each copy ([`Display::repaint`]), so that a
+        // compositor leaves it out of its frames and can show a client's
+        // buffer directly with a pointer over it.
+        cursor: true,
         timings,
         copies: true,
         connectors,

@@ -502,6 +502,7 @@ when you take P2 work, or before touching an area to see what is owed there
 | tole negotiates `zxdg_decoration_manager_v1` and tells an app whether the compositor draws its title bar, so an app with window buttons of its own (lode-viewer) draws them only where none does. Until then the viewer has none (apps 1cfd054, 2026-10-28: under Yoru it had two rows); under a compositor without server-side bars it has no buttons at all | 19 |
 | Moving wallpapers on nazuna were never looked at since the AV1 change: only two of 17 are `.ivf`, an orphaned `.fxvid` remains, ten `.fxwall` are single frames. Re-run `cargo xtask wallpapers --from <dir>`, check the 64 KB clip, delete the `.fxvid`, boot and look; no gate covers it. 1 point, wants whoever has nazuna's display [more](backlog/desktop.md#dg-014) | 19 |
 | A cpuset controller, so game mode keeps other processes *off* the game's processors; `sched_setaffinity` only keeps a task on its own. Core ring, own design review [more](backlog/desktop.md#dg-015) | 24 |
+| Endfield dies loading under direct scanout: on the N150 with card0's pointer (2026-10-31), 2 of 2 loads into the world while scanned out died with "SuspendThread loop failed", 0 of 1 composited did; the box runs `HYPRIX_DIRECT_SCANOUT=0` until the cause is found [more](backlog/desktop.md#dg-016) | open |
 
 ### P3 — hardware variants and later stages
 

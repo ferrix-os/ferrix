@@ -20,7 +20,9 @@
 //!   the one mode its display runs.
 //!
 //! [`scale`] is the arithmetic of showing a buffer smaller than the screen,
-//! scaled, for a driver that cannot retime its display.
+//! scaled, for a driver that cannot retime its display, and
+//! [`pointer`](mod@pointer) that of a cursor such a driver blends into its
+//! plane itself.
 //!
 //! Drivers' alone: the kernel never parses an EDID or makes a timing for a
 //! mode list (the customer, 2026-10-22: "keep the kernel slim"); it carries
@@ -32,6 +34,7 @@
 #![forbid(unsafe_code)]
 
 mod edid_tables;
+pub mod pointer;
 pub mod scale;
 
 #[cfg(test)]

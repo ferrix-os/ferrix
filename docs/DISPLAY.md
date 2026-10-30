@@ -1498,12 +1498,33 @@ buffer (`show`), so before this every page flip and every `SETCRTC` was put
 on the screen twice. Each keeps 16 buffers, room for a compositor's two and
 a client's swap chain.
 
+The Intel card also says it has a cursor (2026-10-31), though nothing of
+the display engine's cursor plane is programmed: a pointer the compositor
+drew into its frame would keep every frame with a pointer shown from
+being a client's buffer shown directly. It blends the pointer into the
+plane itself after each copy, the processor's or the blitter's
+(`display.rs` `repaint`, the arithmetic in
+`ferrix_display_modes::pointer`): what is under the image's last place is
+copied again from the buffer shown, then the 64 × 64 premultiplied image
+is blended over the buffer's pixels at its new place, scaled with the
+picture in a scaled mode. CURSOR waits for the blit in flight and is
+answered once the image is in the plane; a MOVE is drawn at once, or by
+the end of the blit in flight. The plane's pixels are never read, being
+write-combining. A hidden pointer, which is what a game shows, costs
+nothing; a shown one two rectangles of at most 4,096 pixels a frame.
+Between a copy's end and the blend the plane briefly shows the frame
+without the pointer. No protocol change: CURSOR and MOVE are the
+messages virtio-gpu and the LTDC already take, and the display core
+gives the card a cursor plane from HELLO's `cursor` alone. efifb has no
+cursor still.
+
 **hyprix.** In software, a frame that is one window alone
 (`compositor_render::alone`: fullscreen, opaque, on top, nothing over it,
 no dimming), with no counter, drag icon, night-light, turn or scale, is
 shown by handing the card the window's own buffer
 (`frame::scanned_out`) when, further, no pointer is drawn into the frame
-(card0 over a lit plane has no cursor plane) and the buffer is a client's
+(on card0 the pointer is the card's to blend in, above; on efifb it is
+drawn into the frame) and the buffer is a client's
 dmabuf of the screen's size, uncropped, from its first byte. The backend
 imports it (`PRIME_FD_TO_HANDLE`, one `ADDFB2` a buffer, kept for up to four
 buffers, a swap chain, and let go of after 120 frames composited), and the
