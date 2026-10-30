@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b17ec770d07546ff2af828f027f1ec16f1a77f1554345e66b0d4b41dad19dfd9",
+  "digest": "6d44ee6a515d65555ea582110095883c87fbe454ae3ce5f68aeaa8d6fcfd592f",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -89313,10 +89313,10 @@
                   "qualifiedName": "FerrixBtrfsRequirements::Full::aChunkMadeMidWriteAbortsNothing",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"ferrix_btrfs_write::volume::WriteVolume::ensure_space\", \"ferrix_btrfs_write::volume::WriteVolume::guarded_with\", \"ferrix_btrfs_write::volume::WriteVolume::grow\")",
+                  "value": "(\"ferrix_btrfs_write::volume::WriteVolume::ensure_space\", \"ferrix_btrfs_write::volume::WriteVolume::guarded_with\", \"ferrix_btrfs_write::volume::WriteVolume::grow\", \"ferrix_btrfs_write::space::Space::has_free\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1093
+                    "line": 1094
                   }
                 }
               ]
@@ -89329,7 +89329,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1095
+                "line": 1096
               },
               "children": [
                 {
@@ -89340,7 +89340,7 @@
                   "value": "\"Through a mount, a write to a full volume shall be refused with ENOSPC at exactly the room statfs offered, keeping what was written.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1098
+                    "line": 1099
                   }
                 },
                 {
@@ -89351,7 +89351,7 @@
                   "value": "\"Through ferrix-btrfs-vfs, writes stop with ENOSPC at the byte statfs offered, the file holds every byte written, and after an unlink a 1 MiB file is written and read back after remounting.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1101
+                    "line": 1102
                   }
                 },
                 {
@@ -89362,7 +89362,7 @@
                   "value": "\"H.STORE.6\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1102
+                    "line": 1103
                   }
                 },
                 {
@@ -89373,7 +89373,7 @@
                   "value": "(\"ferrix_btrfs_write::volume::WriteVolume::admit\", \"ferrix_btrfs_write::grow::WriteVolume::data_room\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1104
+                    "line": 1105
                   }
                 }
               ]
@@ -89386,7 +89386,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1106
+                "line": 1107
               },
               "children": [
                 {
@@ -89397,7 +89397,7 @@
                   "value": "\"Through a mount, creates on full trees shall be refused with ENOSPC, and the mount shall stay writable.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1108
+                    "line": 1109
                   }
                 },
                 {
@@ -89408,7 +89408,7 @@
                   "value": "\"Through ferrix-btrfs-vfs, creates end in ENOSPC, another create is ENOSPC too, the sync succeeds and 64 unlinks succeed.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1111
+                    "line": 1112
                   }
                 },
                 {
@@ -89419,7 +89419,7 @@
                   "value": "\"H.STORE.6\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1112
+                    "line": 1113
                   }
                 },
                 {
@@ -89430,7 +89430,7 @@
                   "value": "(\"ferrix_btrfs_write::volume::WriteVolume::admit\", \"ferrix_btrfs_write::volume::WriteVolume::operation_with\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1114
+                    "line": 1115
                   }
                 }
               ]
@@ -89443,7 +89443,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1116
+                "line": 1117
               },
               "children": [
                 {
@@ -89454,7 +89454,7 @@
                   "value": "\"A failure after an edit changed something shall mark the transaction aborted, and reload_read_only shall replace it with the last commit read from the device and answer ReadOnly to every edit after it.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1120
+                    "line": 1121
                   }
                 },
                 {
@@ -89465,7 +89465,7 @@
                   "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1124
+                    "line": 1125
                   }
                 },
                 {
@@ -89476,7 +89476,7 @@
                   "value": "\"H.STORE.8\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1125
+                    "line": 1126
                   }
                 },
                 {
@@ -89487,7 +89487,7 @@
                   "value": "(\"ferrix_btrfs_write::volume::WriteVolume::abort_with\", \"ferrix_btrfs_write::volume::WriteVolume::check_writable\", \"ferrix_btrfs_write::volume::WriteVolume::guarded_with\", \"ferrix_btrfs_write::volume::WriteVolume::operation_with\", \"ferrix_btrfs_write::open::WriteVolume::reload_read_only\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1130
+                    "line": 1131
                   }
                 }
               ]
@@ -89500,7 +89500,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1132
+                "line": 1133
               },
               "children": [
                 {
@@ -89511,7 +89511,7 @@
                   "value": "\"reload_read_only shall leave the volume aborted, and every read answering an error, when the last commit cannot be read.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1135
+                    "line": 1136
                   }
                 },
                 {
@@ -89522,7 +89522,7 @@
                   "value": "\"Through a mount, with writes and reads failing, the sync answers EIO and every later lookup answers EIO.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1137
+                    "line": 1138
                   }
                 },
                 {
@@ -89533,7 +89533,7 @@
                   "value": "\"H.STORE.8\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1138
+                    "line": 1139
                   }
                 },
                 {
@@ -89544,7 +89544,7 @@
                   "value": "(\"ferrix_btrfs_write::open::WriteVolume::reload_read_only\", \"ferrix_btrfs_write::open::WriteVolume::abort\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1141
+                    "line": 1142
                   }
                 }
               ]
@@ -89557,7 +89557,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1143
+                "line": 1144
               },
               "children": [
                 {
@@ -89568,7 +89568,7 @@
                   "value": "\"Every heap allocation of the btrfs crates' product code shall be made through a helper that reports a refused allocation as an error, never through one that stops the element.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1146
+                    "line": 1147
                   }
                 },
                 {
@@ -89579,7 +89579,7 @@
                   "value": "\"tools/common/check/check-fallible-alloc.py finds 0 unmarked allocating calls in ferrix-btrfs and in ferrix-btrfs-write.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1148
+                    "line": 1149
                   }
                 },
                 {
@@ -89590,7 +89590,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1149
+                    "line": 1150
                   }
                 },
                 {
@@ -89601,7 +89601,7 @@
                   "value": "(\"ferrix_btrfs_write::fallible::zeroed\", \"ferrix_btrfs_write::fallible::filled\", \"ferrix_btrfs_write::fallible::copy\", \"ferrix_btrfs_write::fallible::with_capacity\", \"ferrix_btrfs_write::fallible::push\", \"ferrix_btrfs_write::fallible::insert_at\", \"ferrix_btrfs_write::fallible::extend_from_slice\", \"ferrix_btrfs_write::fallible::resize\", \"ferrix_btrfs_write::fallible::collect\", \"ferrix_btrfs_write::fallible::collect_ok\", \"ferrix_btrfs_write::fallible::split_off\", \"ferrix_btrfs_write::fallible::copy_map\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1161
+                    "line": 1162
                   }
                 }
               ]
@@ -89614,7 +89614,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1163
+                "line": 1164
               },
               "children": [
                 {
@@ -89625,7 +89625,7 @@
                   "value": "\"An operation of the write path whose allocation is refused shall answer OutOfMemory, and either leave the transaction as it was or abort it, so that the volume reopens at its last commit.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1166
+                    "line": 1167
                   }
                 },
                 {
@@ -89636,7 +89636,7 @@
                   "value": "\"With each allocation of a script of eleven file operations and a commit on a populated volume failed once in turn, every failing operation answers OutOfMemory; where the transaction was not aborted, the script resumed from that operation ends with the fs tree an undisturbed run makes; where it was, the volume reopens at the commit before the script with its fs tree; every volume checks clean.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1172
+                    "line": 1173
                   }
                 },
                 {
@@ -89647,7 +89647,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1173
+                    "line": 1174
                   }
                 },
                 {
@@ -89658,7 +89658,7 @@
                   "value": "(\"ferrix_btrfs_write::volume::WriteVolume::guarded_with\", \"ferrix_btrfs_write::volume::WriteVolume::operation_with\", \"ferrix_btrfs_write::volume::WriteVolume::abort_with\", \"ferrix_btrfs_write::open::WriteVolume::abort\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1177
+                    "line": 1178
                   }
                 }
               ]
@@ -89671,7 +89671,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1179
+                "line": 1180
               },
               "children": [
                 {
@@ -89682,7 +89682,7 @@
                   "value": "\"WriteVolume::open shall answer OutOfMemory when an allocation is refused, having written nothing to the device.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1181
+                    "line": 1182
                   }
                 },
                 {
@@ -89693,7 +89693,7 @@
                   "value": "\"With each allocation of opening the blank and the populated volume failed in turn, once and from then on, each open succeeds or answers OutOfMemory, and the device then opens at the same generation with the same fs tree and checks clean.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1185
+                    "line": 1186
                   }
                 },
                 {
@@ -89704,7 +89704,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1186
+                    "line": 1187
                   }
                 },
                 {
@@ -89715,7 +89715,7 @@
                   "value": "(\"ferrix_btrfs_write::open::WriteVolume::open\", \"ferrix_btrfs_write::open::WriteVolume::open_committed\", \"ferrix_btrfs_write::open::WriteVolume::load_block_groups\", \"ferrix_btrfs_write::open::WriteVolume::load_free_space\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1190
+                    "line": 1191
                   }
                 }
               ]
@@ -89728,7 +89728,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1192
+                "line": 1193
               },
               "children": [
                 {
@@ -89739,7 +89739,7 @@
                   "value": "\"The reader shall answer a device read that ran out of memory with OutOfMemory, reading no other copy and reporting no damage.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1195
+                    "line": 1196
                   }
                 },
                 {
@@ -89750,7 +89750,7 @@
                   "value": "\"With each device read of an open, a lookup and a whole-file read failed in turn with OutOfMemory, on a plain, a zstd and a DUP image, the answer is OutOfMemory and no read follows the failed one.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1199
+                    "line": 1200
                   }
                 },
                 {
@@ -89761,7 +89761,7 @@
                   "value": "\"H.STORE.2\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1200
+                    "line": 1201
                   }
                 },
                 {
@@ -89772,7 +89772,7 @@
                   "value": "(\"ferrix_btrfs::volume::Volume::read_node\", \"ferrix_btrfs::fs::read_checked\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1202
+                    "line": 1203
                   }
                 }
               ]
@@ -89785,7 +89785,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1204
+                "line": 1205
               },
               "children": [
                 {
@@ -89796,7 +89796,7 @@
                   "value": "\"WriteVolume::read_node shall answer a device read that ran out of memory with OutOfMemory, reading no other copy.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1206
+                    "line": 1207
                   }
                 },
                 {
@@ -89807,7 +89807,7 @@
                   "value": "\"With the first copy of a DUP fs tree root failing with OutOfMemory, a lookup answers OutOfMemory after that one read, aborts nothing, and succeeds once the device reads again.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1209
+                    "line": 1210
                   }
                 },
                 {
@@ -89818,7 +89818,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1210
+                    "line": 1211
                   }
                 },
                 {
@@ -89829,7 +89829,7 @@
                   "value": "\"ferrix_btrfs_write::volume::WriteVolume::read_node\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1211
+                    "line": 1212
                   }
                 }
               ]
@@ -89842,7 +89842,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1213
+                "line": 1214
               },
               "children": [
                 {
@@ -89853,7 +89853,7 @@
                   "value": "\"A RangeSet insert, removal or union that has to make a run of its own shall, when that allocation is refused, answer OutOfMemory with the set unchanged; one that edits a run in place shall allocate nothing.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1217
+                    "line": 1218
                   }
                 },
                 {
@@ -89864,7 +89864,7 @@
                   "value": "\"Six edits that make a run, each with its first allocation failed, answer OutOfMemory and leave the set equal to what it was; three in-place edits under the same failure succeed.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1220
+                    "line": 1221
                   }
                 },
                 {
@@ -89875,7 +89875,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1221
+                    "line": 1222
                   }
                 },
                 {
@@ -89886,7 +89886,7 @@
                   "value": "(\"ferrix_btrfs_write::ranges::RangeSet::try_insert\", \"ferrix_btrfs_write::ranges::RangeSet::try_remove\", \"ferrix_btrfs_write::ranges::RangeSet::try_add\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1224
+                    "line": 1225
                   }
                 }
               ]
@@ -89899,7 +89899,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1226
+                "line": 1227
               },
               "children": [
                 {
@@ -89910,7 +89910,7 @@
                   "value": "\"A commit shall make everything it needs after writing the primary superblock before writing it, so that running out of memory is never reported for a commit that is on the device.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1229
+                    "line": 1230
                   }
                 },
                 {
@@ -89921,7 +89921,7 @@
                   "value": "\"With each allocation of a script of file operations and a commit on the blank volume failed from then on, in turn, no run whose failure was reported finds the script's commit on the device when the volume is reopened.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1233
+                    "line": 1234
                   }
                 },
                 {
@@ -89932,7 +89932,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1234
+                    "line": 1235
                   }
                 },
                 {
@@ -89943,7 +89943,7 @@
                   "value": "(\"ferrix_btrfs_write::commit::WriteVolume::commit\", \"ferrix_btrfs_write::commit::WriteVolume::write_superblocks\", \"ferrix_btrfs_write::commit::WriteVolume::finish_commit\", \"ferrix_btrfs_write::space::Space::prepare_unpin\", \"ferrix_btrfs_write::space::Space::unpin\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1239
+                    "line": 1240
                   }
                 }
               ]
@@ -89956,7 +89956,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1241
+                "line": 1242
               },
               "children": [
                 {
@@ -89967,7 +89967,7 @@
                   "value": "\"An open whose log replay is refused an allocation shall leave the device so that a later open replays the log.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1243
+                    "line": 1244
                   }
                 },
                 {
@@ -89978,7 +89978,7 @@
                   "value": "\"With each allocation of opening a volume that holds a committed log failed in turn, the open answers OutOfMemory or succeeds, and the next open of the same device holds the logged file's bytes, commits and checks clean.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1247
+                    "line": 1248
                   }
                 },
                 {
@@ -89989,7 +89989,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1248
+                    "line": 1249
                   }
                 },
                 {
@@ -90000,7 +90000,7 @@
                   "value": "\"ferrix_btrfs_write::log::WriteVolume::replay_log\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1249
+                    "line": 1250
                   }
                 }
               ]
@@ -90013,7 +90013,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1251
+                "line": 1252
               },
               "children": [
                 {
@@ -90024,7 +90024,7 @@
                   "value": "\"A read of the write path whose allocation is refused shall answer OutOfMemory and abort nothing.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1253
+                    "line": 1254
                   }
                 },
                 {
@@ -90035,7 +90035,7 @@
                   "value": "\"With each allocation of reading a populated volume's whole fs tree from cold failed in turn, the read answers OutOfMemory, the transaction is not aborted, and the tree then reads whole.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1257
+                    "line": 1258
                   }
                 },
                 {
@@ -90046,7 +90046,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1258
+                    "line": 1259
                   }
                 },
                 {
@@ -90057,7 +90057,7 @@
                   "value": "(\"ferrix_btrfs_write::tree::WriteVolume::range\", \"ferrix_btrfs_write::tree::WriteVolume::next_item\", \"ferrix_btrfs_write::volume::WriteVolume::load\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1261
+                    "line": 1262
                   }
                 }
               ]
@@ -90070,7 +90070,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/24-btrfs-requirements.sysml",
-                "line": 1263
+                "line": 1264
               },
               "children": [
                 {
@@ -90081,7 +90081,7 @@
                   "value": "\"Every ordered map the write path keeps shall have nodes no larger than the kernel heap's largest size class, so that the kernel's reserve can serve its inserts.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1266
+                    "line": 1267
                   }
                 },
                 {
@@ -90092,7 +90092,7 @@
                   "value": "\"The node bound of each of the ten map and set types the write path keeps is at most ferrix_heap::LARGEST_CLASS.\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1268
+                    "line": 1269
                   }
                 },
                 {
@@ -90103,7 +90103,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1269
+                    "line": 1270
                   }
                 },
                 {
@@ -90114,7 +90114,7 @@
                   "value": "(\"ferrix_btrfs_write::fallible::insert\", \"ferrix_btrfs_write::fallible::entry\", \"ferrix_btrfs_write::fallible::insert_into_set\")",
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
-                    "line": 1272
+                    "line": 1273
                   }
                 }
               ]

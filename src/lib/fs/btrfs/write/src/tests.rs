@@ -748,3 +748,67 @@ fn btrfs_check_images() {
         std::fs::write(std::format!("{out}/{name}.img"), device.image()).unwrap();
     }
 }
+
+/// `has_free` answers what `free_bytes(kind) >= want` answers, over a space
+/// of several groups of mixed kinds, for amounts around each kind's total
+/// and around single groups' free bytes: the carry from one group to the
+/// next is what makes a want two groups share come out right.
+///
+/// Verifies: L.btrfs.104
+#[test]
+fn has_free_answers_what_the_free_bytes_answer() {
+    use ferrix_btrfs::chunk::{BLOCK_GROUP_DATA, BLOCK_GROUP_METADATA, BLOCK_GROUP_SYSTEM};
+
+    // A group's start, its flags, and its free runs as (offset, length)
+    // inside it.
+    type Group = (u64, u64, &'static [(u64, u64)]);
+    let mut space = space::Space::default();
+    let groups: [Group; 6] = [
+        (0x10_0000, BLOCK_GROUP_SYSTEM, &[(0, 0x4000)]),
+        (
+            0x20_0000,
+            BLOCK_GROUP_METADATA,
+            &[(0, 0x4000), (0x8000, 0x4000)],
+        ),
+        (0x30_0000, BLOCK_GROUP_DATA, &[(0, 0x8_0000)]),
+        (
+            0x40_0000,
+            BLOCK_GROUP_METADATA,
+            &[(0x1000, 0x2000), (0x10000, 0x6000)],
+        ),
+        (0x50_0000, BLOCK_GROUP_METADATA, &[]),
+        (0x60_0000, BLOCK_GROUP_SYSTEM, &[(0x2000, 0x1000)]),
+    ];
+    let mut each = Vec::new();
+    for (start, flags, runs) in groups {
+        let mut on_disk = RangeSet::new();
+        for &(offset, len) in runs {
+            assert!(on_disk.insert(start + offset, len));
+        }
+        each.push(on_disk.total());
+        let group =
+            space::BlockGroup::new(start, 0x10_0000, flags, 0, on_disk, RangeSet::new()).unwrap();
+        space.insert(group).unwrap();
+    }
+    for kind in [Kind::System, Kind::Metadata, Kind::Data] {
+        let total = space.free_bytes(kind);
+        let mut wants = vec![
+            0,
+            1,
+            total.saturating_sub(1),
+            total,
+            total + 1,
+            total * 2 + 1,
+        ];
+        for &one in &each {
+            wants.extend([one.saturating_sub(1), one, one + 1, one + 0x1000]);
+        }
+        for want in wants {
+            assert_eq!(
+                space.has_free(kind, want),
+                total >= want,
+                "{kind:?}: {want:#x} of {total:#x}"
+            );
+        }
+    }
+}

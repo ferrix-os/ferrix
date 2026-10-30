@@ -350,7 +350,7 @@ impl<D: WriteDevice> WriteVolume<D> {
         }
         let want = nodes.saturating_mul(u64::from(self.geometry.nodesize));
         for kind in [Kind::System, Kind::Metadata] {
-            if self.space.free_bytes(kind) < want {
+            if !self.space.has_free(kind, want) {
                 self.grow(kind)?;
             }
         }

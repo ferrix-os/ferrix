@@ -390,6 +390,28 @@ impl Space {
             .fold(0u64, |sum, group| sum.saturating_add(group.used))
     }
 
+    /// Whether groups of `kind` can still allocate `want` bytes: `free_bytes
+    /// (kind) >= want`, stopping as soon as it is known. Asked before every
+    /// edit (the volume's `ensure_space`), where summing every free run
+    /// of every group was a game's largest single cost in the kernel on the
+    /// N150 (2026-10-30: 8 % of its kernel time).
+    #[must_use]
+    pub fn has_free(&self, kind: Kind, want: u64) -> bool {
+        let mut left = want;
+        left == 0
+            || self
+                .groups
+                .values()
+                .filter(|group| group.kind() == Some(kind))
+                .any(|group| {
+                    if group.free.holds_at_least(left) {
+                        return true;
+                    }
+                    left = left.saturating_sub(group.free.total());
+                    false
+                })
+    }
+
     /// Bytes still allocatable in groups of `kind`.
     #[must_use]
     pub fn free_bytes(&self, kind: Kind) -> u64 {

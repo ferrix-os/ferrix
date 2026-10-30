@@ -1090,7 +1090,8 @@ package FerrixBtrfsRequirements {
             attribute :>> unit =
                 ("ferrix_btrfs_write::volume::WriteVolume::ensure_space",
                 "ferrix_btrfs_write::volume::WriteVolume::guarded_with",
-                "ferrix_btrfs_write::volume::WriteVolume::grow");
+                "ferrix_btrfs_write::volume::WriteVolume::grow",
+                "ferrix_btrfs_write::space::Space::has_free");
         }
         requirement <'L.btrfs.105'> aFullMountAnswersEnospc : ItemLowLevel {
             attribute :>> statement = "Through a mount, a write to a full volume shall

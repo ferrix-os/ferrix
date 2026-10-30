@@ -672,7 +672,9 @@ fn a_large_block_is_held_by_order_and_taken_by_order() {
     // 5000 bytes is two pages: order one.
     let request = Request::new(5000, 8);
     assert_eq!(reserve.take(&pages, request), None);
+    assert!(!reserve.holds_large());
     reserve.hold_large(&mut heap, &mut pages, request).unwrap();
+    assert!(reserve.holds_large());
     assert_eq!(pages.outstanding(), 2);
     reserve.hold_large(&mut heap, &mut pages, request).unwrap();
     assert_eq!(pages.outstanding(), 2, "one block per order is enough");
@@ -680,6 +682,7 @@ fn a_large_block_is_held_by_order_and_taken_by_order() {
     // A request of another order is not served by it.
     assert_eq!(reserve.take(&pages, Request::new(9000, 8)), None);
     let block = reserve.take(&pages, request).unwrap();
+    assert!(!reserve.holds_large(), "taken, nothing is held");
     assert_eq!(reserve.take(&pages, request), None);
     heap.deallocate(&mut pages, block, request);
     assert_eq!(

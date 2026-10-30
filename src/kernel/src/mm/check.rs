@@ -1205,3 +1205,35 @@ pub fn check_pstore_never_free() -> Result<(), &'static str> {
     println!("  pstore   none of its {} frames is free", len / PAGE_SIZE);
     Ok(())
 }
+
+// CHECKS-ONLY: object/alloc_check.rs
+/// A section entered for a large block and closed without using it gives the
+/// block back: while it is open the heap has the block's pages out, and once
+/// it has closed the heap's large pages and the free frames are where they
+/// were before it. The section's end asks the reserve whether it holds a
+/// large block before it takes the heap's lock (`Reserve::holds_large`), so a
+/// wrong answer there would keep the pages out of the frame allocator, which
+/// nothing else would show.
+///
+/// Verifies: L.mm.38
+#[doc(hidden)]
+pub fn check_a_large_block_goes_back_with_the_section() -> Result<(), &'static str> {
+    // Three pages: past every size class, an order-two block.
+    let layout = core::alloc::Layout::from_size_align(3 * PAGE_SIZE as usize, 8)
+        .map_err(|_| "no layout for a large block")?;
+    // A section first, so the reserve's size classes are full and the one
+    // measured moves only the large block.
+    drop(mm::reserve(None).map_err(|_| "the reserve could not be filled")?);
+    let (pages, frames) = (mm::heap_large_pages(), mm::free_frames());
+    let section = mm::reserve(Some(layout))
+        .map_err(|_| "a section for a large block could not be entered")?;
+    let held = mm::heap_large_pages();
+    drop(section);
+    if held <= pages {
+        return Err("a section entered for a large block held none");
+    }
+    if mm::heap_large_pages() != pages || mm::free_frames() != frames {
+        return Err("a section closed without using its large block kept it");
+    }
+    Ok(())
+}

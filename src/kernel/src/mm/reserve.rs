@@ -221,7 +221,10 @@ fn leave() {
     // SAFETY: (SHARED) as in `enter`; the guard being dropped kept interrupts masked.
     let here = unsafe { &mut *cell.get() };
     here.sections = here.sections.saturating_sub(1);
-    if here.sections == 0 {
+    // Nearly every section holds no large block, and needs no trip through
+    // the heap's lock, with interrupts masked, to give back nothing: this
+    // runs at the end of every `Arc` made and every map insert.
+    if here.sections == 0 && here.reserve.holds_large() {
         with_heap(|heap| here.reserve.release_large(heap, &mut KernelPages));
     }
 }

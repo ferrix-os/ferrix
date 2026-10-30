@@ -645,6 +645,14 @@ impl Reserve {
         }
     }
 
+    /// Whether a large block is held: what [`Reserve::release_large`] would
+    /// give back, asked first so that a section that held none need not take
+    /// the heap's lock to give back nothing.
+    #[must_use]
+    pub fn holds_large(&self) -> bool {
+        self.large.iter().any(|&block| block != END)
+    }
+
     /// Give everything held back to `heap`.
     pub fn release(&mut self, heap: &mut Heap, backing: &mut impl Backing) {
         for class in 0..CLASSES {

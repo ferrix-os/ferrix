@@ -843,6 +843,11 @@ pub(crate) fn heap_allocated() -> usize {
     with_heap(|heap| heap.allocated_bytes())
 }
 
+/// Pages the heap has out as large blocks: those too big for a size class.
+pub(crate) fn heap_large_pages() -> usize {
+    with_heap(|heap| heap.large_pages())
+}
+
 /// Pages the heap is holding for its size classes.
 pub fn heap_pages() -> usize {
     with_heap(|heap| heap.slab_pages() + heap.large_pages())
