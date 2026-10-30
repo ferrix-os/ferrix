@@ -80,6 +80,10 @@ pub struct Slot {
     pid: i32,
     /// Whether it is finished and waiting to be dropped.
     gone: bool,
+    /// Whether its process is frozen by `suspend` (`crate::suspend`): its
+    /// frame callbacks wait and no input is sent to it, so that what it
+    /// cannot read does not pile up until the connection is dropped.
+    parked: bool,
     /// Which connection this is of all the compositor has had, counting
     /// from one. A slot's *place* changes when another connection ends;
     /// this does not, which is what something kept across frames for one of
@@ -125,6 +129,7 @@ impl Slot {
             answered: BTreeMap::new(),
             pid: 0,
             gone: false,
+            parked: false,
             serial: 1,
             lane: None,
         }
@@ -201,6 +206,21 @@ impl Slot {
     /// The process that opened it.
     pub const fn pid(&self) -> i32 {
         self.pid
+    }
+
+    /// The windows this connection owns, each with its `xdg_toplevel`.
+    pub fn windows(&self) -> &[(ObjectId, WindowId)] {
+        &self.windows
+    }
+
+    /// Whether its process is frozen by `suspend`.
+    pub const fn parked(&self) -> bool {
+        self.parked
+    }
+
+    /// Say whether its process is frozen by `suspend` (`crate::suspend`).
+    pub const fn park(&mut self, parked: bool) {
+        self.parked = parked;
     }
 
     /// What one of its windows was called when it mapped: the class and
@@ -431,6 +451,8 @@ struct Compositor<'r> {
     quit: bool,
     /// Whether `toggleswallow` is on.
     swallow: bool,
+    /// The programs `suspend` froze (`crate::suspend`).
+    suspended: crate::suspend::Suspended,
     /// When the seat was last used: `ext-idle-notify` measures from the
     /// last of this and `forced`.
     last_input: Instant,
@@ -731,6 +753,7 @@ impl<'r> Compositor<'r> {
             carried: None,
             quit: false,
             swallow: false,
+            suspended: crate::suspend::Suspended::new(),
             last_input: Instant::now(),
             forced: None,
             injected: Vec::new(),
@@ -1032,6 +1055,7 @@ impl<'r> Compositor<'r> {
                         unsized_dialogs: std::collections::BTreeSet::new(),
                         answered: BTreeMap::new(),
                         gone: false,
+                        parked: false,
                         lane: Some(self.devices.handle()),
                     }),
                     Err(_) => continue,
@@ -1518,6 +1542,7 @@ impl<'r> Compositor<'r> {
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
+                suspended: &mut self.suspended,
                 forced: &mut self.forced,
                 focus: &mut self.focus,
                 trigger: asked.trigger,
@@ -1990,6 +2015,7 @@ impl<'r> Compositor<'r> {
                 pending: &mut pending,
                 quit: &mut self.quit,
                 swallow: &mut self.swallow,
+                suspended: &mut self.suspended,
                 forced: &mut self.forced,
                 focus: &mut self.focus,
                 // `hyprctl dispatch pass` has no key behind it: `pass`
@@ -3723,6 +3749,9 @@ fn as_maximized(
 /// wallpaper, a menu and the lock's own surface each drew, and each waits
 /// the same way.
 ///
+/// Nor a frozen client's (`crate::suspend`), which is told once it is
+/// thawed.
+///
 /// But for `unseen`, the surfaces under the windows of which this frame
 /// shows nothing (`State::unseen_layers`): their frame callbacks are kept
 /// until a frame shows them again. A callback says "now is a good time to
@@ -3786,6 +3815,12 @@ fn frames_done(
         let Some(slot) = slots.get_mut(index) else {
             continue;
         };
+        // A frozen client's callbacks wait for its thaw, as an unseen
+        // surface's wait for a frame that shows it: it reads nothing, and
+        // what it is sent meanwhile piles up (`crate::suspend`).
+        if slot.parked() {
+            continue;
+        }
         if !unseen.contains(&(index, surface)) {
             slot.client_mut().fire_frame_callbacks(surface, now);
         }

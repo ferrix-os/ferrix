@@ -1021,6 +1021,18 @@ This is what GNOME does on Wayland, and it is the only safe answer.
   a boot's sessions are numbered once. **A scope the init refuses is not a
   session**: none is started, so the session's end may rely on the scope
   (F6 for this path; host-tested in `sessiond/src/gate.rs` and `scope.rs`).
+* **The scope is delegated to its user** (2026-10-30, `docs/APP-SUSPEND.md`
+  §3.1): `sessiond` gives the account the scope's directory and its
+  `cgroup.procs`, `cgroup.subtree_control` and `cgroup.threads`, as
+  systemd's `Delegate=yes` does, so that the compositor can make a cgroup
+  beneath the scope and freeze one program of the session there
+  (`suspend`). Nothing leaves the session by it: a move needs write access
+  to the common ancestor's `cgroup.procs`, and `user-<uid>.slice`'s stays
+  root's, so a process moves only between cgroups beneath the scope. The
+  scope's own limits, `cgroup.freeze` and `cgroup.kill` stay root's, and the
+  scope's stop kills and removes the cgroups beneath it with it. A
+  delegation that fails is said, and the session goes on without
+  `suspend`.
 * When the compositor exits, `sessiond` asks the init to stop the scope,
   which signals and then writes `cgroup.kill`: every program of the session
   ends. Every way `sessiond` ends after the scope was made goes through

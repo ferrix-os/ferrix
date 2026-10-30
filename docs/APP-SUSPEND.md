@@ -532,6 +532,45 @@ On the box, **only with the customer's agreement** (memory
 Endfield's scope for 30 s, 2 min and 10 min and record what the game does at
 each thaw. That measures the online limit directly.
 
+### 3.1.1 S1 as built (2026-10-30, the customer's go-ahead)
+
+Three findings changed the plan above while building it:
+
+* **In a user's session there was no per-program cgroup to freeze.** A
+  root compositor (every test boot) puts each program in
+  `app.slice/app-<name>-<pid>.scope`, but a session's compositor runs as
+  the user, and the init refuses a user a scope outside
+  `user-<uid>.slice` (`docs/INIT.md` §10). So on the box every program the
+  user starts is in `session-<n>.scope`, beside the compositor, and GAME-MODE
+  §2.1's "every program hyprix starts is in `app.slice/…`" holds for root
+  desktops only. A Steam game is in Steam's cgroup either way.
+* **No new freeze service and no init call are needed.** The compositor
+  knows the window, its client and the client's pid, so it freezes the
+  program itself. It writes the `cgroup.freeze` of the program's cgroup
+  when the program is alone in it. Otherwise it makes `suspend-<pid>`
+  beneath that cgroup, freezes it first, and moves the program's
+  processes in until none is left outside. For that a session's scope is
+  delegated to its user, as systemd delegates; the kernel already
+  supports delegation (`docs/CGROUPS.md`, G4).
+* **pulsed needs nothing.** A stream whose client sends nothing is mixed
+  as silence (`pulsed`'s "what no stream has is not made up"), and nothing
+  is queued to a client that does not write.
+
+What landed:
+
+| Piece | Where |
+|---|---|
+| `suspend [window\|pid:<n>]` and `resume [window\|pid:<n>\|all]`, hyprix dispatchers (`hyprctl dispatch suspend`, or a bind). A window whose class is `steam_app_<id>` means Steam's `reaper` with `AppId=<id>` and everything beneath it, wineserver included; another X window is refused with a hint to name the pid, since yserver serves Steam too | `hyprix/src/suspend.rs`, `act.rs` |
+| The frozen program's connections parked: no frame callbacks (kept for the thaw), no input, the window at half opacity | `state.rs` (`Slot::park`, `frames_done`), `deliver.rs` (`awake`) |
+| The session's scope delegated to its user | `sessiond/src/scope.rs`, `docs/AUTH.md` §6.4 |
+| `test-compositor --boot suspend`: as `ferrix`, a counter in the session's scope is frozen in `suspend-<pid>` for five seconds; not a tick while frozen, and the first tick after is the next number. Then the pattern's window is suspended and resumed and is still a client | `xtask/src/compositor/hyprlock.rs` |
+
+No kernel line, no init change, no certified-item file. Left for S1: the
+keeper's step 2 (INTEL-GPU §12.8), so that a game frozen across a GPU
+driver restart thaws intact; a menu entry or bind in the default
+configuration; and the box run on Endfield (§3.1's PoC), which needs the
+customer's agreement.
+
 ### 3.2 S2: page the frozen application out to disk, same boot
 
 **What it is.** Not a checkpoint. The job stays frozen and every kernel
@@ -789,9 +828,12 @@ an online game should be promised (§4).
 
 ## 5. Where it stands
 
-2026-10-30: research only. Nothing built, nothing measured on any machine;
-every size is a guess and every behaviour said to be "today" was read in
-the code at develop 38b492f28:
+2026-10-30, later: **S1 is built** (§3.1.1), on the customer's go-ahead.
+S2 to S4 remain a design.
+
+The research, the same day: nothing was measured on any machine; every
+size is a guess, and every behaviour said to be "today" was read in the
+code at develop 38b492f28:
 
 * `cgroup.freeze` parks Linux processes and restarts their blocking calls
   (`docs/CGROUPS.md` §11, `fs/cgroupfs.rs`); native processes are not

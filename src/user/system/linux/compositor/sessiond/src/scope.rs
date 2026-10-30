@@ -67,7 +67,39 @@ pub(crate) fn end(uid: u32, unit: &str) -> Result<(), String> {
 
 /// The scope's own `cgroup.kill`, where the init's cgroup tree puts it.
 pub(crate) fn kill_file(uid: u32, unit: &str) -> String {
-    format!("/sys/fs/cgroup/user.slice/user-{uid}.slice/{unit}/cgroup.kill")
+    format!("{}/cgroup.kill", directory(uid, unit))
+}
+
+/// The scope's cgroup directory, where the init's cgroup tree puts it.
+fn directory(uid: u32, unit: &str) -> String {
+    format!("/sys/fs/cgroup/user.slice/user-{uid}.slice/{unit}")
+}
+
+/// What a delegation gives the user of the scope: the directory, so that
+/// the compositor can make cgroups beneath it, and the files cgroup v2
+/// moves processes and enables controllers by, as systemd's `Delegate=yes`
+/// does (init's `Groups::delegate`).
+const DELEGATED: [&str; 3] = ["cgroup.procs", "cgroup.subtree_control", "cgroup.threads"];
+
+/// Hand the session's scope to its user, `uid` and `gid`, so that the
+/// compositor can freeze one program of the session apart from the rest:
+/// `suspend` makes a cgroup beneath the scope, moves the program into it
+/// and freezes that (`docs/APP-SUSPEND.md` §3.1). The scope stays the
+/// session's: a process can move only between cgroups below the scope,
+/// since the slice above stays root's, so everything the session started
+/// still ends with it when the scope is stopped, whose `cgroup.kill` and
+/// removal take the cgroups beneath too.
+pub(crate) fn delegate(uid: u32, gid: u32, unit: &str) -> Result<(), String> {
+    let dir = directory(uid, unit);
+    let give = |path: &str| {
+        std::os::unix::fs::chown(path, Some(uid), Some(gid))
+            .map_err(|error| format!("{path}: {error}"))
+    };
+    give(&dir)?;
+    for file in DELEGATED {
+        give(&format!("{dir}/{file}"))?;
+    }
+    Ok(())
 }
 
 /// The next session number.
@@ -141,6 +173,20 @@ mod tests {
     use super::*;
 
     /// The consultant's control (c): a refusal is never taken for a scope.
+    #[test]
+    fn a_delegation_gives_the_files_a_move_needs_and_no_limit() {
+        assert_eq!(
+            directory(1000, "session-3.scope"),
+            "/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope"
+        );
+        assert!(DELEGATED.contains(&"cgroup.procs"));
+        // The scope's own limits and its freeze stay root's.
+        assert!(DELEGATED.iter().all(|file| !file.starts_with("memory.")
+            && !file.starts_with("cpu.")
+            && *file != "cgroup.freeze"
+            && *file != "cgroup.kill"));
+    }
+
     #[test]
     fn the_fallback_kills_the_scope_the_init_made() {
         assert_eq!(

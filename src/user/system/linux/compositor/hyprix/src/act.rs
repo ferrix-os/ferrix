@@ -129,6 +129,8 @@ pub struct Around<'a> {
     /// Workspaces whose `on-created-empty:` command has already been run,
     /// so that going back to one does not start a second terminal.
     pub opened: &'a mut std::collections::BTreeSet<compositor_layout::WorkspaceId>,
+    /// The programs `suspend` froze.
+    pub suspended: &'a mut crate::suspend::Suspended,
     /// What to say.
     pub report: &'a mut dyn FnMut(&str),
 }
@@ -214,6 +216,8 @@ pub fn compositor(
         "sendshortcut" => Some(send_shortcut(argument, None, state, around)),
         "sendkeystate" => Some(send_key_state(argument, state, around)),
         "focusurgentorlast" => Some(focus_urgent_or_last(state, around)),
+        "suspend" => Some(suspend(argument, state, around)),
+        "resume" => Some(resume(argument, state, around)),
         "toggleswallow" => {
             *around.swallow = !*around.swallow;
             around.say("hyprix: swallowing a terminal is not implemented");
@@ -1002,6 +1006,140 @@ pub fn pick(which: Option<&str>, state: &State, around: &mut Around<'_>) -> Opti
         around.say(&format!("hyprix: no window answers {which:?}"));
     }
     window
+}
+
+/// What `suspend` and `resume` name: `pid:<n>`, or a window -- the focused
+/// one when nothing is named. A window Proton made, whose class is
+/// `steam_app_<id>`, names Steam's game; any other window, the process on
+/// the other end of its connection, unless that is the X server, which
+/// serves more than one program.
+fn suspend_target(
+    argument: &str,
+    state: &State,
+    around: &mut Around<'_>,
+) -> Option<crate::suspend::Target> {
+    use crate::suspend::{Target, steam_app};
+    let argument = argument.trim();
+    if let Some(number) = argument.strip_prefix("pid:") {
+        let Ok(pid) = number.trim().parse::<u32>() else {
+            around.say("hyprix: pid: takes a number");
+            return None;
+        };
+        return Some(Target::Pid(pid));
+    }
+    let window = pick(Some(argument), state, around)?;
+    let class = crate::state::as_seen(state, around.slots, around.sources)
+        .iter()
+        .find(|seen| seen.window == window)
+        .map(|seen| seen.initial_class.to_owned())
+        .unwrap_or_default();
+    if let Some(id) = steam_app(&class) {
+        return Some(Target::Steam(id));
+    }
+    let Some(pid) = pid_of(window, around).and_then(|pid| u32::try_from(pid).ok()) else {
+        around.say("hyprix: the window's connection has no process");
+        return None;
+    };
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    if comm.trim_end() == "yserver" {
+        around.say(&format!(
+            "hyprix: {class:?} is an X window, and the X server serves other programs too; \
+             suspend pid:<its pid> instead"
+        ));
+        return None;
+    }
+    Some(Target::Pid(pid))
+}
+
+/// `suspend [window|pid:<n>]`: freeze a program where it is, every process
+/// of it, and park its connections (`crate::suspend`, `docs/APP-SUSPEND.md`
+/// §3.1).
+fn suspend(argument: &str, state: &State, around: &mut Around<'_>) -> bool {
+    let Some(target) = suspend_target(argument, state, around) else {
+        return false;
+    };
+    let procs = crate::suspend::snapshot();
+    let root = match crate::suspend::root_of(&target, &procs) {
+        Ok(root) => root,
+        Err(why) => {
+            around.say(&format!("hyprix: suspend: {why}"));
+            return false;
+        }
+    };
+    if let Some(frozen) = around.suspended.holding(root) {
+        let root = frozen.root;
+        around.say(&format!(
+            "hyprix: suspend: process {root}'s program is frozen already"
+        ));
+        return false;
+    }
+    let frozen = match crate::suspend::freeze(root, std::process::id()) {
+        Ok(frozen) => frozen,
+        Err(why) => {
+            around.say(&format!("hyprix: suspend: {why}"));
+            return false;
+        }
+    };
+    let windows = park(&frozen.pids, true, around);
+    around.say(&format!(
+        "hyprix: suspended process {root} and {} more in {} ({windows} windows)",
+        frozen.pids.len().saturating_sub(1),
+        frozen.cgroup
+    ));
+    around.suspended.insert(frozen);
+    windows > 0
+}
+
+/// `resume [window|pid:<n>|all]`: thaw what `suspend` froze.
+fn resume(argument: &str, state: &State, around: &mut Around<'_>) -> bool {
+    let roots: Vec<u32> = if argument.trim() == "all" {
+        around.suspended.all().map(|frozen| frozen.root).collect()
+    } else {
+        let Some(target) = suspend_target(argument, state, around) else {
+            return false;
+        };
+        let procs = crate::suspend::snapshot();
+        let found = crate::suspend::root_of(&target, &procs)
+            .ok()
+            .and_then(|root| around.suspended.holding(root))
+            .map(|frozen| frozen.root);
+        let Some(root) = found else {
+            around.say("hyprix: resume: that program is not suspended");
+            return false;
+        };
+        vec![root]
+    };
+    let mut changed = false;
+    for root in roots {
+        let Some(frozen) = around.suspended.remove(root) else {
+            continue;
+        };
+        // Thawed before its connections are woken, so that what they are
+        // sent next is read.
+        match crate::suspend::thaw(&frozen) {
+            Ok(()) => around.say(&format!("hyprix: resumed process {root}")),
+            Err(why) => around.say(&format!("hyprix: resume: {why}")),
+        }
+        changed |= park(&frozen.pids, false, around) > 0;
+    }
+    changed
+}
+
+/// Park or wake every connection opened by one of `pids`, half its windows'
+/// opacity while parked: how many windows that touched.
+fn park(pids: &std::collections::BTreeSet<u32>, parked: bool, around: &mut Around<'_>) -> usize {
+    let mut windows = Vec::new();
+    for slot in around.slots.iter_mut() {
+        if u32::try_from(slot.pid()).is_ok_and(|pid| pids.contains(&pid)) {
+            slot.park(parked);
+            windows.extend(slot.windows().iter().map(|&(_, window)| window));
+        }
+    }
+    let opacity = if parked { "0.5" } else { "unset" };
+    for &window in &windows {
+        let _ = around.rules.set_property(window, "opacity", opacity);
+    }
+    windows.len()
 }
 
 /// The process on the other end of a window's connection.

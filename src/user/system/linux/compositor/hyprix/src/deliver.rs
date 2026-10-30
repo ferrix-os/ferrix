@@ -406,14 +406,14 @@ pub fn deliver(
             }
             Action::Key { code, pressed } => {
                 if let Some((client, _)) = focus.keyboard
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().keyboard_key(time, *code, *pressed);
                 }
             }
             Action::Modifiers(modifiers) => {
                 if let Some((client, _)) = focus.keyboard
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().keyboard_modifiers(*modifiers);
                 }
@@ -428,7 +428,7 @@ pub fn deliver(
                 // `CLOCK_MONOTONIC`, carried on to the client
                 // (`docs/GAME-PATH.md` §4.7); now, for an input with none.
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let micros = if stamp == 0 {
                         crate::front::monotonic_us()
@@ -459,7 +459,7 @@ pub fn deliver(
                 }
                 if let Some((local_x, local_y)) = focus.move_pointer(&placements, slots, (*x, *y))
                     && let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     slot.client_mut()
                         .pointer_motion(time, fixed(local_x), fixed(local_y));
@@ -485,7 +485,7 @@ pub fn deliver(
                     continue;
                 }
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().pointer_button(time, *button, *pressed);
                     slot.client_mut().pointer_frame();
@@ -493,7 +493,7 @@ pub fn deliver(
             }
             Action::Axis { axis, value } => {
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     slot.client_mut().pointer_axis(time, *axis, fixed(*value));
                     slot.client_mut().pointer_frame();
@@ -502,6 +502,13 @@ pub fn deliver(
         }
     }
     done
+}
+
+/// The connection at `client`, unless its process is frozen by `suspend`:
+/// a frozen client is sent no input, which it could not read and which
+/// would pile up until it was dropped (`crate::suspend`).
+fn awake(slots: &mut [Slot], client: usize) -> Option<&mut Slot> {
+    slots.get_mut(client).filter(|slot| !slot.parked())
 }
 
 /// The window the point is on, for `follow_mouse`: the topmost placement
@@ -859,6 +866,26 @@ mod tests {
             );
             assert_eq!(done.focus, wanted, "grabbed {grabbed}");
         }
+    }
+
+    /// A client frozen by `suspend` is sent no input; the one beside it is,
+    /// and so is it again once thawed (`crate::suspend`).
+    #[test]
+    fn a_parked_client_is_sent_no_input() {
+        let mut slots = [
+            crate::state::Slot::for_test(),
+            crate::state::Slot::for_test(),
+        ];
+        if let Some(slot) = slots.get_mut(0) {
+            slot.park(true);
+        }
+        assert!(super::awake(&mut slots, 0).is_none());
+        assert!(super::awake(&mut slots, 1).is_some());
+        assert!(super::awake(&mut slots, 2).is_none());
+        if let Some(slot) = slots.get_mut(0) {
+            slot.park(false);
+        }
+        assert!(super::awake(&mut slots, 0).is_some());
     }
 
     /// Chrome's surface is its window and 10 pixels of shadow all round;

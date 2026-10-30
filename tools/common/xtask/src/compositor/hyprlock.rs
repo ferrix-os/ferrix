@@ -545,6 +545,189 @@ fn drive_session(
         .collect())
 }
 
+/// The suspend boot's desktop: one window, and the script.
+const SUSPEND_CONFIG: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor --boot suspend`.
+input:kb_layout = de
+input:kb_variant = nodeadkeys
+exec-once = /bin/pattern checkerboard one
+exec-once = /bin/sh /etc/attack.sh
+";
+
+/// The suspend boot's script (`docs/APP-SUSPEND.md` §3.1), as `ferrix` in
+/// the session's scope: a counter -- a program and a child of its own, both
+/// beside the compositor in the scope -- suspended for five seconds and
+/// resumed; then the window, the pattern, suspended and resumed. What it
+/// says is judged by [`test_suspend`].
+const SUSPEND_SCRIPT: &str = "\
+#!/bin/sh
+exec 2>&1
+until hyprctl version > /dev/null 2>&1; do sleep 1; done
+sleep 2
+sh -c 'sh -c \"while :; do sleep 1; done\" & n=0; while :; do n=$((n+1)); echo \"suspend-tick $n\"; sleep 1; done' &
+counter=$!
+sleep 4
+echo \"suspend-asked: $(hyprctl dispatch suspend pid:$counter 2>&1)\"
+sleep 1
+cg=$(sed -n 's/^0:://p' /proc/$counter/cgroup)
+echo \"suspend-cgroup: $cg\"
+echo \"suspend-events: $(tr '\\n' ' ' < /sys/fs/cgroup$cg/cgroup.events)\"
+echo suspend-quiet-begin
+sleep 5
+echo suspend-quiet-end
+echo \"suspend-resumed: $(hyprctl dispatch resume pid:$counter 2>&1)\"
+sleep 3
+echo \"suspend-events-after: $(tr '\\n' ' ' < /sys/fs/cgroup$cg/cgroup.events)\"
+echo \"suspend-window: $(hyprctl dispatch suspend 2>&1)\"
+sleep 5
+echo \"suspend-window-resumed: $(hyprctl dispatch resume 2>&1)\"
+sleep 2
+echo \"suspend-clients: $(hyprctl clients 2>/dev/null | grep -c 'class:')\"
+kill $counter
+echo suspend-done
+";
+
+/// The suspend boot's one step: the script to its end.
+const SUSPEND_STEPS: [Step; 1] = [Step {
+    what: "a program of the session was suspended and resumed, then the window",
+    keys: &[],
+    until: "suspend-done",
+    wanted: &[],
+    unwanted: &["hyprix: suspend:", "hyprix: resume:"],
+}];
+
+/// `test-compositor --boot suspend` (`docs/APP-SUSPEND.md` §3.1): as
+/// ferrix, whose session's scope `sessiond` delegated, a counter in that
+/// scope beside the compositor is suspended -- moved into a cgroup of its
+/// own beneath the scope and frozen there -- and resumed five seconds later.
+/// Required: the cgroup was the one made beneath the scope and said `frozen
+/// 1`; not one tick while frozen; the first tick after is the next number,
+/// so the program went on from where it stopped; `frozen 0` after. Then the
+/// pattern's window is suspended (its connection parked, one window) and
+/// resumed, and is still a client after.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one boot read top to bottom: each thing the suspend must have done"
+)]
+pub(super) fn test_suspend(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let steps: Vec<&Step> = SUSPEND_STEPS.iter().collect();
+    let Some(said) = session_boot(
+        arch,
+        programs,
+        args,
+        (SUSPEND_CONFIG, SUSPEND_SCRIPT),
+        &steps,
+        None,
+    )?
+    else {
+        return Ok(());
+    };
+    let line = |key: &str| {
+        said.iter()
+            .find(|line| line.contains(key))
+            .map(|line| line.trim().to_owned())
+            .unwrap_or_default()
+    };
+    let cgroup = line("suspend-cgroup: ");
+    if !cgroup.contains("session-") || !cgroup.contains("/suspend-") {
+        return Err(Error::new(format!(
+            "{arch}: the counter was not moved into a cgroup beneath the session's scope: \
+             {cgroup:?}"
+        )));
+    }
+    if !line("suspend-events: ").contains("frozen 1") {
+        return Err(Error::new(format!(
+            "{arch}: the counter's cgroup did not say it was frozen: {:?}",
+            line("suspend-events: ")
+        )));
+    }
+    let tick = |text: &str| -> Option<u64> {
+        text.split("suspend-tick ")
+            .nth(1)?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    let (Some(begin), Some(end)) = (
+        said.iter()
+            .position(|line| line.contains("suspend-quiet-begin")),
+        said.iter()
+            .position(|line| line.contains("suspend-quiet-end")),
+    ) else {
+        return Err(Error::new(format!(
+            "{arch}: the script never froze the counter"
+        )));
+    };
+    if let Some(line) = said
+        .get(begin..end)
+        .unwrap_or_default()
+        .iter()
+        .find(|line| line.contains("suspend-tick "))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the counter ran while suspended: {}",
+            line.trim()
+        )));
+    }
+    let before = said
+        .get(..begin)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .find_map(|line| tick(line));
+    let after = said
+        .get(end..)
+        .unwrap_or_default()
+        .iter()
+        .find_map(|line| tick(line));
+    match (before, after) {
+        (Some(before), Some(after)) if before.checked_add(1) == Some(after) => {}
+        _ => {
+            return Err(Error::new(format!(
+                "{arch}: the counter did not go on from where it stopped: tick {before:?} \
+                 before, {after:?} after"
+            )));
+        }
+    }
+    if !line("suspend-events-after: ").contains("frozen 0") {
+        return Err(Error::new(format!(
+            "{arch}: the counter's cgroup was still frozen after resume: {:?}",
+            line("suspend-events-after: ")
+        )));
+    }
+    let suspended: Vec<&String> = said
+        .iter()
+        .filter(|line| line.contains("hyprix: suspended process"))
+        .collect();
+    if suspended.len() != 2 || !suspended.iter().any(|line| line.contains("(1 windows)")) {
+        return Err(Error::new(format!(
+            "{arch}: the compositor did not say it suspended the counter and the window: \
+             {suspended:?}"
+        )));
+    }
+    let resumed = said
+        .iter()
+        .filter(|line| line.contains("hyprix: resumed process"))
+        .count();
+    if resumed != 2 {
+        return Err(Error::new(format!(
+            "{arch}: the compositor resumed {resumed} programs, not 2"
+        )));
+    }
+    if line("suspend-clients: ").ends_with(": 0") {
+        return Err(Error::new(format!(
+            "{arch}: the window was dropped while suspended"
+        )));
+    }
+    println!(
+        "  {arch}: a program of the session was frozen in a cgroup beneath the session's scope \
+         and went on from tick {} after it; the window was parked, and still a client after",
+        before.unwrap_or_default()
+    );
+    Ok(())
+}
+
 /// The session-end boot's stand-in for a session bus (`docs/GNOME.md`, G1;
 /// the certification consultant's condition 6 (i), ledger line 3123):
 /// `sessiond --session-bus` starts it as it would `dbus-daemon`, and it says

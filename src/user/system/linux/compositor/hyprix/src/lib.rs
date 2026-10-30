@@ -62,6 +62,7 @@ pub mod seat;
 pub mod select;
 pub mod settings;
 pub mod state;
+pub mod suspend;
 pub mod switcher;
 pub mod titlebar;
 pub(crate) mod wait;

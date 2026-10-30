@@ -799,7 +799,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 71] = [
+const BOOTS: [(&str, Boot); 72] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -823,6 +823,7 @@ const BOOTS: [(&str, Boot); 71] = [
     ("hyprlock-unset", hyprlock::test_hyprlock_unset),
     ("hyprlock-session", hyprlock::test_hyprlock_session),
     ("session-end", hyprlock::test_session_end),
+    ("suspend", hyprlock::test_suspend),
     ("menu", test_menu),
     ("bar-menu", test_bar_menu),
     ("drag", test_drag),

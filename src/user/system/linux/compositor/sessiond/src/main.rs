@@ -617,6 +617,17 @@ fn start(
         Some(_) => scope::join(account.uid, &pids),
         None => Err("the compositor never said its pid".to_owned()),
     };
+    // The scope is the user's to divide, so that one program of the session
+    // can be frozen apart from the rest. Without it the session goes on,
+    // and `suspend` says why it cannot.
+    if let Ok(unit) = &scope
+        && let Err(why) = scope::delegate(account.uid, account.gid, unit)
+    {
+        say(&format!(
+            "{unit} was not handed to uid {}, and suspend will not work: {why}",
+            account.uid
+        ));
+    }
     // The bus first, and its address, then the compositor.
     let mut bus_child = None;
     if let Some((gated, pid, read)) = bus_side {
