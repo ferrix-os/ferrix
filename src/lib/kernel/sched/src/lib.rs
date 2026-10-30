@@ -309,17 +309,57 @@ pub struct EntityState {
     /// Real nanoseconds it has run for, ever. Carried rather than reset, so it
     /// is a lifetime total wherever the entity has been.
     pub sum_exec: u64,
+    /// The slice it asks for, in real nanoseconds, or zero for the queue's
+    /// (L.sched.107; Linux's `sched_attr::sched_runtime`). What a request
+    /// is measured with is [`effective_request`] of this and the queue's
+    /// slice, never this alone.
+    pub request_ns: u64,
 }
 
 impl EntityState {
-    /// A fresh entity: owed nothing, and never run.
+    /// A fresh entity: owed nothing, never run, asking for the queue's slice.
     #[must_use]
     pub const fn new(weight: u32) -> EntityState {
         EntityState {
             weight,
             vlag: 0,
             sum_exec: 0,
+            request_ns: 0,
         }
+    }
+}
+
+/// The shortest slice an entity may ask for: Linux's floor for
+/// `sched_runtime`, 0.1 ms (`__setparam_fair`).
+pub const MIN_REQUEST_NS: u64 = 100_000;
+
+/// The slice an entity asking for `request_ns` is given on a queue whose
+/// slice is `slice_ns` (L.sched.107, L.sched.108): the queue's when it asks
+/// for none, and otherwise what it asks for, **never more than the queue's
+/// slice** and never less than [`MIN_REQUEST_NS`] unless the queue's slice
+/// itself is shorter.
+///
+/// The cap is what keeps every bound the queue states in its own slice: the
+/// lag limit, the placement lag and the decision's interval are measured
+/// with `slice_ns`, never with this, so no request widens them. Linux grants
+/// up to 100 ms and widens its lag limit with it; Ferrix grants less to
+/// leave H.SCHED.2 as it is (`docs/GAME-MODE-SCHED.md` §2.2, ledger 5156).
+#[must_use]
+pub const fn effective_request(request_ns: u64, slice_ns: u64) -> u64 {
+    if request_ns == 0 {
+        return slice_ns;
+    }
+    let floor = if MIN_REQUEST_NS < slice_ns {
+        MIN_REQUEST_NS
+    } else {
+        slice_ns
+    };
+    if request_ns < floor {
+        floor
+    } else if request_ns > slice_ns {
+        slice_ns
+    } else {
+        request_ns
     }
 }
 
@@ -356,6 +396,8 @@ pub(crate) struct Entity<T> {
     pub(crate) deadline: u64,
     /// Real nanoseconds it has run for.
     pub(crate) sum_exec: u64,
+    /// The slice it asks for, or zero for the queue's: [`EntityState::request_ns`].
+    pub(crate) request_ns: u64,
     /// The caller's data: always there while the entity is on a queue, and
     /// taken out as it leaves, so that the slot it came in goes back empty.
     pub(crate) payload: Option<T>,
@@ -384,6 +426,8 @@ pub struct EntityView<'a, T> {
     pub deadline: u64,
     /// Real nanoseconds it has run for.
     pub sum_exec: u64,
+    /// The slice it asks for, or zero for the queue's.
+    pub request_ns: u64,
     /// The queue's virtual time less its virtual runtime: what it is owed, in
     /// virtual nanoseconds. Eligible exactly when this is not negative.
     pub lag: i64,
@@ -504,6 +548,13 @@ impl<T> RunQueue<T> {
         self.load
     }
 
+    /// The slice every entity asking for none is given now, and the cap on
+    /// any request ([`effective_request`]).
+    #[must_use]
+    pub const fn slice_ns(&self) -> u64 {
+        self.config.slice_ns
+    }
+
     /// Change the slice every entity asks for from now on.
     ///
     /// Deadlines already handed out are left alone: an entity part-way through
@@ -599,6 +650,14 @@ impl<T> RunQueue<T> {
         to_virtual(self.config.slice_ns, weight)
     }
 
+    /// The virtual length of one request, for an entity of `weight` asking
+    /// for `request_ns`: what a new deadline is measured with, at every one
+    /// of the six places a request starts (L.sched.107). Only deadlines use
+    /// it; every bound the queue states keeps [`Self::vslice`].
+    fn vrequest(&self, request_ns: u64, weight: u32) -> u64 {
+        to_virtual(effective_request(request_ns, self.config.slice_ns), weight)
+    }
+
     /// The most lag an entity of `weight` may carry away or bring back: two
     /// slices, as Linux allows. Enough that an entity preempted a moment
     /// before its turn is still owed that turn when it comes back; not so much
@@ -685,7 +744,7 @@ impl<T> RunQueue<T> {
 
         let lag = self.placement_lag(state);
         let vruntime = self.avg_vruntime().wrapping_sub(lag as u64);
-        let deadline = vruntime.wrapping_add(self.vslice(state.weight));
+        let deadline = vruntime.wrapping_add(self.vrequest(state.request_ns, state.weight));
         self.add_load(vruntime, state.weight);
 
         let Slot(mut node) = slot;
@@ -695,6 +754,7 @@ impl<T> RunQueue<T> {
             vruntime,
             deadline,
             sum_exec: state.sum_exec,
+            request_ns: state.request_ns,
             payload: Some(payload),
         };
         self.tree.insert(node);
@@ -776,7 +836,7 @@ impl<T> RunQueue<T> {
         // to the virtual time.
         let lag = self.placement_lag(state);
         let vruntime = self.avg_vruntime().wrapping_sub(lag as u64);
-        let deadline = vruntime.wrapping_add(self.vslice(state.weight));
+        let deadline = vruntime.wrapping_add(self.vrequest(state.request_ns, state.weight));
         self.add_load(vruntime, state.weight);
         self.normalize();
         // `set_slice_ns`.
@@ -791,7 +851,8 @@ impl<T> RunQueue<T> {
         let entity = &leaving.entity;
         let limit = self.lag_limit(entity.weight);
         let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
-        let (left_id, weight, sum_exec) = (entity.id, entity.weight, entity.sum_exec);
+        let (left_id, weight, sum_exec, request_ns) =
+            (entity.id, entity.weight, entity.sum_exec, entity.request_ns);
         self.load -= u64::from(weight);
         self.zero = vruntime;
         self.sum = 0;
@@ -803,6 +864,7 @@ impl<T> RunQueue<T> {
             vruntime,
             deadline,
             sum_exec: state.sum_exec,
+            request_ns: state.request_ns,
             payload: Some(payload),
         };
         self.curr = Some(node);
@@ -816,6 +878,7 @@ impl<T> RunQueue<T> {
                 weight,
                 vlag,
                 sum_exec,
+                request_ns,
             },
             Slot(leaving),
         )))
@@ -851,6 +914,8 @@ impl<T> RunQueue<T> {
     /// request. That is the overrun the fairness bound has to allow for.
     pub fn update_curr(&mut self, delta_ns: u64) -> bool {
         let slice_ns = self.config.slice_ns;
+        // The renewal is a new request: measured with the entity's own
+        // (L.sched.107), never longer than the queue's slice.
         let Some(curr) = self.curr.as_mut().map(|node| &mut node.entity) else {
             return false;
         };
@@ -859,9 +924,8 @@ impl<T> RunQueue<T> {
         curr.vruntime = curr.vruntime.wrapping_add(delta);
         let exhausted = !before(curr.vruntime, curr.deadline);
         if exhausted {
-            curr.deadline = curr
-                .vruntime
-                .wrapping_add(to_virtual(slice_ns, curr.weight));
+            let renewed = effective_request(curr.request_ns, slice_ns);
+            curr.deadline = curr.vruntime.wrapping_add(to_virtual(renewed, curr.weight));
         }
         let weight = curr.weight;
 
@@ -886,9 +950,10 @@ impl<T> RunQueue<T> {
         }
         let slice_ns = self.config.slice_ns;
         if let Some(curr) = self.curr.as_mut().map(|node| &mut node.entity) {
-            curr.deadline = curr
-                .deadline
-                .wrapping_add(to_virtual(slice_ns, curr.weight));
+            curr.deadline = curr.deadline.wrapping_add(to_virtual(
+                effective_request(curr.request_ns, slice_ns),
+                curr.weight,
+            ));
         }
     }
 
@@ -966,14 +1031,20 @@ impl<T> RunQueue<T> {
         let slice_ns = self.config.slice_ns;
         if let Some(curr) = self.curr.as_mut().map(|node| &mut node.entity) {
             curr.vruntime = avg;
-            curr.deadline = avg.wrapping_add(to_virtual(slice_ns, curr.weight));
+            curr.deadline = avg.wrapping_add(to_virtual(
+                effective_request(curr.request_ns, slice_ns),
+                curr.weight,
+            ));
         }
         // Moved node by node from the old tree to a fresh one, every key
         // changing on the way: no list of them, so nothing is allocated.
         let mut old = core::mem::replace(&mut self.tree, Tree::new());
         while let Some(mut node) = old.pop_first() {
             node.entity.vruntime = avg;
-            node.entity.deadline = avg.wrapping_add(to_virtual(slice_ns, node.entity.weight));
+            node.entity.deadline = avg.wrapping_add(to_virtual(
+                effective_request(node.entity.request_ns, slice_ns),
+                node.entity.weight,
+            ));
             self.tree.insert(node);
         }
         // Everything sits at the average, so the weighted sum about it is
@@ -1030,9 +1101,9 @@ impl<T> RunQueue<T> {
             .map(|node| &node.entity)
             .filter(|curr| curr.id == id)
         {
-            let (vruntime, was) = (curr.vruntime, curr.weight);
+            let (vruntime, was, request_ns) = (curr.vruntime, curr.weight, curr.request_ns);
             if was != weight {
-                let (at, deadline) = self.reweigh(vruntime, was, weight);
+                let (at, deadline) = self.reweigh(vruntime, was, weight, request_ns);
                 if let Some(curr) = self.curr.as_mut().map(|node| &mut node.entity) {
                     curr.weight = weight;
                     curr.vruntime = at;
@@ -1052,7 +1123,8 @@ impl<T> RunQueue<T> {
         };
         let entity = &mut node.entity;
         if entity.weight != weight {
-            let (at, deadline) = self.reweigh(entity.vruntime, entity.weight, weight);
+            let (at, deadline) =
+                self.reweigh(entity.vruntime, entity.weight, weight, entity.request_ns);
             let entity = &mut node.entity;
             entity.weight = weight;
             entity.vruntime = at;
@@ -1061,6 +1133,37 @@ impl<T> RunQueue<T> {
         self.tree.insert(node);
         self.normalize();
         Ok(true)
+    }
+
+    /// Give entity `id`, running or waiting, the slice request `request_ns`
+    /// (zero for the queue's), and say whether it was there to be given one.
+    ///
+    /// **Nothing else moves.** The deadline it has stands, and the new
+    /// request is what its next one is measured with (L.sched.107, ledger
+    /// 5156 (A5)): rewriting a live deadline would let a task that asks again
+    /// and again for a shorter slice jump the queue without running, which
+    /// is what [`RunQueue::set_slice_ns`] declines for the same reason.
+    pub fn set_request(&mut self, id: u64, request_ns: u64) -> bool {
+        if let Some(curr) = self
+            .curr
+            .as_mut()
+            .map(|node| &mut node.entity)
+            .filter(|curr| curr.id == id)
+        {
+            curr.request_ns = request_ns;
+            return true;
+        }
+        // Out of the tree and back with the same key: neither its deadline
+        // nor its id changes, so it sorts where it did.
+        let Some(key) = self.tree.find(id) else {
+            return false;
+        };
+        let Some(mut node) = self.tree.remove(key) else {
+            return false;
+        };
+        node.entity.request_ns = request_ns;
+        self.tree.insert(node);
+        true
     }
 
     /// Count an entity at `vruntime` out of the virtual time at `was` and back
@@ -1078,7 +1181,7 @@ impl<T> RunQueue<T> {
     ///
     /// The entity's own `weight` field is the caller's to set: the sums are
     /// what this keeps right between the two.
-    fn reweigh(&mut self, vruntime: u64, was: u32, weight: u32) -> (u64, u64) {
+    fn reweigh(&mut self, vruntime: u64, was: u32, weight: u32, request_ns: u64) -> (u64, u64) {
         let virtual_time = self.avg_vruntime();
         let owed = truncating_div(
             i128::from(self.lag_at(vruntime)) * i128::from(was),
@@ -1088,7 +1191,7 @@ impl<T> RunQueue<T> {
         let at = virtual_time.wrapping_sub(owed as u64);
         self.sub_load(vruntime, was);
         self.add_load(at, weight);
-        (at, at.wrapping_add(self.vslice(weight)))
+        (at, at.wrapping_add(self.vrequest(request_ns, weight)))
     }
 
     /// Record an entity's lag, uncount it, and hand its parts back.
@@ -1101,8 +1204,13 @@ impl<T> RunQueue<T> {
         let entity = &node.entity;
         let limit = self.lag_limit(entity.weight);
         let vlag = self.lag_at(entity.vruntime).clamp(-limit, limit);
-        let (id, weight, vruntime, sum_exec) =
-            (entity.id, entity.weight, entity.vruntime, entity.sum_exec);
+        let (id, weight, vruntime, sum_exec, request_ns) = (
+            entity.id,
+            entity.weight,
+            entity.vruntime,
+            entity.sum_exec,
+            entity.request_ns,
+        );
         self.sub_load(vruntime, weight);
         self.normalize();
         let payload = node.entity.payload.take()?;
@@ -1113,6 +1221,7 @@ impl<T> RunQueue<T> {
                 weight,
                 vlag,
                 sum_exec,
+                request_ns,
             },
             Slot(node),
         ))
@@ -1196,6 +1305,7 @@ impl<T> RunQueue<T> {
             vruntime: entity.vruntime,
             deadline: entity.deadline,
             sum_exec: entity.sum_exec,
+            request_ns: entity.request_ns,
             lag: self.lag_at(entity.vruntime),
             running,
             payload: entity.payload.as_ref()?,

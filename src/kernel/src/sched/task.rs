@@ -45,6 +45,12 @@ use crate::vmap::Stack;
 pub trait UserThread: Any + Send + Sync + fmt::Debug {
     /// The process whose code it runs.
     fn process(&self) -> &dyn Host;
+
+    /// The slice it asks for, in nanoseconds, or zero for its queue's
+    /// (L.sched.109): what its task is made with.
+    fn slice_request(&self) -> u64 {
+        0
+    }
 }
 
 /// A task's name, unique for the life of the machine.
@@ -170,6 +176,11 @@ pub struct Task {
     seen_moves: AtomicU64,
     /// The lag it left its last queue with.
     vlag: AtomicI64,
+    /// The slice it asks for, in nanoseconds, or zero for its queue's
+    /// (L.sched.107): what it is enqueued with, written under the lock of
+    /// the queue that owns it ([`crate::sched::set_request`]), or before any
+    /// queue can see it.
+    request_ns: AtomicU64,
     /// Real nanoseconds it has run for, mirrored out of the queue so that a
     /// reader needs no lock.
     sum_exec: AtomicU64,
@@ -532,6 +543,7 @@ impl Task {
             group: AtomicU64::new(ungrouped()),
             seen_moves: AtomicU64::new(0),
             vlag: AtomicI64::new(0),
+            request_ns: AtomicU64::new(0),
             sum_exec: AtomicU64::new(0),
             baseline: AtomicU64::new(0),
             window_end: AtomicU64::new(0),
@@ -590,6 +602,7 @@ impl Task {
             group: AtomicU64::new(ungrouped()),
             seen_moves: AtomicU64::new(0),
             vlag: AtomicI64::new(0),
+            request_ns: AtomicU64::new(0),
             sum_exec: AtomicU64::new(0),
             baseline: AtomicU64::new(0),
             window_end: AtomicU64::new(0),
@@ -1020,7 +1033,20 @@ impl Task {
             weight: self.weight.load(Ordering::Relaxed),
             vlag: self.vlag.load(Ordering::Relaxed),
             sum_exec: self.sum_exec.load(Ordering::Relaxed),
+            request_ns: self.request_ns.load(Ordering::Relaxed),
         }
+    }
+
+    /// The slice it asks for, or zero for its queue's.
+    pub fn request_ns(&self) -> u64 {
+        self.request_ns.load(Ordering::Relaxed)
+    }
+
+    /// Give it a new slice request: the record it is enqueued with next. A
+    /// queue holding it is told by [`crate::sched::set_request`], under that
+    /// queue's lock, which is the only other caller than a task's making.
+    pub(crate) fn set_request(&self, request_ns: u64) {
+        self.request_ns.store(request_ns, Ordering::Relaxed);
     }
 
     /// Give it a new scheduling weight.
@@ -1038,6 +1064,7 @@ impl Task {
         self.weight.store(state.weight, Ordering::Relaxed);
         self.vlag.store(state.vlag, Ordering::Relaxed);
         self.sum_exec.store(state.sum_exec, Ordering::Relaxed);
+        self.request_ns.store(state.request_ns, Ordering::Relaxed);
     }
 
     /// Charge it for time on a CPU.

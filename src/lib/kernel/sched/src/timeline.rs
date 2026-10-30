@@ -53,6 +53,7 @@ impl<T> Timeline<T> {
             vruntime: 0,
             deadline: at,
             sum_exec: 0,
+            request_ns: 0,
             payload: Some(payload),
         };
         self.tree.insert(node);

@@ -44,6 +44,7 @@ use std::thread;
 mod cpu_number;
 mod futex_signal;
 mod setuid;
+mod slice_request;
 
 /// Threads the program spawns besides its main one.
 const THREADS: u64 = 4;
@@ -166,6 +167,19 @@ fn check_proc() {
 }
 
 fn main() {
+    match std::env::args().nth(1).as_deref() {
+        Some(slice_request::EXEC_PROBE) => slice_request::probe(),
+        // The slice step alone, for its comparison with Linux run as an
+        // ordinary program there (ledger 5232 (5)): every other step wants
+        // to be init.
+        Some("--slice-request-only") => {
+            println!("threads: slice-request");
+            slice_request::check_slice_request(fail);
+            println!("threads: slice-request ok");
+            std::process::exit(0)
+        }
+        _ => {}
+    }
     println!("threads: spawn {THREADS}");
     let counter = Arc::new(Mutex::new(0_u64));
     let barrier = Arc::new(Barrier::new(
@@ -246,6 +260,10 @@ fn main() {
     println!("threads: cpu-number");
     cpu_number::check_cpu_number(fail);
     println!("threads: cpu-number ok");
+
+    println!("threads: slice-request");
+    slice_request::check_slice_request(fail);
+    println!("threads: slice-request ok");
 
     println!("threads: all ok");
     std::process::exit(0)

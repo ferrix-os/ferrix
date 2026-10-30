@@ -2072,6 +2072,37 @@ would have to be made is named.
 
 ---
 
+### 2.2z3 A task's slice request (`sched::set_request`, F7, 2026-10-30)
+
+`L.sched.107` to `L.sched.109`; the certification consultant's design
+review, ledger 5156 ((A5) to (A7), (A10)); design in
+`docs/GAME-MODE-SCHED.md` §2.2.
+
+* **Memory.** None allocated. One word a task (`Task::request_ns`), one a
+  Linux thread (`Thread::slice_request`), and one an entity on a queue
+  (`Entity::request_ns`, carried in `EntityState` between queues). A
+  `sched_setattr` reads at most a page of a larger structure's unknown
+  tail into a buffer of its size (load ring, `syscall/limits.rs`), as it
+  reads every other system call's argument.
+* **Time, the setter** (`sched::set_request`, interrupts masked): one
+  queue lock, the task's home, found and re-read as `set_weight` finds it,
+  retried if the task moved; under it two stores, and for an entity on
+  the queue one `Tree::find` walk of that queue's tree (at most that
+  queue's entities, as for `set_weight`), then one O(log n) removal and
+  insertion. No other lock is taken under it, and no new lock exists: the
+  order is `set_weight`'s (ledger 5232 (3)).
+* **Time, each new request:** one call of `effective_request`, two
+  comparisons, in place of reading the queue's slice. No walk.
+* **The bound on decisions** ((A7)). A request is never shorter than
+  `MIN_REQUEST_NS` (100 µs, Linux's floor), so a task can make its
+  processor decide at most once per `MIN_REQUEST_NS` of its own running
+  through its request, beside the decisions the queue makes anyway. That is
+  a bound on decisions, not a time claim.
+* **The per-task bound.** A request is never longer than the queue's slice
+  (L.sched.108), and the lag limit, the placement of an arriving entity and
+  the decision interval keep the queue's slice; so H.SCHED.2 and its `fair`
+  line are unchanged by any request.
+
 ### 2.2r An RMRR's identity domain at bring-up (`iommu::bring_up_vtd`, K2)
 
 Before any program runs, once per VT-d unit whose RMRRs are honoured

@@ -204,7 +204,7 @@
       "purpose": "docs/INTEL-GPU.md §14.3, vmo_pin's PIN_BLOCKS (consultant OK IF (1)-(9), ledger 5088): L.object.254 the option word's refusals; 255 blocks naturally aligned in object and memory, at most the order, only over absent pages, committed frames unchanged; 256 the fallback (no retry above a refused order, a refused frame ends it, every page still pinned, a race only shrinks the order); 257 the budget read first and the failure rule; 258 a file's or bound object not pre-committed"
     },
     {
-      "ids": ["H.SCHED.19", "L.sched.107-123"],
+      "ids": ["H.SCHED.19", "L.sched.110-123"],
       "owner": "game-mode-sched",
       "branch": "docs/game-mode-sched",
       "date": "2026-10-30",

@@ -104,6 +104,7 @@ impl<T> Slot<T> {
                 vruntime: 0,
                 deadline: 0,
                 sum_exec: 0,
+                request_ns: 0,
                 payload: None,
             },
             left: None,

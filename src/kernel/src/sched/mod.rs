@@ -48,6 +48,7 @@ mod mark_check;
 mod preempt;
 mod preempt_check;
 mod queue;
+mod slice_check;
 mod task;
 pub mod trip;
 pub mod vtime;
@@ -79,6 +80,10 @@ pub(crate) use preempt::{
 };
 pub use preempt::{preempt_disable, preempt_enable};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
+
+/// The slice a task alone on its queue is given: what `sched_getattr`
+/// answers for a thread that asked for none of its own.
+pub const BASE_SLICE_NS: u64 = SLICE_NS;
 pub use task::Task;
 pub use task::{TaskId, UserThread};
 pub use wait::{LastLook, WaitQueue};
@@ -1454,6 +1459,9 @@ pub fn prepare_user(
     // Its process's job, for its share of the processor and for what it
     // charges; set before any queue can see it.
     task.set_group(thread.process().core().quota_slot());
+    // Its thread's slice request, which a clone or fork child has from its
+    // creator (L.sched.109); set before any queue can see it.
+    task.set_request(thread.slice_request());
     Ok(PreparedTask {
         task,
         cpu,
@@ -2814,6 +2822,32 @@ pub(crate) fn interrupt(task: &Arc<Task>) {
     if this_cpu() != Some(cpu) {
         kick(cpu);
     }
+}
+
+/// Give `task` the slice request `request_ns`, zero for its queue's slice
+/// (L.sched.107, `docs/GAME-MODE-SCHED.md` §2.2).
+///
+/// Written under the lock of the queue that has it, found as [`set_weight`]
+/// finds it, so that the record and the queue's copy never disagree. No
+/// decision is asked for: the request it is in the middle of stands, and the
+/// new one measures its next (ledger 5156 (A5)).
+pub fn set_request(task: &Arc<Task>, request_ns: u64) {
+    let saved = <arch::Irq as IrqControl>::disable();
+    loop {
+        let cpu = task.cpu();
+        let Some(lock) = queue_of(cpu) else {
+            task.set_request(request_ns);
+            break;
+        };
+        let mut queue = lock.lock();
+        // It may have moved between the read and the lock, as in `wake`.
+        if task.cpu() != cpu {
+            continue;
+        }
+        queue.set_request(task, request_ns);
+        break;
+    }
+    <arch::Irq as IrqControl>::restore(saved);
 }
 
 /// Give `task` a new scheduling weight, and ask for a decision if that has

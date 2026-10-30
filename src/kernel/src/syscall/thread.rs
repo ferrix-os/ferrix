@@ -104,6 +104,13 @@ pub(crate) struct Thread {
     /// per process, every thread of a game went to 19 with them. A fork
     /// child's first thread starts at 0, as `syscall::attributes` says.
     nice: AtomicI32,
+    /// The slice it asks for with `sched_setattr`'s `sched_runtime`, in
+    /// nanoseconds, or zero for its queue's (L.sched.109). Linux keeps it per
+    /// thread (`se.slice` with `se.custom_slice`), and a thread made by
+    /// `clone` or `fork` starts with its creator's: `dup_task_struct` copies
+    /// it and only `SCHED_RESET_ON_FORK`, which is refused here, resets it.
+    /// `execve` keeps it.
+    slice_request: AtomicU64,
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
@@ -147,6 +154,7 @@ impl Thread {
             parent.seccomp_copy(),
         );
         *thread.name.get_mut() = parent.name();
+        *thread.slice_request.get_mut() = parent.slice_request();
         Ok(thread)
     }
 
@@ -194,6 +202,7 @@ impl Thread {
         *thread.numbers.get_mut() = numbers;
         *thread.name.get_mut() = caller.name();
         *thread.nice.get_mut() = caller.nice();
+        *thread.slice_request.get_mut() = caller.slice_request();
         Ok(thread)
     }
 
@@ -222,7 +231,19 @@ impl Thread {
             dispatch: SpinLock::new(Dispatch::OFF),
             name: SpinLock::new(None),
             nice: AtomicI32::new(0),
+            slice_request: AtomicU64::new(0),
         }
+    }
+
+    /// Its slice request: see [`Thread::slice_request`]'s field.
+    pub(crate) fn slice_request(&self) -> u64 {
+        self.slice_request.load(Ordering::Relaxed)
+    }
+
+    /// Set its slice request. The caller has checked the value, and gives
+    /// its task the request (`sched::set_request`).
+    pub(crate) fn set_slice_request(&self, request_ns: u64) {
+        self.slice_request.store(request_ns, Ordering::Relaxed);
     }
 
     /// Its nice value: see [`Thread::nice`]'s field.
@@ -481,6 +502,10 @@ impl Thread {
 impl UserThread for Thread {
     fn process(&self) -> &dyn Host {
         &*self.process
+    }
+
+    fn slice_request(&self) -> u64 {
+        Thread::slice_request(self)
     }
 }
 

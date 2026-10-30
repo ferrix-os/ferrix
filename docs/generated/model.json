@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "de59593e82f437076dc5bf2a9bb1c0c5d82a4ec1164fb1d0b09e79f27474672d",
+  "digest": "60c617120dccf5750a5afbcd58daa7fbcb76a8c0cc621c20f0f2113341a5f826",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -112,8 +112,8 @@
     }
   ],
   "summary": {
-    "packages": 149,
-    "elements": 8339,
+    "packages": 150,
+    "elements": 8355,
     "maturity": {
       "implemented": 285,
       "inProgress": 31,
@@ -39970,6 +39970,189 @@
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1092
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "SliceRequests",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests",
+              "kind": "package",
+              "doc": "src/lib/kernel/sched, sched/queue.rs, sched/mod.rs and syscall/thread.rs: a slice a task asks for (F7, docs/GAME-MODE-SCHED.md section 2.2; the consultant's design review, ledger 5156).",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 1096
+              },
+              "children": [
+                {
+                  "name": "eachNewRequestIsTheTasksOwn",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::eachNewRequestIsTheTasksOwn",
+                  "kind": "requirement",
+                  "shortName": "L.sched.107",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 1102
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::eachNewRequestIsTheTasksOwn",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"At each new request of a fair entity -- its enqueue, the renewal of a spent request, a yield, a change of weight, a levelling and the direct switch's arrival -- the scheduler shall set its virtual deadline to its virtual runtime plus effective_request(its requested slice, the queue's slice) at its weight, the queue's slice standing for a request of zero; a changed request shall take effect at the entity's next new request.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1110
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::eachNewRequestIsTheTasksOwn",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"Host tests every_new_request_is_measured_with_the_entitys_own, a_request_is_carried_and_a_change_waits_for_the_next, a_shorter_request_is_picked_first and hand_over_is_the_general_sequence; stage 5's slice check: three spinners pinned to one processor are each seen waiting exactly one effective request from their deadline. Control: the renewal measured with the queue's slice -- the check fails with 'a renewed request ignored the task's slice'.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1119
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::eachNewRequestIsTheTasksOwn",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.2\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1120
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::eachNewRequestIsTheTasksOwn",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"sched::set_request\", \"sched::queue::CpuQueue::set_request\", \"sched::task::Task::set_request\", \"sched::task::Task::entity_state\", \"sched::task::Task::store_entity_state\")",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1123
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "noRequestIsLongerThanTheSlice",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::noRequestIsLongerThanTheSlice",
+                  "kind": "requirement",
+                  "shortName": "L.sched.108",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 1125
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::noRequestIsLongerThanTheSlice",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"No entity shall be given a request longer than its queue's slice, whatever it asks for; the lag limit, the placement of an arriving entity and the interval to the next decision shall be measured with the queue's slice alone.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1129
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::noRequestIsLongerThanTheSlice",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"Host tests the_effective_request_is_the_ask_capped_at_the_slice and no_request_moves_a_bound (placement, the lag left with and the decision interval identical for every request); stage 5's slice check: a spinner asking for twice the largest slice is never seen further from its deadline than that slice. Control: the cap removed -- 'a request longer than the queue's slice was granted'.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1137
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::noRequestIsLongerThanTheSlice",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.2\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1138
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::noRequestIsLongerThanTheSlice",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "\"sched::queue::CpuQueue::request_sample\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1139
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "aTaskIsMadeWithItsThreadsRequest",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::aTaskIsMadeWithItsThreadsRequest",
+                  "kind": "requirement",
+                  "shortName": "L.sched.109",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 1141
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::aTaskIsMadeWithItsThreadsRequest",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"prepare_user shall give a user task its thread's slice request before any queue can see it, so that a thread made by clone or fork, which starts with its creator's request, and a thread after execve, which keeps its own, run with it from their first pick.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1146
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::aTaskIsMadeWithItsThreadsRequest",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"test-threads' slice step: sched_setattr and sched_getattr round trip, 99 us read back as 100 us and 101 ms as 100 ms, RESET_ON_FORK refused, a forked child and a new thread read their creator's request, as uid 1000 pid 1's thread EPERM and SCHED_FIFO refused; sched_getattr reads the task's request. The exec half is argued by construction and not yet run: sys_execve keeps the caller's Thread and Task (end_other_threads) and Thread::reset_for_exec clears only dispatch and name; the run from a file on the N150 box's disk is a BACKLOG row (ledger 5232 (4)). Control: prepare_user making the task with no request -- the step fails with 'a child did not start with its creator's slice request'.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1158
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::aTaskIsMadeWithItsThreadsRequest",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.1\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1159
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::SliceRequests::aTaskIsMadeWithItsThreadsRequest",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "\"sched::prepare_user\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 1160
                       }
                     }
                   ]

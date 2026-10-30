@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 150 | 97 | 53 |
-| Low (`L.*`) | 1175 | 910 | 265 |
+| Low (`L.*`) | 1178 | 913 | 265 |
 
-2632 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2639 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2635 |
-| Accessors, covered by the requirement they serve | 1124 |
+| Named by a low-level requirement | 2642 |
+| Accessors, covered by the requirement they serve | 1125 |
 | Check code in a product file | 94 |
-| Named by none | 948 |
+| Named by none | 946 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -749,6 +749,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.104` | A processor parking shall move every queued task and every sleeper of its own off to processors in service, under the two queues' locks, keeping each sleeper's due time; a task found there while parked shall be drained and counted. | test-quarantine: /proc/ferrix-service says service out drained 0 for the target after the CPU-bound loops and the readers; the loops go on on the others; fifty times out and back with the loops running, none lost, the longest move's hold printed (MEMORY-AND-TIMING 2.2e2). | H.SCHED.18 | `sched::evacuate`, `sched::move_one_off`, `sched::queue::CpuQueue::take_movable_sleeper`, `sched::park`, `sched::drained`, `sched::pick_or_park`, `sched::steal_from`, `sched::move_hold_max` | `tools/common/xtask/src/quarantine.rs::test_quarantine` | xtask gate | xtask gate | xtask gate |
 | `L.sched.105` | Taking a processor out shall check every refusal before any state changes, clear its ACTIVE bit and wait a grace period before asking the park, and move its park state Active to Parking to Parked by compare-exchange; a park not made by the deadline shall be cancelled by compare-exchange Parking to Cancelled and the processor put back. | The native boot check a_processor_leaves_service_through_its_token_alone: a park whose deadline has passed, asked of nobody, is cancelled and the processor left in service; test-quarantine's fifty cycles each park and return. Control: the park loop with interrupts left masked -- a shootdown is never answered and the kernel stops, which fires. | H.SCHED.18 | `sched::take_out_of_service`, `sched::service_refusal`, `sched::park_transition` | `src/kernel/src/syscall/native_check.rs::a_processor_leaves_service_through_its_token_alone` | not reached | not reached | not reached |
 | `L.sched.106` | A processor brought back shall flush its whole TLB, global entries and every PCID included, and re-arm its timer before its ACTIVE bit is set, last. | test-quarantine: root's echo 1 brings the target back and online names it again; fifty times out and back under load. The flush is CR4.PGE's toggle (SDM vol. 3A 4.10.4.1), argued. | H.SCHED.18 | `sched::put_back_in_service`, `sched::park`, `arch::x86_64::flush_tlb` | `tools/common/xtask/src/quarantine.rs::test_quarantine` | xtask gate | xtask gate | xtask gate |
+
+### SliceRequests
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.sched.107` | At each new request of a fair entity -- its enqueue, the renewal of a spent request, a yield, a change of weight, a levelling and the direct switch's arrival -- the scheduler shall set its virtual deadline to its virtual runtime plus effective_request(its requested slice, the queue's slice) at its weight, the queue's slice standing for a request of zero; a changed request shall take effect at the entity's next new request. | Host tests every_new_request_is_measured_with_the_entitys_own, a_request_is_carried_and_a_change_waits_for_the_next, a_shorter_request_is_picked_first and hand_over_is_the_general_sequence; stage 5's slice check: three spinners pinned to one processor are each seen waiting exactly one effective request from their deadline. Control: the renewal measured with the queue's slice -- the check fails with 'a renewed request ignored the task's slice'. | H.SCHED.2 | `sched::set_request`, `sched::queue::CpuQueue::set_request`, `sched::task::Task::set_request`, `sched::task::Task::entity_state`, `sched::task::Task::store_entity_state` | `src/kernel/src/sched/slice_check.rs::run`, `src/lib/kernel/sched/src/tests.rs::the_effective_request_is_the_ask_capped_at_the_slice`, `src/lib/kernel/sched/src/tests.rs::every_new_request_is_measured_with_the_entitys_own`, `src/lib/kernel/sched/src/tests.rs::a_shorter_request_is_picked_first`, `src/lib/kernel/sched/src/tests.rs::a_request_is_carried_and_a_change_waits_for_the_next` | host test | host test | host test |
+| `L.sched.108` | No entity shall be given a request longer than its queue's slice, whatever it asks for; the lag limit, the placement of an arriving entity and the interval to the next decision shall be measured with the queue's slice alone. | Host tests the_effective_request_is_the_ask_capped_at_the_slice and no_request_moves_a_bound (placement, the lag left with and the decision interval identical for every request); stage 5's slice check: a spinner asking for twice the largest slice is never seen further from its deadline than that slice. Control: the cap removed -- 'a request longer than the queue's slice was granted'. | H.SCHED.2 | `sched::queue::CpuQueue::request_sample` | `src/kernel/src/sched/slice_check.rs::run`, `src/lib/kernel/sched/src/tests.rs::the_effective_request_is_the_ask_capped_at_the_slice`, `src/lib/kernel/sched/src/tests.rs::no_request_moves_a_bound` | host test | host test | host test |
+| `L.sched.109` | prepare_user shall give a user task its thread's slice request before any queue can see it, so that a thread made by clone or fork, which starts with its creator's request, and a thread after execve, which keeps its own, run with it from their first pick. | test-threads' slice step: sched_setattr and sched_getattr round trip, 99 us read back as 100 us and 101 ms as 100 ms, RESET_ON_FORK refused, a forked child and a new thread read their creator's request, as uid 1000 pid 1's thread EPERM and SCHED_FIFO refused; sched_getattr reads the task's request. The exec half is argued by construction and not yet run: sys_execve keeps the caller's Thread and Task (end_other_threads) and Thread::reset_for_exec clears only dispatch and name; the run from a file on the N150 box's disk is a BACKLOG row (ledger 5232 (4)). Control: prepare_user making the task with no request -- the step fails with 'a child did not start with its creator's slice request'. | H.SCHED.1 | `sched::prepare_user` | `tools/common/xtask/src/threads.rs::test_threads` | xtask gate | xtask gate | xtask gate |
 
 ### Discovery
 
@@ -2454,6 +2462,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/preempt_check.rs::an_underflow_is_refused` | kernel | L.sched.21 |
 | `src/kernel/src/sched/preempt_check.rs::may_block_reads_its_own_count` | kernel | L.sched.22 |
 | `src/kernel/src/sched/preempt_check.rs::the_count_survives_preemption_and_moves` | kernel | L.sched.20 |
+| `src/kernel/src/sched/slice_check.rs::run` | kernel | L.sched.107, L.sched.108 |
 | `src/kernel/src/sched/work/check.rs::run` | kernel | L.sched.32, L.sched.34 |
 | `src/kernel/src/service_check.rs::a_claim_is_refused_while_its_driver_lives` | kernel | L.claim.1, L.claim.5 |
 | `src/kernel/src/service_check.rs::a_claim_or_a_number_without_memory_is_refused` | kernel | L.claim.8 |
@@ -2802,13 +2811,18 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_box_units_and_qemus_are_of_versions_read_against` | host | L.iommu.59 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_queue_registers_name_slots_of_sixteen_bytes` | host | L.iommu.47 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_widest_walk_offered_is_taken` | host | L.iommu.60 |
+| `src/lib/kernel/sched/src/tests.rs::a_request_is_carried_and_a_change_waits_for_the_next` | host | L.sched.107 |
+| `src/lib/kernel/sched/src/tests.rs::a_shorter_request_is_picked_first` | host | L.sched.107 |
 | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host | L.sched.63 |
 | `src/lib/kernel/sched/src/tests.rs::a_wake_is_wide_only_between_many_partners` | host | L.sched.91 |
+| `src/lib/kernel/sched/src/tests.rs::every_new_request_is_measured_with_the_entitys_own` | host | L.sched.107 |
 | `src/lib/kernel/sched/src/tests.rs::flips_halve_after_a_second_and_count_changes` | host | L.sched.91 |
 | `src/lib/kernel/sched/src/tests.rs::hand_over_is_the_general_sequence` | host | L.sched.55, H.SCHED.13 |
+| `src/lib/kernel/sched/src/tests.rs::no_request_moves_a_bound` | host | L.sched.108 |
 | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host | L.sched.1 |
 | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host | L.object.160 |
 | `src/lib/kernel/sched/src/tests.rs::the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them` | host | L.sched.66 |
+| `src/lib/kernel/sched/src/tests.rs::the_effective_request_is_the_ask_capped_at_the_slice` | host | L.sched.107, L.sched.108 |
 | `src/lib/kernel/sched/src/tests.rs::the_pull_weighs_the_home_at_108_percent` | host | L.sched.90 |
 | `src/lib/kernel/sched/src/tests.rs::utilisation_is_runtime_over_the_window` | host | L.sched.90 |
 | `src/lib/kernel/sched/src/tests.rs::yielding_alone_leaves_the_request_as_it_was` | host | L.sched.2 |
@@ -3053,3 +3067,4 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/scrub.rs::test_scrub` | gate | H.FAIL.9, L.mm.101, L.mm.103, L.mm.106, L.mm.107, L.armv7a.29 |
 | `tools/common/xtask/src/scrub.rs::the_scrub_facade_writes_without_reading_and_evicts_every_line` | gate | L.x86_64.243, L.aarch64.68 |
 | `tools/common/xtask/src/smbios.rs::problem` | gate | H.BOOT.16 |
+| `tools/common/xtask/src/threads.rs::test_threads` | gate | L.sched.109 |

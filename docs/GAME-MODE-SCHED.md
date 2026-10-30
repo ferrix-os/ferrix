@@ -166,7 +166,9 @@ same share as before, because its weight is unchanged.
 **The system calls** (load ring, `syscall/limits.rs`; no L id, as ledger
 3538 and (D10) put the syscall surface):
 
-* `sched_setattr(pid, attr, 0)` with `SCHED_OTHER` or `SCHED_BATCH`:
+* `sched_setattr(pid, attr, 0)` with `SCHED_OTHER` alone (`SCHED_BATCH`
+  is refused as `sched_setscheduler` refuses it; `SCHED_FLAG_KEEP_POLICY`
+  and `SCHED_FLAG_KEEP_PARAMS` are honoured):
   `sched_nice` applied as `setpriority` applies it today, and
   `sched_runtime` zero for none, otherwise clamped to 0.1 to 100 ms and
   stored as `r`, as Linux 7.0's `__setparam_fair` clamps it
@@ -177,9 +179,9 @@ same share as before, because its weight is unchanged.
   `attr.size` handled as Linux's `sched_copy_attr` (`E2BIG` with the size
   written back for a larger unknown tail that is not zero).
 * `sched_getattr` answers the policy, the nice value and `sched_runtime`
-  as the stored `r`, or the queue's current slice when `r` is zero (Linux
-  answers `se.slice`, its base slice when none was asked; so the parity
-  lines print no slice value, C1).
+  as the stored `r`, or with none the slice a task alone on its queue is
+  given (`sched::BASE_SLICE_NS`, 3 ms), as Linux answers its base slice;
+  so the parity lines print no slice value (C1).
 
 **What F7 does not do alone.** A task woken with negative lag is not
 eligible, and waits for the next decision whatever its request
@@ -198,22 +200,30 @@ and without F6 if F6 lands first.
   queue's slice; `hand_over`'s bit-for-bit test extended with a request;
   the lag limit unchanged by any `r`; two eligible entities, one asking
   for `MIN_REQUEST_NS`, the other none: the short one is picked first.
-* **Boot check (`sched/slice_check.rs`, L.sched.107-108):** two spinners
-  pinned to one processor, one asking for the minimum, one for nothing,
-  and a third asking for twice the queue's slice. At each switch-in read
-  through `sched::inspect`, each one's deadline less its virtual runtime
-  is its effective request at its weight. Three attempts.
+* **Boot check (`sched/slice_check.rs`, L.sched.107-108):** three
+  spinners at the unit weight pinned to the last processor, asking for the
+  minimum, for nothing and for twice the largest slice, sampled from
+  another processor under that queue's lock (`CpuQueue::request_sample`).
+  No sample is further from its deadline than the spinner's effective
+  request against the largest slice, and each spinner is seen waiting
+  exactly one effective request from its deadline at least once. Three
+  attempts of a thousand samples; one processor alone runs nothing and
+  says so.
 * **Controls:** the renewal measured with the queue's slice
   (`update_curr` ignoring `r`): "a renewed request ignored the task's
   slice"; the cap removed: "a request longer than the queue's slice was
   granted". Both through `gate.sh control --expect`, FIRED.
 * **test-threads steps (L.sched.109 and the load surface):**
   `sched_setattr` and `sched_getattr` round trip; 99 µs read back as
-  100 µs and 101 ms as 100 ms; `EINVAL` for `SCHED_FIFO` and
-  `RESET_ON_FORK`; a fork child reads its parent's request; an exec keeps
-  it; another user's task `EPERM`. Lines compared with Linux 7.0 on the
-  same processor count (D12's practice). Control: the child given no
-  request.
+  100 µs and 101 ms as 100 ms; `RESET_ON_FORK` `EINVAL` (Linux takes it,
+  and the step accepts either); a new thread and a fork child read their
+  creator's request; an exec keeps it (run only where the program is a
+  file: booted as init by `test-threads` it came from no file and the step
+  says "execve not run"; the case is run from the box's disk, §7); as uid
+  1000, pid 1's thread `EPERM`
+  and `SCHED_FIFO` refused (`EINVAL` here, `EPERM` on Linux). Lines
+  compared with Linux 7.0 on the same processor count (D12's practice).
+  Control: the request not copied at clone and fork.
 
 F3's checks and controls are (D11)'s, as (A9) assigns them to ids: 96
 the kernel-thread refusal (a canary in `check.rs`; control: the refusal
@@ -693,11 +703,17 @@ design reviews the same day, internal and not independent verification
 
 | § | Piece | Verdict | Ledger | Built |
 |---|---|---|---|---|
-| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | no |
+| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | F7 built, code review OK IF (1)-(6), ledger 5232; F3 being built |
 | 3 | The frame mark | OK IF (K1)-(K12) | 5170 | no |
 | 4 | Lends | OK IF (N1)-(N8); no code before §3 lands | 5184 | no |
 | 5 | Idle-gap class | OK IF (G1)-(G5), design only | 5194 | no |
 | 6 | Deadlines | OK IF (E1)-(E5), design only | 5201 | no |
+
+F7's code review (ledger 5232, OK IF (1)-(6)): `check` passed on the
+landing hash; rebased onto develop with the rows cited; MEMORY-AND-TIMING's
+setter cost corrected; L.sched.109's exec half argued by construction and
+not yet run (a BACKLOG row runs it from the box's disk); the step run on
+Linux 7.0 and compared in the commit; this line.
 
 What each piece still owes before its code review: §2 the list of every
 reader of the mask and of `r` with the lock it holds (A5), and the

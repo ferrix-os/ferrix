@@ -515,6 +515,29 @@ impl CpuQueue {
         let _ = self.fair.set_weight(task.id, weight);
     }
 
+    /// Task `id`'s request as the fair class holds it, for stage 5's check of
+    /// slice requests (L.sched.107-108): its deadline less its virtual
+    /// runtime, its weight, what it asked for, whether it is running, and
+    /// the queue's slice now. `None` if it is not on this queue.
+    pub(crate) fn request_sample(&self, id: TaskId) -> Option<(i64, u32, u64, bool, u64)> {
+        let view = self.fair.get(id)?;
+        Some((
+            view.deadline.wrapping_sub(view.vruntime) as i64,
+            view.weight,
+            view.request_ns,
+            view.running,
+            self.fair.slice_ns(),
+        ))
+    }
+
+    /// Give a task a new slice request, whether it is running here, queued
+    /// here or neither (L.sched.107). Its own record is set either way; the
+    /// fair class keeps the deadline it has and measures the next with it.
+    pub(crate) fn set_request(&mut self, task: &Arc<Task>, request_ns: u64) {
+        task.set_request(request_ns);
+        let _ = self.fair.set_request(task.id, request_ns);
+    }
+
     /// Take the running task out of the fair class, keeping what it needs to
     /// come back with.
     pub(crate) fn detach_current(&mut self) {

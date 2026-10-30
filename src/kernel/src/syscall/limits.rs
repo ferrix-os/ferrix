@@ -55,6 +55,8 @@ pub(crate) fn dispatch(
         Syscall::SchedGetparam => sys_sched_getparam(process, int(a[0]), a[1]),
         Syscall::SchedSetparam => sys_sched_setparam(process, int(a[0]), a[1]),
         Syscall::SchedGetscheduler => sys_sched_getscheduler(process, int(a[0])),
+        Syscall::SchedSetattr => sys_sched_setattr(process, int(a[0]), a[1], a[2]),
+        Syscall::SchedGetattr => sys_sched_getattr(process, int(a[0]), a[1], a[2] as u32, a[3]),
         Syscall::SchedSetscheduler => sys_sched_setscheduler(process, int(a[0]), int(a[1]), a[2]),
         Syscall::SchedGetPriorityMax => priority_range(int(a[0])).map(|(_, max)| max),
         Syscall::SchedGetPriorityMin => priority_range(int(a[0])).map(|(min, _)| min),
@@ -398,6 +400,184 @@ pub(crate) fn sys_sched_setparam(process: &Process, pid: i32, at: u64) -> Result
         return Err(Errno::EPERM);
     }
     Ok(0)
+}
+
+/// `SCHED_ATTR_SIZE_VER0`: `struct sched_attr` up to `sched_period`.
+const SCHED_ATTR_SIZE_VER0: usize = 48;
+/// `SCHED_ATTR_SIZE_VER1`: with the utilisation clamps, the whole structure
+/// as this kernel knows it.
+const SCHED_ATTR_SIZE_VER1: usize = 56;
+/// Linux's `PAGE_SIZE` bound on a `sched_attr` a caller may pass.
+const SCHED_ATTR_SIZE_MAX: usize = 4096;
+/// `SCHED_FLAG_KEEP_POLICY`: leave the policy as it is.
+const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+/// `SCHED_FLAG_KEEP_PARAMS`: leave the nice value and the slice as they are.
+const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+/// The longest `sched_runtime` a fair task may ask for, 100 ms: Linux's
+/// ceiling in `__setparam_fair`. What the queue then grants is never longer
+/// than its own slice (`ferrix_sched::effective_request`).
+const MAX_REQUEST_NS: u64 = 100_000_000;
+
+/// `sched_setattr`: the nice value and the slice request of a fair thread
+/// (`docs/GAME-MODE-SCHED.md` §2.2, F7; L.sched.109).
+///
+/// Only `SCHED_OTHER` at priority zero, as [`sys_sched_setscheduler`]
+/// accepts; every other policy, `SCHED_FLAG_RESET_ON_FORK`, the reclaim and
+/// overrun flags, the utilisation clamps and any unknown flag are `EINVAL`.
+/// `sched_runtime` is zero for the queue's slice, or clamped to 0.1 to
+/// 100 ms as Linux 7.0's `__setparam_fair` clamps it. The structure is read
+/// as `sched_copy_attr` reads it: a size of zero is the first version's, a
+/// size below it or above a page is `E2BIG` with this kernel's size written
+/// back, and so is a larger structure whose unknown tail is not zero.
+/// Permission is `setpriority`'s, except that a nice value lowered without
+/// privilege is `EPERM` here, as `sched_setattr`'s `can_nice` answers.
+pub(crate) fn sys_sched_setattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    flags: u64,
+) -> Result<usize, Errno> {
+    if at == 0 || pid < 0 || flags != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let attr = read_sched_attr(process, at)?;
+    let keep_policy = attr.flags & SCHED_FLAG_KEEP_POLICY != 0;
+    let keep_params = attr.flags & SCHED_FLAG_KEEP_PARAMS != 0;
+    if attr.flags & !(SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0
+        || (!keep_policy && attr.policy != SCHED_OTHER as u32)
+        || attr.priority != 0
+    {
+        return Err(Errno::EINVAL);
+    }
+    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
+    if !credentials::same_owner(process, thread.process()) {
+        return Err(Errno::EPERM);
+    }
+    if keep_params {
+        return Ok(0);
+    }
+    let nice = attr.nice.clamp(-20, 19);
+    if nice < thread.nice() && credentials::require_privilege(process).is_err() {
+        return Err(Errno::EPERM);
+    }
+    let request = match attr.runtime {
+        0 => 0,
+        asked => asked.clamp(ferrix_sched::MIN_REQUEST_NS, MAX_REQUEST_NS),
+    };
+    thread.set_nice(nice);
+    if let Some(task) = attributes::task_of(&thread) {
+        attributes::apply_nice(thread.nice(), &task);
+    }
+    attributes::set_slice_request(&thread, request);
+    Ok(0)
+}
+
+/// `sched_getattr`: the policy, the nice value and the slice request of a
+/// fair thread, written as `sched_attr_copy_to_user` writes them: as much of
+/// the structure as both sides know, with `size` saying how much that was.
+/// `sched_runtime` is the request the thread's task has, or with none the
+/// slice a task alone on its queue is given; Linux answers its own base
+/// slice there.
+pub(crate) fn sys_sched_getattr(
+    process: &Process,
+    pid: i32,
+    at: u64,
+    size: u32,
+    flags: u64,
+) -> Result<usize, Errno> {
+    let size = size as usize;
+    if at == 0
+        || pid < 0
+        || flags != 0
+        || !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size)
+    {
+        return Err(Errno::EINVAL);
+    }
+    let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
+    // The task's own record, which is what its queue is told, not the
+    // thread's: so a task made without its thread's request reads none
+    // (L.sched.109's check).
+    let asked =
+        attributes::task_of(&thread).map_or(thread.slice_request(), |task| task.request_ns());
+    let runtime = match asked {
+        0 => crate::sched::BASE_SLICE_NS,
+        asked => asked,
+    };
+    let written = size.min(SCHED_ATTR_SIZE_VER1);
+    let mut attr = [0_u8; SCHED_ATTR_SIZE_VER1];
+    put(&mut attr, 0, &(written as u32).to_ne_bytes());
+    put(&mut attr, 4, &(SCHED_OTHER as u32).to_ne_bytes());
+    put(&mut attr, 16, &thread.nice().to_ne_bytes());
+    put(&mut attr, 24, &runtime.to_ne_bytes());
+    let out = attr.get(..written).ok_or(Errno::EINVAL)?;
+    uaccess::copy_to_user(process.space(), at, out).map_err(|_| Errno::EFAULT)?;
+    Ok(0)
+}
+
+/// Write `bytes` into `buffer` at `offset`, where they always fit.
+fn put(buffer: &mut [u8], offset: usize, bytes: &[u8]) {
+    if let Some(field) = buffer.get_mut(offset..offset + bytes.len()) {
+        field.copy_from_slice(bytes);
+    }
+}
+
+/// The fields of a `struct sched_attr` this kernel reads.
+struct SchedAttr {
+    /// `sched_policy`.
+    policy: u32,
+    /// `sched_flags`.
+    flags: u64,
+    /// `sched_nice`.
+    nice: i32,
+    /// `sched_priority`.
+    priority: u32,
+    /// `sched_runtime`, in nanoseconds.
+    runtime: u64,
+}
+
+/// Read a `struct sched_attr` from `at` as Linux's `sched_copy_attr` does.
+fn read_sched_attr(process: &Process, at: u64) -> Result<SchedAttr, Errno> {
+    let too_big = || {
+        let _ = uaccess::put_u32(process.space(), at, SCHED_ATTR_SIZE_VER1 as u32);
+        Errno::E2BIG
+    };
+    let size = match uaccess::get_u32(process.space(), at)? as usize {
+        0 => SCHED_ATTR_SIZE_VER0,
+        size => size,
+    };
+    if !(SCHED_ATTR_SIZE_VER0..=SCHED_ATTR_SIZE_MAX).contains(&size) {
+        return Err(too_big());
+    }
+    let mut raw = [0_u8; SCHED_ATTR_SIZE_VER1];
+    let known = size.min(SCHED_ATTR_SIZE_VER1);
+    let head = raw.get_mut(..known).ok_or(Errno::EINVAL)?;
+    uaccess::copy_from_user(process.space(), at, head).map_err(|_| Errno::EFAULT)?;
+    // `copy_struct_from_user`: a tail this kernel does not know must be zero.
+    if size > SCHED_ATTR_SIZE_VER1 {
+        let mut tail = vec![0_u8; size - SCHED_ATTR_SIZE_VER1];
+        uaccess::copy_from_user(process.space(), at + SCHED_ATTR_SIZE_VER1 as u64, &mut tail)
+            .map_err(|_| Errno::EFAULT)?;
+        if tail.iter().any(|&byte| byte != 0) {
+            return Err(too_big());
+        }
+    }
+    let word = |offset: usize| {
+        raw.get(offset..offset + 4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .unwrap_or_default()
+    };
+    let long = |offset: usize| {
+        raw.get(offset..offset + 8)
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+            .unwrap_or_default()
+    };
+    Ok(SchedAttr {
+        policy: u32::from_ne_bytes(word(4)),
+        flags: u64::from_ne_bytes(long(8)),
+        nice: i32::from_ne_bytes(word(16)),
+        priority: u32::from_ne_bytes(word(20)),
+        runtime: u64::from_ne_bytes(long(24)),
+    })
 }
 
 /// `sched_getscheduler`: `SCHED_OTHER`, for every process.

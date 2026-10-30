@@ -1092,4 +1092,72 @@ package FerrixSchedRequirements {
                 "arch::x86_64::flush_tlb");
         }
     }
+
+    package SliceRequests {
+        doc /* src/lib/kernel/sched, sched/queue.rs, sched/mod.rs and
+             * syscall/thread.rs: a slice a task asks for (F7,
+             * docs/GAME-MODE-SCHED.md section 2.2; the consultant's design
+             * review, ledger 5156). */
+
+        requirement <'L.sched.107'> eachNewRequestIsTheTasksOwn : ItemLowLevel {
+            attribute :>> statement = "At each new request of a fair entity -- its
+                enqueue, the renewal of a spent request, a yield, a change of
+                weight, a levelling and the direct switch's arrival -- the
+                scheduler shall set its virtual deadline to its virtual runtime
+                plus effective_request(its requested slice, the queue's slice)
+                at its weight, the queue's slice standing for a request of
+                zero; a changed request shall take effect at the entity's next
+                new request.";
+            attribute :>> criterion = "Host tests
+                every_new_request_is_measured_with_the_entitys_own,
+                a_request_is_carried_and_a_change_waits_for_the_next,
+                a_shorter_request_is_picked_first and
+                hand_over_is_the_general_sequence; stage 5's slice check: three
+                spinners pinned to one processor are each seen waiting exactly
+                one effective request from their deadline. Control: the renewal
+                measured with the queue's slice -- the check fails with 'a
+                renewed request ignored the task's slice'.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = ("sched::set_request", "sched::queue::CpuQueue::set_request",
+                "sched::task::Task::set_request", "sched::task::Task::entity_state",
+                "sched::task::Task::store_entity_state");
+        }
+        requirement <'L.sched.108'> noRequestIsLongerThanTheSlice : ItemLowLevel {
+            attribute :>> statement = "No entity shall be given a request longer
+                than its queue's slice, whatever it asks for; the lag limit, the
+                placement of an arriving entity and the interval to the next
+                decision shall be measured with the queue's slice alone.";
+            attribute :>> criterion = "Host tests
+                the_effective_request_is_the_ask_capped_at_the_slice and
+                no_request_moves_a_bound (placement, the lag left with and the
+                decision interval identical for every request); stage 5's slice
+                check: a spinner asking for twice the largest slice is never
+                seen further from its deadline than that slice. Control: the cap
+                removed -- 'a request longer than the queue's slice was
+                granted'.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = "sched::queue::CpuQueue::request_sample";
+        }
+        requirement <'L.sched.109'> aTaskIsMadeWithItsThreadsRequest : ItemLowLevel {
+            attribute :>> statement = "prepare_user shall give a user task its
+                thread's slice request before any queue can see it, so that a
+                thread made by clone or fork, which starts with its creator's
+                request, and a thread after execve, which keeps its own, run
+                with it from their first pick.";
+            attribute :>> criterion = "test-threads' slice step: sched_setattr
+                and sched_getattr round trip, 99 us read back as 100 us and
+                101 ms as 100 ms, RESET_ON_FORK refused, a forked child and a
+                new thread read their creator's request, as uid 1000 pid 1's
+                thread EPERM and SCHED_FIFO refused; sched_getattr reads the
+                task's request. The exec half is argued by construction and
+                not yet run: sys_execve keeps the caller's Thread and Task
+                (end_other_threads) and Thread::reset_for_exec clears only
+                dispatch and name; the run from a file on the N150 box's disk
+                is a BACKLOG row (ledger 5232 (4)). Control: prepare_user making the task with no
+                request -- the step fails with 'a child did not start with its
+                creator's slice request'.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::prepare_user";
+        }
+    }
 }

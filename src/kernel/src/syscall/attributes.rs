@@ -829,8 +829,31 @@ pub(crate) fn sys_setpriority(
     answer
 }
 
+/// The thread `tid` names, in the caller's pid namespace, or the caller's own
+/// for zero: what `sched_setattr` and `sched_getattr` act on, which Linux
+/// resolves per thread as `setpriority(PRIO_PROCESS, ..)` does.
+pub(crate) fn thread_named(
+    process: &Process,
+    tid: i32,
+) -> Option<Arc<crate::syscall::thread::Thread>> {
+    threads_named_by(process, PRIO_PROCESS, tid)
+        .ok()?
+        .into_iter()
+        .next()
+}
+
+/// Give `thread` the slice request `request_ns` (zero for its queue's), and
+/// its task, if it is alive, the same (L.sched.109). The value read back
+/// after the store is the one applied, as `setpriority` applies a nice value.
+pub(crate) fn set_slice_request(thread: &crate::syscall::thread::Thread, request_ns: u64) {
+    thread.set_slice_request(request_ns);
+    if let Some(task) = task_of(thread) {
+        crate::sched::set_request(&task, thread.slice_request());
+    }
+}
+
 /// The task that runs `thread`, if it is still alive.
-fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
+pub(crate) fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
     thread.process().tasks().into_iter().find(|task| {
         crate::syscall::thread::of_task(task).is_some_and(|runs| core::ptr::eq(runs, thread))
     })
