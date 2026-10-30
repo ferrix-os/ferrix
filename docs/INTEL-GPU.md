@@ -1858,6 +1858,145 @@ Linux carries none of them. That costs hours of setup and a 120 GB game
 copy. A microbench of `GET_CAP` alone would be cheap, but it says nothing
 about i915's settle, because i915 has none per ioctl.
 
+## 14. Large GPU pages: 64 KiB and 2 MiB PPGTT entries (2026-10-30)
+
+### 14.1 Why
+
+Measured on the N150 with one Vulkan probe (`~/.local/share/ferrix/gpu-probe`,
+compute shaders over 256 MiB buffers, GPU timestamps, 1000 MHz) and the same
+Mesa 25.0.7 anv under both kernels:
+
+| test | Linux i915, shmem THP | Linux i915, THP denied | Ferrix |
+|---|---|---|---|
+| FMA GFLOPS | 340 | - | 340 |
+| shader read GB/s | 20.7 | 18.2 | 17.7 |
+| shader copy GB/s | 21.7 | 19.7 | 16.4 |
+
+ALU is equal; the gap is in memory reach. i915 on Gen12 backs a large
+object from shmem with transparent huge pages and maps it with 2 MiB PDEs
+(`gen8_ppgtt_insert_huge`), or with 64 KiB pages (`GEN8_PDE_IPS_64K`) where
+the backing is 64 KiB-contiguous but not 2 MiB. Ferrix maps every page with
+a 4 KiB PTE (`ppgtt.rs`: "64 KiB and 2 MiB pages left out"), so the GPU's
+TLB covers 1/512 of what it covers on Linux. anv already asks for the
+layout: every BO of 1 MiB or more gets a 2 MiB-aligned GPU address on ICL+
+(`anv_allocator.c`, "Opportunistically align addresses to 2Mb ... for the
+kernel to use Transparent Huge Pages"). Endfield runs GPU-bound at 99.9 %;
+the expected gain is the memory-bound share of its frame, about 5-15 %.
+
+### 14.2 What i915 does, and what this driver will do
+
+`gen8_ppgtt_insert_huge`, for each 2 MiB-aligned GPU address of a binding:
+
+* **2 MiB**: the backing's next 2 MiB are one run from a 2 MiB-aligned
+  device address. The level-1 entry (PDE) itself maps them:
+  `pte_encode(addr, pat) | GEN8_PDE_PS_2M` (bit 7). No leaf table.
+* **64 KiB**: otherwise, the binding covers the whole 2 MiB and every 64 KiB
+  of it is one run from a 64 KiB-aligned address. All 512 4 KiB PTEs are
+  written as for 4 KiB pages, then `GEN8_PDE_IPS_64K` (bit 11) is set in the
+  PDE; the hardware then reads every 16th PTE as a 64 KiB page. i915 below
+  12.50 has no 64 KiB scratch, so it sets IPS only for a full table
+  (`index == I915_PDES`); the same here.
+* **4 KiB**: anything else, as today.
+
+The driver decides from the device addresses alone (runs in the pin's
+address list), so it is right whatever memory it gets: a dmabuf imported
+from elsewhere, a pin the kernel could not give large blocks, a VMO a
+client touched before the pin. Large pages are an optimisation, never a
+requirement; correctness is the 4 KiB path's.
+
+Tree rules (`ppgtt.rs`, whose own record is the hardware entries):
+
+* a level-1 entry with PS is a leaf: walks (`leaf`, `translate`,
+  `alloc_level`, `clear_level`) never descend into it. Allocating over it
+  is refused (`Range`, as an overlapping bind is); clearing it writes the
+  level's scratch entry and frees no table. A clear that covers only part
+  of a 2 MiB page is refused, which no unbind does (an unbind is a whole
+  binding);
+* clearing any entry of a leaf table whose PDE has IPS first clears IPS, so
+  the hardware reads the remaining PTEs as 4 KiB pages again. Every PTE of
+  such a table is a correct 4 KiB entry, so dropping IPS never exposes a
+  wrong page; keeping IPS over a scratch PTE would make it a 64 KiB page
+  past the 4 KiB scratch page, so it is never kept;
+* a 2 MiB entry goes in only where its PDE is scratch or a leaf table that
+  holds scratch entries alone (freed then). Binding never overwrites a live
+  mapping, as today.
+
+PAT: Gen12.0's `max_pat_index` is 3, so `GEN12_PPGTT_PTE_PAT2` (bit 7, the
+same bit as PS) is never set, and a PS entry's PAT bits are bits 3-4 as in
+a PTE (i915 does the same).
+
+### 14.3 Where the backing comes from: one kernel option
+
+Today a GEM object is an anonymous VMO the driver pins at its first bind;
+its frames are committed one at a time (at the pin, or earlier at a
+client's page fault through its mmap), so they are contiguous only by
+chance. Large pages need naturally aligned blocks from the buddy
+allocator. The kernel already gives one block to `PIN_CONTIGUOUS`
+(`Vmo::commit_run`, `docs/NVIDIA.md` §4.3), but only one per pin, and a pin
+per 2 MiB would pass the 4096-handle limit (`object::HANDLE_LIMIT`) with a
+game's 2-3 GiB of objects.
+
+**Proposed: `PIN_BLOCKS`**, a `vmo_pin` option whose bits 8-11 name the
+largest block order the caller wants (`PIN_BLOCKS | order << 8`, order at
+most `MAX_ORDER`). Before the ordinary hold and pin, the kernel commits the
+range's **absent** pages with naturally aligned blocks, best effort:
+
+* at page `i` of the VMO, the order tried is the largest `o <= order` with
+  `i` a multiple of `2^o` and `i..i + 2^o` inside the range and wholly
+  absent; then `commit_run(i, 2^o)`, as `PIN_CONTIGUOUS` uses it (fresh
+  zeroed frames, each charged to the caller's job, the program watermark
+  kept, inserted under the pages lock or not at all);
+* on `OutOfMemory` the next lower order is tried, and no order above a
+  failed one is tried again in this call (no retry storm once the allocator
+  has no more large blocks); at order 0 a failure ends the pre-commit and
+  the hold that follows reports the shortage as today;
+* a committed page is skipped; `Committed` from a race is a smaller order,
+  down to the page being skipped; a file's VMO (`NotAnonymous`) is not
+  pre-committed at all;
+* then `vmo.hold` and `pin_through` exactly as a plain pin. Whether the
+  frames are blocks changes nothing the pin promises: one address per page,
+  the same budget, quarantine and rights.
+
+What the kernel does **not** do: decide sizes (the order is the driver's),
+compact or move memory, reserve blocks, or promise any block at all. A
+failed pin leaves its pre-committed pages committed in the VMO, as a hold
+that fails leaves the pages it committed (`Vmo::hold`'s errors).
+
+Cost to the rest of the machine: large blocks taken from the buddy
+allocator are not available to a later `PIN_CONTIGUOUS` or kernel
+allocation of that order. That is what i915's THP use costs Linux too; the
+watermark still holds, and the driver asks only for objects of 2 MiB or
+more (anv's 2 MiB alignment threshold is 1 MiB, but a smaller object can
+never take a 2 MiB page).
+
+### 14.4 The driver's side (ring 3, outside the item)
+
+* `Platform::pin` asks `PIN_BLOCKS` with order 9 for an object of 2 MiB or
+  more, plain pin otherwise.
+* The pin is made at the first of: bind, mmap answer, dmabuf export
+  (`Backend::populate`, a new call the front end makes before it hands the
+  VMO out), so a client's page faults do not commit the pages one by one
+  first. That is i915's `get_pages` on first use; the pin budget counts the
+  object from then on rather than from its first execbuffer.
+* `XelpBackend::bind` passes the whole address list to a new
+  `Ppgtt::insert_huge`, which follows §14.2.
+* Unit tests on `PtModel`: a 2 MiB run maps with PS, a 64 KiB-only run with
+  IPS, a mixed object with all three, translate and clear for each, a clear
+  of an IPS table dropping IPS, an alloc over a PS entry refused, the PT
+  pool's count back to its start after unbind.
+
+### 14.5 Tests for the kernel option
+
+* `object/check.rs`: `PIN_BLOCKS` on an absent 4 MiB range gives
+  addresses in 2 MiB-aligned runs of 512 (when the allocator has them);
+  on a range with committed pages keeps those frames; with an order past
+  `MAX_ORDER` or bits outside the option refused `INVALID_ARGS`; with the
+  job's limit below the range fails as a plain pin does, its charge
+  balanced; and with the allocator's large blocks taken (the check takes
+  them) falls back and still pins every page.
+* Negative control: with the order loop removed, the run check fails.
+* Done on the box when the probe reads ≈ 20.7 / 21.7 GB/s.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
