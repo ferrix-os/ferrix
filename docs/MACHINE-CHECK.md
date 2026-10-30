@@ -432,3 +432,13 @@ gate row extended.
   mark left in the frame: `err=0x0` missing) and, on b74ee2423 with their
   targets unchanged since, `mce-ctl-srar-fatal-2`, `mce-ctl-poll-clear`,
   `mce-ctl-retired-test`, `mce-ctl-unaffected`, `mce-ctl-vector-18`.
+
+**Final check, 2026-10-30** (`reviews.md` line 4810, on 27053f5ce):
+**OK**. V1-V8 are met. The rows on b60911804 count for the tip: the only
+source difference is three `cfg_attr(not(target_arch = "x86_64"),
+expect(dead_code))` attributes. On x86-64 they produce nothing. On Arm,
+check-7's three-target build fulfilled the `expect(dead_code)`, which is
+the compiler's proof that nothing reaches those items. `mce-land-check-7`,
+run with `SENTRY-TRACE` unset, is accepted: the one test that variable
+breaks is xtask's, outside the item, and has a BACKLOG row. Internal
+review, not independent verification (F-27).
