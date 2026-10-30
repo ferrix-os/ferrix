@@ -186,6 +186,21 @@ page cache's fill and write retry at most 8 times, `memory.reclaim` counts
 the bytes, and the fault path's retry ends with the cache, as the dentry
 cache's does (MEMORY-AND-TIMING §2.2d).
 
+### Where it stands
+
+R2 and F-99 are built on `feature/ram-release` (4bcea5835, 974fb4746, and
+the commit that closes F-99), not landed. Controls, each `control: FIRED`:
+the old clear in `load` (rr-974fb47-f99-ctl, 3 host tests fail), a drop
+that also takes a dirty node (rr-4bcea58-dirty-ctl), `MemAvailable` without
+the nodes and a job's reclaim that takes them (rr-4bcea58-avail-ctl,
+rr-4bcea58-job-ctl, stage 12 stops). Rows PASSED: check and test-restart
+--boot blk on 974fb4746; build --release --arch all, test-btrfs, test-boot
+x86_64 kvm, kvm --smp 2, aarch64 and armv7a on 4bcea5835 (974fb4746 changes
+two doc comments). Open: the heap's per-processor caches
+(`feature/heap-cpu-caches`) are not under this base, so the boot check
+drains none before it counts frames; when both land, the check calls
+`mm::drain_caches` first. R1 waits on B1-B4.
+
 **R2.5.** Nothing in the kernel reads `MemAvailable` but `/proc/meminfo`'s
 render: `sysinfo` reports free frames, and no reclaim or OOM decision looks
 at it. Outside the kernel, host measurement tools read the file
