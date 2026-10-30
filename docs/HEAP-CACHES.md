@@ -153,6 +153,12 @@ held when it starts.
   injection's count is global, so one armed on another processor keeps a
   refusal here from its retry (a comment at `heap_or_drain`); its doc names
   the masked call from `reserve::enter`.
+* 2026-10-30, the single-processor check retries: its counts are the
+  whole machine's, so another processor's allocation between two reads
+  failed test-boot x86_64 kvm once (feature/ram-release, 2f6f02486). An
+  attempt so disturbed is made again, at most five times, and the boot
+  line says how many were disturbed and the first one's message (ledger
+  5015, OK IF H5-H6).
 * N150, Endfield's warm-up, the never-land sampler (performance evidence,
   not certification evidence): before (develop with the btrfs and reserve
   fixes, e0cdb14a1) against after (this branch with the resident-set fix):

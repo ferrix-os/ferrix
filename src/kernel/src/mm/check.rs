@@ -1309,12 +1309,27 @@ pub fn check_heap_caches() -> Result<(), &'static str> {
 /// every count exact passes. A defect fails every attempt.
 fn caches_on_one_processor() -> Result<(), &'static str> {
     let mut outcome = Ok(());
+    let mut disturbed = 0usize;
+    let mut first = None;
     for _ in 0..ONE_PROCESSOR_ATTEMPTS {
         outcome = caches_on_one_processor_once();
-        if outcome.is_ok() {
-            break;
+        match outcome {
+            Ok(()) => break,
+            Err(why) => {
+                disturbed += 1;
+                first = first.or(Some(why));
+            }
         }
     }
+    // Said on every boot, zero included, so a defect that fails only some
+    // attempts shows in the row's log even when the check passes.
+    crate::console::println!(
+        "  heap     caches: {} of {} single-processor attempts disturbed{}{}",
+        disturbed,
+        ONE_PROCESSOR_ATTEMPTS,
+        if first.is_some() { ", the first: " } else { "" },
+        first.unwrap_or(""),
+    );
     outcome
 }
 
@@ -1342,6 +1357,9 @@ fn caches_on_one_processor_once() -> Result<(), &'static str> {
         .map_err(|_| "no room for the check's list")?;
     let _ = mm::drain_caches();
     if mm::cached_here(CHECK_CLASS) != Some(0) {
+        for object in spare.drain(..) {
+            give_one(object);
+        }
         return Err("the drain left an object in this processor's cache");
     }
     let base = mm::heap_raw_allocated();
