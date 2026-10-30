@@ -10,7 +10,7 @@
 
 use alloc::vec::Vec;
 
-use ferrix_bootinfo::PAGE_SIZE;
+use ferrix_bootinfo::{MemKind, MemRegion, PAGE_SIZE};
 use ferrix_vfs::initramfs;
 use ferrix_vfs::{FileType, OpenFile, OpenFlags};
 
@@ -130,6 +130,76 @@ fn through_object(program: &ProgramFile, len: u64) -> Result<u64, &'static str> 
     Ok(hash)
 }
 
+/// An `Initrd` region of a made-up memory map, at 1 MiB for 1 MiB.
+const REGION: MemRegion = MemRegion {
+    base: 0x10_0000,
+    len: 0x10_0000,
+    kind: MemKind::Initrd,
+    reserved: 0,
+};
+
+/// `mm::initrd_readable` and `mm::whole_frames`, the release's two pieces
+/// of arithmetic, on made-up maps and spans: what keeps the archive's
+/// reading inside its region and the direct map (`L.mm.100`), and its
+/// give-back to the pages it fills whole (`L.mm.99`).
+fn arithmetic() -> Result<(), &'static str> {
+    let usable = MemRegion {
+        kind: MemKind::Usable,
+        base: 0x30_0000,
+        ..REGION
+    };
+    let map = [usable, REGION];
+    let wide = (0, 1 << 32);
+    let readable = [
+        // Unaligned at both ends, inside the region.
+        ((0x10_0800, 0x5000), wide, true),
+        // Across the region's end.
+        ((0x1F_F000, 0x2000), wide, false),
+        // In a region that is not `Initrd`, and in none at all.
+        ((0x30_0000, 0x1000), wide, false),
+        ((0x50_0000, 0x1000), wide, false),
+        // Inside the region, past the direct map's end.
+        ((0x10_0800, 0x5000), (0, 0x10_2000), false),
+    ];
+    if readable
+        .iter()
+        .any(|&(span, physmap, expected)| mm::initrd_readable(&map, span, physmap) != expected)
+    {
+        return Err("the archive's range test took or refused a range as it should not");
+    }
+    let array = 0..1 << 20;
+    let whole = [
+        // Unaligned at both ends: the pages it fills whole only.
+        ((0x10_0800, 0x5000), array.clone(), 0x101..0x105),
+        // Aligned.
+        ((0x10_0000, 0x3000), array.clone(), 0x100..0x103),
+        // The frame array ending inside it.
+        ((0x10_0800, 0x5000), 0..0x103, 0x101..0x103),
+        // Frame 0, which no allocator manages.
+        ((0, 0x2000), array.clone(), 1..2),
+        // No page filled whole.
+        ((0x10_0800, 0x800), array, 0..0),
+    ];
+    if whole
+        .into_iter()
+        .any(|((base, len), array, expected)| mm::whole_frames(base, len, array) != expected)
+    {
+        return Err(
+            "the archive's whole pages were counted other than inward and inside the array",
+        );
+    }
+    Ok(())
+}
+
+/// How many holds a give-back of `frames` takes: one per aligned batch it
+/// touches, and one for nothing.
+fn holds_for(frames: &core::ops::Range<u64>) -> u64 {
+    if frames.is_empty() {
+        return 1;
+    }
+    (frames.end - 1) / mm::GIVE_BACK_BATCH - frames.start / mm::GIVE_BACK_BATCH + 1
+}
+
 /// Whether a name of the archive may still resolve after the release: a
 /// spared one, `lib` above `/lib/firmware`, and a mount point or anything
 /// beneath it, which resolves in the filesystem mounted there.
@@ -208,6 +278,11 @@ impl Before {
             if released.given.frames != whole {
                 return Err("the release gave other than the archive's whole pages");
             }
+            if released.given.largest_batch > mm::GIVE_BACK_BATCH
+                || released.given.holds != holds_for(&self.frames)
+            {
+                return Err("the release gave more than one batch a hold, or in other holds");
+            }
             if mm::managed_frames() != self.managed + whole {
                 return Err("the managed frames did not grow by the archive's whole pages");
             }
@@ -272,6 +347,12 @@ impl Before {
 ///
 /// Verifies: L.mm.71, L.mm.99, L.mm.100, L.init.5
 pub(crate) fn run() -> Option<Released> {
+    if let Err(problem) = arithmetic() {
+        crate::panic::fatal!(
+            catalog::RELEASE,
+            "the release self-check failed before it: {problem}"
+        );
+    }
     let before = match Before::take() {
         Ok(before) => before,
         Err(problem) => crate::panic::fatal!(
@@ -282,10 +363,13 @@ pub(crate) fn run() -> Option<Released> {
     let released = release()?;
     match before.after(&released) {
         Ok(tmpfs) => println!(
-            "  release  checked: the managed frames up by the archive's {} whole pages, none \
-             Reserved, the watermark from the new count, the archive answering nothing; pid 1's \
+            "  release  checked: 5 maps and 5 spans counted as the archive's range test and whole \
+             pages should; the managed frames up by the archive's {} whole pages in {} holds of at \
+             most {} frames, none Reserved, the watermark from the new count, the archive answering nothing; pid 1's \
              inputs unchanged and outside it; {tmpfs}",
-            released.given.frames
+            released.given.frames,
+            released.given.holds,
+            mm::GIVE_BACK_BATCH,
         ),
         Err(problem) => {
             crate::panic::fatal!(catalog::RELEASE, "the release self-check failed: {problem}")

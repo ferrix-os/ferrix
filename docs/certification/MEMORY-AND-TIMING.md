@@ -699,9 +699,14 @@ reader has the bytes when a frame goes.
   the allocator's largest block, aligned to it), one hold of `FRAMES` each,
   the lock dropped between them: a hold writes the state of at most 1024
   frame entries and pushes at most a handful of free blocks. Measured, the
-  longest hold of a boot (the `release` line's "longest hold"): 1 us on
-  `test-boot x86_64 --accel kvm`, the release's 9,013 frames in nine holds.
-  `FRAMES` masks interrupts while held, so this is also the masked time.
+  longest hold of a boot (the `release` line's "longest hold"): 1-2 us
+  under KVM on x86-64 (`test-boot`, about 9,000 frames in nine or ten
+  holds), and 87-93 us on armv7a under TCG, which emulates every
+  instruction. `FRAMES` masks interrupts while held, so this is also the
+  masked time. In a build whose checks run, the release check's
+  `mm::reserved_in` reads the state of every one of the archive's frames
+  in one hold as well -- up to 23,343 on the box's image -- once a boot, as
+  a check.
 * **The watermark.** Recomputed from the new managed count in the hold that
   inserts the last batch (`L.mm.71`). Between two batches the free count has
   grown and the watermark is still the old one, computed from fewer frames:

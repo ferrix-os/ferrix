@@ -171,6 +171,11 @@ any).
 
 Nothing of devmgr's: its restart set is the kept copies above.
 
+The archive's names beneath a mount point (`dev/...`, say) are hidden by
+the mount: `remove` reaches the mount's filesystem through them, never the
+tmpfs's entry, so those stay and are counted in the release line's "kept"
+(the consultant's C5).
+
 **Opened by path after the switch, from the tmpfs.** The kernel resolves in
 its first namespace (`fs::namespace().context()`), whose `/` is the tmpfs,
 in these places outside checks: `read_from_root` (devmgr's files: now read

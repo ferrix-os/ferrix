@@ -2020,13 +2020,17 @@ pub struct GivenBack {
     /// The longest of its holds of the frame allocator's lock, in
     /// nanoseconds.
     pub longest_hold_nanos: u64,
+    /// How many holds it took.
+    pub holds: u64,
+    /// The most frames one hold inserted: [`GIVE_BACK_BATCH`] at most.
+    pub largest_batch: u64,
 }
 
 /// How many frames one hold of the frame allocator's lock gives back, at
 /// most: 4 MiB, the allocator's largest block, so each batch is one block
 /// where the archive's pages allow it and no hold describes more frames
 /// than one block's (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
-const GIVE_BACK_BATCH: u64 = 1024;
+pub const GIVE_BACK_BATCH: u64 = 1024;
 
 /// Where the loader put the initramfs: its physical base and its length,
 /// inside the direct map.
@@ -2068,21 +2072,12 @@ pub fn keep_initrd(view: &BootView<'_>) -> Result<Option<u64>, OutsideDirectMap>
     let Some((base, len)) = view.initrd() else {
         return Ok(None);
     };
-    let described = view.regions().iter().any(|region| {
-        region.kind == MemKind::Initrd
-            && region.base <= base
-            && base.saturating_add(len) <= region.base.saturating_add(region.len)
-    });
-    if !described {
-        return Err(OutsideDirectMap);
-    }
     let info = view.raw();
-    let end = base.checked_add(len).ok_or(OutsideDirectMap)?;
-    let map_end = info
-        .physmap_phys
-        .checked_add(info.physmap_len)
-        .ok_or(OutsideDirectMap)?;
-    if base < info.physmap_phys || end > map_end {
+    if !initrd_readable(
+        view.regions(),
+        (base, len),
+        (info.physmap_phys, info.physmap_len),
+    ) {
         return Err(OutsideDirectMap);
     }
     let len_bytes = usize::try_from(len).map_err(|_| OutsideDirectMap)?;
@@ -2096,6 +2091,30 @@ pub fn keep_initrd(view: &BootView<'_>) -> Result<Option<u64>, OutsideDirectMap>
         )
     });
     Ok(Some(len))
+}
+
+/// Whether the archive at `base` for `len` bytes may be read through the
+/// direct map: inside one region `regions` calls [`MemKind::Initrd`], and
+/// inside the direct map at `physmap`'s base for its length. [`keep_initrd`]'s
+/// test, which [`with_initrd`]'s SAFETY argument rests on; pure, so the
+/// release check tries it on made-up maps (`L.mm.100`).
+pub fn initrd_readable(
+    regions: &[MemRegion],
+    (base, len): (u64, u64),
+    physmap: (u64, u64),
+) -> bool {
+    let Some(end) = base.checked_add(len) else {
+        return false;
+    };
+    let Some(map_end) = physmap.0.checked_add(physmap.1) else {
+        return false;
+    };
+    let described = regions.iter().any(|region| {
+        region.kind == MemKind::Initrd
+            && region.base <= base
+            && end <= region.base.saturating_add(region.len)
+    });
+    described && base >= physmap.0 && end <= map_end
 }
 
 /// Run `read` on the initramfs, holding it for the call: `None` if the boot
@@ -2139,11 +2158,25 @@ pub fn initrd_span() -> Option<(u64, u64)> {
 /// map does.
 // CHECKS-ONLY: fs::release_check, besides `give_back_initrd` here.
 pub fn initrd_frames(base: u64, len: u64) -> core::ops::Range<Frame> {
-    let first = base.div_ceil(PAGE_SIZE).max(FIRST_MANAGED_FRAME);
-    let end = base.saturating_add(len) / PAGE_SIZE;
-    with_frames(|frames| first.max(frames.base())..end.min(frames.end()))
-        .filter(|range| !range.is_empty())
-        .unwrap_or(0..0)
+    with_frames(|frames| whole_frames(base, len, frames.base()..frames.end())).unwrap_or(0..0)
+}
+
+/// [`initrd_frames`]' arithmetic for a frame array covering `array`: the
+/// frames inside `[base, base + len)` whole, from [`FIRST_MANAGED_FRAME`]
+/// on, clipped to `array`; empty when none is. Pure, so the release check
+/// tries it on made-up spans (`L.mm.99`).
+// CHECKS-ONLY: fs::release_check, besides `initrd_frames` here.
+pub fn whole_frames(
+    base: u64,
+    len: u64,
+    array: core::ops::Range<Frame>,
+) -> core::ops::Range<Frame> {
+    let first = base
+        .div_ceil(PAGE_SIZE)
+        .max(FIRST_MANAGED_FRAME)
+        .max(array.start);
+    let end = (base.saturating_add(len) / PAGE_SIZE).min(array.end);
+    if first < end { first..end } else { 0..0 }
 }
 
 /// Give the frame allocator the initramfs's pages once the root is final
@@ -2179,6 +2212,8 @@ pub fn give_back_initrd() -> Option<GivenBack> {
                 frames.insert_free(frame, next - frame);
             }
             given.frames += frames.managed_frames() - before;
+            given.holds += 1;
+            given.largest_batch = given.largest_batch.max(next.saturating_sub(frame));
             if last {
                 given.managed = frames.managed_frames();
                 given.watermark = watermark_for(given.managed);

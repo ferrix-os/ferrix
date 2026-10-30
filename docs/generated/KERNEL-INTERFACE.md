@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2454 declarations in the core's files, 178 in the item's; 91 checks-only.
+2459 declarations in the core's files, 178 in the item's; 92 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1821,6 +1821,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `GIVE_BACK_BATCH` | const | load (checks) |  |
 | `RETIRED_CAPACITY` | const | load |  |
 | `MemoryError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `allocate_frame_run` | fn | load |  |
@@ -1839,6 +1840,7 @@ checks above is `pub` for raised checks (F3).
 | `held_frames` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `initrd_frames` | fn | load (checks) | checks-only |
+| `initrd_readable` | fn | load (checks) |  |
 | `initrd_span` | fn | load (checks) | checks-only |
 | `keep_initrd` | fn | load |  |
 | `managed_frames` | fn | load, bin |  |
@@ -1854,6 +1856,7 @@ checks above is `pub` for raised checks (F3).
 | `translate_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `watermark` | fn | load, bin |  |
 | `watermark_for` | fn | load (checks) | checks-only |
+| `whole_frames` | fn | load (checks) | checks-only |
 | `with_initrd` | fn | load |  |
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | load, bin |  |
@@ -1870,6 +1873,8 @@ checks above is `pub` for raised checks (F3).
 | `FrameWindow::open` | method | item, load, bin |  |
 | `FrameWindow::report` | method | item, load, bin |  |
 | `GivenBack::frames` | field | item, load, bin |  |
+| `GivenBack::holds` | field | item, load |  |
+| `GivenBack::largest_batch` | field | load (checks) |  |
 | `GivenBack::longest_hold_nanos` | field | load |  |
 | `GivenBack::managed` | field | load |  |
 | `GivenBack::watermark` | field | load, bin |  |

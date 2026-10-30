@@ -552,11 +552,16 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "On every boot whose checks run, the frames
                 managed grow by exactly the archive's whole pages inside the frame
                 array, none of them is Reserved after, and the watermark is
-                watermark_for of the new count (the `release  checked` line); no
-                release, or the watermark left as it was, stops the boot there
-                (controls 1 and 4).";
+                watermark_for of the new count, in one hold per aligned batch of
+                1024 frames it touches and no more than 1024 frames a hold; and
+                whole_frames counts an archive unaligned at both ends, an aligned
+                one, one the frame array ends inside, one at frame 0 and one
+                filling no page whole as inward and inside the array (the
+                `release  checked` line). No release, the watermark left as it
+                was, or the first page rounded down stops the boot there.";
             attribute :>> parent = "H.MEM.9";
-            attribute :>> unit = ("mm::give_back_initrd", "mm::initrd_frames");
+            attribute :>> unit = ("mm::give_back_initrd", "mm::initrd_frames",
+                "mm::whole_frames");
         }
         requirement <'L.mm.100'> noReaderOutlivesTheArchive : ItemLowLevel {
             attribute :>> statement = "The initramfs archive shall be kept only when it
@@ -565,11 +570,15 @@ package FerrixMemoryRequirements {
                 give_back_initrd shall take it out under that lock before any of its
                 frames is given away; after that it shall answer nothing.";
             attribute :>> criterion = "After the release with_initrd and initrd_span
-                answer None on every boot whose checks run (the `release  checked`
-                line); a release that leaves the archive kept stops the boot there
-                (control 3).";
+                answer None on every boot whose checks run, and initrd_readable
+                takes an archive unaligned at both ends inside an Initrd region and
+                refuses one across the region's end, one in a region of another
+                kind or in none, and one past the direct map (the `release
+                checked` line). A release that leaves the archive kept, or a range
+                test that takes every range, stops the boot there.";
             attribute :>> parent = "H.MEM.9";
-            attribute :>> unit = ("mm::keep_initrd", "mm::with_initrd", "mm::give_back_initrd");
+            attribute :>> unit = ("mm::keep_initrd", "mm::initrd_readable", "mm::with_initrd",
+                "mm::give_back_initrd");
         }
         // Restated by docs/RAM-RELEASE.md R1 (consultant ledger 5022, condition 1):
         // the archive's release sets it a second time.
@@ -2806,7 +2815,9 @@ package FerrixMemoryRequirements {
             attribute :>> criterion = "After the release, svc restart
                 devmgr.service starts a second devmgr whose line says it came from
                 the kept set, and / written, synced and read back afterwards answers
-                what was written (test-init).";
+                what was written; a kept set whose stored fingerprint differs is
+                refused with the line saying it is not as it was kept, and no
+                second devmgr starts (test-init and its control).";
             attribute :>> parent = "H.DEV.4";
             attribute :>> unit = ("discovery::devmgr::read_files",
                 "discovery::devmgr::read_set", "discovery::devmgr::fingerprint");
