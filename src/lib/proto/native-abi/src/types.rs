@@ -163,6 +163,11 @@ pub const AUDIT_BOOT: u64 = 2;
 /// copied, next, lost, and the audit id's low and high halves.
 pub const AUDIT_ANSWER_WORDS: usize = 5;
 
+/// The words a `memory_scrub` answers, in order: frames tested, suspects,
+/// bad, retired, held, sweeps completed, and 1 if the batch stopped early
+/// (the watermark or the retired set), else 0.
+pub const MEMORY_SCRUB_ANSWER_WORDS: usize = 7;
+
 /// Where one of a device's virtio register blocks lies, as `device_info`
 /// reports it and a driver's START carries it: the page-aligned physical
 /// start of the pages holding it, inside one of the device's apertures, the

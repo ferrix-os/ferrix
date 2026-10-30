@@ -3114,6 +3114,20 @@ package FerrixX8664Requirements {
                 "arch::x86_64::mce::retirable",
                 "arch::x86_64::mce::poll");
         }
+        requirement <'L.x86_64.243'> scrubWritesReadNothingAndEvict : ItemLowLevel {
+            attribute :>> statement = "On x86-64 the scrubber's writes shall be MOVNTI over every
+                word of each whole line, a line's stores made with interrupts
+                masked, then SFENCE; and its eviction CLFLUSH per line, the
+                line from CPUID leaf 1, over the whole range, then MFENCE.";
+            attribute :>> criterion = "Build evidence (ledger 5045 (B4), QEMU models no caches): the
+                facade's host test requires one operation per line over the
+                whole range with the line read from the processor and the
+                barrier after; the disassembly of fill_without_reading holds
+                MOVNTI and no ordinary store in its loop. A hardware row on
+                the N150 (BACKLOG).";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("arch::x86_64::scrub::fill_without_reading", "arch::x86_64::scrub::evict_to_coherency", "arch::x86_64::scrub::is_guest", "arch::x86_64::scrub::hypervisor_seen");
+        }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
                 after the console has drained.";
@@ -3543,6 +3557,20 @@ package FerrixX8664Requirements {
             attribute :>> parent = ("H.TRAP.4", "H.TRAP.9");
             attribute :>> unit = ("sched::work::post", "sched::work::post_own",
                 "sched::work::notify");
+        }
+        requirement <'L.syscall.24'> memoryScrubsArgumentsAndAnswers : ItemLowLevel {
+            attribute :>> statement = "memory_scrub shall answer only a handle to the memory scrub
+                token with MANAGE (ACCESS_DENIED without, WRONG_TYPE for
+                another object), refuse a budget of 0 or past 64
+                (INVALID_ARGS), refuse where the scrubber stands down
+                (WRONG_TYPE) or while a batch runs (SHOULD_WAIT), and copy the
+                batch's seven words to the answer.";
+            attribute :>> criterion = "The native boot check: the refusals for a budget of 0 and 65,
+                a handle without MANAGE and a channel end, and the
+                stand-down's WRONG_TYPE at stage 9, before the gate's override
+                can apply; test-scrub: memscrub's batches answered.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("syscall::native::memory_scrub");
         }
         requirement <'L.trap.5'> noEntryMeansEnosys : ItemLowLevel {
             attribute :>> statement = "system_call shall answer ENOSYS with no entry

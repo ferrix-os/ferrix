@@ -65,6 +65,7 @@ use crate::fallible;
 
 pub mod check;
 mod reserve;
+pub mod scrub;
 mod unlinked;
 
 pub use reserve::fill_reserve;

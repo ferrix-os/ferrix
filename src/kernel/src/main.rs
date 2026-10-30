@@ -312,6 +312,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // `finish_memory`, which reclaims the tables the processor list comes
     // from and sweeps a set of mappings that bringing processors up adds to.
     let cpus = bring_up_processors(view);
+    decide_scrubber(view);
     console::screen::milestone(8);
 
     // Stage 5, after stage 4 because it needs every processor it is going to
@@ -1881,6 +1882,26 @@ fn report(view: &BootView<'_>) {
         println!("  fdt      {model}, {len} bytes at {at:#x}");
     }
     report_smbios(view);
+}
+
+/// Whether the RAM scrubber runs (`docs/RAM-SCRUBBER.md` §3.3): from what the
+/// SMBIOS memory arrays say about error correction, after the processors are
+/// up, since AArch64's guest test reads the PSCI conduit they found.
+fn decide_scrubber(view: &BootView<'_>) {
+    let _ = mm::scrub::decide(view, scrub_memory());
+}
+
+/// What the SMBIOS memory arrays the hand-off kept say about error
+/// correction, as the scrubber's decision and its stage 2 check read it.
+fn scrub_memory() -> mm::scrub::Memory {
+    use ferrix_smbios::Correction;
+    match discovery::smbios::tables().map(|tables| tables.memory_correction()) {
+        Some(Correction::None) => mm::scrub::Memory::None,
+        Some(Correction::Corrects(_)) => mm::scrub::Memory::Corrects,
+        Some(Correction::Unclear) => mm::scrub::Memory::Unclear,
+        Some(Correction::Malformed) => mm::scrub::Memory::Malformed,
+        Some(Correction::Absent) | None => mm::scrub::Memory::Absent,
+    }
 }
 
 /// Accept or refuse the loader's SMBIOS copy, and say which: the version, the

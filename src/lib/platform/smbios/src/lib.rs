@@ -418,6 +418,13 @@ impl<'a> Smbios<'a> {
         self.identity
     }
 
+    /// What the table's system memory arrays say about error correction
+    /// ([`correction_of`]).
+    #[must_use]
+    pub fn memory_correction(&self) -> Correction {
+        correction_of(self.table, self.point.count)
+    }
+
     /// `field`'s file as Linux shows it: the value, a newline, at most a
     /// page; `None` when the table did not have it.
     pub fn field_text(&self, field: Field, out: &mut impl FnMut(&[u8])) -> Option<()> {
@@ -576,6 +583,74 @@ pub fn walk<'a>(table: &'a [u8], count: u16, mut decode: impl FnMut(&'a [u8])) -
         }
     }
     (data.min(len), passed)
+}
+
+/// What the system memory arrays (type 16, Use System memory) say about
+/// error correction, as the RAM scrubber reads it (`docs/RAM-SCRUBBER.md`
+/// §3.3): the strongest claim any array makes, a malformed array first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Correction {
+    /// Every system memory array says None (03h).
+    None,
+    /// An array says Parity (04h), single-bit ECC (05h), multi-bit ECC
+    /// (06h) or CRC (07h): the value.
+    Corrects(u8),
+    /// No array corrects, and one says Other (01h) or Unknown (02h).
+    Unclear,
+    /// The table holds no system memory array.
+    Absent,
+    /// A type 16 too short to hold its Use and correction fields, or one
+    /// with a correction value outside 01h-07h: read as correcting, so
+    /// that a table nobody can read never lets the scrubber run.
+    Malformed,
+}
+
+/// Type 16's Use value for system memory.
+const USE_SYSTEM: u8 = 0x03;
+
+/// [`Correction`] for `table` walked as [`walk`] walks it with `count`.
+/// A type 16 is read as Use at offset 5 and Memory Error Correction at
+/// offset 6 (SMBIOS 3.x, 7.17), so one shorter than 7 bytes is malformed;
+/// an array whose Use is not system memory (video, flash, cache) is not
+/// counted.
+#[must_use]
+pub fn correction_of(table: &[u8], count: u16) -> Correction {
+    let (mut system, mut unclear, mut corrects, mut malformed) = (false, false, None, false);
+    let _ = walk(table, count, |structure| {
+        if structure.first() != Some(&16) {
+            return;
+        }
+        let length = usize::from(structure.get(1).copied().unwrap_or(0));
+        let (Some(&usage), Some(&correction)) = (structure.get(5), structure.get(6)) else {
+            malformed = true;
+            return;
+        };
+        if length < 7 {
+            malformed = true;
+            return;
+        }
+        if usage != USE_SYSTEM {
+            return;
+        }
+        system = true;
+        match correction {
+            0x03 => {}
+            0x01 | 0x02 => unclear = true,
+            0x04..=0x07 => corrects = Some(correction),
+            _ => malformed = true,
+        }
+    });
+    if malformed {
+        Correction::Malformed
+    } else if let Some(kind) = corrects {
+        Correction::Corrects(kind)
+    } else if unclear {
+        Correction::Unclear
+    } else if system {
+        Correction::None
+    } else {
+        Correction::Absent
+    }
 }
 
 /// String `index` of `structure` (`dmi_string_nosave`): empty for index 0,

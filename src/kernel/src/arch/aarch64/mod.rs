@@ -6,6 +6,7 @@ mod cpu;
 pub use cpu::dma_barrier;
 mod gic;
 pub(crate) mod mmio;
+pub(crate) mod scrub;
 mod signal;
 mod smp;
 pub(super) mod speculation;

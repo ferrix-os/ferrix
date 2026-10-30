@@ -1037,3 +1037,38 @@ fn no_frame_comes_out_of_a_split_or_a_claim_with_an_owner() {
         assert_eq!(frames.owner(claimed), NO_OWNER, "claimed frame {frame}");
     }
 }
+
+/// The scrubber's claim rule (`docs/RAM-SCRUBBER.md` §3.1): the free block
+/// holding a frame is found by its head and order, and taking it is allowed
+/// only while another free block of that order or larger exists.
+///
+/// Verifies: L.mm.101
+#[test]
+fn a_claim_leaves_another_block_of_its_order() {
+    // 64 frames at 0x100: one order-6 block.
+    let (mut entries, base, count) = arena(0x100, 64);
+    let mut frames = frames!(entries, base, count);
+    assert_eq!(frames.free_block_of(0x123), Some((0x100, 6)));
+    // The only block of order 6: no other one.
+    assert!(!frames.another_free_block(0x100, 6));
+    // Take one frame: the block splits, 32 + 16 + ... + 1 left.
+    let taken = frames.allocate_frame().unwrap();
+    assert_eq!(frames.free_block_of(taken), None);
+    let (head, order) = frames.free_block_of(0x120).unwrap();
+    assert_eq!(order, 5);
+    // The order-5 block is the only one of order 5 or more.
+    assert!(!frames.another_free_block(head, order));
+    // The order-0 buddy of the taken frame: smaller blocks exist above it.
+    let (small, small_order) = frames.free_block_of(taken ^ 1).unwrap();
+    assert_eq!(small_order, 0);
+    assert!(frames.another_free_block(small, small_order));
+    // Two blocks of one order: either may go, the other stays.
+    let (mut two, base2, count2) = arena(0x200, 32);
+    let mut pair = Frames::new(&mut two, base2);
+    pair.insert_free(0x200, 16);
+    pair.insert_free(0x210, 16);
+    assert_eq!(pair.free_block_of(0x205), Some((0x200, 4)));
+    assert!(pair.another_free_block(0x200, 4));
+    assert!(pair.another_free_block(0x210, 4));
+    let _ = count2;
+}

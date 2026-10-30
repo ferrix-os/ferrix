@@ -307,5 +307,13 @@ package FerrixArmv7aRequirements {
                 "arch::armv7a::switch::restore_user_state",
                 "arch::armv7a::switch::turn_on");
         }
+        requirement <'L.armv7a.29'> scrubStandsDownOnArmv7a : ItemLowLevel {
+            attribute :>> statement = "On ARMv7-A, which has no write of a whole line that reads
+                nothing, the scrubber shall stand down.";
+            attribute :>> criterion = "test-scrub on ARMv7-A: the kernel says the stand-down with its
+                reason and /proc/ferrix-scrub says it.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("arch::scrub_ready");
+        }
     }
 }

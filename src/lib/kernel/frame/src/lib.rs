@@ -573,6 +573,46 @@ impl<'a> Frames<'a> {
         self.allocate(0)
     }
 
+    /// The frames this allocator's side array covers: the first, and how
+    /// many.
+    #[must_use]
+    pub fn span(&self) -> (Frame, u64) {
+        (self.base, self.entries.len() as u64)
+    }
+
+    /// The free block holding `frame`: its first frame and its order, the
+    /// block [`Frames::claim`] would split; `None` when `frame` is not free.
+    #[must_use]
+    pub fn free_block_of(&self, frame: Frame) -> Option<(Frame, u8)> {
+        (0..=MAX_ORDER).find_map(|order| {
+            let head = frame & !((1u64 << order) - 1);
+            self.entry(head)
+                .filter(|entry| entry.state == State::Free && entry.order == order)
+                .map(|_| (head, order))
+        })
+    }
+
+    /// Whether a free block of `order` or larger exists other than the one
+    /// starting at `head`: so that taking that one leaves a request of any
+    /// order up to `order` still able to be met (`docs/RAM-SCRUBBER.md`
+    /// §3.1). One look at each list's first two entries.
+    #[must_use]
+    pub fn another_free_block(&self, head: Frame, order: u8) -> bool {
+        let own = self.index(head).and_then(|index| u32::try_from(index).ok());
+        (order..=MAX_ORDER).any(|at| {
+            let first = self.head(at);
+            if first == NONE {
+                return false;
+            }
+            if at != order || Some(first) != own {
+                return true;
+            }
+            self.entries
+                .get(first as usize)
+                .is_some_and(|entry| entry.next != NONE)
+        })
+    }
+
     /// Take exactly `frame`, if it is free, as a single allocated frame.
     ///
     /// For a check that has to get back the very frame it just gave up — to

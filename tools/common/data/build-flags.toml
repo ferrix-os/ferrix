@@ -269,6 +269,11 @@ kind = "flag"
 test_only = true
 why = "the power node over a fake register file on any x86-64 processor, reaching no MSR, every kernel line marked (fake): cargo xtask test-power's lease and holder-death rows (L.x86_64.207); test-only, never in a certified profile"
 
+[boot_options."ferrix.scrub"]
+values = ["test"]
+test_only = true
+why = "test turns the RAM scrubber's stand-down off where a hypervisor is positively seen (x86-64's hypervisor bit, AArch64's hvc conduit or /hypervisor node), so cargo xtask test-scrub can sweep a QEMU guest whose type 16 says ECC; compiled into every build with the checks on, certified profiles included, so it is never honoured on bare metal and a certified profile's command line may not carry it (mm/scrub.rs, docs/RAM-SCRUBBER.md §3.3, ledger 5057 (2), 5140 (1), L.mm.106, SAFETY-MANUAL AoU-38)"
+
 [boot_options."ferrix.panic"]
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"

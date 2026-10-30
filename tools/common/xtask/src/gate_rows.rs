@@ -159,6 +159,34 @@ fn reaches_quarantine(path: &str) -> bool {
         || path.starts_with("src/tests/quarantine/")
 }
 
+/// The RAM scrubber's row (`docs/RAM-SCRUBBER.md` §7, ledger 5057): a full
+/// sweep under the gate's override and the stand-down without it, under
+/// both accelerators on x86-64 and on AArch64, with the facade's pinned
+/// disassembly; ARMv7-A's stand-down.
+const TEST_SCRUB: &[&str] = &[
+    "test-scrub --arch x86_64 --accel kvm",
+    "test-scrub --arch x86_64 --accel tcg",
+    "test-scrub --arch aarch64",
+    "test-scrub --arch armv7a",
+];
+
+/// Whether `path` reaches the RAM scrubber: the batch, the facade, the
+/// type-16 decode, the frame allocator's block look-up, the token's call,
+/// the service, or the gate itself.
+fn reaches_scrub(path: &str) -> bool {
+    [
+        "src/kernel/src/mm/scrub.rs",
+        "src/kernel/src/arch/x86_64/scrub.rs",
+        "src/kernel/src/arch/aarch64/scrub.rs",
+        "src/lib/platform/smbios/src/lib.rs",
+        "src/lib/kernel/frame/src/lib.rs",
+        "src/user/system/linux/init/units/memscrub.service",
+        "tools/common/xtask/src/scrub.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/user/system/native/memscrub/")
+}
+
 /// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
 /// check injected into every processor must stop the kernel as FX-9005, and
 /// the log's and recovery's modes must hold, under both accelerators. Under
@@ -366,7 +394,8 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
 }
 
 /// The rows an area of the tree adds to whatever its kind of path asked:
-/// the memory-pressure row and the Intel GPU's restart row.
+/// the memory-pressure row, the RAM scrubber's row and the Intel GPU's
+/// restart row.
 fn area_rows(path: &str, rows: &mut Rows) {
     let under = |prefix: &str| path.starts_with(prefix);
     let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
@@ -376,6 +405,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if reaches_scrub(path) {
+        rows.add(TEST_SCRUB);
+        reason(
+            rows,
+            "the RAM scrubber's code: test-scrub on every architecture",
         );
     }
     if GPU_RESTARTED.iter().any(|prefix| under(prefix)) {
@@ -713,6 +749,25 @@ mod tests {
         }
         let rows = rows_of(&["src/kernel/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_BTRFS_PRESSURE));
+    }
+
+    #[test]
+    fn the_scrubber_adds_its_row_and_other_kernel_code_does_not() {
+        for path in [
+            "src/kernel/src/mm/scrub.rs",
+            "src/kernel/src/arch/aarch64/scrub.rs",
+            "src/user/system/native/memscrub/src/main.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                TEST_SCRUB
+                    .iter()
+                    .all(|row| rows.commands.iter().any(|c| c == row)),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_SCRUB[0]));
     }
 
     #[test]

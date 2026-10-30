@@ -147,6 +147,7 @@ members = [
     "src/user/system/native/drvupdated",
     "src/user/system/native/devmgr-events",
     "src/user/system/native/lode",
+    "src/user/system/native/memscrub",
 
     # Host-side build and test driver (`cargo xtask ...`).
     "tools/common/release/softsign",

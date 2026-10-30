@@ -187,6 +187,7 @@ mod rename_crash;
 mod restart;
 mod rows_bench;
 mod rustc;
+mod scrub;
 mod seam;
 mod seat;
 mod seccomp;
@@ -592,6 +593,7 @@ const TASKS: &[&[Task]] = &[
     machine_check::TASKS,
     powerctl::TASKS,
     quarantine::TASKS,
+    scrub::TASKS,
     n150::TASKS,
     netboot::TASKS,
     nvidia::TASKS,

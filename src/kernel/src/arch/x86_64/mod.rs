@@ -19,6 +19,7 @@ mod msrlog;
 pub mod paranoid;
 mod pcid;
 mod powerctl;
+pub(crate) mod scrub;
 mod signal;
 mod smp;
 pub(super) mod speculation;

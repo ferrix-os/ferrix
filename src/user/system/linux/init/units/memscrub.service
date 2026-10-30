@@ -1,0 +1,14 @@
+# memscrub, the RAM scrubber's pace (docs/RAM-SCRUBBER.md §5): free memory
+# swept once a period while the machine idles, through the memory scrub token
+# init grants it. A native program in a sealed job, at the lowest weight; it
+# does nothing where the kernel's scrubber stands down (ECC memory, a guest).
+[Unit]
+Description=Test free memory while the machine idles
+DefaultDependencies=no
+
+[Service]
+Type=native
+ExecStart=/sbin/memscrub
+Slice=drivers.slice
+Restart=always
+RestartSec=10s

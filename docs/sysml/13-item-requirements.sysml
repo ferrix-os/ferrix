@@ -1635,6 +1635,26 @@ package FerrixItemRequirements {
                 TCG.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        requirement <'H.FAIL.9'> theScrubberTouchesOnlyFreeMemory : ItemHighLevel {
+            doc /* docs/RAM-SCRUBBER.md (customer, 2026-10-30, item 7; consultant NOT YET ledger 5045, OK IF ledger 5057). */
+            attribute :>> statement = "The RAM scrubber shall touch no frame in use, make no
+                allocation fail but for the window of one frame's test in
+                which two requests of one order meet the last two free blocks
+                of it, never halt the machine where the firmware reports that
+                the memory corrects errors, and never take more than its share
+                of the retired set; a frame that fails its pattern test twice
+                shall not be handed out again.";
+            attribute :>> criterion = "test-scrub on x86-64 and AArch64: a full sweep of free memory,
+                no allocation failed, nothing tested while busy, the
+                stand-down without the gate's override; ARMv7-A's stand-down;
+                mm/check.rs's check_scrubber, run only where the scrubber
+                itself runs; L.mm.101-108, L.x86_64.243, L.aarch64.68,
+                L.armv7a.29, L.object.252 and L.syscall.24 each with its
+                check (L.object.253 released unwritten, ledger 5140 (3)). An
+                ECC machine whose firmware reports Other or Unknown is the
+                SAFETY-MANUAL's residual.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
     }
 
     package Storage {

@@ -480,6 +480,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::DevmgrStart => crate::discovery::devmgr::devmgr_start(caller, &a),
         NativeCall::AuditRead => audit_read(process, handle(a[0]), a[1], a[2], a[3], a[4]),
         NativeCall::CpuService => cpu_service(process, handle(a[0]), a[1], a[2]),
+        NativeCall::MemoryScrub => memory_scrub(process, handle(a[0]), a[1], a[2]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),
         NativeCall::ProcessStatus => process_status(process, handle(a[0]), a[1]),
         NativeCall::IoMappingCreate
@@ -1903,6 +1904,45 @@ fn cpu_service(process: &Process, token: Handle, cpu: u64, wanted: u64) -> Resul
         .map_err(service_status)
 }
 
+/// `memory_scrub(token, budget, answer)`: test up to `budget` free frames
+/// with the RAM scrubber through the memory scrub token with `MANAGE`
+/// (`docs/RAM-SCRUBBER.md` §4), and copy what the batch did to `answer`.
+fn memory_scrub(
+    process: &Process,
+    token: Handle,
+    budget: u64,
+    answer: u64,
+) -> Result<usize, Errno> {
+    use crate::mm::scrub::{self, Refusal};
+    process.with_handles(|table| match table.get(token) {
+        Ok((Object::MemoryScrub, rights)) if rights.contains(Rights::MANAGE) => Ok(()),
+        Ok((Object::MemoryScrub, _)) => Err(status::ACCESS_DENIED),
+        Ok(_) => Err(status::WRONG_TYPE),
+        Err(_) => Err(status::BAD_HANDLE),
+    })?;
+    let budget = u32::try_from(budget).map_err(|_| status::INVALID_ARGS)?;
+    let batch = scrub::test_batch(budget).map_err(|refusal| match refusal {
+        Refusal::Budget => status::INVALID_ARGS,
+        Refusal::StandsDown => status::WRONG_TYPE,
+        Refusal::Busy => status::SHOULD_WAIT,
+    })?;
+    let told = [
+        u64::from(batch.tested),
+        u64::from(batch.suspects),
+        u64::from(batch.bad),
+        u64::from(batch.retired),
+        u64::from(batch.held),
+        u64::from(batch.sweeps),
+        u64::from(batch.stopped),
+    ];
+    let mut words = [0u8; types::MEMORY_SCRUB_ANSWER_WORDS * 8];
+    for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
+        chunk.copy_from_slice(&value.to_ne_bytes());
+    }
+    uaccess::copy_to_user(process.space(), answer, &words).map_err(fault)?;
+    Ok(0)
+}
+
 /// What `cpu_service` answers for each refusal.
 const fn service_status(refusal: crate::smp::service::Refusal) -> Errno {
     use crate::smp::service::Refusal;
@@ -3241,7 +3281,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::Pin(_)
         | Object::Starter
         | Object::Audit
-        | Object::CpuService => None,
+        | Object::CpuService
+        | Object::MemoryScrub => None,
     }
 }
 

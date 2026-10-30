@@ -768,6 +768,218 @@ fn check_retired() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// A free frame with a free block of its order elsewhere: one allocated and
+/// given straight back.
+fn fresh_free_frame() -> Result<super::Frame, &'static str> {
+    let frame = mm::allocate_frames(0).ok_or("no frame for the scrubber's check")?;
+    mm::deallocate_frames(frame, 0);
+    Ok(frame)
+}
+
+// CHECKS-ONLY: stages_check.rs; home: mm::check
+/// The RAM scrubber (`docs/RAM-SCRUBBER.md` §3.1, §7), at stage 2 on one
+/// processor, where nothing else moves the free lists: a clean frame is
+/// tested and given back with the free count and every order's free-block
+/// count as they were; a frame the check holds is skipped, its contents
+/// untouched; an injected one-off makes a suspect, released, and the same
+/// frame failing on a later sweep is retired; an injected stuck bit retires
+/// a frame after its retest, which then stays allocated, owned by nobody and
+/// retired; with the retired set full, a bad frame is held out, not
+/// released, and the batch stops; below twice the watermark nothing is
+/// claimed; and the last free block of the largest order is skipped. Every
+/// retirement is forgotten after.
+/// Run only where the scrubber itself would run ([`mm::scrub::verdict`]):
+/// skipped, with the reason said, where the processor has no write that reads
+/// nothing, where the firmware says the memory corrects errors or its table
+/// cannot be read, and as a guest without the gate's override -- so a boot
+/// with the checks never writes a frame where H.FAIL.9 promises the
+/// scrubber does not (ledger 5140 (2)).
+///
+/// Verifies: L.mm.101, L.mm.102, L.mm.104, L.mm.105
+pub fn check_scrubber(view: &BootView<'_>, memory: mm::scrub::Memory) -> Result<(), &'static str> {
+    use ferrix_frame::State;
+    use mm::scrub;
+    let verdict = scrub::verdict(view, memory);
+    if !verdict.runs() {
+        println!(
+            "  scrub    check skipped: the scrubber {}",
+            verdict.reason()
+        );
+        return Ok(());
+    }
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    let outcome = scrubber_cases();
+    let retired = super::RETIRED_COUNT
+        .load(Ordering::Relaxed)
+        .saturating_sub(before);
+    super::forget_checked_retirements(retired);
+    scrub::reset_for_check();
+    let (suspect, stuck) = outcome?;
+    if [suspect, stuck]
+        .iter()
+        .any(|&frame| !matches!(mm::frame_state(frame), Some(State::Free | State::FreeTail)))
+    {
+        return Err("a frame the scrubber's check retired was not free once forgotten");
+    }
+    println!(
+        "  scrub    a clean frame tested and given back as it was, a held one skipped, a \
+         one-off a suspect and retired when it failed again, a stuck bit retired, a full set \
+         holding the frame out, the watermark stopping it, the last block of its order skipped"
+    );
+    Ok(())
+}
+
+/// [`check_scrubber`]'s cases; the two frames retired, for the caller to
+/// free once forgotten.
+fn scrubber_cases() -> Result<(super::Frame, super::Frame), &'static str> {
+    use ferrix_frame::State;
+    use mm::scrub;
+    let blocks = || super::with_frames(|frames| frames.free_blocks());
+    let kept = |frame| {
+        mm::frame_state(frame) == Some(State::Allocated)
+            && mm::is_retired(frame)
+            && mm::frame_owner(frame) == crate::object::quota::NONE
+    };
+
+    // A clean frame, given back as it was.
+    let clean = fresh_free_frame()?;
+    let (free, shape) = (mm::free_frames(), blocks());
+    scrub::aim(clean);
+    let batch = scrub::batch_for_check(1);
+    if batch.tested != 1 || batch.bad != 0 || batch.suspects != 0 {
+        return Err("the scrubber did not test a clean frame clean");
+    }
+    if mm::free_frames() != free || blocks() != shape {
+        return Err("a scrubbed frame did not go back to the free lists as it was");
+    }
+
+    // A frame in use is skipped, its contents untouched.
+    let held = mm::allocate_frames(0).ok_or("no frame for the scrubber's check")?;
+    let marker = direct_map(held * PAGE_SIZE) as *mut u64;
+    // SAFETY: (KMEM) the check's own frame, through the direct map.
+    unsafe { marker.write_volatile(0x5c2b_5c2b_5c2b_5c2b) };
+    scrub::aim(held);
+    let _ = scrub::batch_for_check(1);
+    // SAFETY: (KMEM) as above.
+    let untouched = unsafe { marker.read_volatile() } == 0x5c2b_5c2b_5c2b_5c2b;
+    let still = mm::frame_state(held) == Some(State::Allocated);
+    mm::deallocate_frames(held, 0);
+    if !untouched || !still {
+        return Err("the scrubber touched a frame in use");
+    }
+
+    // A one-off: a suspect, released; failing again later, retired.
+    let suspect = fresh_free_frame()?;
+    scrub::aim(suspect);
+    scrub::inject(suspect, 1);
+    let first = scrub::batch_for_check(1);
+    if first.suspects != 1 || first.bad != 0 || mm::frame_state(suspect) == Some(State::Allocated) {
+        return Err("a frame that failed once was not a suspect, released");
+    }
+    scrub::aim(suspect);
+    scrub::inject(suspect, 1);
+    let again = scrub::batch_for_check(1);
+    if again.bad != 1 || again.retired != 1 || !kept(suspect) {
+        return Err("a suspect failing on a later sweep was not retired and kept");
+    }
+
+    // A stuck bit: retired after its retest.
+    let stuck = fresh_free_frame()?;
+    scrub::aim(stuck);
+    scrub::inject(stuck, 2);
+    let bad = scrub::batch_for_check(1);
+    if bad.bad != 1 || bad.retired != 1 || !kept(stuck) {
+        return Err("a frame that failed its retest was not retired and kept");
+    }
+
+    // The set full: the bad frame held out, and the batch stops.
+    let room = super::RETIRED_ROOM.load(Ordering::Relaxed);
+    super::RETIRED_ROOM.store(
+        super::RETIRED_COUNT.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    let full = fresh_free_frame()?;
+    scrub::aim(full);
+    scrub::inject(full, 2);
+    let held_out = scrub::batch_for_check(4);
+    super::RETIRED_ROOM.store(room, Ordering::Relaxed);
+    let out_of_use = mm::frame_state(full) == Some(State::Allocated) && !mm::is_retired(full);
+    // Freed only if held: a scrubber that released it has freed it already.
+    if out_of_use {
+        mm::deallocate_frames(full, 0);
+    }
+    if held_out.held != 1 || !held_out.stopped || held_out.tested != 1 || !out_of_use {
+        return Err("with the retired set full a bad frame was released, or the batch went on");
+    }
+
+    // Below twice the watermark nothing is claimed, and the batch stops.
+    let low = fresh_free_frame()?;
+    let watermark = super::WATERMARK.load(Ordering::Relaxed);
+    super::WATERMARK.store(mm::free_frames(), Ordering::Relaxed);
+    scrub::aim(low);
+    let stopped = scrub::batch_for_check(1);
+    super::WATERMARK.store(watermark, Ordering::Relaxed);
+    if stopped.tested != 0 || !stopped.stopped {
+        return Err("the scrubber claimed a frame below twice the watermark");
+    }
+
+    only_block_skipped()?;
+    Ok((suspect, stuck))
+}
+
+/// The last free block of the largest order free is skipped (`L.mm.101`):
+/// every other block of that order is taken, the last one's head aimed at
+/// with a stuck bit injected, and the watermark lifted so only the block
+/// rule can refuse it. Had the scrubber claimed it, it would have found it
+/// bad. The blocks taken are chained through their first words and given
+/// back.
+fn only_block_skipped() -> Result<(), &'static str> {
+    use mm::scrub;
+    let counts = super::with_frames(|frames| frames.free_blocks()).ok_or("no frame allocator")?;
+    let (order, count) = counts
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(_, &count)| count > 0)
+        .ok_or("no free block for the scrubber's check")?;
+    let order = u8::try_from(order).map_err(|_| "an order past u8")?;
+    let mut chain = 0;
+    for _ in 1..*count {
+        let Some(block) = mm::allocate_frames(order) else {
+            break;
+        };
+        // SAFETY: (KMEM) the first word of a block the check just took.
+        unsafe { (direct_map(block * PAGE_SIZE) as *mut u64).write_volatile(chain) };
+        chain = block + 1;
+    }
+    let last = mm::allocate_frames(order);
+    let outcome = match last {
+        Some(head) => {
+            mm::deallocate_frames(head, order);
+            let watermark = super::WATERMARK.load(Ordering::Relaxed);
+            super::WATERMARK.store(0, Ordering::Relaxed);
+            scrub::aim(head);
+            scrub::inject(head, 2);
+            let batch = scrub::batch_for_check(1);
+            scrub::inject(0, 0);
+            super::WATERMARK.store(watermark, Ordering::Relaxed);
+            if batch.bad != 0 {
+                Err("the scrubber claimed the last free block of the largest order")
+            } else {
+                Ok(())
+            }
+        }
+        None => Err("no block for the scrubber's check"),
+    };
+    while chain != 0 {
+        let block = chain - 1;
+        // SAFETY: (KMEM) as above, read back before the block is freed.
+        chain = unsafe { (direct_map(block * PAGE_SIZE) as *const u64).read_volatile() };
+        mm::deallocate_frames(block, order);
+    }
+    outcome
+}
+
 /// [`check_retired`]'s body: three frames retired and their outcomes
 /// checked, then the full set. The frames, for the caller to free once they
 /// are forgotten.

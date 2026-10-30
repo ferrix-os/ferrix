@@ -109,7 +109,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixAssurance` | `11-assurance.sysml` | docs/RELIABILITY.md and docs/ASSEMBLY.md: the quality gates, what each one verifies, and what the tests can actually reach. The gates cargo xtask check runs are in CI. Of the xtask boot gates, CI runs test-boot and test-rustc; the ones that need a binary the repository does not carry, a disk judged on the host or a screendump run in the landing gates of docs/BACKLOG.md instead (docs/ROADMAP.md, Continuously). |
 | `FerrixViews` | `12-views.sysml` | How to read the one model as two: what runs today, and what the roadmap still owes. The filters key on the lifecycle keywords every element carries. |
 | `FerrixItemRequirements` | `13-item-requirements.sysml` | The high-level requirements of the certified item (the `core` and `item` rings of docs/certification/ITEM.md): what each subsystem promises at its interface, decomposed from the Security Target's objectives (docs/certification/SECURITY-TARGET.md §4.1 and §8.2) and the safety manual's assumed safety requirements (SAFETY-MANUAL.md §2). The low-level requirements, one per unit of code, go in one file per subsystem after this one. docs/certification/IMPLEMENTATION.md W-8 is the design, and tools/common/check/check-traceability.py the gate that reads these and writes docs/certification/TRACEABILITY.md. |
-| `FerrixObjectRequirements` | `14-object-requirements.sysml` | What each unit of src/kernel/src/object/ does, as `ItemLowLevel` requirements (part 13 defines the format): the core ring's object layer -- what a handle names and how it is dropped, channels, ports, interrupts, I/O mappings, pins, the job quotas, jobs, the core half of a process, and the scoped OOM kill. The handle table itself and the rights arithmetic are `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify H.OBJ.1 to H.OBJ.4 directly; nothing here restates them. |
+| `FerrixObjectRequirements` | `14-object-requirements.sysml` | What each unit of src/kernel/src/object/ does, as `ItemLowLevel` requirements (part 13 defines the format): the core ring's object layer -- what a handle names and how it is dropped, channels, ports, interrupts, I/O mappings, pins, the job quotas, jobs, the core half of a process, and the scoped OOM kill. The handle table itself and the rights arithmetic are `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify H.OBJ.1 to H.OBJ.4 directly; nothing here restates them. L.object.253, reserved for init's grant of the memory scrub token to memscrub, is released unwritten: the grant is ring-3 init's, outside the item, and the item relies on nothing from it (ledger 5140 (3)). |
 | `FerrixSchedRequirements` | `15-sched-requirements.sysml` | What each unit of src/kernel/src/sched/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14's pilot settled how they are cut). The scheduling decision itself is `src/lib/kernel/sched`'s `RunQueue`, an EEVDF queue the kernel's per-processor queue wraps; its host tests are the checks, and each requirement names the kernel function that carries the behaviour into the item as its `unit`. |
 | `FerrixIommuRequirements` | `16-iommu-requirements.sysml` | What each unit of src/kernel/src/iommu.rs and src/kernel/src/iommu/ does, as `ItemLowLevel` requirements (part 13 defines the format): where firmware puts each PCI function's DMA, the units the kernel turns translation on for, the domains a driver pins pages into, the gate a wait on a unit is made through, and the faults a unit records. The pins a program makes through a handle, and the quarantine a dead driver's pins go to, are object/'s (part 14, `L.object.45` to `L.object.49`); this is the domain side under them. |
 | `FerrixMemoryRequirements` | `17-memory-requirements.sysml` | What each unit of the item's memory management does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies), in two id spaces. |
@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 149 packages, 8270 elements, 220 relations. Model digest `3e3ad1e022dda863`.
+27 files, 149 packages, 8339 elements, 220 relations. Model digest `de59593e82f43707`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4093,6 +4093,7 @@ flowchart LR
 | `L.object.249` | `aSealedJobsStartsStayInside` | — | — | — |
 | `L.object.250` | `sealedAsMade` | — | — | — |
 | `L.object.251` | `aSealedMemberCreatesInside` | — | — | — |
+| `L.object.252` | `theMemoryScrubToken` | — | — | — |
 | `L.object.140` | `anEndsWordIsItsInbox` | — | — | — |
 | `L.object.141` | `aWakerFencesTheWordBeforeItsWake` | — | — | — |
 | `L.object.164` | `aParkIsSetBesideAnEmptyInbox` | — | — | — |
@@ -4312,6 +4313,14 @@ flowchart LR
 | `L.mm.98` | `anInjectedRefusalIsNotRetried` | — | — | — |
 | `L.mm.99` | `theArchivesPagesComeBack` | — | — | — |
 | `L.mm.100` | `noReaderOutlivesTheArchive` | — | — | — |
+| `L.mm.101` | `aScrubClaimLeavesEveryOrder` | — | — | — |
+| `L.mm.102` | `aScrubbedFrameGoesBackUncounted` | — | — | — |
+| `L.mm.103` | `fourPatternsEachReadBack` | — | — | — |
+| `L.mm.104` | `aFrameIsBadOnlyAfterItsRetest` | — | — | — |
+| `L.mm.105` | `aBadFrameIsKeptAndTheShareHeld` | — | — | — |
+| `L.mm.106` | `theScrubberStandsDownWhereItMust` | — | — | — |
+| `L.mm.107` | `theScrubbersCountsShowCoverage` | — | — | — |
+| `L.mm.108` | `oneBatchAtATime` | — | — | — |
 | `L.mm.71` | `theWatermarkIsSizedOnce` | — | — | — |
 | `L.mm.72` | `aProgramsFramesStopAtTheWatermark` | — | — | — |
 | `L.mm.73` | `aProgramsTablesStopAtTheWatermark` | — | — | — |
@@ -4656,6 +4665,7 @@ flowchart LR
 | `L.x86_64.240` | `smcaMcaxSet` | — | — | — |
 | `L.x86_64.241` | `mceLineIpidAndSynd` | — | — | — |
 | `L.x86_64.242` | `amdDeferredLoggedRetiredByPaddrv` | — | — | — |
+| `L.x86_64.243` | `scrubWritesReadNothingAndEvict` | — | — | — |
 | `L.x86_64.99` | `theMachineResets` | — | — | — |
 | `L.x86_64.100` | `aStoppedProcessorStaysStopped` | — | — | — |
 | `L.x86_64.101` | `theVdsoExportsItsClocks` | — | — | — |
@@ -4689,6 +4699,7 @@ flowchart LR
 | `L.syscall.21` | `aReplacingThreadPostsEnd` | — | — | — |
 | `L.syscall.22` | `aStopPostsStop` | — | — | — |
 | `L.syscall.23` | `everySignalPostsSignal` | — | — | — |
+| `L.syscall.24` | `memoryScrubsArgumentsAndAnswers` | — | — | — |
 | `L.trap.5` | `noEntryMeansEnosys` | — | — | — |
 | `L.trap.6` | `aMovedProcessRunsInItsNewJob` | — | — | — |
 | `L.trap.8` | `aTrapAnswersOnlyTheCallsOwnRegister` | — | — | — |
@@ -4740,6 +4751,7 @@ flowchart LR
 | `L.aarch64.40` | `firmwareAnswersAreRead` | — | — | — |
 | `L.aarch64.41` | `theEntryLoopMatchesTheRecords` | — | — | — |
 | `L.aarch64.67` | `eachProcessorsIdentityIsReadBack` | — | — | — |
+| `L.aarch64.68` | `scrubZeroesThenEvicts` | — | — | — |
 | `L.aarch64.42` | `defencesAreAppliedAndReadBack` | — | — | — |
 | `L.aarch64.52` | `nothingInsideADomain` | — | — | — |
 | `L.aarch64.43` | `indicesAreClamped` | — | — | — |
@@ -4840,6 +4852,7 @@ flowchart LR
 | `L.armv7a.24` | `nothingStaysBehindAClearEnable` | — | — | — |
 | `L.armv7a.25` | `theRecordIsTheStateWhileOff` | — | — | — |
 | `L.armv7a.26` | `aVfpUserIsResumedWhole` | — | — | — |
+| `L.armv7a.29` | `scrubStandsDownOnArmv7a` | — | — | — |
 | `L.smp.1` | `impossibleListsAreRefused` | — | — | — |
 | `L.smp.2` | `theBootProcessorIsZero` | — | — | — |
 | `L.smp.3` | `eachProcessorFindsItsOwnRecord` | — | — | — |

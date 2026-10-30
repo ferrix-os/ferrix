@@ -668,3 +668,52 @@ fn qemus_2x_table_as_ovmf_installed_it_reads_as_qemu_built_it() {
     use crate::fixtures::{ENTRY_V2, TABLE_V2};
     reads_as_qemu_built_it(&ENTRY_V2, &TABLE_V2, Kind::V2, 0x02_08_00);
 }
+
+/// A type 16 with Use `usage` and Memory Error Correction `correction`.
+fn array(usage: u8, correction: u8) -> Vec<u8> {
+    // Location 03h (system board), Use, Correction, then capacity, error
+    // handle and device count (SMBIOS 2.1's 15-byte form).
+    let mut formatted = vec![0u8; 11];
+    formatted[0] = 0x03;
+    formatted[1] = usage;
+    formatted[2] = correction;
+    structure(16, &formatted, &[])
+}
+
+/// The scrubber's reading of type 16 (`docs/RAM-SCRUBBER.md` §3.3): only
+/// system memory arrays count; every one saying None runs; Parity, the
+/// ECCs and CRC stand down; Other and Unknown are unclear; none at all is
+/// absent; a short structure or an unknown value is malformed.
+///
+/// Verifies: L.mm.106
+#[test]
+fn the_memory_arrays_say_whether_memory_corrects() {
+    let read = |arrays: &[Vec<u8>]| {
+        let mut table: Vec<u8> = arrays.concat();
+        table.extend(end());
+        correction_of(&table, 0)
+    };
+    assert_eq!(read(&[array(3, 3)]), Correction::None);
+    assert_eq!(read(&[array(3, 3), array(3, 3)]), Correction::None);
+    for kind in 4..=7 {
+        assert_eq!(
+            read(&[array(3, 3), array(3, kind)]),
+            Correction::Corrects(kind)
+        );
+    }
+    assert_eq!(read(&[array(3, 2)]), Correction::Unclear);
+    assert_eq!(read(&[array(3, 1)]), Correction::Unclear);
+    assert_eq!(read(&[array(3, 2), array(3, 6)]), Correction::Corrects(6));
+    // A video memory array with ECC is not system memory.
+    assert_eq!(read(&[array(4, 6), array(3, 3)]), Correction::None);
+    assert_eq!(read(&[array(4, 6)]), Correction::Absent);
+    assert_eq!(read(&[bios(), system()]), Correction::Absent);
+    assert_eq!(read(&[array(3, 0)]), Correction::Malformed);
+    assert_eq!(read(&[array(3, 9)]), Correction::Malformed);
+    // A type 16 three bytes long: no Use, no correction.
+    assert_eq!(
+        read(&[structure(16, &[0x03, 0x03], &[])]),
+        Correction::Malformed
+    );
+    assert_eq!(read(&[array(3, 6), array(3, 9)]), Correction::Malformed);
+}

@@ -166,6 +166,44 @@ pub use aarch64::speculation::midr_of;
 pub use armv7a::speculation::midr_of;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{cpuid, user_extended_state};
+// The RAM scrubber's writes that read nothing, its eviction to the point of
+// coherency, and the guest test (`docs/RAM-SCRUBBER.md` §3.2, §3.3). ARMv7-A
+// has no write of a whole line that reads nothing, so it stands down.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::scrub::{
+    evict_to_coherency, fill_without_reading, hypervisor_seen, is_guest, scrub_ready,
+};
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::scrub::{
+    evict_to_coherency, fill_without_reading, hypervisor_seen, is_guest, scrub_ready,
+};
+
+/// ARMv7-A stands down: no write of a whole line reads nothing there.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn scrub_ready() -> Result<(), &'static str> {
+    Err("ARMv7-A has no write of a whole line that reads nothing")
+}
+
+/// Never reached on ARMv7-A: [`scrub_ready`] refused first.
+#[cfg(target_arch = "arm")]
+pub(crate) fn fill_without_reading(_virt: u64, _len: u64, _value: &dyn Fn(u64) -> u64) {}
+
+/// Never reached on ARMv7-A: [`scrub_ready`] refused first.
+#[cfg(target_arch = "arm")]
+pub(crate) fn evict_to_coherency(_virt: u64, _len: u64) {}
+
+/// Not asked on ARMv7-A, which stands down whatever it runs on.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn is_guest(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
+    false
+}
+
+/// Not asked on ARMv7-A, which stands down whatever it runs on.
+#[cfg(target_arch = "arm")]
+pub(crate) const fn hypervisor_seen(_view: &ferrix_bootinfo::BootView<'_>) -> bool {
+    false
+}
+
 // Core quarantine's interrupt moves (`docs/CORE-QUARANTINE.md` §3.3): on
 // x86-64 every message is a remapping entry that can be retargeted; on the
 // Arm pair moving one is `GICD_IROUTER` or `ITARGETSR`, a later step, so no

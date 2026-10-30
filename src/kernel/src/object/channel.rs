@@ -1132,7 +1132,8 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             | Object::Port(_)
             | Object::Starter
             | Object::Audit
-            | Object::CpuService => None,
+            | Object::CpuService
+            | Object::MemoryScrub => None,
         });
     for queued in carried {
         // Once each, and no more than the walk could use: an inbox can hold

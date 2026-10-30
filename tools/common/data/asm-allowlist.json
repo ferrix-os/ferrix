@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1734,
+  "max_total_lines": 1739,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -71,9 +71,20 @@
     "The founding claim: 99.9% Rust. Reached by writing the operating system,",
     "not by shrinking the vector table. At today's ~1600 lines of assembly it",
     "needs the tree to pass roughly a million and a half lines of Rust, so treat it",
-    "as the direction of travel that check-asm-budget.py prints every run."
+    "as the direction of travel that check-asm-budget.py prints every run.",
+    "1739 since 2026-10-30 (ram-scrubber, docs/RAM-SCRUBBER.md, consultant ledger 5045 and 5057, L.x86_64.243, L.aarch64.68): the RAM scrubber writes free frames with stores that read nothing, so it never reads memory it has not written (an ECC machine would halt on an uncorrectable error in what it read): x86-64 scrub.rs +2, MOVNTI and the SFENCE after it, which need SSE2 that the kernel target has off; AArch64 scrub.rs +3, the DCZID_EL0 read, DC ZVA and the DSB after it, system registers and cache maintenance with no Rust spelling. The tree went from 1734 to 1739."
   ],
   "files": [
+    {
+      "file": "src/kernel/src/arch/x86_64/scrub.rs",
+      "max_lines": 2,
+      "reason": "The RAM scrubber's writes that read nothing (docs/RAM-SCRUBBER.md section 3.2, L.x86_64.243): MOVNTI, a non-temporal store with no read for ownership, over every word of a free frame, and SFENCE after them. The kernel target has SSE off, so core::arch's _mm_stream_si64 and _mm_sfence cannot be called; neither store has another Rust spelling."
+    },
+    {
+      "file": "src/kernel/src/arch/aarch64/scrub.rs",
+      "max_lines": 3,
+      "reason": "The RAM scrubber's writes that read nothing on AArch64 (docs/RAM-SCRUBBER.md section 3.2, L.aarch64.68): the DCZID_EL0 read for the block size and DZP, DC ZVA, which zeroes a block without a linefill, and the DSB after it. A system register and a cache maintenance instruction have no Rust spelling."
+    },
     {
       "file": "src/kernel/src/arch/x86_64/framebuffer.rs",
       "max_lines": 3,

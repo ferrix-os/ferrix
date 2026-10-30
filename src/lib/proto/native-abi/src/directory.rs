@@ -32,6 +32,9 @@ pub const MAX_MESSAGE: usize = 256;
 /// The name a GRANT of the processor service token carries.
 pub const CPU_SERVICE: &str = "cpu-service";
 
+/// The name a GRANT of the memory scrub token carries.
+pub const MEMORY_SCRUB: &str = "memory-scrub";
+
 /// What a message is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

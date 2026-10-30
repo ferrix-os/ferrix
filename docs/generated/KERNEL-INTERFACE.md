@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2459 declarations in the core's files, 178 in the item's; 94 checks-only.
+2479 declarations in the core's files, 179 in the item's; 98 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1860,6 +1860,7 @@ checks above is `pub` for raised checks (F3).
 | `with_initrd` | fn | load |  |
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | load, bin |  |
+| `scrub` | mod | item, load, bin |  |
 | `bypass_heap_in_sections` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fill_reserve` | re-export | bin |  |
 | `refuse_reserve_fills` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1891,6 +1892,7 @@ checks above is `pub` for raised checks (F3).
 | `check_a_large_block_goes_back_with_the_section` | fn | load (checks) | checks-only |
 | `check_heap_caches` | fn | load (checks) | checks-only |
 | `check_pstore_never_free` | fn | bin |  |
+| `check_scrubber` | fn | bin (checks) | checks-only |
 | `check_w_xor_x` | fn | bin |  |
 | `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1907,6 +1909,29 @@ checks above is `pub` for raised checks (F3).
 | `fill_reserve` | fn | bin |  |
 | `refuse_reserve_fills` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reserve_counts` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+
+### `mm::scrub`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `Memory` | enum | bin |  |
+| `Refusal` | enum | item |  |
+| `Standing` | enum | - |  |
+| `decide` | fn | bin |  |
+| `inject` | fn | load (checks) | checks-only |
+| `render` | fn | load |  |
+| `standing` | fn | load (checks) | checks-only |
+| `test_batch` | fn | item |  |
+| `Batch` | struct | - |  |
+| `Batch::bad` | field | item, load |  |
+| `Batch::held` | field | item, load, bin |  |
+| `Batch::retired` | field | item, load |  |
+| `Batch::stopped` | field | item, load |  |
+| `Batch::suspects` | field | item, load |  |
+| `Batch::sweeps` | field | item |  |
+| `Batch::tested` | field | item, load |  |
+| `Standing::reason` | method | item, load, bin |  |
+| `Standing::runs` | method | load, bin |  |
 
 ### `mmio`
 
@@ -3211,7 +3236,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `Refusal` | enum | bin |  |
 | `open` | fn | bin |  |
-| `tables` | fn | load |  |
+| `tables` | fn | load, bin |  |
 | `Shown` | struct | bin |  |
 | `Refusal::text` | method | load, bin |  |
 
@@ -3235,6 +3260,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `AUDIT_RIGHTS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CPU_SERVICE_RIGHTS` | const | load (checks) | checks-only |
+| `MEMORY_SCRUB_RIGHTS` | const | load (checks) | checks-only |
 | `Failure` | enum | load |  |
 | `Image` | enum | load |  |
 | `bootstrap_channel` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

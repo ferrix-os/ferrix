@@ -92,6 +92,11 @@ pub enum Object {
     /// there is given to pid 1, which gives lode a copy; `cpu_service`
     /// answers a holder with `MANAGE`.
     CpuService,
+    /// The capability to run the RAM scrubber (`docs/RAM-SCRUBBER.md` §4): a
+    /// token with nothing in it, the one there is given to pid 1, which
+    /// grants `memscrub` a copy; `memory_scrub` answers a holder with
+    /// `MANAGE`.
+    MemoryScrub,
 }
 
 /// A queue nothing is woken on, for objects whose signals never change.
@@ -118,7 +123,8 @@ impl Object {
             | Object::Port(_)
             | Object::Starter
             | Object::Audit
-            | Object::CpuService => Signals::NONE,
+            | Object::CpuService
+            | Object::MemoryScrub => Signals::NONE,
         }
     }
 
@@ -141,7 +147,8 @@ impl Object {
             | Object::Pin(_)
             | Object::Starter
             | Object::Audit
-            | Object::CpuService => &QUIET,
+            | Object::CpuService
+            | Object::MemoryScrub => &QUIET,
         }
     }
 }
@@ -312,7 +319,8 @@ impl Object {
             | Object::Port(_)
             | Object::Starter
             | Object::Audit
-            | Object::CpuService => true,
+            | Object::CpuService
+            | Object::MemoryScrub => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
         }
     }

@@ -78,8 +78,8 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use ferrix_bootinfo::{BootView, option_in};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::bootstrap::{
-    AUDIT_MAGIC, CPU_SERVICE_MAGIC, DEVMGR_STARTER_MAGIC, ROOT_IN_MEMORY, ROOT_MAGIC,
-    ROOT_SWITCHED, after_hello, init_hello,
+    AUDIT_MAGIC, CPU_SERVICE_MAGIC, DEVMGR_STARTER_MAGIC, MEMORY_SCRUB_MAGIC, ROOT_IN_MEMORY,
+    ROOT_MAGIC, ROOT_SWITCHED, after_hello, init_hello,
 };
 use ferrix_native_abi::rights::Rights;
 use ferrix_sync::Once;
@@ -239,6 +239,7 @@ fn next_bootstrap() -> Option<Transfer> {
     }
     give_audit(&kernel_end);
     give_cpu_service(&kernel_end);
+    give_memory_scrub(&kernel_end);
     let last = CHANNEL.lock().replace(kernel_end);
     // Through `dispose`, with the lock let go: what the last program sent the
     // kernel and nobody read may carry handles.
@@ -322,6 +323,38 @@ static ROOT_CAN_RETURN: AtomicBool = AtomicBool::new(false);
 pub fn root_can_return() {
     ROOT_CAN_RETURN.store(true, Ordering::Release);
 }
+
+/// Give the first program -- pid 1 -- the memory scrub token after the
+/// processor service token (`docs/RAM-SCRUBBER.md` §4): kept by pid 1, which
+/// grants `memscrub` a copy. Given once, whether or not the scrubber runs:
+/// where it stands down, the call says so.
+fn give_memory_scrub(kernel_end: &Arc<Endpoint>) {
+    if MEMORY_SCRUB_GIVEN.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let written = fallible::try_to_vec(&after_hello(MEMORY_SCRUB_MAGIC, 1))
+        .and_then(|message| Ok((message, fallible::try_with_capacity(1)?)))
+        .map_err(|_| ())
+        .and_then(|(message, mut transfers): (Vec<u8>, Vec<Transfer>)| {
+            let _ =
+                fallible::push_within(&mut transfers, (Object::MemoryScrub, MEMORY_SCRUB_RIGHTS));
+            kernel_end
+                .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                .map_err(|_| ())
+        });
+    if written.is_err() {
+        println!("  init     the memory scrub token could not be written; no memory is scrubbed");
+    }
+}
+
+/// Whether pid 1 has been given the memory scrub token.
+static MEMORY_SCRUB_GIVEN: AtomicBool = AtomicBool::new(false);
+
+// CHECKS-ONLY: syscall/native_check.rs; home: init
+/// The rights pid 1's memory scrub token carries: as the processor service
+/// token's, `MANAGE` to use it, `DUPLICATE` and `TRANSFER` to grant a copy.
+pub const MEMORY_SCRUB_RIGHTS: Rights =
+    Rights(Rights::MANAGE.0 | Rights::DUPLICATE.0 | Rights::TRANSFER.0);
 
 /// Whether pid 1 has been given the processor service token.
 static CPU_SERVICE_GIVEN: AtomicBool = AtomicBool::new(false);

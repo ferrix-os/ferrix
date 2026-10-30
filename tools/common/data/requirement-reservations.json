@@ -197,13 +197,6 @@
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
     },
     {
-      "ids": ["H.FAIL.9", "L.mm.101-108", "L.x86_64.243", "L.aarch64.68", "L.armv7a.29", "L.object.252-253", "L.syscall.24"],
-      "owner": "ram-scrubber",
-      "branch": "feature/ram-scrubber",
-      "date": "2026-10-30",
-      "purpose": "docs/RAM-SCRUBBER.md, the idle-time RAM scrubber for memory without ECC (customer, 2026-10-30, item 7; consultant NOT YET B1-B6 ledger 5045, OK IF (1)-(9) ledger 5057): H.FAIL.9 the scrubber's failure modes; L.mm the claim and its skip rules, the uncounted release, the four patterns, the judgement and suspects, the bad frame kept and the share, the stand-down decision, the counts; one arch id each for the write-without-read and eviction facade; L.object the token and its rights; L.syscall MEMORY_SCRUB's arguments and answers"
-    },
-    {
       "ids": ["L.object.254-258"],
       "owner": "intel-large-pages",
       "branch": "feature/intel-large-pages",

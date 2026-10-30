@@ -8,6 +8,9 @@
  * kill. The handle table itself and the rights arithmetic are
  * `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify
  * H.OBJ.1 to H.OBJ.4 directly; nothing here restates them.
+ * L.object.253, reserved for init's grant of the memory scrub token to
+ * memscrub, is released unwritten: the grant is ring-3 init's, outside the
+ * item, and the item relies on nothing from it (ledger 5140 (3)).
  *
  * This is W-8's pilot (docs/certification/IMPLEMENTATION.md, step 3), the
  * subsystem the format was corrected on before the others copy it. What it
@@ -2119,6 +2122,16 @@ package FerrixObjectRequirements {
                 ACCESS_DENIED, and passes that refusal for its own inner job.";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("syscall::native::process_create");
+        }
+        requirement <'L.object.252'> theMemoryScrubToken : ItemLowLevel {
+            attribute :>> statement = "The kernel shall make one memory scrub token and give it to
+                pid 1 after the processor service token, with MANAGE,
+                DUPLICATE and TRANSFER, once.";
+            attribute :>> criterion = "The native boot check pins MEMORY_SCRUB_RIGHTS to MANAGE,
+                DUPLICATE and TRANSFER; test-scrub: memscrub scrubs through
+                the copy init granted it.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("init::give_memory_scrub");
         }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state

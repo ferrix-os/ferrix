@@ -172,6 +172,13 @@ pub(crate) const PROGRAMS: &[Program] = &[
         binary: "lode",
         directory: DIRECTORY,
     },
+    // memscrub, the RAM scrubber's pace (docs/RAM-SCRUBBER.md §5): a service
+    // init starts and grants the memory scrub token.
+    Program {
+        package: "ferrix-memscrub",
+        binary: "memscrub",
+        directory: DIRECTORY,
+    },
     // Not a driver: the helper `devmgr` publishes drivers' deaths and
     // restarts through (docs/DESKTOP.md §4.2), handed to it as an image
     // the way drvupdated is, and named by no table entry.

@@ -812,10 +812,11 @@ pub(crate) fn desktop_files(
     // The desktop keeps its log (docs/LOGGING.md): lode with basic.target,
     // crash and app-error screenshots on (§19, the customer, 2026-10-23),
     // and the event kinds at their defaults, written out to be changed.
-    files.push(crate::lode::enabled());
-    files.push(crate::lode::crashd_enabled());
+    files.extend([crate::lode::enabled(), crate::lode::crashd_enabled()]);
     files.push(crate::lode::pstore_enabled());
     files.extend(crate::lode::desktop_settings());
+    // And tests its free memory while it idles (docs/RAM-SCRUBBER.md §5).
+    files.push(crate::scrub::enabled());
     // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
     // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is
     // enabled (`lode-receive pair` says how).

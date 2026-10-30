@@ -171,19 +171,24 @@ Use is System memory (03h):
 
 It also stands down **as a guest**, where the architecture lets it tell:
 touching every free guest frame makes the host back all of them (C2).
-x86-64: `CPUID` leaf 1 ECX bit 31. AArch64 (condition 3): the SMCCC vendor
-hypervisor UID answers as KVM's, or the device tree has a `/hypervisor`
-node, or PSCI's conduit is `hvc` -- so QEMU's `virt` under KVM and the
-Pixel 7's crosvm VM stand down. A guest none of these betrays is the AoU's
+x86-64: `CPUID` leaf 1 ECX bit 31. AArch64 (condition 3): the device tree
+has a `/hypervisor` node, or PSCI's conduit is not `smc` (it is `hvc`, or
+the firmware names none: fail closed) -- so QEMU's `virt` and the Pixel 7's
+crosvm VM stand down. (The SMCCC vendor hypervisor UID adds nothing to
+these: a hypervisor that answers it is reached by `hvc`.) A guest none of these betrays is the AoU's
 residual.
 
 The gate needs the scrubber on under QEMU, whose own type 16 says
 multi-bit ECC. One boot option, `ferrix.scrub=test`, overrides both
 stand-downs, and only where it cannot defeat the ECC stand-down on bare
-metal (condition 2): it is compiled into a build with the checks
-(`ferrix_checks = "on"`) alone, a build check pinning that a product build
-names no such option; and on x86-64 it is honoured only when the
-hypervisor bit is set. Taken, it says `scrub: runs: stand-down overridden
+metal (condition 2, ledger 5140 (1)): it is compiled into a build with the
+checks (`ferrix_checks = "on"`), which every certified profile is, so what
+keeps it off bare metal is that it is honoured only where a hypervisor is
+positively seen -- x86-64's hypervisor bit, AArch64's `hvc` conduit or
+`/hypervisor` node, never the fail-closed answer for firmware that names no
+conduit. The option is declared test-only in `build-flags.toml`, which a
+certified profile's command line may not carry, and the integrator shall
+not pass it (AoU-38). Taken, it says `scrub: runs: stand-down overridden
 for the gate`. Only `test-scrub` passes it. Otherwise the decision and its
 reason are a boot line: `scrub: runs` / `scrub: stands down: <why>`.
 
@@ -283,7 +288,8 @@ L.object.252-253; L.syscall.24.
   (budget 0 and 65, no `MANAGE`, another object); a call's answer adds up;
   `SHOULD_WAIT` while a batch runs.
 * **`test-scrub`** (x86-64 KVM and TCG, AArch64; ARMv7-A's row requires
-  the stand-down line, its reason the missing type 16): init and `memscrub` with `period = 20`, 512 MiB of memory,
+  the stand-down line, its reason no write of a whole line that reads
+  nothing: the architecture is judged before the table): init and `memscrub` with `period = 20`, 512 MiB of memory,
   `ferrix.scrub=test`: a full sweep completes and is said,
   `/proc/ferrix-scrub` counts the frames tested against managed, no
   allocation failed, and with four CPU-bound loops it scrubs nothing while
@@ -337,3 +343,13 @@ call preemptible between frames).
   facade's host test and pinned disassembly in check, the BACKLOG hardware
   row, unsafe tagged and registered, certification-item.json covering
   mm/scrub and the facade, coverage carried; commits citing 5045 and 5057.
+* Code (feature/ram-scrubber, 2026-10-30) reviewed, ledger 5140: **OK IF
+  (1)-(6)**, with the deviations accepted: the stand-down decision judges
+  the architecture first, so ARMv7-A and an AArch64 with `DZP` set say
+  their own reason whatever the table says; AArch64's guest test is the
+  PSCI conduit and the `/hypervisor` node, the SMCCC UID dropped (§3.3);
+  and, for (1)(b), the override honoured only where a hypervisor is
+  positively seen (`arch::hypervisor_seen`), apart from the stand-down's
+  fail-closed guest test. (2) stage 2's scrubber check runs only where the
+  scrubber itself would (`mm::scrub::verdict`), and says its skip; (3)
+  L.object.253 released unwritten; (4) MEMORY-AND-TIMING 2.2e3 corrected.

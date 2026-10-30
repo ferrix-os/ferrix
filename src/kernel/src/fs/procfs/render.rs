@@ -634,6 +634,14 @@ pub(super) fn machine_check(_: &Kernel) -> Result<Vec<u8>> {
     Ok(out.0)
 }
 
+/// `/proc/ferrix-scrub`: the RAM scrubber's counts and its standing
+/// (`docs/RAM-SCRUBBER.md` §3.4). No addresses. Not Linux's.
+pub(super) fn scrub(_: &Kernel) -> Result<Vec<u8>> {
+    let mut out = alloc::string::String::new();
+    let _ = mm::scrub::render(&mut out);
+    Ok(out.into_bytes())
+}
+
 /// `/proc/ferrix-service`: each processor's service (`docs/CORE-QUARANTINE.md`
 /// §3) -- in or out, the tasks it drained while parked (expected 0) and the
 /// blocked tasks moved off it at their wake -- and the longest one move

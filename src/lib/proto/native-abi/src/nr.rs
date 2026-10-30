@@ -191,6 +191,8 @@ pub const POWER_SET: usize = 0x1067;
 pub const POWER_READ: usize = 0x1068;
 /// [`NativeCall::CpuService`].
 pub const CPU_SERVICE: usize = 0x1069;
+/// [`NativeCall::MemoryScrub`].
+pub const MEMORY_SCRUB: usize = 0x106A;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -654,10 +656,19 @@ pub enum NativeCall {
     /// a processor that may not go, `TIMED_OUT` for one that did not
     /// answer. A processor already as asked is answered 0.
     CpuService,
+    /// `(token, budget, answer: *[u64; MEMORY_SCRUB_ANSWER_WORDS])`. Test up
+    /// to `budget` free frames with the RAM scrubber, through the memory
+    /// scrub token with `MANAGE` (`docs/RAM-SCRUBBER.md` §4); the answer is
+    /// what the batch did (`types::MEMORY_SCRUB_ANSWER_WORDS`):
+    /// `INVALID_ARGS` for a budget of 0 or past 64, `ACCESS_DENIED` without
+    /// `MANAGE`, `WRONG_TYPE` on another object or where the scrubber stands
+    /// down, `SHOULD_WAIT` while another batch runs, `FAULT` for an answer
+    /// nothing maps.
+    MemoryScrub,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 69] = [
+pub const ALL: [NativeCall; 70] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -727,6 +738,7 @@ pub const ALL: [NativeCall; 69] = [
     NativeCall::PowerSet,
     NativeCall::PowerRead,
     NativeCall::CpuService,
+    NativeCall::MemoryScrub,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -811,6 +823,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         POWER_SET => NativeCall::PowerSet,
         POWER_READ => NativeCall::PowerRead,
         CPU_SERVICE => NativeCall::CpuService,
+        MEMORY_SCRUB => NativeCall::MemoryScrub,
         _ => return None,
     };
     Some(call)
@@ -889,5 +902,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::PowerSet => POWER_SET,
         NativeCall::PowerRead => POWER_READ,
         NativeCall::CpuService => CPU_SERVICE,
+        NativeCall::MemoryScrub => MEMORY_SCRUB,
     }
 }

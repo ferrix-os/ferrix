@@ -580,6 +580,109 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("mm::keep_initrd", "mm::initrd_readable", "mm::with_initrd",
                 "mm::give_back_initrd");
         }
+        requirement <'L.mm.101'> aScrubClaimLeavesEveryOrder : ItemLowLevel {
+            attribute :>> statement = "The scrubber shall claim a frame only in one hold of the frame
+                allocator's lock in which the frame is free, not retired, free
+                memory is at least twice the watermark, and another free block
+                of the claimed block's order or larger exists; otherwise it
+                shall skip the frame, and stop the batch at the watermark.";
+            attribute :>> criterion = "ferrix-frame's host test
+                a_claim_leaves_another_block_of_its_order; check_scrubber: a
+                frame the check holds is skipped, its contents untouched, and
+                a clean frame's batch leaves the free count and every order's
+                free-block count as they were. Control: the claim's free test
+                removed -- the held frame changes.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::claim", "mm::scrub::run", "mm::scrub::test_batch");
+        }
+        requirement <'L.mm.102'> aScrubbedFrameGoesBackUncounted : ItemLowLevel {
+            attribute :>> statement = "A frame the scrubber found good shall be zeroed and freed
+                through the path that keeps a retired frame held, moving none
+                of the allocator's counters, as its claim moved none.";
+            attribute :>> criterion = "check_scrubber: the free count and the free-block counts after
+                a clean frame's batch equal those before.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::release", "mm::scrub::zero");
+        }
+        requirement <'L.mm.103'> fourPatternsEachReadBack : ItemLowLevel {
+            attribute :>> statement = "Each test shall write the frame four times -- 0x5555..,
+                0xAAAA.., each word its physical address, and that inverted --
+                each with writes that read nothing, evict it to the point of
+                coherency, and read every word back and compare; it shall read
+                no line whose memory contents it has not itself written in the
+                current pass.";
+            attribute :>> criterion = "test-scrub: a full sweep of good memory finds nothing bad;
+                check_scrubber's injected failure is seen on a read-back; the
+                arch requirements L.x86_64.243, L.aarch64.68 and L.armv7a.29
+                for the writes and the eviction.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::test", "mm::scrub::injected");
+        }
+        requirement <'L.mm.104'> aFrameIsBadOnlyAfterItsRetest : ItemLowLevel {
+            attribute :>> statement = "A frame that fails a test shall be tested again at once; it is
+                bad if the retest fails or if it failed before as one of the
+                last 64 suspects; one that passes its retest shall be
+                remembered as a suspect and released.";
+            attribute :>> criterion = "check_scrubber: an injected one-off makes a suspect, released;
+                the same frame failing again later is retired; an injected
+                stuck bit is retired after its retest. Control: retirement
+                after one failure -- the one-off retires a good frame.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::judge", "mm::scrub::was_suspect", "mm::scrub::remember_suspect");
+        }
+        requirement <'L.mm.105'> aBadFrameIsKeptAndTheShareHeld : ItemLowLevel {
+            attribute :>> statement = "A bad frame shall be retired and freed through the
+                retired-frame decision, so that it stays allocated, owned by
+                nobody and retired; where the retired set is full or the
+                scrubber's share of 192 used, it shall be held claimed, not
+                released, and the batch shall stop, so that at most one frame
+                is held out.";
+            attribute :>> criterion = "check_scrubber: the retired frames are allocated, owned by
+                nobody and in the set; with the set full a bad frame is held
+                out and the batch stops after it. Control: a bad frame
+                released when the set is full.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::keep_bad", "mm::scrub::share_used");
+        }
+        requirement <'L.mm.106'> theScrubberStandsDownWhereItMust : ItemLowLevel {
+            attribute :>> statement = "At boot the kernel shall decide once, from SMBIOS type 16's
+                system memory arrays, whether the scrubber runs: where every
+                array says None; and where they say Other or Unknown or none
+                exists only if the processor writes without reading; never
+                where one says Parity, ECC or CRC or a type 16 cannot be read,
+                nor as a guest (or where AArch64 firmware names no PSCI
+                conduit); the gate's override, test-only and refused in a
+                certified profile's command line, is honoured only where a
+                hypervisor is positively seen (x86-64's hypervisor bit,
+                AArch64's hvc conduit or /hypervisor node).";
+            attribute :>> criterion = "ferrix-smbios's host test
+                the_memory_arrays_say_whether_memory_corrects; test-scrub: the
+                boot without the override stands down for QEMU's multi-bit
+                ECC, the override taken under QEMU's hypervisor, ARMv7-A's
+                stand-down. Control: the type-16 stand-down removed -- the
+                boot without the override runs.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::decide", "mm::scrub::verdict", "mm::scrub::standing", "mm::scrub::override_asked", "mm::scrub::Standing::reason", "mm::scrub::Standing::from_number");
+        }
+        requirement <'L.mm.107'> theScrubbersCountsShowCoverage : ItemLowLevel {
+            attribute :>> statement = "/proc/ferrix-scrub, readable by all, shall give the frames
+                managed, the frames tested in all and this sweep, the sweeps,
+                the suspects, bad, retired and held counts, and the standing
+                with its reason, and no address.";
+            attribute :>> criterion = "test-scrub: the guest reads tested against managed after a
+                sweep and the standing in both boots.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::render");
+        }
+        requirement <'L.mm.108'> oneBatchAtATime : ItemLowLevel {
+            attribute :>> statement = "Only one batch shall run at a time machine-wide, of at most 64
+                frames; a batch asked for while one runs shall be refused, and
+                a budget of 0 or past 64 refused, with nothing tested.";
+            attribute :>> criterion = "The native boot check: a budget of 0 and of 65 refused
+                INVALID_ARGS; test-scrub's memscrub batches answered.";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("mm::scrub::test_batch", "mm::scrub::batch_for_check");
+        }
         // Restated by docs/RAM-RELEASE.md R1 (consultant ledger 5022, condition 1):
         // the archive's release sets it a second time.
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {

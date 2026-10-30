@@ -54,6 +54,13 @@
 //! `TRANSFER`, so pid 1 keeps it and gives lode a copy with `MANAGE` and
 //! `TRANSFER`, again whenever lode restarts. Its `u32` is 1. Only the first
 //! program is given it.
+//!
+//! # The memory scrub token
+//!
+//! [`MEMORY_SCRUB_MAGIC`], written after the processor service token's,
+//! carries one handle: the memory scrub token (`docs/RAM-SCRUBBER.md` §4),
+//! with the same rights, which pid 1 grants `memscrub` a copy of. Its `u32`
+//! is 1. Only the first program is given it.
 
 /// The first four bytes of the message.
 pub const INIT_HELLO_MAGIC: [u8; 4] = *b"FXIN";
@@ -94,6 +101,9 @@ pub const AUDIT_MAGIC: [u8; 4] = *b"FXAU";
 
 /// The magic of the message carrying the processor service token.
 pub const CPU_SERVICE_MAGIC: [u8; 4] = *b"FXCS";
+
+/// The magic of the message carrying the memory scrub token.
+pub const MEMORY_SCRUB_MAGIC: [u8; 4] = *b"FXMS";
 
 /// The magic of the message saying where `/` is.
 pub const ROOT_MAGIC: [u8; 4] = *b"FXRT";

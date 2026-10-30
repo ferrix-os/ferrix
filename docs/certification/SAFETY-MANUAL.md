@@ -783,6 +783,45 @@ system, set `action = warn` or `off` where they do not, and treat a
 quarantined core as a hardware fault to be serviced. AArch64 and ARMv7-A
 take no processor out of service.
 
+### AoU-38 — the RAM scrubber is a detection aid for memory without ECC, not a guarantee
+`memscrub` tests free frames while the machine is idle and retires the
+ones that fail (`docs/RAM-SCRUBBER.md`, H.FAIL.9). The integrator shall
+not count on it to keep a program's data correct, and shall provide
+memory that corrects errors where that matters. In particular:
+
+* it tests only free memory: a program's pages, the heap, page tables,
+  the page cache and DMA buffers are never tested, and memory held for
+  the whole boot is never tested at all; `/proc/ferrix-scrub` shows how
+  much was tested (`tested-this-sweep` against `managed`);
+* detection stops at the point of coherency: a fault in a cache past it,
+  or one that only shows under a pattern the four do not make, is missed;
+* it stands down where the firmware's SMBIOS type 16 says the memory
+  corrects errors (parity, single-bit or multi-bit ECC, CRC), under a
+  hypervisor, on AArch64 with `DC ZVA` prohibited, and always on ARMv7-A.
+  A machine whose memory corrects errors but whose table says Other or
+  Unknown, or has no type 16, is scrubbed; on x86-64 an SMI or NMI that
+  splits one line's eight non-temporal stores lets such a memory
+  controller read the old line, and an uncorrectable error found there is
+  a machine check in ring 0 (AoU-36, H.FAIL.8). The integrator of such a
+  machine shall turn `memscrub.service` off;
+* a guest none of the tests betrays (x86-64's hypervisor bit, AArch64's
+  `hvc` PSCI conduit or `/hypervisor` node) is scrubbed, which makes its
+  host back every free frame;
+* while a frame is under test it is not free: two requests of the same
+  order made at once while exactly two blocks of it are free can see the
+  second fail for one frame's test (MEMORY-AND-TIMING §2.2e3); the
+  allocator does not retry;
+* a bad frame is retired and stays out until the next boot, at most 192
+  of the 256 retired places taken by the scrubber; past that it stops and
+  says so. A frame that fails is a hardware fault to be serviced.
+* `ferrix.scrub=test` is a test-only boot option for the gate: it is
+  honoured only where a hypervisor is positively seen, a certified
+  profile's command line may not carry it, and the integrator shall not
+  pass it;
+* a boot with the checks on runs stage 2's scrubber check only where the
+  scrubber itself would run, and says `scrub    check skipped: ...` with
+  the reason elsewhere.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

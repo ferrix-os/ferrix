@@ -1899,7 +1899,7 @@ static CLFLUSH_LINE: AtomicU64 = AtomicU64::new(0);
 
 /// The bytes one `CLFLUSH` covers, asked of `CPUID` the first time only. Two
 /// processors asking at once both store the same answer.
-fn clflush_line() -> u64 {
+pub(crate) fn clflush_line() -> u64 {
     let known = CLFLUSH_LINE.load(Ordering::Relaxed);
     if known != 0 {
         return known;

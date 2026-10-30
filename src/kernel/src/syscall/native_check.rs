@@ -113,6 +113,7 @@ fn checks(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     a_write_without_memory_keeps_its_handles(side, report)?;
     the_audit_record_is_read_by_its_handle_alone(side, report)?;
     a_processor_leaves_service_through_its_token_alone(side, report)?;
+    memory_is_scrubbed_through_its_token_alone(side, report)?;
     Ok(())
 }
 
@@ -1273,4 +1274,81 @@ fn the_undo_and_the_pinned_refusal(report: &mut Report) -> Result<(), &'static s
     }
     report.refusals += 2;
     Ok(())
+}
+
+/// The memory scrub token (`docs/RAM-SCRUBBER.md` §4): pid 1's rights pinned,
+/// `MANAGE`, `DUPLICATE` and `TRANSFER`; `memory_scrub` refusing a budget of 0
+/// and of 65, a handle without `MANAGE` and another object's handle; and a
+/// batch of one answered `WRONG_TYPE` where the scrubber stands down, or with
+/// at most one frame tested and the answer adding up where it runs (the
+/// gate's override).
+///
+/// Verifies: L.object.252, L.syscall.24, L.mm.108
+fn memory_is_scrubbed_through_its_token_alone(
+    side: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    if crate::init::MEMORY_SCRUB_RIGHTS != Rights::MANAGE | Rights::DUPLICATE | Rights::TRANSFER {
+        return Err("pid 1's memory scrub token is not MANAGE, DUPLICATE and TRANSFER");
+    }
+    let core = side.process.core();
+    let token = native::insert_new(core, Object::MemoryScrub, crate::init::MEMORY_SCRUB_RIGHTS)
+        .ok()
+        .and_then(|value| u32::try_from(value).ok())
+        .map(Handle)
+        .ok_or("could not give the check a memory scrub token")?;
+    let waiter = native::insert_new(core, Object::MemoryScrub, Rights::WAIT)
+        .ok()
+        .and_then(|value| u32::try_from(value).ok())
+        .map(Handle)
+        .ok_or("could not give the check a second memory scrub token")?;
+    let ask =
+        |handle: Handle, budget: u64| side.call(nr::MEMORY_SCRUB, &[reg(handle), budget, SCRATCH]);
+    refused(
+        ask(token, 0),
+        status::INVALID_ARGS,
+        "memory_scrub with a budget of 0 was answered",
+        report,
+    )?;
+    refused(
+        ask(token, 65),
+        status::INVALID_ARGS,
+        "memory_scrub with a budget past 64 was answered",
+        report,
+    )?;
+    refused(
+        ask(waiter, 1),
+        status::ACCESS_DENIED,
+        "memory_scrub through a handle without MANAGE was answered",
+        report,
+    )?;
+    let (end, _other) = channel(side)?;
+    refused(
+        ask(end, 1),
+        status::WRONG_TYPE,
+        "memory_scrub through a channel end was answered",
+        report,
+    )?;
+    match ask(token, 1) {
+        Err(status::WRONG_TYPE) if !crate::mm::scrub::standing().reason().starts_with("runs") => {
+            report.refusals += 1;
+            Ok(())
+        }
+        Ok(0) => {
+            let words = side.get(SCRATCH, types::MEMORY_SCRUB_ANSWER_WORDS * 8)?;
+            let word = |at: usize| {
+                words
+                    .get(at * 8..at * 8 + 8)
+                    .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+                    .map_or(u64::MAX, u64::from_ne_bytes)
+            };
+            let (tested, suspects, bad, retired, held) =
+                (word(0), word(1), word(2), word(3), word(4));
+            if tested > 1 || suspects + bad > tested || retired + held > bad {
+                return Err("memory_scrub's answer did not add up");
+            }
+            Ok(())
+        }
+        _ => Err("memory_scrub answered neither a batch nor the scrubber's stand-down"),
+    }
 }

@@ -106,7 +106,7 @@
     },
     "main.rs::kmain": {
       "complexity": 11,
-      "lines": 81,
+      "lines": 82,
       "recursive": false
     },
     "main.rs::start_scheduler": {
@@ -360,8 +360,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 31,
-      "lines": 83,
+      "complexity": 32,
+      "lines": 84,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {

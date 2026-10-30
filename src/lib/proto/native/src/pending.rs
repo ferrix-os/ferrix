@@ -180,6 +180,64 @@ pub fn cpu_service<S: Syscall>(
     )
 }
 
+/// What one [`memory_scrub`] batch did (`docs/RAM-SCRUBBER.md` §4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScrubBatch {
+    /// Frames tested.
+    pub tested: u64,
+    /// Frames that failed once and passed the retest.
+    pub suspects: u64,
+    /// Frames found bad.
+    pub bad: u64,
+    /// Bad frames retired.
+    pub retired: u64,
+    /// Bad frames held out, the retired set full.
+    pub held: u64,
+    /// Sweeps of all memory completed.
+    pub sweeps: u64,
+    /// Whether the batch stopped early.
+    pub stopped: bool,
+}
+
+/// `memory_scrub`: test up to `budget` free frames through the memory
+/// scrub token.
+///
+/// # Errors
+///
+/// [`Error::InvalidArgs`] for a budget of 0 or past 64,
+/// [`Error::AccessDenied`] without `MANAGE`, [`Error::WrongType`] for
+/// another object or where the scrubber stands down,
+/// [`Error::ShouldWait`] while another batch runs.
+pub fn memory_scrub<S: Syscall>(
+    sys: S,
+    token: &OwnedHandle<S>,
+    budget: usize,
+) -> Result<ScrubBatch, Error> {
+    let mut answer = [0_u8; types::MEMORY_SCRUB_ANSWER_WORDS * 8];
+    decode_unit(
+        Call::new(nr::MEMORY_SCRUB)
+            .value(register(token.raw()))
+            .value(budget)
+            .output(&mut answer)
+            .make(sys),
+    )?;
+    let word = |at: usize| {
+        answer
+            .get(at * 8..at * 8 + 8)
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+            .map_or(0, u64::from_ne_bytes)
+    };
+    Ok(ScrubBatch {
+        tested: word(0),
+        suspects: word(1),
+        bad: word(2),
+        retired: word(3),
+        held: word(4),
+        sweeps: word(5),
+        stopped: word(6) != 0,
+    })
+}
+
 /// What one [`audit_read`] answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuditRead {

@@ -1242,6 +1242,34 @@ lock held across the wait (the vectors' routes are copied out first). Both
 run in the asking task, under the service's sleeping lock, never in an
 interrupt; the park itself runs in the idle task with interrupts on.
 
+### 2.2e3 The RAM scrubber's batch (`docs/RAM-SCRUBBER.md`)
+
+`MEMORY_SCRUB` tests at most 64 free frames a call. One batch runs at a
+time machine-wide: a try-flag (`BUSY`, an atomic swap), and a second caller
+is answered `SHOULD_WAIT` at once, never made to wait. A call walks the
+frames from its cursor and stops at its budget, at the first claim refused
+for the watermark, at a full retired set, or when it has **looked at every
+managed frame once**: so one call may look at up to every managed frame,
+each look one `FRAMES` hold of `O(MAX_ORDER)` -- the free test, the
+watermark, the look for another free block of its order (the first two
+entries of each list of that order or above), and for a frame taken, the
+detach -- and a frame tested is released in one more such hold. No spin lock
+is held across a frame's test. One frame's test is four passes, each 512
+word stores that read nothing, an eviction of every line (64 lines of 64
+bytes on x86-64, `clflush` then `mfence`; `DC CIVAC` then `DSB SY` on
+AArch64) and 512 word reads: 2048 stores, 256 evictions and 2048 reads,
+twice over for a frame that fails once. On x86-64 interrupts are masked for
+one line's eight `movnti`s at a time, never longer. Between those holds the
+calling task holds no lock that raises its preemption count, so the timer's
+interrupt preempts it on its way out (`sched::preempt_on_irq_exit`, the
+kernel's preemption point, `sched/mod.rs` "Where preemption happens"): a
+call delays other tasks, it does not block them. So a call's worst case is
+64 frames' tests (128 for frames all failing once) plus one look at each
+managed frame, and the allocator waits at most one look, one claim or one
+release. The pace is `memscrub`'s (`period`, `idle`, `batch` in its unit's
+configuration), and it calls only while the machine has been idle the share
+it asks.
+
 ### 2.2f Device memory types (`user::memory_type::CLAIMS`)
 
 A spin lock over the physical ranges user mappings of device memory hold,

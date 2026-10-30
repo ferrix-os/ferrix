@@ -206,6 +206,10 @@ const DEVMGR_PROGRAM: &str = "/sbin/devmgr";
 /// (`docs/CORE-QUARANTINE.md` §4).
 const LODE_PROGRAM: &str = "/sbin/lode";
 
+/// memscrub's program, granted the memory scrub token at every start
+/// (`docs/RAM-SCRUBBER.md` §4).
+const MEMSCRUB_PROGRAM: &str = "/sbin/memscrub";
+
 /// What a control connection is waiting for from the manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pending {
@@ -915,6 +919,12 @@ impl Init {
             && let Err(why) = directory.grant_cpu_service(unit)
         {
             say(&format!("{name}: no processor service token: {why}"));
+        }
+        // memscrub paces the RAM scrubber (docs/RAM-SCRUBBER.md §5).
+        if spec.command.path == MEMSCRUB_PROGRAM
+            && let Err(why) = directory.grant_memory_scrub(unit)
+        {
+            say(&format!("{name}: no memory scrub token: {why}"));
         }
         // As its User=, Group= and SupplementaryGroups= (P0b): a helper
         // that has become them makes the process, and needs the cgroup's

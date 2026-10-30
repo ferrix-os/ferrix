@@ -1,0 +1,21 @@
+[package]
+name = "ferrix-memscrub"
+description = "The RAM scrubber's pace (docs/RAM-SCRUBBER.md §5): free memory swept once a period while the machine idles, through the memory scrub token"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "memscrub"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-rt.workspace = true
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

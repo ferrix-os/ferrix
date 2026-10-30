@@ -174,8 +174,20 @@
     {
       "file": "src/kernel/src/mm/check.rs",
       "kind": "memory",
-      "max_sites": 5,
-      "reason": "Stage 2's boot checks, moved out of main.rs: a vmap page and a kernel stack written and read back to its last word. Ordinary RAM, read for real because that is what is being proven."
+      "max_sites": 9,
+      "reason": "Stage 2's boot checks, moved out of main.rs: a vmap page and a kernel stack written and read back to its last word; the RAM scrubber's check marking a frame it holds and chaining the blocks it takes through their first words (docs/RAM-SCRUBBER.md §7). Ordinary RAM, read for real because that is what is being proven."
+    },
+    {
+      "file": "src/kernel/src/mm/scrub.rs",
+      "kind": "memory",
+      "max_sites": 1,
+      "reason": "The RAM scrubber's read-back of a free frame it claimed, through the direct map, after the pattern was written and evicted to the point of coherency (docs/RAM-SCRUBBER.md §3.1). Ordinary RAM, read for real because that is what is being tested."
+    },
+    {
+      "file": "src/kernel/src/arch/aarch64/scrub.rs",
+      "kind": "memory",
+      "max_sites": 1,
+      "reason": "The RAM scrubber's pattern stores after DC ZVA, into a free frame it claimed, through the direct map (docs/RAM-SCRUBBER.md §3.2). Ordinary RAM, written for real because that is what is being tested."
     },
     {
       "file": "src/kernel/src/mm.rs",
