@@ -209,13 +209,46 @@ CHECK_FILE = "src/kernel/src/arch/x86_64/cpu/check.rs"
 CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*))?")
 # And the machine check's bring-up (L.x86_64.232, docs/MACHINE-CHECK.md
 # §3.1, the consultant's M12): IA32_MCG_CTL and the banks' registers alone,
-# named through MCG_CTL and bank_msr.
+# named through MCG_CTL and bank_msr; and on an AMD SMCA part (L.x86_64.240,
+# docs/MACHINE-CHECK-AMD.md §3, the consultant's A6) MCA_CONFIG, named
+# `config` in smca_bank_up, the one function that writes it.
 MCE_FILE = "src/kernel/src/arch/x86_64/mce.rs"
 CHECKED_WRITE_ARGUMENT = {
     POWER_FILE: {"VR_CURRENT_CONFIG"},
     CHECK_FILE: {"ABSENT"},
-    MCE_FILE: {"MCG_CTL", "bank_msr"},
+    MCE_FILE: {"MCG_CTL", "bank_msr", "config"},
 }
+
+# AMD's SMCA registers (L.x86_64.239-240, the consultant's A6): every
+# smca_msr in mce.rs is inside smca_bank_up -- MCA_CONFIG (4) read and
+# written, MCA_IPID (5) read -- or read_synd -- MCA_SYND (6) read -- and
+# each of those functions reaches an MSR only through the checked accesses.
+SMCA_CALL = re.compile(r"\bsmca_msr\(\s*\w+\s*,\s*(SMCA_\w+)\s*\)")
+SMCA_ALLOWED = {"smca_bank_up": {"SMCA_CONFIG", "SMCA_IPID"}, "read_synd": {"SMCA_SYND"}}
+FUNCTION = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)")
+UNCHECKED_MSR = re.compile(r"\bcpu::(read_msr|write_msr)\(")
+
+
+def smca_problems(root: pathlib.Path) -> list[str]:
+    path = root / MCE_FILE
+    if not path.exists():
+        return []
+    problems = []
+    function = None
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        named = FUNCTION.match(line)
+        if named:
+            function = named.group(1)
+        if function in SMCA_ALLOWED and UNCHECKED_MSR.search(line):
+            problems.append(f"{MCE_FILE}:{number}: {function} reaches an MSR without the checked access (L.x86_64.239)")
+        if "fn smca_msr" in line:
+            continue
+        for match in SMCA_CALL.finditer(line):
+            if match.group(1) not in SMCA_ALLOWED.get(function, set()):
+                problems.append(f"{MCE_FILE}:{number}: {match.group(1)} reached in {function} (L.x86_64.239)")
+        if "smca_msr(" in line and not SMCA_CALL.search(line) and "fn smca_msr" not in line:
+            problems.append(f"{MCE_FILE}:{number}: an SMCA register not named by its constant (L.x86_64.239)")
+    return problems
 OTHER_MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
 ANY_MSR_ACCESS = re.compile(r"\b(read|write)_msr\w*|\brdmsr\b|\bwrmsr\w*\b")
 ASM_WRMSR = re.compile(r'"wrmsr"')
@@ -270,7 +303,12 @@ def main() -> int:
     allowed = {entry["file"]: entry for entry in policy["files"]}
 
     measured = survey(root)
-    problems = check(measured, policy) + read_only_msr_problems(root) + checked_write_problems(root)
+    problems = (
+        check(measured, policy)
+        + read_only_msr_problems(root)
+        + checked_write_problems(root)
+        + smca_problems(root)
+    )
 
     by_kind = {kind: 0 for kind in KINDS}
     for relative, count in measured.items():

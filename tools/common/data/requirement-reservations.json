@@ -195,13 +195,6 @@
       "branch": "driver-model-step1",
       "date": "2026-10-25",
       "purpose": "docs/DRIVER-MODEL.md step 1, generic device-tree nodes (customer, 2026-10-25: a driver never needs a kernel change; consultant OK IF D1-D23, ledger 4475): H.DEV for publishing every enabled, non-kernel-owned node and for kernel-owned-by-use; L.discovery for the seal point, KERNEL_DEPENDS, page-rounded overlap, SPI-only vectors and no double publication; L.device for references, subtree and identity in device_info, DMA failing closed. V-19 is held in VULNERABILITY-ANALYSIS for this step."
-    },
-    {
-      "ids": ["L.x86_64.233-242"],
-      "owner": "mce-amd",
-      "branch": "feature/mce-amd",
-      "date": "2026-10-30",
-      "purpose": "docs/MACHINE-CHECK-AMD.md, the machine check on AMD (customer, 2026-10-30, item 1; consultant OK IF A1-A13, ledger 4820, A9): the vendor and its rules, AMD's classifier, its usable address and the SMCA cut, its ring-3 action, the TCC and RIPV-clear kill, ring 0 stops, SMCA CONFIG/IPID/SYND checked reads, McaX set, ipid=/synd= on the lines, deferred logged and retired only by PADDRV"
     }
   ]
 }

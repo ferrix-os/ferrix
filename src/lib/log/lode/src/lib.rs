@@ -57,6 +57,7 @@ pub mod ingest;
 pub mod kmsg;
 pub mod lastkernel;
 pub mod limit;
+pub mod mce;
 pub mod protocols;
 pub mod record;
 pub mod regex;

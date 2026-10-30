@@ -104,6 +104,88 @@ pub(crate) const TASKS: &[Task] = &[
         ],
         run: |_, args| test_mode(args, Mode::Kill),
     },
+    Task {
+        name: "test-mce-amd-srar",
+        help_at: 215,
+        help: &[
+            "test-mce-amd-srar  An AMD consumption (Poison) a ring-3 program reads: SIGBUS BUS_MCEERR_AR where SUCCOR is reported (KVM), the fail-closed stop where not (TCG)",
+        ],
+        run: |_, args| test_amd(args, "srar"),
+    },
+    Task {
+        name: "test-mce-amd-kill",
+        help_at: 216,
+        help: &[
+            "test-mce-amd-kill  test-mce-amd-srar with RIPV clear: the victim ended without its handler (or the fail-closed stop)",
+        ],
+        run: |_, args| test_amd(args, "kill"),
+    },
+    Task {
+        name: "test-mce-amd-tcc",
+        help_at: 217,
+        help: &[
+            "test-mce-amd-tcc  test-mce-amd-srar with TCC set: the victim ended without its handler (or the fail-closed stop)",
+        ],
+        run: |_, args| test_amd(args, "tcc"),
+    },
+    Task {
+        name: "test-mce-amd-eipv",
+        help_at: 218,
+        help: &[
+            "test-mce-amd-eipv  An AMD consumption with EIPV clear: the kernel stops (AMD has no bystander)",
+        ],
+        run: |_, args| test_amd(args, "eipv"),
+    },
+    Task {
+        name: "test-mce-amd-pcc",
+        help_at: 219,
+        help: &["test-mce-amd-pcc  An AMD record with PCC: the kernel stops"],
+        run: |_, args| test_amd(args, "pcc"),
+    },
+    Task {
+        name: "test-mce-amd-nosuccor",
+        help_at: 221,
+        help: &[
+            "test-mce-amd-nosuccor  An AMD consumption on a model without SUCCOR: the kernel stops",
+        ],
+        run: |_, args| test_amd(args, "nosuccor"),
+    },
+    Task {
+        name: "test-mce-amd-over",
+        help_at: 222,
+        help: &[
+            "test-mce-amd-over  An overflowed AMD consumption without OverflowRecov: the kernel stops",
+        ],
+        run: |_, args| test_amd(args, "over"),
+    },
+    Task {
+        name: "test-mce-amd-deferred",
+        help_at: 223,
+        help: &[
+            "test-mce-amd-deferred  An AMD deferred record: logged by the poll, its frame not retired",
+        ],
+        run: |_, args| test_amd(args, "deferred"),
+    },
+    Task {
+        name: "test-mce-amd-ring0",
+        help_at: 224,
+        help: &["test-mce-amd-ring0  An AMD consumption in ring 0: the kernel stops"],
+        run: |_, args| test_amd(args, "ring0"),
+    },
+    Task {
+        name: "test-mce-amd-corrected",
+        help_at: 225,
+        help: &["test-mce-amd-corrected  An AMD corrected record: logged once by the poll"],
+        run: |_, args| test_amd(args, "corrected"),
+    },
+    Task {
+        name: "test-mce-amd-recover-off",
+        help_at: 226,
+        help: &[
+            "test-mce-amd-recover-off  test-mce-amd-srar with ferrix.mce.recover=off: the kernel stops",
+        ],
+        run: |_, args| test_amd(args, "recover-off"),
+    },
 ];
 
 /// `test-mce` on x86-64; skipped on the other architectures, which have no
@@ -126,6 +208,9 @@ pub(crate) fn test_mce(args: &Args) -> Result<()> {
         let port = free_port()?;
         let mut qemu_args = args.clone();
         qemu_args.qmp_port = Some(port);
+        // Intel's rules, whatever the accelerator's model says
+        // (`docs/MACHINE-CHECK-AMD.md` §6, the consultant's A8).
+        qemu_args.x86_cpu_extra = Some(INTEL.to_owned());
         let mut replies = Vec::new();
         let mut processors = 0;
         let mut reported = false;
@@ -292,6 +377,8 @@ fn test_mode(args: &Args, mode: Mode) -> Result<()> {
     let port = free_port()?;
     let mut qemu_args = args.clone();
     qemu_args.qmp_port = Some(port);
+    // Intel's rules: these modes' records are Intel's (A8).
+    qemu_args.x86_cpu_extra = Some(INTEL.to_owned());
     qemu_args.smp = match mode {
         Mode::Srar | Mode::Srao | Mode::RecoverOff | Mode::Kill => 1,
         Mode::Broadcast => 2,
@@ -695,6 +782,50 @@ mod tests {
         assert!(source.contains("pub(super) const MAX_BANKS: usize = 32;"));
     }
 
+    /// AMD's SMCA registers are reached only in `smca_bank_up` (`MCA_CONFIG`
+    /// read and written, `MCA_IPID` read) and `read_synd` (`MCA_SYND` read,
+    /// only with `SyndV`), each through the checked accesses alone.
+    ///
+    /// Verifies: `L.x86_64.239`
+    #[test]
+    fn smca_registers_only_in_their_two_functions() {
+        let source = include_str!("../../../../src/kernel/src/arch/x86_64/mce.rs");
+        let mut function = "";
+        let mut seen = Vec::new();
+        for line in source.lines() {
+            if let Some(name) = line
+                .trim_start()
+                .strip_prefix("fn ")
+                .and_then(|rest| rest.split('(').next())
+            {
+                function = name;
+            }
+            if ["smca_bank_up", "read_synd"].contains(&function) {
+                assert!(
+                    !line.contains("cpu::read_msr(") && !line.contains("cpu::write_msr("),
+                    "{function} makes an unchecked access: {line}"
+                );
+            }
+            if line.contains("smca_msr(") && !line.contains("fn smca_msr") {
+                let register = ["SMCA_CONFIG", "SMCA_IPID", "SMCA_SYND"]
+                    .into_iter()
+                    .find(|register| line.contains(register))
+                    .unwrap_or("unnamed");
+                seen.push((function, register));
+            }
+        }
+        for (function, register) in &seen {
+            let allowed = match *function {
+                "smca_bank_up" => ["SMCA_CONFIG", "SMCA_IPID"].contains(register),
+                "read_synd" => *register == "SMCA_SYND",
+                _ => false,
+            };
+            assert!(allowed, "{register} reached in {function}");
+        }
+        assert!(seen.contains(&("read_synd", "SMCA_SYND")));
+        assert!(source.contains("if status & decode::SYNDV == 0 || proc.ipid(bank).is_none() {"));
+    }
+
     #[test]
     fn an_empty_reply_is_an_injection_made() {
         assert_eq!(refusal("{\"return\": \"\"}"), None);
@@ -716,5 +847,373 @@ mod tests {
         ];
         assert_eq!(online(&lines), Some(4));
         assert_eq!(online(&["nothing".to_owned()]), None);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AMD's rules (`docs/MACHINE-CHECK-AMD.md` §6, the consultant's A8)
+// ---------------------------------------------------------------------------
+
+/// The `-cpu` properties of Intel's modes.
+const INTEL: &str = "vendor=GenuineIntel";
+/// AMD's, with both recovery bits asked for. QEMU's TCG drops both
+/// ("TCG doesn't support requested feature"), KVM on an AMD host passes
+/// them: under TCG the guest reports no `SUCCOR`, and the kernel's rules
+/// then stop on every uncorrected record.
+const AMD: &str = "vendor=AuthenticAMD,+succor,+overflow-recov";
+/// AMD's, without `SUCCOR`.
+const AMD_NO_SUCCOR: &str = "vendor=AuthenticAMD,-succor,+overflow-recov";
+/// AMD's, without `OverflowRecov`.
+const AMD_NO_OVERFLOW_RECOV: &str = "vendor=AuthenticAMD,+succor,-overflow-recov";
+
+/// An AMD consumption: `VAL`, `UC`, `EN`, `MISCV`, `ADDRV` and `Poison`.
+const AMD_AR: u64 = 0xbc00_0800_0000_0000;
+/// AMD `MCA_STATUS.TCC`.
+const TCC: u64 = 1 << 55;
+/// `MCi_STATUS.PCC`.
+const PCC: u64 = 1 << 57;
+/// `MCi_STATUS.OVER`.
+const OVER: u64 = 1 << 62;
+/// An AMD deferred record: `VAL`, `MISCV`, `ADDRV`, `Deferred`, `Poison`,
+/// `UC` clear, so no machine check is raised.
+const AMD_DEFERRED: u64 = 0x8c00_1800_0000_0000;
+
+/// What an AMD mode requires of the boot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Expect {
+    /// `SIGBUS` to the handler where `SUCCOR` is reported, else the stop.
+    Signal,
+    /// The victim ended without its handler where `SUCCOR` is reported,
+    /// else the stop.
+    Kill,
+    /// The kernel stops as FX-9005.
+    Stop,
+    /// The poll logs the record once and retires nothing.
+    Deferred,
+    /// The poll logs the record once.
+    Corrected,
+}
+
+/// Where an AMD mode's record goes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Target {
+    /// The processor running the victim in ring 3.
+    Consumer,
+    /// Another processor, in ring 0 when the machine is stopped.
+    Ring0,
+}
+
+/// One AMD mode.
+#[derive(Clone, Copy, Debug)]
+struct AmdMode {
+    /// The task's name after `test-mce-amd-`.
+    name: &'static str,
+    /// The `-cpu` properties.
+    cpu: &'static str,
+    /// The kernel options.
+    options: &'static str,
+    /// The record's `MCi_STATUS`.
+    status: u64,
+    /// The record's `MCG_STATUS`.
+    mcg: u64,
+    /// Where it goes.
+    target: Target,
+    /// What the boot must show.
+    expect: Expect,
+}
+
+/// The AMD modes (the consultant's A8, ledger 4820).
+const AMD_MODES: &[AmdMode] = &[
+    AmdMode {
+        name: "srar",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Signal,
+    },
+    AmdMode {
+        name: "kill",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR,
+        mcg: UNRESTARTABLE,
+        target: Target::Consumer,
+        expect: Expect::Kill,
+    },
+    AmdMode {
+        name: "tcc",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR | TCC,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Kill,
+    },
+    AmdMode {
+        name: "eipv",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR,
+        mcg: BYSTANDER,
+        target: Target::Consumer,
+        expect: Expect::Stop,
+    },
+    AmdMode {
+        name: "pcc",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR | PCC,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Stop,
+    },
+    AmdMode {
+        name: "nosuccor",
+        cpu: AMD_NO_SUCCOR,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Stop,
+    },
+    AmdMode {
+        name: "over",
+        cpu: AMD_NO_OVERFLOW_RECOV,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR | OVER,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Stop,
+    },
+    AmdMode {
+        name: "deferred",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_DEFERRED,
+        mcg: 0,
+        target: Target::Consumer,
+        expect: Expect::Deferred,
+    },
+    AmdMode {
+        name: "ring0",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: AMD_AR,
+        mcg: CONSUMER,
+        target: Target::Ring0,
+        expect: Expect::Stop,
+    },
+    AmdMode {
+        name: "corrected",
+        cpu: AMD,
+        options: POLL_EVERY_SECOND,
+        status: CORRECTED,
+        mcg: 0,
+        target: Target::Consumer,
+        expect: Expect::Corrected,
+    },
+    AmdMode {
+        name: "recover-off",
+        cpu: AMD,
+        options: "ferrix.mce.poll=1 ferrix.mce.recover=off\n",
+        status: AMD_AR,
+        mcg: CONSUMER,
+        target: Target::Consumer,
+        expect: Expect::Stop,
+    },
+];
+
+/// One AMD mode on x86-64.
+///
+/// # Errors
+///
+/// A boot that did not reach the victim, an injection the monitor refused,
+/// or a line the mode requires missing.
+///
+/// Verifies: `L.x86_64.233`
+/// Verifies: `L.x86_64.236`
+/// Verifies: `L.x86_64.237`
+/// Verifies: `L.x86_64.238`
+/// Verifies: `L.x86_64.242`
+fn test_amd(args: &Args, name: &str) -> Result<()> {
+    let arch = Arch::X86_64;
+    let mode = AMD_MODES
+        .iter()
+        .find(|mode| mode.name == name)
+        .copied()
+        .ok_or_else(|| Error::new(format!("no AMD mode {name}")))?;
+    if !args.arches()?.contains(&arch) {
+        println!("  test-mce-amd-{name}: x86_64 only; skipped");
+        return Ok(());
+    }
+    let program = crate::sem::build_test(TEST_PROGRAM, arch, None, false)?;
+    let loader = crate::cargo::build_loader(arch, args.release)?;
+    let kernel =
+        crate::cargo::build_kernel_with_init(arch, args.release, &program, crate::shell::SCRIPT)?;
+    let natives = crate::native::build(arch, args.release)?;
+    let archive = crate::initramfs::build(None, &natives, None, &[])?;
+    let image = crate::fat::write_image_with(arch, &loader, &kernel, &archive, Some(mode.options))?;
+    let port = free_port()?;
+    let mut qemu_args = args.clone();
+    qemu_args.qmp_port = Some(port);
+    qemu_args.x86_cpu_extra = Some(mode.cpu.to_owned());
+    qemu_args.smp = if mode.target == Target::Ring0 { 2 } else { 1 };
+    qemu_args.smp_given = true;
+    let mut injected = Injected::default();
+    let hook = |watching: &mut qemu::Watching<'_>| -> Result<()> {
+        let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+        injected = inject_amd(&mut qmp, watching.lines(), mode, qemu_args.smp)?;
+        let deadline = Instant::now() + MODE_PATIENCE;
+        let _ = watching.read_more(deadline, |seen| {
+            seen.iter().any(|line| line.contains(DONE))
+                || (seen.iter().any(|line| line.contains(qemu::PANIC_MARKER))
+                    && seen.iter().any(|line| line.contains("  code ")))
+        })?;
+        watching.stop_when_done();
+        Ok(())
+    };
+    let lines = qemu::watch_then(arch, &image, &kernel, &qemu_args, VICTIM, hook)?;
+    let log = crate::paths::build_dir(arch).join("serial.log");
+    let recovery = !lines
+        .iter()
+        .any(|line| line.contains("recovery not reported"));
+    judge_amd(mode, &lines, &injected, recovery).map_err(|why| {
+        Error::new(format!(
+            "{arch}: test-mce-amd-{name}: {why}.\n  Serial output is in {}",
+            log.display()
+        ))
+    })?;
+    let ebx = lines
+        .iter()
+        .find_map(|line| line.split("cpuid 80000007 ebx=").nth(1)?.split(',').next())
+        .unwrap_or("?");
+    println!(
+        "  {arch}: test-mce-amd-{name}: as required ({}; cpuid 80000007 ebx={ebx}, recovery {})",
+        injected.said,
+        if recovery { "reported" } else { "not reported" }
+    );
+    Ok(())
+}
+
+/// Make an AMD mode's injection with the machine stopped, as [`inject`]
+/// does: into the processor running the victim in ring 3, or, for
+/// [`Target::Ring0`], into another processor found in ring 0.
+fn inject_amd(qmp: &mut Qmp, lines: &[String], mode: AmdMode, smp: u32) -> Result<Injected> {
+    let processors = smp.max(1) as usize;
+    let virt = lines
+        .iter()
+        .rev()
+        .find_map(|line| {
+            let at = line.find(" va=0x")? + " va=0x".len();
+            u64::from_str_radix(line.get(at..)?.trim(), 16).ok()
+        })
+        .ok_or_else(|| Error::new("the victim printed no address"))?;
+    for _ in 0..200 {
+        stopped(qmp, true)?;
+        let mut consumer = None;
+        let mut idle = None;
+        for cpu in 0..processors {
+            if in_ring_3(&monitor(qmp, "info registers", Some(cpu))?) {
+                let reply = monitor(qmp, &format!("gva2gpa {virt:#x}"), Some(cpu))?;
+                if let Some(physical) = gpa(&reply) {
+                    consumer = Some((cpu, physical & !0xfff));
+                }
+            } else {
+                idle = Some(cpu);
+            }
+        }
+        let target = match (mode.target, consumer, idle) {
+            (Target::Consumer, Some((cpu, page)), _) => Some((cpu, page)),
+            (Target::Ring0, Some((_, page)), Some(cpu)) => Some((cpu, page)),
+            _ => None,
+        };
+        let made = target
+            .map(|(cpu, page)| make(qmp, cpu, mode.status, mode.mcg, page).map(|()| (cpu, page)));
+        stopped(qmp, false)?;
+        if let Some(made) = made {
+            let (cpu, page) = made?;
+            return Ok(Injected {
+                virt,
+                page,
+                consumer: cpu,
+                processors,
+                said: format!("{:#x} at {page:#x} on processor {cpu}", mode.status),
+            });
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    Err(Error::new(format!(
+        "no processor was where the {} mode needs it within 200 tries",
+        mode.name
+    )))
+}
+
+/// Whether `lines` show what `mode` requires, `recovery` being whether the
+/// boot reported `SUCCOR`.
+fn judge_amd(
+    mode: AmdMode,
+    lines: &[String],
+    injected: &Injected,
+    recovery: bool,
+) -> std::result::Result<(), String> {
+    let has = |want: &str| lines.iter().any(|line| line.contains(want));
+    let stopped = has(qemu::PANIC_MARKER) && has(FX_9005) && !has("mce-test: SIGBUS");
+    let retired = format!("mce-test: /proc/ferrix-mce-retired: {:#x}", injected.page);
+    let expect = match mode.expect {
+        Expect::Signal | Expect::Kill if !recovery => Expect::Stop,
+        other => other,
+    };
+    if expect == Expect::Stop {
+        return stopped
+            .then_some(())
+            .ok_or_else(|| "the kernel went on where it must stop as FX-9005".to_owned());
+    }
+    if has(qemu::PANIC_MARKER) {
+        return Err("the kernel stopped".to_owned());
+    }
+    match expect {
+        Expect::Signal => {
+            let want = format!(
+                "mce-test: SIGBUS code=4 addr={:#x} lsb=12 err=0x0",
+                injected.virt
+            );
+            all(
+                lines,
+                &[&want, "mce-test: victim exited 42", &retired, DONE],
+            )
+        }
+        Expect::Kill => {
+            all(
+                lines,
+                &[
+                    "mce-test: victim killed by signal 7",
+                    &retired,
+                    "mce-test: a second program ran",
+                    DONE,
+                ],
+            )?;
+            if has("mce-test: SIGBUS") {
+                return Err("the victim's handler ran for a machine check that ends it".to_owned());
+            }
+            Ok(())
+        }
+        Expect::Deferred | Expect::Corrected => {
+            let class = if expect == Expect::Deferred {
+                "deferred"
+            } else {
+                "corrected"
+            };
+            once(
+                lines,
+                &format!("mce: cpu {} bank {BANK} {class}", injected.consumer),
+            )?;
+            if has("mce: frame ") {
+                return Err(format!("a {class} record's frame was retired"));
+            }
+            all(lines, &["mce-test: victim exited 0", DONE])
+        }
+        Expect::Stop => Ok(()),
     }
 }

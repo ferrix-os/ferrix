@@ -2731,7 +2731,9 @@ package FerrixX8664Requirements {
                 checked MSR read, write all ones to IA32_MCG_CTL where MCG_CTL_P
                 is set and to each bank's MCi_CTL (bank 0 excepted on Intel family
                 6 before model 0x1a), and record the bank count and MCG_SER_P for
-                that processor.";
+                that processor. It shall record, with the count, the vendor's rules
+                and CPUID 8000_0007h's OverflowRecov, SUCCOR and SMCA bits
+                (L.x86_64.233).";
             attribute :>> criterion = "Every gate boot's /proc/ferrix-mce reads
                 a non-zero bank count for every processor (test-mce-corrected
                 under KVM and TCG), and the mce: line names the count; a
@@ -2787,7 +2789,8 @@ package FerrixX8664Requirements {
                 "arch::x86_64::mce::Line::write_str");
         }
         requirement <'L.x86_64.224'> machineCheckClassifierFailsClosed : ItemLowLevel {
-            attribute :>> statement = "The classifier shall put a record with VAL
+            attribute :>> statement = "For a processor that takes Intel's rules
+                (L.x86_64.233), the classifier shall put a record with VAL
                 clear in no class, one with UC clear in corrected, one with PCC
                 or OVER set or without MCG_SER_P in fatal, one with S and AR
                 clear or S set and EN clear in uncorrected-no-action, S with EN
@@ -2808,7 +2811,8 @@ package FerrixX8664Requirements {
                 every processor unless LMCE is on, and some banks are shared, so
                 a processor that did not consume the poison sees the record with
                 EIPV clear and RIPV set. */
-            attribute :>> statement = "A machine check whose banks hold nothing
+            attribute :>> statement = "On a processor that takes Intel's rules
+                (L.x86_64.233), a machine check whose banks hold nothing
                 but corrected, uncorrected-no-action and action-required records
                 with EIPV clear and RIPV set, or no valid record, shall return
                 with MCG_STATUS cleared and be counted as spurious, leaving those
@@ -2824,6 +2828,8 @@ package FerrixX8664Requirements {
                 "arch::x86_64::mce::decode::fold",
                 "arch::x86_64::mce::decode::finish",
                 "arch::x86_64::mce::decode::rank",
+                "arch::x86_64::mce::address_of",
+                "arch::x86_64::mce::misc_of",
                 "arch::x86_64::mce::decide");
         }
         requirement <'L.x86_64.226'> actionOptionalHandedToThePoll : ItemLowLevel {
@@ -2869,7 +2875,8 @@ package FerrixX8664Requirements {
                 leave its interrupt stack for the task's kernel stack, read its
                 banks before any other work of the trap path with interrupts
                 masked, and, where one action-required record has EIPV set and a
-                usable address, clear that bank and MCG_STATUS, retire the
+                usable address under its vendor's rules (L.x86_64.224,
+                L.x86_64.235), clear that bank and MCG_STATUS, retire the
                 record's frame, and raise SIGBUS on the running program with
                 si_code BUS_MCEERR_AR, si_addr the lowest address in the
                 program's half that maps the frame (0 past 2^18 leaves) and
@@ -2941,6 +2948,170 @@ package FerrixX8664Requirements {
                 refuses these registers, so the refusal's line is argued.";
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("arch::x86_64::mce::bring_up");
+        }
+        requirement <'L.x86_64.233'> machineCheckVendorRules : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-AMD.md §2, the consultant's ruling (a),
+                ledger 4820: MCG_SER_P is Intel's bit, and QEMU sets it on
+                every model, AMD ones included, so an unknown vendor gets no
+                recovery whatever it says. */
+            attribute :>> statement = "Bring-up shall read records by AMD's rules
+                on a processor whose CPUID vendor string is AuthenticAMD or
+                HygonGenuine, with CPUID 8000_0007h's OverflowRecov (bit 0),
+                SUCCOR (bit 1) and SMCA (bit 3), by Intel's rules where it is
+                GenuineIntel or Zhaoxin's '  Shanghai  ', and on every other
+                processor shall treat every uncorrected record as fatal; the
+                boot line shall name the rules and print 8000_0007h's EBX.";
+            attribute :>> criterion = "Stage 3's vendor table (each string,
+                the bits, a lower-case Intel and a hypervisor's string with no
+                recovery); test-mce-amd-* print the rules and EBX on their
+                boot line under KVM and TCG. Negative control: an unknown
+                vendor given Intel's rules, stage 3 stops.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::vendor_of",
+                "arch::x86_64::mce::decode::classify_by",
+                "arch::x86_64::mce::decode::Vendor::name",
+                "arch::x86_64::mce::this_vendor",
+                "arch::x86_64::mce::vendor_bits",
+                "arch::x86_64::mce::record_of",
+                "arch::x86_64::mce::Proc::class",
+                "arch::x86_64::mce::Proc::recovers");
+        }
+        requirement <'L.x86_64.234'> amdClassifier : ItemLowLevel {
+            doc /* Linux 6.18.54's mce_severity_amd. */
+            attribute :>> statement = "AMD's classifier shall put a record with
+                VAL clear in no class, PCC in fatal, Deferred (bit 44) in
+                deferred, UC clear in corrected, UC with OVER and no
+                OverflowRecov or UC with no SUCCOR in fatal, and every other UC
+                record in AMD's action-required class.";
+            attribute :>> criterion = "Stage 3's table of AMD records, each bit
+                flipped; any difference stops the boot.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::classify_amd");
+        }
+        requirement <'L.x86_64.235'> amdUsableAddressAndCut : ItemLowLevel {
+            doc /* Linux 6.18.54's mce_usable_address, amd_mce_usable_address
+                and smca_extract_err_addr; PhysAddrV from Linux 821f5fe4dbcb
+                (Zen 6 on). */
+            attribute :>> statement = "An AMD record's address shall be usable
+                only with ADDRV and then, on an SMCA bank whose MCA_CONFIG
+                bring-up read with bit 11 set, PhysAddrV (bit 54), otherwise
+                Poison (bit 43); on SMCA it shall be cut to bits 56:lsb with
+                lsb from MCA_STATUS 29:24 where the bank's MCA_CONFIG bit 8 is
+                set, else bits 55:lsb with lsb from MCA_ADDR 61:56, an lsb above
+                12 naming no frame; without SMCA the frame containing it.";
+            attribute :>> criterion = "Stage 3's tables of usable addresses
+                (ADDRV dropped, Poison, PhysAddrV with and without CONFIG bit
+                11 or its read) and cuts (lsb 12, 6, 13, 21, status-held, bits
+                above 55). Negative controls: ADDRV dropped and the cut
+                removed, stage 3 stops.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::usable_address_amd",
+                "arch::x86_64::mce::decode::paddrv_supported",
+                "arch::x86_64::mce::decode::cut_address",
+                "arch::x86_64::mce::signal_page",
+                "arch::x86_64::mce::Proc::config");
+        }
+        requirement <'L.x86_64.236'> amdRingThreeAction : ItemLowLevel {
+            attribute :>> statement = "An AMD action-required record in a
+                machine check taken in ring 3 shall stop the kernel with EIPV
+                clear or no usable address, and with EIPV, RIPV and a usable
+                address and TCC clear shall raise SIGBUS BUS_MCEERR_AR on the
+                program with its handler run; it shall never be left as
+                another processor's record.";
+            attribute :>> criterion = "Stage 3's AMD action table, the
+                bystander's flags stopping; test-mce-amd-srar under KVM (SUCCOR
+                reported): the handler prints code=4, its address, lsb=12 and
+                err=0x0; test-mce-amd-eipv stops. Negative control: AMD's class
+                let into the bystander arm, -amd-eipv fails.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action",
+                "arch::x86_64::mce::bank_action");
+        }
+        requirement <'L.x86_64.237'> amdTccOrRipvClearKills : ItemLowLevel {
+            doc /* The consultant's ruling (b): TCC means the task's context is
+                lost. No Linux source; strictly no more permissive than 6.18,
+                which signals. */
+            attribute :>> statement = "An AMD action-required record a ring-3
+                program consumed with EIPV and a usable address shall end the
+                program without its handler, and retire the frame, where RIPV is
+                clear or TCC (bit 55) is set.";
+            attribute :>> criterion = "Stage 3's AMD action table;
+                test-mce-amd-kill and -amd-tcc under KVM: the victim killed by
+                signal 7, its handler not run, a second program runs. Negative
+                control: TCC treated as resumable, -amd-tcc fails.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action");
+        }
+        requirement <'L.x86_64.238'> amdRingZeroStops : ItemLowLevel {
+            attribute :>> statement = "An AMD uncorrected record in a machine
+                check taken in ring 0 shall stop the kernel as FX-9005.";
+            attribute :>> criterion = "Stage 3's AMD action table;
+                test-mce-amd-ring0 under KVM and TCG: the record injected into a
+                processor stopped in ring 0 stops the boot.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("arch::x86_64::mce::decode::amd_action");
+        }
+        requirement <'L.x86_64.239'> smcaRegistersCheckedAndBounded : ItemLowLevel {
+            attribute :>> statement = "On an SMCA processor bring-up shall read
+                each bank's MCA_CONFIG and MCA_IPID through the checked read,
+                keep CONFIG bits 8 and 11 and the IPID, and count a refusal,
+                said and not fatal, leaving that bank's address unusable; and
+                MCA_SYND shall be read only for a valid bank with SyndV (bit 53)
+                whose bring-up reads succeeded, through the checked read; no
+                other code shall reach an SMCA register.";
+            attribute :>> criterion = "xtask's host test reads mce.rs: SMCA
+                registers only in smca_bank_up (CONFIG, IPID) and read_synd
+                (SYND, behind SyndV), with no unchecked access there;
+                check-device-access.py holds the same. No QEMU model sets
+                CPUID's SMCA bit, so the reads are argued, not run.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::smca_bank_up",
+                "arch::x86_64::mce::read_synd",
+                "arch::x86_64::mce::smca_msr",
+                "arch::x86_64::mce::Proc::ipid",
+                "arch::x86_64::mce::Proc::smca",
+                "arch::x86_64::mce::decode::bank_config");
+        }
+        requirement <'L.x86_64.240'> smcaMcaxSet : ItemLowLevel {
+            doc /* Linux 6.18.54's smca_configure: without McaX "uncorrectable
+                errors will cause a system panic". */
+            attribute :>> statement = "On an SMCA processor bring-up shall write
+                each bank's MCA_CONFIG back with McaX (bit 32) set and no other
+                bit changed, through the checked write, a refusal counted and
+                said.";
+            attribute :>> criterion = "Stage 3: with_mcax sets bit 32 and
+                changes nothing else over a table; check-device-access.py
+                allows the checked write of MCA_CONFIG in smca_bank_up alone.
+                The write itself is argued (no QEMU model has SMCA).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::with_mcax",
+                "arch::x86_64::mce::smca_bank_up");
+        }
+        requirement <'L.x86_64.241'> mceLineIpidAndSynd : ItemLowLevel {
+            attribute :>> statement = "An mce: line and a stop report's bank line
+                shall carry addr= and misc= where the status says they are
+                valid, and for an SMCA bank its cached ipid= and, with SyndV,
+                synd=.";
+            attribute :>> criterion = "Stage 3: write_fields over a table with
+                and without each field.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::write_fields",
+                "arch::x86_64::mce::say",
+                "arch::x86_64::mce::report");
+        }
+        requirement <'L.x86_64.242'> amdDeferredLoggedRetiredByPaddrv : ItemLowLevel {
+            doc /* Linux 6.18.54: Poison does not cover deferred errors. */
+            attribute :>> statement = "The poll shall log and count an AMD
+                deferred record and clear it, and retire its frame only where
+                ADDRV, the bank's PhysAddrV support and PhysAddrV make its
+                address physical, never by Poison alone.";
+            attribute :>> criterion = "Stage 3's table of deferred records;
+                test-mce-amd-deferred under KVM and TCG: logged once, no frame
+                retired.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::decode::deferred_retirable",
+                "arch::x86_64::mce::retirable",
+                "arch::x86_64::mce::poll");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware

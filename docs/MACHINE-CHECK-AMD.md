@@ -202,10 +202,17 @@ vendors), **.228** (per vendor). `H.FAIL.8` per A10.
     pure functions over their values tabled, and the coverage
     justification names the unreached reads (A7). Hygon has no model in
     any gate either; it takes AMD's rules by the vendor table alone.
-* **KVM on nazuna** (AMD host): `CPUID 8000_0007h:EBX` under KVM with the
-  AMD model is measured first, by a `gate.sh` boot of this branch, and
-  recorded in §7. The KVM judges follow it: recovery where KVM passes
-  `SUCCOR`, the fail-closed stop where it does not.
+* **Where AMD recovery runs.** QEMU's TCG does not offer `SUCCOR` or
+  `OverflowRecov` (their feature word's `tcg_features` is 0: "TCG doesn't
+  support requested feature ... succor"), so under TCG every AMD mode that
+  would recover requires the fail-closed stop instead. KVM on nazuna's AMD
+  host passes both. Measured on 1bdb00dcf by `gate.sh`
+  (`~/.local/share/ferrix/logs/queue/amd-1bdb00dcf-amd-srar-kvm.log`):
+  `cpuid 80000007 ebx=0x3`, recovery reported, the victim's handler
+  printed `code=4 ... lsb=12 err=0x0`; under TCG (`...-amd-srar-tcg.log`)
+  `ebx=0x0`, recovery not reported, stopped as FX-9005. So AMD recovery is
+  shown under KVM, on the host's own AMD processor, and the fail-closed
+  rules under TCG.
 * **lode**: a unit test over IPIDs for Linux's types and an unknown one,
   and over lines with and without `ipid=`.
 * **Hardware**: a BACKLOG row for the customer's Ryzen 9 9900X, run only if

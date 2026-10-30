@@ -35,7 +35,7 @@ use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 use super::cpu;
 use super::trap::TrapFrame;
 use crate::console::println;
-use decode::{Action, Class};
+use decode::{Action, BankConfig, Class, Vendor};
 
 /// `IA32_MCG_CAP`.
 const MCG_CAP: u32 = 0x179;
@@ -66,6 +66,22 @@ const fn bank_msr(bank: usize, which: u32) -> u32 {
     MC0_CTL + 4 * bank as u32 + which
 }
 
+/// AMD's `MCA_CTL` of bank 0 in the SMCA range; bank `b`'s registers are at
+/// `+ 0x10b`.
+const SMCA_MC0: u32 = 0xc000_2000;
+/// [`smca_msr`]: `MCA_CONFIG`.
+const SMCA_CONFIG: u32 = 4;
+/// [`smca_msr`]: `MCA_IPID`.
+const SMCA_IPID: u32 = 5;
+/// [`smca_msr`]: `MCA_SYND`.
+const SMCA_SYND: u32 = 6;
+
+/// SMCA bank `bank`'s register `which` ([`SMCA_CONFIG`], [`SMCA_IPID`],
+/// [`SMCA_SYND`]).
+const fn smca_msr(bank: usize, which: u32) -> u32 {
+    SMCA_MC0 + 0x10 * bank as u32 + which
+}
+
 /// A processor's record from its bring-up: 0 for none, else [`BROUGHT_UP`]
 /// with the bank count in bits 7:0 and [`RECORD_SER`] where the processor
 /// reports recovery. A machine check on a processor with none stops.
@@ -76,6 +92,33 @@ const BROUGHT_UP: u32 = 1 << 31;
 const RECORD_SER: u32 = 1 << 30;
 /// [`RECORDS`]: `MCG_CAP` named more banks than [`MAX_BANKS`].
 const RECORD_CLAMPED: u32 = 1 << 29;
+/// [`RECORDS`]: the vendor's rules, bits 9:8 -- [`RECORD_INTEL`],
+/// [`RECORD_AMD`] or [`RECORD_NONE`] (`L.x86_64.233`).
+const RECORD_VENDOR: u32 = 3 << 8;
+/// [`RECORD_VENDOR`]: Intel's rules.
+const RECORD_INTEL: u32 = 1 << 8;
+/// [`RECORD_VENDOR`]: AMD's rules.
+const RECORD_AMD: u32 = 2 << 8;
+/// [`RECORD_VENDOR`]: no recovery.
+const RECORD_NONE: u32 = 3 << 8;
+/// [`RECORDS`], AMD: `SUCCOR`.
+const RECORD_SUCCOR: u32 = 1 << 10;
+/// [`RECORDS`], AMD: `OverflowRecov`.
+const RECORD_OVERFLOW_RECOV: u32 = 1 << 11;
+/// [`RECORDS`], AMD: scalable MCA.
+const RECORD_SMCA: u32 = 1 << 12;
+
+/// Each processor's SMCA banks' `MCA_CONFIG` as bring-up kept it
+/// (`decode::bank_config`); 0 where it was not read.
+static BANK_CONFIG: [[AtomicU8; MAX_BANKS]; PROCESSORS] =
+    [const { [const { AtomicU8::new(0) }; MAX_BANKS] }; PROCESSORS];
+/// Each processor's SMCA banks' `MCA_IPID`, read once at bring-up (the
+/// consultant's A6); 0 where it was not read.
+static BANK_IPID: [[AtomicU64; MAX_BANKS]; PROCESSORS] =
+    [const { [const { AtomicU64::new(0) }; MAX_BANKS] }; PROCESSORS];
+/// SMCA register accesses each processor's bring-up was refused, said by
+/// [`start`] (`L.x86_64.239`).
+static SMCA_REFUSED: [AtomicU32; PROCESSORS] = [const { AtomicU32::new(0) }; PROCESSORS];
 /// Processors whose bring-up a register refused, said by [`start`].
 static REFUSED: [AtomicBool; PROCESSORS] = [const { AtomicBool::new(false) }; PROCESSORS];
 
@@ -95,6 +138,8 @@ struct Counts {
     corrected: AtomicU64,
     /// Uncorrected, no-action records the poll found.
     ucna: AtomicU64,
+    /// AMD's deferred records the poll found.
+    deferred: AtomicU64,
     /// Records the boot before left.
     left: AtomicU64,
     /// Poll rounds run.
@@ -108,6 +153,7 @@ static COUNTS: [Counts; PROCESSORS] = [const {
         spurious: AtomicU64::new(0),
         corrected: AtomicU64::new(0),
         ucna: AtomicU64::new(0),
+        deferred: AtomicU64::new(0),
         left: AtomicU64::new(0),
         polls: AtomicU64::new(0),
     }
@@ -234,11 +280,118 @@ fn here() -> Option<usize> {
         .filter(|&index| index < PROCESSORS)
 }
 
-/// This processor's bring-up record: the bank count and whether it reports
-/// recovery, or `None` when it has none.
-fn record_of(index: usize) -> Option<(usize, bool)> {
+/// What bring-up recorded of one processor.
+#[derive(Clone, Copy, Debug)]
+struct Proc {
+    /// Its index.
+    index: usize,
+    /// Its banks, at most [`MAX_BANKS`].
+    banks: usize,
+    /// `MCG_SER_P`, which Intel's rules read.
+    ser: bool,
+    /// Whose rules its records are read by.
+    vendor: Vendor,
+}
+
+impl Proc {
+    /// Whether the processor has SMCA's per-bank registers.
+    const fn smca(self) -> bool {
+        matches!(self.vendor, Vendor::Amd { smca: true, .. })
+    }
+
+    /// Whether the processor reports recovery under its vendor's rules.
+    const fn recovers(self) -> bool {
+        match self.vendor {
+            Vendor::Intel => self.ser,
+            Vendor::Amd { succor, .. } => succor,
+            Vendor::NoRecovery => false,
+        }
+    }
+
+    /// Bank `bank`'s `MCA_CONFIG` as bring-up kept it.
+    fn config(self, bank: usize) -> BankConfig {
+        BANK_CONFIG
+            .get(self.index)
+            .and_then(|banks| banks.get(bank))
+            .map_or(0, |config| config.load(Ordering::Relaxed))
+    }
+
+    /// Bank `bank`'s `MCA_IPID` as bring-up read it, on an SMCA part.
+    fn ipid(self, bank: usize) -> Option<u64> {
+        if !self.smca() || self.config(bank) & decode::BANK_CONFIG_READ == 0 {
+            return None;
+        }
+        BANK_IPID
+            .get(self.index)
+            .and_then(|banks| banks.get(bank))
+            .map(|ipid| ipid.load(Ordering::Relaxed))
+    }
+
+    /// The class of a raw `MCi_STATUS` under the processor's vendor.
+    const fn class(self, status: u64) -> Class {
+        decode::classify_by(self.vendor, status, self.ser)
+    }
+}
+
+/// Processor `index`'s bring-up record, or `None` when it has none.
+fn record_of(index: usize) -> Option<Proc> {
     let record = RECORDS.get(index)?.load(Ordering::Acquire);
-    (record & BROUGHT_UP != 0).then_some(((record & 0xff) as usize, record & RECORD_SER != 0))
+    if record & BROUGHT_UP == 0 {
+        return None;
+    }
+    let vendor = match record & RECORD_VENDOR {
+        RECORD_INTEL => Vendor::Intel,
+        RECORD_AMD => Vendor::Amd {
+            succor: record & RECORD_SUCCOR != 0,
+            overflow_recov: record & RECORD_OVERFLOW_RECOV != 0,
+            smca: record & RECORD_SMCA != 0,
+        },
+        _ => Vendor::NoRecovery,
+    };
+    Some(Proc {
+        index,
+        banks: (record & 0xff) as usize,
+        ser: record & RECORD_SER != 0,
+        vendor,
+    })
+}
+
+/// The vendor's rules for this processor and `CPUID 8000_0007h:EBX`, the
+/// latter 0 where the leaf is not offered (`L.x86_64.233`).
+fn this_vendor() -> (Vendor, u32) {
+    let id = core::arch::x86_64::__cpuid(0);
+    let mut name = [0_u8; 12];
+    for (chunk, word) in name.chunks_exact_mut(4).zip([id.ebx, id.edx, id.ecx]) {
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    let ebx = if core::arch::x86_64::__cpuid(0x8000_0000).eax >= 0x8000_0007 {
+        core::arch::x86_64::__cpuid(0x8000_0007).ebx
+    } else {
+        0
+    };
+    (decode::vendor_of(&name, ebx), ebx)
+}
+
+/// The record bits for a vendor.
+const fn vendor_bits(vendor: Vendor) -> u32 {
+    match vendor {
+        Vendor::Intel => RECORD_INTEL,
+        Vendor::Amd {
+            succor,
+            overflow_recov,
+            smca,
+        } => {
+            RECORD_AMD
+                | if succor { RECORD_SUCCOR } else { 0 }
+                | if overflow_recov {
+                    RECORD_OVERFLOW_RECOV
+                } else {
+                    0
+                }
+                | if smca { RECORD_SMCA } else { 0 }
+        }
+        Vendor::NoRecovery => RECORD_NONE,
+    }
 }
 
 /// Read bank `bank`'s register `which`, which bring-up proved is there.
@@ -317,7 +470,12 @@ pub(super) fn bring_up() {
     {
         return refuse(index);
     }
+    let (vendor, _) = this_vendor();
+    if matches!(vendor, Vendor::Amd { smca: true, .. }) {
+        smca_bank_up(index, banks);
+    }
     let record = BROUGHT_UP
+        | vendor_bits(vendor)
         | banks as u32
         | if cap & decode::SER_P != 0 {
             RECORD_SER
@@ -328,6 +486,57 @@ pub(super) fn bring_up() {
     if let Some(slot) = RECORDS.get(index) {
         slot.store(record, Ordering::Release);
     }
+}
+
+/// SMCA's per-bank registers on processor `index` (`L.x86_64.239`,
+/// `240`): each bank's `MCA_CONFIG` and `MCA_IPID` through the checked read,
+/// the `CONFIG` bits kept and the IPID cached, and `CONFIG` written back
+/// with `McaX` set and nothing else changed, through the checked write. A
+/// refusal leaves that bank's address unusable and its IPID unread, and is
+/// counted for [`start`] to say; it does not refuse the processor. The one
+/// function that touches `MCA_CONFIG` and `MCA_IPID` (check-device-access.py).
+fn smca_bank_up(index: usize, banks: usize) {
+    let mut refused = 0_u32;
+    for bank in 0..banks {
+        let config = smca_msr(bank, SMCA_CONFIG);
+        let Some(raw) = cpu::read_msr_checked(config) else {
+            refused += 1;
+            continue;
+        };
+        // SAFETY: (SYSREG) `McaX` is the OS's acknowledgement that it uses
+        // the SMCA registers, without which uncorrectable errors are fatal
+        // (Linux 6.18's `smca_configure`); the value is the one just read
+        // with that bit set, so nothing else in the bank's configuration
+        // changes. Refused, the bank keeps its configuration.
+        if !unsafe { cpu::write_msr_checked(config, decode::with_mcax(raw)) } {
+            refused += 1;
+        }
+        let Some(ipid) = cpu::read_msr_checked(smca_msr(bank, SMCA_IPID)) else {
+            refused += 1;
+            continue;
+        };
+        if let (Some(kept), Some(cached)) = (
+            BANK_CONFIG.get(index).and_then(|banks| banks.get(bank)),
+            BANK_IPID.get(index).and_then(|banks| banks.get(bank)),
+        ) {
+            cached.store(ipid, Ordering::Relaxed);
+            kept.store(decode::bank_config(raw), Ordering::Relaxed);
+        }
+    }
+    if let Some(count) = SMCA_REFUSED.get(index) {
+        count.store(refused, Ordering::Relaxed);
+    }
+}
+
+/// SMCA bank `bank`'s `MCA_SYND`, where its status says it holds one and
+/// bring-up read the bank's registers (`L.x86_64.239`): through the checked
+/// read, so a refusal is a missing syndrome, never a fault. The one place
+/// that reads `MCA_SYND` (check-device-access.py).
+fn read_synd(proc: Proc, bank: usize, status: u64) -> Option<u64> {
+    if status & decode::SYNDV == 0 || proc.ipid(bank).is_none() {
+        return None;
+    }
+    cpu::read_msr_checked(smca_msr(bank, SMCA_SYND))
 }
 
 /// Mark processor `index` as one whose bring-up a register refused.
@@ -468,9 +677,18 @@ fn start_poll(index: usize, period: u64) -> bool {
         println!("mce: cpu {index} refused a machine-check register; no log there");
         return false;
     }
-    let Some((banks, ser)) = record_of(index) else {
+    let Some(proc) = record_of(index) else {
         return false;
     };
+    let refused_smca = SMCA_REFUSED
+        .get(index)
+        .map_or(0, |count| count.load(Ordering::Relaxed));
+    if refused_smca > 0 {
+        println!(
+            "mce: cpu {index} refused {refused_smca} SMCA register accesses; those banks' \
+             addresses are unusable"
+        );
+    }
     if RECORDS
         .get(index)
         .is_some_and(|record| record.load(Ordering::Relaxed) & RECORD_CLAMPED != 0)
@@ -478,9 +696,16 @@ fn start_poll(index: usize, period: u64) -> bool {
         println!("mce: cpu {index} names more than {MAX_BANKS} banks; the first {MAX_BANKS} read");
     }
     if index == 0 {
+        let (_, ebx) = this_vendor();
         println!(
-            "mce: {banks} banks, recovery {}, every {period} s",
-            if ser { "reported" } else { "not reported" }
+            "mce: {} banks, {} rules, cpuid 80000007 ebx={ebx:#x}, recovery {}, every {period} s",
+            proc.banks,
+            proc.vendor.name(),
+            if proc.recovers() {
+                "reported"
+            } else {
+                "not reported"
+            }
         );
     }
     let mut only = CpuSet::empty();
@@ -514,7 +739,7 @@ fn run(argument: usize) {
 /// every bank's corrected and no-action records, each printed, counted and
 /// cleared. Holds no lock while it reads a bank.
 pub(super) fn poll(index: usize) {
-    let Some((banks, ser)) = record_of(index) else {
+    let Some(proc) = record_of(index) else {
         return;
     };
     let Some(counts) = counts(index) else {
@@ -522,66 +747,96 @@ pub(super) fn poll(index: usize) {
     };
     let _ = counts.polls.fetch_add(1, Ordering::Relaxed);
     while let Some(record) = take(pending(index)) {
-        let class = decode::classify(record.status, ser);
+        let bank = usize::from(record.bank);
         let what = match record.kind {
             Kind::Left => "left from before this boot",
-            Kind::Deferred => class.name(),
+            Kind::Deferred => proc.class(record.status).name(),
         };
         say(
-            index,
-            record.bank,
+            proc,
+            bank,
             what,
             record.status,
             record.address,
             record.misc,
             None,
         );
-        if class != Class::Corrected && decode::usable_address(record.status, record.misc, ser) {
-            retire(record.address);
+        if let Some(page) = retirable(proc, bank, record.status, record.address, record.misc) {
+            retire(page);
         }
     }
-    for bank in 0..banks {
+    for bank in 0..proc.banks {
         let status = read_bank(bank, 1);
-        let class = decode::classify(status, ser);
-        let count = match class {
+        let count = match proc.class(status) {
             Class::Corrected => &counts.corrected,
             Class::Ucna => &counts.ucna,
+            Class::Deferred => &counts.deferred,
             // Empty; or an uncorrected record whose machine check this
             // processor has not taken yet, which is the check's.
             _ => continue,
         };
-        let address = if status & decode::ADDRV != 0 {
-            read_bank(bank, 2)
-        } else {
-            0
-        };
-        let misc = if status & decode::MISCV != 0 {
-            read_bank(bank, 3)
-        } else {
-            0
-        };
+        let address = address_of(bank, status);
+        let misc = misc_of(bank, status);
         let total = count.fetch_add(1, Ordering::Relaxed).saturating_add(1);
         say(
-            index,
-            bank as u8,
-            class.name(),
+            proc,
+            bank,
+            proc.class(status).name(),
             status,
             address,
             misc,
             Some(total),
         );
         clear_bank(bank);
-        if class == Class::Ucna && decode::usable_address(status, misc, ser) {
-            retire(address);
+        if let Some(page) = retirable(proc, bank, status, address, misc) {
+            retire(page);
         }
     }
 }
 
+/// Bank `bank`'s `MCi_ADDR`, read only where `status` says it holds one.
+fn address_of(bank: usize, status: u64) -> u64 {
+    if status & decode::ADDRV != 0 {
+        read_bank(bank, 2)
+    } else {
+        0
+    }
+}
+
+/// Bank `bank`'s `MCi_MISC`, read only where `status` says it holds one.
+fn misc_of(bank: usize, status: u64) -> u64 {
+    if status & decode::MISCV != 0 {
+        read_bank(bank, 3)
+    } else {
+        0
+    }
+}
+
+/// The frame a record names, where the poll may retire it: Intel's
+/// uncorrected records with a usable address; AMD's action-required and
+/// fatal ones with a usable address cut to its frame; AMD's deferred ones
+/// only by `PhysAddrV` (`L.x86_64.242`); never a corrected record.
+fn retirable(proc: Proc, bank: usize, status: u64, address: u64, misc: u64) -> Option<u64> {
+    let (smca, config) = (proc.smca(), proc.config(bank));
+    match (proc.class(status), proc.vendor) {
+        (Class::Empty | Class::Corrected, _) => None,
+        (Class::Deferred, _) => decode::deferred_retirable(status, smca, config)
+            .then(|| decode::cut_address(address, status, smca, config))
+            .flatten(),
+        (_, Vendor::Amd { .. }) => decode::usable_address_amd(status, smca, config)
+            .then(|| decode::cut_address(address, status, smca, config))
+            .flatten(),
+        (_, Vendor::Intel | Vendor::NoRecovery) => decode::usable_address(status, misc, proc.ser)
+            .then_some(address & !(ferrix_bootinfo::PAGE_SIZE - 1)),
+    }
+}
+
 /// Print one record as an `mce:` line: a warning for a corrected one, an
-/// error for the rest.
+/// error for the rest. An SMCA bank adds its `ipid=` and, with `SyndV`, its
+/// `synd=` (`L.x86_64.241`).
 fn say(
-    index: usize,
-    bank: u8,
+    proc: Proc,
+    bank: usize,
     what: &str,
     status: u64,
     address: u64,
@@ -592,16 +847,19 @@ fn say(
         bytes: [0; LINE],
         len: 0,
     };
+    let index = proc.index;
     let _ = write!(
         line,
         "mce: cpu {index} bank {bank} {what} status={status:#018x}"
     );
-    if status & decode::ADDRV != 0 {
-        let _ = write!(line, " addr={address:#x}");
-    }
-    if status & decode::MISCV != 0 {
-        let _ = write!(line, " misc={misc:#x}");
-    }
+    let _ = write_fields(
+        &mut line,
+        status,
+        address,
+        misc,
+        proc.ipid(bank),
+        read_synd(proc, bank, status),
+    );
     if let Some(total) = total {
         let _ = write!(line, " total={total}");
     }
@@ -611,6 +869,32 @@ fn say(
         ERROR
     };
     crate::console::write_record(priority, line.bytes.get(..line.len).unwrap_or_default());
+}
+
+/// A record's optional fields as an `mce:` line carries them: `addr=` and
+/// `misc=` where `status` says they are valid, and an SMCA bank's `ipid=`
+/// and `synd=` (`L.x86_64.241`). Pure, for stage 3's table.
+pub(super) fn write_fields(
+    out: &mut impl Write,
+    status: u64,
+    address: u64,
+    misc: u64,
+    ipid: Option<u64>,
+    synd: Option<u64>,
+) -> core::fmt::Result {
+    if status & decode::ADDRV != 0 {
+        write!(out, " addr={address:#x}")?;
+    }
+    if status & decode::MISCV != 0 {
+        write!(out, " misc={misc:#x}")?;
+    }
+    if let Some(ipid) = ipid {
+        write!(out, " ipid={ipid:#x}")?;
+    }
+    if let Some(synd) = synd {
+        write!(out, " synd={synd:#x}")?;
+    }
+    Ok(())
 }
 
 /// The longest `mce:` line: the longest a record makes is under 120 bytes.
@@ -663,24 +947,52 @@ fn retire(address: u64) {
 // The machine check
 // ---------------------------------------------------------------------------
 
+/// The action one valid bank asks for under the processor's vendor: AMD's
+/// [`decode::amd_action`] with its usable, cut address, else Intel's
+/// [`decode::action`] (no-recovery vendors' uncorrected records are fatal
+/// by then). Reads only.
+fn bank_action(proc: Proc, bank: usize, status: u64, mcg_status: u64, user: bool) -> Action {
+    let class = proc.class(status);
+    match proc.vendor {
+        Vendor::Amd { smca, .. } => {
+            let config = proc.config(bank);
+            let usable = decode::usable_address_amd(status, smca, config)
+                && decode::cut_address(address_of(bank, status), status, smca, config).is_some();
+            decode::amd_action(class, status, mcg_status, user, usable)
+        }
+        Vendor::Intel | Vendor::NoRecovery => decode::action(
+            class,
+            status,
+            misc_of(bank, status),
+            mcg_status,
+            user,
+            proc.ser,
+        ),
+    }
+}
+
+/// The frame a signalled bank's record names: AMD's cut address, or
+/// Intel's address's page.
+fn signal_page(proc: Proc, bank: usize, status: u64) -> Option<u64> {
+    let address = address_of(bank, status);
+    match proc.vendor {
+        Vendor::Amd { smca, .. } => decode::cut_address(address, status, smca, proc.config(bank)),
+        Vendor::Intel | Vendor::NoRecovery => Some(address & !(ferrix_bootinfo::PAGE_SIZE - 1)),
+    }
+}
+
 /// Read and classify every bank of this processor under `mcg_status`, from
 /// ring 3 when `user`: the folded action, and the bank a `Signal` names.
 /// Reads only.
-fn decide(banks: usize, ser: bool, mcg_status: u64, user: bool) -> (Action, Option<usize>) {
+fn decide(proc: Proc, mcg_status: u64, user: bool) -> (Action, Option<usize>) {
     let mut folded = Action::Leave;
     let mut signalled = None;
-    for bank in 0..banks {
+    for bank in 0..proc.banks {
         let status = read_bank(bank, 1);
-        let class = decode::classify(status, ser);
-        if class == Class::Empty {
+        if proc.class(status) == Class::Empty {
             continue;
         }
-        let misc = if status & decode::MISCV != 0 {
-            read_bank(bank, 3)
-        } else {
-            0
-        };
-        let action = decode::action(class, status, misc, mcg_status, user, ser);
+        let action = bank_action(proc, bank, status, mcg_status, user);
         if matches!(action, Action::Signal { .. }) {
             signalled = Some(bank);
         }
@@ -690,32 +1002,22 @@ fn decide(banks: usize, ser: bool, mcg_status: u64, user: bool) -> (Action, Opti
 }
 
 /// Hand every action-optional bank to the poll and clear it; false when a
-/// slot ran out, which stops the kernel (`L.x86_64.226`).
-fn defer_banks(index: usize, banks: usize, ser: bool, mcg_status: u64, user: bool) -> bool {
-    for bank in 0..banks {
+/// slot ran out, which stops the kernel (`L.x86_64.226`). Only Intel's rules
+/// defer: AMD's never ask for it.
+fn defer_banks(proc: Proc, mcg_status: u64, user: bool) -> bool {
+    for bank in 0..proc.banks {
         let status = read_bank(bank, 1);
-        let class = decode::classify(status, ser);
-        let misc = if status & decode::MISCV != 0 {
-            read_bank(bank, 3)
-        } else {
-            0
-        };
-        if decode::action(class, status, misc, mcg_status, user, ser) != Action::Defer {
+        if bank_action(proc, bank, status, mcg_status, user) != Action::Defer {
             continue;
         }
-        let address = if status & decode::ADDRV != 0 {
-            read_bank(bank, 2)
-        } else {
-            0
-        };
         let record = Record {
             kind: Kind::Deferred,
             bank: bank as u8,
             status,
-            address,
-            misc,
+            address: address_of(bank, status),
+            misc: misc_of(bank, status),
         };
-        if !put(pending(index), record) {
+        if !put(pending(proc.index), record) {
             return false;
         }
         clear_bank(bank);
@@ -736,7 +1038,7 @@ pub(super) fn on_kernel_stack(frame: &mut TrapFrame) {
         stop(frame);
     };
     let _ = counts.checks.fetch_add(1, Ordering::Relaxed);
-    let Some((banks, ser)) = record_of(index) else {
+    let Some(proc) = record_of(index) else {
         stop(frame);
     };
     if !RECOVER.load(Ordering::Relaxed) {
@@ -744,12 +1046,12 @@ pub(super) fn on_kernel_stack(frame: &mut TrapFrame) {
     }
     // SAFETY: (SYSREG) this processor has `MCG_STATUS`: its bring-up read it.
     let mcg_status = unsafe { cpu::read_msr(MCG_STATUS) };
-    match decide(banks, ser, mcg_status, false).0 {
+    match decide(proc, mcg_status, false).0 {
         Action::Leave | Action::Unaffected => {
             let _ = counts.spurious.fetch_add(1, Ordering::Relaxed);
         }
         Action::Defer => {
-            if !defer_banks(index, banks, ser, mcg_status, false) {
+            if !defer_banks(proc, mcg_status, false) {
                 stop(frame);
             }
         }
@@ -781,7 +1083,7 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
         stop(frame);
     };
     let _ = counts.checks.fetch_add(1, Ordering::Relaxed);
-    let Some((banks, ser)) = record_of(index) else {
+    let Some(proc) = record_of(index) else {
         stop(frame);
     };
     if !RECOVER.load(Ordering::Relaxed) {
@@ -789,11 +1091,13 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
     }
     // SAFETY: (SYSREG) as in `on_kernel_stack`.
     let mcg_status = unsafe { cpu::read_msr(MCG_STATUS) };
-    let (action, signalled) = decide(banks, ser, mcg_status, true);
+    let (action, signalled) = decide(proc, mcg_status, true);
     let marked = match (action, signalled) {
         (Action::Stop, _) => stop(frame),
         (Action::Signal { kill }, Some(bank)) => {
-            let page = read_bank(bank, 2) & !(ferrix_bootinfo::PAGE_SIZE - 1);
+            let Some(page) = signal_page(proc, bank, read_bank(bank, 1)) else {
+                stop(frame);
+            };
             frame.error_code = page | MARKED | if kill { MARKED_KILL } else { 0 };
             clear_bank(bank);
             true
@@ -805,7 +1109,7 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
         }
         (Action::Defer, _) => false,
     };
-    if !defer_banks(index, banks, ser, mcg_status, true) {
+    if !defer_banks(proc, mcg_status, true) {
         stop(frame);
     }
     let _ = counts.recovered.fetch_add(1, Ordering::Relaxed);
@@ -866,30 +1170,38 @@ pub(super) fn signal_for(frame: &mut TrapFrame) -> (u32, i32, u64, bool) {
 pub(super) fn report() {
     use crate::console::println_unlogged;
 
-    let Some((banks, ser)) = here().and_then(record_of) else {
+    let Some(proc) = here().and_then(record_of) else {
         println_unlogged!("  mce      no bank record on this processor");
         return;
     };
     let mcg_status = cpu::read_msr_checked(MCG_STATUS).unwrap_or(0);
-    println_unlogged!("  mce      mcg_status {mcg_status:#x}, {banks} banks");
-    for bank in 0..banks {
+    println_unlogged!(
+        "  mce      mcg_status {mcg_status:#x}, {} banks, {} rules",
+        proc.banks,
+        proc.vendor.name()
+    );
+    for bank in 0..proc.banks {
         let status = read_bank(bank, 1);
         if status & decode::VAL == 0 {
             continue;
         }
-        let address = if status & decode::ADDRV != 0 {
-            read_bank(bank, 2)
-        } else {
-            0
+        let mut line = Line {
+            bytes: [0; LINE],
+            len: 0,
         };
-        let misc = if status & decode::MISCV != 0 {
-            read_bank(bank, 3)
-        } else {
-            0
-        };
+        let _ = write!(line, "mce: bank {bank} status={status:#018x}");
+        let _ = write_fields(
+            &mut line,
+            status | decode::ADDRV | decode::MISCV,
+            address_of(bank, status),
+            misc_of(bank, status),
+            proc.ipid(bank),
+            read_synd(proc, bank, status),
+        );
+        let _ = write!(line, " {}", proc.class(status).name());
         println_unlogged!(
-            "mce: bank {bank} status={status:#018x} addr={address:#x} misc={misc:#x} {}",
-            decode::classify(status, ser).name()
+            "{}",
+            core::str::from_utf8(line.bytes.get(..line.len).unwrap_or_default()).unwrap_or("")
         );
     }
 }
@@ -915,16 +1227,17 @@ pub(crate) fn render(out: &mut impl Write) -> core::fmt::Result {
         let Some(counts) = COUNTS.get(index) else {
             continue;
         };
-        let banks = record_of(index).map_or(0, |(banks, _)| banks);
+        let banks = record_of(index).map_or(0, |proc| proc.banks);
         writeln!(
             out,
             "cpu{index} banks {banks} checks {} recovered {} spurious {} corrected {} ucna {} \
-             left {} polls {}",
+             deferred {} left {} polls {}",
             counts.checks.load(Ordering::Relaxed),
             counts.recovered.load(Ordering::Relaxed),
             counts.spurious.load(Ordering::Relaxed),
             counts.corrected.load(Ordering::Relaxed),
             counts.ucna.load(Ordering::Relaxed),
+            counts.deferred.load(Ordering::Relaxed),
             counts.left.load(Ordering::Relaxed),
             counts.polls.load(Ordering::Relaxed),
         )?;

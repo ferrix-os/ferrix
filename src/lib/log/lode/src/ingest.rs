@@ -76,6 +76,17 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
     if kernel.facility == 0 {
         record.push("SYSLOG_IDENTIFIER", b"kernel");
         record.push("_TRANSPORT", b"kernel");
+        // A machine check's record: its processor, bank and class, and on an
+        // AMD SMCA part the block the bank reports for, named from its
+        // `ipid=` (`docs/MACHINE-CHECK-AMD.md` §3).
+        if let Some(mce) = crate::mce::read(&kernel.text) {
+            record.push("MCE_CPU", mce.cpu.as_bytes());
+            record.push("MCE_BANK", mce.bank.as_bytes());
+            record.push("MCE_CLASS", mce.class.as_bytes());
+            if let Some(bank_type) = mce.bank_type {
+                record.push("MCE_BANK_TYPE", bank_type.as_bytes());
+            }
+        }
         if let Some(crash) = console::crash(&kernel.text) {
             record.set_level(3, LevelSource::Derived);
             record

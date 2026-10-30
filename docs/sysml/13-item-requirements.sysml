@@ -1591,13 +1591,19 @@ package FerrixItemRequirements {
                 hardware errors that are not one: the kernel's own state is
                 intact, and only a program's page or nothing at all is lost. */
             attribute :>> statement = "On x86-64 with recovery on, the kernel
-                shall go on after a machine check only where every record is
-                corrected, uncorrected with no action required, action-optional
-                with the interrupted code restartable, another processor's
+                shall go on after a machine check only where every record is,
+                by its vendor's rules (L.x86_64.233): on Intel's, corrected,
+                uncorrected with no action required, action-optional with the
+                interrupted code restartable, another processor's
                 action-required record, or one action-required record a ring-3
-                program consumed at a usable address; it shall then retire the
-                frame of each uncorrected record with a usable address, never hand
-                it out again, and end or signal that program; every other machine
+                program consumed at a usable address; on AMD's and Hygon's,
+                corrected, deferred, or one action-required record a ring-3
+                program consumed with EIPV at a usable address where the
+                processor reports SUCCOR, the program signalled, or ended where
+                RIPV is clear or TCC set; on any other vendor's, corrected. It
+                shall then retire the frame of each uncorrected record with a
+                usable address (a deferred one only by PhysAddrV), never hand it
+                out again, and end or signal that program; every other machine
                 check stops as H.FAIL.1.";
             attribute :>> criterion = "L.x86_64.221-232 and L.mm.91-92 each
                 verified; test-mce and its five recovery modes pass under KVM and

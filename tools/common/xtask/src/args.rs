@@ -311,6 +311,11 @@ pub(crate) struct Args {
     /// as Intel family 6 model 0xBE under TCG; the QEMU `-cpu` model, in
     /// place of [`crate::qemu::x86_cpu`]'s.
     pub(crate) x86_cpu: Option<String>,
+    /// Not a flag: set by `test-mce`'s modes, which pin the processor's
+    /// vendor and its machine-check bits (`docs/MACHINE-CHECK-AMD.md` §6):
+    /// `,`-separated properties appended to whichever `-cpu` model the boot
+    /// takes, [`Args::x86_cpu`] or [`crate::qemu::x86_cpu`]'s.
+    pub(crate) x86_cpu_extra: Option<String>,
     /// Not a flag: set by `test-compositor` for every boot of an architecture
     /// after its first, whose images then carry `ferrix.checks=skip`. The
     /// first boot runs the self-checks on the compositor's machine, and

@@ -2554,6 +2554,19 @@ pub(crate) fn x86_cpu(accelerator: &str) -> String {
     format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}{kvm}")
 }
 
+/// The x86-64 `-cpu` model a boot takes: [`Args::x86_cpu`] or
+/// [`x86_cpu_for`]'s, with [`Args::x86_cpu_extra`]'s properties appended.
+fn x86_model(args: &Args, binary: &Path, accelerator: &str) -> String {
+    let model = args
+        .x86_cpu
+        .clone()
+        .unwrap_or_else(|| x86_cpu_for(binary, accelerator));
+    match args.x86_cpu_extra.as_deref() {
+        Some(extra) if !extra.is_empty() => format!("{model},{extra}"),
+        _ => model,
+    }
+}
+
 /// [`x86_cpu`] for the QEMU at `binary`: under TCG before QEMU 9.1, without
 /// SMAP.
 ///
@@ -2866,10 +2879,7 @@ fn qemu_command(
                 // Under a hypervisor, the speculation controls as well, and
                 // under KVM an invariant TSC; see `x86_cpu`.
                 "-cpu",
-                &args
-                    .x86_cpu
-                    .clone()
-                    .unwrap_or_else(|| x86_cpu_for(&binary, &accelerator)),
+                &x86_model(args, &binary, &accelerator),
                 // A VT-d unit for stage 10's IOMMU domains, remapping
                 // interrupts (`INTEL_IOMMU`), unless the boot is
                 // `test-nvrm`'s without.

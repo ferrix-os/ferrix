@@ -756,7 +756,16 @@ every machine check halts (L.x86_64.231). Either way:
   `ferrix.mce.poll` seconds (5 by default), so a record a bank overwrites
   sooner is counted once with `OVER` set;
 * AArch64 and ARMv7-A make no such claim: their external aborts and
-  SErrors halt as before.
+  SErrors halt as before;
+* the vendor decides the rules (`docs/MACHINE-CHECK-AMD.md`): Intel's for
+  Intel and Zhaoxin, AMD's for AMD and Hygon, and none for any other
+  vendor, whose every uncorrected error halts. AMD recovery needs the
+  processor's `SUCCOR`; it is shown under KVM on an AMD host, never on AMD
+  bare metal, and the SMCA address path (`PhysAddrV`, the address cut,
+  `MCA_CONFIG`) by argument and stage-3 tables only, since no emulator has
+  SMCA. On an SMCA processor the kernel sets `MCA_CONFIG.McaX` on every
+  bank, which AMD requires before an uncorrectable error can be survived;
+  `ferrix.mce.recover=off` halts on AMD as on Intel.
 
 ## 5. Element failure analysis
 
