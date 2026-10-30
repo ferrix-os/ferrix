@@ -821,22 +821,32 @@ impl<P: Platform> XelpBackend<P> {
         }
         let ppgtt = self.vms.get(vm).copied().flatten().ok_or(Error::Invalid)?;
         let mut platform = self.platform.borrow_mut();
-        // No page for a table is i915's `-ENOMEM` from `alloc_pt_dma`, not a
-        // bad range: anv retries an execbuffer's ENOMEM and marks the
-        // device lost on EINVAL.
-        ppgtt
-            .alloc_va_range(&mut *platform, address, bytes)
-            .map_err(ppgtt_error)?;
-        for page in 0..bytes / 4096 {
-            let device = platform.memory_page(memory, page)?;
-            ppgtt
-                .insert_entry(
+        if bytes == 0 || !address.is_multiple_of(4096) || !bytes.is_multiple_of(4096) {
+            return Err(Error::Invalid);
+        }
+        // `gen8_ppgtt_insert_huge`, one 2 MiB window of GPU addresses at a
+        // time (`docs/INTEL-GPU.md` §14.2). No page for a table is i915's
+        // `-ENOMEM` from `alloc_pt_dma`, not a bad range: anv retries an
+        // execbuffer's ENOMEM and marks the device lost on EINVAL.
+        let window = crate::ppgtt::PAGE_2M;
+        let mut pages = [0_u64; (crate::ppgtt::PAGE_2M / 4096) as usize];
+        let mut at = 0;
+        while at < bytes {
+            let gpu = address + at;
+            let len = (window - gpu % window).min(bytes - at);
+            let count = (len / 4096) as usize;
+            for (n, slot) in pages.iter_mut().take(count).enumerate() {
+                *slot = platform.memory_page(memory, at / 4096 + n as u64)?;
+            }
+            let _ = ppgtt
+                .insert_huge(
                     &mut *platform,
-                    device,
-                    address + page * 4096,
+                    pages.get(..count).unwrap_or_default(),
+                    gpu,
                     u32::from(pat_index),
                 )
                 .map_err(ppgtt_error)?;
+            at += len;
         }
         Ok(())
     }
@@ -1488,6 +1498,15 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
 
     fn create_memory(&mut self, bytes: u64) -> Result<P::Memory, ferrix_linux_abi::errno::Errno> {
         self.platform.get_mut().create_memory(bytes).map_err(errno)
+    }
+
+    fn populate(&mut self, memory: &P::Memory) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        // The first page's address pins the whole object.
+        self.platform
+            .get_mut()
+            .memory_page(memory, 0)
+            .map(|_| ())
+            .map_err(errno)
     }
 
     fn vm_create(&mut self) -> Result<crate::frontend::VmId, ferrix_linux_abi::errno::Errno> {

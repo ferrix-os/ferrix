@@ -415,6 +415,9 @@ pub fn mmap<B: Backend, H: Host<B::Memory>>(
             Some(first) if first != wc => return Err(Errno::EINVAL),
             _ => {}
         }
+        // Backed before the client's faults can commit its pages one by one
+        // (`Backend::populate`).
+        frontend.backend.populate(&entry.memory)?;
         host.reply_map(request, &entry.memory, within, wc)?;
         entry.mapped_wc = Some(wc);
         entry.wc_as_cached |= asked_wc && !wc;
@@ -730,6 +733,8 @@ pub fn prime_handle_to_fd<B: Backend, H: Host<B::Memory>>(
         .objects
         .get_mut(usize::from(object))
         .ok_or(Errno::ENOENT)?;
+    // Backed before anyone else can touch it (`Backend::populate`).
+    frontend.backend.populate(&entry.memory)?;
     let installed = host.dmabuf_install(
         call.request,
         &entry.memory,

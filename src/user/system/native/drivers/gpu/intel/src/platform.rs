@@ -2,7 +2,7 @@
 //! BAR 0's registers and GGTT entries, time, page tables in a pinned pool,
 //! the driver's own objects (rings, context images, status pages) each a
 //! pinned VMO bound into the driver's GGTT window, and the client's objects
-//! as VMOs pinned into 00:02.0's domain at their first bind.
+//! as VMOs pinned into 00:02.0's domain at their first bind, mmap or export.
 //!
 //! Nothing here allocates: every table has a fixed size, and a full one is
 //! `ENOMEM` to the program that asked.
@@ -186,12 +186,19 @@ impl<'a> Real<'a> {
         (index < o.pages * PAGE / 4).then(|| o.base + index * 4)
     }
 
-    /// Pin `memory` and keep its pages' addresses.
+    /// Pin `memory` and keep its pages' addresses. An object of 2 MiB or
+    /// more asks for 2 MiB blocks (`PIN_BLOCKS`, `docs/INTEL-GPU.md` §14),
+    /// which the PPGTT maps with 2 MiB and 64 KiB pages where it got them.
     fn pin(&self, memory: &Memory) -> Result<(), Error> {
         let bytes = memory.pages * PAGE;
+        let access = if bytes as u64 >= ferrix_intel_xelp::ppgtt::PAGE_2M {
+            PinAccess::Blocks { order: 9 }
+        } else {
+            PinAccess::ReadWrite
+        };
         let pin = self
             .device
-            .pin(&memory.vmo, 0, bytes, PinAccess::ReadWrite)
+            .pin(&memory.vmo, 0, bytes, access)
             .map_err(pin_error)?;
         let len = (memory.pages * 8).next_multiple_of(PAGE);
         let addresses = vmo::create(Kernel, len).map_err(|_| Error::NoMemory)?;

@@ -90,7 +90,7 @@ pub struct Facts {
 /// The GPU, as the front end sees it.
 pub trait Backend {
     /// One GEM object's memory: a VMO the process owns. The real back end
-    /// pins it into the device's IOMMU domain at its first bind
+    /// pins it into the device's IOMMU domain at its first bind, mmap or export
     /// (`docs/INTEL-GPU.md` §4.4). Dropping it frees it.
     type Memory;
 
@@ -103,6 +103,19 @@ pub trait Backend {
     ///
     /// `ENOMEM`, or the pin budget's `EDQUOT`.
     fn create_memory(&mut self, bytes: u64) -> Result<Self::Memory, Errno>;
+
+    /// Give `memory` its backing now, if it has none yet: before the front
+    /// end hands the VMO to a program (an mmap, a dmabuf), so that the
+    /// back end, not the program's page faults, chooses the frames, as
+    /// i915's `get_pages` does on first use (`docs/INTEL-GPU.md` §14.4).
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM`, `EDQUOT`.
+    fn populate(&mut self, memory: &Self::Memory) -> Result<(), Errno> {
+        let _ = memory;
+        Ok(())
+    }
 
     /// A new 4-level PPGTT.
     ///
