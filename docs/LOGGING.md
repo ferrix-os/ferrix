@@ -1402,7 +1402,17 @@ read of the kernel log.
 **What triggers it.** Crash records (§18, step 2), `devmgr`'s driver
 deaths and restarts, and a rule action, `capture where EXPR`, for
 anything else (`capture where message ~ "illegal instruction"`). At most
-one picture each 10 s.
+one picture each 10 s, and for one program at most one each 10 minutes:
+a crash loop gets a picture when it starts and then one each 10 minutes,
+so the loop does not also spend the desktop's readback, a blob and its
+upload on every crash (Steam's browser on the N150, 2026-10-30, crashed a
+renderer every 3-5 s). The program is the crash record's `CRASH_PROGRAM`
+(else `CRASH_EXE`, else `CRASH_COMM`); a record naming no process is
+binned by who said it and what, digits taken out. A crash turned away
+gets `CAPTURE=binned` and `CAPTURE_SAME_AS=<seqnum>`, the crash whose
+picture stands for it. `SameProgramEvery=` in `capture.conf` sets the
+span (`30min`, `600`, `90s`) and `0` or `always` takes a picture for every
+crash; `lode reload` reads it again.
 
 **Storage and privacy.** The screen can show secrets, so capture is off
 unless turned on, and a picture is kept like the journal: in
@@ -1561,10 +1571,11 @@ Crash screenshots (§19), on the session token of step 2a.
   (`SO_PEERCRED`); anything else is REFUSED and dropped. Triggers: crash
   records, `devmgr` lines saying a driver died, and `capture where EXPR`
   lines of the file. The crash record is stored first; then one CAPTURE to
-  the seat's provider, at most one each 10 s; the answer within 2 s or a
+  the seat's provider, at most one each 10 s and one per program each
+  `SameProgramEvery=` (10 min; `0` for every crash); the answer within 2 s or a
   `timed-out` record, three in a row dropping the provider. Every outcome
   is a record, `CAPTURE_OF=<seqnum>` and `CAPTURE=stored|none|declined|
-  timed-out|skipped`; a stored picture is
+  timed-out|skipped|binned`; a stored picture is
   `captures/<boot>-<seqnum>-<time>.qoi`, 0640, kept 7 days and 256 MiB.
 * hyprix (`lodeshot.rs`): takes `FERRIX_SESSION_TOKEN` out of its
   environment first thing in `main`, registers for seat0, and answers each

@@ -549,13 +549,17 @@ impl Service {
                 record.realtime_us = now.realtime_of(record.monotonic_us);
             }
         }
-        let wanted: Vec<(usize, String)> = batch
+        let wanted: Vec<(usize, String, String)> = batch
             .iter()
             .enumerate()
             .filter(|(_, record)| self.events.on("capture") && self.capture.wants(record))
             .map(|(index, record)| {
                 let text = String::from_utf8_lossy(record.message());
-                (index, text.chars().take(160).collect())
+                (
+                    index,
+                    text.chars().take(160).collect(),
+                    ferrix_lode_core::capture::bin_of(record),
+                )
             })
             .collect();
         // Which records name a process, and which are crashes, for the
@@ -585,9 +589,9 @@ impl Service {
         if self.events.on("tombstone") {
             self.tombstones_for(crashes, &seqnums, now, &mut more);
         }
-        for (index, what) in wanted {
+        for (index, what, bin) in wanted {
             if let Some(&seqnum) = seqnums.get(index) {
-                self.capture.ask(seqnum, &what, now, &mut more);
+                self.capture.ask(seqnum, &what, &bin, now, &mut more);
             }
         }
         self.capture.serve(now, self.seat.sessions(), &mut more);

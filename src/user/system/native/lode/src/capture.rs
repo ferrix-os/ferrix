@@ -7,7 +7,9 @@
 //! and for each crash record -- a kernel `signal` line that ended a
 //! process, a `devmgr` line saying a driver died, or a record a `capture
 //! where EXPR` line of the file matches -- asks the seat's provider for a
-//! picture, at most one each [`SPACING_US`]. The record is stored first and
+//! picture, at most one each [`SPACING_US`], and for one program at most one
+//! each `SameProgramEvery=` (10 min unless the file says otherwise;
+//! [`ferrix_lode_core::capture`]). The record is stored first and
 //! never waits: the answer, or its absence, is a record of its own, linked
 //! by `CAPTURE_OF`, and an image is a blob in the store's blob container
 //! (`BLOB_SCREENSHOT`, §21.4), readable by exactly those who read the
@@ -18,6 +20,7 @@ use alloc::vec::Vec;
 
 use ferrix_lode_capture::{FORMAT_QOI, Message};
 use ferrix_lode_core::blob;
+use ferrix_lode_core::capture::{Bins, SAME_PROGRAM_DEFAULT_US, same_program_every};
 use ferrix_lode_core::filter::{self, Expr};
 use ferrix_lode_core::ingest::{self, Now};
 use ferrix_lode_core::record::Record;
@@ -76,6 +79,8 @@ pub(crate) struct Capture {
     providers: Vec<Provider>,
     /// `capture where EXPR` lines.
     rules: Vec<Expr>,
+    /// Each program's last capture, for one per `SameProgramEvery=`.
+    bins: Bins,
     /// When the last capture was asked for.
     last: Option<u64>,
     /// The next request's number.
@@ -85,13 +90,14 @@ pub(crate) struct Capture {
 impl Capture {
     /// Read the switch, and when on make the socket, as root.
     pub(crate) fn open() -> Capture {
-        let (on, rules) = read_config();
+        let (on, rules, every_us) = read_config();
         let mut capture = Capture {
             on,
             listener: None,
             blobs: Vec::new(),
             providers: Vec::new(),
             rules,
+            bins: Bins::new(every_us),
             last: None,
             next: 1,
         };
@@ -105,13 +111,14 @@ impl Capture {
         capture
     }
 
-    /// Read `capture.conf` again (`lode reload`): the switch and the
-    /// rules. The socket is made as root at start, so a capture turned on
-    /// that was off then takes a restart; said so.
+    /// Read `capture.conf` again (`lode reload`): the switch, the rules and
+    /// `SameProgramEvery=`. The socket is made as root at start, so a
+    /// capture turned on that was off then takes a restart; said so.
     pub(crate) fn reload(&mut self) -> &'static str {
-        let (on, rules) = read_config();
+        let (on, rules, every_us) = read_config();
         let was = self.on;
         self.rules = rules;
+        self.bins.set_every_us(every_us);
         match (was, on, self.listener.is_some()) {
             (_, true, false) => "on in the file, but lode must restart to listen",
             (true, false, _) => {
@@ -149,8 +156,38 @@ impl Capture {
     }
 
     /// Ask for a picture of the screen at record `seqnum`, `what` being
-    /// one line of it; what is to be said goes into `out`.
-    pub(crate) fn ask(&mut self, seqnum: u64, what: &str, now: Now, out: &mut Vec<Record>) {
+    /// one line of it and `bin` the program it is about
+    /// ([`ferrix_lode_core::capture::bin_of`]); what is to be said goes into
+    /// `out`.
+    pub(crate) fn ask(
+        &mut self,
+        seqnum: u64,
+        what: &str,
+        bin: &str,
+        now: Now,
+        out: &mut Vec<Record>,
+    ) {
+        if let Err(earlier) = self.bins.check(bin, now.monotonic_us) {
+            let mut record = said(
+                now,
+                seqnum,
+                "binned",
+                &alloc::format!(
+                    "the same program's crash {} s before has the picture, record {}; one each {} s \
+                     (capture.conf SameProgramEvery=)",
+                    earlier.ago_us / 1_000_000,
+                    earlier.seqnum,
+                    self.bins.every_us() / 1_000_000
+                ),
+                None,
+            );
+            record.push(
+                "CAPTURE_SAME_AS",
+                alloc::format!("{}", earlier.seqnum).as_bytes(),
+            );
+            out.push(record);
+            return;
+        }
         if self
             .last
             .is_some_and(|last| now.monotonic_us.saturating_sub(last) < SPACING_US)
@@ -202,6 +239,7 @@ impl Capture {
             seqnum,
             deadline: now.monotonic_us + PATIENCE_US,
         });
+        self.bins.took(bin, now.monotonic_us, seqnum);
     }
 
     /// Accept, read, answer; give up on late answers. What is to be said
@@ -415,10 +453,13 @@ fn said(now: Now, seqnum: u64, outcome: &str, why: &str, provider: Option<&str>)
     record
 }
 
-/// `capture.conf`: the switch and the `capture where` rules.
-fn read_config() -> (bool, Vec<Expr>) {
+/// `capture.conf`: the switch, the `capture where` rules and
+/// `SameProgramEvery=` (microseconds; a value that does not read keeps the
+/// default).
+fn read_config() -> (bool, Vec<Expr>, u64) {
     let mut on = false;
     let mut rules = Vec::new();
+    let mut every_us = SAME_PROGRAM_DEFAULT_US;
     if let Some(bytes) = sys::read_small(CONFIG) {
         for line in String::from_utf8_lossy(&bytes).lines() {
             let line = line
@@ -427,6 +468,8 @@ fn read_config() -> (bool, Vec<Expr>) {
                 .trim();
             if let Some(value) = line.strip_prefix("Capture=") {
                 on = matches!(value.trim(), "yes" | "true" | "on" | "1");
+            } else if let Some(value) = line.strip_prefix("SameProgramEvery=") {
+                every_us = same_program_every(value).unwrap_or(SAME_PROGRAM_DEFAULT_US);
             } else if let Some(expr) = line.strip_prefix("capture where ")
                 && let Ok(expr) = filter::parse(expr)
             {
@@ -434,5 +477,5 @@ fn read_config() -> (bool, Vec<Expr>) {
             }
         }
     }
-    (on, rules)
+    (on, rules, every_us)
 }

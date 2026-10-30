@@ -2736,3 +2736,63 @@ fn the_loaders_last_kernel_file_gives_the_lines_lode_did_not_store() {
         None
     );
 }
+
+/// A crash loop gets one screenshot per program per span: the same program
+/// is turned away, with the record whose picture stands for it, until the
+/// span is over; another program is not; a span of 0 lets every crash
+/// through; and the bin is the program's path, else who said what without
+/// its numbers.
+#[test]
+fn crash_screenshots_are_binned_by_program() {
+    use crate::capture::{Bins, Earlier, SAME_PROGRAM_DEFAULT_US, bin_of, same_program_every};
+
+    let mut bins = Bins::new(SAME_PROGRAM_DEFAULT_US);
+    let helper = "/data/steam/ubuntu12_64/steamwebhelper";
+    assert_eq!(bins.check(helper, 1_000), Ok(()));
+    bins.took(helper, 1_000, 40);
+    assert_eq!(
+        bins.check(helper, 4_001_000),
+        Err(Earlier {
+            seqnum: 40,
+            ago_us: 4_000_000
+        })
+    );
+    assert_eq!(bins.check("/bin/foot", 4_001_000), Ok(()));
+    assert_eq!(bins.check(helper, 1_000 + SAME_PROGRAM_DEFAULT_US), Ok(()));
+
+    let mut every = Bins::new(0);
+    every.took(helper, 1_000, 40);
+    assert_eq!(every.check(helper, 2_000), Ok(()));
+    bins.set_every_us(0);
+    assert_eq!(bins.check(helper, 4_001_000), Ok(()));
+
+    // A table full of programs forgets the one it took longest ago.
+    let mut full = Bins::new(SAME_PROGRAM_DEFAULT_US);
+    for n in 0..300_u64 {
+        full.took(&alloc::format!("/bin/p{n}"), n, n);
+    }
+    assert_eq!(full.check("/bin/p0", 400), Ok(()));
+    assert!(full.check("/bin/p299", 400).is_err());
+
+    assert_eq!(same_program_every("10min"), Some(SAME_PROGRAM_DEFAULT_US));
+    assert_eq!(same_program_every("600"), Some(SAME_PROGRAM_DEFAULT_US));
+    assert_eq!(same_program_every("0"), Some(0));
+    assert_eq!(same_program_every("always"), Some(0));
+    assert_eq!(same_program_every("soon"), None);
+
+    let mut crash = Record::new(3, 0, 0);
+    crash.push("CRASH_COMM", b"steamwebhelper");
+    crash.push("CRASH_PROGRAM", helper.as_bytes());
+    assert_eq!(bin_of(&crash), helper);
+    let mut named = Record::new(3, 0, 0);
+    named.push("CRASH_COMM", b"steamwebhelper");
+    assert_eq!(bin_of(&named), "steamwebhelper");
+    let mut first = Record::new(3, 0, 0);
+    first.push("FERRIX_SUBSYSTEM", b"devmgr");
+    first.push("MESSAGE", b"driver net0 (pid 712) died");
+    let mut second = Record::new(3, 0, 0);
+    second.push("FERRIX_SUBSYSTEM", b"devmgr");
+    second.push("MESSAGE", b"driver net1 (pid 980) died");
+    assert_eq!(bin_of(&first), bin_of(&second));
+    assert_eq!(bin_of(&first), "devmgr: driver net (pid ) died");
+}

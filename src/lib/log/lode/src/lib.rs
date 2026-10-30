@@ -45,6 +45,7 @@ extern crate alloc;
 pub mod access;
 pub mod alert;
 pub mod blob;
+pub mod capture;
 pub mod compress;
 pub mod console;
 pub mod crc;
