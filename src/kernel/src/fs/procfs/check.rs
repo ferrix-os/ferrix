@@ -566,6 +566,7 @@ fn check_proc(process: &Arc<Process>, layout: &Layout) -> Found {
         return Err("/proc/self/comm is not the last component of that path");
     }
     check_oom_score_adj(ns, &ctx)?;
+    check_resident(ns, &ctx, process, layout)?;
 
     // The heap is the check's user memory: `getcwd` and `uname` write into
     // it as they would into a program's buffer.
@@ -577,6 +578,225 @@ fn check_proc(process: &Arc<Process>, layout: &Layout) -> Found {
         return Err("/proc/partitions is not empty, with no block device to list");
     }
     Ok((listed, lines, named, values))
+}
+
+/// `VmRSS`, `RssAnon`, `RssFile` and `RssShmem` from `/proc/self/status`,
+/// in kibibytes.
+fn resident_lines(ns: &Namespace, ctx: &Context) -> Result<[u64; 4], &'static str> {
+    let text = read_all(ns, ctx, b"/proc/self/status", 64)?;
+    let text = core::str::from_utf8(&text).map_err(|_| "/proc/self/status is not text")?;
+    let field = |label: &str| -> Result<u64, &'static str> {
+        text.lines()
+            .find_map(|line| line.strip_prefix(label)?.strip_prefix(":\t"))
+            .and_then(|value| value.trim().strip_suffix(" kB"))
+            .and_then(|kib| kib.trim().parse().ok())
+            .ok_or("/proc/self/status lacks a resident set line")
+    };
+    Ok([
+        field("VmRSS")?,
+        field("RssAnon")?,
+        field("RssFile")?,
+        field("RssShmem")?,
+    ])
+}
+
+/// `/proc/self/status` says the resident set and how it splits: `VmRSS` is
+/// `RssAnon`, `RssFile` and `RssShmem` together; two pages of the stack
+/// written for the first time add exactly two pages to `RssAnon` and none to
+/// the others; one page of a shared anonymous mapping written adds exactly
+/// one to `RssShmem`. The check process has no disk file mapped, so
+/// `RssFile` stays as it was.
+///
+/// Verifies: L.user.171
+fn check_resident(
+    ns: &Namespace,
+    ctx: &Context,
+    process: &Process,
+    layout: &Layout,
+) -> Result<(), &'static str> {
+    let page_kib = PAGE_SIZE / 1024;
+    let before = resident_lines(ns, ctx)?;
+    if before[0] != before[1] + before[2] + before[3] {
+        return Err("/proc/self/status's VmRSS is not its three parts together");
+    }
+    // The stack's two lowest pages: nothing has written them.
+    for page in 0..2 {
+        uaccess::copy_to_user(process.space(), layout.stack.0 + page * PAGE_SIZE, &[1])
+            .map_err(|_| "could not write the check process's stack")?;
+    }
+    let anon = resident_lines(ns, ctx)?;
+    if anon[1] != before[1] + 2 * page_kib || anon[2] != before[2] || anon[3] != before[3] {
+        return Err("two stack pages written did not add two pages to RssAnon alone");
+    }
+    let shared = process
+        .space()
+        .map_anywhere(
+            None,
+            2 * PAGE_SIZE,
+            VmaFlags {
+                shared: true,
+                ..VmaFlags::READ_WRITE
+            },
+        )
+        .map_err(|_| "the check process's space refused a shared mapping")?;
+    uaccess::copy_to_user(process.space(), shared, &[1])
+        .map_err(|_| "could not write the shared mapping")?;
+    let after = resident_lines(ns, ctx)?;
+    let _ = process.space().unmap(shared, 2 * PAGE_SIZE);
+    if after[3] != anon[3] + page_kib || after[1] != anon[1] || after[2] != anon[2] {
+        return Err("a shared anonymous page written did not add one page to RssShmem alone");
+    }
+    if after[0] != after[1] + after[2] + after[3] {
+        return Err("/proc/self/status's VmRSS is not its three parts together");
+    }
+    check_resident_memory_file(ns, ctx, process)?;
+    check_stat_rss(ns, ctx)?;
+    time_resident_count(process)
+}
+
+/// Pages [`time_resident_count`] commits and counts.
+const TIMED_PAGES: u64 = 4096;
+
+/// How long counting a space's resident set takes over an object of
+/// [`TIMED_PAGES`] committed pages, said on the console for
+/// `docs/certification/MEMORY-AND-TIMING.md` §2.2y: the space's lock is
+/// held for one pass over the regions, then each object's pages lock for at
+/// most `COUNT_CHUNK` entries a hold.
+fn time_resident_count(process: &Process) -> Result<(), &'static str> {
+    let space = process.space();
+    let len = TIMED_PAGES * PAGE_SIZE;
+    let at = space
+        .map_anywhere(None, len, VmaFlags::READ_WRITE)
+        .map_err(|_| "the space refused the timed mapping")?;
+    let touched = (0..TIMED_PAGES)
+        .try_for_each(|page| uaccess::copy_to_user(space, at + page * PAGE_SIZE, &[1]).map(|_| ()));
+    let start = crate::timer::now_nanos();
+    let split = space.resident_split();
+    let took = crate::timer::now_nanos().saturating_sub(start);
+    let _ = space.unmap(at, len);
+    touched.map_err(|_| "could not write the timed mapping")?;
+    let split = split.map_err(|_| "no memory to count the resident set")?;
+    if split.anon < TIMED_PAGES {
+        return Err("the timed mapping's pages were not counted");
+    }
+    let holds = split.total().div_ceil(crate::user::vmo::COUNT_CHUNK as u64);
+    crate::console::println!(
+        "  procfs   resident set of {} pages counted in {} ns: {} holds of at most {} entries, {} ns a hold on average",
+        split.total(),
+        took,
+        holds,
+        crate::user::vmo::COUNT_CHUNK,
+        took / holds.max(1),
+    );
+    Ok(())
+}
+
+/// A memory filesystem's file in the split: a page of a tmpfs file mapped
+/// shared adds one page to `RssShmem`; the same page mapped private adds
+/// one too, and once the mapping writes it, it moves to `RssAnon` -- the
+/// copy is what the mapping shows -- leaving `VmRSS` as it was.
+fn check_resident_memory_file(
+    ns: &Namespace,
+    ctx: &Context,
+    process: &Process,
+) -> Result<(), &'static str> {
+    use crate::user::space::{FileMapping, FilePlace};
+    use crate::user::vmo::Vmo;
+
+    let page_kib = PAGE_SIZE / 1024;
+    let path: &[u8] = b"/tmp/procfs-resident";
+    let file = ns
+        .open(
+            ctx,
+            None,
+            path,
+            &OpenFlags {
+                create: true,
+                truncate: true,
+                ..read_write()
+            },
+            0o600,
+        )
+        .map_err(|_| "could not make a tmpfs file for the resident check")?;
+    let written = file
+        .write(&vec![0x5a_u8; 2 * PAGE_SIZE as usize])
+        .map_err(|_| "could not write the tmpfs file")?;
+    if written != 2 * PAGE_SIZE as usize {
+        return Err("the tmpfs file took less than was written");
+    }
+    let object = ns
+        .resolve(ctx, None, path, true)
+        .map_err(|_| "the tmpfs file is gone")?
+        .inode()
+        .map_err(|_| "the tmpfs file has no inode")?
+        .mapping()
+        .and_then(|object| object.downcast::<Vmo>().ok())
+        .ok_or("the tmpfs file has no object to map")?;
+    let map = |shared: bool| {
+        process.space().map_file(
+            FilePlace::Anywhere(None),
+            PAGE_SIZE,
+            VmaFlags {
+                shared,
+                ..VmaFlags::READ_WRITE
+            },
+            Arc::clone(&object),
+            0,
+            FileMapping {
+                file: Arc::new(()) as Arc<dyn core::any::Any + Send + Sync>,
+                may_write: shared,
+            },
+        )
+    };
+    let outcome = (|| {
+        let before = resident_lines(ns, ctx)?;
+        let shared = map(true).map_err(|_| "the space refused a shared tmpfs mapping")?;
+        let lines = resident_lines(ns, ctx)?;
+        let _ = process.space().unmap(shared, PAGE_SIZE);
+        if lines[3] != before[3] + page_kib || lines[1] != before[1] || lines[2] != before[2] {
+            return Err("a tmpfs page mapped shared did not add one page to RssShmem alone");
+        }
+        let private = map(false).map_err(|_| "the space refused a private tmpfs mapping")?;
+        let read = resident_lines(ns, ctx)?;
+        let copied = uaccess::copy_to_user(process.space(), private, &[0xa5])
+            .map_err(|_| "could not write the private tmpfs mapping");
+        let written = resident_lines(ns, ctx);
+        let _ = process.space().unmap(private, PAGE_SIZE);
+        copied?;
+        let written = written?;
+        if read[3] != before[3] + page_kib || read[1] != before[1] {
+            return Err("a tmpfs page mapped private did not count as shared memory");
+        }
+        if written[1] != read[1] + page_kib
+            || written[3] != read[3] - page_kib
+            || written[0] != read[0]
+        {
+            return Err(
+                "a private tmpfs page written did not move from RssShmem to RssAnon, VmRSS unchanged",
+            );
+        }
+        Ok(())
+    })();
+    drop(file);
+    let _ = ns.unlink(ctx, None, path);
+    outcome
+}
+
+/// `/proc/self/stat`'s rss, field 24, is `VmRSS` in pages.
+fn check_stat_rss(ns: &Namespace, ctx: &Context) -> Result<(), &'static str> {
+    let stat = read_all(ns, ctx, b"/proc/self/stat", 64)?;
+    let lines = resident_lines(ns, ctx)?;
+    let stat = core::str::from_utf8(&stat).map_err(|_| "/proc/self/stat is not text")?;
+    // The fields after the command's closing parenthesis start at field 3.
+    let rss: u64 = stat
+        .rsplit_once(')')
+        .and_then(|(_, rest)| rest.split_whitespace().nth(24 - 3))
+        .and_then(|field| field.parse().ok())
+        .ok_or("/proc/self/stat has no rss field")?;
+    if rss * (PAGE_SIZE / 1024) != lines[0] {
+        return Err("/proc/self/stat's rss is not VmRSS in pages");
+    }
+    Ok(())
 }
 
 /// How long the busy thread of [`check_thread_times`] runs for, by its own

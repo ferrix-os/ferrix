@@ -2628,5 +2628,41 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::install",
                 "user::space::AddressSpace::uninstall");
         }
+        // The parent is the requirement whose quantity the report counts: the
+        // frames a space holds, as L.object.189 takes the cache's. No
+        // high-level requirement covers /proc's reports as such.
+        requirement <'L.user.171'> theResidentSetSplitsByKind : ItemLowLevel {
+            attribute :>> statement = "/proc/<pid>/status shall report VmRSS, RssAnon,
+                RssFile and RssShmem from each region's committed pages inside its own
+                range: private anonymous memory as RssAnon, shared anonymous memory
+                and a memory filesystem's file as RssShmem, a page a private file
+                mapping has copied once, as RssAnon and not as its file's, and VmRSS
+                their sum; /proc/<pid>/stat's rss shall be VmRSS in pages.";
+            attribute :>> criterion = "In the procfs check process, VmRSS equals the
+                three parts; two stack pages written for the first time add exactly 8
+                kB to RssAnon and nothing to the others; one page of a shared
+                anonymous mapping written adds exactly 4 kB to RssShmem alone; a page
+                of a tmpfs file mapped shared adds 4 kB to RssShmem alone; mapped
+                private and then written, it moves 4 kB from RssShmem to RssAnon with
+                VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+                "user::space::Resident::total",
+                "user::vmo::Vmo::committed_in",
+                "user::vmo::Vmo::committed_in_both");
+        }
+        // As L.user.171's, the parent is the frames a space holds.
+        requirement <'L.user.172'> aDiskFilesMappedPagesAreItsRss : ItemLowLevel {
+            attribute :>> statement = "A disk file's pages inside a region's range shall
+                count as RssFile, the file's other cached pages not at all, and a page
+                a private mapping of it has written as RssAnon instead.";
+            attribute :>> criterion = "With an eight-page file on the stage 12 disk all
+                in the cache, a read-only mapping of pages 2 to 5 counts exactly 4
+                file pages and no others; a private mapping of page 0, written,
+                counts 1 anonymous page and no file page.";
+            attribute :>> parent = "H.MEM.9";
+            attribute :>> unit = ("user::space::AddressSpace::resident_split",
+                "user::vmo::Vmo::is_disk_file");
+        }
     }
 }

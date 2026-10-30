@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2416 declarations in the core's files, 175 in the item's; 79 checks-only.
+2422 declarations in the core's files, 175 in the item's; 80 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2902,6 +2902,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace` | struct | load |  |
 | `FileMapping` | struct | load |  |
 | `Region` | struct | load |  |
+| `Resident` | struct | - |  |
 | `WindowPages` | struct | load |  |
 | `Access::READ` | associated const | item, load |  |
 | `Access::WRITE` | associated const | item, load |  |
@@ -2932,7 +2933,7 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
 | `AddressSpace::replace_shared_code` | method | load |  |
-| `AddressSpace::resident_pages` | method | load |  |
+| `AddressSpace::resident_split` | method | load |  |
 | `AddressSpace::root_table` | method | item, load |  |
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
@@ -2948,6 +2949,10 @@ checks above is `pub` for raised checks (F3).
 | `Region::file` | field | item, load, bin |  |
 | `Region::flags` | field | item, load |  |
 | `Region::start` | field | item, load, bin |  |
+| `Resident::anon` | field | load |  |
+| `Resident::file` | field | item, load, bin |  |
+| `Resident::shmem` | field | load |  |
+| `Resident::total` | method | load, bin |  |
 | `WindowPages::physical` | field | load, bin |  |
 | `WindowPages::whole` | field | load, bin |  |
 | `WindowPages::whole_len` | field | load |  |
@@ -2957,6 +2962,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `COUNT_CHUNK` | const | load (checks) | checks-only |
 | `RunError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
 | `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

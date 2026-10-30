@@ -234,6 +234,16 @@ pub(crate) enum Commit {
     Unfilled,
 }
 
+// CHECKS-ONLY: fs/procfs/check.rs
+/// Committed pages a count looks at per hold of an object's pages lock
+/// ([`Vmo::committed_in`]): what a fault on the object may wait behind while
+/// `/proc/<pid>/status` counts it.
+#[doc(hidden)]
+pub const COUNT_CHUNK: usize = 256;
+
+/// Pages [`Vmo::committed_in_both`] takes per hold, kept on the stack.
+const OVERLAP_CHUNK: usize = 64;
+
 /// A pageable memory object.
 ///
 /// Reference-counted, because the whole point is that more than one mapping
@@ -759,6 +769,66 @@ impl Vmo {
     /// means and what the exit criterion measures.
     pub fn committed(&self) -> usize {
         self.pages.lock().frames.len()
+    }
+
+    /// Pages committed in `first..end`, page indexes: what a mapping of that
+    /// part of the object shows. Counted [`COUNT_CHUNK`] entries at a time,
+    /// the pages lock let go between chunks, so a fault on this object waits
+    /// for at most one chunk however many pages it holds; pages committed or
+    /// taken while it counts may or may not be counted, as in any report.
+    pub(crate) fn committed_in(&self, first: u64, end: u64) -> u64 {
+        let mut counted = 0u64;
+        let mut from = first;
+        while from < end {
+            let pages = self.pages.lock();
+            let mut taken = 0usize;
+            let mut last = None;
+            for (&index, _) in pages.frames.range(from..end).take(COUNT_CHUNK) {
+                taken += 1;
+                last = Some(index);
+            }
+            drop(pages);
+            counted = counted.saturating_add(taken as u64);
+            match last {
+                Some(index) if taken == COUNT_CHUNK => from = index.saturating_add(1),
+                _ => break,
+            }
+        }
+        counted
+    }
+
+    /// Of the pages committed here in `first..end`, those `other` also holds
+    /// at the same index: a private file mapping's pages its shadow has
+    /// copied, which the mapping no longer shows from the file. Each chunk's
+    /// indexes are taken under this object's lock, then looked up in `other`
+    /// under its own, one lock at a time.
+    pub(crate) fn committed_in_both(&self, other: &Vmo, first: u64, end: u64) -> u64 {
+        let mut counted = 0u64;
+        let mut from = first;
+        let mut chunk = [0u64; OVERLAP_CHUNK];
+        while from < end {
+            let pages = self.pages.lock();
+            let mut taken = 0usize;
+            for (slot, (&index, _)) in chunk
+                .iter_mut()
+                .zip(pages.frames.range(from..end).take(OVERLAP_CHUNK))
+            {
+                *slot = index;
+                taken += 1;
+            }
+            drop(pages);
+            let indexes = chunk.get(..taken).unwrap_or_default();
+            let held = indexes
+                .iter()
+                .filter(|&&index| other.page(index).is_some())
+                .count();
+            counted = counted.saturating_add(held as u64);
+            match indexes.last() {
+                Some(&index) if taken == OVERLAP_CHUNK => from = index.saturating_add(1),
+                _ => break,
+            }
+        }
+        counted
     }
 
     /// The frame holding page `index`, if it has been committed.

@@ -1730,7 +1730,7 @@
     },
     {
       "file": "user/vmo.rs",
-      "lines": "2000",
+      "lines": "2070",
       "category": "defensive",
       "match": "return Err(VmoError::OutOfMemory);",
       "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."

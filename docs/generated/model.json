@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "6d44ee6a515d65555ea582110095883c87fbe454ae3ce5f68aeaa8d6fcfd592f",
+  "digest": "94dc0423069116221afded03fdc5ba6bbf2859b9135b00b73212b71506225271",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 149,
-    "elements": 8116,
+    "elements": 8126,
     "maturity": {
       "implemented": 285,
       "inProgress": 31,
@@ -56100,6 +56100,120 @@
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2629
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theResidentSetSplitsByKind",
+              "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
+              "kind": "requirement",
+              "shortName": "L.user.171",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 2634
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"/proc/<pid>/status shall report VmRSS, RssAnon, RssFile and RssShmem from each region's committed pages inside its own range: private anonymous memory as RssAnon, shared anonymous memory and a memory filesystem's file as RssShmem, a page a private file mapping has copied once, as RssAnon and not as its file's, and VmRSS their sum; /proc/<pid>/stat's rss shall be VmRSS in pages.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2640
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In the procfs check process, VmRSS equals the three parts; two stack pages written for the first time add exactly 8 kB to RssAnon and nothing to the others; one page of a shared anonymous mapping written adds exactly 4 kB to RssShmem alone; a page of a tmpfs file mapped shared adds 4 kB to RssShmem alone; mapped private and then written, it moves 4 kB from RssShmem to RssAnon with VmRSS unchanged; stat's field 24 times 4 kB is VmRSS.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2647
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.9\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2648
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theResidentSetSplitsByKind",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"user::space::AddressSpace::resident_split\", \"user::space::Resident::total\", \"user::vmo::Vmo::committed_in\", \"user::vmo::Vmo::committed_in_both\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2652
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aDiskFilesMappedPagesAreItsRss",
+              "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
+              "kind": "requirement",
+              "shortName": "L.user.172",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 2655
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A disk file's pages inside a region's range shall count as RssFile, the file's other cached pages not at all, and a page a private mapping of it has written as RssAnon instead.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2658
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With an eight-page file on the stage 12 disk all in the cache, a read-only mapping of pages 2 to 5 counts exactly 4 file pages and no others; a private mapping of page 0, written, counts 1 anonymous page and no file page.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2662
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.9\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2663
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aDiskFilesMappedPagesAreItsRss",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"user::space::AddressSpace::resident_split\", \"user::vmo::Vmo::is_disk_file\")",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2665
                   }
                 }
               ]

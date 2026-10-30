@@ -1178,8 +1178,8 @@
     "user/vmo.rs": {
       "ring": "core",
       "lines": [
-        1501,
-        2000
+        1571,
+        2070
       ]
     },
     "syscall/program.rs": {

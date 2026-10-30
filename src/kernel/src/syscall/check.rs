@@ -12011,12 +12011,13 @@ fn check_cacheflush_answers_as_linux_does(process: &Process) -> Result<(), &'sta
         }
         let resident = process
             .space()
-            .resident_pages()
-            .map_err(|_| "could not count the resident pages")?;
+            .resident_split()
+            .map_err(|_| "could not count the resident pages")?
+            .total();
         // From the middle of the first page to the middle of the last.
         let (start, end) = (code + 8, code + len - 8);
         let maintained = memory::cacheflush_pages(process, start, end, 0);
-        if process.space().resident_pages() != Ok(resident) {
+        if process.space().resident_split().map(|split| split.total()) != Ok(resident) {
             return Err("cacheflush committed a page the program never touched");
         }
         if maintained != Ok(2) {

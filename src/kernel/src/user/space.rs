@@ -3952,6 +3952,44 @@ impl Drop for AddressSpace {
     }
 }
 
+/// One region's part of an object, as [`AddressSpace::resident_split`]
+/// lists it under the space's lock to count after.
+struct Counted {
+    /// The region's object.
+    vmo: Arc<Vmo>,
+    /// A private file mapping's shadow: the pages it has copied.
+    shadow: Option<Arc<Vmo>>,
+    /// The region's first page index in the object.
+    first: u64,
+    /// One past its last.
+    end: u64,
+    /// Whether it maps a file.
+    file: bool,
+    /// Whether the mapping is shared.
+    shared: bool,
+}
+
+/// A space's resident pages by kind: [`AddressSpace::resident_split`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Resident {
+    /// Private memory, and private file mappings' copied pages.
+    pub anon: u64,
+    /// A disk file's pages.
+    pub file: u64,
+    /// A memory filesystem's file's pages, and shared anonymous memory.
+    pub shmem: u64,
+}
+
+impl Resident {
+    /// All of it: `VmRSS`.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.anon
+            .saturating_add(self.file)
+            .saturating_add(self.shmem)
+    }
+}
+
 /// One region of an address space, as `/proc/<pid>/maps` reports it.
 ///
 /// No name: the region map records none. `[heap]` and `[stack]` are things
@@ -3997,6 +4035,85 @@ impl AddressSpace {
         visit(&mut regions)
     }
 
+    /// The resident set split as Linux's `RssAnon`, `RssFile` and
+    /// `RssShmem` split it: each region's object's committed pages inside the
+    /// region's own range. Private memory, and the pages a private file
+    /// mapping has copied into its shadow, are anonymous; a disk file's pages
+    /// are a file's; a memory filesystem's file (tmpfs, `memfd`) and shared
+    /// anonymous memory are shared memory. A device region's pages are the
+    /// device's and counted in none. A page a private file mapping copied is
+    /// counted once, as anonymous: the mapping shows the copy, not the file's
+    /// page.
+    ///
+    /// Every region counts its own range, so an object mapped twice counts
+    /// twice, as Linux counts a page once per mapping of it.
+    ///
+    /// The space's lock is held only to list the regions' objects and
+    /// ranges, one entry per region; the pages are counted after it is let go,
+    /// a bounded number per hold of each object's own lock
+    /// ([`Vmo::committed_in`]). So a reader of another process's
+    /// `/proc/<pid>/status` holds that process's space lock for one pass over
+    /// its regions, as `/proc/<pid>/maps` does, and never for its pages.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] when there is no memory to list the regions
+    /// in.
+    pub fn resident_split(&self) -> Result<Resident, fallible::AllocError> {
+        let listed = {
+            let inner = self.inner.lock();
+            let mut listed: Vec<Counted> = fallible::try_with_capacity(inner.map.iter().len())?;
+            for vma in inner.map.iter() {
+                let pages = (vma.range.end() - vma.range.start()) / PAGE_SIZE;
+                let (id, offset, file) = match vma.backing {
+                    Backing::Anonymous { id, offset } => (id, offset, false),
+                    Backing::File { id, offset } => (id, offset, true),
+                    Backing::Device { .. } => continue,
+                };
+                let Some(vmo) = inner.objects.get(&id) else {
+                    continue;
+                };
+                let first = offset / PAGE_SIZE;
+                let shadow = (file && !vma.flags.shared)
+                    .then(|| inner.shadows.get(&id).cloned())
+                    .flatten();
+                // NOALLOC: room for every region was had above.
+                listed.push(Counted {
+                    vmo: Arc::clone(vmo),
+                    shadow,
+                    first,
+                    end: first.saturating_add(pages),
+                    file,
+                    shared: vma.flags.shared,
+                });
+            }
+            listed
+        };
+        let mut resident = Resident::default();
+        for counted in &listed {
+            let (first, end) = (counted.first, counted.end);
+            let mut held = counted.vmo.committed_in(first, end);
+            if let Some(shadow) = &counted.shadow {
+                let copied = shadow.committed_in(first, end);
+                resident.anon = resident.anon.saturating_add(copied);
+                held = held.saturating_sub(counted.vmo.committed_in_both(shadow, first, end));
+            }
+            let slot = if !counted.file {
+                if counted.shared {
+                    &mut resident.shmem
+                } else {
+                    &mut resident.anon
+                }
+            } else if counted.vmo.is_disk_file() {
+                &mut resident.file
+            } else {
+                &mut resident.shmem
+            };
+            *slot = slot.saturating_add(held);
+        }
+        Ok(resident)
+    }
+
     /// Pages the objects this space maps have committed: its resident set.
     ///
     /// A page shared with another space after `fork` is counted in both, as
@@ -4007,7 +4124,7 @@ impl AddressSpace {
     ///
     /// [`fallible::AllocError`] when there is no memory to list the objects
     /// in.
-    pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
+    pub(crate) fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
         objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));

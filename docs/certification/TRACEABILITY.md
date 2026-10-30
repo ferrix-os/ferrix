@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 148 | 95 | 53 |
-| Low (`L.*`) | 1132 | 867 | 265 |
+| Low (`L.*`) | 1134 | 869 | 265 |
 
-2523 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2528 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2525 |
-| Accessors, covered by the requirement they serve | 1096 |
+| Named by a low-level requirement | 2530 |
+| Accessors, covered by the requirement they serve | 1095 |
 | Check code in a product file | 88 |
 | Named by none | 937 |
 
@@ -1080,6 +1080,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.user.106` | map_code_page shall map a one-page object as a single read-and-run shared page, never writable, and refuse an object of any other size before changing the space. | A two-page object is refused with BadRange and the space keeps its regions; a one-page object maps as one region read, execute and shared and not writable, one page long, and unmapping it leaves the space's regions as they were (the sweep's page scenario, the `sweep` line). | H.MEM.18 | `user::space::AddressSpace::map_code_page` | `src/kernel/src/user/alloc_check.rs::run` | reached | reached | reached |
 | `L.user.169` | begin_shootdown shall count a shootdown before it reads the space's set, and install shall join the set before it reads the count, both sequentially consistent, so that a processor that left the set with the space's translations kept under a PCID is either interrupted by a shootdown or flushes the PCID before it uses the space again. | The loom model of the two orders (src/tests/loom/tests/pcid.rs, `cargo xtask loom`) finds no interleaving in which a processor uses a translation after the shootdown that took it down has returned; with either order reversed, or the slot's comparison left out, it finds one. The switch-back check runs both orders on every boot. | H.MEM.17 | `user::space::AddressSpace::install`, `user::space::AddressSpace::begin_shootdown` | `src/kernel/src/user/check.rs::check_a_space_switched_back_to_sees_its_shootdowns` | not reached | not reached | not reached |
 | `L.user.170` | A space installed again on a processor after a shootdown of it began while it was installed elsewhere shall be translated through its tables as they are, never through a translation the shootdown took down. | A page moved to a new frame while its space is not installed is read, after the switch back, as the new frame's marker: decisive on PCID hardware (the N150), where a kept tag would read the old frame. | H.MEM.17 | `user::space::AddressSpace::install`, `user::space::AddressSpace::uninstall` | `src/kernel/src/user/check.rs::check_a_space_switched_back_to_sees_its_shootdowns` | not reached | not reached | not reached |
+| `L.user.171` | /proc/<pid>/status shall report VmRSS, RssAnon, RssFile and RssShmem from each region's committed pages inside its own range: private anonymous memory as RssAnon, shared anonymous memory and a memory filesystem's file as RssShmem, a page a private file mapping has copied once, as RssAnon and not as its file's, and VmRSS their sum; /proc/<pid>/stat's rss shall be VmRSS in pages. | In the procfs check process, VmRSS equals the three parts; two stack pages written for the first time add exactly 8 kB to RssAnon and nothing to the others; one page of a shared anonymous mapping written adds exactly 4 kB to RssShmem alone; a page of a tmpfs file mapped shared adds 4 kB to RssShmem alone; mapped private and then written, it moves 4 kB from RssShmem to RssAnon with VmRSS unchanged; stat's field 24 times 4 kB is VmRSS. | H.MEM.9 | `user::space::AddressSpace::resident_split`, `user::space::Resident::total`, `user::vmo::Vmo::committed_in`, `user::vmo::Vmo::committed_in_both` | `src/kernel/src/fs/procfs/check.rs::check_resident` | not reached | not reached | not reached |
+| `L.user.172` | A disk file's pages inside a region's range shall count as RssFile, the file's other cached pages not at all, and a page a private mapping of it has written as RssAnon instead. | With an eight-page file on the stage 12 disk all in the cache, a read-only mapping of pages 2 to 5 counts exactly 4 file pages and no others; a private mapping of page 0, written, counts 1 anonymous page and no file page. | H.MEM.9 | `user::space::AddressSpace::resident_split`, `user::vmo::Vmo::is_disk_file` | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::resident_of_a_disk_file` | reached | not built | not built |
 
 ### Descriptors
 
@@ -2174,6 +2176,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/discovery/smbios_check.rs::run` | kernel | L.discovery.5 |
 | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_beside_a_mapping` | kernel | L.object.188 |
 | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_written` | kernel | L.object.188, L.object.189 |
+| `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::resident_of_a_disk_file` | kernel | L.user.172 |
 | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::write_reclaims_at_max` | kernel | L.object.190 |
 | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | kernel | L.object.52, L.object.61 |
 | `src/kernel/src/fs/cgroupfs/cpu_check.rs::burst_carried` | kernel | L.object.184 |
@@ -2217,6 +2220,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/fs/mmap_check.rs::check_the_loader_mapping_pattern` | kernel | L.user.97 |
 | `src/kernel/src/fs/mmap_check.rs::check_the_mapping_is_the_file` | kernel | L.user.93 |
 | `src/kernel/src/fs/mmap_check.rs::read_maps` | kernel | L.user.98 |
+| `src/kernel/src/fs/procfs/check.rs::check_resident` | kernel | L.user.171 |
 | `src/kernel/src/fs/sysfs/check.rs::check_drivers_sealed` | kernel | L.device.54 |
 | `src/kernel/src/fs/timens_check.rs::vdso_views` | kernel | L.user.130 |
 | `src/kernel/src/init_check.rs::check` | kernel | L.init.2, L.init.3, H.BOOT.15 |

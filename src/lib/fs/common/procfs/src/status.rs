@@ -112,6 +112,16 @@ pub struct Status<'a> {
     pub vm_size: u64,
     /// `VmLck`: the `mlock`ed part.
     pub vm_locked: u64,
+    /// `VmRSS`: the resident set, `RssAnon`, `RssFile` and `RssShmem`
+    /// together.
+    pub vm_rss: u64,
+    /// `RssAnon`: resident private memory.
+    pub rss_anon: u64,
+    /// `RssFile`: resident pages of files on a disk.
+    pub rss_file: u64,
+    /// `RssShmem`: resident shared memory -- a memory filesystem's files
+    /// and shared anonymous memory.
+    pub rss_shmem: u64,
     /// `VmData`: private writable memory that is not the stack.
     pub vm_data: u64,
     /// `VmStk`: the main thread's stack.
@@ -187,6 +197,10 @@ pub fn render(out: &mut Vec<u8>, status: &Status<'_>) {
     for (label, kib) in [
         ("VmSize", status.vm_size),
         ("VmLck", status.vm_locked),
+        ("VmRSS", status.vm_rss),
+        ("RssAnon", status.rss_anon),
+        ("RssFile", status.rss_file),
+        ("RssShmem", status.rss_shmem),
         ("VmData", status.vm_data),
         ("VmStk", status.vm_stack),
     ] {

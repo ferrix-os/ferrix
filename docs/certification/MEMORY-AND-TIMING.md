@@ -1816,6 +1816,25 @@ verdict of ledger line 3950.
   hardware yet: a row of `docs/BACKLOG.md`.
 * **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
   most 32 bank reads and 32 lines; no lock while it reads a bank.
+* **An address space's lock, then an object's pages lock**
+  (`AddressSpace::resident_split`, `Vmo::committed_in`,
+  `Vmo::committed_in_both`; L.user.171, L.user.172): whoever may read a
+  process's `/proc/<pid>/status` or `stat` -- `ps` and `top` read them for
+  every process -- holds that process's space lock for one pass over its
+  regions, one entry each, into a list allocated fallibly first: the pass
+  `/proc/<pid>/maps` already makes. The lock is let go before any page is
+  counted. Each object's pages lock is then held for at most `COUNT_CHUNK`
+  (256) entries of its page map's range walk, and let go between chunks;
+  `committed_in_both` holds one object's for at most 64 entries, then the
+  other's for one lookup at a time, never both. A program's own page count
+  sets how many holds a read takes, never how long one is, so a fault on
+  the program's objects waits behind at most one chunk. The order, space
+  lock then pages lock, is `resident_pages`'s already; here the two are
+  never held together. Measured under KVM on nazuna (the procfs check's
+  line, 2026-10-30): 4,098 pages in 17 holds, 164 µs in all, 9.6 µs a hold
+  on average. The worst case the review asks for -- an object of 1 GiB or
+  more mapped in part, `status` read in a loop, and the target's fault
+  latency meanwhile -- is not measured yet: a row of `docs/backlog/p2.md`.
 
 ### 2.3 What is missing, per standard
 

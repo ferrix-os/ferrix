@@ -202,20 +202,6 @@
       "branch": "feature/core-quarantine",
       "date": "2026-10-30",
       "purpose": "docs/CORE-QUARANTINE.md, taking an unstable processor out of service (customer, 2026-10-30, item 6; consultant OK IF Q1-Q14, ledger 4856, Q12): H.SCHED.18 the mechanism's failure modes; L.sched the shared placement helper, re-home at enqueue, evacuation with timer objects, the park handshake and its undo, back in service; L.smp the in-service predicate and Linux surface, the refusals, one function behind both doors with audit records, CpuService and CPU_SERVICE's rights and arguments, the sysfs write through setters; L.iommu the IRTE retarget's single store and unchanged fields, invalidation with its wait, serialized allocation, other sources refused"
-    },
-    {
-      "ids": ["L.user.171"],
-      "owner": "proc-status-rss",
-      "branch": "feature/proc-status-rss",
-      "date": "2026-10-30",
-      "purpose": "/proc/<pid>/status's VmRSS, RssAnon, RssFile and RssShmem (customer, 2026-10-30: the lines were missing): the resident set split by kind, per region, from AddressSpace::resident_split"
-    },
-    {
-      "ids": ["L.user.172"],
-      "owner": "proc-status-rss",
-      "branch": "feature/proc-status-rss",
-      "date": "2026-10-30",
-      "purpose": "a disk file's pages in /proc/<pid>/status's RssFile (consultant NOT YET B3, ledger 4894: split out of L.user.171 and checked in a boot with the stage 12 disk)"
     }
   ]
 }
