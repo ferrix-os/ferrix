@@ -252,7 +252,13 @@ impl Inner {
 /// The most leaves [`AddressSpace::find_frame`] visits: a gibibyte of
 /// four-kilobyte pages. A program that maps more, and consumed poison past
 /// them, is told address 0.
-#[cfg(target_arch = "x86_64")]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        dead_code,
+        reason = "only x86-64's machine check finds a poisoned frame's address"
+    )
+)]
 pub(crate) const FIND_FRAME_LEAVES: usize = 1 << 18;
 
 /// One process's address space.
@@ -357,7 +363,13 @@ impl AddressSpace {
     /// leaves in address order under the space's own lock, stopping at the
     /// first match, at the program half's end, or after [`FIND_FRAME_LEAVES`]
     /// leaves -- the bound its hold of the lock has (MEMORY-AND-TIMING).
-    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        expect(
+            dead_code,
+            reason = "only x86-64's machine check finds a poisoned frame's address"
+        )
+    )]
     pub(crate) fn find_frame(&self, frame: Frame) -> Option<u64> {
         let wanted = frame * PAGE_SIZE;
         let inner = self.inner.lock();

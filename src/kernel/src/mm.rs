@@ -1138,7 +1138,13 @@ pub fn translate_in(root: u64, virt: u64) -> Option<u64> {
 /// Visit the leaves of the tree rooted at `root` in address order, until
 /// `visit` returns false. Takes no lock, as [`translate_in`]: the caller holds
 /// the address space's own across it.
-#[cfg(target_arch = "x86_64")]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        dead_code,
+        reason = "only x86-64's machine check finds a poisoned frame's address"
+    )
+)]
 pub(crate) fn for_each_leaf_in(root: u64, visit: impl FnMut(ferrix_paging::Leaf) -> bool) {
     let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
     let _ = mapper.for_each_leaf(&KernelPhysMem, visit);
