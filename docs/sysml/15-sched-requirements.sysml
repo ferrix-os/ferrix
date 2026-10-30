@@ -141,10 +141,12 @@ package FerrixSchedRequirements {
             attribute :>> statement = "attention_due, asked at every way out to ring 3
                 on every architecture -- a call's, an interrupt's, a fault's, and the
                 last look of the personality's return_to_user -- with interrupts masked,
-                shall read the running task's pending-work word once, clear STOP and
+                shall read the running task's pending-work word, clear STOP and
                 SIGNAL in it if they are set before anything reads what they stand
                 for, and ask the personality's needs_attention when END, STOP, SIGNAL
-                or TRACE was set; FILTERED shall not be read there.";
+                or TRACE was set; FILTERED shall not be read there. With PLACE
+                posted the task is first moved inside its mask (look_placed, which
+                may switch) and the word is then read again (F3, ledger 5269 (5)).";
             attribute :>> criterion = "A program of three threads stopped by its stop
                 alone, which posts STOP and no signal, has both counting threads park
                 and stay still, and runs again after SIGCONT (stage 7's stop check,
@@ -153,7 +155,8 @@ package FerrixSchedRequirements {
                 at every clear word.";
             attribute :>> parent = ("H.OBJ.9", "H.TRAP.4");
             attribute :>> unit = ("trap::attention_due", "sched::work::look",
-                "sched::work::wants_attention", "sched::work::with_running");
+                "sched::work::wants_attention", "sched::work::with_running",
+                "sched::work::look_placed");
         }
         requirement <'L.sched.31'> notifyPostsBeforeItWakes : ItemLowLevel {
             attribute :>> statement = "notify shall post its bits to the task's word
@@ -1063,7 +1066,9 @@ package FerrixSchedRequirements {
         }
         requirement <'L.sched.105'> theParkIsAHandshakeWithAnUndo : ItemLowLevel {
             attribute :>> statement = "Taking a processor out shall check every
-                refusal before any state changes, clear its ACTIVE bit and wait a
+                refusal before any state changes -- among them a task pinned to
+                it alone at its spawn, never a mask a user set
+                (L.sched.123, ledger 5156 (A3)) -- clear its ACTIVE bit and wait a
                 grace period before asking the park, and move its park state
                 Active to Parking to Parked by compare-exchange; a park not made
                 by the deadline shall be cancelled by compare-exchange Parking to
@@ -1071,8 +1076,10 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The native boot check
                 a_processor_leaves_service_through_its_token_alone: a park
                 whose deadline has passed, asked of nobody, is cancelled and
-                the processor left in service; test-quarantine's fifty
-                cycles each park and return. Control: the park loop with
+                the processor left in service, and one with a program task
+                counted as pinned at its spawn is refused; test-quarantine's
+                fifty cycles each park and return, a spinner pinned to the
+                target by sched_setaffinity not refusing them. Control: the park loop with
                 interrupts left masked -- a shootdown is never answered and
                 the kernel stops, which fires.";
             attribute :>> parent = "H.SCHED.18";
@@ -1158,6 +1165,149 @@ package FerrixSchedRequirements {
                 creator's slice request'.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::prepare_user";
+        }
+    }
+
+    package AppliedAffinity {
+        doc /* sched/affinity.rs, sched/mod.rs, sched/queue.rs, sched/task.rs,
+             * sched/work.rs and the way out of every architecture:
+             * sched_setaffinity that pins (F3, docs/GAME-MODE-SCHED.md
+             * section 2.1; the consultant's design reviews, ledger 4446
+             * (D1)-(D12) and 5156 (A1)-(A12)). The mask a task's placement
+             * asks is mask_for: its stored mask, or the domain while that
+             * names no processor in service (L.sched.123); the effective
+             * mask is that and in service. The system call's EINVAL, EPERM,
+             * ESRCH and read-back are load statements in the design note
+             * (limits.rs, no L id). */
+
+        requirement <'L.sched.96'> aKernelThreadsMaskIsNeverSet : ItemLowLevel {
+            attribute :>> statement = "set_affinity shall refuse every task that
+                runs no program, before anything changes, so that a kernel
+                thread's mask is the one it was spawned with for its whole
+                life.";
+            attribute :>> criterion = "Stage 5's affinity check: a kernel thread
+                asked a mask through set_affinity is refused with KernelThread
+                and keeps its spawn mask. Control: the refusal removed -- 'a
+                kernel thread's mask was changed by sched_setaffinity's
+                door'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = "sched::affinity::set_affinity";
+        }
+        requirement <'L.sched.97'> everyPlacementObeysTheMask : ItemLowLevel {
+            attribute :>> statement = "Every placer -- may_place (the Sync wake,
+                the pull and rehome_blocked's choice), idle_allowed,
+                place_on_idle, a steal, a balance, the evacuation of a park,
+                and a user task's making -- shall ask allowed(task, cpu) over
+                mask_for beside placeable(cpu); a task woken at a home its
+                mask does not allow shall be moved, under both queues' locks
+                taken lower first, to a processor it allows before it is
+                queued; a mask shall be stored only under the lock of the
+                queue that owns the task, and read whole.";
+            attribute :>> criterion = "Stage 5's affinity check: a task asleep at
+                home on processor 0 is given the last processor alone and
+                woken from processor 0 with preemption held; as the wake
+                returns its home is the last processor, and it runs there.
+                Controls: wake_at_home's mask test skipped -- 'a task woken
+                with a mask that excludes its home was queued there'; the
+                store skipped -- the same line.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::allowed", "sched::affinity::mask_for",
+                "sched::affinity::pinned", "sched::affinity::set_mask",
+                "sched::task::Task::store_affinity", "sched::task::Task::affinity",
+                "sched::may_place", "sched::idle_allowed", "sched::place_on_idle",
+                "sched::wake_at_home", "sched::wake_onto", "sched::rehome_blocked",
+                "sched::may_pull", "sched::queue::CpuQueue::steal_candidate",
+                "sched::queue::CpuQueue::take_movable_sleeper", "sched::prepare_user");
+        }
+        requirement <'L.sched.98'> aTaskPickedOutsideItsMaskIsPushed : ItemLowLevel {
+            attribute :>> statement = "A queued task picked on a processor its
+                mask does not allow shall be taken off that queue and queued
+                on one it allows before it is switched to, and the pick made
+                again, the destination's lock waited for when it is above
+                the picking processor and only tried when below.";
+            attribute :>> criterion = "Stage 5's affinity check: a task woken on
+                processor 0 behind its waker, then given the last processor
+                alone, runs on the last processor, and the push count rose.
+                Control: the push skipped -- 'a task picked on a processor its
+                mask excludes ran there'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::pick_inside", "sched::affinity::push_picked",
+                "sched::affinity::pushed");
+        }
+        requirement <'L.sched.99'> noUserInstructionRunsOutsideTheMask : ItemLowLevel {
+            attribute :>> statement = "A task given a mask shall carry PLACE while
+                its mask is narrower than the domain, and every way back to
+                user mode on every architecture -- a call's, an interrupt's,
+                a fault's, before a signal frame is built, a restarted call,
+                and a program's or a clone or fork child's first entry --
+                shall, before any user instruction, switch it away from a
+                processor mask_for does not name and queue it, after the
+                switch has saved its registers, under both queues' locks on
+                one it names; with no lock held and the preemption count
+                zero at the switch, and again until it is inside.";
+            attribute :>> criterion = "test-threads' affinity step on x86-64,
+                AArch64 and ARMv7-A: pinned to each processor in turn, getcpu
+                (and RDTSCP on x86-64) on the instruction after the call
+                names it; a pinned spinner is never seen elsewhere over a
+                second. Control: the bit not posted -- 'a thread that pinned
+                itself ran its next instruction elsewhere'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::keep_inside",
+                "sched::affinity::leaves_with_switch", "sched::affinity::take_pushing",
+                "sched::affinity::push_off", "sched::affinity::unmasked",
+                "sched::work::look_placed", "sched::work::place_before_entry",
+                "sched::work::anything_due", "sched::choose_next", "sched::depart",
+                "sched::finish_switch",
+                "sched::nothing_due_here", "trap::attention_due");
+        }
+        requirement <'L.sched.100'> theSetterWaitsForARunningTarget : ItemLowLevel {
+            attribute :>> statement = "A set_affinity whose target runs on
+                another processor its new mask does not allow shall interrupt
+                that processor and return only once the target is off it, it
+                has died, or 100 ms have passed.";
+            attribute :>> criterion = "test-threads' affinity step: another
+                thread's mask is set while it spins on another processor;
+                its first getcpu begun after the call returned names the new
+                processor. Control: the wait removed -- 'another thread's
+                next getcpu after its mask was set named a processor outside
+                it'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::wait_until_off",
+                "sched::affinity::running_outside");
+        }
+        requirement <'L.sched.101'> aThreadStartsWithItsCreatorsMask : ItemLowLevel {
+            attribute :>> statement = "A thread made by clone, fork or vfork shall
+                be made with the mask its creator's task had at that moment,
+                read whole, and execve shall keep it; any other user task
+                shall start with the whole domain.";
+            attribute :>> criterion = "test-threads' affinity step: a new thread
+                and a fork child read their creator's one-processor mask back
+                and run on it; an exec keeps it where the program is a file.
+                Control: the creator's mask not copied at clone -- 'a new
+                thread did not start with its creator's mask'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = "sched::prepare_user";
+        }
+        requirement <'L.sched.123'> aMaskNeverVetoesAPark : ItemLowLevel {
+            attribute :>> statement = "A task that runs a program and whose stored
+                mask names no processor in service shall be placed as if its
+                mask were the whole domain, its stored mask kept, and
+                sched_getaffinity shall answer the effective mask; a user's
+                mask shall never count among the pins that refuse a park.";
+            attribute :>> criterion = "test-quarantine: a spinner the probe pinned
+                to the target with sched_setaffinity does not refuse the park,
+                and by its own getcpu runs elsewhere while the target is out;
+                its sched_getaffinity reads every processor in service during
+                the park and the target alone after, and it runs on the target
+                again after its return; fifty cycles out and back with it
+                running all succeed. Control: the fallback removed -- the
+                step fails with 'a task pinned to processor 2 did not read
+                every processor in service while it was out': getaffinity's
+                look during the park, made before the probe's getcpu, catches
+                the removed fallback first (ledger 5269 (4)).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::affinity::mask_for",
+                "sched::affinity::effective_mask", "sched::task::Task::new");
         }
     }
 }

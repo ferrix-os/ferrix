@@ -192,6 +192,20 @@ proc_of() { busybox cut -d' ' -f39 "/proc/$1/stat" 2>/dev/null; }
 interrupts() { busybox sed "s/^/quarantine-test: $1 /" /proc/interrupts; }
 busy=
 for n in 1 2 3 4; do busybox sh -c 'while :; do :; done' & busy="$busy $!"; done
+# L.sched.123: a spinner pinned to the target by sched_setaffinity, which
+# must not refuse the park, and runs elsewhere while it is out.
+busybox mkdir -p /run/qt
+/bin/quarantine-test pin @T@ /run/qt/pinned & pinned=$!
+# Where the pinned spinner runs: `stat`'s processor field names the reader's.
+pinned_on() {
+    a=$(busybox cat /run/qt/pinned 2>/dev/null)
+    busybox sleep 0.3
+    b=$(busybox cat /run/qt/pinned 2>/dev/null)
+    if [ -z "$b" ] || [ "$a" = "$b" ]; then echo stalled
+    elif [ "${b#* }" = @T@ ]; then echo target
+    else echo elsewhere
+    fi
+}
 busybox mkdir -p /run/qt
 for n in $(busybox seq 24); do
     busybox sh -c 'busybox sleep 100000 | busybox cat' &
@@ -225,6 +239,8 @@ for stat in /proc/[0-9]*/stat; do
 done
 say "tasks read: $read"
 say "tasks on @T@: $on2"
+say "pinned mask out $(/bin/quarantine-test mask $pinned)"
+say "pinned while out: $(pinned_on)"
 interrupts out
 disks=$(busybox ls /dev | busybox grep -E '^(vd[a-z]+|sd[a-z]+|nvme[0-9]+n[0-9]+)$' | busybox tr '\n' ' ')
 say "disks $disks"
@@ -247,6 +263,14 @@ done
 say "after probes $(busybox cat $cpu/online)"
 echo 1 > $cpu/cpu@T@/online
 say "back $?"
+say "pinned mask back $(/bin/quarantine-test mask $pinned)"
+i=0
+where=$(pinned_on)
+while [ "$where" != target ] && [ $i -lt 10 ]; do
+    where=$(pinned_on)
+    i=$((i + 1))
+done
+say "pinned after the return: $where"
 say "online after $(busybox cat $cpu/online)"
 failures=0
 for i in $(busybox seq 50); do
@@ -257,7 +281,7 @@ alive=0
 for pid in $busy; do busybox kill -0 $pid 2>/dev/null && alive=$((alive + 1)); done
 say "cycles 50 failures $failures loops alive $alive online $(busybox cat $cpu/online)"
 say "$(busybox grep '^move-hold-max-ns' /proc/ferrix-service)"
-busybox kill $busy 2>/dev/null
+busybox kill $busy $pinned 2>/dev/null
 say done
 "#;
 
@@ -313,6 +337,7 @@ fn image_files(arch: Arch, script: String) -> Result<Vec<File>> {
 ///
 /// Verifies: H.SCHED.18, L.sched.102, L.sched.103, L.sched.104, L.sched.106
 /// Verifies: L.smp.35, L.smp.38, L.smp.39, L.iommu.102, L.iommu.103
+/// Verifies: L.sched.123
 fn test_quarantine(args: &Args, mode: Mode) -> Result<()> {
     let arch = Arch::X86_64;
     if !args.arches()?.contains(&arch) {
@@ -412,8 +437,26 @@ fn wanted(mode: Mode) -> Vec<(String, String)> {
             format!("a task ran on processor {t}"),
         ),
         (
+            format!("quarantine-test: pinned mask out {without}"),
+            format!(
+                "a task pinned to processor {t} did not read every processor in service while it was out"
+            ),
+        ),
+        (
+            "quarantine-test: pinned while out: elsewhere".to_owned(),
+            format!("a task pinned to processor {t} did not run elsewhere while it was out"),
+        ),
+        (
             format!("cpu: {t} back in service (by root)"),
             format!("root's write did not bring processor {t} back"),
+        ),
+        (
+            format!("quarantine-test: pinned mask back {t}"),
+            format!("a task pinned to processor {t} did not read it alone after its return"),
+        ),
+        (
+            "quarantine-test: pinned after the return: target".to_owned(),
+            format!("a task pinned to processor {t} did not go back to it after its return"),
         ),
         (
             "quarantine-test: back 0".to_owned(),

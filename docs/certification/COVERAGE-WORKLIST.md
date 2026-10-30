@@ -12,7 +12,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 |---|---:|---:|---:|---:|
 | [`arch/x86_64`](#archx86_64) | 413 | - | - | 17 |
 | [`discovery`](#discovery) | 170 | 106 | 126 | 8 |
-| [`sched`](#sched) | 158 | 3 | 3 | 11 |
+| [`sched`](#sched) | 156 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
 | [`iommu`](#iommu) | 100 | - | - | 2 |
 | [`user`](#user) | 73 | - | 1 | 3 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1264** | **170** | **225** | 77 |
+| **Total** | **1262** | **169** | **224** | 77 |
 
 ---
 
@@ -156,14 +156,14 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `sched/direct.rs` | `core` | 39 | - | - | 39 | 109, 117, 132, 167-169, 173-174, 186, 194, 201, 204-206, 213, 228, 234, 237, 239, 251, 272-273, 281, 283, 294-295, 297-298, 303-305, 307, 309, 314, 317-318, 331-332, 340 |
 | `sched/queue.rs` | `core` | 26 | 0 | 0 | 0 | - |
-| `sched/mod.rs` | `core` | 22 | 3 | 2 | 2 | 1458, 3187 |
+| `sched/mod.rs` | `core` | 20 | 2 | 1 | 1 | 1475 |
 | `sched/wait.rs` | `core` | 15 | 0 | 0 | 0 | - |
 | `sched/inspect.rs` | `core` | 13 | - | - | 13 | 101, 161-163, 165-166, 168, 172, 178, 180, 183, 188, 191 |
 | `sched/preempt.rs` | `core` | 12 | - | - | 12 | 188, 355, 365-366, 370, 375-376, 378, 390, 414-415, 417 |
 | `sched/vtime.rs` | `core` | 11 | - | - | 11 | 125, 137, 141, 215, 269-270, 274, 279, 281, 285, 289 |
 | `sched/task.rs` | `core` | 10 | 0 | 1 | 0 | - |
 | `sched/borrow.rs` | `core` | 5 | - | - | 5 | 143, 218, 225-226, 233 |
-| `sched/work.rs` | `core` | 4 | - | - | 4 | 144, 280, 318, 321 |
+| `sched/work.rs` | `core` | 4 | - | - | 4 | 155, 339, 377, 380 |
 | `sched/trip.rs` | `core` | 1 | - | - | 1 | 365 |
 
 ---

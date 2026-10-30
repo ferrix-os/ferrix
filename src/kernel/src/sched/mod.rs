@@ -39,6 +39,8 @@
 //! holding another processor's record. Every use here is inside an
 //! interrupts-masked region for that reason.
 
+mod affinity;
+mod affinity_check;
 mod borrow;
 mod borrow_check;
 mod check;
@@ -69,6 +71,9 @@ use crate::smp::Topology;
 use queue::CpuQueue;
 use task::{DEAD, RUNNABLE};
 
+pub use affinity::{AffinityRefusal, effective_mask, set_affinity};
+use affinity::{allowed, pinned};
+pub(crate) use affinity::{keep_inside, unmasked};
 pub(crate) use borrow::RunningSlot;
 pub use borrow::with_current;
 pub use check::before_start as check_before_start;
@@ -288,7 +293,7 @@ pub(crate) fn nothing_due_here() -> bool {
         .get()
         .and_then(|seen| seen.get(cpu))
         .is_some_and(|seen| seen.load(Ordering::Relaxed) != moves);
-    !moved && !work::wants_attention(work::peek()) && !throttled_here(cpu)
+    !moved && !work::anything_due(work::peek()) && !throttled_here(cpu)
 }
 
 /// Whether the running task's job, or one above it, has used its `cpu.max`
@@ -1433,9 +1438,21 @@ pub fn prepare_user(
 ) -> Result<PreparedTask, &'static str> {
     let here = this_cpu().ok_or("no processor to start a program on")?;
     let anywhere = *domain_cpus().ok_or("the scheduler has no domain")?;
+    // A thread made by `clone`, `fork` or `vfork` starts with its creator's
+    // mask (L.sched.101); any other with the whole domain.
     let (cpu, affinity) = match cpu {
         Some(cpu) => (cpu, CpuSet::of(cpu)),
-        None => (choose_cpu(&anywhere, here).unwrap_or(here), anywhere),
+        None => {
+            let mask = thread
+                .start_affinity()
+                .map(|mask| mask.intersection(&anywhere))
+                .filter(|mask| !mask.is_empty())
+                .unwrap_or(anywhere);
+            let cpu = choose_cpu(&mask, here)
+                .or_else(|| choose_cpu(&anywhere, here))
+                .unwrap_or(here);
+            (cpu, mask)
+        }
     };
     // Resolved here, so that launching has nothing left to refuse.
     let queue = queue_of(cpu).ok_or("no such processor")?;
@@ -1462,6 +1479,11 @@ pub fn prepare_user(
     // Its thread's slice request, which a clone or fork child has from its
     // creator (L.sched.109); set before any queue can see it.
     task.set_request(thread.slice_request());
+    // A mask narrower than the domain, its creator's: its way out looks at
+    // it from its first entry on (L.sched.99, L.sched.101).
+    if !unmasked(&task) {
+        work::post(&task, work::PLACE);
+    }
     Ok(PreparedTask {
         task,
         cpu,
@@ -1954,9 +1976,9 @@ pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
 }
 
 /// Whether anything but its own placement may put `task` on `cpu`: a
-/// processor its affinity allows, in the domain and in service.
+/// processor its mask allows (L.sched.97), in the domain and in service.
 fn may_place(task: &Task, cpu: usize) -> bool {
-    task.may_run_on(cpu) && domain_cpus().is_some_and(|cpus| cpus.contains(cpu)) && placeable(cpu)
+    allowed(task, cpu) && domain_cpus().is_some_and(|cpus| cpus.contains(cpu)) && placeable(cpu)
 }
 
 /// Whether `task`, blocked, is asleep at `home`, the queue that owns it, and
@@ -2023,6 +2045,11 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         };
         if task.state() != task::BLOCKED {
             return Placed::NotBlocked;
+        }
+        // The mask read again under the home's lock, its writer's: the test
+        // above was a hint (L.sched.97).
+        if !allowed(task, here) {
+            return Placed::Declined;
         }
         if refuses(how, here_queue, home_queue, task) || !asleep_at_home(task, home_queue) {
             return Placed::Declined;
@@ -2171,7 +2198,7 @@ fn may_pull(task: &Task, domain: &Domain, here: usize) -> bool {
         && domain.cpus().contains(here)
         && domain.cpus().contains(home)
         && home != here
-        && !task.is_pinned()
+        && !pinned(task)
         && may_place(task, here)
 }
 
@@ -2187,7 +2214,7 @@ fn idle_allowed(task: &Task, domain: &Domain) -> bool {
     while idle != 0 {
         let cpu = idle.trailing_zeros() as usize;
         idle &= idle - 1;
-        if task.may_run_on(cpu) && domain.cpus().contains(cpu) && placeable(cpu) {
+        if allowed(task, cpu) && domain.cpus().contains(cpu) && placeable(cpu) {
             return true;
         }
     }
@@ -2247,8 +2274,11 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
         // A home out of service: the task moves, blocked, to a processor in
         // service, and the wake goes on there (L.sched.103). A task blocked
         // on a channel, futex or port is on no list the evacuation walks;
-        // this is where it is found.
-        if !in_service(cpu) && rehome_blocked(task, cpu) {
+        // this is where it is found. And a home its mask no longer allows,
+        // the second conjunct beside the first: the same move, onto a
+        // processor it does (L.sched.97).
+        let mask_allows_home = allowed(task, cpu);
+        if !(in_service(cpu) && mask_allows_home) && rehome_blocked(task, cpu) {
             continue;
         }
         let Some(lock) = queue_of(cpu) else {
@@ -2682,7 +2712,11 @@ fn rehome_blocked(task: &Arc<Task>, home: usize) -> bool {
     } else {
         &mut *first_queue
     };
-    if task.cpu() != home || task.state() != task::BLOCKED || !asleep_at_home(task, home_queue) {
+    if task.cpu() != home
+        || task.state() != task::BLOCKED
+        || !allowed(task, to)
+        || !asleep_at_home(task, home_queue)
+    {
         return false;
     }
     task.set_cpu(to);
@@ -2775,7 +2809,7 @@ pub(crate) fn placements() -> u64 {
 /// that found work of its own meanwhile is not taken; one that finds it
 /// after this runs `task` after its pick, as any queued task.
 fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
-    if task.is_pinned() {
+    if pinned(task) {
         return None;
     }
     let domain = DOMAIN.get()?;
@@ -2787,7 +2821,7 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
     for step in 1..online {
         let to = (home + step) % online;
         if idle & (1_u64 << to) == 0
-            || !task.may_run_on(to)
+            || !allowed(task, to)
             || !domain.cpus().contains(to)
             || !placeable(to)
         {
@@ -3154,6 +3188,58 @@ fn pick_or_park(queue: &mut CpuQueue, cpu: usize) -> Option<Arc<Task>> {
     }
 }
 
+/// [`pick_or_park`], with the pick push (L.sched.98): a queued task picked
+/// on `cpu` though its mask excludes it is moved to a processor it allows
+/// and the pick made again, at most once a queued task. `previous`, still
+/// this processor's, is never moved here.
+fn pick_inside(
+    queue: &mut CpuQueue,
+    cpu: usize,
+    previous: Option<&Arc<Task>>,
+) -> Option<Arc<Task>> {
+    loop {
+        let next = pick_or_park(queue, cpu)?;
+        let running = previous.is_some_and(|previous| Arc::ptr_eq(previous, &next));
+        if running || allowed(&next, cpu) {
+            return Some(next);
+        }
+        if !affinity::push_picked(queue, cpu, &next) {
+            return Some(next);
+        }
+    }
+}
+
+/// What `choose_next` does with the task that was running, `previous`,
+/// before it picks: taken off the queue if it leaves this processor with the
+/// switch, and off it and filed as a sleeper if it no longer runs.
+///
+/// Under `queue`'s lock, held manually by `choose_next`.
+fn depart(queue: &mut CpuQueue, cpu: usize, previous: &Arc<Task>) {
+    // Runnable and outside its mask here: it leaves this queue with the
+    // switch, and the switch's tail queues it where its mask allows
+    // (L.sched.99, `affinity::push_off`). Never queued here again first,
+    // where another processor could take it before its registers are saved.
+    if affinity::leaves_with_switch(queue, cpu, previous) {
+        queue.detach_current();
+    }
+    if previous.state() == RUNNABLE {
+        return;
+    }
+    queue.detach_current();
+    // Taken either way, filed only for a task that can wake: a dead task
+    // in the sleeper set is a dead task the timer makes runnable.
+    if let Some(at) = previous.take_sleep_deadline()
+        && !previous.is_dead()
+        && !queue.file_sleeper(at, previous)
+    {
+        // No sleep slot to file it in: it runs on, and its sleep returns
+        // early and asks again. See `CpuQueue::file_sleeper`.
+        previous.set_state(RUNNABLE);
+        // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+        queue.insert(previous);
+    }
+}
+
 /// Choose what runs next, leaving the queue's lock held and returning where
 /// to save this context and what to resume — or releasing the lock and
 /// returning `None` when nothing has to change.
@@ -3174,23 +3260,11 @@ fn choose_next(
     wake_sleepers_placing(queue, cpu, now);
 
     let previous = queue.current.clone();
-    if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
-        queue.detach_current();
-        // Taken either way, filed only for a task that can wake: a dead task
-        // in the sleeper set is a dead task the timer makes runnable.
-        if let Some(at) = previous.take_sleep_deadline()
-            && !previous.is_dead()
-            && !queue.file_sleeper(at, previous)
-        {
-            // No sleep slot to file it in: it runs on, and its sleep returns
-            // early and asks again. See `CpuQueue::file_sleeper`.
-            previous.set_state(RUNNABLE);
-            // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-            queue.insert(previous);
-        }
+    if let Some(previous) = previous.as_ref() {
+        depart(queue, cpu, previous);
     }
 
-    let next = pick_or_park(queue, cpu);
+    let next = pick_inside(queue, cpu, previous.as_ref());
     if queue.stats.measuring {
         queue.note_pick(now);
     }
@@ -3450,6 +3524,7 @@ fn finish_switch() {
         borrow::audit(borrow::Site::Switch, queue.current.as_ref());
     }
     let previous = queue.previous.take();
+    let pushing = this_cpu().is_some_and(affinity::take_pushing);
     let dead = previous.as_ref().is_some_and(|task| task.is_dead());
     // **The last moment a dead task's queue membership means anything.** It is
     // switched away from for good, and anything that still counts it as
@@ -3464,6 +3539,16 @@ fn finish_switch() {
     // SAFETY: (SHARED) held as above, released exactly once, and the queue is not
     // touched afterwards.
     unsafe { lock.force_unlock() };
+
+    // Its registers saved and this lock let go: the task `choose_next` took
+    // off this queue for running outside its mask goes where its mask allows
+    // (L.sched.99).
+    if pushing
+        && !dead
+        && let (Some(previous), Some(home)) = (previous.as_ref(), this_cpu())
+    {
+        affinity::push_off(previous, home);
+    }
 
     if let Some(previous) = previous
         && dead

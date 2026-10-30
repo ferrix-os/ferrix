@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | coverage | 1929 | 401 | 264 | **1264** |
-| aarch64 | debug | 640 | 313 | 157 | **170** |
-| armv7a | debug | 992 | 415 | 352 | **225** |
+| x86_64 | coverage | 1926 | 400 | 264 | **1262** |
+| aarch64 | debug | 638 | 312 | 157 | **169** |
+| armv7a | debug | 990 | 414 | 352 | **224** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,16 +16,16 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**1929** unreached statements, coverage profile.
+**1926** unreached statements, coverage profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 186 | 10% |
 | Reached only when the kernel is stopping | 145 | 8% |
-| Reached only when something has already failed | 65 | 3% |
+| Reached only when something has already failed | 64 | 3% |
 | Run, and credited to another line | 5 | 0% |
 | Hardware the measured machine does not have | 264 | 14% |
-| Needs a test | 1264 | 66% |
+| Needs a test | 1262 | 66% |
 
 ### x86_64: Unreachable on the measured architecture — 186 statements
 
@@ -66,7 +66,7 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### x86_64: Reached only when something has already failed — 65 statements
+### x86_64: Reached only when something has already failed — 64 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
@@ -85,11 +85,11 @@ Justified, line by line. Each of these runs only when hardware misbehaves or an 
 | 2 | `core` | `arch/x86_64/cpu.rs` |
 | 2 | `core` | `arch/x86_64/mod.rs` |
 | 2 | `core` | `object/interrupt.rs` |
-| 2 | `core` | `sched/mod.rs` |
 | 1 | `core` | `arch/x86_64/clock.rs` |
 | 1 | `core` | `arch/x86_64/smp.rs` |
 | 1 | `core` | `console/output.rs` |
 | 1 | `core` | `mm.rs` |
+| 1 | `core` | `sched/mod.rs` |
 | 1 | `core` | `user/vmo.rs` |
 
 ### x86_64: Run, and credited to another line — 5 statements
@@ -128,7 +128,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `item` | `discovery/smbios.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### x86_64: Needs a test — 1264 statements
+### x86_64: Needs a test — 1262 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -156,12 +156,12 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 23 | `core` | `arch/x86_64/cpu.rs` |
 | 23 | `core` | `user/space.rs` |
 | 22 | `core` | `arch/x86_64/syscall.rs` |
-| 22 | `core` | `sched/mod.rs` |
 | 21 | `core` | `arch/x86_64/msrlog/decode.rs` |
 | 21 | `core` | `discovery/tree.rs` |
+| 20 | `core` | `sched/mod.rs` |
 | 252 | | *and 45 more files* |
 
-### x86_64: argued line by line — 263 statements
+### x86_64: argued line by line — 262 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -300,21 +300,20 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `object/process.rs` | 930 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
 | `object/process.rs` | 1072 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
 | `power.rs` | 126 | Unreachable on the measured architecture | `/chosen/bootargs`, read only when the loader handed over a device tree; the x86-64 loader hands over ACPI and never a device tree. |
-| `sched/mod.rs` | 1511 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
-| `sched/mod.rs` | 1750 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
-| `sched/mod.rs` | 3117-3119 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
-| `sched/mod.rs` | 3189 | Reached only when something has already failed | A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper). |
-| `sched/mod.rs` | 4037-4038 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4042 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4047-4048 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4051-4052 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4056 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4059-4060 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4065 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4069 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4076 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4081 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4091 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 1533 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
+| `sched/mod.rs` | 1772 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
+| `sched/mod.rs` | 3151-3153 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
+| `sched/mod.rs` | 4122-4123 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4127 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4132-4133 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4136-4137 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4141 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4144-4145 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4150 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4154 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4161 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4166 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4176 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
 | `sched/preempt.rs` | 427-428 | Reached only when the kernel is stopping | unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 476 | Reached only when the kernel is stopping | preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock. |
 | `sched/queue.rs` | 256 | Reached only when something has already failed | A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it. |
@@ -338,11 +337,11 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture cannot read a system call trap's registers. On x86-64 only `int $0x80` classifies as one, and its gate is not open to ring 3. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An invalid opcode or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the stage 3 fault check, through the arm above these. |
 | `trap.rs` | 509 | Reached only when something has already failed | A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector. |
-| `trap.rs` | 667 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
-| `trap.rs` | 690 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
-| `trap.rs` | 727 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
-| `trap.rs` | 805, 807, 810-813 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
-| `trap.rs` | 827, 832, 842, 852, 854 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
+| `trap.rs` | 669 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
+| `trap.rs` | 692 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
+| `trap.rs` | 729 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
+| `trap.rs` | 807, 809, 812-815 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
+| `trap.rs` | 829, 834, 844, 854, 856 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
 | `user/space.rs` | 310 | Reached only when something has already failed | `ferrix_vma::AddressSpace::new` refuses a window whose ends are not page aligned or out of order, and the window here is `MMAP_MIN_ADDR..USER_VIRT_END`, two constants of the layout that are both. Reported rather than panicked on, as the comment says. |
 | `user/space.rs` | 684 | Reached only when something has already failed | A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically. |
 | `user/space.rs` | 891 | Run, and credited to another line | Run whenever a mapping is abandoned part-way: the allocation sweep's `fork` scenario fails the file mapping's table insert after a native object is mapped, and `abandon_region` runs (its lines 637 and 641 are reached). The line's only statement row is on the removal of an entry the set holds, and `abandon_region` is only called for an id that never went into the native set -- a native mapping whose insert failed, or a file mapping -- so the search always ends empty-handed, under the inlined `BTreeSet::remove`'s rows. |
@@ -362,16 +361,16 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**640** unreached statements, debug profile.
+**638** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 104 | 16% |
 | Reached only when the kernel is stopping | 120 | 19% |
-| Reached only when something has already failed | 79 | 12% |
+| Reached only when something has already failed | 78 | 12% |
 | Run, and credited to another line | 10 | 2% |
 | Hardware the measured machine does not have | 157 | 25% |
-| Needs a test | 170 | 27% |
+| Needs a test | 169 | 26% |
 
 ### aarch64: Unreachable on the measured architecture — 104 statements
 
@@ -406,7 +405,7 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### aarch64: Reached only when something has already failed — 79 statements
+### aarch64: Reached only when something has already failed — 78 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
@@ -427,12 +426,12 @@ Justified, line by line. Each of these runs only when hardware misbehaves or an 
 | 2 | `core` | `arch/aarch64/gic.rs` |
 | 2 | `core` | `arch/arm_common/gicv2.rs` |
 | 2 | `core` | `object/interrupt.rs` |
-| 2 | `core` | `sched/mod.rs` |
 | 1 | `core` | `arch/aarch64/mod.rs` |
 | 1 | `core` | `console/output.rs` |
 | 1 | `core` | `early.rs` |
 | 1 | `core` | `irq.rs` |
 | 1 | `core` | `mm.rs` |
+| 1 | `core` | `sched/mod.rs` |
 | 1 | `core` | `user/vmo.rs` |
 
 ### aarch64: Run, and credited to another line — 10 statements
@@ -476,7 +475,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `iommu/smmuv3.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### aarch64: Needs a test — 170 statements
+### aarch64: Needs a test — 169 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -493,16 +492,16 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 4 | `item` | `syscall/program.rs` |
 | 3 | `core` | `console/screen.rs` |
 | 3 | `core` | `object/process.rs` |
-| 3 | `core` | `sched/mod.rs` |
 | 2 | `core` | `console.rs` |
 | 2 | `core` | `object/mod.rs` |
 | 2 | `item` | `random.rs` |
+| 2 | `core` | `sched/mod.rs` |
 | 2 | `core` | `vmap.rs` |
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `object/pin.rs` |
 
-### aarch64: argued line by line — 281 statements
+### aarch64: argued line by line — 280 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -670,21 +669,20 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `object/process.rs` | 905 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
 | `object/process.rs` | 930 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
 | `object/process.rs` | 1072 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
-| `sched/mod.rs` | 1511 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
-| `sched/mod.rs` | 1750 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
-| `sched/mod.rs` | 3117-3119 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
-| `sched/mod.rs` | 3189 | Reached only when something has already failed | A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper). |
-| `sched/mod.rs` | 4037-4038 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4042 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4047-4048 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4051-4052 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4056 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4059-4060 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4065 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4069 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4076 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4081 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4091 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 1533 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
+| `sched/mod.rs` | 1772 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
+| `sched/mod.rs` | 3151-3153 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
+| `sched/mod.rs` | 4122-4123 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4127 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4132-4133 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4136-4137 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4141 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4144-4145 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4150 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4154 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4161 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4166 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4176 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
 | `sched/preempt.rs` | 253-254 | Reached only when the kernel is stopping | The release's add-back: a release found the count, or for a lock the locks held, already zero, so the word is put back before unmatched() stops the machine with SCHEDULE_WITH_PREEMPTION_HELD (FX-0503). A kernel that releases every lock on the processor that took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 427-428 | Reached only when the kernel is stopping | unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 476 | Reached only when the kernel is stopping | preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock. |
@@ -706,11 +704,11 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/aarch64/trap.rs) refuses only an `svc` taken from EL1, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/aarch64/trap/check.rs), through the arm above these. |
 | `trap.rs` | 509 | Reached only when something has already failed | A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector. |
-| `trap.rs` | 667 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
-| `trap.rs` | 690 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
-| `trap.rs` | 727 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
-| `trap.rs` | 805, 807, 810-813 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
-| `trap.rs` | 827, 832, 842, 850-852, 854 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
+| `trap.rs` | 669 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
+| `trap.rs` | 692 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
+| `trap.rs` | 729 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
+| `trap.rs` | 807, 809, 812-815 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
+| `trap.rs` | 829, 834, 844, 852-854, 856 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
 | `user/space.rs` | 310 | Reached only when something has already failed | `ferrix_vma::AddressSpace::new` refuses a window whose ends are not page aligned or out of order, and the window here is `MMAP_MIN_ADDR..USER_VIRT_END`, two constants of the layout that are both. Reported rather than panicked on, as the comment says. |
 | `user/space.rs` | 684 | Reached only when something has already failed | A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically. |
 | `user/space.rs` | 1349 | Reached only when something has already failed | A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing. |
@@ -728,16 +726,16 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**992** unreached statements, debug profile.
+**990** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 156 | 16% |
 | Reached only when the kernel is stopping | 174 | 18% |
-| Reached only when something has already failed | 66 | 7% |
+| Reached only when something has already failed | 65 | 7% |
 | Run, and credited to another line | 19 | 2% |
-| Hardware the measured machine does not have | 352 | 35% |
-| Needs a test | 225 | 23% |
+| Hardware the measured machine does not have | 352 | 36% |
+| Needs a test | 224 | 23% |
 
 ### armv7a: Unreachable on the measured architecture — 156 statements
 
@@ -773,7 +771,7 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### armv7a: Reached only when something has already failed — 66 statements
+### armv7a: Reached only when something has already failed — 65 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
@@ -787,12 +785,12 @@ Justified, line by line. Each of these runs only when hardware misbehaves or an 
 | 4 | `core` | `vmap.rs` |
 | 3 | `core` | `arch/armv7a/mod.rs` |
 | 3 | `core` | `object/process.rs` |
-| 3 | `core` | `sched/mod.rs` |
 | 3 | `core` | `sched/queue.rs` |
 | 3 | `core` | `trap.rs` |
 | 2 | `core` | `arch/arm_common/gicv2.rs` |
 | 2 | `core` | `mm.rs` |
 | 2 | `core` | `object/interrupt.rs` |
+| 2 | `core` | `sched/mod.rs` |
 | 1 | `core` | `console/output.rs` |
 | 1 | `core` | `early.rs` |
 | 1 | `core` | `object/pin.rs` |
@@ -839,7 +837,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `discovery/fdt.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### armv7a: Needs a test — 225 statements
+### armv7a: Needs a test — 224 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -863,16 +861,16 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 2 | `core` | `object/mod.rs` |
 | 2 | `core` | `object/port.rs` |
 | 2 | `item` | `random.rs` |
-| 2 | `core` | `sched/mod.rs` |
 | 2 | `item` | `syscall/program.rs` |
 | 1 | `core` | `arch/armv7a/mod.rs` |
 | 1 | `core` | `arch/armv7a/speculation.rs` |
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `irq.rs` |
+| 1 | `core` | `sched/mod.rs` |
 | 1 | `core` | `sched/task.rs` |
 | 3 | | *and 3 more files* |
 
-### armv7a: argued line by line — 367 statements
+### armv7a: argued line by line — 366 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -1082,22 +1080,21 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `object/process.rs` | 905 | Reached only when something has already failed | The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing. |
 | `object/process.rs` | 930 | Reached only when something has already failed | As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed. |
 | `object/process.rs` | 1072 | Reached only when something has already failed | The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill. |
-| `sched/mod.rs` | 1088 | Reached only when something has already failed | The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails. |
-| `sched/mod.rs` | 1511 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
-| `sched/mod.rs` | 1750 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
-| `sched/mod.rs` | 3117-3119 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
-| `sched/mod.rs` | 3189 | Reached only when something has already failed | A task going to sleep with no sleep slot to be filed in: its slot is lent to a sleeper set or the reaper and returned when it leaves, so a task switching away to sleep always has it back. Were it lent twice, the task runs on and its sleep returns early and asks again (CpuQueue::file_sleeper). |
-| `sched/mod.rs` | 4037-4038 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4042 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4047-4048 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4051-4052 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4056 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
-| `sched/mod.rs` | 4059-4060 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4065 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4069 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4076 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4081 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/mod.rs` | 4091 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 1093 | Reached only when something has already failed | The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails. |
+| `sched/mod.rs` | 1533 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9). |
+| `sched/mod.rs` | 1772 | Reached only when something has already failed | After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing. |
+| `sched/mod.rs` | 3151-3153 | Reached only when the kernel is stopping | FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it. |
+| `sched/mod.rs` | 4122-4123 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4127 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4132-4133 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4136-4137 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4141 | Reached only when the kernel is stopping | What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path. |
+| `sched/mod.rs` | 4144-4145 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4150 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4154 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4161 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4166 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
+| `sched/mod.rs` | 4176 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
 | `sched/preempt.rs` | 253-254 | Reached only when the kernel is stopping | The release's add-back: a release found the count, or for a lock the locks held, already zero, so the word is put back before unmatched() stops the machine with SCHEDULE_WITH_PREEMPTION_HELD (FX-0503). A kernel that releases every lock on the processor that took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 427-428 | Reached only when the kernel is stopping | unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 476 | Reached only when the kernel is stopping | preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock. |
@@ -1122,11 +1119,11 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `trap.rs` | 142 | Reached only when the kernel is stopping | The stop when the architecture refuses a system call trap. On this architecture `system_call` (arch/armv7a/trap.rs) refuses only an `svc` taken from SVC mode, and the kernel issues no `svc` of its own: every `svc` in the tree is in a program's bytes. |
 | `trap.rs` | 145, 150-151 | Reached only when the kernel is stopping | An undefined instruction or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the trap check's programs (arch/armv7a/trap/check.rs), through the arm above these. |
 | `trap.rs` | 509 | Reached only when something has already failed | A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector. |
-| `trap.rs` | 667 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
-| `trap.rs` | 690 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
-| `trap.rs` | 727 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
-| `trap.rs` | 805, 807, 810-813 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
-| `trap.rs` | 827, 832, 842, 850-852, 854 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
+| `trap.rs` | 669 | Reached only when the kernel is stopping | A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program. |
+| `trap.rs` | 692 | Reached only when the kernel is stopping | A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread. |
+| `trap.rs` | 729 | Reached only when something has already failed | A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved. |
+| `trap.rs` | 807, 809, 812-815 | Reached only when the kernel is stopping | The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops. |
+| `trap.rs` | 829, 834, 844, 852-854, 856 | Reached only when the kernel is stopping | `fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap. |
 | `user/space.rs` | 310 | Reached only when something has already failed | `ferrix_vma::AddressSpace::new` refuses a window whose ends are not page aligned or out of order, and the window here is `MMAP_MIN_ADDR..USER_VIRT_END`, two constants of the layout that are both. Reported rather than panicked on, as the comment says. |
 | `user/space.rs` | 684 | Reached only when something has already failed | A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically. |
 | `user/space.rs` | 1340 | Reached only when something has already failed | The region `resolve` found to be a private file mapping is gone, or is no longer one, when this takes the space's lock again: `resolve` lets the lock go to call here. Reached only if another thread of the process unmaps or replaces the region in that gap, while this one faults on it; the fault then answers as for an address with nothing mapped, which is what it has become. |

@@ -215,6 +215,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     super::mark_check::run(topology)?;
     super::deadline_check::run()?;
     super::slice_check::run(topology)?;
+    super::affinity_check::run(topology)?;
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;

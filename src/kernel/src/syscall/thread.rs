@@ -111,6 +111,26 @@ pub(crate) struct Thread {
     /// it and only `SCHED_RESET_ON_FORK`, which is refused here, resets it.
     /// `execve` keeps it.
     slice_request: AtomicU64,
+    /// The processors its task is made with (L.sched.101): its creator's
+    /// task's mask at the moment of the `clone`, `fork` or `vfork`, as
+    /// Linux's `dup_task_struct` copies `cpus_mask`; `None`, the whole
+    /// domain, for a process's first thread made any other way. Read once,
+    /// by `sched::prepare_user`; the task's own mask is what changes after.
+    start_affinity: Option<ferrix_sched::CpuSet>,
+}
+
+/// The mask of the task running `creator`, if `creator` is the running
+/// thread (L.sched.101): what a thread it makes starts with. A copy read
+/// whole, never half of one mask and half of another (`sched::task`'s
+/// `Affinity`). `None` where `creator` is not running here, as for a boot
+/// check's thread, which makes a thread with the whole domain.
+fn creator_mask(creator: &Thread) -> Option<ferrix_sched::CpuSet> {
+    sched::with_current(|task| {
+        of_task(task)
+            .filter(|running| core::ptr::eq(*running, creator))
+            .map(|_| task.affinity())
+    })
+    .flatten()
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
@@ -155,6 +175,7 @@ impl Thread {
         );
         *thread.name.get_mut() = parent.name();
         *thread.slice_request.get_mut() = parent.slice_request();
+        thread.start_affinity = creator_mask(parent);
         Ok(thread)
     }
 
@@ -203,6 +224,7 @@ impl Thread {
         *thread.name.get_mut() = caller.name();
         *thread.nice.get_mut() = caller.nice();
         *thread.slice_request.get_mut() = caller.slice_request();
+        thread.start_affinity = creator_mask(caller);
         Ok(thread)
     }
 
@@ -232,6 +254,7 @@ impl Thread {
             name: SpinLock::new(None),
             nice: AtomicI32::new(0),
             slice_request: AtomicU64::new(0),
+            start_affinity: None,
         }
     }
 
@@ -506,6 +529,10 @@ impl UserThread for Thread {
 
     fn slice_request(&self) -> u64 {
         Thread::slice_request(self)
+    }
+
+    fn start_affinity(&self) -> Option<ferrix_sched::CpuSet> {
+        self.start_affinity
     }
 }
 

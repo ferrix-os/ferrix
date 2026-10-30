@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2482 declarations in the core's files, 179 in the item's; 98 checks-only.
+2490 declarations in the core's files, 179 in the item's; 98 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2495,6 +2495,7 @@ checks above is `pub` for raised checks (F3).
 | `trip` | mod | item, load |  |
 | `vtime` | mod | load |  |
 | `work` | mod | item, load, bin |  |
+| `AffinityRefusal` | re-export | load |  |
 | `LastLook` | re-export | item |  |
 | `Mark` | re-export | load |  |
 | `ReadyList` | re-export | load |  |
@@ -2503,10 +2504,12 @@ checks above is `pub` for raised checks (F3).
 | `UserThread` | re-export | load |  |
 | `WaitQueue` | re-export | item, load |  |
 | `check_before_start` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `effective_mask` | re-export | load |  |
 | `preempt_disable` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `preempt_enable` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `records_kept` | re-export | load |  |
 | `run_checks` | re-export | bin |  |
+| `set_affinity` | re-export | load |  |
 | `with_current` | re-export | item, load |  |
 | `CpuReport` | struct | - |  |
 | `CpuTime` | struct | load |  |
@@ -2519,6 +2522,14 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime::switches` | field | load, bin |  |
 | `PreparedTask::launch` | method | load, bin |  |
 | `Summary::switches` | field | load, bin |  |
+
+### `sched::affinity`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `AffinityRefusal` | enum | load |  |
+| `effective_mask` | fn | load |  |
+| `set_affinity` | fn | load |  |
 
 ### `sched::borrow`
 
@@ -2599,6 +2610,7 @@ checks above is `pub` for raised checks (F3).
 | `UserThread` | trait | load |  |
 | `TaskId` | type | load |  |
 | `Task::id` | field | item, load, bin |  |
+| `Task::affinity` | method | load |  |
 | `Task::base_weight` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::core_process` | method | item, load |  |
 | `Task::cpu` | method | item, load |  |
@@ -2701,6 +2713,7 @@ checks above is `pub` for raised checks (F3).
 | `hook_armed_by` | fn | bin |  |
 | `notify` | fn | load |  |
 | `own_end` | fn | item |  |
+| `place_before_entry` | fn | load |  |
 | `post` | fn | load |  |
 | `post_own` | fn | load |  |
 | `posting` | fn | load |  |

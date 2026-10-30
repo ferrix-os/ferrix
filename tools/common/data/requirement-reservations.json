@@ -22,13 +22,6 @@
       "purpose": "F-98, docs/KMEM-BOUNDS.md (the consultant's OK IF K1-K10, ledger 4626; K1 OK IF K1.1-K1.5, ledger 4643): R1-R4 at the item level (H.QUOTA.18-21), and their mechanisms (L.mm.83-90): the witness's answered and oversized counts, the region map's limit refused ENOMEM, the charge before the heap, the watermark on charged heap"
     },
     {
-      "ids": ["L.sched.96-101"],
-      "owner": "game-mode-sched",
-      "branch": "feature/game-mode-affinity-slices",
-      "date": "2026-10-30",
-      "purpose": "Taken over from chardev-sigrace (reserved 2026-10-25 for feature/sched-setaffinity, never started) by docs/GAME-MODE-SCHED.md §2.1, F3. sched_setaffinity that pins (design OK IF D1-D12, ledger 4446): the kernel-thread refusal, every placement path re-homing an excluded task, the pick push, the move before user code, the setter's wait, inheritance"
-    },
-    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
@@ -204,11 +197,11 @@
       "purpose": "docs/INTEL-GPU.md §14.3, vmo_pin's PIN_BLOCKS (consultant OK IF (1)-(9), ledger 5088): L.object.254 the option word's refusals; 255 blocks naturally aligned in object and memory, at most the order, only over absent pages, committed frames unchanged; 256 the fallback (no retry above a refused order, a refused frame ends it, every page still pinned, a race only shrinks the order); 257 the budget read first and the failure rule; 258 a file's or bound object not pre-committed"
     },
     {
-      "ids": ["H.SCHED.19", "L.sched.110-123"],
+      "ids": ["H.SCHED.19", "L.sched.110-122"],
       "owner": "game-mode-sched",
       "branch": "docs/game-mode-sched",
       "date": "2026-10-30",
-      "purpose": "docs/GAME-MODE-SCHED.md, game mode's layer B (GAME-MODE.md §13, ledger 5115 (12)): L.sched.107-109 F7 per-task slice requests (deadline from the effective request, never above the queue's slice, set only by sched_setattr or the mark; not inherited); H.SCHED.19 and L.sched.110-114 the frame mark (only the right marks, the order inside eligibility, the kernel's bound for the unmarked, the end at close/exec/unmark/exit and never inherited, nothing else changed); L.sched.115-118 lends (served request, wake history, no chains, a lent mark only orders); L.sched.119-120 the idle-gap class; L.sched.121-122 deadlines from the frame; L.sched.123 F3's fallback, a mask never vetoes a park (ledger 5156 (A2))"
+      "purpose": "docs/GAME-MODE-SCHED.md, game mode's layer B (GAME-MODE.md §13, ledger 5115 (12)): L.sched.107-109 F7 per-task slice requests (deadline from the effective request, never above the queue's slice, set only by sched_setattr or the mark; inherited by clone and fork, ledger 5232 (2)); H.SCHED.19 and L.sched.110-114 the frame mark (only the right marks, the order inside eligibility, the kernel's bound for the unmarked, the end at close/exec/unmark/exit and never inherited, nothing else changed); L.sched.115-118 lends (served request, wake history, no chains, a lent mark only orders); L.sched.119-120 the idle-gap class; L.sched.121-122 deadlines from the frame"
     },
     {
       "ids": ["H.FAIL.10", "L.x86_64.244-246", "L.syscall.25-26"],

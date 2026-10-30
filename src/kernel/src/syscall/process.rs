@@ -2757,6 +2757,10 @@ pub(crate) fn run_program(_argument: usize) {
     // interrupt pending, and it is taken from user mode on the first
     // instruction, where the check sees it. Entering user mode opens them.
     crate::arch::disable_interrupts();
+    // Inside its mask before its first user instruction (L.sched.99), and
+    // before the test below, which a move's switch would otherwise come
+    // between with the entry.
+    sched::work::place_before_entry();
     if thread::current().is_some_and(|thread| process.must_leave(&thread))
         || process.is_terminated()
     {

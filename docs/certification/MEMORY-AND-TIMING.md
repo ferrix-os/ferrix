@@ -2103,6 +2103,55 @@ review, ledger 5156 ((A5) to (A7), (A10)); design in
   the decision interval keep the queue's slice; so H.SCHED.2 and its `fair`
   line are unchanged by any request.
 
+### 2.2z4 A task's mask (`sched::set_affinity`, F3, 2026-10-30)
+
+`L.sched.96` to `L.sched.101` and `L.sched.123`; the certification
+consultant's design reviews, ledger 4446 ((D1), (D2), (D6), (D7)) and
+5156 ((A1)-(A5), (A10)); design in `docs/GAME-MODE-SCHED.md` §2.1, the
+readers and their locks in `sched/affinity.rs`'s module comment.
+
+* **Memory.** None allocated. A task's stored mask is its `CpuSet`'s four
+  words, one atomic each, and a sequence word (`task::Affinity`); a Linux
+  thread holds the mask its task is made with (`Thread::start_affinity`,
+  32 bytes, set once); one flag a processor (`affinity::PUSHING`, 256
+  bytes) and one counter. `sched_setaffinity` reads at most the kernel's
+  mask size from the caller (load ring).
+* **The stored mask** is written only by `set_mask`, under the lock of
+  the queue that owns the task, with interrupts masked: four stores
+  between two of the sequence word. A reader copies the four words between
+  two loads of it and retries when they differ or the first was odd, at
+  most once for each write that overlaps it; a write is four stores long
+  and writers are serialised. No `unsafe`.
+* **The lock order.** The setter takes one queue lock, the task's home,
+  found and re-read as `set_request` finds it, and no other lock under it;
+  its wait (`wait_until_off`, L.sched.100) holds none, yields between looks
+  and ends after at most 100 ms (`SETTER_WAIT_NANOS`), at the target's
+  death, or once it is off the excluded processor. The pick push
+  (`push_picked`, L.sched.98) holds the picking processor's lock and takes
+  a destination's: waited for when it is above, which the lowest-first
+  order allows, only tried when below, as `place_on_idle` tries its; one
+  push a queued task, then the pick again. The push at a switch's tail
+  (`push_off`, L.sched.99) is made after `finish_switch` has let the home
+  lock go and takes the two queues' locks lower first, as `steal_from`
+  does, waiting, so it cannot fail. No new nesting with any lock outside
+  `sched`.
+* **The way out** (`keep_inside`, L.sched.99): with `PLACE` posted, one
+  look at the mask a way out; outside, one decision (`schedule`, with no
+  lock held and the preemption count zero, as FX-0503 asserts), whose
+  switch takes the task off its queue and whose tail queues it where its
+  mask allows. Repeated only for a mask set again, or a processor leaving
+  service, while it moved: one round each. A task whose mask is the whole
+  domain carries no bit and pays one load, as before.
+* **The walk** is over a mask's `WORDS` (4) words and, for a push's
+  destination, the 256 processor numbers a `CpuSet` can name: constant.
+* **A return to service walks nothing** (L.sched.123, (A10)): a task whose
+  stored mask names the returning processor again is moved at its next
+  placement, pick, or way out, which `PLACE` makes it look at.
+* **The fallback** (L.sched.123) is one comparison more at each placement:
+  the stored mask against the in-service set, the domain when they do not
+  meet. `PINNED_PROGRAMS` counts spawn pins only (`Task::spawn_pin`, set
+  once at `Task::new`).
+
 ### 2.2r An RMRR's identity domain at bring-up (`iommu::bring_up_vtd`, K2)
 
 Before any program runs, once per VT-d unit whose RMRRs are honoured

@@ -27,8 +27,10 @@ both, with the decision in ring 3 and only the mechanism in the kernel.
   `pull_onto_waker`, `steal_work` and `balance` all filter by the one
   `DOMAIN`, fixed at `sched::init`. `IDLE` (a bit per idle processor)
   attracts wakes.
-* **Affinity** is fixed at a task's creation; `sched_setaffinity` is
-  accepted and not applied (`syscall/limits.rs`).
+* **Affinity**, as surveyed on 2026-10-30, was fixed at a task's creation,
+  `sched_setaffinity` accepted and not applied (`syscall/limits.rs`). Since
+  F3 a thread's mask is set by `sched_setaffinity` (`docs/GAME-MODE-SCHED.md`
+  §2.1), and only a kernel thread's spawn pin refuses a park (§3.2).
 * **Pinned work**: each processor's idle task, its machine-check poll task
   (`arch/x86_64/mce.rs`), `msrlog` and `powerctl` on the boot processor,
   and user tasks made by `prepare_user(Some(cpu))`.
@@ -84,10 +86,14 @@ channel, futex or port is on no list; this is what finds it when it wakes.
 ### 3.2 Taking a processor out (Q2, Q3, Q4)
 
 1. **Refusals**, each before any state changes (Q6): the boot processor;
-   the last processor in service; a processor running a task pinned to it
-   alone other than its idle and machine-check poll tasks (ruling (g):
-   today only checks make such tasks; if `sched_setaffinity` is ever
-   applied this becomes an unprivileged veto and comes back for review); a
+   the last processor in service; a processor with a task pinned to it
+   alone **at its spawn** other than its idle and machine-check poll tasks
+   (ruling (g): only the kernel and its checks make such tasks). Since
+   `sched_setaffinity` is applied (F3, `docs/GAME-MODE-SCHED.md` §2.1), a
+   mask a user sets is never such a pin: `PINNED_PROGRAMS` counts spawn
+   pins only, and a task whose mask names no processor in service is placed
+   as if its mask were the whole domain, its mask kept for its processors'
+   return (L.sched.123, ledger 5156 (A2), (A3)); a
    domain whose mode does not steal work (only Throughput exists; an RT
    domain's admission must not be broken by evacuation); a target processor
    for the retarget above APIC ID 255; and any interrupt source aimed at the

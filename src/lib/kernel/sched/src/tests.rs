@@ -971,6 +971,30 @@ fn a_cpu_set_holds_what_it_is_given_and_nothing_else() {
 }
 
 #[test]
+fn a_cpu_set_crosses_its_words_and_intersects_bit_for_bit() {
+    let mut a = CpuSet::empty();
+    let mut b = CpuSet::empty();
+    for cpu in [0, 5, 63, 64, 130, MAX_CPUS - 1] {
+        a.insert(cpu).unwrap();
+    }
+    for cpu in [5, 64, 131, MAX_CPUS - 1] {
+        b.insert(cpu).unwrap();
+    }
+    assert_eq!(CpuSet::from_words(a.words()), a, "words and back");
+    assert_eq!(a.words()[1], 1, "CPU 64 is bit 0 of the second word");
+    assert_eq!(
+        a.intersection(&b).iter().collect::<Vec<_>>(),
+        [5, 64, MAX_CPUS - 1],
+        "only the CPUs in both"
+    );
+    assert!(
+        a.intersection(&CpuSet::empty()).is_empty(),
+        "nothing with the empty set"
+    );
+    assert_eq!(a.intersection(&a), a, "a set with itself");
+}
+
+#[test]
 fn an_empty_domain_is_refused() {
     assert_eq!(
         Domain::new(CpuSet::empty(), Mode::Throughput),

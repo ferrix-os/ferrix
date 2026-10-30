@@ -113,6 +113,52 @@ What has changed since 2026-10-25, and how F3 uses it:
   per-processor kernel tasks stay where they are (GAME-MODE.md §5.6).
   A cpuset controller is backlog row dg-015.
 
+**As built (branch `feature/game-mode-affinity`, code review owed).**
+`src/kernel/src/sched/affinity.rs` holds the rules; its module comment
+lists every reader of the mask with the lock it holds ((A5)), and
+MEMORY-AND-TIMING §2.2z4 the lock order ((D2), (A10)). Where the build
+says more than the text above:
+
+* **Storage** is (D1)'s second form: the four words, one atomic each,
+  under a sequence count (`sched::task::Affinity`), written only under the
+  home queue's lock; readers out of a lock read a whole copy as a hint,
+  re-checked under the move's locks (`wake_onto`, `rehome_blocked`) or
+  caught by a backstop. No `unsafe`.
+* **The mask kept** is the one given ∩ the domain ∩ in service, as (A1)
+  says, so a processor out of service when the mask is set is not in it
+  after its return (Linux keeps an offline processor in `cpus_mask`). A
+  mask set or restored while a processor is out of service therefore
+  leaves that processor out of it after the processor returns. And during
+  a park a user instruction can run outside the effective mask until the
+  park moves the task (ledger 5269 (7), deviation (a)).
+* **A running task** is not moved by its setter: the setter posts the new
+  work bit `PLACE` and interrupts it, and the task's way out
+  (`work::look_placed`, called by `trap::attention_due`, which every way
+  back to user mode of the three architectures goes through, and
+  `work::place_before_entry` before a new task's first entry) switches
+  away; `choose_next` takes it off its queue as it switches
+  (`leaves_with_switch`), and the switch's tail, its registers saved and
+  the home lock let go, queues it on an allowed processor under both locks
+  taken lower first (`push_off`), which cannot fail. Queued again first,
+  another processor could have run it on a stack still in use. The bit
+  stays while the mask is narrower than the domain, so a return to
+  service, which walks nothing, is met at the task's next way out.
+* **L.sched.99's "outside"** is outside the mask a placement asks
+  (`mask_for`); a processor's in-service half is the park's (L.sched.104),
+  which preempts and evacuates, as for every task. A way out that waited
+  for in-service there would spin with interrupts masked against the park's
+  own grace period.
+* **The pick push** waits for a destination's lock above the picking
+  processor and only tries one below; with every one below held at that
+  instant and none above, the task runs there, in the kernel, and a task
+  that runs a program is moved by its way out before its next user
+  instruction.
+* **The checks**: stage 5's `sched/affinity_check.rs` (96, 97, 98),
+  test-threads' affinity step (99, 100, 101), test-quarantine's pinned
+  probe (123). `/proc/<pid>/stat`'s processor field names the reader's
+  processor, not the task's, so the quarantine case has the probe say
+  where it runs by its own `getcpu` (backlog p2-160).
+
 ### 2.2 F7: a slice a task asks for
 
 Today one slice serves every entity of a queue: `slice_for` gives
@@ -703,7 +749,7 @@ design reviews the same day, internal and not independent verification
 
 | § | Piece | Verdict | Ledger | Built |
 |---|---|---|---|---|
-| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | F7 built, code review OK IF (1)-(6), ledger 5232; F3 being built |
+| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | F7 landed (2e717f409), code review OK IF (1)-(6), ledger 5232; F3 code review OK IF (1)-(8), ledger 5269 |
 | 3 | The frame mark | OK IF (K1)-(K12) | 5170 | no |
 | 4 | Lends | OK IF (N1)-(N8); no code before §3 lands | 5184 | no |
 | 5 | Idle-gap class | OK IF (G1)-(G5), design only | 5194 | no |
@@ -715,8 +761,8 @@ setter cost corrected; L.sched.109's exec half argued by construction and
 not yet run (a BACKLOG row runs it from the box's disk); the step run on
 Linux 7.0 and compared in the commit; this line.
 
-What each piece still owes before its code review: §2 the list of every
-reader of the mask and of `r` with the lock it holds (A5), and the
-MEMORY-AND-TIMING section (A10); §3 the build flag through BUILD-FLAGS'
+What each piece still owes before its code review: §2 nothing written (the
+readers of the mask in `sched/affinity.rs`, MEMORY-AND-TIMING §2.2z3 and
+§2.2z4), only its rows and (D12)'s parity lines; §3 the build flag through BUILD-FLAGS'
 review (K4) and sessiond's own code review (K10); §4 to §6 the landing of
 the piece before them.

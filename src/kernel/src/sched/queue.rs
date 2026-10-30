@@ -570,7 +570,7 @@ impl CpuQueue {
     pub(crate) fn take_movable_sleeper(&mut self, to: usize) -> Option<(u64, Arc<Task>)> {
         let (at, task, slot) = self
             .sleepers
-            .take_last_where(|task| !task.is_pinned() && task.may_run_on(to))?;
+            .take_last_where(|task| !super::pinned(task) && super::allowed(task, to))?;
         task.return_sleep_slot(slot);
         Some((at, task))
     }
@@ -676,13 +676,15 @@ impl CpuQueue {
 
     /// The task another CPU should take from this one, if any may be moved.
     pub(crate) fn steal_candidate(&self, to: usize) -> Option<TaskId> {
-        // `may_run_on` is the one that matters now that affinity is a set:
-        // a task allowed on processors 0 and 1 must not be moved to 2 however
-        // idle 2 is. `is_pinned` stays because it says something different —
-        // a task with exactly one home should not be moved even *to* that
-        // home, since it is already there.
+        // `allowed` is the one that matters now that affinity is a set: a
+        // task allowed on processors 0 and 1 must not be moved to 2 however
+        // idle 2 is (L.sched.97; read exactly, under this queue's lock, the
+        // mask's writer's). `pinned` stays because it says something
+        // different -- a task with exactly one home should not be moved even
+        // *to* that home, since it is already there; one queued elsewhere is
+        // the pick push's (L.sched.98).
         self.fair.latest_where(|task| {
-            !task.is_pinned() && task.may_run_on(to) && task.state() == RUNNABLE
+            !super::pinned(task) && super::allowed(task, to) && task.state() == RUNNABLE
         })
     }
 

@@ -28,6 +28,13 @@
 //! * [`FILTERED`]: reserved for §9.7's filtered flag. It waits on seccomp S3's
 //!   install lock, which is not on `main`; nothing posts it, and the way out
 //!   does not read it.
+//! * [`PLACE`]: the task was given a mask by `sched_setaffinity`
+//!   (`sched::set_affinity`, L.sched.99). The way out moves it onto a
+//!   processor its mask allows before anything else it does, and keeps the
+//!   bit while the mask is narrower than the domain, so that a processor's
+//!   return to service, which walks nothing, finds the task at its next way
+//!   out. Cleared only by the task, at a way out that finds its mask the
+//!   whole domain again.
 //!
 //! # Posting and clearing
 //!
@@ -100,7 +107,11 @@ pub(crate) const TRACE: u32 = 1 << 3;
 )]
 pub(crate) const FILTERED: u32 = 1 << 4;
 
-/// The bits the way out acts on.
+/// The task has a mask narrower than its domain: the way out moves it inside
+/// first (L.sched.99).
+pub(crate) const PLACE: u32 = 1 << 5;
+
+/// The bits the way out acts on through the personality.
 const ATTENTION: u32 = END | STOP | SIGNAL | TRACE;
 /// The bits the task clears as it finds them. [`END`] is never cleared.
 const CLEARED_AS_FOUND: u32 = STOP | SIGNAL;
@@ -186,9 +197,57 @@ pub(crate) fn peek() -> u32 {
     super::with_current(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
 }
 
+/// Before a new task's first user instruction -- a program's entry, a clone
+/// or fork child's first resume, which no way out precedes -- with
+/// [`PLACE`] posted, move it inside its mask (L.sched.99). Clears nothing:
+/// the bits the first trap's way out reads stay for it. With interrupts
+/// masked; returns masked.
+pub fn place_before_entry() {
+    let word = with_running(|task| task.work().load(Ordering::Acquire)).unwrap_or(0);
+    if word & PLACE != 0 {
+        super::keep_inside();
+    }
+}
+
 /// Whether a word [`look`] answered asks the way out to act.
 pub(crate) const fn wants_attention(word: u32) -> bool {
     word & ATTENTION != 0
+}
+
+/// Whether a word asks anything of the way out: [`wants_attention`], or
+/// [`PLACE`]. What the frame tail's quiet exit must find clear.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
+)]
+pub(crate) const fn anything_due(word: u32) -> bool {
+    word & (ATTENTION | PLACE) != 0
+}
+
+/// [`look`], after the move a mask asks for (L.sched.99): with [`PLACE`]
+/// posted, the running task is first moved onto a processor its mask allows
+/// (`sched::keep_inside`, which may switch), and the word looked at again
+/// for what was posted meanwhile; the bit is let go once the mask is the
+/// whole domain. With interrupts masked; returns masked. The word is
+/// [`look`]'s, both looks' bits together.
+pub(crate) fn look_placed() -> u32 {
+    let word = look();
+    if word & PLACE == 0 {
+        return word;
+    }
+    super::keep_inside();
+    // Cleared before the mask is read again, as every bit is (A before B):
+    // a setter that stored a narrower mask and posted meanwhile either left
+    // its bit after the clear, or is seen by the read, which posts it again.
+    if super::with_current(super::unmasked).unwrap_or(false) {
+        let _ = with_running(|task| {
+            let _ = task.work().fetch_and(!PLACE, Ordering::Acquire);
+            if !super::unmasked(task) {
+                post(task, PLACE);
+            }
+        });
+    }
+    word | look()
 }
 
 /// Run `visit` on the task running on this processor, with interrupts masked

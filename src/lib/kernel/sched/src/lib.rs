@@ -88,7 +88,7 @@ pub use balance::{
     Placement, busiest, flip, imbalance, place, pull_fits, quietest, slice_for, utilisation,
     wake_wide,
 };
-pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
+pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, WORDS, check_partition};
 pub use timeline::Timeline;
 use tree::{Key, Tree, before};
 pub use tree::{Node, Slot};

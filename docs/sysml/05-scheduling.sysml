@@ -174,7 +174,13 @@ package FerrixScheduling {
             doc /* The processors it may run on, one bit each. Replaced a
                  * `pinned` boolean: a task pinned to one processor is an
                  * affinity of one, which is the same thing said once rather
-                 * than twice. */
+                 * than twice. A kernel thread's is its spawn's for its whole
+                 * life (L.sched.96); a task that runs a program starts with
+                 * its creator's or the domain (L.sched.101) and is changed by
+                 * sched_setaffinity, under its home queue's lock, every
+                 * placement obeying the new one (L.sched.97-100). Placement
+                 * asks the stored mask, or the domain while that names no
+                 * processor in service (L.sched.123). */
         }
         attribute runtimeNanos : Natural;
         attribute switches : Natural;

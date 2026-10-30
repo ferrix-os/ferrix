@@ -556,3 +556,9 @@ Done 2026-10-24 (kernel-flakes).
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-10-25, btrfs-crash).** Stage 13's cgroup freeze check (`src/kernel/src/fs/cgroupfs/freeze_check.rs`) stopped `test-boot --arch x86_64 --accel tcg` with "cgroup.events did not poll POLLPRI when its cgroup froze" (gate tag `bo-x86tcg`, c88b9a1ff, branch `park/block-ring-offline`, whose change -- the block ring's offline state -- this check does not reach; the same hash's KVM boot and the other architectures passed). Log kept at `~/.local/share/ferrix/logs/rc/bo-x86tcg-cgroup-freeze-flake.log`. Not rerun yet. A guess to check first: `events_become` reads `cgroup.events` until it says `frozen 1`, and if a read takes the pending priority event, the `watched.poll()` after it has nothing to see under TCG's slower timing. | unowned | 13 |
+
+### fl-086
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-10-30, game-mode-sched).** `test-threads --arch all` and `--smp 2` on 5fe02f4ec (feature/game-mode-affinity) both timed out on ARMv7-A: "`init     the shell exited with` was not printed within 120s". In both, the armv7a boot's block-ring read took about ten times its usual time (depth 1 p50 4982 and 4996 us, p99 174 and 141 ms, against 508 to 572 us and about 1.1 to 1.4 ms in the passing runs on 1ab0bca33 and 9248cddad), and the boot reached btrfs at 90 s where it does at 38 to 40 s. The x86_64 and aarch64 halves of the same runs passed. The commit's code differs from the passing ones only by a move of `choose_next`'s departure into a function (no behaviour), and the same tree's armv7a boot rows passed; host load at the runs' starts 7.7 to 25. Read as TCG under host load until it recurs. Logs: `~/.local/share/ferrix/logs/game-mode/flake-v7/`. | game-mode-sched | 7 |

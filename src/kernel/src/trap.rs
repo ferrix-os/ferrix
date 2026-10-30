@@ -607,7 +607,9 @@ pub fn set_return_path(path: &'static ReturnPath) {
 /// self-checks on, when none is, to show that none should have been
 /// (`sched::work::audit`).
 pub fn attention_due(path: &ReturnPath) -> bool {
-    if crate::sched::work::wants_attention(crate::sched::work::look()) {
+    // `look_placed`: a task given a mask is moved inside it first, before
+    // any signal frame is built and any user instruction runs (L.sched.99).
+    if crate::sched::work::wants_attention(crate::sched::work::look_placed()) {
         return (path.needs_attention)();
     }
     crate::sched::work::auditing() && crate::sched::work::audit(path.needs_attention)

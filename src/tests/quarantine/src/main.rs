@@ -11,6 +11,16 @@
 //! Each prints `quarantine-probe: <mode> open=<ok|errno N>
 //! write=<ok|errno N|skipped>` and exits 0; a step of its own that failed
 //! is `quarantine-probe: FAILED <what>` and status 1.
+//!
+//! And two for the fallback of applied affinity (L.sched.123,
+//! `docs/GAME-MODE-SCHED.md` §2.1), which busybox has no `taskset` for:
+//!
+//! * `quarantine-test pin <cpu> <file>`: `sched_setaffinity` to that
+//!   processor alone, then spin for ever, writing `<n> <processor>` to the
+//!   file every few milliseconds, `n` counting up, the processor `getcpu`'s
+//!   (`/proc/<pid>/stat`'s processor field names the reader's);
+//! * `quarantine-test mask <pid>`: print `sched_getaffinity(pid)` as sysfs
+//!   lists processors, `0-1,3`.
 
 use std::ffi::CString;
 use std::io::Write as _;
@@ -19,8 +29,13 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let (Some(mode), Some(path)) = (args.get(1), args.get(2)) else {
-        return failed("usage: quarantine-test nonroot|userns <path>");
+        return failed("usage: quarantine-test nonroot|userns <path> | pin <cpu> | mask <pid>");
     };
+    match mode.as_str() {
+        "pin" => return pin(path, args.get(3).map_or("/run/qt/pinned", String::as_str)),
+        "mask" => return mask(path),
+        _ => {}
+    }
     let ready = match mode.as_str() {
         "nonroot" => become_nobody(),
         "userns" => become_namespace_root(),
@@ -78,6 +93,74 @@ fn become_namespace_root() -> Result<(), &'static str> {
     std::fs::write("/proc/self/setgroups", b"deny\n").map_err(|_| "writing setgroups")?;
     std::fs::write("/proc/self/gid_map", b"0 0 1\n").map_err(|_| "writing gid_map")?;
     Ok(())
+}
+
+/// Pin this process to processor `cpu` alone and spin for ever, saying
+/// where it runs in `file`.
+fn pin(cpu: &str, file: &str) -> ExitCode {
+    let Ok(cpu) = cpu.parse::<usize>() else {
+        return failed("a processor that is not a number");
+    };
+    // SAFETY: a zeroed `cpu_set_t` is the empty set.
+    let mut set: libc::cpu_set_t = unsafe { core::mem::zeroed() };
+    // SAFETY: sets one bit of a live set.
+    unsafe { libc::CPU_SET(cpu, &mut set) };
+    // SAFETY: the kernel reads `size_of` bytes of a live set.
+    if unsafe { libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &raw const set) } != 0 {
+        return failed(&format!("sched_setaffinity to {cpu}: errno {}", errno()));
+    }
+    let mut count = 0_u64;
+    loop {
+        for _ in 0..1_000_000 {
+            core::hint::spin_loop();
+        }
+        count += 1;
+        let mut now = 0_u32;
+        // SAFETY: getcpu writes one u32 through a live pointer.
+        let _ = unsafe {
+            libc::syscall(
+                libc::SYS_getcpu,
+                &raw mut now,
+                core::ptr::null_mut::<u32>(),
+                core::ptr::null_mut::<u8>(),
+            )
+        };
+        let _ = std::fs::write(file, format!("{count} {now}\n"));
+    }
+}
+
+/// Print `pid`'s mask as sysfs lists processors.
+fn mask(pid: &str) -> ExitCode {
+    let Ok(pid) = pid.parse::<i32>() else {
+        return failed("a pid that is not a number");
+    };
+    // SAFETY: a zeroed `cpu_set_t` is the empty set.
+    let mut set: libc::cpu_set_t = unsafe { core::mem::zeroed() };
+    // SAFETY: the kernel writes at most `size_of` bytes into a live set.
+    if unsafe { libc::sched_getaffinity(pid, size_of::<libc::cpu_set_t>(), &raw mut set) } != 0 {
+        return failed(&format!("sched_getaffinity of {pid}: errno {}", errno()));
+    }
+    let cpus: Vec<usize> = (0..libc::CPU_SETSIZE as usize)
+        // SAFETY: reads one bit of a live set.
+        .filter(|&cpu| unsafe { libc::CPU_ISSET(cpu, &set) })
+        .collect();
+    let mut parts = Vec::new();
+    let mut at = 0;
+    while let Some(&start) = cpus.get(at) {
+        let mut end = start;
+        while cpus.get(at + 1) == Some(&(end + 1)) {
+            end += 1;
+            at += 1;
+        }
+        parts.push(if start == end {
+            start.to_string()
+        } else {
+            format!("{start}-{end}")
+        });
+        at += 1;
+    }
+    say(&parts.join(","));
+    ExitCode::SUCCESS
 }
 
 /// The last error number.
