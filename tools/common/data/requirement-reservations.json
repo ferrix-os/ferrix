@@ -209,6 +209,13 @@
       "branch": "feature/proc-status-rss",
       "date": "2026-10-30",
       "purpose": "/proc/<pid>/status's VmRSS, RssAnon, RssFile and RssShmem (customer, 2026-10-30: the lines were missing): the resident set split by kind, per region, from AddressSpace::resident_split"
+    },
+    {
+      "ids": ["L.user.172"],
+      "owner": "proc-status-rss",
+      "branch": "feature/proc-status-rss",
+      "date": "2026-10-30",
+      "purpose": "a disk file's pages in /proc/<pid>/status's RssFile (consultant NOT YET B3, ledger 4894: split out of L.user.171 and checked in a boot with the stage 12 disk)"
     }
   ]
 }
