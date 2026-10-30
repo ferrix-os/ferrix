@@ -408,7 +408,7 @@ log path fixed (94a24df29). Code review: OK IF K1-K3, ledger line 5004
   test-btrfs, test-boot x86_64 kvm, kvm --smp 2, aarch64 tcg and armv7a
   tcg, test-restart --boot blk; every boot reads 0 of 5 single-processor
   attempts disturbed. The check row on the commit that records this.
-* R1 waits on B1-B4.
+* R1: see "R1, where it stands" below.
 
 **R2.5.** Nothing in the kernel reads `MemAvailable` but `/proc/meminfo`'s
 render: `sysinfo` reports free frames, and no reclaim or OOM decision looks
@@ -420,3 +420,50 @@ at it. Outside the kernel, host measurement tools read the file
 On the box: the archive (about 95 MB) and its tmpfs copy (about the same)
 at every boot with a root disk, and 130-200 MB of btrfs nodes given back
 under pressure and counted as available meanwhile.
+
+## R1, where it stands
+
+Built on `claude/ram-release-r1-ee0624`, on origin/develop 76130433e, not
+landed:
+
+* ed6da128c, the design (§2); 5ff5e73ee, the reservation re-owned;
+  cea00f56a, the release (mm keeps and gives back the archive, pid 1's
+  inputs copied, the tmpfs's names removed after a switch, devmgr's kept
+  set); 1acb888c6 and 340c47dd5, the code review's conditions 1-3 (the
+  range test and whole-page count as pure functions with cases, the holds
+  and batches checked, the fingerprint's control named); fe3e49314, the
+  stage 8 check arming the release check (the first check row's clippy
+  semicolon and item-boundary refusal); ebcafa666, 30b6e62ad and 8d4b089d6,
+  coverage carried (two anchors dropped on aarch64 and armv7a,
+  `discovery/devmgr.rs` 821, 823, 825, 838 and 937; `--check` current).
+* The consultant: design NOT YET, ledger 4971; OK IF (1)-(10), 5022
+  (verdict 5025); the archive's keeping moved into mm OK IF M1-M4 and
+  L.user.173 released unwritten under U1-U3, 5038; code review OK IF
+  (1)-(6), 5073 (verdict 5077).
+* Controls on 8d4b089d6, each `control: FIRED [accel x86_64:kvm]`, logs
+  `~/.local/share/ferrix/logs/queue/<tag>.log`: r1b-ctl-norelease (no
+  give-back), r1b-ctl-inputs (inputs left in the archive), r1b-ctl-kept
+  (the archive read, not taken), r1b-ctl-watermark (not recomputed),
+  r1b-ctl-tmpfs (every name spared), r1b-ctl-region (the range test taking
+  every range), r1b-ctl-rounddown (the first page rounded down), each a
+  FERRIX-PANIC of the release check; r1b-ctl-keptset (the kept set never
+  read: "svc restart devmgr.service did not start a second devmgr") and
+  r1b-ctl-fingerprint (the stored fingerprint altered: "the kept set is not
+  as it was kept"), test-init's lines.
+* Rows on 8d4b089d6, each `run: PASSED`: r1b-check, r1b-build-all,
+  test-boot x86_64 kvm (r1b-boot-kvm), kvm --smp 2 (r1b-boot-smp2), tcg
+  (r1b-boot-tcg-2; the first, r1b-boot-tcg, stopped in stage 9's
+  allocation check before the release, a flake filed in BACKLOG), aarch64
+  (r1b-boot-a64), armv7a (r1b-boot-v7) and armv7a --smp 2
+  (r1b-boot-v7-smp2), test-restart --boot blk (r1b-restart-blk), test-init
+  (r1b-init), test-disk-offline (r1b-disk-offline), test-btrfs (r1b-btrfs),
+  test-iso (r1b-iso).
+* Given back on those boots: 9,093 pages on test-boot (the tmpfs kept),
+  21,138 on test-restart --boot blk (2,809 tmpfs names removed), 13,981 on
+  test-init (157 removed); the longest hold 2-3 us under KVM, 47 us x86-64
+  TCG, 80 us armv7a TCG. On the box's image, measured from it and not
+  booted: 23,343 archive pages and 24,639 tmpfs pages, less pid 1's mapped
+  `/sbin/init` (320), about 195 MB; the kept set 20 pages beyond what
+  devmgr holds.
+* Follow-up: p3-020, the root disk's driver alive across a devmgr restart.
+
