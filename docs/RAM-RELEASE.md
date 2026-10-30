@@ -188,16 +188,26 @@ cache's does (MEMORY-AND-TIMING §2.2d).
 
 ### Where it stands
 
-R2 and F-99 are built on `feature/ram-release` (4bcea5835, 974fb4746, and
-the commit that closes F-99), not landed. Controls, each `control: FIRED`:
-the old clear in `load` (rr-974fb47-f99-ctl, 3 host tests fail), a drop
-that also takes a dirty node (rr-4bcea58-dirty-ctl), `MemAvailable` without
-the nodes and a job's reclaim that takes them (rr-4bcea58-avail-ctl,
-rr-4bcea58-job-ctl, stage 12 stops). Rows PASSED: check and test-restart
---boot blk on 974fb4746; build --release --arch all, test-btrfs, test-boot
-x86_64 kvm, kvm --smp 2, aarch64 and armv7a on 4bcea5835 (974fb4746 changes
-two doc comments). Rebased on the heap caches (e4d44f24a), the boot check drains them around
-its frame count. R1 waits on B1-B4.
+R2 and F-99 land as d0b034524 (the code, tests, boot check and
+requirements), 3e1967b5f (doc comments), 60559327d (F-99 closed) and
+2f6f02486 (the heap caches drained around the boot check's frame count),
+with the heap caches' one-processor check made to retry a disturbed attempt
+and say so (16d8d2526, a89cf40f6) and a softsign test that searched its own
+log path fixed (94a24df29). Code review: OK IF K1-K3, ledger line 5004
+(verdict 5009); the retry, OK IF H5-H6, line 5015.
+
+* Controls, each `control: FIRED`: the old clear in `load`
+  (rr-974fb47-f99-ctl, 3 host tests fail), a drop that also takes a dirty
+  node (rr-4bcea58-dirty-ctl), `MemAvailable` without the nodes and a job's
+  reclaim that takes them (rr-4bcea58-avail-ctl, rr-4bcea58-job-ctl, stage
+  12 stops) -- counted for the landing hashes by the review, the R2 code
+  being byte-identical since -- and `heap_allocated` not subtracting on
+  a89cf40f6 (rr-a89cf40f6-ctl-not-subtracting, 5 of 5 attempts failing).
+* Rows on a89cf40f6, each `run: PASSED`: build --release --arch all,
+  test-btrfs, test-boot x86_64 kvm, kvm --smp 2, aarch64 tcg and armv7a
+  tcg, test-restart --boot blk; every boot reads 0 of 5 single-processor
+  attempts disturbed. The check row on the commit that records this.
+* R1 waits on B1-B4.
 
 **R2.5.** Nothing in the kernel reads `MemAvailable` but `/proc/meminfo`'s
 render: `sysinfo` reports free frames, and no reclaim or OOM decision looks
