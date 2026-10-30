@@ -41,7 +41,7 @@
 //! commit. No failure is reported for a commit that is on the disk: what the
 //! commit needs after its primary superblock is written is made before it.
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::vec::Vec;
 
 pub(crate) use ferrix_fallible::AllocError;
@@ -117,6 +117,11 @@ pub(crate) fn split_off<T>(vec: &mut Vec<T>, at: usize) -> Result<Vec<T>> {
     // NOALLOC: into the capacity just reserved for exactly these elements.
     tail.extend(vec.drain(at..));
     Ok(tail)
+}
+
+/// Room for `additional` more entries in `queue`.
+pub(crate) fn reserve_deque<T>(queue: &mut VecDeque<T>, additional: usize) -> Result<()> {
+    Ok(ferrix_fallible::try_reserve_deque(queue, additional)?)
 }
 
 /// `map.insert(key, value)`, inside the kernel's section.

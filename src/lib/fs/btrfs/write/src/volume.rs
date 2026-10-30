@@ -15,6 +15,7 @@ use ferrix_btrfs::tree::{BtrfsKey, KeyPtr, Node};
 use ferrix_btrfs::volume::ReadKind;
 
 use crate::chunks::Chunks;
+use crate::clean::CleanNodes;
 use crate::extent::Backref;
 use crate::node::{Body, TreeNode};
 use crate::refs::DelayedRefs;
@@ -45,10 +46,14 @@ pub(crate) struct Geometry {
     pub(crate) device_size: u64,
 }
 
-/// How many clean nodes the cache keeps before it starts again. Clean nodes
-/// are only a cache of what is on disk, so dropping them costs reads, never
-/// correctness.
-const CLEAN_NODES: usize = 4096;
+/// How many clean nodes the cache keeps between operations. Clean nodes are
+/// only a cache of what is on disk, so dropping them costs reads, never
+/// correctness -- between operations only: see [`crate::clean`].
+pub(crate) const CLEAN_NODES: usize = 4096;
+
+/// The most clean nodes one [`WriteVolume::drop_clean`] drops: a reclaim
+/// holds the volume's lock for this many and no more.
+pub(crate) const DROP_BATCH: usize = 64;
 
 /// Nodes of metadata kept free before every edit. One edit copies at most a
 /// root-to-leaf path and splits along it — sixteen nodes on the deepest tree
@@ -116,8 +121,8 @@ pub struct WriteVolume<D> {
     /// Nodes this transaction wrote or copied, by logical address. Their
     /// generation is `transid`, and they are edited in place.
     pub(crate) dirty: BTreeMap<u64, TreeNode>,
-    /// Nodes read from disk and not changed.
-    pub(crate) clean: BTreeMap<u64, TreeNode>,
+    /// Nodes read from disk and not changed, oldest first.
+    pub(crate) clean: CleanNodes,
     pub(crate) roots: BTreeMap<TreeId, Root>,
     /// Trees whose root moved since their `ROOT_ITEM` was written.
     pub(crate) stale_roots: BTreeSet<TreeId>,
@@ -441,11 +446,52 @@ impl<D: WriteDevice> WriteVolume<D> {
         if node.level != level || node.generation != generation {
             return Err(Error::Volume(BtrfsError::BadTree { logical }));
         }
-        if self.clean.len() >= CLEAN_NODES {
-            self.clean.clear();
+        // Never a node dropped to make room: the walk that asked for this
+        // one holds the addresses of the levels above it (F-99).
+        // FALLIBLE: the clean nodes' own insert, which reports running out of
+        // memory.
+        self.clean.insert(logical, node)
+    }
+
+    /// Bring the clean nodes back to [`CLEAN_NODES`], the oldest going
+    /// first; a dirty node is never among them.
+    ///
+    /// Only between operations, by whoever holds the volume for them: never
+    /// inside one, whose walks keep the addresses of the nodes they loaded
+    /// and read them again (F-99). Until it runs, the cache holds what the
+    /// last operations loaded besides (`docs/certification/
+    /// MEMORY-AND-TIMING.md`).
+    pub fn trim_clean(&mut self) {
+        while self.clean.len() > CLEAN_NODES {
+            if self.clean.drop_oldest().is_none() {
+                return;
+            }
         }
-        let _ = fallible::insert(&mut self.clean, logical, node)?;
-        Ok(())
+    }
+
+    /// Give up clean nodes, the oldest first, until `want` bytes of heap are
+    /// given or [`DROP_BATCH`] nodes are gone; answers the bytes given. A
+    /// dirty node is never among them. Only between operations, as
+    /// [`WriteVolume::trim_clean`].
+    pub fn drop_clean(&mut self, want: u64) -> u64 {
+        let mut given = 0u64;
+        for _ in 0..DROP_BATCH {
+            if given >= want {
+                break;
+            }
+            match self.clean.drop_oldest() {
+                Some(bytes) => given = given.saturating_add(bytes),
+                None => break,
+            }
+        }
+        given
+    }
+
+    /// What the clean nodes hold of the heap: an exact count, kept as nodes
+    /// are loaded, copied, dropped and committed.
+    #[must_use]
+    pub const fn clean_bytes(&self) -> u64 {
+        self.clean.bytes()
     }
 
     /// Read and check the node at `logical`, from its first copy that reads

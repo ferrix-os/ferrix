@@ -594,7 +594,7 @@ fn a_node_read_out_of_memory_is_not_retried_from_the_other_copy() {
     // Nothing cached: the next lookup reads the fs tree's root, and its
     // first copy answers that memory ran out. The second copy would read
     // fine, and must not be asked.
-    volume.clean.clear();
+    volume.clean = crate::clean::CleanNodes::new();
     volume.device.reads = 0;
     volume.device.fail_at = 1;
     let read = volume.get(FS_TREE_OBJECTID, &BtrfsKey::MIN);

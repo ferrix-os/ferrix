@@ -204,11 +204,11 @@
       "purpose": "docs/CORE-QUARANTINE.md, taking an unstable processor out of service (customer, 2026-10-30, item 6; consultant OK IF Q1-Q14, ledger 4856, Q12): H.SCHED.18 the mechanism's failure modes; L.sched the shared placement helper, re-home at enqueue, evacuation with timer objects, the park handshake and its undo, back in service; L.smp the in-service predicate and Linux surface, the refusals, one function behind both doors with audit records, CpuService and CPU_SERVICE's rights and arguments, the sysfs write through setters; L.iommu the IRTE retarget's single store and unchanged fields, invalidation with its wait, serialized allocation, other sources refused"
     },
     {
-      "ids": ["L.mm.99-100", "L.init.5", "L.user.173-175", "L.btrfs.119-121"],
+      "ids": ["L.mm.99-100", "L.init.5", "L.user.173-174"],
       "owner": "ram-release",
       "branch": "feature/ram-release",
       "date": "2026-10-30",
-      "purpose": "docs/RAM-RELEASE.md (consultant: R1 NOT YET B1-B4, R2 OK IF R2.1-R2.6, ledger 4971): the initramfs archive's pages to the frame allocator, no reader outliving them (L.mm.99-100); pid 1's inputs surviving it (L.init.5); the tmpfs keeping the mount directories and devmgr's set, devmgr restarting from it, MemAvailable and SReclaimable counting btrfs clean nodes (L.user.173-175); btrfs clean nodes evicted never dirty or in use, taken by a machine-wide reclaim only, counted exactly (L.btrfs.119-121)"
+      "purpose": "docs/RAM-RELEASE.md (consultant: R1 NOT YET B1-B4, ledger 4971): the initramfs archive's pages to the frame allocator, no reader outliving them (L.mm.99-100); pid 1's inputs surviving it (L.init.5); the tmpfs keeping the mount directories and devmgr's set, devmgr restarting from it (L.user.173-174). R2's L.user.175 and L.btrfs.119-121 are written"
     }
   ]
 }

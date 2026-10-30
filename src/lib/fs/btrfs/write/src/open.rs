@@ -25,6 +25,7 @@ use ferrix_btrfs::volume::{Device, ReadKind};
 
 use crate::bytes::{get_u32, get_u64};
 use crate::chunks::{Chunk, Chunks};
+use crate::clean::CleanNodes;
 use crate::commit::FREE_SPACE_TREE_OBJECTID;
 use crate::extent::{
     BLOCK_GROUP_ITEM_KEY, FREE_SPACE_BITMAP_KEY, FREE_SPACE_EXTENT_KEY, FREE_SPACE_INFO_KEY,
@@ -103,7 +104,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             committed: sb.generation(),
             transid: sb.generation().saturating_add(1),
             dirty: BTreeMap::new(),
-            clean: BTreeMap::new(),
+            clean: CleanNodes::new(),
             roots: BTreeMap::new(),
             stale_roots: BTreeSet::new(),
             refs: DelayedRefs::default(),

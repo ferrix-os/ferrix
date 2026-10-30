@@ -627,7 +627,7 @@ T.EXHAUST).
 
 | What | Bound | Where it is set |
 |---|---|---|
-| Clean nodes cached | 4,096 nodes, then dropped (`CLEAN_NODES`): 64 MiB of 16 KiB nodes, before the in-memory form's overhead | the item, `volume.rs` |
+| Clean nodes cached | 4,096 nodes between operations (`CLEAN_NODES`): 64 MiB of 16 KiB nodes, before the in-memory form's overhead; within one operation, that and what the operation loads (below) | the item, `volume.rs`, `clean.rs`; trimmed by the load's `rw.rs` |
 | Nodes a transaction holds (`dirty`) | none in the item; the glue commits once `dirty_bytes()` or the data written reaches 32 MiB (`COMMIT_THRESHOLD`) | the load, `ferrix-btrfs-vfs` `rw.rs` |
 | A writeback's copy buffer | 256 pages, 1 MiB (`WRITEBACK_PAGES`) | the load, `rw.rs` |
 | Delayed references, ranges per block group | none: they grow with the transaction's edits and the volume's fragmentation | -- |
@@ -638,6 +638,39 @@ So the write path's memory is bounded only by the load's commit threshold,
 and between commits by nothing the item sets; a job driving btrfs writes is
 charged for its pages, not for the transaction's nodes (V-05's "a btrfs
 transaction's changed nodes").
+
+**The clean nodes' bound is per operation (finding F-99, 2026-10-30).**
+Until then `load` cleared the whole cache when it held 4,096 nodes, in the
+middle of a walk whose path still named the nodes it cleared, and a range
+scan ended early or skipped items. Now `load` drops nothing; the cache is
+brought back to `CLEAN_NODES`, oldest first, only between operations, by the
+load's `Shared::lock` each time it takes the volume (`L.btrfs.119`). Of the
+two ways the consultant offered (F2), this is the first: the overshoot is
+argued per operation rather than evicting what the operation has not
+touched, since an operation's walks are what overshoot, and a range touches
+every leaf it returns from either way. Within one operation the cache holds
+`CLEAN_NODES` and what that operation loads, and each load is one node of a
+walk: a lookup's at most eight; a range's, one path to its first item and
+then each leaf it crosses, at least one item of which it copies into the
+`Vec` it returns -- so a range holds no more nodes than items it hands back,
+plus a path; a commit's, the paths its delayed references reach, which turn
+into dirty nodes it has already counted against the commit threshold, and
+the nodes it wrote, which join the clean ones at its end. Opening a volume
+loads its chunk, root and block-group items and the free-space tree before
+the mount's first hold trims them. What overshoots is given back at the
+next hold of the lock, and to a reclaim of the machine meanwhile (§2.2d).
+
+**Clean nodes are reclaimable, and counted** (`docs/RAM-RELEASE.md` §3).
+The nodes are kernel heap charged to no job: neither btrfs crate makes a
+`ferrix_kmem` charge. So the filesystem's shrinker takes them only for a
+reclaim whose `takes` admits the kernel's owner, `quota::NONE` -- a reclaim
+of the whole machine -- and a job's `memory.max` reclaim never does
+(`L.btrfs.120`). Each volume keeps the heap its clean nodes hold as an exact
+running count, changed as each node is loaded, copied, dropped or committed
+(`L.btrfs.121`), and `/proc/meminfo` reports the mounts' sum as
+`SReclaimable` and counts it in `MemAvailable` (`L.user.175`). Nothing in
+the kernel reads `MemAvailable` but `/proc/meminfo`'s render: `sysinfo`
+reports the free frames, and no policy decides on it.
 
 **Space on the volume** is a separate budget with its own reserves, kept so
 that a full volume refuses before it changes anything (`H.STORE.6`): an
@@ -1104,6 +1137,27 @@ What bounds the work in them:
   makes at most height + 2 nodes of at most 2 KiB each. A commit makes many
   such inserts, each its own window, all in task context under the volume's
   sleeping lock; none waits. This adds to the masked windows AoU-4 budgets.
+* **Clean nodes given back.** Each hold of a volume's lock by a reclaim
+  (`WriteVolume::drop_clean`) drops at most 64 nodes (`DROP_BATCH`), each a
+  remove from the map and the frees of its lists, and the lock is taken only
+  if it is free: a reclaim never waits for an operation, which may itself be
+  allocating. The shrinker asks each writable mount once per reclaim, so one
+  reclaim drops at most 64 nodes a mount. The trim at each hold
+  (`WriteVolume::trim_clean`) drops what the operations since the last
+  overshot `CLEAN_NODES` by: at most what they loaded, each node once, paid
+  for by the read that loaded it. A place in the queue of loads is skipped
+  in O(1) when its node has left; the queue is closed up, with no
+  allocation, when it holds more stale places than live ones.
+* **A reclaim that frees heap and no frame.** The callers that retry on a
+  reclaim that gave anything: `fs::pages`' fill and write, at most
+  `RECLAIMS` (8) times each; `memory.reclaim`'s rounds, which count the
+  bytes given towards what was asked; and the machine's fault path
+  (`oom::out_of_memory`), which retries the fault while a reclaim gave
+  anything. A freed node's list larger than 2 KiB gives its pages back at
+  once, and a slab page goes when its last object does (stage 12's check
+  saw 475 KB of nodes free 124 frames), but a round could free heap and no
+  frame; the retries still end, since each gives up at least one node of a
+  cache that only operations refill, as the dentry cache's do.
 
 ### 2.2e The IOMMU's bridge table (`iommu::BRIDGES`)
 

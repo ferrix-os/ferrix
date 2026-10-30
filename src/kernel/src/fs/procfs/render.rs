@@ -222,15 +222,19 @@ pub(super) fn loadavg(_: &Kernel) -> Result<Vec<u8>> {
 /// have nowhere to go, as there is no swap, and are not available. `Buffers`
 /// is zero: no block device has a page cache of its own here, and btrfs's
 /// metadata cache is kernel heap, which `Slab` counts, the kernel heap's
-/// pages being the same thing by another allocator.
+/// pages being the same thing by another allocator. Of that heap, the clean
+/// tree nodes of writable btrfs mounts are what a reclaim of the machine
+/// gives back (`fs::btrfs`), so they are `SReclaimable`, and `MemAvailable`
+/// counts them as Linux counts reclaimable slab.
 pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
     let kib = |frames: u64| frames.saturating_mul(PAGE_SIZE / 1024);
     let free = mm::free_frames();
     let cache = crate::user::cache::totals();
+    let nodes = fs::btrfs::clean_bytes() / 1024;
     let info = Meminfo {
         total: kib(mm::managed_frames()),
         free: kib(free),
-        available: kib(cache.available(free)),
+        available: kib(cache.available(free)).saturating_add(nodes),
         buffers: 0,
         cached: kib(cache.cached()),
         swap_cached: 0,
@@ -239,6 +243,7 @@ pub(super) fn meminfo(_: &Kernel) -> Result<Vec<u8>> {
         dirty: kib(cache.dirty),
         shmem: kib(cache.memory),
         slab: kib(mm::heap_pages() as u64),
+        s_reclaimable: nodes,
     };
     let mut out = Vec::new();
     meminfo::render(&mut out, &info);

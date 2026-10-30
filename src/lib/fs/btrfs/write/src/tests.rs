@@ -29,6 +29,7 @@ use crate::node::Body;
 use crate::ranges::RangeSet;
 use crate::space::Kind;
 
+mod clean;
 mod fsops;
 mod full;
 mod inodes;

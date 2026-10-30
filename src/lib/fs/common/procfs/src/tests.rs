@@ -306,9 +306,12 @@ fn meminfo_is_byte_for_byte_what_linux_printed() {
         dirty: 1176,
         shmem: 2135792,
         slab: 3343592,
+        s_reclaimable: 2913312,
     };
     let out = rendered(|out| meminfo::render(out, &info));
-    assert_eq!(show(&out), show(b"MemTotal:       62103444 kB\nMemFree:          768736 kB\nMemAvailable:   34850072 kB\nBuffers:         2613488 kB\nCached:         37462144 kB\nSwapCached:       538760 kB\nSwapTotal:       8388604 kB\nSwapFree:        4308344 kB\nDirty:              1176 kB\nShmem:           2135792 kB\nSlab:            3343592 kB\n"), "meminfo");
+    // The lines Linux printed, with the sample's value of SReclaimable made
+    // up beneath its Slab: the layout is what is checked.
+    assert_eq!(show(&out), show(b"MemTotal:       62103444 kB\nMemFree:          768736 kB\nMemAvailable:   34850072 kB\nBuffers:         2613488 kB\nCached:         37462144 kB\nSwapCached:       538760 kB\nSwapTotal:       8388604 kB\nSwapFree:        4308344 kB\nDirty:              1176 kB\nShmem:           2135792 kB\nSlab:            3343592 kB\nSReclaimable:    2913312 kB\n"), "meminfo");
 }
 
 #[test]

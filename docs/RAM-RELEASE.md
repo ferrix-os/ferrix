@@ -1,6 +1,6 @@
 # Memory the kernel keeps after boot and after a game
 
-Status: design. The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
+Status: R1 design; R2 built (§3, "How it was built"). The certification consultant, ledger line 4971 (2026-10-30): R1 NOT YET (B1-B4), R2 OK IF R2.1-R2.6; F-99 (ledger 4988) found while reviewing R2, fixed with R2 under F1-F4.
 
 ## 1. Why
 
@@ -116,6 +116,80 @@ enough to fill the cache, reclaim, the bytes come back to the heap and the
 next lookup reads from the disk with the same result; a busy volume
 skipped. Controls: a shrinker that drops a dirty node (the write check
 loses an edit), `MemAvailable` without the nodes.
+
+### How it was built
+
+**F-99 first.** Reviewing this design, the consultant found that `load`
+cleared the whole cache when it held `CLEAN_NODES` nodes, between the levels
+of a walk whose `Path` still named the nodes it cleared; `next_item` then
+took the missing node for the end of the tree, and a range scan (`readdir`,
+an inode's deletion, the orphan list) ended early or skipped items. Now
+`load` drops nothing (`volume.rs`), `next_item`'s climb answers an error for
+anything but a level's last pointer (`tree.rs`, `next_leaf`), and the cache
+is trimmed only between operations: by `Shared::lock` in the writable
+mount's glue (`ferrix-btrfs-vfs` `rw.rs`), the one place the kernel takes a
+volume for anything, each time it is taken (F1). The overshoot is argued per
+operation rather than evicting what the operation has not touched (F2,
+`docs/certification/MEMORY-AND-TIMING.md` §1.8).
+
+**The cache.** `clean.rs`'s `CleanNodes`: a map by address and a
+`VecDeque` of loads, each place stamped so that a node copied or dropped
+from the middle leaves a stale place that eviction passes over; the queue is
+closed up without allocating once stale places outnumber live ones. It keeps
+the heap its nodes hold (`TreeNode::heap_bytes`, the lists' capacities) as a
+running sum, stored per node so a remove subtracts exactly what the insert
+added. `WriteVolume::trim_clean` brings it to `CLEAN_NODES`;
+`WriteVolume::drop_clean` gives up to 64 nodes (`DROP_BATCH`), oldest first;
+the commit's written nodes join it without evicting anything.
+
+**The mount.** `Shared::lock` hands out a guard (`Held`) that trims after
+taking the lock and publishes the volume's clean bytes into an atomic as it
+lets go, so `RwBtrfs::clean_bytes` reads without the lock. `RwBtrfs::
+drop_clean` takes the lock with `try_lock` and gives nothing when an
+operation holds it.
+
+**The kernel.** `fs::btrfs` lists every writable mount weakly as
+`mount_rw` makes it (refusing the mount with `ENOMEM` when the list cannot
+grow) and asks each in turn (`drop_clean`, `clean_bytes`). The fs shrinker
+(`fs::shrink_dentries`) asks for the nodes after the dentry cache, and only
+when `takes(quota::NONE)`: the nodes are charged to no job (neither btrfs
+crate makes a `ferrix_kmem` charge), so only a reclaim of the whole machine
+admits their owner. `/proc/meminfo` gains `SReclaimable`, and `MemAvailable`
+adds the same bytes.
+
+**Requirements.** `L.btrfs.119` (eviction between operations only, oldest
+first, never a dirty node), `L.btrfs.120` (the machine's reclaim only, busy
+volumes skipped, 64 a hold), `L.btrfs.121` (the exact count), `L.user.175`
+(`SReclaimable` and `MemAvailable`).
+
+**Evidence.** Host tests, `ferrix-btrfs-write` `tests/clean.rs`: with the
+cache at `CLEAN_NODES`, the fs tree's root held and a leaf not, `next_item`
+from a gap between two leaves, `prev_item` from slot 0 of a leaf (whose
+pointer key the test lowers: only such a tree reaches that climb) and
+`read_dir` from the gap answer what they should -- all three fail with the
+old `clear()` put back; a trim drops the oldest and no dirty node; batches
+until empty leave every dirty node and the edit commits; the count equals
+the sum over the nodes after loads, edits and commits. `ferrix-btrfs-vfs`
+`tests/rw.rs`: a mount asked for nodes from inside its own read gives none
+and returns, and gives them all between operations in batches. The boot
+check `fs/btrfs_write_check/clean_check.rs` (test-btrfs's `reclaim` line):
+a wide directory made, synced and read on a fresh mount; `SReclaimable` and
+`MemAvailable` hold its nodes; a job's reclaim takes none; the machine's
+takes some; giving all back raises the free frames by at least a quarter of
+the bytes (x86_64: 474,912 bytes, 124 frames); the listing read again comes
+off the disk the same. `mm::drain_caches` is not on this branch's base (it
+is `feature/heap-cpu-caches`'s), so the check drains nothing first; a heap
+with per-processor caches would need it there.
+
+**A reclaim that frees heap but no frame** does not loop without end: the
+page cache's fill and write retry at most 8 times, `memory.reclaim` counts
+the bytes, and the fault path's retry ends with the cache, as the dentry
+cache's does (MEMORY-AND-TIMING §2.2d).
+
+**R2.5.** Nothing in the kernel reads `MemAvailable` but `/proc/meminfo`'s
+render: `sysinfo` reports free frames, and no reclaim or OOM decision looks
+at it. Outside the kernel, host measurement tools read the file
+(`tools/common/game/rig.c`, xtask's compositor bench).
 
 ## 4. What it saves
 

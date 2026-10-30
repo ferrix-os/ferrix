@@ -1272,5 +1272,63 @@ package FerrixBtrfsRequirements {
                 "ferrix_btrfs_write::fallible::entry",
                 "ferrix_btrfs_write::fallible::insert_into_set");
         }
+        // docs/RAM-RELEASE.md §3 and finding F-99: the clean nodes, a cache of
+        // the disk, are dropped only between operations.
+        requirement <'L.btrfs.119'> cleanNodesGoBetweenOperationsOnly : ItemLowLevel {
+            attribute :>> statement = "A clean tree node shall be dropped only between
+                operations, by whoever holds the volume for them, oldest first; a
+                load shall drop none, so that no node an operation has loaded goes
+                while it runs, and no node of the running transaction shall ever be
+                dropped.";
+            attribute :>> criterion = "With the clean nodes at their number, the
+                fs tree's root held and a leaf not, next_item from a gap between
+                two leaves answers the next leaf's first item, prev_item from slot 0
+                of a leaf the previous leaf's last, and read_dir from the gap every
+                entry after it; a trim brings 4,106 clean nodes to 4,096 by the
+                oldest and leaves the dirty ones; nodes given up in batches until
+                none is left leave every dirty node, and the edit they held is in
+                the next commit.";
+            attribute :>> parent = ("H.STORE.4", "H.STORE.5");
+            attribute :>> unit = ("ferrix_btrfs_write::volume::WriteVolume::load",
+                "ferrix_btrfs_write::volume::WriteVolume::trim_clean",
+                "ferrix_btrfs_write::volume::WriteVolume::drop_clean",
+                "ferrix_btrfs_write::clean::CleanNodes::drop_oldest",
+                "ferrix_btrfs_write::tree::WriteVolume::next_item",
+                "ferrix_btrfs_write::tree::WriteVolume::next_leaf");
+        }
+        requirement <'L.btrfs.120'> onlyTheMachinesReclaimTakesCleanNodes : ItemLowLevel {
+            attribute :>> statement = "A reclaim of the whole machine that falls short
+                of pages shall give back the clean tree nodes of every writable btrfs
+                mount no operation holds at the time, at most 64 nodes a mount per
+                hold of its lock and never waiting for the lock; a job's reclaim
+                shall give back none of them, since no job is charged for them.";
+            attribute :>> criterion = "On the stage 12 disk, a job's reclaim leaves
+                the volume's count of clean bytes unchanged and a reclaim of the
+                machine lowers it; giving them all back raises the free frames by at
+                least a quarter of the bytes given, and the directory read again
+                lists the same; through a mount, asking for clean nodes from inside
+                one of its own reads gives none and returns, and between operations
+                they all go in more than one batch (the `reclaim` line of
+                test-btrfs).";
+            attribute :>> parent = ("H.QUOTA.12", "H.QUOTA.13");
+            attribute :>> unit = "ferrix_btrfs_write::volume::WriteVolume::drop_clean";
+        }
+        requirement <'L.btrfs.121'> cleanBytesAreCountedExactly : ItemLowLevel {
+            attribute :>> statement = "Each writable volume shall keep the heap its clean
+                nodes hold as an exact running count, changed as each node is
+                loaded, copied, dropped or committed, and its mount shall publish
+                that count each time its lock is let go.";
+            attribute :>> criterion = "After a commit, a read of a whole directory, an
+                edit and another commit, the count equals the sum over the nodes
+                held; each drop lowers it by exactly what it answers; through a
+                mount it is above zero after a sync and after a read, and zero once
+                every node is given back.";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("ferrix_btrfs_write::clean::CleanNodes::insert",
+                "ferrix_btrfs_write::clean::CleanNodes::remove",
+                "ferrix_btrfs_write::clean::CleanNodes::drop_oldest",
+                "ferrix_btrfs_write::node::TreeNode::heap_bytes",
+                "ferrix_btrfs_write::volume::WriteVolume::clean_bytes");
+        }
     }
 }

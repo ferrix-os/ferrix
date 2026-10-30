@@ -462,19 +462,19 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// superblock the commit wrote, and `unpinned` the free space
     /// [`crate::space::Space::prepare_unpin`] made before it. Allocates
     /// nothing that can fail the commit: a node the clean cache has no room
-    /// for is read again when next wanted.
+    /// for is read again when next wanted. Drops no clean node either: the
+    /// commit may be inside an operation, and the cache comes back to its
+    /// size between operations ([`WriteVolume::trim_clean`]).
     fn finish_commit(&mut self, primary: Vec<u8>, unpinned: crate::space::Unpinned) {
         self.superblock = primary;
         self.committed = self.transid;
         self.transid = self.transid.saturating_add(1);
         let written = core::mem::take(&mut self.dirty);
-        if self.clean.len().saturating_add(written.len()) > 4096 {
-            self.clean = written;
-        } else {
-            for (logical, node) in written {
-                if fallible::insert(&mut self.clean, logical, node).is_err() {
-                    break;
-                }
+        for (logical, node) in written {
+            // FALLIBLE: the clean nodes' own insert, which reports running out
+            // of memory.
+            if self.clean.insert(logical, node).is_err() {
+                break;
             }
         }
         self.space.unpin(unpinned);

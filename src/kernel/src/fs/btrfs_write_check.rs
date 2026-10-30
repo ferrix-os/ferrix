@@ -32,6 +32,7 @@ use ferrix_vfs::{Errno, FileType, NewNode, RenameMode};
 use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
+mod clean_check;
 mod reclaim_check;
 mod stuck_check;
 
@@ -386,6 +387,16 @@ pub fn run() -> Result<Report, &'static str> {
     crate::console::println!(
         "  btrfs-rw a sync past a file whose writeback failed answered ENOMEM and still \
          committed the other file; the next sync committed the first"
+    );
+    let clean = clean_check::run(rdev)?;
+    crate::console::println!(
+        "  reclaim  btrfs-rw: {} bytes of clean tree nodes counted in SReclaimable and \
+         MemAvailable, none taken by a job's reclaim, {} taken by the machine's; {} given back \
+         freed {} frames, and the directory read again off the disk the same",
+        clean.held,
+        clean.reclaimed,
+        clean.given,
+        clean.frames,
     );
     Ok(report)
 }

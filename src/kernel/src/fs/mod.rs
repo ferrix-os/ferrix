@@ -98,6 +98,7 @@ use ferrix_vfs::{
 
 use crate::hooks::Full;
 use crate::mm;
+use crate::object::quota;
 use crate::power::Flush;
 use crate::syscall::program::ProgramFile;
 use crate::syscall::time;
@@ -151,10 +152,18 @@ pub fn install() -> Result<(), Full> {
     portfd::install()
 }
 
-/// The dentry and inode caches' shrinker, which a reclaim that fell short of
-/// its pages calls (`user::cache`): the cache every namespace shares.
+/// The filesystem's shrinker, which a reclaim that fell short of its pages
+/// calls (`user::cache`): the dentry and inode caches every namespace
+/// shares, then the clean tree nodes of the writable btrfs mounts. Those
+/// are kernel heap charged to no job (`btrfs`, "Clean tree nodes are
+/// reclaimable"), so only a reclaim that may take what the kernel's owner,
+/// [`quota::NONE`], holds -- the whole machine's -- takes them.
 fn shrink_dentries(takes: &dyn Fn(u32) -> bool, want: u64) -> u64 {
-    namespace().shrink(takes, want)
+    let given = namespace().shrink(takes, want);
+    if given >= want || !takes(quota::NONE) {
+        return given;
+    }
+    given.saturating_add(btrfs::drop_clean(want - given))
 }
 
 /// Read the file at `path` in the root the initramfs was unpacked into.

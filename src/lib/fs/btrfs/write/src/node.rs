@@ -120,6 +120,21 @@ impl TreeNode {
         }
     }
 
+    /// What the node holds of the heap: itself, its list, and each item's
+    /// payload, as their capacities say -- what dropping it gives back,
+    /// before the heap rounds each allocation up to its size class.
+    #[must_use]
+    pub fn heap_bytes(&self) -> u64 {
+        let lists = match &self.body {
+            Body::Leaf(items) => items.iter().map(|item| item.data.capacity()).fold(
+                items.capacity().saturating_mul(size_of::<LeafItem>()),
+                usize::saturating_add,
+            ),
+            Body::Internal(ptrs) => ptrs.capacity().saturating_mul(size_of::<KeyPtr>()),
+        };
+        size_of::<TreeNode>().saturating_add(lists) as u64
+    }
+
     /// Whether the node holds nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {

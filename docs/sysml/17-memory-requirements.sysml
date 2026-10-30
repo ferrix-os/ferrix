@@ -2744,5 +2744,17 @@ package FerrixMemoryRequirements {
             attribute :>> unit = ("user::space::AddressSpace::resident_split",
                 "user::vmo::Vmo::is_disk_file");
         }
+        // docs/RAM-RELEASE.md §3: the clean btrfs nodes, reclaimable heap.
+        requirement <'L.user.175'> cleanBtrfsNodesAreAvailable : ItemLowLevel {
+            attribute :>> statement = "/proc/meminfo's SReclaimable shall be the bytes the
+                writable btrfs mounts' clean tree nodes hold, and MemAvailable shall
+                count them besides the free frames and the clean page cache.";
+            attribute :>> criterion = "With a wide directory read on the stage 12 disk,
+                SReclaimable is the mounts' count in KiB, and MemAvailable exceeds
+                the free frames and reclaimable pages by that count within half the
+                volume's clean bytes (the `reclaim` line of test-btrfs).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = "ferrix_btrfs_write::volume::WriteVolume::clean_bytes";
+        }
     }
 }

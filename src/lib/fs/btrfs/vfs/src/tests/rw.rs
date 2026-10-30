@@ -1327,3 +1327,87 @@ fn a_file_whose_writeback_fails_holds_back_no_other_files_commit() {
     );
     drop((stuck, kept));
 }
+
+/// A [`Disk`] that, while set to, asks its own mount for clean nodes from
+/// inside every read: with the volume's lock held by the operation reading.
+#[derive(Clone, Debug)]
+struct Asking {
+    disk: Disk,
+    mount: Arc<Mutex<Option<std::sync::Weak<RwBtrfs<Asking>>>>>,
+    answers: Arc<Mutex<Vec<u64>>>,
+}
+
+impl Device for Asking {
+    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+        let mount = self
+            .mount
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(fs) = mount.and_then(|weak| weak.upgrade()) {
+            self.answers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(fs.drop_clean(u64::MAX));
+        }
+        self.disk.read_at(physical, buf, kind)
+    }
+}
+
+impl ferrix_btrfs_write::WriteDevice for Asking {
+    fn write_at(&mut self, physical: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+        self.disk.write_at(physical, data)
+    }
+
+    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+        self.disk.flush()
+    }
+}
+
+/// Clean nodes are given up between operations, all of them in batches,
+/// and counted as the lock goes; a volume an operation holds gives none and
+/// is not waited for -- with the spinning parker here, a wait would never
+/// end, since the holder is the one asking.
+///
+/// Verifies: L.btrfs.120, L.btrfs.121
+#[test]
+fn clean_nodes_go_between_operations_only() {
+    let asking = Asking {
+        disk: Disk::new(BLANK),
+        mount: Arc::new(Mutex::new(None)),
+        answers: Arc::new(Mutex::new(Vec::new())),
+    };
+    let fs = RwBtrfs::mount(
+        asking.clone(),
+        0x0800_0011,
+        storage(),
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .unwrap();
+    let root = fs.root();
+    for i in 0..1000 {
+        drop(make_file(&root, std::format!("file-{i}").as_bytes(), &[]));
+    }
+    fs.sync().unwrap();
+    assert!(fs.clean_bytes() > 0, "a commit's nodes are counted clean");
+    let mut batches = 0;
+    while fs.drop_clean(u64::MAX) > 0 {
+        batches += 1;
+    }
+    assert!(batches > 1, "the nodes went in one batch");
+    assert_eq!(fs.clean_bytes(), 0);
+
+    *asking.mount.lock().unwrap() = Some(Arc::downgrade(&fs));
+    assert!(root.lookup(b"file-33").is_ok());
+    *asking.mount.lock().unwrap() = None;
+    let answers = asking.answers.lock().unwrap().clone();
+    assert!(!answers.is_empty(), "the lookup read nothing");
+    assert!(
+        answers.iter().all(|&given| given == 0),
+        "a busy volume gave nodes"
+    );
+    assert!(fs.clean_bytes() > 0, "the lookup's nodes are counted clean");
+    assert!(fs.drop_clean(u64::MAX) > 0);
+}
