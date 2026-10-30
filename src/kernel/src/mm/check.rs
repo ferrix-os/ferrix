@@ -1248,7 +1248,9 @@ pub fn check_a_large_block_goes_back_with_the_section() -> Result<(), &'static s
         if first.is_some() { ", the first: " } else { "" },
         first.unwrap_or(""),
     );
-    outcome
+    // Every attempt failed: the first one's reason is the one to give, since
+    // a later attempt starts from whatever the failed one left behind.
+    outcome.map_err(|last| first.unwrap_or(last))
 }
 
 /// How many times [`check_a_large_block_goes_back_with_the_section`] tries.
