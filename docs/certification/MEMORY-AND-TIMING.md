@@ -1142,7 +1142,10 @@ What bounds the work in them:
   remove from the map and the frees of its lists, and the lock is taken only
   if it is free: a reclaim never waits for an operation, which may itself be
   allocating. The shrinker asks each writable mount once per reclaim, so one
-  reclaim drops at most 64 nodes a mount. The trim at each hold
+  reclaim drops at most 64 nodes a mount. The hold is the volume's sleeping
+  lock: it can be preempted, and nothing is masked across it but each
+  free's own window in the heap, so no worst hold is measured for it
+  (the consultant's ruling, ledger line 5011). The trim at each hold
   (`WriteVolume::trim_clean`) drops what the operations since the last
   overshot `CLEAN_NODES` by: at most what they loaded, each node once, paid
   for by the read that loaded it. A place in the queue of loads is skipped

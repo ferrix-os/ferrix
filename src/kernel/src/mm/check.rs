@@ -1302,8 +1302,28 @@ pub fn check_heap_caches() -> Result<(), &'static str> {
     caches_on_every_processor()
 }
 
-/// [`check_heap_caches`]'s single-processor half.
+/// [`check_heap_caches`]'s single-processor half. The heap's count it reads
+/// is the whole machine's, and another processor's allocation or free
+/// between two reads moves it: an attempt so disturbed is made again, at
+/// most [`ONE_PROCESSOR_ATTEMPTS`] times, and one undisturbed attempt with
+/// every count exact passes. A defect fails every attempt.
 fn caches_on_one_processor() -> Result<(), &'static str> {
+    let mut outcome = Ok(());
+    for _ in 0..ONE_PROCESSOR_ATTEMPTS {
+        outcome = caches_on_one_processor_once();
+        if outcome.is_ok() {
+            break;
+        }
+    }
+    outcome
+}
+
+/// How many times [`caches_on_one_processor`] tries.
+const ONE_PROCESSOR_ATTEMPTS: usize = 5;
+
+/// One attempt of [`caches_on_one_processor`]; gives back everything it
+/// took, whatever it answers.
+fn caches_on_one_processor_once() -> Result<(), &'static str> {
     let refill = ferrix_heap::REFILL;
     let depth = ferrix_heap::CACHE_DEPTH;
     // Objects to free into a full cache later, made before the drain so
@@ -1346,17 +1366,23 @@ fn caches_on_one_processor() -> Result<(), &'static str> {
     let _ = mm::drain_caches();
     let mut drain_nanos = crate::timer::now_nanos().saturating_sub(started);
     let drained = mm::heap_raw_allocated();
-    if refilled != base + refill * CHECK_SIZE {
-        return Err("an empty cache's refill did not take REFILL objects from the heap");
-    }
-    if popped != refilled {
-        return Err("an allocation the cache could serve went to the heap");
-    }
-    if pushed != popped || held != Some(refill) {
-        return Err("a free the cache had room for went to the heap");
-    }
-    if drained != base {
-        return Err("the drain did not give the cache's objects back to the heap");
+    let first = if refilled != base + refill * CHECK_SIZE {
+        Err("an empty cache's refill did not take REFILL objects from the heap")
+    } else if popped != refilled {
+        Err("an allocation the cache could serve went to the heap")
+    } else if pushed != popped || held != Some(refill) {
+        Err("a free the cache had room for went to the heap")
+    } else if drained != base {
+        Err("the drain did not give the cache's objects back to the heap")
+    } else {
+        Ok(())
+    };
+    if first.is_err() {
+        for object in spare.drain(..) {
+            give_one(object);
+        }
+        let _ = mm::drain_caches();
+        return first;
     }
 
     // L.mm.94: a full cache's next free gives back REFILL and that one;
