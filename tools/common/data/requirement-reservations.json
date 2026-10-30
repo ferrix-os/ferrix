@@ -202,6 +202,13 @@
       "branch": "docs/game-mode-sched",
       "date": "2026-10-30",
       "purpose": "docs/GAME-MODE-SCHED.md, game mode's layer B (GAME-MODE.md §13, ledger 5115 (12)): L.sched.107-109 F7 per-task slice requests (deadline from the effective request, never above the queue's slice, set only by sched_setattr or the mark; inherited by clone and fork, ledger 5232 (2)); H.SCHED.19 and L.sched.110-114 the frame mark (only the right marks, the order inside eligibility, the kernel's bound for the unmarked, the end at close/exec/unmark/exit and never inherited, nothing else changed); L.sched.115-118 lends (served request, wake history, no chains, a lent mark only orders); L.sched.119-120 the idle-gap class; L.sched.121-122 deadlines from the frame"
+    },
+    {
+      "ids": ["H.FAIL.11", "L.object.259-261", "L.x86_64.247-248"],
+      "owner": "mce-pagecache",
+      "branch": "feature/mce-pagecache",
+      "date": "2026-10-31",
+      "purpose": "docs/MACHINE-CHECK-PAGECACHE.md, poison in a clean page-cache page (customer, 2026-10-30, machine-check item 3; consultant OK IF (1)-(12), ledger 5294): H.FAIL.11 a clean cached page costs a disk read and nothing else, a page not clean never dropped, a frame not retired never taken; L.object.259 cache::drop_poisoned (retire first, the walk, the clean take with the frame checked again); 260 Vmo::read_present through copy_mc answering Poisoned; 261 read_piece's drop and refill, EIO when not clean; L.x86_64.247 the ring-3 no-signal path; 248 the poll's drop"
     }
   ]
 }
