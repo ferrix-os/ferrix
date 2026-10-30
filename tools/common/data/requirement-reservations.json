@@ -202,6 +202,13 @@
       "branch": "feature/core-quarantine",
       "date": "2026-10-30",
       "purpose": "docs/CORE-QUARANTINE.md, taking an unstable processor out of service (customer, 2026-10-30, item 6; consultant OK IF Q1-Q14, ledger 4856, Q12): H.SCHED.18 the mechanism's failure modes; L.sched the shared placement helper, re-home at enqueue, evacuation with timer objects, the park handshake and its undo, back in service; L.smp the in-service predicate and Linux surface, the refusals, one function behind both doors with audit records, CpuService and CPU_SERVICE's rights and arguments, the sysfs write through setters; L.iommu the IRTE retarget's single store and unchanged fields, invalidation with its wait, serialized allocation, other sources refused"
+    },
+    {
+      "ids": ["L.mm.93-98"],
+      "owner": "heap-cpu-caches",
+      "branch": "feature/heap-cpu-caches",
+      "date": "2026-10-30",
+      "purpose": "docs/HEAP-CACHES.md, per-processor heap caches (consultant OK IF 1-10, ledger 4914, condition 6): pop and refill, push and overflow, every refusal drains and retries, heap_allocated less the cached bytes, the drain entered with no lock held, an injected refusal not retried"
     }
   ]
 }
