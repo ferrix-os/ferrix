@@ -209,6 +209,13 @@
       "branch": "feature/heap-cpu-caches",
       "date": "2026-10-30",
       "purpose": "docs/HEAP-CACHES.md, per-processor heap caches (consultant OK IF 1-10, ledger 4914, condition 6): pop and refill, push and overflow, every refusal drains and retries, heap_allocated less the cached bytes, the drain entered with no lock held, an injected refusal not retried"
+    },
+    {
+      "ids": ["L.mm.99-100", "L.init.5", "L.user.173-175", "L.btrfs.119-121"],
+      "owner": "ram-release",
+      "branch": "feature/ram-release",
+      "date": "2026-10-30",
+      "purpose": "docs/RAM-RELEASE.md (consultant: R1 NOT YET B1-B4, R2 OK IF R2.1-R2.6, ledger 4971): the initramfs archive's pages to the frame allocator, no reader outliving them (L.mm.99-100); pid 1's inputs surviving it (L.init.5); the tmpfs keeping the mount directories and devmgr's set, devmgr restarting from it, MemAvailable and SReclaimable counting btrfs clean nodes (L.user.173-175); btrfs clean nodes evicted never dirty or in use, taken by a machine-wide reclaim only, counted exactly (L.btrfs.119-121)"
     }
   ]
 }
