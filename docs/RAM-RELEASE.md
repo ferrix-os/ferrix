@@ -177,9 +177,9 @@ a wide directory made, synced and read on a fresh mount; `SReclaimable` and
 `MemAvailable` hold its nodes; a job's reclaim takes none; the machine's
 takes some; giving all back raises the free frames by at least a quarter of
 the bytes (x86_64: 474,912 bytes, 124 frames); the listing read again comes
-off the disk the same. `mm::drain_caches` is not on this branch's base (it
-is `feature/heap-cpu-caches`'s), so the check drains nothing first; a heap
-with per-processor caches would need it there.
+off the disk the same. The heap's per-processor caches are drained
+(`mm::drain_caches`) before the frames are counted and after the nodes go
+back, as R2.3 asks.
 
 **A reclaim that frees heap but no frame** does not loop without end: the
 page cache's fill and write retry at most 8 times, `memory.reclaim` counts
@@ -196,10 +196,8 @@ the nodes and a job's reclaim that takes them (rr-4bcea58-avail-ctl,
 rr-4bcea58-job-ctl, stage 12 stops). Rows PASSED: check and test-restart
 --boot blk on 974fb4746; build --release --arch all, test-btrfs, test-boot
 x86_64 kvm, kvm --smp 2, aarch64 and armv7a on 4bcea5835 (974fb4746 changes
-two doc comments). Open: the heap's per-processor caches
-(`feature/heap-cpu-caches`) are not under this base, so the boot check
-drains none before it counts frames; when both land, the check calls
-`mm::drain_caches` first. R1 waits on B1-B4.
+two doc comments). Rebased on the heap caches (e4d44f24a), the boot check drains them around
+its frame count. R1 waits on B1-B4.
 
 **R2.5.** Nothing in the kernel reads `MemAvailable` but `/proc/meminfo`'s
 render: `sysinfo` reports free frames, and no reclaim or OOM decision looks

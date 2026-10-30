@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "d72feb8c889434c490239cfaee5ee0f740e70b8c0913675284146d7cdde83435",
+  "digest": "5fc307a19c0ff0c83cefcd0af970f980dca5074e89c269011905732f44e70589",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 149,
-    "elements": 8156,
+    "elements": 8176,
     "maturity": {
       "implemented": 285,
       "inProgress": 31,
@@ -56559,6 +56559,63 @@
                   }
                 }
               ]
+            },
+            {
+              "name": "cleanBtrfsNodesAreAvailable",
+              "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::cleanBtrfsNodesAreAvailable",
+              "kind": "requirement",
+              "shortName": "L.user.175",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 2748
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::cleanBtrfsNodesAreAvailable",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"/proc/meminfo's SReclaimable shall be the bytes the writable btrfs mounts' clean tree nodes hold, and MemAvailable shall count them besides the free frames and the clean page cache.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2751
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::cleanBtrfsNodesAreAvailable",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With a wide directory read on the stage 12 disk, SReclaimable is the mounts' count in KiB, and MemAvailable exceeds the free frames and reclaimable pages by that count within half the volume's clean bytes (the `reclaim` line of test-btrfs).\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2755
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::cleanBtrfsNodesAreAvailable",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2756
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::cleanBtrfsNodesAreAvailable",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_btrfs_write::volume::WriteVolume::clean_bytes\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2757
+                  }
+                }
+              ]
             }
           ]
         }
@@ -90571,6 +90628,177 @@
                   "source": {
                     "file": "docs/sysml/24-btrfs-requirements.sysml",
                     "line": 1273
+                  }
+                }
+              ]
+            },
+            {
+              "name": "cleanNodesGoBetweenOperationsOnly",
+              "qualifiedName": "FerrixBtrfsRequirements::Full::cleanNodesGoBetweenOperationsOnly",
+              "kind": "requirement",
+              "shortName": "L.btrfs.119",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/24-btrfs-requirements.sysml",
+                "line": 1277
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanNodesGoBetweenOperationsOnly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A clean tree node shall be dropped only between operations, by whoever holds the volume for them, oldest first; a load shall drop none, so that no node an operation has loaded goes while it runs, and no node of the running transaction shall ever be dropped.\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1282
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanNodesGoBetweenOperationsOnly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With the clean nodes at their number, the fs tree's root held and a leaf not, next_item from a gap between two leaves answers the next leaf's first item, prev_item from slot 0 of a leaf the previous leaf's last, and read_dir from the gap every entry after it; a trim brings 4,106 clean nodes to 4,096 by the oldest and leaves the dirty ones; nodes given up in batches until none is left leave every dirty node, and the edit they held is in the next commit.\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1290
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanNodesGoBetweenOperationsOnly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.STORE.4\", \"H.STORE.5\")",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1291
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanNodesGoBetweenOperationsOnly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_btrfs_write::volume::WriteVolume::load\", \"ferrix_btrfs_write::volume::WriteVolume::trim_clean\", \"ferrix_btrfs_write::volume::WriteVolume::drop_clean\", \"ferrix_btrfs_write::clean::CleanNodes::drop_oldest\", \"ferrix_btrfs_write::tree::WriteVolume::next_item\", \"ferrix_btrfs_write::tree::WriteVolume::next_leaf\")",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1297
+                  }
+                }
+              ]
+            },
+            {
+              "name": "onlyTheMachinesReclaimTakesCleanNodes",
+              "qualifiedName": "FerrixBtrfsRequirements::Full::onlyTheMachinesReclaimTakesCleanNodes",
+              "kind": "requirement",
+              "shortName": "L.btrfs.120",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/24-btrfs-requirements.sysml",
+                "line": 1299
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::onlyTheMachinesReclaimTakesCleanNodes",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A reclaim of the whole machine that falls short of pages shall give back the clean tree nodes of every writable btrfs mount no operation holds at the time, at most 64 nodes a mount per hold of its lock and never waiting for the lock; a job's reclaim shall give back none of them, since no job is charged for them.\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1304
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::onlyTheMachinesReclaimTakesCleanNodes",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On the stage 12 disk, a job's reclaim leaves the volume's count of clean bytes unchanged and a reclaim of the machine lowers it; giving them all back raises the free frames by at least a quarter of the bytes given, and the directory read again lists the same; through a mount, asking for clean nodes from inside one of its own reads gives none and returns, and between operations they all go in more than one batch (the `reclaim` line of test-btrfs).\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1312
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::onlyTheMachinesReclaimTakesCleanNodes",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.QUOTA.12\", \"H.QUOTA.13\")",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1313
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::onlyTheMachinesReclaimTakesCleanNodes",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"ferrix_btrfs_write::volume::WriteVolume::drop_clean\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1314
+                  }
+                }
+              ]
+            },
+            {
+              "name": "cleanBytesAreCountedExactly",
+              "qualifiedName": "FerrixBtrfsRequirements::Full::cleanBytesAreCountedExactly",
+              "kind": "requirement",
+              "shortName": "L.btrfs.121",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/24-btrfs-requirements.sysml",
+                "line": 1316
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanBytesAreCountedExactly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Each writable volume shall keep the heap its clean nodes hold as an exact running count, changed as each node is loaded, copied, dropped or committed, and its mount shall publish that count each time its lock is let go.\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1320
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanBytesAreCountedExactly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"After a commit, a read of a whole directory, an edit and another commit, the count equals the sum over the nodes held; each drop lowers it by exactly what it answers; through a mount it is above zero after a sync and after a read, and zero once every node is given back.\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1325
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanBytesAreCountedExactly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.12\"",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1326
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixBtrfsRequirements::Full::cleanBytesAreCountedExactly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"ferrix_btrfs_write::clean::CleanNodes::insert\", \"ferrix_btrfs_write::clean::CleanNodes::remove\", \"ferrix_btrfs_write::clean::CleanNodes::drop_oldest\", \"ferrix_btrfs_write::node::TreeNode::heap_bytes\", \"ferrix_btrfs_write::volume::WriteVolume::clean_bytes\")",
+                  "source": {
+                    "file": "docs/sysml/24-btrfs-requirements.sysml",
+                    "line": 1331
                   }
                 }
               ]

@@ -1064,7 +1064,7 @@ pub(crate) fn cached_bytes() -> usize {
     CACHED.load(Ordering::Relaxed)
 }
 
-// CHECKS-ONLY: user/alloc_check.rs
+// CHECKS-ONLY: user/alloc_check.rs, fs/btrfs_write_check/clean_check.rs
 /// Give everything every processor's cache holds back to the heap, one
 /// cache lock at a time with the heap's under it (L.mm.97). Entered with no
 /// cache lock held on this processor: one held here would be taken again,

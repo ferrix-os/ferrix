@@ -11,10 +11,9 @@
 //! * giving them all back raises the free frames, not only the heap's free
 //!   bytes, and the listing read again comes off the disk the same.
 //!
-//! The heap's per-processor caches, where they exist, hold freed objects
-//! back from their slab pages; this tree has none (`mm::drain_caches` is on
-//! `feature/heap-cpu-caches`), so nothing is drained before the frames are
-//! counted.
+//! The heap's per-processor caches hold freed objects back from their slab
+//! pages, so they are drained (`mm::drain_caches`) before the frames are
+//! counted and again after the nodes are given back.
 
 use alloc::format;
 use alloc::sync::Arc;
@@ -268,6 +267,7 @@ fn reclaim_reaches(volume: &RwBtrfs<Disk>, held: u64) -> Result<u64, &'static st
 /// Give every clean node of `volume` back, a batch at a time, and answer
 /// the bytes given and the frames that came free.
 fn give_all_back(volume: &RwBtrfs<Disk>) -> Result<(u64, u64), &'static str> {
+    let _ = mm::drain_caches();
     let before = mm::free_frames();
     let mut given = 0u64;
     loop {
@@ -277,6 +277,7 @@ fn give_all_back(volume: &RwBtrfs<Disk>) -> Result<(u64, u64), &'static str> {
         }
         given = given.saturating_add(more);
     }
+    let _ = mm::drain_caches();
     let frames = mm::free_frames().saturating_sub(before);
     if volume.clean_bytes() != 0 {
         return Err("giving back every clean node left some counted");
