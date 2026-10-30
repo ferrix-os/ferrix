@@ -3,7 +3,8 @@
 //! Written here rather than by `cpio` or `bsdcpio` for the reason `fat.rs`
 //! writes FAT32: one fewer host tool, and an archive that is the same bytes on
 //! every machine, because every timestamp, inode number and owner below is a
-//! constant rather than something read off the build host's filesystem.
+//! constant, or made from the archive's own names, rather than something read
+//! off the build host's filesystem.
 //!
 //! # What is in it
 //!
@@ -30,9 +31,18 @@ use std::path::Path;
 use crate::{Error, Result};
 use crate::{native, omz, ports};
 
-/// Every timestamp in the archive: 2026-01-01 00:00:00 UTC, the same instant
-/// `fat.rs` stamps the boot image with.
+/// Every file's and link's timestamp in the archive: 2026-01-01 00:00:00
+/// UTC, the same instant `fat.rs` stamps the boot image with. A directory's
+/// is this moved on by its names ([`directory_time`]).
 pub(crate) const FIXED_MTIME: u32 = 1_767_225_600;
+
+/// How far past [`FIXED_MTIME`] a directory's time may lie: 2^24 s, about
+/// 194 days.
+const DIRECTORY_TIME_SPAN: u32 = 1 << 24;
+
+/// Where `c_mtime` lies in a newc header: after the magic and five fields of
+/// eight hex digits (ino, mode, uid, gid, nlink).
+const MTIME_AT: usize = 6 + 5 * 8;
 
 /// Where the marker is unpacked, relative to the root.
 pub(crate) const MARKER_PATH: &str = "etc/ferrix/initramfs";
@@ -64,6 +74,11 @@ struct Newc {
     /// Each directory an entry so far lies beneath, with the first such
     /// entry: what [`Newc::entry`] refuses to put a file or a link over.
     filled: BTreeMap<String, String>,
+    /// Every name so far, for the directories' times.
+    names: Vec<String>,
+    /// Each directory entry's name and where its `c_mtime` lies in `bytes`,
+    /// which [`Newc::finish`] fills in.
+    directories: Vec<(String, usize)>,
 }
 
 impl Newc {
@@ -72,6 +87,8 @@ impl Newc {
             bytes: Vec::new(),
             next_ino: 1,
             filled: BTreeMap::new(),
+            names: Vec::new(),
+            directories: Vec::new(),
         }
     }
 
@@ -118,6 +135,11 @@ impl Newc {
     ) -> Result<()> {
         if name != "TRAILER!!!" {
             self.refuse_over_filled(name, mode)?;
+            self.names.push(name.to_owned());
+            if mode & 0o170_000 == S_IFDIR {
+                self.directories
+                    .push((name.to_owned(), self.bytes.len() + MTIME_AT));
+            }
         }
         let size = u32::try_from(data.len())
             .map_err(|_| Error::new(format!("{name} is too large for a newc entry")))?;
@@ -194,9 +216,59 @@ impl Newc {
     }
 
     fn finish(mut self) -> Result<Vec<u8>> {
+        self.stamp_directories();
         self.entry("TRAILER!!!", 0, 0, 1, ROOT, &[])?;
         Ok(self.bytes)
     }
+
+    /// Give each directory entry the time [`directory_time`] makes of the
+    /// names directly in it.
+    fn stamp_directories(&mut self) {
+        let mut inside: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for name in &self.names {
+            let parent = name.rsplit_once('/').map_or("", |(parent, _)| parent);
+            inside.entry(parent).or_default().push(name);
+        }
+        let stamps: Vec<(usize, u32)> = self
+            .directories
+            .iter()
+            .map(|(name, at)| {
+                let mut names = inside.get(name.as_str()).cloned().unwrap_or_default();
+                names.sort_unstable();
+                names.dedup();
+                (*at, directory_time(&names))
+            })
+            .collect();
+        for (at, time) in stamps {
+            // Every offset is inside a header [`Newc::entry`] wrote.
+            if let Some(field) = self.bytes.get_mut(at..at + 8) {
+                field.copy_from_slice(format!("{time:08X}").as_bytes());
+            }
+        }
+    }
+}
+
+/// A directory's time: [`FIXED_MTIME`] moved on by an FNV-1a hash of the
+/// names directly in it, sorted.
+///
+/// The same names give the same time, so the archive stays the same bytes
+/// on every machine. Other names give another time, as a directory's mtime
+/// moves on Linux when an entry is added, removed or renamed. That is what
+/// fontconfig keys its caches on: the kernel unpacks the archive over a
+/// disk's `/` at every boot (`src/kernel/src/fs/root_disk.rs`), and with one
+/// fixed time a `/usr/share/fonts` whose fonts changed kept the time of the
+/// one before, so a cache in `/var/cache/fontconfig` from an older image went
+/// on saying it held no fonts. Steam's browser then found none at all and
+/// every renderer crashed (the N150 box, 2026-10-30).
+fn directory_time(names: &[&str]) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for name in names {
+        for &byte in name.as_bytes().iter().chain(&[0]) {
+            hash ^= u32::from(byte);
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+    }
+    FIXED_MTIME + hash % DIRECTORY_TIME_SPAN
 }
 
 /// An archive of `directories` and then `files`, each a path, its
@@ -1021,6 +1093,40 @@ mod tests {
             ]
         );
         assert!(entries(&[b'x'; 200]).is_none());
+    }
+
+    /// A directory's time follows the names in it: another name moves it, a
+    /// file's new contents do not, and files keep the fixed time.
+    #[test]
+    fn a_directory_time_moves_with_the_names_in_it_and_only_with_them() {
+        let archive = |names: &[&str], data: &[u8]| {
+            let mut written = Newc::new();
+            written.directory("fonts", 0o755).unwrap();
+            written.directory("fonts/inter", 0o755).unwrap();
+            for name in names {
+                written.file(name, 0o644, data).unwrap();
+            }
+            written.finish().unwrap()
+        };
+        let time = |bytes: &[u8], name: &str| {
+            ferrix_cpio::Archive::new(bytes)
+                .find(name)
+                .unwrap()
+                .unwrap()
+                .mtime
+        };
+        let old = archive(&["fonts/dejavu.ttf"], b"a");
+        let new = archive(&["fonts/dejavu.ttf", "fonts/plex.ttf"], b"a");
+        let rewritten = archive(&["fonts/dejavu.ttf"], b"another font");
+
+        assert_ne!(time(&old, "fonts"), time(&new, "fonts"));
+        assert_eq!(time(&old, "fonts"), time(&rewritten, "fonts"));
+        assert_eq!(time(&old, "fonts/inter"), time(&new, "fonts/inter"));
+        assert_eq!(time(&new, "fonts/plex.ttf"), FIXED_MTIME);
+        assert_eq!(
+            archive(&["fonts/plex.ttf"], b"a"),
+            archive(&["fonts/plex.ttf"], b"a")
+        );
     }
 
     /// An image with more drivers than devmgr's protocol names is refused
