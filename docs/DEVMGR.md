@@ -376,10 +376,52 @@ RESTARTED devmgr -> kernel, 16 bytes
 
    Whether to start it again is the service manager's own restart policy
    (`src/lib/init/restart`, `docs/INIT.md` §5.4): `Restart=always` for a kind
-   that is started again and `Restart=no` for the rest, no delay, and a start
-   limit of eight. A native program has no clock, so the limit is a count,
-   not a rate: eight restarts per device, after which the device stays
-   quiesced, as does one whose restarted driver dies before it publishes.
+   that is started again and `Restart=no` for the rest, and a start limit of
+   eight restarts per device in the life of the machine, a count, after
+   which the device stays quiesced (`gave-up`).
+
+   **A crash loop escalates** (the customer, 2026-10-30, after the N150 box's
+   Intel driver died at every start). No restart is made at once: the first
+   comes 1 s after the death, and each one of a crash loop waits twice the
+   one before (`ferrix_restart::Escalation`, over the policy's backoff). A
+   start has failed when its driver dies before it is up -- published, or
+   started for a kind that publishes nothing -- or within 10 s of it; a
+   driver that stayed up 10 s ends the streak, and its death is restarted as
+   a first one, 1 s later. After two failed restarts in a row the next start
+   is made on a **reinitialised** device, 4 s later: `devmgr` quiesces it
+   again, so the kernel turns its bus mastering off once more and reads back
+   every register it owns in its configuration space (SAFETY-MANUAL AoU-22),
+   and the driver brings the device up from its own reset as every start
+   does. The kernel has no device-reset call (`L.device.47`), so that is all
+   reinitialising is. If that start fails too, the device is
+   **quarantined**: nothing is started on it again, and the pins its dead
+   drivers left stay in the kernel's quarantine, mapped and held, until a
+   driver of it is accepted again. A device that will not quiesce again, or
+   whose next start the kernel or `devmgr` refuses, is quarantined at once.
+   Each step is a line and an event on `devmgr-events` (`docs/DESKTOP.md`
+   §4.2):
+
+```
+died intel 0x00000010 70          the first driver
+restarted intel 0x00000010 1      1 s later
+died intel 0x00000010 70
+restarted intel 0x00000010 2      2 s later
+died intel 0x00000010 70
+reinit intel 0x00000010 3         "... the device is reinitialised ..."
+restarted intel 0x00000010 3      4 s later, on the reinitialised device
+died intel 0x00000010 70
+quarantined intel 0x00000010 3    "devmgr   intel 0x00000010 quarantined after 3 restarts: ..."
+```
+
+   A BIND (a write to the driver's `bind`, `docs/SYSFS.md` §5) is the way
+   out of a quarantine: it starts the driver at once, as any BIND does, and
+   the crash loop begins again from nothing. A quarantined device keeps up to
+   twice its pin budget of dead drivers' pages, mapped and charged to no job,
+   until that start is accepted or the machine restarts. The Intel keeper's
+   own worker restarts never reach `devmgr`: only the keeper's death counts
+   here, and a keeper that gives up at its start is one failed start
+   (`cargo xtask test-restart --boot crashloop` is the gate: a driver that
+   dies at every start on the QEMU stand-in for ADL-N's GPU).
 
 What each kind gets back (2026-09-27, T0 of the live kernel update plan):
 

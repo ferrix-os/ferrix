@@ -358,9 +358,16 @@ engine a predecessor left pointed at a status page (`RING_HWS_PGA` not 0),
 never the GT (`GRDOM_FULL`) and never the function (FLR, which the kernel
 refuses there, K4), and sends no HELLO if any such reset fails
 (`docs/INTEL-GPU.md` §11.2); that is the driver's property, outside the
-element. devmgr starts no driver again
-after one that died before publishing, or once a device's restart budget is
-spent, so a device keeps at most two drivers' pins that way. An explicit rebind
+element. devmgr starts a driver that keeps dying at its start (before it is
+up, or within 10 s of it) at most three times more -- two restarts, then one
+on the device quiesced again -- and then quarantines the device: it starts
+nothing on it again until an explicit bind, and none at all once the
+device's restart budget is spent (`docs/DEVMGR.md` §4). So a device keeps at
+most four drivers' pins that way, together never more than `2B` (below): a
+later driver whose pin would pass it is refused `QUARANTINE_FULL`, and devmgr
+counts that driver's death as one more failed start. A quarantined device
+keeps those pages, mapped and charged to no job, until a reboot or an
+explicit rebind whose driver is accepted. An explicit rebind
 of a device whose drivers die before publishing keeps one more driver's pins
 each time, up to the element's own bound: each device has a pin budget `B`
 (`object/pin.rs`, `docs/NVIDIA.md` §12.2), 66560 pages (260 MiB, one driver's

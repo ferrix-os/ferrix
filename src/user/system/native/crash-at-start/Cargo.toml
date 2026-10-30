@@ -1,0 +1,22 @@
+[package]
+name = "ferrix-crash-at-start"
+description = "A test driver that dies at every start, a page pinned: devmgr's crash-loop escalation's gate (test-restart --boot crashloop)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "crash-at-start"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

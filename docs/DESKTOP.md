@@ -610,7 +610,8 @@ There is no notification daemon and no D-Bus code in Rust in the tree.
   kernel's message does not carry). The helper binds the abstract socket
   `\0ferrix.devmgr.events` and writes each event as one line to every
   connected reader (`died snd 0x00000010 status 137`, `restarted snd
-  0x00000010 1`, `gave-up gpu 0x00000008 8`), keeping the last 32 for a
+  0x00000010 1`, `gave-up gpu 0x00000008 8`, and since 2026-10-30 a crash
+  loop's `reinit` and `quarantined`, `docs/DEVMGR.md` §4), keeping the last 32 for a
   reader that connects late. Readers are read-only; any uid may read, as
   the events say no more than the kernel log does. A slow reader is
   dropped rather than allowed to hold the helper, and the helper never

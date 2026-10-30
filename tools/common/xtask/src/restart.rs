@@ -36,6 +36,9 @@
 //!   image of its own ([`intel`]).
 //! * `intel-keeper`: the same image with the keeper killed instead, whose
 //!   programs are told their device was lost (`docs/INTEL-GPU.md` §11).
+//! * `crashloop`: an Intel driver on the same stand-in that dies at every
+//!   start, restarted twice with growing delays, started once more on a
+//!   reinitialised device, then quarantined ([`crashloop`]).
 //! * `all`: each of gpu, input, net and blk, one boot each.
 //!
 //! The drivers it kills are looked up afresh each round, and must be ones it
@@ -60,6 +63,7 @@ use crate::task::Task;
 use crate::{Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, native, ports, qemu};
 use crate::{uutils, zinc};
 
+mod crashloop;
 mod intel;
 mod update;
 mod usb;
@@ -70,7 +74,7 @@ pub(crate) const TASKS: &[Task] = &[
         name: "test-restart",
         help_at: 470,
         help: &[
-            "test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|intel|all; gpu if not given)",
+            "test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|intel|crashloop|all; gpu if not given)",
         ],
         run,
     },
@@ -170,7 +174,7 @@ impl Kind {
             Some("all") => vec![Kind::Gpu, Kind::Input, Kind::Net, Kind::Blk],
             Some(other) => {
                 return Err(Error::new(format!(
-                    "test-restart --boot takes gpu, input, net, blk, usb, nvme, intel or all, not `{other}`"
+                    "test-restart --boot takes gpu, input, net, blk, usb, nvme, intel, intel-keeper, crashloop or all, not `{other}`"
                 )));
             }
         })
@@ -232,6 +236,7 @@ fn test_restart(args: &Args) -> Result<()> {
     match args.boot.as_deref() {
         Some("intel") => return intel::test(args, intel::Victim::Worker),
         Some("intel-keeper") => return intel::test(args, intel::Victim::Keeper),
+        Some("crashloop") => return crashloop::test(args),
         _ => {}
     }
     let kinds = Kind::asked(args.boot.as_deref())?;

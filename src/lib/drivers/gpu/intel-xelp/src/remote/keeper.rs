@@ -45,7 +45,9 @@ pub const PING_NS: u64 = 500_000_000;
 /// box; ten seconds is a worker that will not come up.
 pub const START_NS: u64 = 10_000_000_000;
 /// Worker deaths one keeper survives, as devmgr's budget for a driver
-/// (§11): the ninth gives up.
+/// (§11): the ninth gives up. devmgr never sees these deaths, so its
+/// crash-loop escalation (`docs/DEVMGR.md` §4) counts only the keeper's own:
+/// a keeper that gives up at its start is one failed start there.
 pub const MAX_RESTARTS: u32 = 8;
 
 /// Binding slots: half again the front end's bindings, so the open

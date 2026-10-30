@@ -6,15 +6,18 @@
 //! ```text
 //! EVENT    devmgr -> devmgr-events, 48 bytes
 //!   0  magic     "FXDE"
-//!   4  what      u32: 1 died, 2 restarted, 3 gave up
+//!   4  what      u32: 1 died, 2 restarted, 3 gave up, 4 reinit,
+//!                5 quarantined
 //!   8  location  u32, the device's PCI address word
 //!   12 value     u32: the exit status (died), the restarts so far
-//!                (restarted, gave up)
+//!                (restarted, gave up, reinit, quarantined)
 //!   16 driver    [u8; 32], the driver's program name, NUL-padded
 //! LINE     devmgr-events -> reader, text
 //!   "died <driver> <location> <status>\n"
 //!   "restarted <driver> <location> <restarts>\n"
 //!   "gave-up <driver> <location> <restarts>\n"
+//!   "reinit <driver> <location> <restarts>\n"
+//!   "quarantined <driver> <location> <restarts>\n"
 //! ```
 //!
 //! A crate of its own: the kernel links `ferrix-devmgr-proto` and has no
@@ -48,6 +51,14 @@ pub enum What {
     /// It died once too often: its device stays quiesced; `value` is the
     /// restarts it had.
     GaveUp,
+    /// Its restarts died at their start, so its device is reinitialised and
+    /// it is started once more, the crash loop's last start (`docs/DEVMGR.md`
+    /// §4); `value` is the restarts so far, that one counted.
+    Reinit,
+    /// That start died too: its device is quarantined, and nothing is
+    /// started on it again but by an explicit bind; `value` is the restarts
+    /// it had.
+    Quarantined,
 }
 
 impl What {
@@ -56,6 +67,8 @@ impl What {
             Self::Died => 1,
             Self::Restarted => 2,
             Self::GaveUp => 3,
+            Self::Reinit => 4,
+            Self::Quarantined => 5,
         }
     }
 
@@ -64,6 +77,8 @@ impl What {
             1 => Some(Self::Died),
             2 => Some(Self::Restarted),
             3 => Some(Self::GaveUp),
+            4 => Some(Self::Reinit),
+            5 => Some(Self::Quarantined),
             _ => None,
         }
     }
@@ -75,6 +90,8 @@ impl What {
             Self::Died => "died",
             Self::Restarted => "restarted",
             Self::GaveUp => "gave-up",
+            Self::Reinit => "reinit",
+            Self::Quarantined => "quarantined",
         }
     }
 }
@@ -243,6 +260,15 @@ mod tests {
         let died = Event::new(What::Died, 0x10, 137, b"gpu");
         let length = died.line(&mut line);
         assert_eq!(&line[..length], b"died gpu 0x00000010 137\n");
+        for (what, said) in [
+            (What::Reinit, &b"reinit intel 0x00000010 3\n"[..]),
+            (What::Quarantined, b"quarantined intel 0x00000010 3\n"),
+        ] {
+            let event = Event::new(what, 0x10, 3, b"intel");
+            assert_eq!(Event::decode(&event.encode()), Ok(event));
+            let length = event.line(&mut line);
+            assert_eq!(&line[..length], said);
+        }
     }
 
     /// Bytes that are not an event are refused.

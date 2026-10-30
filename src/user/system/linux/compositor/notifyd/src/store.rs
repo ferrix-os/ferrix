@@ -336,6 +336,18 @@ pub fn from_driver_line(line: &str) -> Option<(String, String, String, Urgency)>
             format!("{driver} is not started again; its device stays off until the next boot"),
             Urgency::Critical,
         ),
+        "reinit" => (
+            format!("{kind} driver keeps crashing at its start"),
+            format!("{driver}: its device is reinitialised for one more try ({value} restarts)"),
+            Urgency::Normal,
+        ),
+        "quarantined" => (
+            format!("{kind} device quarantined"),
+            format!(
+                "{driver} crashed at every start, after its device was reinitialised too; it is not started again until the next boot or a bind"
+            ),
+            Urgency::Critical,
+        ),
         _ => return None,
     };
     Some((key, summary, body, urgency))
@@ -418,6 +430,13 @@ mod tests {
         let (_, summary, _, urgency) =
             from_driver_line("gave-up snd 0x00000020 8").expect("a line");
         assert_eq!(summary, "Sound driver stopped after 8 restarts");
+        assert_eq!(urgency, Urgency::Critical);
+        let (_, summary, _, urgency) = from_driver_line("reinit gpu 0x00000010 3").expect("a line");
+        assert_eq!(summary, "Graphics driver keeps crashing at its start");
+        assert_eq!(urgency, Urgency::Normal);
+        let (_, summary, _, urgency) =
+            from_driver_line("quarantined gpu 0x00000010 3").expect("a line");
+        assert_eq!(summary, "Graphics device quarantined");
         assert_eq!(urgency, Urgency::Critical);
         assert!(from_driver_line("nonsense").is_none());
     }
