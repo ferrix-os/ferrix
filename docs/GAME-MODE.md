@@ -519,12 +519,12 @@ trick, what it did, and its counterpart here.
 |---|---|---|---|---|---|
 | H1 | **The consoles' reserved cores** (PS4 and Xbox One, 2013) | the OS kept two of eight cores; the game had six to itself, and both later gave games part of the seventh [S] | three of four cores for the game and its path, one for the system, while a session lasts (F3, §5.5's floor) | A: the 1% lows, as §3.4 | F3 |
 | H2 | **Crash Bandicoot's own virtual memory** (PS1, 1996) | levels of 32 to 40 MB on 2 MB of RAM, paged in 64 KB chunks laid out on the disc in the order the player reaches them, so each arrived before it was needed [S] | **record and replay the game's page-ins**: the first run records which file pages and which anonymous regions the game touches, in order, from launch to the world; the next run's session pre-faults them in that order, in large batches, before the game asks (what Windows' Prefetch does at launch). `MADV_WILLNEED` is a hint ignored today (`syscall/memory.rs`) | A: launch to title is 199 to 213 s on develop kernels with faults a large share of the kernel's time (F11); a batch costs one lock hold where a fault costs one each. Unmeasured | a recorder that lands in the core ring and records one process's page-in order, so it gets its own design review (bounded memory; no new lock or allocation in the fault path; readable only by the session service under a right, and only for the admitted game's job); a ring-3 replayer; acting on `MADV_WILLNEED` is an item change with its own requirement; 8 points |
-| H3 | **Shipping compiled shaders for one GPU** (every console) | no compile at run time: the binaries are built for the one GPU the console has | the N150 is one GPU too: the game's pipeline cache and Mesa's are built once, keyed by the device and driver hash, kept on the volume and **replayed before the session** (Fossilize's replay, which Steam's pre-caching uses), so "Shaders are being compiled" and the first sight of a scene find everything compiled. The hardware-hash key is `docs/HOTPATHS.md`'s | A: the warm-up and first-sight stalls where they are compiles; the 2026-10-30 profile says part of them is the game's own CPU work, which this does not reach | a replay step in the session's start; 3 points |
-| H4 | **Factor 5's own microcode** (N64, *Rogue Squadron*, 1998) | replaced Nintendo's RSP microcode with its own for its terrain and audio, and ran at 640x480 with the Expansion Pak [S] | the GPU driver's own command streams are Ferrix's: the flushes, invalidations and breadcrumbs it adds around each batch (`engine_cs.rs`, i915's `gen12_emit_flush_rcs` translated) are i915's general case. Emit only what each batch needs: an AUX invalidation only when the AUX table changed, a full pipe flush only before a buffer leaves the GPU | A: a fixed cost per batch, times the batches a frame; unmeasured. E5 measures the per-batch overhead | driver work; 3 points |
-| H5 | **The Amiga's copper and blitter** (1985) | the display coprocessor changed registers in step with the beam and the blitter moved memory, neither using the CPU | the card's copy of each frame (G5's 5 ms of a processor) done by the GT's **blitter engine** (BCS0, whose `XY_FAST_COPY_BLT` the driver already runs, M2) into the lit plane, which is reachable through the GGTT; the copy then runs beside the render engine and takes no EU time and no core | M for the processor time freed (~5 ms a frame); the bandwidth stays | a copy path in the driver's card; 5 points; G5 makes it unnecessary when a display driver lands |
+| H3 | **Shipping compiled shaders for one GPU** (every console) | no compile at run time: the binaries are built for the one GPU the console has | the N150 is one GPU too: the game's pipeline cache and Mesa's are built once, keyed by the device and driver hash, kept on the volume and **replayed before the session** (Fossilize's replay, which Steam's pre-caching uses), so "Shaders are being compiled" and the first sight of a scene find everything compiled. The hardware-hash key is `docs/HOTPATHS.md`'s | M (§5.7.1): little. Mesa's and the game's caches already hit across launches; in a first-sight stall Mesa's anv is 2 to 4% of the game's processor time, so compiles are not what stalls. Kept as the re-warm step after a driver change (H8, a Mesa update), not built | a replay step in the session's start; 3 points |
+| H4 | **Factor 5's own microcode** (N64, *Rogue Squadron*, 1998) | replaced Nintendo's RSP microcode with its own for its terrain and audio, and ran at 640x480 with the Expansion Pak [S] | the GPU driver's own command streams are Ferrix's: the flushes, invalidations and breadcrumbs it adds around each batch (`engine_cs.rs`, i915's `gen12_emit_flush_rcs` translated) are i915's general case. Emit only what each batch needs: an AUX invalidation only when the AUX table changed, a full pipe flush only before a buffer leaves the GPU | M (§5.7.1): 2.35 batches a frame; the driver's own commands cost RCS0 about 32 µs a request on an idle engine, of which the AUX invalidation and its quiescing flush 5.4 µs: about 13 µs of a 40 ms frame (0.03%). Not trimmed: no gain, and anv invalidates the AUX table itself at each command buffer anyway | driver work; 3 points |
+| H5 | **The Amiga's copper and blitter** (1985) | the display coprocessor changed registers in step with the beam and the blitter moved memory, neither using the CPU | the card's copy of each frame (G5's 5 ms of a processor) done by the GT's **blitter engine** (BCS0, whose `XY_FAST_COPY_BLT` the driver already runs, M2) into the lit plane, which is reachable through the GGTT; the copy then runs beside the render engine and takes no EU time and no core | M (§5.7.1): **built and kept**. The Intel driver 20.7% of a core → 12.6% at The Hub (the copy was 3.4 ms a frame); the blit takes about 2 ms of BCS0 a frame; fps unchanged (24.6 / 24.9, GPU-bound). The bandwidth stays | a copy path in the driver's card; 5 points; G5 makes it unnecessary when a display driver lands |
 | H6 | **Racing the beam** (Atari 2600, 1977) | the program drew each line just before the beam reached it, with no frame buffer at all | the card's copy run **in raster order just behind the beam**: strips copied as the scanout passes them, so a finished frame reaches the screen within a fraction of a refresh instead of at the next one, without tearing. GAME-PATH §4.5's just-in-time swap is the same idea at the swap | A: up to a refresh (16.7 ms) of latency, no frame-rate change | the card's copy timed against the pipe's scanline counter; 5 points |
 | H7 | **A locked 30 with even pacing** (most console games) | an even 30 fps reads smoother than an uneven 40 | the panel run at a multiple of the game's rate (48 or 50 Hz for 24 or 25 fps), and the game's cap at a divisor of the refresh (`endfield-levers-after-fsr3`, 4) | A: no frame rate; the judder of 2-3-2-3 gone | a mode per session |
-| H8 | **Compiling for the one CPU** (every console title) | the compiler targets the exact processor | Ferrix builds its own Mesa, Wine, DXVK, yserver and hyprix: build them for Gracemont (`x86-64-v3`, AVX2), with LTO and profile-guided optimisation trained on Endfield's own run. CachyOS reports 5 to 20% across its packages for `x86-64-v3` alone [S] | A: the processor-side work (shader compiles at first sight, Wine, the driver's submit); little in the GPU-bound steady state | a build variant of the volumes; the images still run on any x86-64-v3 processor; 3 points |
+| H8 | **Compiling for the one CPU** (every console title) | the compiler targets the exact processor | Ferrix builds its own Mesa, Wine, DXVK, yserver and hyprix: build them for Gracemont (`x86-64-v3`, AVX2), with LTO and profile-guided optimisation trained on Endfield's own run. CachyOS reports 5 to 20% across its packages for `x86-64-v3` alone [S] | M (§5.7.1): not worth its cost here. Mesa, Proton/Wine and DXVK are not built by Ferrix (Debian's Mesa 25.0.7, a prebuilt Proton), so this is building them from source; and in first-sight stalls Mesa and Wine together are under 10% of the game's processor time (game code 47 to 57%, kernel 33 to 43%): 5 to 20% of that is at most 1 to 2%. Not built | a build variant of the volumes; the images still run on any x86-64-v3 processor; 3 points (more: Mesa, Wine and DXVK built here first) |
 | H9 | **Every coprocessor put to work** (Saturn, PS2's vector units, PS3's SPUs) | nothing idle that could carry part of the frame | the N150's other engines: the blitter (H5), the video enhancement engine (VECS) for scaling a 720p game to the screen in hardware (G6), the CPU's AVX2 (H8) | as G6 and H5 | as those |
 | H10 | **A console's direct command buffers** (libgnm, the Xbox's) | the game writes the GPU's commands straight into its queue; no system call per submit | Mesa writing submits into a ring shared with the driver, which the driver reads (as Xe2's user-mode queues do in hardware), instead of an `EXECBUFFER2` crossing to the ring-3 driver: two address-space switches, with their barriers, per submit | A: tens of microseconds a submit, a few submits a frame: small at 30 fps | a new interface between Mesa and the driver; large |
 | — | **Asynchronous reprojection** (VR's timewarp) | the compositor re-aims the last frame with the newest head pose | not for a flat game: the compositor knows no camera, and the game's own FSR3 frame generation already fills frames | — | — |
@@ -536,6 +536,51 @@ Technica's *War Stories* (via gamedeveloper.com); the consoles' cores,
 Tom's Hardware (PS4's seventh core, 2015) and eWeek (Xbox One, 2014);
 `x86-64-v3`, wiki.cachyos.org's optimised repositories and Phoronix's
 review of them.
+
+### 5.7.1 T0h measured (2026-10-30, the N150)
+
+Endfield at The Hub, 1280x720, 60% render scale, frame generation off;
+Wine's fps channel, 20 s windows; processor time from `/proc/<pid>/stat`.
+Raw files: `~/.local/share/ferrix/logs/t0h/` on nazuna.
+
+* **H5, card0's copy on BCS0** (`display/blit.rs` in the Intel driver,
+  branch `feature/game-mode-t0h`). One image (main-e4bdec864), the blit on
+  against `ferrix.intelgpu.blit=off`, three windows each:
+
+  | | fps | Intel driver | card0's copy |
+  |---|---|---|---|
+  | processor | 24.68, 24.00, 25.19 | 20.3 to 21.1% of a core | 3.4 ms a frame |
+  | BCS0 | 24.84, 24.99, 24.96 | 12.3 to 12.9% | none; ~2 ms of BCS0, FLIPPED when it ends |
+
+  About 8% of a core freed; no frame, as the GPU is 99.9% busy. A
+  compositor's buffer is pinned read-only by the card; a client's buffer
+  shown directly is the driver's own GEM object, which the kernel will not
+  pin twice into one domain, so the card finds it by a random tag in a page
+  past the object's end. A scaled mode, the second scanout and any failure
+  stay on the processor.
+* **What H5 showed of hyprix.** It composited every frame in both runs,
+  12.5 to 28% of a core: never direct scanout, because the yoru dock and
+  sidebars (layer level "top") count as over the fullscreen game, and on
+  the title screen because the pointer is drawn into the frame (card0 has
+  no cursor plane). Neither is H5's; both are the compositor's and card0's
+  to fix (a fullscreen window above the top layer, as Hyprland does; the
+  cursor composited by the card).
+* **H4**: `ferrix.intelgpu.m2` now times, with the engine's timestamp,
+  24 copies of each part the driver wraps around a request: on RCS0 the
+  invalidation 10.2 µs (4.8 without the AUX table's), the final
+  breadcrumb 22.1 µs; on BCS0 4.3 µs a request. With 587 `EXECBUFFER2`
+  in 10 s (`ferrix.intelgpu.ioctlstat`), 2.35 a frame: the whole wrapper is
+  about 75 µs of a 40 ms frame and the AUX part 13 µs. Trimmed nothing.
+* **H3 and H8**: a never-land kernel sampler (user samples by 1 MiB
+  region, attributed through `/proc/<pid>/maps`) over the warm-up, the
+  stall on entering the world (about 20 s at 0.2 to 7 fps) and a walk into
+  unseen scenery (dips to 4 to 10 fps): the game's own code 32 / 47 / 57%
+  of its processor samples, the kernel 53 / 43 / 33%, Mesa's anv 0.6 /
+  1.9 / 4.0%, Wine 5 to 5.5%, DXVK below the top regions. The stalls are
+  the game's work and the kernel's (F11), not compiles: neither lever is
+  built.
+* Launch to title: 158 to 180 s on develop with H5 (199 to 213 s this
+  morning on develop kernels, 487 s on main-94d0c9df0).
 
 What they have in common is what §5.6 says of the frame's path: **work
 moved to the place and time where it costs least, because one party knew
@@ -899,5 +944,13 @@ review. The customer chose T0g, T0h and T2/T3 the same day (§10,
 question 1), and put the iGPU's IOMMU in scope (§7.4). The same evening
 intel-large-pages built G4 and found the bandwidth limit in the IOMMU's
 4 KiB entries, not the GPU's (§4.1): G11, VT-d superpages, recovered most
-of the gap to Linux with the isolation kept. Nothing of game mode is
-landed as code yet.
+of the gap to Linux with the isolation kept.
+
+2026-10-30 evening, T0h (session game-mode-t0h, §5.7.1), the first
+game-mode code: H5 built and kept (card0's copy on BCS0, about 8% of a core freed in the Intel
+driver, no frame at 720p); H4 measured and not trimmed (13 µs a frame);
+H3 and H8 measured and not built (Mesa and Wine under 10% of the game's
+processor time in first-sight stalls; the game's code and the kernel
+are the rest). What the run found for the compositor: hyprix composites
+a fullscreen game every frame, because the dock and sidebars count as
+over it and the pointer is drawn into the frame.
