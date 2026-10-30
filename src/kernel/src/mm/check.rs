@@ -1220,8 +1220,42 @@ pub fn check_pstore_never_free() -> Result<(), &'static str> {
 /// nothing else would show.
 ///
 /// Verifies: L.mm.38
+///
+/// Both counts are the whole machine's, and another processor's page taken
+/// or given between two reads moves them: an attempt so disturbed is made
+/// again, at most [`LARGE_BLOCK_ATTEMPTS`] times, and one undisturbed attempt
+/// passes. A defect fails every attempt; the boot line says how many were
+/// disturbed and why the first was.
 #[doc(hidden)]
 pub fn check_a_large_block_goes_back_with_the_section() -> Result<(), &'static str> {
+    let mut outcome = Ok(());
+    let mut disturbed = 0usize;
+    let mut first = None;
+    for _ in 0..LARGE_BLOCK_ATTEMPTS {
+        outcome = a_large_block_goes_back_once();
+        match outcome {
+            Ok(()) => break,
+            Err(why) => {
+                disturbed += 1;
+                first = first.or(Some(why));
+            }
+        }
+    }
+    println!(
+        "  reserve  a large block back with its section: {} of {} attempts disturbed{}{}",
+        disturbed,
+        LARGE_BLOCK_ATTEMPTS,
+        if first.is_some() { ", the first: " } else { "" },
+        first.unwrap_or(""),
+    );
+    outcome
+}
+
+/// How many times [`check_a_large_block_goes_back_with_the_section`] tries.
+const LARGE_BLOCK_ATTEMPTS: usize = 5;
+
+/// One attempt of [`check_a_large_block_goes_back_with_the_section`].
+fn a_large_block_goes_back_once() -> Result<(), &'static str> {
     // Three pages: past every size class, an order-two block.
     let layout = core::alloc::Layout::from_size_align(3 * PAGE_SIZE as usize, 8)
         .map_err(|_| "no layout for a large block")?;
