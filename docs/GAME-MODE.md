@@ -331,7 +331,16 @@ copy +2.1 GB/s), with the DMA isolation kept. That run's FMA reached 306
 rather than 340, unexplained. The superpage build leaks a block's frames on
 unpin (safe for a measurement only); a real one needs its own design review
 (ledger 5208 records the withdrawn request and four notes for the next).
-Not yet measured: `ferrix.vtd=off`, and Endfield's fps on each image.
+Later the same night, with the GPU's clock not pinned (so compare only
+within a boot): stock develop read 16.2 and copied 18.0 GB/s, and Endfield
+ran 25.15 fps at The Hub with the GPU 99.9% busy; the superpage build read
+18.5 and copied 20.9 (+2.3 and +2.9), but Endfield died after entering the
+world, most likely of the build's own leak (a streaming game runs out of pin
+budget when no block is ever taken down), so **no fps figure exists for
+G11**; and a `ferrix.vtd=off` image did not come up as Ferrix within the
+deploy's limit and fell back to the inspection Linux, so **the IOMMU-off
+figure is not measured** either. A real G11 must take a block down on
+unpin (ledger 5208's notes) before its fps can be measured.
 
 So the GPU-path lever is **G11, VT-d superpages for the GPU's pinned
 runs**, ahead of G4; §7.4 weighs it against turning the IOMMU off.
@@ -633,8 +642,9 @@ leaves every unit alone).
 **Recommended: G11 first, off only for what G11 leaves.** Superpages keep
 the isolation and recovered 1.8 of the 2.5 GB/s read gap and 2.1 of the
 2.7 GB/s copy gap on the probe. Whether the rest (and the probe's FMA dip)
-is worth an isolation trade waits on the `ferrix.vtd=off` run and on
-Endfield's fps for all three images. Either way the figure decides a
+is worth an isolation trade waits on a `ferrix.vtd=off` boot that comes up
+(the first did not) and on Endfield's fps, which needs a G11 that takes
+blocks down on unpin (§4.1). Either way the figure decides a
 `desktop`-only trade; the consultant reviews it as a change to the DMA gate.
 
 ## 8. Authority and scope
