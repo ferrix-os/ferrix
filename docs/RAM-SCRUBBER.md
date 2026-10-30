@@ -3,7 +3,8 @@
 Item 7 of the eight hardware-error follow-ups the customer ordered after
 `docs/MACHINE-CHECK.md` landed (2026-10-30: "go for all items on the list";
 items 1 and 6 are `docs/MACHINE-CHECK-AMD.md` and `docs/CORE-QUARANTINE.md`).
-Design v2, answering the consultant's NOT YET (B1)-(B6), ledger 5045.
+Design v2.1: v2 answered the consultant's NOT YET (B1)-(B6), ledger 5045;
+v2.1 carries the re-review's conditions, OK IF (1)-(9), ledger 5057.
 
 ## 1. Why
 
@@ -68,11 +69,15 @@ time:
    released; a suspect that fails again on any later sweep is bad.
 4. **Releases** a good frame, zeroed, through the uncounted free. A **bad**
    frame is retired (`retire_frame`), which answers `Marked` for the
-   scrubber's own claimed frame; the scrubber then frees it, and
-   `keep_retired` holds it, its state checked afterwards (B6). If the
-   retired set is full, or the scrubber's share of it used (B6: 192 of the
-   256, the rest left to the machine check), a bad frame is **not
-   released**: it stays claimed, owned by nobody, counted and said. Each is
+   scrubber's own claimed frame; the scrubber then frees it through a free
+   path that makes the same `holds_retired` / `keep_retired` decision
+   `deallocate_frames` makes, so the frame stays Allocated, owned by
+   nobody, and in `RETIRED` -- the stage check asserts all three (B6,
+   condition 4). If the retired set is full, or the scrubber's share of it
+   used (192 of the 256, the rest left to the machine check), a bad frame
+   is **not released**: it stays claimed, owned by nobody, counted and
+   said -- and the scrubber **stops** either way, so at most one frame is
+   ever held out. Each is
    said on the console: `scrub: a frame failed its pattern test twice and
    was retired` (or `... and is held: the retired set is full`); no address
    (`/proc/ferrix-mce-retired` lists retired ones, root's).
@@ -80,7 +85,7 @@ time:
 The call runs in the asking task, preemptible, with interrupts on; it holds
 `FRAMES` only to claim and to release, and no spin lock across a frame's
 test. It stops at the first claim refused for the watermark, and when the
-scrubber's share of the retired set is used.
+retired set is full or the scrubber's share of it used.
 
 **The residual** (B3): two requests of order `m` made at once while exactly
 two such blocks are free and the scrubber holds a frame split from one:
@@ -95,12 +100,28 @@ read for ownership on x86, a linefill on Arm), so the first pass of plain
 stores would read the frame's old contents -- on ECC or parity memory an
 uncorrectable error there is a machine check in ring 0, which halts (B1).
 So every pass's writes are made by an operation that writes a whole line
-without reading it, and the requirement is: **the scrubber reads no line it
-has not written since the line's last eviction.**
+without reading it, and the requirement is: **the scrubber reads no line
+whose memory contents it has not itself written in the current pass**.
+Every read of memory is of contents the pass wrote -- the read-back after
+the eviction included -- and none is of the frame's old contents
+(condition 1). On AArch64 a store
+after `dc zva` may fill its line from memory, and what it reads there is
+the zeros `dc zva` wrote in the same pass, so it meets the requirement.
 
 * **x86-64**: `movnti` over every 8 bytes of each whole line (non-temporal,
   write-combining, no read for ownership), then `sfence`; the eviction is
-  `clflush` per line (the line from `CPUID` leaf 1), then `mfence`.
+  `clflush` per line (the line from `CPUID` leaf 1), then `mfence`. A
+  write-combining buffer flushed part-way -- by an interrupt between the
+  eight `movnti`s of a line -- writes a partial line, and an ECC memory
+  controller completes a partial line by reading the old one. Ring 0 keeps
+  no vector state (the kernel is built without SSE and AVX, and saves no
+  vector registers on entry), so a single full-line non-temporal store
+  (`movdir64b`, or an AVX-512 `vmovntdq`) is not available to it; each
+  line's eight stores are instead made with interrupts masked, which
+  leaves an SMI or an NMI as the only thing that can split a line. That
+  residual matters only where the scrubber runs on memory that corrects
+  errors without saying so (Other, Unknown, or no type 16), and the AoU
+  names it (condition 5).
 * **AArch64**: `dc zva` per block (the size from `DCZID_EL0.BS`; the
   scrubber stands down if `DCZID_EL0.DZP` is set), which writes zeros
   without a linefill, followed, for the non-zero patterns, by ordinary
@@ -109,7 +130,11 @@ has not written since the line's last eviction.**
   eviction is `dc civac` per line (`CTR_EL0.DminLine`), then `dsb sy`.
 * **ARMv7-A** has no write-without-read: it **stands down** unless the
   table says the memory has no ECC (§3.3) and the platform has no outer
-  cache (a PL310's lines are not maintained by the CP15 operations, B5).
+  cache -- the device tree names none: no `arm,pl310-cache` and no other
+  `arm,*-cache` node (a PL310's lines are not maintained by the CP15
+  operations, B5). On every ARMv7-A platform supported today it stands
+  down: neither DK1 nor QEMU's `virt` gives a type 16 saying None
+  (condition 6).
   Where it runs, the eviction is `DCCIMVAC` per line (`CTR.DminLine`),
   then `dsb`.
 
@@ -144,13 +169,23 @@ Use is System memory (03h):
 * a type 16 that is truncated, or whose length or fields cannot be read,
   makes it stand down (fail closed).
 
-It also stands down **under a hypervisor** where the architecture says so
-(x86-64's `CPUID` leaf 1 ECX bit 31): touching every free guest frame
-makes the host back all of them (C2). One boot option, `ferrix.scrub=test`,
-read only in a build with the checks (`ferrix.checks` not `skip`) and
-passed only by `test-scrub`, overrides both stand-downs for the gate --
-QEMU's own type 16 says multi-bit ECC. The decision and its reason are a
-boot line: `scrub: runs` / `scrub: stands down: <why>`.
+It also stands down **as a guest**, where the architecture lets it tell:
+touching every free guest frame makes the host back all of them (C2).
+x86-64: `CPUID` leaf 1 ECX bit 31. AArch64 (condition 3): the SMCCC vendor
+hypervisor UID answers as KVM's, or the device tree has a `/hypervisor`
+node, or PSCI's conduit is `hvc` -- so QEMU's `virt` under KVM and the
+Pixel 7's crosvm VM stand down. A guest none of these betrays is the AoU's
+residual.
+
+The gate needs the scrubber on under QEMU, whose own type 16 says
+multi-bit ECC. One boot option, `ferrix.scrub=test`, overrides both
+stand-downs, and only where it cannot defeat the ECC stand-down on bare
+metal (condition 2): it is compiled into a build with the checks
+(`ferrix_checks = "on"`) alone, a build check pinning that a product build
+names no such option; and on x86-64 it is honoured only when the
+hypervisor bit is set. Taken, it says `scrub: runs: stand-down overridden
+for the gate`. Only `test-scrub` passes it. Otherwise the decision and its
+reason are a boot line: `scrub: runs` / `scrub: stands down: <why>`.
 
 ### 3.4 Counts
 
@@ -206,8 +241,9 @@ pace is the service's (§8 answer 2).
 
 **Hazard** H.FAIL.9: the scrubber never touches a frame in use, never makes
 an allocation fail but for §3.1's residual, never halts the machine where
-the memory corrects errors, and never takes more than its share of the
-retired set. (Losing a good 4 KiB to a false failure is not a hazard; the
+the firmware reports that the memory corrects errors (an ECC machine that
+reports Other or Unknown is the AoU's residual), and never takes more than
+its share of the retired set. (Losing a good 4 KiB to a false failure is not a hazard; the
 share bounds it.)
 
 **Requirements**, one check-provable property each (C3), reserved before
@@ -220,8 +256,9 @@ the counts. In the arch parts, three facade ids, one per architecture
 (x86-64, AArch64, ARMv7-A): the write-without-read and the eviction per
 line with its barrier. In the object and syscall parts, as quarantine's
 were: the token, its rights, and `MEMORY_SCRUB`'s arguments and answers.
-(Ids: H.FAIL.9; L.mm.101 onward; the arch, object and syscall ids at the
-next free numbers, all reserved in one docs-only landing.)
+Ids, reserved in one docs-only landing before code (condition 7):
+H.FAIL.9; L.mm.101-108; L.x86_64.243, L.aarch64.68, L.armv7a.29;
+L.object.252-253; L.syscall.24.
 
 **Checks, all of which run and fail under QEMU** (B4):
 
@@ -245,8 +282,8 @@ next free numbers, all reserved in one docs-only landing.)
 * **Native check**: the token's rights pinned; `MEMORY_SCRUB`'s refusals
   (budget 0 and 65, no `MANAGE`, another object); a call's answer adds up;
   `SHOULD_WAIT` while a batch runs.
-* **`test-scrub`** (x86-64 KVM and TCG, AArch64; ARMv7-A shows the
-  stand-down): init and `memscrub` with `period = 20`, 512 MiB of memory,
+* **`test-scrub`** (x86-64 KVM and TCG, AArch64; ARMv7-A's row requires
+  the stand-down line, its reason the missing type 16): init and `memscrub` with `period = 20`, 512 MiB of memory,
   `ferrix.scrub=test`: a full sweep completes and is said,
   `/proc/ferrix-scrub` counts the frames tested against managed, no
   allocation failed, and with four CPU-bound loops it scrubs nothing while
@@ -286,5 +323,17 @@ call preemptible between frames).
   eviction cannot be shown under QEMU (B4); the operations reach the point
   of coherency, not the cells (B5); the bad frame and the retired set
   (B6); C1-C8.
-* Design v2 (this) answers them: §3.2 (B1, B5), §3.3 (B2, C2), §3.1 (B3,
-  B6, C1, C4, C8), §7 (B4, C3, C5), §3.4 (C6), §2 (C7).
+* Design v2 (a020b2dd3) answered them: §3.2 (B1, B5), §3.3 (B2, C2), §3.1
+  (B3, B6, C1, C4, C8), §7 (B4, C3, C5), §3.4 (C6), §2 (C7).
+* Re-reviewed 2026-10-30, ledger 5057: **OK IF (1)-(9)**. v2.1 carries
+  (1) the requirement's wording, (2) the override compiled into check
+  builds alone and honoured on x86-64 only under a hypervisor, (3)
+  AArch64's guest stand-down, (4) the bad frame kept through
+  `keep_retired`'s decision and the stop on a full set, (5) x86-64's
+  partial-line residual and the masked stores, (6) ARMv7-A's outer-cache
+  test and its stand-down everywhere today, (9) H.FAIL.9's wording. (7)
+  is the reservation landing; (8) is the code landing's evidence: rows on
+  the landing hash, the native check, §7's five controls FIRED, the
+  facade's host test and pinned disassembly in check, the BACKLOG hardware
+  row, unsafe tagged and registered, certification-item.json covering
+  mm/scrub and the facade, coverage carried; commits citing 5045 and 5057.
