@@ -135,4 +135,47 @@ load); they get lode's own test.
 
 ## 7. Where it stands
 
-Design written; waiting for the certification consultant's design review.
+Design v1 written (19b56cf8c). **Design review: OK IF A1-A13** (the
+consultant's ledger line 4820, `~/.local/share/ferrix/cert-consultant/reviews.md`,
+2026-10-30; internal review, not independent verification, F-27). Checked
+against Linux 6.18.54: its `mce_severity_amd` has no `TCC` test, and its
+`amd_mce_usable_address` requires `ADDRV` and then, on SMCA, `Poison` alone
+(no `PADDRV`); Linux sets `MCA_CONFIG.McaX`, which this design does not.
+
+* Rulings: (a) AMD's rules for `AuthenticAMD` and `HygonGenuine`, Intel's
+  for `GenuineIntel` and Zhaoxin's `  Shanghai  `; every other vendor
+  string gets no recovery whatever `MCG_SER_P` says. (b) `TCC` from ring 3
+  (`EIPV` set, usable address) kills the task by the `RIPV`-clear path,
+  handler never run; `TCC` in ring 0 or with `EIPV` clear stops. (c) the
+  matrix accepted, each mode pinning its vendor and bits. (d) SMCA argued,
+  on a pure split tabled in stage 3. (e) `H.FAIL.8` widened as A10 words it.
+* A1 a design v2 on this branch before code, carrying A2-A5 and A8.
+* A2 sources named for every rule Linux 6.18 does not have (`PADDRV`,
+  `CONFIG` bit 11, `TCC`), else 6.18's rule; the status-held cut 56:lsb.
+* A3 `ADDRV` always first; `Poison`, or sourced `PADDRV`; a deferred record
+  retired only by `PADDRV`, so under TCG logged, not retired.
+* A4 AMD's action-required class never takes the bystander (`Unaffected`)
+  arm; ring 3: `EIPV` clear or no usable address stops, `RIPV` set and
+  `TCC` clear signals, `RIPV` clear or `TCC` kills; ring 0 stops.
+* A5 `McaX`: set through the checked write (allowance, requirement,
+  control), or left clear and recovery not offered on SMCA parts, said in
+  §2 and AoU-36.
+* A6 SMCA reads only through the checked read; `IPID` cached at bring-up;
+  `SYND` only with `SYNDV` on a bank whose bring-up reads succeeded; the
+  device-access allowance one function, offsets 4/5/6, reads only.
+* A7 pure functions tabled in stage 3; §6 corrected (qemu64 never enters
+  the SMCA branch); BACKLOG row for the Ryzen 9 9900X, run only on the
+  customer's bare-metal choice; recovery there only with an injector.
+* A8 every `test-mce` mode pins vendor and bits; the AMD modes listed in the
+  ledger line; broadcast Intel-only; the KVM `CPUID 8000_0007h` measurement
+  first, hashed, recorded here; BACKLOG line 48 updated.
+* A9 ids reserved from `L.x86_64.233` as many as one check each needs
+  (likely .233-.242); .221, .224, .225, .228 restated.
+* A10 `H.FAIL.8` and AoU-36 per A4/A5/A7; `ferrix.mce.recover=off` shown on
+  an AMD-rule mode.
+* A11 VULNERABILITY-ANALYSIS: `ipid=`/`synd=` to privileged kmsg only; new
+  inputs bounded.
+* A12 controls: §6's three, plus `TCC` resumable, AMD class let into the
+  bystander arm, `ADDRV` dropped, an unknown vendor given Intel's rules.
+* A13 code review against ledger 4820 before take; rows as 4795 V4 plus
+  A8's modes; coverage carried; commits cite 4820 and 4772.
