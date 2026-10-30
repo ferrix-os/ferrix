@@ -689,6 +689,10 @@ measurements; **T4 not for the N150**.
 1. **Which tiers to build**, and in which order? *Recommended: T0g (G4
    first) and T0h now; T1 next; T2 and T3 on their measurements; T4 not for
    the N150 (§7.3: the protections cost about 1% of one core there).*
+   **Decided by the customer on 2026-10-30: T0g, T0h and T2/T3**; not T1
+   or T4 (`docs/backlog/DECISIONS.md`). T2/T3's frame mark needs a
+   privileged holder, which §8 gave to T1's session service; the frame
+   mark's design review settles who holds it instead.
 2. **Freeze by default, or only what the user lists?** *Recommended: by
    default, everything the user started except the game and the keep row
    (§3.1), with exceptions the user lists.*
@@ -830,4 +834,5 @@ cheap fixed-hardware tricks, then the session service, and the protection
 trades not on this machine. The certification consultant reviewed it as a
 design (OK IF (1) to (12), carried; ledger line 5115; §13): no code of
 layer B, C or H2, or of any core item §13 lists, without its own design
-review. The customer decides the tiers (§10).
+review. The customer chose T0g, T0h and T2/T3 the same day (§10,
+question 1); nothing is built yet.

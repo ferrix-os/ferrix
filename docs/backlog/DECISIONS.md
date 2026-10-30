@@ -7,6 +7,19 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-30 (customer)** **Game mode: build the GPU path, the cheap
+  fixed-hardware tricks and the scheduler tiers** (`docs/GAME-MODE.md` §9,
+  §10 question 1). Chosen: T0g (the GPU path, large GPU pages first), T0h
+  (pipeline caches replayed before play, the card's copy on the blitter,
+  the volumes built for Gracemont with PGO, the driver's per-batch commands
+  trimmed) and T2/T3 (layer B: applied affinity, per-task slices, the frame
+  mark, lends through waits, the idle-gap class, deadlines). Not chosen:
+  T1 (the session service and the background frozen, measured at no frame
+  at 720p) and T4 (the protection trades, ~1% of one core on the N150).
+  Every core-ring item of T2/T3 and G4's `PIN_BLOCKS` still needs its own
+  design review before code (consultant, ledger 5115 (12)). T2/T3's frame
+  mark is granted by a privileged holder; without T1's session service,
+  which holds it is for the frame mark's design review to settle.
 * **2026-10-24 (customer, through the coordinator)** **settingsd keeps
   the password relay for accounts with no seat** (ledger 3636 (3),
   `docs/SETTINGS-WRITER.md` §12.7): a console or ssh user is asked at their
