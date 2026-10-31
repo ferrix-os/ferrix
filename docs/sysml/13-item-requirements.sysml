@@ -1636,7 +1636,10 @@ package FerrixItemRequirements {
             attribute :>> criterion = "L.x86_64.221-232, L.x86_64.249-253 and L.mm.91-92
                 each verified; test-mce and its five recovery modes pass under KVM
                 and TCG; test-mce-cmci's modes pass under TCG on QEMU with patch
-                0008 (docs/MACHINE-CHECK-CMCI.md).";
+                0008 (docs/MACHINE-CHECK-CMCI.md). test-mce-driver's Own, Kill and
+                Bystander: a ring-3 driver that consumes poison ends alone, status
+                135, its frame retired and left unread (docs/MACHINE-CHECK-DRIVER.md;
+                devmgr's restart the evidence's environment)";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.9'> theScrubberTouchesOnlyFreeMemory : ItemHighLevel {
@@ -1679,7 +1682,9 @@ package FerrixItemRequirements {
                 fail-closed rows only (TCG runs rep movsb in one step and
                 reports no recovery; Intel's model has no MCG_SER_P there), so
                 Intel's recovery is shown by stage 3's tables and frame;
-                L.x86_64.244-246 and L.syscall.25-26 each with its check.";
+                L.x86_64.244-246 and L.syscall.25-26 each with its check. test-mce-driver-copy: a driver's
+                channel_write of its poisoned page fails, the driver ends with
+                status 135";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {

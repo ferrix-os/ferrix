@@ -450,7 +450,9 @@ package FerrixMemoryRequirements {
                 inside a two-frame block stays allocated when the block is freed
                 and its neighbour is free; one retired while free is allocated at
                 once; a second retirement answers already. Negative control: the
-                free paths' test removed, stage 2 stops.";
+                free paths' test removed, stage 2 stops. test-mce-driver: a pinned retired
+                frame is still listed after quarantine_release; its keep is stage
+                2's check (control: the keep removed, stage 2 stops)";
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("mm::retire_frame",
                 "mm::holds_retired",

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2512 declarations in the core's files, 179 in the item's; 114 checks-only.
+2516 declarations in the core's files, 179 in the item's; 117 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2152,9 +2152,12 @@ checks above is `pub` for raised checks (F3).
 | `intel_gpu_budget` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `intel_gpu_budget_for` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `release` | fn | load (checks) | checks-only |
+| `retire_for_check` | fn | load (checks) | checks-only |
+| `retire_for_check` | fn | load (checks) | checks-only |
 | `room` | fn | item, load |  |
 | `set_budget` | fn | item, load |  |
 | `set_wait` | fn | load (checks) | checks-only |
+| `unread` | fn | load (checks) | checks-only |
 | `QUARANTINE` | static | load (checks) | checks-only |
 | `Counts` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Pin` | struct | item, load |  |
@@ -2171,6 +2174,7 @@ checks above is `pub` for raised checks (F3).
 | `PinBudget::write` | method | item, load |  |
 | `Released::kept` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
 | `Released::pages` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
+| `Released::retired` | field | item, load | pub for raised checks; type unobtainable from product API |
 
 ### `object::port`
 

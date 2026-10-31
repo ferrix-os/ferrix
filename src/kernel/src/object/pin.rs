@@ -161,6 +161,60 @@ pub struct Quarantine {
 /// Pins refused because their device's quarantine was full, since boot.
 static REFUSED: AtomicU64 = AtomicU64::new(0);
 
+/// Pages the quarantine left unread because their frame is retired, at a
+/// pin's close and at its release, since boot (`L.object.262`): a retired
+/// frame may hold poison, and a ring-0 read of it outside a copy stops the
+/// machine (`docs/MACHINE-CHECK-DRIVER.md` §2.1).
+static UNREAD: AtomicUsize = AtomicUsize::new(0);
+
+/// The frame plus one that the quarantine treats as retired, for the pin
+/// check: the retired set is full in a check build, so a real retirement
+/// would answer `Full`. 0 for none. Check builds only.
+#[cfg(ferrix_checks = "on")]
+static RETIRED_FOR_CHECK: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: object/pin/check.rs
+/// Make the quarantine treat `frame` as retired, or none for `None`
+/// (`docs/MACHINE-CHECK-DRIVER.md` §2.1). Check builds only.
+#[cfg(ferrix_checks = "on")]
+pub fn retire_for_check(frame: Option<Frame>) {
+    RETIRED_FOR_CHECK.store(frame.map_or(0, |frame| frame + 1), Ordering::SeqCst);
+}
+
+/// A product build has no hook: the quarantine's test is
+/// `mm::frame_retired` alone.
+// CHECKS-ONLY: object/pin/check.rs
+#[cfg(not(ferrix_checks = "on"))]
+pub const fn retire_for_check(_frame: Option<Frame>) {}
+
+/// Whether the check names `frame` retired. Check builds only.
+#[cfg(ferrix_checks = "on")]
+fn retired_for_check(frame: Frame) -> bool {
+    RETIRED_FOR_CHECK.load(Ordering::SeqCst) == frame + 1
+}
+
+/// A product build's: never.
+#[cfg(not(ferrix_checks = "on"))]
+const fn retired_for_check(_frame: Frame) -> bool {
+    false
+}
+
+/// Whether the quarantine leaves `frame` unread: it is retired
+/// (`L.object.262`). Counted in [`UNREAD`] when so.
+fn left_unread(frame: Frame) -> bool {
+    let unread = mm::frame_retired(frame) || retired_for_check(frame);
+    if unread {
+        let _ = UNREAD.fetch_add(1, Ordering::Relaxed);
+    }
+    unread
+}
+
+// CHECKS-ONLY: object/pin/check.rs
+/// Pages the quarantine left unread since boot, for the pin check.
+pub fn unread() -> usize {
+    UNREAD.load(Ordering::Relaxed)
+}
+
 /// The kernel's ceiling on twice every raised budget, in pages: a quarter of
 /// the RAM the allocator manages, counted at stage 10 ([`count_ceiling`]).
 /// Zero until then, which refuses every raise.
@@ -778,7 +832,9 @@ fn quarantine(mut spare: Box<Quarantined>, pinned: Pinned, held: Held, quiet: bo
     }
     for (&frame, sum) in spare.frames.iter().zip(spare.sums.iter_mut()) {
         mm::disown_frame(frame);
-        *sum = fold(frame);
+        // A retired frame is not read: it may hold the poison it was
+        // retired for (`L.object.262`); its sum is not taken.
+        *sum = if left_unread(frame) { 0 } else { fold(frame) };
     }
     drop(held);
     spare.pinned = Some(pinned);
@@ -812,6 +868,9 @@ pub struct Released {
     written: usize,
     /// Pages the domain would not unpin, kept for good.
     pub kept: usize,
+    /// Of those given back, the ones left unread because their frame is
+    /// retired (`L.object.262`): not compared, so in neither count above.
+    pub retired: usize,
 }
 
 /// Give back the frames of every pin into `node`'s domain that its process's
@@ -828,13 +887,14 @@ pub(crate) fn quarantine_release(node: &DeviceNode) {
         println!(
             "  iommu    {} pages a dead driver's device could still write went back once its \
              next driver had reset it, {} of them written after it died; {} kept for good; {} \
-             pins refused while a quarantine was full; {}: {}",
+             pins refused while a quarantine was full; {}: {}; {} retired, not read",
             released.pages,
             released.written,
             released.kept,
             REFUSED.load(Ordering::Relaxed),
             node.location(),
             counts(&domain),
+            released.retired,
         );
     }
 }
@@ -883,7 +943,11 @@ pub fn release(domain: &Arc<Domain>, refusing: usize) -> Released {
         match unpinned {
             Ok(()) => {
                 for (&frame, &sum) in entry.frames.iter().zip(entry.sums.iter()) {
-                    released.written += usize::from(fold(frame) != sum);
+                    if left_unread(frame) {
+                        released.retired += 1;
+                    } else {
+                        released.written += usize::from(fold(frame) != sum);
+                    }
                     let _ = mm::release_frame(frame);
                 }
                 released.pages += pages;

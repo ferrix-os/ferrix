@@ -1015,7 +1015,7 @@
     },
     "object/pin/check.rs": {
       "ring": "core",
-      "reached": "133, 470, 476-477, 505"
+      "reached": "174, 511, 517-518, 546"
     },
     "object/quota_check.rs": {
       "ring": "core",

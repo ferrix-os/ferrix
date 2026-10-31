@@ -2178,6 +2178,26 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.FAIL.11";
             attribute :>> unit = ("user::cache::poisoned_read");
         }
+        requirement <'L.object.262'> theQuarantineLeavesARetiredFrameUnread : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-DRIVER.md §2.1 (customer, 2026-10-30, item 5; consultant NOT YET ledger 5435, OK IF ledger 5444). */
+            attribute :>> statement = "The pin quarantine shall not read a retired frame --
+                neither at a dead driver's pin's close nor at its release -- and
+                shall count each frame left unread and say the count in the
+                release line; every other frame shall be read and compared as
+                before.";
+            attribute :>> criterion = "The pin check's check_retired_unread: a frame the check
+                names retired left unread at the close and the release (the count
+                up by two, the release's retired 1), one not named read at both;
+                test-mce-driver's Own under KVM and TCG: the release after the
+                restart says 1 retired, not read. Negative controls: the skip
+                removed at the close, and at the release, each fires the check.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("object::pin::left_unread",
+                "mm::frame_retired",
+                "object::pin::retired_for_check",
+                "object::pin::quarantine_release",
+                "object::pin::release");
+        }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state
                 word's NONEMPTY shall be set exactly when the inbox holds a message,

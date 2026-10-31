@@ -250,6 +250,29 @@ fn reaches_mce_pagecache(path: &str) -> bool {
         || path.starts_with("src/tests/mce-pagecache/")
 }
 
+/// A ring-3 driver's poison (`docs/MACHINE-CHECK-DRIVER.md` §3, ledger
+/// 5444): Own and Kill under both accelerators, Copy under KVM with AMD's
+/// records, Bystander under TCG with Intel's.
+const TEST_MCE_DRIVER: &[&str] = &[
+    "test-mce-driver --arch x86_64 --accel kvm",
+    "test-mce-driver --arch x86_64 --accel tcg",
+    "test-mce-driver-kill --arch x86_64 --accel kvm",
+    "test-mce-driver-kill --arch x86_64 --accel tcg",
+    "test-mce-driver-copy --arch x86_64 --accel kvm",
+    "test-mce-driver-bystander --arch x86_64 --accel tcg",
+];
+
+/// Whether `path` reaches a driver's poison: the pin quarantine, the victim
+/// driver, or the gate.
+fn reaches_mce_driver(path: &str) -> bool {
+    [
+        "src/kernel/src/object/pin.rs",
+        "tools/common/xtask/src/mce_driver.rs",
+    ]
+    .contains(&path)
+        || path.starts_with("src/user/system/native/mce-victim/")
+}
+
 /// CMCI (`docs/MACHINE-CHECK-CMCI.md` §5, ledger 5348): every mode under
 /// TCG on QEMU with patch 0008, which no other machine here can run.
 const TEST_MCE_CMCI: &[&str] = &[
@@ -495,6 +518,10 @@ fn area_rows(path: &str, rows: &mut Rows) {
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
         );
+    }
+    if reaches_mce_driver(path) {
+        rows.add(TEST_MCE_DRIVER);
+        reason(rows, "a driver's poison: test-mce-driver and its modes");
     }
     if reaches_mce_cmci(path) {
         rows.add(TEST_MCE_CMCI);

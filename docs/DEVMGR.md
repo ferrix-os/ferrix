@@ -349,8 +349,10 @@ DIED     devmgr -> kernel, 16 bytes
 
    A `TERMINATED` packet carries no status, so `devmgr` reads it from the
    process handle (`process_status`, `docs/INIT.md` K6): `137` for a
-   `SIGKILL`, `1` for a driver that exited 1. One whose status cannot be read
-   is reported as `137`, as every death was before K6;
+   `SIGKILL`, `1` for a driver that exited 1, `135` for one a machine check
+   ended (`SIGBUS`, `docs/MACHINE-CHECK-DRIVER.md`) -- one more death, the
+   same restart. One whose status cannot be read is reported as `137`, as
+   every death was before K6;
 3. starts a **display**, **sound**, **network**, **input** or **disk**
    driver again, once the quiesce
    succeeded: in a new job, on a duplicate of its kept device handle, with

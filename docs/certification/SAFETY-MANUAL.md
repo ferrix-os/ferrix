@@ -798,6 +798,16 @@ every machine check halts (L.x86_64.231). Either way:
   applies no threshold; lode's quarantine policy may take a core out of
   service on them (AoU-37), and a machine whose corrected counts grow is
   still the integrator's to take out of service;
+* a ring-3 driver that consumes poison in its own memory, or whose system
+  call's copy consumes it, is a program like any other: it ends with status
+  135 (`SIGBUS`), its frame is retired, and devmgr quiesces the device and
+  starts it again by the kind's policy (`docs/MACHINE-CHECK-DRIVER.md`,
+  DEVMGR §4). The pin quarantine never reads a retired frame of a dead
+  driver's pins, at their close or their release (`L.object.262`). The
+  residual is the ring cores' own ring-0 reads of memory a live driver
+  shares with them -- `interfaces/block_ring`, `net_ring`, `display`,
+  `audio` -- which stop the machine on poison as any ring-0 consumption
+  outside a copy does (a BACKLOG row);
 * corrected errors are found by a poll every `ferrix.mce.poll` seconds (5
   by default), and at once by CMCI where an Intel processor reports
   `MCG_CMCI_P` (`docs/MACHINE-CHECK-CMCI.md`); a record a bank overwrites

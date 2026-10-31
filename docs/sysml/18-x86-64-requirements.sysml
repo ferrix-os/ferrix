@@ -2894,7 +2894,8 @@ package FerrixX8664Requirements {
                 /proc/ferrix-mce-retired and a second program runs;
                 test-mce-kill, the same with RIPV clear: the victim is killed by
                 signal 7, its handler does not run, a second program runs. Negative controls: the classifier calling the record fatal,
-                and vector 18 not moved to the task stack, each stop the boot.";
+                and vector 18 not moved to the task stack, each stop the boot. test-mce-driver and its kill and
+                bystander modes: a native driver ends with status 135";
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("arch::x86_64::mce::from_user",
                 "arch::x86_64::mce::marked",
@@ -3765,7 +3766,8 @@ package FerrixX8664Requirements {
                 and empties; test-mce-copy: write fails EFAULT or ends short at
                 the poisoned page under KVM with AMD's records, SIGBUS code 4 at
                 the injected page's user address, mce: frame retired. Controls:
-                the signal not raised; the frame not retired.";
+                the signal not raised; the frame not retired. test-mce-driver-copy (KVM, AMD's
+                records): a native driver's channel_write consuming its page";
             attribute :>> parent = "H.FAIL.10";
             attribute :>> unit = ("syscall::uaccess::poisoned", "syscall::uaccess::poison_action", "syscall::uaccess::copy_from_user_through", "syscall::uaccess::copy_cstr_from_user", "sched::task::PoisonRecord::record", "sched::task::PoisonRecord::take", "sched::task::Task::record_copy_poison", "sched::task::Task::take_copy_poison", "trap::copy_poisoned");
         }

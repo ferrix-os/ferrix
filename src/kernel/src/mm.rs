@@ -701,10 +701,16 @@ pub fn forget_retired_for_check(count: usize) {
     forget_checked_retirements(count);
 }
 
-// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
-/// Whether `frame` is retired.
-pub fn is_retired(frame: Frame) -> bool {
+/// Whether `frame` is retired: for the pin quarantine, which leaves a
+/// retired frame unread (`L.object.262`).
+pub(crate) fn frame_retired(frame: Frame) -> bool {
     with_frames(|_| holds_retired(frame, 0)).unwrap_or(false)
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// [`frame_retired`], for the poison checks above the core.
+pub fn is_retired(frame: Frame) -> bool {
+    frame_retired(frame)
 }
 
 /// Free a block that holds a retired frame, frame by frame, keeping every

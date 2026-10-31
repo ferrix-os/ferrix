@@ -24,7 +24,10 @@ use ferrix_native_abi::types::{
 };
 use ferrix_paging::MapFlags;
 
-use super::{Counts, DEFAULT_PIN_BUDGET_PAGES, Pin, PinError, ceiling, counts, release};
+use super::{
+    Counts, DEFAULT_PIN_BUDGET_PAGES, Pin, PinError, ceiling, counts, release, retire_for_check,
+    unread,
+};
 use crate::audit::{self, DEVICE_LIMIT, DEVICE_LIMIT_SET};
 use crate::device::DeviceNode;
 use crate::iommu::{Domain, DomainError, Wait};
@@ -81,9 +84,47 @@ pub(crate) fn check_budget(nodes: &[Arc<DeviceNode>]) -> Result<Option<Report>, 
     check_twice(&domain, &owners, &mut report)?;
     check_give_back(&domain, &owners)?;
     check_release(&domain, &owners, &mut report)?;
+    check_retired_unread(&domain, &owners)?;
     check_set_limit(&node, &domain, &owners, &mut report)?;
     check_failed_invalidation(&domain, &owners, &mut report)?;
     Ok(Some(report))
+}
+
+/// The quarantine leaves a retired frame unread (`docs/MACHINE-CHECK-DRIVER.md`
+/// §2.1): a dead owner's one-page pin whose frame the check names retired
+/// (`retire_for_check`, as the retired set is full in a check build) is
+/// neither folded at its close nor at its release -- the unread count rises
+/// by two and the release counts it retired -- and a pin not
+/// named is read at both as before.
+///
+/// Verifies: `L.object.262`
+fn check_retired_unread(domain: &Arc<Domain>, owners: &Owners) -> Result<(), &'static str> {
+    const READ: &str = "a retired frame's page was read by the quarantine";
+    for named in [true, false] {
+        let vmo = crate::user::vmo::Vmo::new_anonymous(1).map_err(|_| "no memory for a pin")?;
+        let held = vmo.hold(0, 1).map_err(|_| "no memory for a pin")?;
+        let frame = *held.frames().first().ok_or("a held page had no frame")?;
+        let pin = Pin::with_budget(
+            Arc::clone(domain),
+            held,
+            MapFlags::DMA,
+            Arc::clone(&owners.dead),
+            Some(BUDGET),
+            true,
+        )
+        .map_err(|_| "a pin within the budget was refused")?;
+        let before = unread();
+        retire_for_check(named.then_some(frame));
+        drop(pin);
+        let released = release(domain, 0);
+        retire_for_check(None);
+        let left = unread().wrapping_sub(before);
+        let (want_left, want_retired) = if named { (2, 1) } else { (0, 0) };
+        if left != want_left || released.retired != want_retired {
+            return Err(READ);
+        }
+    }
+    Ok(())
 }
 
 /// R7 (`docs/NVIDIA.md` §12.3): a pin whose unpin's invalidation fails is

@@ -1348,7 +1348,12 @@ entries off it -- a pass over every quarantined pin on the machine, which
 the budgets bound at twice each device's budget in pages, with no
 allocation; the unpins and the frames' release come after the lock is
 dropped. A quarantined pin's own record is allocated with the pin, outside
-the lock (finding F-23), so a death allocates nothing.
+the lock (finding F-23), so a death allocates nothing. The close's and the
+release's test of each page for a retired frame (`L.object.262`,
+`docs/MACHINE-CHECK-DRIVER.md` §2.1) is one hold of the allocator's
+`FRAMES` per page, outside this lock, bounded by the pin's pages, beside
+the `disown_frame` and `release_frame` holds those paths already make; a
+retired page skips the fold's flush and read.
 
 **The Intel integrated GPU's budget** (`L.object.194`-`196`; the
 consultant's K3 (3), ledger 2352). Counted at stage 10 with the ceiling,

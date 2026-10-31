@@ -51,7 +51,7 @@ From the consumption to the frames' release, each with how it is handled:
 | `arch/x86_64/mce.rs` `from_user`, `signal_page` | the record's address, the space's walk for the program's page | no read of the frame's data |
 | `mm::retire_frame` | the retired set, the allocator's lists | no read of the frame's data |
 | `syscall/deliver.rs` `force_held`, `fault_end` | the kill; no handler, so no signal frame is written | no touch of the frame |
-| `syscall/process.rs` exit's `clear_child_tid` (`uaccess::copy_to_user`) and `futex::wake_address` | a 4-byte store, and the futex word's read, at the thread's `clear_child_tid` | a store is not a consumption; the futex read is `uaccess`, so `copy_mc` (L.syscall.26); a native driver sets none |
+| `syscall/process.rs` exit's `clear_child_tid` (`uaccess::copy_to_user`) and `futex::wake_address` | a 4-byte store, and the futex word's read, at the thread's `clear_child_tid` | a store is not a consumption; the futex read is `uaccess`, so `copy_mc` (L.syscall.26); a native driver sets none: only `set_tid_address` (`syscall/linux.rs`) and `clone` with `CLONE_CHILD_CLEARTID` (`syscall/family.rs`) set it, neither of which `ferrix_rt` or `ferrix_native` makes (grep), and `exec` clears it (5444 (5)) |
 | `fs/crashes.rs`, lode crashd | the hold; crashd reads threads, status, maps and descriptors, never the program's memory (no `/proc/<pid>/mem`, no `process_vm_readv`: grep of `src/user/system/native/lode`) | no touch |
 | address-space teardown (`user/space`) | unmap, page tables freed, the shootdown | page tables only, no data |
 | VMO teardown, `mm::release_frame` | the reference dropped; a retired frame kept, never zeroed or handed out (`holds_retired`) | no read of the frame's data |
@@ -207,3 +207,25 @@ row's driver run).
   and TCG; the rows and the five controls; the clear_child_tid row's
   "a native driver sets none" cited from source or moved to the residual;
   the docs, criteria and coverage.
+* As built: the victim sends the chardev HELLO the Intel driver sends, since
+  only a core's accepted HELLO releases a dead driver's pins
+  (`DeviceNode::hello_accepted`); the quarantine's product test is
+  `mm::frame_retired` (`pub(crate)`), and `mm::is_retired` stays the poison
+  checks' CHECKS-ONLY wrapper, since the kernel-interface rule makes a pub
+  item used above the core only by checks CHECKS-ONLY, which product code
+  may not name (5444 (2)); Copy's judge reads the copy path's `signal pid
+  <p> is` line, since `trap::copy_poisoned` prints no `ended by signal`
+  line, with devmgr's status 135 required in every mode; the second start's
+  page frame is not compared with `<f>`, which the quarantine still holds
+  when that start allocates: the gate shows `<f>` still listed after
+  `quarantine_release`, and its keep is stage 2's L.mm.91 check (control c3:
+  the keep removed, stage 2 stops); the `signal_page` control expects `machine
+  check`, the text of the stop's `FERRIX-PANIC` line, whose catalogue code
+  FX-9005 follows on another line.
+* Code reviewed 2026-10-31 at 64fdf1fc2, ledger 5455: **OK IF (1)-(4)**:
+  the criteria amendments' wording, L.mm.91's amendment narrowed to the
+  listing (its keep is stage 2's), the squash and rebase with coverage
+  carried, and the commit; rulings (a) `mm::frame_retired` with `is_retired`
+  the checks' wrapper, (b) c5's `machine check` text, (c) the victim's
+  HELLO, (d) Copy's judge line, (e) no comparison of the second start's
+  frame, each accepted.

@@ -316,6 +316,9 @@ Reserved on `develop` in 971dd7f2a and written in the model
 
 ## 6. What it does not do
 
+* A ring-3 driver's poison (`MACHINE-CHECK-DRIVER.md`): it ends alone and is
+  started again; the ring cores' ring-0 reads of driver-shared memory are
+  its residual.
 * CMCI on hardware: `MACHINE-CHECK-CMCI.md` is shown on a patched QEMU only;
   the N150 run is a BACKLOG row. AMD's threshold interrupt is not used.
 * AMD's deferred errors and SMCA's per-bank `MCA_IPID` decoding: the
