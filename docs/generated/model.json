@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "a87e047676fdfd183f107e10f5513ca2389f8579dfb5db18d3bb12a20abde3db",
+  "digest": "1364d823cc84959fcf3a98cbeccf32e1912e2379907f233fdf7cf8e06b3c687a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -36867,10 +36867,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::pinBlocksBudgetAndFailure",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"vmo_pin with PIN_BLOCKS shall check the device's pin budget before committing any page, refusing a range past it with LIMIT_REACHED and nothing committed; and a PIN_BLOCKS pin refused after its pre-commit shall leave committed exactly the pages the pre-commit committed, each charged to the caller's job, whether the refusal is the job's memory limit, the hold's or the pin's own (QUARANTINE_FULL, which the budget check before the pre-commit does not read).\"",
+                  "value": "\"vmo_pin with PIN_BLOCKS shall check the device's pin budget before committing any page, refusing a range past it with LIMIT_REACHED and nothing committed; and a PIN_BLOCKS pin refused after its pre-commit shall leave committed exactly the pages the pre-commit committed, each charged to the caller's job, where the refusal is the job's memory limit.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2424
+                    "line": 2422
                   }
                 },
                 {
@@ -36881,7 +36881,7 @@
                   "value": "\"Stage 10's PIN_BLOCKS check: a pin of the budget plus one page is LIMIT_REACHED with no page committed; a pin of 512 pages by a job limited to 256 pages' memory is NO_MEMORY, the VMO holds some pages and exactly that many are charged to the job, and none once the VMO is gone.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2429
+                    "line": 2427
                   }
                 },
                 {
@@ -36892,7 +36892,7 @@
                   "value": "(\"H.DMA.3\", \"H.QUOTA.2\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2430
+                    "line": 2428
                   }
                 },
                 {
@@ -36903,7 +36903,7 @@
                   "value": "(\"syscall::native::vmo_pin\", \"syscall::native::commit_blocks_for_pin\", \"user::vmo::Vmo::commit_blocks\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2432
+                    "line": 2430
                   }
                 }
               ]
@@ -36916,7 +36916,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2434
+                "line": 2432
               },
               "children": [
                 {
@@ -36927,7 +36927,7 @@
                   "value": "\"Vmo::commit_blocks shall commit no page of a file's VMO.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2436
+                    "line": 2434
                   }
                 },
                 {
@@ -36938,7 +36938,7 @@
                   "value": "\"Stage 10's PIN_BLOCKS check: on a VMO over a source, commit_blocks asks commit_run never and the VMO holds no page.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2439
+                    "line": 2437
                   }
                 },
                 {
@@ -36949,7 +36949,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2440
+                    "line": 2438
                   }
                 },
                 {
@@ -36960,7 +36960,7 @@
                   "value": "(\"user::vmo::Vmo::commit_blocks\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2441
+                    "line": 2439
                   }
                 }
               ]
