@@ -226,8 +226,9 @@ header copy (one block, as PM4):
   64  "FXBADFRM"   72 version 1   76 count (0..=64)   80 reserved, 0
   84  64 frame numbers, u32 each (4 KiB pages), the first `count` strictly
       ascending, the rest 0
-  340 CRC-32C of 0..340 (the header's bytes too: an extension belongs to
-      its copy's generation and cannot be paired with the other copy's)
+  340 CRC-32C of the header's 0..40 continued over 64..340 (the header's
+      bytes too: an extension belongs to its copy's generation and cannot be
+      paired with the other copy's; not over 40..44, see §9.8)
 ```
 
 * **PM4's header stays version 1** and its bytes unchanged, so every PM4
@@ -280,7 +281,7 @@ header copy (one block, as PM4):
   there is no disk copy to wait for, and the kernel's attach rewrites every
   kept-out page into the new table, so the frames still cross warm resets.
   The decision is a host-tested pure function the loader calls
-  (`events::renew_after(outcome)`), with its control. A torn write: the set only grows, so the older copy is a subset
+  (`ferrix_eventlog::may_renew(record, frames)`), with its control. A torn write: the set only grows, so the older copy is a subset
   of the newer; falling back to it loses only this boot's additions, which
   the un-renewed table still holds.
 * **Full**: a 65th frame is not added, said (`events   bad frame <f> not
@@ -290,8 +291,9 @@ header copy (one block, as PM4):
 * **Where there is no log** (the bare FAT image, `ferrix.pstore=off`, an
   unusable or damaged partition): nothing is written; 8a's warm-reset path
   only.
-* **A frame at or above 16 TiB** (not a u32 frame number) is not added,
-  said.
+* **A frame at or above 16 TiB** never reaches the set: the kernel's
+  `record_bad_frame` and the banks' `left_page` refuse a frame that is not a
+  u32 already (8a), so every frame the loader holds fits the set (§9.8).
 
 ### 9.3 Who reads it
 
@@ -336,6 +338,16 @@ clears it, and no Ferrix interface asks to.
   boot (the region rule): the post-mortem record is lost until the log is
   repaired, said every boot; BACKLOG row.
 * **Another boot disk, or a reinstall** starts with an empty set.
+* **The tool's commands unrun**: no gate runs `ferrix-eventlog list` or
+  `clear-bad-frames` as a binary; the gate calls the functions they wrap.
+* **The banks' early write unchecked** (ledger 5531 C1): the write of the
+  banks' frames right after the pstore switch is not part of the region
+  rule; if it fails and the region then has no valid header to keep, the
+  region is renewed with those frames not on disk. They still stay out
+  across warm resets (the kernel's attach), so this is the log-refusing-
+  writes residual in another form. The early "already held" test in
+  `keep_frames` relies on nothing else writing the log during a boot,
+  which holds today.
 * **A 4 KiB-block disk** writes the header copy as one 4 KiB block: the
   same layout, still one block.
 
@@ -361,13 +373,25 @@ clears it, and no Ferrix interface asks to.
   boot 4 writes nothing (the header's generation, read by the host tool
   before and after, unchanged); the host's `ferrix-eventlog list` on the
   image prints the frame; after the host's `clear-bad-frames`, a cold boot
-  5's loader keeps nothing out.
+  5's loader keeps nothing out. The gate's host side reads and clears the
+  set by the library functions the tool calls (`read_header`,
+  `clear_bad_frames`) on the disk file; no gate runs the binary's `list`
+  or `clear-bad-frames`, thin wrappers over them (§9.5). **The counted
+  retry** (ledger 5564): an attempt is inconclusive only when boot 2's
+  loader says exactly `badframe <page> could not be kept out (table): it is
+  in use` and still `kept in the event log (1 of 64)`, or cold boot 3's says
+  `could not be kept out (log): it is in use` beside its set's summary line,
+  with every other check of those boots met; it is said with its page and
+  boot and made again from a fresh disk and injection, at most 3 attempts,
+  and all 3 inconclusive fail. The pass line says how many were (`N of M
+  attempts inconclusive (firmware held the page)`). A pure classifier
+  (`after_boot_2`, `after_boot_3`) decides, host-tested with its control.
 * **Negative controls** (`gate.sh control`): the loader's log read removed
   (boot 3: no `(log)`); `add_bad_frames` not called (boot 2: no line);
   `append` not carrying the set (host test); the CRC not covering the
   header (host test, the swapped extension); the order check removed (host
   test, the duplicate); the renewal moved before `add_bad_frames` (the
-  `renew_after` host test with its control); plus (ledger 5511 (3), (8))
+  `may_renew` host test with its control); plus (ledger 5511 (3), (8))
   a fresh header written over damaged copies (host test: both copies
   damaged and an unknown extension version each give 0 writes) and a
   write on an unchanged set (host test: 0 block writes).
@@ -389,3 +413,45 @@ clears it, and no Ferrix interface asks to.
   tool's commands); SAFETY-MANUAL (the AoU); VULNERABILITY-ANALYSIS V-14
   and V-15; MEMORY-AND-TIMING (one block written twice on a boot that adds
   frames); BACKLOG (8b's row closed by the landing; the residuals' rows).
+
+### 9.8 As built
+
+* **The extension's CRC** covers the header's checked bytes 0..40, then the
+  extension's 64..340 -- not 0..340 as v3 said. A CRC-32C run over bytes and
+  their own stored CRC (bytes 40..44) ends in the same state whatever the
+  bytes, so a CRC over 0..340 bound nothing: the host test
+  `an_extension_moved_to_the_other_copy_is_refused` caught it, an extension
+  spliced onto the other copy decoding as valid.
+* **PM4 headers stay readable both ways**: an empty set leaves bytes 44..344
+  zero, byte for byte a PM4 header; the decoder also requires 44..64 zero.
+* **Frames above 16 TiB** never reach the loader: the kernel's
+  `record_bad_frame` and the banks' `left_page` refuse a frame that is not a
+  u32 already (8a), so the set's u32 needs no check of its own.
+* **The order in the loader**: `events::open` and `events::keep_out` run in
+  `boot_info_and_pstore` after the bank read and before `boot_info_area`;
+  `pstore::take` gets the opened log. The banks' frames are written to the
+  log as soon as pstore is on (so a boot that ends with no region still
+  keeps them), the table's before the renewal, and `may_renew` decides from
+  both writes.
+* **A damaged log with a panic record**: `append` refuses it (`Damaged`), so
+  the record stays in RAM, not handed over, as PM4 keeps one for an
+  unusable log.
+* **The summary**: `events   N bad frame(s) kept out across power cycles`,
+  a line of its own and only when the set is not empty, so boots without a
+  set print what they printed.
+* **The gate's host side** reads and clears the set by the library functions
+  the tool calls (`read_header`, `clear_bad_frames`) on the disk file.
+* **The counted retry** (ledger 5564, after m8b-d10 on 8f1a1d67e): that
+  run's victim page 0x1e286000, near the top of the guest's RAM, was held
+  by firmware when boot 2's loader read the table and again on boots 3 and
+  4 (`could not be kept out (table)` then `(log): it is in use`), though
+  boot 2 kept it in the log. AoU-39's order residual, made likelier by the
+  GPT disk (firmware binds more drivers there); the gate now retries such an
+  attempt as §9.6 says, and BACKLOG's 8b row (e) owes the read order.
+* `test-mce-restart-power` passed locally on the first run: boot 2 `kept out
+  (table)` and `kept in the event log (1 of 64)`, cold boot 3 `kept out
+  (log)` only, warm boot 4 `(log)` and `(table, as already)`, the
+  generation unchanged, boot 5 after the clear keeping nothing out.
+* Code review 2026-10-31, ledger 5531: **OK IF (1)-(6)** (rustfmt only on
+  the fix, these docs, the rows and controls, the commit body, coverage).
+* Gate ruling 2026-10-31, ledger 5564: **OK IF (1)-(8)** (the counted retry, its classifier and controls, these docs, BACKLOG (e), the rows owed).

@@ -1,9 +1,11 @@
-//! `ferrix-eventlog`: read the Ferrix event log, or append a pstore record
-//! to it, from Linux (`docs/POSTMORTEM.md` §4).
+//! `ferrix-eventlog`: read the Ferrix event log, append a pstore record to
+//! it, or clear its bad-frame set, from Linux (`docs/POSTMORTEM.md` §4,
+//! `docs/MACHINE-CHECK-RESTART.md` §9.4).
 //!
 //! ```text
 //! ferrix-eventlog list   DEVICE [--text] [--block BYTES]
 //! ferrix-eventlog append DEVICE (--mem ADDRESS | --region FILE) [--block BYTES]
+//! ferrix-eventlog clear-bad-frames DEVICE [--block BYTES]
 //! ```
 //!
 //! `DEVICE` is the event-log partition (`/dev/disk/by-partlabel/ferrix-events`
@@ -16,6 +18,9 @@
 //! log holds already. It never writes the region, which the next Ferrix
 //! loader finds as it was and skips as already kept. `--region FILE` reads
 //! the region from a file instead (a saved copy, `test-postmortem`'s).
+//! `list` also prints the header's generation and the bad-frame set, which
+//! `append` carries through. `clear-bad-frames` empties the set: what root
+//! does after the memory was replaced, and nothing in Ferrix does.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -91,7 +96,7 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<(), String> {
     let usage = || {
-        "usage: ferrix-eventlog list DEVICE [--text] [--block BYTES] | append DEVICE --mem ADDRESS [--block BYTES]"
+        "usage: ferrix-eventlog list DEVICE [--text] [--block BYTES] | append DEVICE --mem ADDRESS [--block BYTES] | clear-bad-frames DEVICE [--block BYTES]"
             .to_owned()
     };
     let (command, device) = match args {
@@ -116,6 +121,7 @@ fn run(args: &[String]) -> Result<(), String> {
             };
             append(device, block, &source)
         }
+        "clear-bad-frames" => clear(device, block),
         _ => Err(usage()),
     }
 }
@@ -170,12 +176,20 @@ fn list(path: &str, block: u32, text: bool) -> Result<(), String> {
     let (mut device, geometry) = open(path, block, false)?;
     let header =
         eventlog::read_header(&mut device, &geometry).map_err(|why| format!("{path}: {why:?}"))?;
-    let Some(header) = header else {
-        say!(
-            "{path}: no valid header: an empty event log ({} records of room)",
-            geometry.records()
-        );
-        return Ok(());
+    let header = match header {
+        eventlog::Current::Header(header) => header,
+        eventlog::Current::Fresh => {
+            say!(
+                "{path}: no header: an empty event log ({} records of room)",
+                geometry.records()
+            );
+            return Ok(());
+        }
+        eventlog::Current::Damaged => {
+            return Err(format!(
+                "{path}: the header is damaged or newer than this tool: nothing read"
+            ));
+        }
     };
     let mut buffer = vec![0u8; RECORD_LEN];
     let mut found = Vec::new();
@@ -191,11 +205,13 @@ fn list(path: &str, block: u32, text: bool) -> Result<(), String> {
     }
     found.sort_by_key(|(meta, _)| meta.index);
     say!(
-        "{path}: {} record(s) held, {} ever appended, room for {}",
+        "{path}: {} record(s) held, {} ever appended, room for {}, generation {}",
         found.len(),
         header.appended,
-        geometry.records()
+        geometry.records(),
+        header.sequence
     );
+    say!("bad frames: {}", frames(&header.bad));
     for (meta, body) in &found {
         let line = String::from_utf8_lossy(eventlog::first_line(body, 200)).into_owned();
         let time = i64::from_le_bytes(meta.last_time);
@@ -218,6 +234,29 @@ fn list(path: &str, block: u32, text: bool) -> Result<(), String> {
             say!("{}", String::from_utf8_lossy(body));
         }
     }
+    Ok(())
+}
+
+/// A bad-frame set as a line: the count, then each page's address.
+fn frames(bad: &eventlog::BadFrames) -> String {
+    let pages: Vec<String> = bad
+        .frames()
+        .iter()
+        .map(|&frame| format!("{:#x}", u64::from(frame) * 4096))
+        .collect();
+    if pages.is_empty() {
+        "0".to_owned()
+    } else {
+        format!("{}: {}", pages.len(), pages.join(" "))
+    }
+}
+
+/// `clear-bad-frames`.
+fn clear(path: &str, block: u32) -> Result<(), String> {
+    let (mut device, geometry) = open(path, block, true)?;
+    let dropped = eventlog::clear_bad_frames(&mut device, &geometry)
+        .map_err(|why| format!("{path}: the clear failed: {why:?}"))?;
+    say!("bad frames dropped: {}", frames(&dropped));
     Ok(())
 }
 

@@ -207,8 +207,9 @@ retired is also recorded in the pstore header's bad-frame table, and a fatal
 machine check records its own records' pages before its report, so that
 after a warm reset the next boot's loader keeps them out from that boot's
 start, and the kernel leaves them out and lists them retired
-(`docs/MACHINE-CHECK-RESTART.md`, H.FAIL.12; across a power cycle is slice
-8b, a BACKLOG row).
+(`docs/MACHINE-CHECK-RESTART.md`, H.FAIL.12); across a power cycle the
+loader keeps them in the boot disk's event log and keeps that set out of
+every boot (slice 8b, §9 there, H.FAIL.13).
 
 * A set of retired frames (256 entries, atomics; full: said once, and
   later frames are logged but not retired -- a machine with 256 bad pages

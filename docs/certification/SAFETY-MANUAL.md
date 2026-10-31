@@ -884,22 +884,34 @@ memory that corrects errors where that matters. In particular:
   scrubber itself would run, and says `scrub    check skipped: ...` with
   the reason elsewhere.
 
-### AoU-39 — a bad frame stays out across a warm reset only on the loader's word
+### AoU-39 — a bad frame stays out across a reset or a power cycle only on the loader's word
 
 H.FAIL.12 (`docs/MACHINE-CHECK-RESTART.md`, slice 8a): after a warm reset
 the kernel hands out no frame the boot before retired, nor the page of an
 uncorrected record a fatal machine check named, **where the loader marked
-it left out**. The loader is outside the item (A.FIRMWARE), and the kernel
+it left out**. H.FAIL.13 (§9, slice 8b): after a power cycle the kernel
+hands out no frame of the boot disk's event-log bad-frame set, **where the
+loader marked it left out**. The loader is outside the item (A.FIRMWARE), and the kernel
 trusts its `BadFrame` pages only to leave memory out -- the risk is RAM
 lost, never wrong data. The integrator:
 
 * uses the loader that marks exactly the frames the pstore header's
-  version-3 table and the machine-check banks name, never one more and never
-  dropping one, and that reads no pstore page a bank names; a loader and
+  version-3 table, the machine-check banks and the event log's bad-frame
+  set name, never one more and never dropping one, that never removes a
+  frame from the set, that writes the set durably before it renews the
+  pstore header, and that reads no pstore page a bank names; a loader and
   kernel of different header versions fail closed (no region that boot);
-* knows that nothing survives a power cycle yet (slice 8b), and that a
-  fatal machine check resets only under `ferrix.panic=reset`, after its
-  10 s hold (the customer's R1);
+* ships the inspection tool (`ferrix-eventlog`) with the loader: a loader
+  or tool from before slice 8b drops the set on its first header write
+  (the records survive); and clears the set (`ferrix-eventlog
+  clear-bad-frames`, root on a host) only after replacing the memory;
+* knows that a frame retired in a run that ended by a power cut or a
+  power-off before any warm reset is not in the set (only a loader writes
+  the disk, and only a warm reset carries the table to one); that another
+  boot disk or a reinstall starts with an empty set; that a log which keeps
+  refusing writes keeps the pstore region off every boot, said; and that a
+  fatal machine check resets only under `ferrix.panic=reset`, after its 10 s
+  hold (the customer's R1);
 * knows that a frame the table could not take (past 64 in one boot) or the
   retired set had no room for is not kept out after a reset, which the
   kernel says once;
@@ -907,8 +919,13 @@ lost, never wrong data. The integrator:
   table inside its pstore step, after it has allocated the boot info area,
   since the command line there can turn pstore off; a retired frame that
   area or firmware now holds is not kept out, which its line says (`is in
-  use (firmware or the loader's earlier allocation)`). The banks' pages are
-  kept out first, before any allocation;
+  use (firmware or the loader's earlier allocation)`); from slice 8b the
+  same holds for the event log's set, read before the boot info area but
+  after firmware's own allocations (boot 3 onward). A page firmware holds
+  may stay held on every boot of a given machine and disk (ledger 5564):
+  then the residual is a retired frame firmware goes on using, not only RAM
+  lost -- "RAM lost, never wrong data" holds for the frames the loader
+  marked. The banks' pages are kept out first, before any allocation;
 * knows that the loader reads only the boot processor's banks; another
   processor's record is kept out through the table, which its stop writes.
 

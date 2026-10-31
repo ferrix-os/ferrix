@@ -1060,7 +1060,7 @@ fn read_log(disk: &std::path::Path) -> Result<Option<(u32, String)>> {
     };
     let geometry =
         Geometry::of(&part, 512).map_err(|why| Error::new(format!("the log: {why:?}")))?;
-    let Some(header) = eventlog::read_header(&mut device, &geometry)
+    let eventlog::Current::Header(header) = eventlog::read_header(&mut device, &geometry)
         .map_err(|why| Error::new(format!("the log's header: {why:?}")))?
     else {
         return Ok(None);
@@ -1114,7 +1114,7 @@ fn kept_problem(panic: &str, boot_3: &[String], record: &Option<(u32, String)>) 
 /// Write `disk`: a GUID partition table, the event log at
 /// [`EVENTS_RANGE`] (zeroed: no header yet), and `image`, the ESP, from
 /// [`ESP_FIRST`].
-fn write_disk(image: &std::path::Path, disk: &std::path::Path) -> Result<()> {
+pub(crate) fn write_disk(image: &std::path::Path, disk: &std::path::Path) -> Result<()> {
     use ferrix_partition::{ESP, Guid, Partition, write_table};
     let esp = std::fs::read(image)?;
     let esp_sectors = (esp.len() as u64).div_ceil(512);
@@ -1152,8 +1152,23 @@ fn write_disk(image: &std::path::Path, disk: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// The disk file as the event log's device, for reading it back.
-struct LogDisk<'a>(&'a std::fs::File);
+/// The event log of a disk [`write_disk`] wrote, as a device and its
+/// geometry: for reading it back, and for the host's clear.
+pub(crate) fn log_device(file: &std::fs::File) -> Result<(LogDisk<'_>, ferrix_eventlog::Geometry)> {
+    let part = ferrix_slots::gpt::Part {
+        index: 0,
+        unique: [0; 16],
+        first_lba: EVENTS_RANGE.0,
+        last_lba: EVENTS_RANGE.1,
+    };
+    let geometry = ferrix_eventlog::Geometry::of(&part, 512)
+        .map_err(|why| Error::new(format!("the log: {why:?}")))?;
+    Ok((LogDisk(file), geometry))
+}
+
+/// The disk file as the event log's device: read back, and written by the
+/// host's clear (the file must then be open for writing).
+pub(crate) struct LogDisk<'a>(&'a std::fs::File);
 
 impl ferrix_slots::record::ControlDisk for LogDisk<'_> {
     fn block_size(&self) -> u32 {
@@ -1161,13 +1176,19 @@ impl ferrix_slots::record::ControlDisk for LogDisk<'_> {
     }
     fn write_block(
         &mut self,
-        _: u64,
-        _: &[u8],
+        lba: u64,
+        bytes: &[u8],
     ) -> std::result::Result<(), ferrix_slots::record::DeviceError> {
-        Err(ferrix_slots::record::DeviceError)
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = self.0;
+        file.seek(SeekFrom::Start(lba * 512))
+            .and_then(|_| file.write_all(bytes))
+            .map_err(|_| ferrix_slots::record::DeviceError)
     }
     fn flush(&mut self) -> std::result::Result<(), ferrix_slots::record::DeviceError> {
-        Ok(())
+        self.0
+            .sync_data()
+            .map_err(|_| ferrix_slots::record::DeviceError)
     }
     fn read_block(
         &mut self,

@@ -10,6 +10,8 @@ use core::ptr;
 
 use ferrix_bootinfo::pstore::{self, Found, HEADER_BYTES, Switch, Text};
 
+use ferrix_eventlog::{self as eventlog, Durability};
+
 use crate::console::println;
 use crate::events;
 use crate::load::{DirectMap, describe};
@@ -38,6 +40,7 @@ pub(crate) fn take(
     cmdline: &str,
     direct: DirectMap,
     kept: &mut crate::badframes::Kept,
+    opened: &mut events::Opened,
 ) -> Option<Allocation> {
     match pstore::switch(cmdline) {
         Switch::On => {}
@@ -52,6 +55,11 @@ pub(crate) fn take(
             );
             return None;
         }
+    }
+    // The frames the banks named go to the event log first, so that a boot
+    // that ends up with no region (below) still keeps them on disk.
+    if let events::Opened::Present(log) = opened {
+        let _ = events::keep_frames(log, kept.named());
     }
     let Some(address) = choose(services, direct) else {
         println!("  pstore   no place for the region below the direct map's end: {NONE}");
@@ -84,7 +92,6 @@ pub(crate) fn take(
     // bytes, identity mapped under boot services, and nothing else refers to
     // it; it is read before anything writes it.
     let header = unsafe { ptr::read_volatile(region.address as *const [u8; HEADER_BYTES]) };
-    let mut opened = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
             // The frames the boot before retired, kept out of this one
@@ -106,14 +113,26 @@ pub(crate) fn take(
                 // (POSTMORTEM §4, E2); a failed append keeps the region as it
                 // is, still allocated so the kernel never uses its pages, and
                 // this boot goes without one.
-                match &mut opened {
+                match opened {
                     events::Opened::Absent => events::Kept::NotAPanic,
                     events::Opened::Unusable => events::Kept::Failed,
                     events::Opened::Present(log) => events::keep(log, services, region),
                 }
             };
-            if matches!(logged, events::Kept::Failed) {
-                if let events::Opened::Present(log) = &mut opened {
+            // The table's frames, durable before the fresh header lets the
+            // table go (`docs/MACHINE-CHECK-RESTART.md` §9.2, the region
+            // rule).
+            let frames = match opened {
+                events::Opened::Present(log) => events::keep_frames(log, kept.named()),
+                events::Opened::Absent | events::Opened::Unusable => Durability::NotNeeded,
+            };
+            let record = match logged {
+                events::Kept::NotAPanic => Durability::NotNeeded,
+                events::Kept::Durable => Durability::Durable,
+                events::Kept::Failed => Durability::Failed,
+            };
+            if !eventlog::may_renew(record, frames) {
+                if let events::Opened::Present(log) = opened {
                     events::summary(log, services);
                 }
                 println!(
@@ -132,7 +151,7 @@ pub(crate) fn take(
             1
         }
     };
-    if let events::Opened::Present(log) = &mut opened {
+    if let events::Opened::Present(log) = opened {
         events::summary(log, services);
     }
     renew(region, sequence);

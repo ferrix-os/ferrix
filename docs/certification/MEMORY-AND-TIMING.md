@@ -2043,7 +2043,9 @@ verdict of ledger line 3950.
   and two cache-line write-backs (the entry and the count), no lock; the
   fatal machine check's stop makes the same per uncorrected record before
   its report, on its stack. The pstore attach writes the loader's kept-out
-  frames back, at most 64, once per boot.
+  frames back, at most 64, once per boot. The event log's set (§9, slice 8b)
+  costs the kernel nothing: the loader reads one block twice per boot, and
+  writes one block twice only on a boot that adds a frame.
 * **CMCI** (`docs/MACHINE-CHECK-CMCI.md`): the handler masks the LVT entry
   (one APIC write), counts, sets and swaps one flag and wakes one wait
   queue; it reads no bank and takes no lock but the queue's. The claim

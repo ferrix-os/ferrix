@@ -477,6 +477,8 @@ and xtask share:
 
 header:  0 "FXEVENTS"  8 version 1  12 record length  16 records  20 next slot
          24 generation  32 appended (the next record's index)  40 CRC-32C of 0..40
+         64 the bad-frame extension, or zero (MACHINE-CHECK-RESTART §9.1):
+         "FXBADFRM", version 1, count, 64 frames ascending, 340 its CRC-32C
 record:  0 "FXEVTREC"  8 version 1  12 kind (1 = panic)  13 flags (truncated, unchecked)
          16 index  24 count  28 text length  32 first boot  40 last boot
          48 identity  56 key (CRC-32C of the panic line)  64 first time  72 last time
@@ -523,17 +525,23 @@ left for its own review. Nothing is ever logged as "power loss" or "hang".
   block not wholly inside the partition (host test
   `no_address_outside_the_partition`, which also appends 40 records and
   counts 0 writes outside LBA 40-2047).
-* **EL3** It writes only on a boot whose pstore region holds a valid record
-  with a panic report (and, on that boot, a fresh header if the partition
-  has none).
-* **EL4** The inspection Linux's `ferrix-eventlog append` writes by the same
+* **EL3** (amended by `docs/MACHINE-CHECK-RESTART.md` §9.2) It writes (a)
+  a record only on a boot whose pstore region holds a valid record with a
+  panic report, and (b) both header copies alone only on a boot whose
+  pstore table or machine-check banks name a frame the log's bad-frame set
+  does not hold; on such a boot, a fresh header first only if neither copy
+  carries the header's magic.
+* **EL4** The inspection Linux's `ferrix-eventlog append`, and root's
+  `ferrix-eventlog clear-bad-frames` (§9.4 there), write by the same
   functions to the partition device named `ferrix-events`, and never writes
   the pstore region.
 
 ### 4.3 The append (E2, E3, E4, E8)
 
 `ferrix_eventlog::append`, in this order: read the header (two copies; a
-fresh header, both copies, when neither is valid); read the newest record
+fresh header, both copies, only when neither copy carries `FXEVENTS`:
+copies that carry it and both fail to decode -- damage, or a newer format
+-- get no write, MACHINE-CHECK-RESTART §9.2); read the newest record
 through it. If its identity is this pstore record's (the boot sequence and
 the CRC-32C of the whole pstore header, `written` among it), nothing is
 written (E3): a reset during the header writes, the loader after Linux or

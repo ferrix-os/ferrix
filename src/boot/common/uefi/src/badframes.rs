@@ -2,7 +2,8 @@
 //! §2.5-2.7): the pages uncorrected records left in the machine-check banks
 //! name, read first, before any of the loader's own allocations; and the
 //! frames the boot before retired, from the pstore header's bad-frame table,
-//! as `pstore::take` reads it.
+//! as `pstore::take` reads it; and the event log's set, which outlives a
+//! power cycle (§9), read right after the banks.
 //!
 //! A page is kept out by allocating exactly it from firmware with the
 //! loader's own type for it (`MemoryType::FERRIX_BAD_FRAME`), which the map
@@ -20,8 +21,13 @@ use crate::uefi::tables::MemoryType;
 /// A page.
 const PAGE: u64 = 4096;
 
-/// Pages kept out at most: the banks' 32 and the table's 64.
-const MOST: usize = 96;
+/// Pages kept out at most: the banks' 32, the table's 64 and the event
+/// log's 64.
+const MOST: usize = 160;
+
+/// Frames the banks and the table named, at most: what the event log's set
+/// is given (§9.2).
+const NAMED: usize = 96;
 
 /// The pages kept out so far this boot.
 pub(crate) struct Kept {
@@ -31,6 +37,12 @@ pub(crate) struct Kept {
     count: usize,
     /// Of them, the ones the banks named.
     from_banks: usize,
+    /// The frames the banks and the table named this boot, kept out or
+    /// not, the first [`Kept::named_count`]: the set records what the
+    /// evidence named, the map what could be done about it.
+    named: [u32; NAMED],
+    /// How many.
+    named_count: usize,
 }
 
 impl Kept {
@@ -42,6 +54,11 @@ impl Kept {
             .iter()
             .take(self.from_banks)
             .any(|&kept| u64::from(kept) == frame)
+    }
+
+    /// The frames the banks and the table named this boot.
+    pub(crate) fn named(&self) -> &[u32] {
+        self.named.get(..self.named_count).unwrap_or_default()
     }
 
     /// Whether frame `frame` is already kept out.
@@ -60,6 +77,8 @@ pub(crate) fn from_banks(services: &Services) -> Kept {
         frames: [0; MOST],
         count: 0,
         from_banks: 0,
+        named: [0; NAMED],
+        named_count: 0,
     };
     let mut pages = [0_u32; 32];
     let found = crate::arch::left_bank_pages(&mut pages);
@@ -70,10 +89,17 @@ pub(crate) fn from_banks(services: &Services) -> Kept {
     kept
 }
 
-/// Keep frame `frame` out, found from `source` (`left` or `table`), unless
-/// it is already; say it either way.
+/// Keep frame `frame` out, found from `source` (`left`, `log` or `table`),
+/// unless it is already; say it either way. A frame the banks or the table
+/// named is remembered for the event log's set, whatever became of it.
 pub(crate) fn keep(services: &Services, kept: &mut Kept, frame: u32, source: &str) {
     let address = u64::from(frame) * PAGE;
+    if source != "log"
+        && let Some(slot) = kept.named.get_mut(kept.named_count)
+    {
+        *slot = frame;
+        kept.named_count += 1;
+    }
     if kept.has(frame) {
         println!("  badframe {address:#x} kept out ({source}, as already)");
         return;

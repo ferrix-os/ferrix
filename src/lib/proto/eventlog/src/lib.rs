@@ -18,7 +18,11 @@
 //!   left, trusting none of it (E5);
 //! * [`append`], the order of writes, idempotent by the pstore record's
 //!   identity (E3), and a reset loop's copies collapsed into a count on the
-//!   newest record (E8).
+//!   newest record (E8);
+//! * [`BadFrames`], the frames the machine checks retired, kept in an
+//!   extension of each header copy so that they outlive a power cycle
+//!   (`docs/MACHINE-CHECK-RESTART.md` §9), with [`add_bad_frames`] and
+//!   [`clear_bad_frames`].
 //!
 //! Records are ordered by their index, the log's own count of appends, kept
 //! in the header: neither the pstore's boot sequence (it starts again at 1
@@ -67,8 +71,12 @@ pub const MAX_RECORDS: u32 = 4096;
 /// The largest block size the log is kept on: every place in it is a
 /// multiple of a page, so a block must divide one.
 pub const MAX_BLOCK: u32 = 4096;
-/// Bytes of a header copy that mean something.
-pub const HEADER_USED: usize = 64;
+/// Bytes of a header copy that mean something: the header, then the
+/// bad-frame extension.
+pub const HEADER_USED: usize = EXTENSION_CHECKED + 4;
+/// The most frames the bad-frame set holds (`docs/MACHINE-CHECK-RESTART.md`
+/// §9.1): the pstore table's bound.
+pub const BAD_FRAMES_MOST: usize = 64;
 
 /// The header's and a record's magic numbers.
 const HEADER_MAGIC: &[u8; 8] = b"FXEVENTS";
@@ -77,6 +85,21 @@ const RECORD_MAGIC: &[u8; 8] = b"FXEVTREC";
 const VERSION: u32 = 1;
 /// The header bytes its CRC covers, and where the CRC is.
 const HEADER_CHECKED: usize = 40;
+/// Where the bad-frame extension starts in a header copy.
+const EXTENSION_AT: usize = 64;
+/// The extension's magic number and version.
+const EXTENSION_MAGIC: &[u8; 8] = b"FXBADFRM";
+const EXTENSION_VERSION: u32 = 1;
+/// Where the extension's count and frames are.
+const EXTENSION_COUNT: usize = 76;
+const EXTENSION_RESERVED: usize = 80;
+const EXTENSION_FRAMES: usize = 84;
+/// Where the extension's CRC is: it covers the header's checked bytes
+/// (0..40, so an extension cannot be paired with the other copy's header)
+/// continued over the extension's (64..340). Not the header's own CRC with
+/// them: a CRC-32C run over bytes and their CRC ends in the same state
+/// whatever the bytes, which would bind nothing.
+const EXTENSION_CHECKED: usize = EXTENSION_FRAMES + 4 * BAD_FRAMES_MOST;
 /// A record head's bytes its CRC covers (with the text), and where it is.
 const HEAD_CHECKED: usize = 92;
 /// The most appends counted before the log refuses more: never reached,
@@ -273,8 +296,146 @@ pub fn classify(scan: Scan, block_size: u32) -> Store {
     }
 }
 
-/// The log's header: where the next record goes and how many were ever
-/// appended.
+/// The frames kept out as bad across power cycles
+/// (`docs/MACHINE-CHECK-RESTART.md` §9.1): at most [`BAD_FRAMES_MOST`]
+/// frame numbers of 4 KiB pages, strictly ascending, so none is there
+/// twice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BadFrames {
+    /// The frames, the first `count` of them; the rest 0.
+    frames: [u32; BAD_FRAMES_MOST],
+    /// How many.
+    count: usize,
+}
+
+/// What [`BadFrames::insert`] did with a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Insert {
+    /// It is in the set now.
+    Added,
+    /// It was in the set.
+    Already,
+    /// The set holds [`BAD_FRAMES_MOST`] others: not added.
+    Full,
+}
+
+impl BadFrames {
+    /// No frames.
+    #[must_use]
+    pub const fn empty() -> BadFrames {
+        BadFrames {
+            frames: [0; BAD_FRAMES_MOST],
+            count: 0,
+        }
+    }
+
+    /// The frames, ascending.
+    #[must_use]
+    pub fn frames(&self) -> &[u32] {
+        self.frames.get(..self.count).unwrap_or_default()
+    }
+
+    /// How many.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Whether there are none.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    /// Put `frame` in its place, keeping the order.
+    pub fn insert(&mut self, frame: u32) -> Insert {
+        let Err(at) = self.frames().binary_search(&frame) else {
+            return Insert::Already;
+        };
+        if self.count >= BAD_FRAMES_MOST {
+            return Insert::Full;
+        }
+        self.frames.copy_within(at..self.count, at + 1);
+        if let Some(slot) = self.frames.get_mut(at) {
+            *slot = frame;
+        }
+        self.count += 1;
+        Insert::Added
+    }
+
+    /// Write the extension into `bytes` (a copy's [`HEADER_USED`] bytes, the
+    /// header's written), unless the set is empty: then the extension's bytes
+    /// stay zero, and the copy is byte for byte a PM4 header.
+    fn encode_into(&self, bytes: &mut [u8; HEADER_USED]) {
+        if self.is_empty() {
+            return;
+        }
+        put(bytes, EXTENSION_AT, EXTENSION_MAGIC);
+        put(bytes, EXTENSION_AT + 8, &EXTENSION_VERSION.to_le_bytes());
+        put(bytes, EXTENSION_COUNT, &(self.count as u32).to_le_bytes());
+        for (index, frame) in self.frames().iter().enumerate() {
+            put(bytes, EXTENSION_FRAMES + 4 * index, &frame.to_le_bytes());
+        }
+        let crc = extension_crc(bytes);
+        put(bytes, EXTENSION_CHECKED, &crc.to_le_bytes());
+    }
+
+    /// The set in a copy's `bytes`, its header already decoded: empty where
+    /// the extension's bytes are all zero; refused where they are anything
+    /// but a whole, valid extension, so that the copy is invalid as a whole
+    /// and the other copy is taken -- never "no frames" in place of damage.
+    fn decode(bytes: &[u8]) -> Result<BadFrames, Refusal> {
+        let extension = bytes.get(EXTENSION_AT..HEADER_USED).ok_or(Refusal::Field)?;
+        if extension.iter().all(|&byte| byte == 0) {
+            return Ok(BadFrames::empty());
+        }
+        if bytes.get(EXTENSION_AT..EXTENSION_AT + 8) != Some(&EXTENSION_MAGIC[..])
+            || le32(bytes, EXTENSION_AT + 8) != Some(EXTENSION_VERSION)
+        {
+            return Err(Refusal::Magic);
+        }
+        if le32(bytes, EXTENSION_CHECKED) != Some(extension_crc(bytes)) {
+            return Err(Refusal::Crc);
+        }
+        let count = le32(bytes, EXTENSION_COUNT).ok_or(Refusal::Field)? as usize;
+        if count == 0 || count > BAD_FRAMES_MOST || le32(bytes, EXTENSION_RESERVED) != Some(0) {
+            return Err(Refusal::Field);
+        }
+        let mut set = BadFrames::empty();
+        for index in 0..BAD_FRAMES_MOST {
+            let frame = le32(bytes, EXTENSION_FRAMES + 4 * index).ok_or(Refusal::Field)?;
+            if index >= count {
+                if frame != 0 {
+                    return Err(Refusal::Field);
+                }
+                continue;
+            }
+            // Strictly ascending: in order, and none twice.
+            if set.frames().last().is_some_and(|&last| frame <= last) {
+                return Err(Refusal::Field);
+            }
+            if let Some(slot) = set.frames.get_mut(index) {
+                *slot = frame;
+            }
+            set.count += 1;
+        }
+        Ok(set)
+    }
+}
+
+/// The extension's CRC in a copy's `bytes`: the header's checked bytes, then
+/// the extension's up to its CRC.
+fn extension_crc(bytes: &[u8]) -> u32 {
+    crc32c_continue(
+        pstore::crc32c(bytes.get(..HEADER_CHECKED).unwrap_or_default()),
+        bytes
+            .get(EXTENSION_AT..EXTENSION_CHECKED)
+            .unwrap_or_default(),
+    )
+}
+
+/// The log's header: where the next record goes, how many were ever
+/// appended, and the bad-frame set its copy carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Header {
     /// The header's generation: one more on every write; the newer valid
@@ -284,6 +445,8 @@ pub struct Header {
     pub next: u32,
     /// Records ever appended: the next record's index.
     pub appended: u64,
+    /// The frames kept out as bad, carried through every header write.
+    pub bad: BadFrames,
 }
 
 impl Header {
@@ -294,6 +457,7 @@ impl Header {
             sequence: 1,
             next: 0,
             appended: 0,
+            bad: BadFrames::empty(),
         }
     }
 
@@ -310,6 +474,7 @@ impl Header {
         put(&mut bytes, 32, &self.appended.to_le_bytes());
         let crc = pstore::crc32c(bytes.get(..HEADER_CHECKED).unwrap_or_default());
         put(&mut bytes, HEADER_CHECKED, &crc.to_le_bytes());
+        self.bad.encode_into(&mut bytes);
         bytes
     }
 
@@ -326,6 +491,7 @@ impl Header {
             next: le32(bytes, 20).ok_or(Refusal::Field)?,
             sequence: le64(bytes, 24).ok_or(Refusal::Field)?,
             appended: le64(bytes, 32).ok_or(Refusal::Field)?,
+            bad: BadFrames::empty(),
         };
         if le32(bytes, 12) != Some(RECORD_LEN as u32)
             || le32(bytes, 16) != Some(records)
@@ -335,7 +501,17 @@ impl Header {
         {
             return Err(Refusal::Field);
         }
-        Ok(header)
+        // Bytes 44..64 are zero in every PM4 header.
+        if bytes
+            .get(HEADER_CHECKED + 4..EXTENSION_AT)
+            .is_none_or(|gap| gap.iter().any(|&byte| byte != 0))
+        {
+            return Err(Refusal::Field);
+        }
+        Ok(Header {
+            bad: BadFrames::decode(bytes)?,
+            ..header
+        })
     }
 
     /// The slot of the newest record, if any was appended.
@@ -362,6 +538,7 @@ impl Header {
                 self.next + 1
             },
             appended: self.appended.saturating_add(1),
+            bad: self.bad,
         }
     }
 }
@@ -641,6 +818,10 @@ pub enum AppendError {
     Range,
     /// The device refused a read, a write or a flush.
     Device,
+    /// Neither header copy decodes and one carries the header's magic:
+    /// damage, or a newer format (`docs/MACHINE-CHECK-RESTART.md` §9.2).
+    /// Nothing is written over it.
+    Damaged,
 }
 
 impl From<DeviceError> for AppendError {
@@ -649,26 +830,72 @@ impl From<DeviceError> for AppendError {
     }
 }
 
-/// The current header on the disk; `None` when neither copy is valid (a
-/// new partition, or one never written).
+/// The log's header on the disk, as [`read_header`] found it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "no_std and nothing here allocates; read once or twice a boot, on the stack"
+)]
+pub enum Current {
+    /// Neither copy carries the header's magic: a partition never written.
+    /// The one case a fresh header is written in.
+    Fresh,
+    /// Neither copy decodes, and one carries the magic (or could not be
+    /// read): damage, or a format newer than this one. Nothing is written
+    /// over it, and its bad frames are not read.
+    Damaged,
+    /// The current header: the valid copy, or of two the newer.
+    Header(Header),
+}
+
+/// The current header on the disk.
 pub fn read_header(
     disk: &mut impl ControlDisk,
     geometry: &Geometry,
-) -> Result<Option<Header>, AppendError> {
+) -> Result<Current, AppendError> {
     let mut block = [0u8; MAX_BLOCK as usize];
     let size = geometry.block_size as usize;
     let mut copies = [Err(Refusal::Magic), Err(Refusal::Magic)];
+    let mut marked = false;
     for (copy, offset) in copies.iter_mut().zip(COPY_OFFSETS) {
         let lba = geometry.lba(offset).ok_or(AppendError::Range)?;
         let bytes = block.get_mut(..size).ok_or(AppendError::Range)?;
         *copy = match disk.read_block(lba, bytes) {
-            Ok(()) => Header::decode(bytes, geometry.records),
-            // An unreadable copy is an invalid one.
-            Err(DeviceError) => Err(Refusal::Magic),
+            Ok(()) => {
+                marked |= bytes.get(..8) == Some(&HEADER_MAGIC[..]);
+                Header::decode(bytes, geometry.records)
+            }
+            // An unreadable copy is an invalid one, and may hold anything:
+            // never taken for a partition never written.
+            Err(DeviceError) => {
+                marked = true;
+                Err(Refusal::Magic)
+            }
         };
     }
     let [a, b] = copies;
-    Ok(select(a, b))
+    Ok(match select(a, b) {
+        Some(header) => Current::Header(header),
+        None if marked => Current::Damaged,
+        None => Current::Fresh,
+    })
+}
+
+/// The header to write to: the current one, or on a partition never
+/// written a fresh one, both copies written first. Damage is refused.
+fn header_to_write(
+    disk: &mut impl ControlDisk,
+    geometry: &Geometry,
+) -> Result<Header, AppendError> {
+    match read_header(disk, geometry)? {
+        Current::Header(header) => Ok(header),
+        Current::Damaged => Err(AppendError::Damaged),
+        Current::Fresh => {
+            let fresh = Header::empty();
+            write_header(disk, geometry, &fresh)?;
+            Ok(fresh)
+        }
+    }
 }
 
 /// Read record `slot` into `buffer` ([`RECORD_LEN`] bytes) and decode it.
@@ -707,8 +934,9 @@ pub const fn counted(header: &Header, meta: &Meta) -> bool {
 /// place, then flushed (E8); otherwise the record goes to the header's next
 /// slot and is flushed, then the header's copy A, flushed, then copy B,
 /// flushed. `Ok` only once that is all durable; then, and only then, the
-/// caller may let the pstore record go. A partition with no valid header
-/// gets a fresh one first, both copies.
+/// caller may let the pstore record go. A partition never written gets a
+/// fresh header first, both copies; damaged copies get nothing
+/// ([`Current::Damaged`]). The bad-frame set is carried through.
 pub fn append(
     disk: &mut impl ControlDisk,
     geometry: &Geometry,
@@ -719,13 +947,7 @@ pub fn append(
     if record.len() != RECORD_LEN || scratch.len() != RECORD_LEN || incoming.text_len > TEXT_MAX {
         return Err(AppendError::Range);
     }
-    let header = if let Some(header) = read_header(disk, geometry)? {
-        header
-    } else {
-        let fresh = Header::empty();
-        write_header(disk, geometry, &fresh)?;
-        fresh
-    };
+    let header = header_to_write(disk, geometry)?;
     let records = geometry.records;
     if let Some(slot) = header.newest_slot(records)
         && let Some(newest) = read_record(disk, geometry, slot, scratch)?
@@ -778,6 +1000,106 @@ pub fn append(
         index: meta.index,
         slot,
     })
+}
+
+/// What [`add_bad_frames`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Added {
+    /// Frames new to the set.
+    pub added: u32,
+    /// Frames the set held already.
+    pub already: u32,
+    /// Frames not added: the set holds [`BAD_FRAMES_MOST`].
+    pub full: u32,
+    /// The set's frames now.
+    pub held: u32,
+}
+
+/// Add `frames` to the log's bad-frame set (`docs/MACHINE-CHECK-RESTART.md`
+/// §9.2): merged in order, none twice, at most [`BAD_FRAMES_MOST`]. When
+/// none is new, nothing is written; otherwise copy A with the generation one
+/// more, flushed, then copy B, flushed. `Ok` only once that is durable; then,
+/// and only then, the caller may let the pstore table go. The set only
+/// grows: a torn write leaves the older copy, a subset of the newer.
+pub fn add_bad_frames(
+    disk: &mut impl ControlDisk,
+    geometry: &Geometry,
+    frames: &[u32],
+) -> Result<Added, AppendError> {
+    let header = header_to_write(disk, geometry)?;
+    let mut bad = header.bad;
+    let mut added = Added {
+        added: 0,
+        already: 0,
+        full: 0,
+        held: 0,
+    };
+    for &frame in frames {
+        match bad.insert(frame) {
+            Insert::Added => added.added += 1,
+            Insert::Already => added.already += 1,
+            Insert::Full => added.full += 1,
+        }
+    }
+    added.held = bad.len() as u32;
+    if added.added > 0 {
+        let next = Header {
+            sequence: header.sequence.wrapping_add(1),
+            bad,
+            ..header
+        };
+        write_header(disk, geometry, &next)?;
+    }
+    Ok(added)
+}
+
+/// Empty the log's bad-frame set: what root does on a host after the memory
+/// was replaced (`docs/MACHINE-CHECK-RESTART.md` §9.4); nothing in Ferrix
+/// calls it. Copy A with the generation one more, flushed, then copy B,
+/// flushed; nothing written when the set is empty already. The frames
+/// dropped.
+pub fn clear_bad_frames(
+    disk: &mut impl ControlDisk,
+    geometry: &Geometry,
+) -> Result<BadFrames, AppendError> {
+    let header = match read_header(disk, geometry)? {
+        Current::Fresh => return Ok(BadFrames::empty()),
+        Current::Damaged => return Err(AppendError::Damaged),
+        Current::Header(header) => header,
+    };
+    if header.bad.is_empty() {
+        return Ok(header.bad);
+    }
+    let next = Header {
+        sequence: header.sequence.wrapping_add(1),
+        bad: BadFrames::empty(),
+        ..header
+    };
+    write_header(disk, geometry, &next)?;
+    Ok(header.bad)
+}
+
+/// What became of one of the two things the pstore region holds for the
+/// disk -- a panic record, the bad-frame table -- before the region is
+/// renewed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Durability {
+    /// It is in the log, durably.
+    Durable,
+    /// The log does not need it, or cannot take it and the boot goes on
+    /// without (no log, an unusable or damaged one, no panic, no frames).
+    NotNeeded,
+    /// The log's write failed: the region is the only copy.
+    Failed,
+}
+
+/// Whether the loader may give the pstore region a fresh header
+/// (`docs/MACHINE-CHECK-RESTART.md` §9.2, the region rule; POSTMORTEM §4,
+/// E2): not while the region is the only copy of a record or a frame the
+/// log failed to take.
+#[must_use]
+pub const fn may_renew(record: Durability, frames: Durability) -> bool {
+    !matches!(record, Durability::Failed) && !matches!(frames, Durability::Failed)
 }
 
 /// Write `header` to copy A, flush, then copy B, flush.

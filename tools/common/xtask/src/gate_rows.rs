@@ -256,11 +256,13 @@ fn reaches_mce_pagecache(path: &str) -> bool {
 const TEST_MCE_RESTART: &[&str] = &[
     "test-mce-restart --arch x86_64 --accel tcg",
     "test-mce-restart-retired --arch x86_64 --accel tcg",
+    "test-mce-restart-power --arch x86_64 --accel tcg",
 ];
 
-/// Whether `path` reaches the warm restart: the pstore table, the stop word,
-/// the loader's bank read and keep-out, the allocator's leave-out, the
-/// machine check's stop, or the gate.
+/// Whether `path` reaches the restart after a machine check: the pstore
+/// table, the stop word, the loader's bank read and keep-out, the event log's
+/// bad-frame set, the allocator's leave-out, the machine check's stop, or
+/// the gate.
 fn reaches_mce_restart(path: &str) -> bool {
     [
         "src/lib/proto/bootinfo/src/pstore.rs",
@@ -270,6 +272,8 @@ fn reaches_mce_restart(path: &str) -> bool {
         "src/kernel/src/arch/x86_64/mce.rs",
         "src/boot/common/uefi/src/badframes.rs",
         "src/boot/common/uefi/src/pstore.rs",
+        "src/boot/common/uefi/src/events.rs",
+        "src/lib/proto/eventlog/src/lib.rs",
         "tools/common/xtask/src/mce_restart.rs",
     ]
     .contains(&path)

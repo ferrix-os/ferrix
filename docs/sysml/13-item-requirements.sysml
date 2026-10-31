@@ -1692,8 +1692,9 @@ package FerrixItemRequirements {
             attribute :>> statement = "After a warm reset, the kernel shall hand out no frame the
                 boot before retired, nor the frame of an uncorrected record the
                 machine check named, where the loader marked it left out (the
-                assumption of use: the loader marks exactly the version-3 table's
-                and the banks' frames, and never drops one).";
+                assumption of use: the loader marks exactly the frames of the
+                version-3 table, the banks and the event log's set, and never
+                drops one).";
             attribute :>> criterion = "L.console.58-59, L.mm.109-110 and L.x86_64.254 each
                 verified; test-mce-restart under TCG with Intel's records: a fatal
                 record under ferrix.panic=reset, then boot 2's loader says boot 1
@@ -1702,6 +1703,22 @@ package FerrixItemRequirements {
                 retired; test-mce-restart-retired: a frame a recovered machine
                 check retired kept out of boots 2 and 3 from the table alone. TCG
                 only; KVM injection across a reset not tried.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.13'> aBadFrameStaysOutAcrossAPowerCycle : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. */
+            attribute :>> statement = "After a power cycle, the kernel shall hand out no frame
+                of the boot disk's event-log bad-frame set, where the loader marked
+                it left out (AoU-39).";
+            attribute :>> criterion = "L.mm.110 verified; test-mce-restart-power under TCG
+                with Intel's records: a frame a recovered machine check retired is
+                kept in the event log by boot 2's loader, kept out of a cold boot 3
+                after a power cut from the log alone, nothing written by boots 3 and
+                4, and gone from a cold boot 5 after the host's clear-bad-frames;
+                an attempt whose victim page firmware holds at boot 2's table read
+                or boot 3's log read (the loader's exact in-use line, the frame
+                still in the log) is inconclusive and made again from a fresh
+                disk, at most 3, all 3 inconclusive failing. TCG only.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {

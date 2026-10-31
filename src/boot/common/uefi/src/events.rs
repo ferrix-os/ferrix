@@ -8,12 +8,18 @@
 //! (`Geometry::lba`), the record's text, the order of writes, idempotence
 //! and a reset loop's collapse. This file moves blocks between firmware's
 //! Block I/O and them. It writes nothing but blocks of that one partition
-//! (POSTMORTEM §4.2, E1), and only on a boot that found a panic record.
+//! (POSTMORTEM §4.2, E1), and only on a boot that found a panic record or
+//! a bad frame its set did not hold (EL3 amended,
+//! `docs/MACHINE-CHECK-RESTART.md` §9.2). The set is read on every boot with
+//! a log, before the loader's own allocations (§9.3).
 
 use core::ptr;
 
 use ferrix_bootinfo::pstore::{self, HEADER_BYTES};
-use ferrix_eventlog::{self as eventlog, AppendError, Geometry, Outcome, RECORD_LEN, Scan, Store};
+use ferrix_eventlog::{
+    self as eventlog, AppendError, BAD_FRAMES_MOST, BadFrames, Current, Durability, Geometry,
+    Outcome, RECORD_LEN, Scan, Store,
+};
 use ferrix_slots::gpt::{self, Lookup};
 
 use crate::console::println;
@@ -27,9 +33,15 @@ const SHOWN: usize = 160;
 pub(crate) struct Log {
     disk: Disk,
     geometry: Geometry,
+    /// Its bad-frame set as [`keep_out`] read it.
+    set: BadFrames,
+    /// Its header copies are damaged or newer: nothing is written to it
+    /// (said once, by [`keep_out`]).
+    damaged: bool,
 }
 
 /// What became of a previous boot's record.
+#[derive(Clone, Copy)]
 pub(crate) enum Kept {
     /// It holds no panic report: nothing to keep.
     NotAPanic,
@@ -40,6 +52,11 @@ pub(crate) enum Kept {
 }
 
 /// The boot disk's event log, as [`open`] found it.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one per boot, on the loader's stack, which has no allocator to box it in; \
+              an allow, not an expect, since the sizes differ by target"
+)]
 pub(crate) enum Opened {
     /// None: no partition table, or no partition of the log's type. PM3's
     /// path: the record is reported and renewed.
@@ -66,12 +83,86 @@ pub(crate) fn open(services: &Services) -> Opened {
     let scan = scan(services, &disk);
     match eventlog::classify(scan, disk.block_size) {
         Store::Absent => Opened::Absent,
-        Store::Present(geometry) => Opened::Present(Log { disk, geometry }),
+        Store::Present(geometry) => Opened::Present(Log {
+            disk,
+            geometry,
+            set: BadFrames::empty(),
+            damaged: false,
+        }),
         Store::Unusable(why) => {
             println!(
                 "  events   the event log cannot be used ({why:?}): a record found stays in RAM"
             );
             Opened::Unusable
+        }
+    }
+}
+
+/// Keep every frame of the log's bad-frame set out of this boot
+/// (`docs/MACHINE-CHECK-RESTART.md` §9.3): right after the bank read, before
+/// the boot info area. The header is read into a block on the stack.
+pub(crate) fn keep_out(store: &mut Log, services: &Services, kept: &mut crate::badframes::Kept) {
+    match eventlog::read_header(&mut store.disk, &store.geometry) {
+        Ok(Current::Header(header)) => {
+            store.set = header.bad;
+            for &frame in header.bad.frames() {
+                crate::badframes::keep(services, kept, frame, "log");
+            }
+        }
+        Ok(Current::Fresh) => {}
+        Ok(Current::Damaged) => {
+            store.damaged = true;
+            println!(
+                "  events   header damaged or newer: nothing written, its bad frames not read"
+            );
+        }
+        Err(_) => println!("  events   its bad frames not kept out this boot"),
+    }
+}
+
+/// Add the frames the banks and the table named to the log's set, before the
+/// pstore region is renewed (§9.2). `Failed` keeps the region: it is then
+/// their only other copy.
+pub(crate) fn keep_frames(store: &mut Log, frames: &[u32]) -> Durability {
+    if store.damaged
+        || frames
+            .iter()
+            .all(|frame| store.set.frames().contains(frame))
+    {
+        return Durability::NotNeeded;
+    }
+    match eventlog::add_bad_frames(&mut store.disk, &store.geometry, frames) {
+        Ok(_) => {
+            // The set as written: the same merge, said frame by frame.
+            for &frame in frames {
+                let address = u64::from(frame) * 4096;
+                match store.set.insert(frame) {
+                    eventlog::Insert::Added => println!(
+                        "  events   bad frame {address:#x} kept in the event log ({} of \
+                         {BAD_FRAMES_MOST})",
+                        store.set.len()
+                    ),
+                    eventlog::Insert::Already => {}
+                    eventlog::Insert::Full => println!(
+                        "  events   bad frame {address:#x} not kept in the event log: its \
+                         {BAD_FRAMES_MOST} are"
+                    ),
+                }
+            }
+            Durability::Durable
+        }
+        Err(AppendError::Damaged) => {
+            store.damaged = true;
+            println!(
+                "  events   header damaged or newer: nothing written, its bad frames not read"
+            );
+            Durability::NotNeeded
+        }
+        Err(why) => {
+            println!(
+                "  events   the bad frames' write failed ({why:?}): the pstore region stays as it is"
+            );
+            Durability::Failed
         }
     }
 }
@@ -129,11 +220,20 @@ pub(crate) fn summary(store: &mut Log, services: &Services) {
     };
     let (buffer, _) = buffers.slices();
     match eventlog::read_header(&mut store.disk, &store.geometry) {
-        Ok(None) => println!(
+        Ok(Current::Fresh) => println!(
             "  events   empty ({} records of room)",
             store.geometry.records()
         ),
-        Ok(Some(header)) => newest(store, &header, buffer),
+        Ok(Current::Header(header)) => {
+            newest(store, &header, buffer);
+            if !header.bad.is_empty() {
+                println!(
+                    "  events   {} bad frame(s) kept out across power cycles",
+                    header.bad.len()
+                );
+            }
+        }
+        Ok(Current::Damaged) => println!("  events   the header is damaged or newer"),
         Err(_) => println!("  events   the header cannot be read"),
     }
     buffers.free(services);
