@@ -8,7 +8,7 @@
   ],
   "arch": "aarch64",
   "profile": "debug",
-  "unreached": 638,
+  "unreached": 635,
   "files": {
     "iommu/vtd.rs": {
       "ring": "core",
@@ -489,8 +489,8 @@
         2583,
         2625,
         2693,
-        3232,
-        3362
+        3265,
+        3395
       ]
     },
     "mm.rs": {
@@ -704,12 +704,9 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        225,
-        233,
-        257,
-        261,
-        264,
-        269
+        393,
+        401,
+        494
       ]
     },
     "arch/arm_common/gicv2.rs": {

@@ -8,7 +8,7 @@
   ],
   "arch": "armv7a",
   "profile": "debug",
-  "unreached": 983,
+  "unreached": 980,
   "files": {
     "iommu/smmuv3.rs": {
       "ring": "core",
@@ -816,9 +816,9 @@
         2583,
         2625,
         2693,
-        2867,
-        3027,
-        3232
+        2900,
+        3060,
+        3265
       ]
     },
     "arch/arm_common/stm32_usart.rs": {
@@ -1087,11 +1087,8 @@
     "object/oom.rs": {
       "ring": "core",
       "lines": [
-        225,
-        257,
-        261,
-        264,
-        269
+        393,
+        494
       ]
     },
     "arch/armv7a/mod.rs": {

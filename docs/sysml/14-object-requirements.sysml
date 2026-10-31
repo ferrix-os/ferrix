@@ -1494,18 +1494,37 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.6";
             attribute :>> unit = ("object::oom::kill_within", "object::oom::at_or_above");
         }
-        requirement <'L.object.102'> noLimitFullNoKill : ItemLowLevel {
+        requirement <'L.object.102'> noLimitFullKillsMachineWide : ItemLowLevel {
             attribute :>> statement = "A fault that failed for want of memory with
                 no limit full shall take back clean file cache anywhere and retry
-                if that gave back any, and otherwise, like one with nothing
-                killable in the full job, fail as it would without the OOM kill
-                and kill nothing.";
-            attribute :>> criterion = "A fault refused with every limit unset and
-                no cache to take back kills 0 processes and ends its program with
-                SIGSEGV; a system call's fault there answers EFAULT.";
-            attribute :>> parent = "H.QUOTA.6";
-            attribute :>> unit = ("object::oom::out_of_memory", "object::oom::fault",
-                "object::oom::kill_within");
+                while that gave back any, at most MACHINE_RECLAIMS (16) times for
+                one fault; once a reclaim gave back nothing or those are spent, it
+                shall end, with the kill's status, the live process with the most
+                resident pages anywhere, never pid 1, count the kill in that
+                process's job and above and an OOM in none, and retry; it shall
+                wait for a victim still ending, make no second machine-wide kill
+                within KILL_GRACE_NANOS (250 ms) of one, kill nobody for a
+                refusal the allocation check injected, and fail as it would
+                without the OOM kill after MOST_ANSWERS (1024) answers to one
+                fault.";
+            attribute :>> criterion = "Stage 5's quota check, over three processes
+                of its own in two jobs with 8, 32 and 1 pages resident and no limit
+                set: with the injection armed nobody is killed; a fault's 1024th
+                answer is a refusal; the process of 32 pages is killed, its job
+                counts oom 0 and oom_kill 1 and the other job 0 and 0, and the
+                answer is a retry; a second answer while it ends kills nobody;
+                once it lets go its job's use falls by its 32 pages; within the
+                grace a second kill is not made; after it the faulter, alone, is
+                killed and told it is the victim.";
+            attribute :>> parent = "H.QUOTA.22";
+            attribute :>> unit = ("object::oom::out_of_memory", "object::oom::out_of_memory_at",
+                "object::oom::fault", "object::oom::user_fault",
+                "object::oom::machine_out_of_memory", "object::oom::machine_answer",
+                "object::oom::machine_out_of_memory_among", "object::oom::kill_in",
+                "object::oom::kill_victim", "object::oom::ended", "object::oom::survey",
+                "object::oom::in_grace",
+                "object::oom::machine_want",
+                "fallible::injecting_here");
         }
         requirement <'L.object.103'> anEndedVictimIsEmptied : ItemLowLevel {
             attribute :>> statement = "A victim that has ended and closed
@@ -2439,15 +2458,23 @@ package FerrixObjectRequirements {
                 past it with LIMIT_REACHED and nothing committed; and a PIN_BLOCKS
                 pin refused after its pre-commit shall leave committed exactly the
                 pages the pre-commit committed, each charged to the caller's job,
-                where the refusal is the job's memory limit.";
+                where the refusal is the job's memory limit. A pin refused for
+                want of memory shall first take back clean file cache, charged to
+                the job whose memory limit is full or beneath it or, with no limit
+                full, anywhere, and try again while that gave back any, at most
+                16 times, before it answers NO_MEMORY.";
             attribute :>> criterion = "Stage 10's PIN_BLOCKS check: a pin of the
                 budget plus one page is LIMIT_REACHED with no page committed; a pin
                 of 512 pages by a job limited to 256 pages' memory is NO_MEMORY,
                 the VMO holds some pages and exactly that many are charged to the
-                job, and none once the VMO is gone.";
+                job, and none once the VMO is gone; a pin of 512 pages by a job
+                limited to 1024 pages and filled to its limit with a file's clean
+                cache is answered, all 512 pages committed, the file holding fewer
+                pages than before.";
             attribute :>> parent = ("H.DMA.3", "H.QUOTA.2");
             attribute :>> unit = ("syscall::native::vmo_pin",
-                "syscall::native::commit_blocks_for_pin", "user::vmo::Vmo::commit_blocks");
+                "syscall::native::commit_blocks_for_pin", "user::vmo::Vmo::commit_blocks",
+                "object::oom::reclaim_for");
         }
         requirement <'L.object.258'> pinBlocksLeaveFilesAlone : ItemLowLevel {
             attribute :>> statement = "Vmo::commit_blocks shall commit no page of a

@@ -20,7 +20,9 @@
 //!    the rest is committed around it;
 //! 6. a pin refused at its job's memory limit leaves exactly the pages it
 //!    committed committed, charged to the job, and nothing else;
-//! 7. a file's object is not committed at all.
+//! 7. a file's object is not committed at all;
+//! 8. a pin refused at its job's memory limit, with clean file cache charged
+//!    to the job, takes the cache back and is answered (`L.object.257`).
 //!
 //! Every case asks [`Vmo::commit_run`] at most `pages + MAX_ORDER + 1`
 //! times.
@@ -65,6 +67,7 @@ pub(crate) fn run(node: &Arc<DeviceNode>) -> Result<u32, &'static str> {
     check_the_race()?;
     refusals += check_the_failure_rule(&side, device)?;
     check_a_file_is_not_committed()?;
+    check_cache_makes_room(&side, device)?;
     side.close_everything();
     Ok(refusals)
 }
@@ -356,5 +359,60 @@ fn check_a_file_is_not_committed() -> Result<(), &'static str> {
     if done != (0, 0) || vmo.committed() != 0 {
         return Err("PIN_BLOCKS committed pages of a file's object");
     }
+    Ok(())
+}
+
+/// A file's source whose every page can be read again: what reclaim may
+/// take, as a read-only mount's pages.
+#[derive(Debug)]
+struct ReadAgain;
+
+impl Filler for ReadAgain {
+    fn fill(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn fill_one(&self, _: &Vmo, _: u64) -> Result<(), ferrix_vfs::Errno> {
+        Ok(())
+    }
+
+    fn reclaimable(&self) -> bool {
+        true
+    }
+}
+
+/// Case 8, `L.object.257`: a job filled to its memory limit with clean file
+/// cache pins a block of fresh memory all the same, the cache given back to
+/// make room, as a fault would take it (2026-10-31: GPU objects pinned
+/// whole answered `ENOMEM` with gigabytes of cache to give back).
+fn check_cache_makes_room(side: &Side, device: Handle) -> Result<(), &'static str> {
+    let tree = Job::new_root().map_err(|_| "no memory for a job")?;
+    let job = tree.new_child().map_err(|_| "a job refused a child")?;
+    let _ = job.set_limit(Resource::Memory, 2 * BLOCK * PAGE_SIZE);
+    let source: Arc<dyn Filler> =
+        crate::fallible::try_arc(ReadAgain).map_err(|_| "no memory for a source")?;
+    let file = Vmo::new_filled(4 * BLOCK, Some(source)).map_err(|_| "no memory for a VMO")?;
+    let vmo = Vmo::new_anonymous(BLOCK).map_err(|_| "no memory for a VMO")?;
+    let handle = vmo_handle(side, &vmo)?;
+    let own = sched::running_group();
+    sched::set_current_group(job.quota_index());
+    // The cache, until the limit refuses a page of it.
+    let cached = (0..4 * BLOCK)
+        .take_while(|&index| file.commit_and_write(index, 0, &[1]).is_ok())
+        .count() as u64;
+    let answer = pin(side, device, handle, BLOCK, blocks(u64::from(ORDER)));
+    sched::set_current_group(own);
+    if cached == 0 || cached >= 4 * BLOCK {
+        return Err("the cache check's file was not cut short by its job's memory limit");
+    }
+    let pinned = answer.map_err(
+        |_| "a pin at its job's memory limit was refused with the job's clean cache to give back",
+    )?;
+    if vmo.committed() as u64 != BLOCK || file.committed() as u64 >= cached {
+        return Err("a pin at its job's memory limit was answered without the cache's room");
+    }
+    close(side, pinned)?;
+    close(side, handle.0 as usize)?;
+    drop((vmo, file));
     Ok(())
 }

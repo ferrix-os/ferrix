@@ -7,8 +7,8 @@ The statements in the certified item that the measured suite did not reach, on e
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1925 | 400 | 264 | **1261** |
-| aarch64 | debug | 638 | 312 | 157 | **169** |
-| armv7a | debug | 983 | 414 | 346 | **223** |
+| aarch64 | debug | 635 | 312 | 157 | **166** |
+| armv7a | debug | 980 | 414 | 346 | **220** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -361,7 +361,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**638** unreached statements, debug profile.
+**635** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -370,7 +370,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | Reached only when something has already failed | 78 | 12% |
 | Run, and credited to another line | 10 | 2% |
 | Hardware the measured machine does not have | 157 | 25% |
-| Needs a test | 169 | 26% |
+| Needs a test | 166 | 26% |
 
 ### aarch64: Unreachable on the measured architecture — 104 statements
 
@@ -475,7 +475,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `iommu/smmuv3.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### aarch64: Needs a test — 169 statements
+### aarch64: Needs a test — 166 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -485,12 +485,12 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 33 | `item` | `discovery/pci/virtio.rs` |
 | 14 | `item` | `init.rs` |
 | 6 | `item` | `main.rs` |
-| 6 | `core` | `object/oom.rs` |
 | 6 | `item` | `syscall/native.rs` |
 | 4 | `core` | `object/channel.rs` |
 | 4 | `core` | `smp.rs` |
 | 4 | `item` | `syscall/program.rs` |
 | 3 | `core` | `console/screen.rs` |
+| 3 | `core` | `object/oom.rs` |
 | 3 | `core` | `object/process.rs` |
 | 2 | `core` | `console.rs` |
 | 2 | `core` | `object/mod.rs` |
@@ -726,7 +726,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**983** unreached statements, debug profile.
+**980** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -735,7 +735,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | Reached only when something has already failed | 65 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 346 | 35% |
-| Needs a test | 223 | 23% |
+| Needs a test | 220 | 22% |
 
 ### armv7a: Unreachable on the measured architecture — 156 statements
 
@@ -837,7 +837,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `discovery/fdt.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### armv7a: Needs a test — 223 statements
+### armv7a: Needs a test — 220 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
@@ -848,7 +848,6 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 21 | `core` | `object/pin.rs` |
 | 14 | `item` | `init.rs` |
 | 8 | `item` | `syscall/native.rs` |
-| 5 | `core` | `object/oom.rs` |
 | 4 | `core` | `console.rs` |
 | 4 | `item` | `main.rs` |
 | 4 | `core` | `mm.rs` |
@@ -859,6 +858,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 2 | `core` | `console/output.rs` |
 | 2 | `core` | `early.rs` |
 | 2 | `core` | `object/mod.rs` |
+| 2 | `core` | `object/oom.rs` |
 | 2 | `core` | `object/port.rs` |
 | 2 | `item` | `random.rs` |
 | 2 | `item` | `syscall/program.rs` |

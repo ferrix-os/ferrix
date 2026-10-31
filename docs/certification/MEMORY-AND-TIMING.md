@@ -267,6 +267,30 @@ frames always took: clean cache reclaimed first, then the fault fails
   filling cache again, ends only on a signal to the writer, which is looked
   for before every round: preemptible, and paid for by the writer, since
   the file is 0200 and the root has none.
+* **A fault with the machine out of frames, and the machine-wide OOM kill**
+  (`object::oom`, since 2026-10-31, `H.QUOTA.22`, `L.object.102`). A fault
+  refused with no memory limit full is retried in the kernel, from
+  `oom::user_fault` and `oom::fault` alike, its answers counted: at most
+  `MACHINE_RECLAIMS` (16) machine-wide reclaims, each of `RECLAIM_PAGES`
+  (32) and what the free count lacks of the watermark (at most 8192), so at
+  most 16 x 8224 pages; then, once a reclaim gave nothing or those are
+  spent, the machine-wide kill; and at most `MOST_ANSWERS` (1024) answers
+  in all, the waits for an ending victim and while another fault chooses
+  each 1 ms (`PAUSE_NANOS`), about a second, after which the fault fails as
+  it did before (`SIGSEGV`, `EFAULT`). The choice walks `process::live()`'s
+  copy of the list with no spin lock held (`CHOOSING` is a flag, not a
+  lock), one look per process. No second machine-wide kill is made within
+  `KILL_GRACE_NANOS` (250 ms) of one: a victim its parent reaped leaves the
+  list before its memory is back.
+* **A pin's reclaim** (`syscall::native::hold_reclaiming`, since
+  2026-10-31, `L.object.257`). A `vmo_pin` whose commit or hold finds no
+  frame reclaims clean cache (`oom::reclaim_for`), in the job whose
+  `memory.max` is full or machine-wide, and tries again while a reclaim
+  gives back: at most 16 reclaims (`PIN_RECLAIMS`), each of at most
+  `RECLAIM_FOR_MOST` (16384) pages and, machine-wide, the watermark's
+  shortfall (at most 8192), so one pin call reclaims at most 16 x 24576 =
+  393216 pages, with no lock held across a reclaim. A pin kills nobody: it
+  answers `NO_MEMORY`.
 * **The kernel's own users of the program routes**, which the watermark
   now refuses earlier than an empty allocator would, and why each is
   handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
@@ -306,8 +330,8 @@ frames always took: clean cache reclaimed first, then the fault fails
   sequential stream also waits for a whole run of 32 pages from the
   source, as a fault did, with no lock held while it waits (ledger line
   1700); a fault's
-  own retry after it is `oom::out_of_memory`'s, so 8 is not the fault's
-  whole bound; a file's write (`fs/pages.rs`,
+  own retry after it is `oom::out_of_memory_at`'s, whose bound is below
+  (the machine-wide OOM kill); a file's write (`fs/pages.rs`,
   `write_reclaiming` over `Vmo::commit_and_write`, since 2026-10-15)
   reclaims the same way, in the job whose `memory.max` refused it or
   machine-wide, at most 8 times while a reclaim gives pages back, and then

@@ -1396,6 +1396,23 @@ package FerrixItemRequirements {
                 comes back (the `watermark` line).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
+        requirement <'H.QUOTA.22'> machineOomKillIsBounded : ItemHighLevel {
+            attribute :>> statement = "A user page fault refused for want of memory
+                with no job's memory limit full shall take back clean file cache
+                anywhere and retry, a bounded number of times; once that gives back
+                nothing or the bound is spent, it shall end the live process with
+                the most resident memory anywhere, never pid 1, count the kill in
+                that process's job and every job above it, and retry; it shall make
+                at most one such kill within a grace period while a victim's memory
+                comes back, and fail as it would without a kill after a bounded
+                number of answers.";
+            attribute :>> criterion = "Stage 5's quota check: with reclaims left and
+                clean cache the fault retries and kills nobody; with them spent the
+                process with the most resident pages among three in two jobs is
+                ended and counted in its job alone; a second kill is not made
+                while it ends or within the grace; a fault's last answer refuses.";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
     }
 
     package Audit {

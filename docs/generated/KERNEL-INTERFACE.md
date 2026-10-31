@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2518 declarations in the core's files, 179 in the item's; 118 checks-only.
+2525 declarations in the core's files, 179 in the item's; 123 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1971,7 +1971,7 @@ checks above is `pub` for raised checks (F3).
 | `interrupt` | mod | item, load, bin |  |
 | `io_mapping` | mod | item, load |  |
 | `job` | mod | item, load |  |
-| `oom` | mod | load |  |
+| `oom` | mod | item, load |  |
 | `pin` | mod | item, load |  |
 | `port` | mod | item, load |  |
 | `process` | mod | item, load |  |
@@ -2129,11 +2129,18 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `MACHINE_RECLAIMS` | const | item, load |  |
+| `MOST_ANSWERS` | const | load (checks) | checks-only |
 | `Answer` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fault` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `forget_last_machine_kill_for_check` | fn | load (checks) | checks-only |
 | `is_charge_refusal` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `kills` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `machine_answer` | fn | load (checks) | checks-only |
+| `machine_out_of_memory_among` | fn | load (checks) | checks-only |
 | `out_of_memory` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `out_of_memory_at` | fn | load (checks) | checks-only |
+| `reclaim_for` | fn | item |  |
 | `throttle` | fn | load |  |
 
 ### `object::pin`
@@ -2742,7 +2749,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report` | struct | item, load, bin |  |
-| `Report::tries` | field | load |  |
+| `Report::tries` | field | item, load |  |
 
 ### `signal_frame`
 

@@ -2696,16 +2696,49 @@ fn vmo_pin(
     if options & PIN_CONTIGUOUS != 0 {
         return contiguous_pin(process, &node, &vmo, (first, pages), read_only, past_caches);
     }
-    if let Some(order) = order {
-        commit_blocks_for_pin(&node, &vmo, (first, pages), order)?;
-    }
-    let held = vmo.hold(first, pages).map_err(vmo_error)?;
+    let held = hold_reclaiming(&node, &vmo, (first, pages), order)?;
     if past_caches {
         coherent_for_device(&vmo, &held)?;
     }
     let pin = pin_through(&node, held, dma_flags(read_only), process.exit_record())?;
     insert_new(process, Object::Pin(pin), Rights::PIN)
 }
+
+/// `vmo_pin`'s commit and hold of `range` (first page, pages) of `vmo`, with
+/// `PIN_BLOCKS`' pre-commit up to `order` if it asks for one. At the
+/// machine's floor, or a job's memory limit, clean file cache is room for
+/// the pin as it is for a fault (`object::oom::reclaim_for`): without it a
+/// GPU object pinned whole at its first bind, mmap or export answered
+/// `ENOMEM` with gigabytes of cache to give back (2026-10-31, Endfield on
+/// the N150 box). What one try committed stays committed, so each try after
+/// a reclaim needs only the rest; at most [`PIN_RECLAIMS`] reclaims.
+fn hold_reclaiming(
+    node: &DeviceNode,
+    vmo: &Arc<Vmo>,
+    (first, pages): (u64, u64),
+    order: Option<u8>,
+) -> Result<crate::user::vmo::Held, Errno> {
+    let mut tries = 0;
+    loop {
+        if let Some(order) = order {
+            commit_blocks_for_pin(node, vmo, (first, pages), order)?;
+        }
+        match vmo.hold(first, pages) {
+            Err(VmoError::OutOfMemory)
+                if tries < PIN_RECLAIMS && object::oom::reclaim_for(pages) =>
+            {
+                tries += 1;
+            }
+            held => return held.map_err(vmo_error),
+        }
+    }
+}
+
+/// Reclaims one `vmo_pin` makes, each followed by another try, before it
+/// answers `NO_MEMORY`: as many as a fault makes before the machine-wide OOM
+/// kill (`object::oom::MACHINE_RECLAIMS`). A pin kills nobody: a driver
+/// answers its program's `ENOMEM`.
+const PIN_RECLAIMS: u32 = object::oom::MACHINE_RECLAIMS;
 
 /// `vmo_pin`'s options and range, checked before anything else: the
 /// largest block order `PIN_BLOCKS` asks for, if it does (L.object.254: an
