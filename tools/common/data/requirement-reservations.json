@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["H.QUOTA.22"],
+      "owner": "oom-no-panic",
+      "branch": "bugfix/oom-no-panic",
+      "date": "2026-10-31",
+      "purpose": "p1-002, the machine-wide OOM kill (consultant OK IF (1)-(9), ledger 5546): the item-level parent of the amended L.object.102 -- a bounded reclaim, then the largest process anywhere, never pid 1, one kill per grace, a bound on a fault's answers"
+    },
+    {
       "ids": [
         "H.QUOTA.18-21",
         "L.mm.83-90"
