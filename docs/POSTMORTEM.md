@@ -1011,6 +1011,144 @@ S4a 6-8 points, S4b 8-10, the box steps about 1: 15 to 19 points.
   lockup module registers into, as power's flushes do.
 * The rest (D5, D8-D12, D14) are the code reviews' to check.
 
+### 6.9 S4c: user space's heartbeat (version 2, 2026-10-31)
+
+**Why.** On 2026-10-31 at 14:14 UTC the N150 box (develop 86b79a87d,
+Endfield running) froze all of user space at once: the screen stood still,
+sshd's connection was reset, ping was answered, and `journalctl -b -1`
+stops mid-line with no OOM kill and no process death. The kernel did not
+panic, so nothing survived the power cycle (journal copy:
+`~/.local/share/ferrix/postmortem-2026-10-31/journal-b1-all.txt`). Ping
+answered means every processor was taking interrupts: S4a sees no lockup,
+and S4b, fed from the kernel's own tick, keeps being fed. What stopped was
+user space. So a third layer, the customer's: user space feeds the
+kernel, and a feed that does not come is a lockup.
+
+* **Off unless asked.** `ferrix.watchdog=` takes a comma-separated list:
+  `user` (this section) and `tco` (S4b). Any other word is said in one line
+  and ignored; no option is the reference. Without `user` there is no
+  device node and nothing below runs.
+* **The interface is Linux's watchdog device** (`linux/watchdog.h`), so
+  busybox's `watchdog` and init speak it unchanged, and no new system call
+  is made: `/dev/watchdog`, character device 10:130, mode 0600, root's.
+  * `open` arms it with the current timeout (60 s until set). One opener at
+    a time: a second open is `EBUSY`.
+  * `write` of any length feeds it. If the last byte written is a `V`, a
+    later `close` disarms it (Linux's magic close); otherwise `close`
+    leaves it armed and counting, and only a new opener can feed it again.
+  * `ioctl`: `WDIOC_GETSUPPORT` (options `SETTIMEOUT`, `KEEPALIVEPING`,
+    `MAGICCLOSE`; identity `Ferrix user watchdog`), `WDIOC_GETSTATUS` and
+    `WDIOC_GETBOOTSTATUS` (0), `WDIOC_KEEPALIVE`, `WDIOC_SETTIMEOUT` (1 to
+    600 s, else `EINVAL`; feeds and answers the timeout set),
+    `WDIOC_GETTIMEOUT`, `WDIOC_GETTIMELEFT`, `WDIOC_SETOPTIONS`
+    (`WDIOS_DISABLECARD` disarms, `WDIOS_ENABLECARD` arms). Any other
+    request is `ENOTTY`.
+* **The kernel holds the timer, the deadline and the panic, nothing
+  else.** One deadline word on the counter (0 = disarmed), the timeout, the
+  time of the last feed and the opener's process id and name, copied at
+  `open`. Which services must be alive for the feed to come, and how often
+  it comes, is ring 3's: init's, below.
+* **The check runs on the watch.** `ferrix.watchdog=user` brings the watch
+  with it (heartbeats and the 1 s tick on every processor, as `tco` does,
+  D7). On every processor's watch tick, one load and one compare: a deadline
+  passed stores the stop word **code 7, a lockup** (`locked_up`, before
+  anything else), and reports under a new catalog entry **FX-9008**, "user
+  space stopped feeding its watchdog": who armed it, its timeout, and how
+  long since the last feed. Any processor may find it; the first report
+  wins, as with every report. A halted or powered-off machine takes no tick
+  and so never reports.
+* **What each processor ran and where.** While the watch runs, every
+  interrupt a processor takes records, in that processor's own slot, the
+  interrupted instruction pointer, whether it was in user mode, the running
+  task's id and the counter (`trap::dispatch`, one read of the set-once flag
+  when the watch is off). Every failure report with the watch running
+  prints, after its `on` line, one `cpu` line per online processor: the
+  task, kernel or user, where (a kernel address as its offset in the image,
+  `kernel+0x...`, which names no slide and so is logged and reaches the
+  pstore record and `LASTKERNEL.TXT`; a user address on the port only, as
+  the backtrace is), the sample's age, the processor's heartbeat and the
+  preemption count it holds. A processor whose sample is older than 2 s is
+  said to take no interrupts (S4a's case). xtask names `kernel+0x...`
+  from the image booted, as it names a backtrace.
+* **Init feeds** (ring 3, the policy): `ferrix.init.watchdog=<seconds>`
+  (init's own option, as `ferrix.target=` is) makes init open
+  `/dev/watchdog`, set the timeout and feed it every third of it from its
+  event loop, whose wait the next feed bounds. A user space in which pid 1
+  cannot turn its loop for the timeout is a stopped one. Init never writes
+  the magic `V`: `reboot(2)` ends the machine, and a halt takes no tick.
+  Per-service watchdogs (systemd's `WatchdogSec=`, a service's own
+  `WATCHDOG=1` gating init's feed) are left open.
+* **The reset.** The report halts unless `ferrix.panic=reset` (AoU-32), with
+  which the machine resets 10 s after the report and the next loader keeps
+  it as `FERRIX/LASTKERNEL.TXT`. The box's command line gets
+  `ferrix.lockup=on ferrix.watchdog=user ferrix.init.watchdog=30
+  ferrix.panic=reset`.
+* **Ring and rings.** The deadline and its check are item
+  (`src/kernel/src/userwatch.rs`), the sample and the `cpu` lines core
+  (`watch.rs`, `panic.rs`), the device node load (`fs/devfs.rs`, beside the
+  other character devices). Nothing in core names the item's file.
+* **Bound** (MEMORY-AND-TIMING 2.2o'): a watch tick does one load and one
+  compare more; an interrupt with the watch on, four relaxed stores; a feed,
+  one read of the counter and one store; a report, one line per processor.
+* **Requirements** (reserved 676efd6ff): H.FAIL.14 (with `ferrix.watchdog=user`,
+  an armed watchdog not fed within its timeout ends in a failure report,
+  stop word a lockup), L.lockup.6 (the device's interface and its
+  refusals), L.lockup.7 (the deadline: a feed moves it, a magic close
+  disarms it, a plain close keeps it), L.lockup.8 (the check on the watch
+  tick, code 7 before the report), L.lockup.9 (the `cpu` lines).
+* **Gate**, `cargo xtask test-lockup` (a command of its own: the lockup
+  cases leave test-postmortem, which keeps the record and the stops), x86-64
+  under KVM with 4 processors and AArch64:
+  1. S4a's lockup case and quiet case, as reviewed.
+  2. **The heartbeat stops**: `ferrix.watchdog=user ferrix.panic=reset`, a
+     script that starts busybox's `watchdog -F -T 5 -t 1 /dev/watchdog`,
+     says so, then `kill -STOP`s it and says that. The report must come 4.5
+     to 15 s after the stop line, under FX-9008, with a `cpu` line for each
+     processor; the machine must reset by itself, and the next loader must
+     say `boot 1 ended: a lockup` and keep `LASTKERNEL.TXT` with the
+     FX-9008 line.
+  3. **The heartbeat goes on**: the same feeder fed for 15 s, then a
+     `kill -TERM` (busybox writes `V` and closes), then 10 s more: no
+     report. With the device: a second open is `EBUSY`, a timeout of 0 is
+     `EINVAL`.
+  4. **Init feeds**: init as pid 1 with `ferrix.watchdog=user
+     ferrix.init.watchdog=5` for 20 s: init's line that it feeds, and no
+     report.
+  5. **Off**: no `ferrix.watchdog`: `/dev/watchdog` is absent.
+  Controls (`gate.sh control`, each FIRED on a named message): the deadline
+  check removed (case 2: no report within its bound); the feed not moving
+  the deadline (case 3: a report); the magic close ignored (case 3: a
+  report after the close); init's feed removed (case 4: a report); the
+  `cpu` lines removed (case 2: no `cpu` line).
+
+### 6.10 S4b, as found on 2026-10-31
+
+Read again before S4b's code, with line cites (D8):
+
+* **QEMU 10.2.1** (the gate host's, `hw/acpi/ich9_tco.c`,
+  `include/hw/acpi/ich9_tco.h`, `hw/isa/lpc_ich9.c`): the ICH9's TCO keeps
+  `TCO_TMR` at **+0x12, 10 bits** (`TCO_TMR = 0x12`, `TCO_TMR_MASK 0x3ff`),
+  as Linux's version 2 and later (`iTCO_wdt.c` lines 75 and 82: `TCOv1_TMR`
+  +0x01 is version 1's alone). D8's "version 2: +0x01, 6 bits" was version
+  1's layout; corrected here. The timer starts only on a write of `TCO_RLD`
+  or `TCO1_CNT` with `TCO_TMR_HLT` clear and a count above 1
+  (`can_start_tco_timer`); nothing starts it at reset. The second expiry
+  sets `SECOND_TO_STS` and `BOOT_STS` and resets unless the `noreboot`
+  strap or GCS's `NO_REBOOT` (bit 5 at the root complex's +0x3410) holds it.
+  **GCS's default is 0 in 10.2.1** (`ICH9_CC_GCS_DEFAULT 0x00000000`,
+  ich9.h line 98; 9.2.4's was 0x20), so `NO_REBOOT` is already clear. The
+  registers are set only at machine creation (`acpi_pm_tco_init`), so they
+  and a running timer survive `system_reset`, as §6.1 says.
+* **OVMF** (edk2 in the QEMU tree, `OvmfPkg/Library/PlatformInitLib/Platform.c`
+  line 401) enables the RCBA at `0xFED1C000` on q35: the q35 path is open,
+  and the kernel's discovery line on a q35 boot is the emulator evidence
+  §6.5 asks for.
+* **The N150** (version 6): `NO_REBOOT` is `TCO1_CNT` bit 0, written with
+  `NMI_NOW` (bit 8) masked (`update_no_reboot_bit_cnt`, lines 221-243);
+  the ticks are 0.6 s for every version but 3 (`seconds_to_ticks`). Linux's
+  stop sets `TCO_TMR_HLT` then `NO_REBOOT` (`iTCO_wdt_stop`), its start
+  clears `NO_REBOOT`, writes `TCO_RLD` then clears the halt (`iTCO_wdt_start`).
+
 ## 7. Where it stands
 
 2026-10-21, §6 (lockup): S4's design, the lockup detector and the TCO
