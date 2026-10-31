@@ -494,7 +494,7 @@ pub(crate) fn watchdog_timeout(fd: RawFd, seconds: u32) -> io::Result<u32> {
     let mut value = libc::c_int::try_from(seconds).unwrap_or(libc::c_int::MAX);
     // SAFETY: `WDIOC_SETTIMEOUT` reads and writes the one `int` the pointer
     // names, which lives across the call.
-    check(unsafe { libc::ioctl(fd, WDIOC_SETTIMEOUT, &raw mut value) })?;
+    let _ = check(unsafe { libc::ioctl(fd, WDIOC_SETTIMEOUT, &raw mut value) })?;
     Ok(u32::try_from(value).unwrap_or(0))
 }
 

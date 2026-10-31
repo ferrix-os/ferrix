@@ -62,6 +62,9 @@ pub(crate) struct WatchdogFile {
     pid: u32,
     /// Whether the last write held a `V`: the magic close.
     magic: AtomicBool,
+    /// Whether this open armed the watchdog: false for one refused
+    /// `EBUSY`, whose drop must not end the open that holds it.
+    arms: AtomicBool,
 }
 
 impl WatchdogFile {
@@ -84,10 +87,12 @@ impl WatchdogFile {
         let file = crate::fallible::try_arc(WatchdogFile {
             pid,
             magic: AtomicBool::new(false),
+            arms: AtomicBool::new(false),
         })
         .map_err(|_| Errno::ENOMEM)?;
         let name = caller.as_ref().map(|caller| caller.comm()).unwrap_or_default();
         userwatch::open(pid, &name).map_err(|_| Errno::EBUSY)?;
+        file.arms.store(true, Ordering::Release);
         Ok(file)
     }
 }
@@ -96,7 +101,9 @@ impl Drop for WatchdogFile {
     /// The open's last release: disarmed after the magic close, armed and
     /// counting otherwise (`L.lockup.7`).
     fn drop(&mut self) {
-        userwatch::release(self.pid, *self.magic.get_mut());
+        if *self.arms.get_mut() {
+            userwatch::release(self.pid, *self.magic.get_mut());
+        }
     }
 }
 

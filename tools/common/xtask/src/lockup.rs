@@ -22,6 +22,10 @@
 //! 4. *init feeds*: init as pid 1 with `ferrix.init.watchdog=5` for 20 s:
 //!    init says it feeds, and no report;
 //! 5. *off*: without `ferrix.watchdog`, `/dev/watchdog` is absent.
+//!
+//! `FERRIX_TEST_LOCKUP_ONLY=<case>,...` (`lockup`, `quiet`, `stopped`,
+//! `killed`, `goes-on`, `init`, `off`) runs those cases alone, for a
+//! negative control's run; a gate row sets nothing and runs every case.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -60,7 +64,11 @@ pub(crate) fn test_lockup(
                  U-Boot, whose RAM across a reset is not this gate's to claim",
             ));
         }
-        locked_up(arch, args, &build)?;
+        let only = std::env::var("FERRIX_TEST_LOCKUP_ONLY").unwrap_or_default();
+        let wants = |case: &str| only.is_empty() || only.split(',').any(|each| each == case);
+        if wants("lockup") {
+            locked_up(arch, args, &build)?;
+        }
         let busybox = crate::busybox::program(arch)?;
         let shell = read(&busybox)?;
         let loader = crate::cargo::build_loader(arch, args.release)?;
@@ -75,12 +83,24 @@ pub(crate) fn test_lockup(
             program: &busybox,
             carried: &carried,
         };
-        watched_quietly(arch, args, &parts, &shell)?;
-        heartbeat_stops(arch, args, &parts, &shell, Signal::Stop)?;
-        heartbeat_stops(arch, args, &parts, &shell, Signal::Kill)?;
-        heartbeat_goes_on(arch, args, &parts, &shell)?;
-        init_feeds(arch, args)?;
-        heartbeat_off(arch, args, &parts, &shell)?;
+        if wants("quiet") {
+            watched_quietly(arch, args, &parts, &shell)?;
+        }
+        if wants("stopped") {
+            heartbeat_stops(arch, args, &parts, &shell, Signal::Stop)?;
+        }
+        if wants("killed") {
+            heartbeat_stops(arch, args, &parts, &shell, Signal::Kill)?;
+        }
+        if wants("goes-on") {
+            heartbeat_goes_on(arch, args, &parts, &shell)?;
+        }
+        if wants("init") {
+            init_feeds(arch, args)?;
+        }
+        if wants("off") {
+            heartbeat_off(arch, args, &parts, &shell)?;
+        }
         println!("  {arch}: test-lockup passed");
     }
     Ok(())
@@ -97,7 +117,7 @@ const SECOND_OPEN: &str = "lk-heart: second open done";
 const MAGIC_SENT: &str = "lk-heart: magic close sent";
 const STILL: &str = "lk-heart: still running";
 /// busybox's words for the refusals.
-const BUSY: &str = "Device or resource busy";
+const BUSY: &str = "Resource busy";
 const INVALID: &str = "Invalid argument";
 /// The kernel's line for the magic close.
 const MAGIC_DISARMED: &str = "closed it with the magic `V`: disarmed";
