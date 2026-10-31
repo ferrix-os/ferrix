@@ -188,6 +188,11 @@ why = "whether the image carries settingsd, settingsctl, the settings.* authd po
 values.absent = { allows = ["sc4", "present", "sc2", "none"] }
 values.present = { allows = ["present", "none"], requires = ["runtime_settings=live"] }
 
+[image_keys.bad_frames]
+why = "whether the UEFI loader's bad-frame mode is fixed: `persist` keeps the frames the machine checks retired out across a warm reset and a power cycle, with no code that reads ferrix.badframes; `choice` reads ferrix.badframes (persist, reset or off) from the command line (docs/MACHINE-CHECK-RESTART.md §10; ledger 5579)"
+values.persist = { allows = ["sc4", "present", "sc2", "none"] }
+values.choice = { allows = ["none"] }
+
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any
 # option not declared here fails the gate (check-item-boundary.py, with a
@@ -227,6 +232,11 @@ why = "Linux's: the kernel log's size, a memparse size (decimal or 0x hex, K/M/G
 [boot_options."ferrix.pstore"]
 values = ["on", "off"]
 why = "whether the loader keeps the kernel log across a reset (docs/POSTMORTEM.md §3; read by the loader through ferrix_bootinfo::pstore::switch); any other value is said and taken as off"
+
+[boot_options."ferrix.badframes"]
+values = ["persist", "reset", "off"]
+settable = true
+why = "the bad-frame mode a `bad_frames = choice` loader uses (docs/MACHINE-CHECK-RESTART.md §10): persist keeps retired frames out across a warm reset and a power cycle, reset across a warm reset only, off across neither; absent or not understood is persist, said; read by that loader alone (a `persist` loader compiles no read of it), through ferrix_bootinfo::option_in; settable by B5's set-boot-word where the image's profile permits it (ledger 5579 (8))"
 
 [boot_options."ferrix.efifb"]
 kind = "flag"

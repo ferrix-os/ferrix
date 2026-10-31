@@ -1351,6 +1351,10 @@ fn cross_target_clippy() -> Result<()> {
             )
         })?;
         step(
+            &format!("the loader's bad-frame mode, both ways ({arch})"),
+            || loader_bad_frames(arch),
+        )?;
+        step(
             &format!("clippy (native runtime and programs, {arch})"),
             || native_clippy(arch),
         )?;
@@ -2684,6 +2688,71 @@ fn loader_needs_its_build_inputs() -> Result<()> {
              that names no trust-policy block (docs/SIGNING.md 10.6)",
         ))
     }
+}
+
+/// The loader's bad-frame mode both ways (`docs/MACHINE-CHECK-RESTART.md`
+/// §10.6, ledger 5579 (3)): this run's loader, a `bad_frames = persist`
+/// build, carries no `ferrix.badframes` text -- it compiles no read of the
+/// word -- and says its mode is fixed; a `choice` build of the same loader,
+/// in a target directory of its own so the two never rebuild each other,
+/// lints clean and carries the word.
+fn loader_bad_frames(arch: Arch) -> Result<()> {
+    const WORD: &[u8] = b"ferrix.badframes";
+    let holds = |bytes: &[u8], text: &[u8]| bytes.windows(text.len()).any(|at| at == text);
+    let persist = cargo::build_loader(arch, false)?;
+    let bytes = std::fs::read(&persist)
+        .map_err(|error| Error::new(format!("reading {}: {error}", persist.display())))?;
+    if holds(&bytes, WORD) || !holds(&bytes, b"fixed by this build") {
+        return Err(Error::new(format!(
+            "{arch}: the bad_frames = persist loader carries `ferrix.badframes` or does not say \
+             its mode is fixed by this build (docs/MACHINE-CHECK-RESTART.md 10.6)"
+        )));
+    }
+    let target_dir = paths::target_dir().join("bad-frames-choice");
+    let mut env = crate::signing::loader_env()?;
+    env.retain(|(key, _)| *key != "FERRIX_BAD_FRAMES");
+    env.push(("FERRIX_BAD_FRAMES", "choice".to_owned()));
+    for verb in ["clippy", "build"] {
+        let mut command = Command::new(cargo_binary());
+        let _ = command
+            .current_dir(paths::workspace_root())
+            .args([
+                verb,
+                "-q",
+                "-p",
+                "ferrix-boot",
+                "--target",
+                arch.loader_target(),
+            ])
+            .env("CARGO_TARGET_DIR", &target_dir)
+            .envs(env.iter().map(|(key, value)| (*key, value)));
+        if verb == "clippy" {
+            let _ = command.args(["--", "-D", "warnings"]);
+        }
+        cargo::run(command, "cargo (the choice loader)")?;
+    }
+    let name = if arch.loader_is_elf() {
+        "ferrix-boot"
+    } else {
+        "ferrix-boot.efi"
+    };
+    let choice = target_dir
+        .join(arch.loader_target())
+        .join("debug")
+        .join(name);
+    let bytes = std::fs::read(&choice)
+        .map_err(|error| Error::new(format!("reading {}: {error}", choice.display())))?;
+    if !holds(&bytes, WORD) {
+        return Err(Error::new(format!(
+            "{arch}: the bad_frames = choice loader carries no `ferrix.badframes`: it does not \
+             read the word (docs/MACHINE-CHECK-RESTART.md 10.6)"
+        )));
+    }
+    println!(
+        "  {arch}: the persist loader carries no ferrix.badframes and says fixed; the choice \
+         loader lints clean and reads the word"
+    );
+    Ok(())
 }
 
 /// [`clippy`], with the kernel's flags in its environment.

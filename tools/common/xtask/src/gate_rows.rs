@@ -257,6 +257,8 @@ const TEST_MCE_RESTART: &[&str] = &[
     "test-mce-restart --arch x86_64 --accel tcg",
     "test-mce-restart-retired --arch x86_64 --accel tcg",
     "test-mce-restart-power --arch x86_64 --accel tcg",
+    "test-mce-restart-reset --arch x86_64 --accel tcg --kernel-profile desktop",
+    "test-mce-restart-off --arch x86_64 --accel tcg --kernel-profile desktop",
 ];
 
 /// Whether `path` reaches the restart after a machine check: the pstore
@@ -273,6 +275,9 @@ fn reaches_mce_restart(path: &str) -> bool {
         "src/boot/common/uefi/src/badframes.rs",
         "src/boot/common/uefi/src/pstore.rs",
         "src/boot/common/uefi/src/events.rs",
+        "src/boot/common/uefi/src/main.rs",
+        "src/boot/common/uefi/build.rs",
+        "src/lib/proto/eventlog/src/badframes.rs",
         "src/lib/proto/eventlog/src/lib.rs",
         "tools/common/xtask/src/mce_restart.rs",
     ]

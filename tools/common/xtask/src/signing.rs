@@ -138,19 +138,34 @@ pub(crate) fn refuse_development_anchors(what: &str, bytes: &[u8]) -> Result<()>
 /// The registry of hardware families (`docs/SIGNING.md` §1.4).
 const FAMILIES: &str = "tools/common/data/hardware-families.toml";
 
-/// The two build inputs every build of the UEFI loader is given
+/// The build inputs every build of the UEFI loader is given
 /// (`docs/SIGNING.md` §10.6; its `build.rs` refuses a build without them):
 /// `FERRIX_ANCHORS`, the trust-policy block, and `FERRIX_SLOT_BUILD`, what
 /// the build is. A development image (profile `none`) takes
 /// `development-off` and every family; an image of a profile takes
-/// `release-<its slot_signing>` and its `slot_families`.
+/// `release-<its slot_signing>` and its `slot_families`. And
+/// `FERRIX_BAD_FRAMES`, the image key `bad_frames` of the resolved base
+/// profile, so an ad-hoc build keeps its base profile's value, as its image
+/// manifest does (`docs/MACHINE-CHECK-RESTART.md` §10.2, ledger 5579 (2)).
 ///
 /// # Errors
 ///
 /// A profile file or the family registry that does not read.
 pub(crate) fn loader_env() -> Result<Vec<(&'static str, String)>> {
     let run = crate::flags::this_run()?;
-    loader_env_for(&run.profile, &run.level)
+    let mut env = loader_env_for(&run.profile, &run.level)?;
+    env.push(("FERRIX_BAD_FRAMES", bad_frames_of(&run.base)?));
+    Ok(env)
+}
+
+/// The image key `bad_frames` of the profile called `base`.
+pub(crate) fn bad_frames_of(base: &str) -> Result<String> {
+    crate::flags::Profile::load(base)?
+        .image
+        .into_iter()
+        .find(|(key, _)| key == "bad_frames")
+        .map(|(_, value)| value)
+        .ok_or_else(|| Error::new(format!("profile {base}: no image key bad_frames")))
 }
 
 /// [`loader_env`] for a run of `profile` (`none` for a development image)

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "ae4b0832338c8b30685cf708c4e7c63ecca4b8b9ce87a20c66fc407611d4b52a",
+  "digest": "f564bb2da3f5b004ee739fc467108367bc7f6b8879f3e34c3ead5c1b63170807",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -26757,7 +26757,7 @@
                           "kind": "requirement",
                           "shortName": "H.FAIL.12",
                           "type": "ItemHighLevel",
-                          "doc": "docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried.",
+                          "doc": "docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist.",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
                             "line": 1707
@@ -26768,10 +26768,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aBadFrameStaysOutAcrossAWarmReset",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"After a warm reset, the kernel shall hand out no frame the boot before retired, nor the frame of an uncorrected record the machine check named, where the loader marked it left out (the assumption of use: the loader marks exactly the frames of the version-3 table, the banks and the event log's set, and never drops one).\"",
+                              "value": "\"In an image built bad_frames=persist, whatever its command line, after a warm reset, the kernel shall hand out no frame the boot before retired, nor the frame of an uncorrected record the machine check named, where the loader marked it left out (the assumption of use: the loader marks exactly the frames of the version-3 table, the banks and the event log's set, and never drops one).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1714
+                                "line": 1715
                               }
                             },
                             {
@@ -26779,10 +26779,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aBadFrameStaysOutAcrossAWarmReset",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"L.console.58-59, L.mm.109-110 and L.x86_64.254 each verified; test-mce-restart under TCG with Intel's records: a fatal record under ferrix.panic=reset, then boot 2's loader says boot 1 ended in a machine check and keeps the page out (left and table), its kernel leaves the frame out and its poll finds it already retired; test-mce-restart-retired: a frame a recovered machine check retired kept out of boots 2 and 3 from the table alone. TCG only; KVM injection across a reset not tried.\"",
+                              "value": "\"L.console.58-59, L.mm.109-110 and L.x86_64.254 each verified; test-mce-restart under TCG with Intel's records: a fatal record under ferrix.panic=reset, then boot 2's loader says boot 1 ended in a machine check and keeps the page out (left and table), its kernel leaves the frame out and its poll finds it already retired; test-mce-restart-retired: a frame a recovered machine check retired kept out of boots 2 and 3 from the table alone. TCG only; KVM injection across a reset not tried; xtask check: the persist loader carries no ferrix.badframes on any architecture, the choice loader does.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1722
+                                "line": 1724
                               }
                             },
                             {
@@ -26793,7 +26793,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1723
+                                "line": 1725
                               }
                             }
                           ]
@@ -26804,10 +26804,10 @@
                           "kind": "requirement",
                           "shortName": "H.FAIL.13",
                           "type": "ItemHighLevel",
-                          "doc": "docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm.",
+                          "doc": "docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist.",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1725
+                            "line": 1727
                           },
                           "children": [
                             {
@@ -26815,10 +26815,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aBadFrameStaysOutAcrossAPowerCycle",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"After a power cycle, the kernel shall hand out no frame of the boot disk's event-log bad-frame set, where the loader marked it left out (AoU-39).\"",
+                              "value": "\"In an image built bad_frames=persist, whatever its command line, after a power cycle, the kernel shall hand out no frame of the boot disk's event-log bad-frame set, where the loader marked it left out (AoU-39).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1729
+                                "line": 1732
                               }
                             },
                             {
@@ -26826,10 +26826,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aBadFrameStaysOutAcrossAPowerCycle",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"L.mm.110 verified; test-mce-restart-power under TCG with Intel's records: a frame a recovered machine check retired is kept in the event log by boot 2's loader, kept out of a cold boot 3 after a power cut from the log alone, nothing written by boots 3 and 4, and gone from a cold boot 5 after the host's clear-bad-frames; an attempt whose victim page firmware holds at boot 2's table read or boot 3's log read (the loader's exact in-use line, the frame still in the log) is inconclusive and made again from a fresh disk, at most 3, all 3 inconclusive failing. TCG only.\"",
+                              "value": "\"L.mm.110 verified; test-mce-restart-power under TCG with Intel's records: a frame a recovered machine check retired is kept in the event log by boot 2's loader, kept out of a cold boot 3 after a power cut from the log alone, nothing written by boots 3 and 4, and gone from a cold boot 5 after the host's clear-bad-frames; an attempt whose victim page firmware holds at boot 2's table read or boot 3's log read (the loader's exact in-use line, the frame still in the log) is inconclusive and made again from a fresh disk, at most 3, all 3 inconclusive failing; with ferrix.badframes=off on the command line, ignored. xtask check: the persist loader carries no ferrix.badframes on any architecture, the choice loader does. TCG only.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1738
+                                "line": 1744
                               }
                             },
                             {
@@ -26840,7 +26840,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1739
+                                "line": 1745
                               }
                             }
                           ]
@@ -26854,7 +26854,7 @@
                           "doc": "docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294).",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1741
+                            "line": 1747
                           },
                           "children": [
                             {
@@ -26865,7 +26865,7 @@
                               "value": "\"On x86-64 with recovery on, poison in a clean page-cache frame shall cost a disk read and nothing else: a read that consumes it refilled from the disk and answered, a program whose restartable load consumed it faulting the page in again without a signal, the poll dropping it first; a page that is not clean -- or a clean one held still at that moment by a write, a truncation, a writeback or a reclaim of its file -- shall never be dropped or refilled (its read fails EIO, its mapper is signalled as H.FAIL.8 says), and a frame that cannot be retired shall never be taken.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1752
+                                "line": 1758
                               }
                             },
                             {
@@ -26876,7 +26876,7 @@
                               "value": "\"test-mce-pagecache's read and mapped modes under KVM with AMD's records (the read answered with the disk's bytes, the mapper unsignalled), its dirty modes on a memfd's pages under KVM (the read failing EIO or ending short exactly at the poisoned page, the mapper SIGBUS), its poll mode with Intel's UCNA record under TCG (the page dropped before it is read), and test-mce-copy-file under KVM (the copy fails, SIGBUS, the page dropped), each frame retired; the TCG copy rows fail-closed only; stage 12's poison check (the dirty disk page among its cases); L.object.259-261 and L.x86_64.247-248 each with its check.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1762
+                                "line": 1768
                               }
                             },
                             {
@@ -26887,7 +26887,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1763
+                                "line": 1769
                               }
                             }
                           ]
@@ -26901,7 +26901,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1767
+                        "line": 1773
                       },
                       "children": [
                         {
@@ -26912,7 +26912,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1783
+                            "line": 1789
                           },
                           "children": [
                             {
@@ -26923,7 +26923,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1787
+                                "line": 1793
                               }
                             },
                             {
@@ -26934,7 +26934,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1794
+                                "line": 1800
                               }
                             },
                             {
@@ -26945,7 +26945,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1795
+                                "line": 1801
                               }
                             }
                           ]
@@ -26958,7 +26958,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1797
+                            "line": 1803
                           },
                           "children": [
                             {
@@ -26969,7 +26969,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1801
+                                "line": 1807
                               }
                             },
                             {
@@ -26980,7 +26980,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1805
+                                "line": 1811
                               }
                             },
                             {
@@ -26991,7 +26991,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1806
+                                "line": 1812
                               }
                             }
                           ]
@@ -27004,7 +27004,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1808
+                            "line": 1814
                           },
                           "children": [
                             {
@@ -27015,7 +27015,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1811
+                                "line": 1817
                               }
                             },
                             {
@@ -27026,7 +27026,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1814
+                                "line": 1820
                               }
                             },
                             {
@@ -27037,7 +27037,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1815
+                                "line": 1821
                               }
                             }
                           ]
@@ -27050,7 +27050,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1817
+                            "line": 1823
                           },
                           "children": [
                             {
@@ -27061,7 +27061,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1821
+                                "line": 1827
                               }
                             },
                             {
@@ -27072,7 +27072,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1825
+                                "line": 1831
                               }
                             },
                             {
@@ -27083,7 +27083,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1826
+                                "line": 1832
                               }
                             }
                           ]
@@ -27096,7 +27096,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1828
+                            "line": 1834
                           },
                           "children": [
                             {
@@ -27107,7 +27107,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1831
+                                "line": 1837
                               }
                             },
                             {
@@ -27118,7 +27118,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1835
+                                "line": 1841
                               }
                             },
                             {
@@ -27129,7 +27129,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1836
+                                "line": 1842
                               }
                             }
                           ]
@@ -27142,7 +27142,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1838
+                            "line": 1844
                           },
                           "children": [
                             {
@@ -27153,7 +27153,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1841
+                                "line": 1847
                               }
                             },
                             {
@@ -27164,7 +27164,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1844
+                                "line": 1850
                               }
                             },
                             {
@@ -27175,7 +27175,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1845
+                                "line": 1851
                               }
                             }
                           ]
@@ -27188,7 +27188,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1847
+                            "line": 1853
                           },
                           "children": [
                             {
@@ -27199,7 +27199,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1850
+                                "line": 1856
                               }
                             },
                             {
@@ -27210,7 +27210,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1854
+                                "line": 1860
                               }
                             },
                             {
@@ -27221,7 +27221,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1855
+                                "line": 1861
                               }
                             }
                           ]
@@ -27234,7 +27234,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1857
+                            "line": 1863
                           },
                           "children": [
                             {
@@ -27245,7 +27245,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1861
+                                "line": 1867
                               }
                             },
                             {
@@ -27256,7 +27256,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1865
+                                "line": 1871
                               }
                             },
                             {
@@ -27267,7 +27267,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1866
+                                "line": 1872
                               }
                             }
                           ]

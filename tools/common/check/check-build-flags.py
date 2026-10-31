@@ -64,10 +64,12 @@ KERNEL = "src/kernel/"
 READERS = ("src/kernel", "src/boot")
 # Library files that read the command line on the loader's or the kernel's
 # behalf, through a function of their own the loader or kernel calls:
-# `ferrix_bootinfo::pstore::switch` reads `ferrix.pstore` for the loader. A
+# `ferrix_bootinfo::pstore::switch` reads `ferrix.pstore` for the loader, and
+# `ferrix_eventlog::badframes::choice` reads `ferrix.badframes` for a
+# `bad_frames = choice` loader (docs/MACHINE-CHECK-RESTART.md §10). A
 # library's own reads are not otherwise scanned (the libraries also hold the
 # parsers and their tests), so a new one is named here.
-LIBRARY_READERS = ("src/lib/proto/bootinfo/src/pstore.rs",)
+LIBRARY_READERS = ("src/lib/proto/bootinfo/src/pstore.rs", "src/lib/proto/eventlog/src/badframes.rs")
 QUALIFIED = re.compile(r"(?:[a-z_][a-z0-9_]*::)*([a-z_][a-z0-9_]*)::([A-Z][A-Z0-9_]*)")
 
 # A cfg naming something: `cfg(`, `cfg!(`, `cfg_attr(`, and a build script's
@@ -420,6 +422,28 @@ def image_key_problems(flag_file: dict, profiles: dict[str, dict]) -> list[str]:
     return problems
 
 
+def settable_problems(registry: dict, profiles: dict[str, dict]) -> list[str]:
+    """The boot words a Settings page may set (ledger 5579 (8)): `settable`
+    only on a word that is neither test-only nor free-form (`*`, which B5's
+    closed list never takes); and `ferrix.badframes`, the bad-frame switch
+    (docs/MACHINE-CHECK-RESTART.md §10), permitted only by a profile whose
+    image key `bad_frames` is `choice`, since a `persist` loader compiles no
+    read of it."""
+    problems = []
+    for name, entry in sorted(registry.items()):
+        if not entry.get("settable"):
+            continue
+        if entry.get("test_only"):
+            problems.append(f"boot option {name} is settable and test-only")
+        if "*" in entry.get("values", []):
+            problems.append(f"boot option {name} is settable and takes any word (`*`)")
+    for name, profile in sorted(profiles.items()):
+        permits = profile.get("boot_options", {})
+        if "ferrix.badframes" in permits and profile.get("image", {}).get("bad_frames") != "choice":
+            problems.append(f"profiles/{name}.toml permits ferrix.badframes, but its bad_frames is not choice")
+    return problems
+
+
 def rust_files() -> list[tuple[str, str]]:
     files = []
     for top in ("src", "tools"):
@@ -517,6 +541,27 @@ def self_test() -> list[str]:
     ]:
         if not any(expect in p for p in image_key_problems(keys, {"p": profile})):
             failures.append(f"the image-key rule passed {what}")
+    bad = {"image_keys": {"bad_frames": {"values": {"persist": {"allows": ["sc4", "present", "none"]},
+                                                     "choice": {"allows": ["none"]}}}}}
+    for what, profile, expect in [
+        ("bad_frames=choice at a certified level", {"level": "present", "flags": {}, "image": {"bad_frames": "choice"}}, "does not allow"),
+        ("bad_frames unset", {"level": "none", "flags": {}, "image": {}}, "is not set"),
+    ]:
+        if not any(expect in p for p in image_key_problems(bad, {"p": profile})):
+            failures.append(f"the image-key rule passed {what}")
+    registry = {"ferrix.badframes": {"values": ["persist", "reset", "off"], "settable": True},
+                "t": {"values": ["a"], "settable": True, "test_only": True},
+                "w": {"values": ["*"], "settable": True}}
+    found = settable_problems(registry, {
+        "desktop": {"image": {"bad_frames": "choice"}, "boot_options": {"ferrix.badframes": ["off"]}},
+        "present": {"image": {"bad_frames": "persist"}, "boot_options": {"ferrix.badframes": ["off"]}},
+    })
+    for expect in ["t is settable and test-only", "w is settable and takes any word",
+                   "present.toml permits ferrix.badframes"]:
+        if not any(expect in p for p in found):
+            failures.append(f"the settable rule missed: {expect}")
+    if any("desktop" in p for p in found):
+        failures.append(f"the settable rule refused desktop's ferrix.badframes: {found}")
     return failures
 
 
@@ -571,6 +616,12 @@ def main() -> int:
             print(f"    {problem}", file=sys.stderr)
         status = 1
     registry = flag_file.get("boot_options", {})
+    settable = settable_problems(registry, profile_files)
+    if settable:
+        print("build-flags: the settable boot words do not follow the rule (ledger 5579 (8)):", file=sys.stderr)
+        for problem in settable:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
     options, counts = option_problems(files, registry, flag_file.get("boot_option_forwarders", {}))
     if options:
         print(

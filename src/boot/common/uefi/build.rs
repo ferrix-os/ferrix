@@ -30,6 +30,7 @@ use std::path::Path;
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo::rerun-if-changed=build.rs");
     trust_policy()?;
+    bad_frames()?;
     // A reproducible PE (lld-link's /Brepro): its timestamp and debug
     // signature are hashes of its contents, not the clock, so one commit
     // and one block build the same bytes, which the signing gate's relink
@@ -59,6 +60,25 @@ const TABLES: [&str; 4] = [
     "development-off",
     "development-required",
 ];
+
+/// The loader's bad-frame mode (`docs/MACHINE-CHECK-RESTART.md` §10.2,
+/// ledger 5579 (3)): `FERRIX_BAD_FRAMES` is the image key `bad_frames`,
+/// `persist` or `choice`, which xtask always sets; a build without it, or
+/// with another value, fails. It becomes `cfg(ferrix_bad_frames = "...")`,
+/// under which a `persist` loader compiles no read of `ferrix.badframes`.
+fn bad_frames() -> Result<(), Box<dyn Error>> {
+    println!("cargo::rerun-if-env-changed=FERRIX_BAD_FRAMES");
+    println!("cargo::rustc-check-cfg=cfg(ferrix_bad_frames, values(\"persist\", \"choice\"))");
+    let value = std::env::var("FERRIX_BAD_FRAMES").map_err(|_| {
+        "FERRIX_BAD_FRAMES is not set: the loader is built by xtask, which sets it from the \
+         profile's image key bad_frames (docs/MACHINE-CHECK-RESTART.md §10.2)"
+    })?;
+    if !["persist", "choice"].contains(&value.as_str()) {
+        return Err(format!("FERRIX_BAD_FRAMES is {value:?}, not persist or choice").into());
+    }
+    println!("cargo::rustc-cfg=ferrix_bad_frames=\"{value}\"");
+    Ok(())
+}
 
 /// Choose the loader's trust-policy block and say what the build is
 /// (`docs/SIGNING.md` §10.6). Both are build inputs xtask sets, never a

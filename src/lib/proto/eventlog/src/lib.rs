@@ -22,7 +22,9 @@
 //! * [`BadFrames`], the frames the machine checks retired, kept in an
 //!   extension of each header copy so that they outlive a power cycle
 //!   (`docs/MACHINE-CHECK-RESTART.md` §9), with [`add_bad_frames`] and
-//!   [`clear_bad_frames`].
+//!   [`clear_bad_frames`];
+//! * [`badframes`], the bad-frame switch a `bad_frames = choice` loader
+//!   reads (`docs/MACHINE-CHECK-RESTART.md` §10).
 //!
 //! Records are ordered by their index, the log's own count of appends, kept
 //! in the header: neither the pstore's boot sequence (it starts again at 1
@@ -47,6 +49,8 @@ use ferrix_slots::gpt::{GptError, Lookup, Part};
 use ferrix_slots::record::{ControlDisk, DeviceError};
 
 pub use ferrix_slots::gpt::EVENTS_TYPE;
+
+pub mod badframes;
 
 #[cfg(test)]
 mod tests;

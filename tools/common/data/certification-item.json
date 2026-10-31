@@ -77,6 +77,16 @@
       "images that boot /sbin/init use it, and no claim is made of it",
       "(ITEM.md 5, SAFETY-MANUAL AoU-8 and AoU-13)."
     ],
+    "bad_frames": "persist",
+    "bad_frames_why": [
+      "An image key changes what the loader keeps out across a restart:",
+      "`bad_frames = persist`, the reference, keeps every frame the machine",
+      "checks retired out across a warm reset and a power cycle, and its loader",
+      "compiles no read of `ferrix.badframes`; `choice` (desktop alone, no",
+      "claim) lets that boot word choose persist, reset or off. H.FAIL.12 and",
+      "H.FAIL.13 are claimed of a persist image (docs/MACHINE-CHECK-RESTART.md",
+      "10, SAFETY-MANUAL AoU-39, ledger 5579)."
+    ],
     "pstore": "on",
     "pstore_settings": [
       "on",

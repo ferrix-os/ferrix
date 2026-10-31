@@ -56,6 +56,24 @@ pub(crate) const TASKS: &[Task] = &[
         ],
         run: |_, args| test_power(args),
     },
+    Task {
+        name: "test-mce-restart-reset",
+        help_at: 262,
+        help: &[
+            "test-mce-restart-reset  ferrix.badframes=reset on a bad_frames = choice image (--kernel-profile desktop):",
+            "                        the frame kept out across the warm reset, nothing written to the event log",
+        ],
+        run: |_, args| test_reset(args),
+    },
+    Task {
+        name: "test-mce-restart-off",
+        help_at: 263,
+        help: &[
+            "test-mce-restart-off  ferrix.badframes=off on a bad_frames = choice image (--kernel-profile desktop):",
+            "                      the fatal record's page released by the next boot's loader, nothing left out",
+        ],
+        run: |_, args| test_off(args),
+    },
 ];
 
 /// The guest program the boot runs as init (`src/tests/mce`).
@@ -323,7 +341,7 @@ fn test_retired(args: &Args) -> Result<()> {
         println!("  test-mce-restart (Retired): x86_64 only; skipped");
         return Ok(());
     }
-    let (image, kernel) = retired_image(arch, args)?;
+    let (image, kernel) = retired_image(arch, args, "")?;
     let port = free_port()?;
     let qemu_args = retired_args(args, port);
     let mut page = 0;
@@ -400,15 +418,19 @@ fn test_retired(args: &Args) -> Result<()> {
 
 /// The image the recovered-retirement modes boot: test-mce as init, polled
 /// banks, `ferrix.panic=reset`, no KASLR.
-fn retired_image(arch: Arch, args: &Args) -> Result<(std::path::PathBuf, crate::cargo::Kernel)> {
+fn retired_image(
+    arch: Arch,
+    args: &Args,
+    extra: &str,
+) -> Result<(std::path::PathBuf, crate::cargo::Kernel)> {
     let program = crate::sem::build_test(TEST_PROGRAM, arch, None, false)?;
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel =
         crate::cargo::build_kernel_with_init(arch, args.release, &program, crate::shell::SCRIPT)?;
     let natives = crate::native::build(arch, args.release)?;
     let archive = crate::initramfs::build(None, &natives, None, &[])?;
-    let options = "ferrix.mce.poll=1 ferrix.panic=reset nokaslr\n";
-    let image = crate::fat::write_image_with(arch, &loader, &kernel, &archive, Some(options))?;
+    let options = format!("ferrix.mce.poll=1 ferrix.panic=reset nokaslr{extra}\n");
+    let image = crate::fat::write_image_with(arch, &loader, &kernel, &archive, Some(&options))?;
     Ok((image, kernel))
 }
 
@@ -489,6 +511,9 @@ fn clear_set(disk: &std::path::Path) -> Result<Vec<u32>> {
         .map_err(|why| Error::new(format!("the clear: {why:?}")))
 }
 
+/// What a `bad_frames = persist` loader says of its mode.
+const FIXED: &str = "badframe mode persist (fixed by this build)";
+
 /// Attempts `PowerCycle` makes at most (ledger 5564 (2)).
 const POWER_ATTEMPTS: u32 = 3;
 
@@ -520,7 +545,9 @@ fn test_power(args: &Args) -> Result<()> {
         println!("  test-mce-restart (PowerCycle): x86_64 only; skipped");
         return Ok(());
     }
-    let (image, kernel) = retired_image(arch, args)?;
+    // The word on a persist build (ledger 5579 (9)): ignored, as its loader
+    // compiles no read of it; every line is PowerCycle's.
+    let (image, kernel) = retired_image(arch, args, " ferrix.badframes=off")?;
     let log = crate::paths::build_dir(arch).join("serial.log");
     let failed = |why: String| {
         Error::new(format!(
@@ -603,6 +630,11 @@ fn power_attempt(
         Step::Go => {}
         Step::Inconclusive => return Ok(Attempt::Inconclusive { page, boot: 2 }),
         Step::Fail(why) => return Ok(Attempt::Failed(why)),
+    }
+    if !has(&boot_2, FIXED) {
+        return Ok(Attempt::Failed(format!(
+            "boot 2's loader did not say `{FIXED}`: not a bad_frames = persist build"
+        )));
     }
     let after_2 = log_set(&disk)?;
     // Boot 3, cold, and a warm boot 4 from inside the same process.
@@ -765,6 +797,238 @@ fn judge_power(
     }
     if !has(boots.boot_5, POLLING) {
         return Err("boot 5 did not reach its poll".to_owned());
+    }
+    Ok(())
+}
+
+/// Refuse a run whose loader is not a `bad_frames = choice` build: the
+/// switch's gates run with `--kernel-profile desktop` (ledger 5579 (2)).
+fn require_choice(what: &str) -> Result<()> {
+    let base = &crate::flags::this_run()?.base;
+    if crate::signing::bad_frames_of(base)? == "choice" {
+        Ok(())
+    } else {
+        Err(Error::new(format!(
+            "{what} needs a bad_frames = choice loader: give --kernel-profile desktop (profile \
+             {base} is persist)"
+        )))
+    }
+}
+
+/// `reset` (`docs/MACHINE-CHECK-RESTART.md` §10.6): as `PowerCycle`'s first
+/// boots, under `ferrix.badframes=reset` on a `choice` image: boot 2's
+/// loader keeps the frame out from the table, writes nothing to the event
+/// log (its set and generation as before) and renews the region; a cold
+/// boot 3 keeps nothing out and leaves the set as it was. Firmware holding
+/// the page at boot 2 is inconclusive and tried again, as `PowerCycle`'s.
+///
+/// # Errors
+///
+/// As [`test()`], and every attempt inconclusive.
+fn test_reset(args: &Args) -> Result<()> {
+    let arch = Arch::X86_64;
+    if !args.arches()?.contains(&arch) {
+        println!("  test-mce-restart (reset): x86_64 only; skipped");
+        return Ok(());
+    }
+    require_choice("test-mce-restart-reset")?;
+    let (image, kernel) = retired_image(arch, args, " ferrix.badframes=reset")?;
+    let log = crate::paths::build_dir(arch).join("serial.log");
+    let failed = |why: String| {
+        Error::new(format!(
+            "{arch}: test-mce-restart (reset): {why}.\n  Serial output is in {}",
+            log.display()
+        ))
+    };
+    let mut inconclusive = 0;
+    for attempt in 1..=POWER_ATTEMPTS {
+        let disk = crate::paths::build_dir(arch).join("mce-restart-disk.img");
+        crate::postmortem::write_disk(&image, &disk)?;
+        let before = log_set(&disk)?;
+        let port = free_port()?;
+        let qemu_args = retired_args(args, port);
+        let mut page = 0;
+        let mut boot_2 = Vec::new();
+        let hook = |watching: &mut qemu::Watching<'_>| -> Result<()> {
+            let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+            page = inject(&mut qmp, watching.lines(), SRAR)?;
+            if !watching.read_more(Instant::now() + PATIENCE, |lines| {
+                lines.iter().any(|line| line.contains(POWERED_OFF))
+            })? {
+                return Err(Error::new("boot 1 did not finish and power off"));
+            }
+            if !crate::postmortem::paused(&mut qmp, Instant::now() + Duration::from_secs(30))? {
+                return Err(Error::new("QEMU did not pause at boot 1's power-off"));
+            }
+            let _ = qmp.execute("system_reset", None)?;
+            let _ = qmp.execute("cont", None);
+            let from = watching.after().len();
+            boot_2 =
+                next_boot(watching, from)?.ok_or_else(|| Error::new("boot 2 never started"))?;
+            watching.cut_power();
+            Ok(())
+        };
+        let boot_1 = qemu::watch_then(arch, &disk, &kernel, &qemu_args, VICTIM, hook)?;
+        match after_boot_2_reset(&boot_1, &boot_2, page) {
+            Step::Go => {}
+            Step::Inconclusive => {
+                inconclusive += 1;
+                println!(
+                    "  {arch}: test-mce-restart (reset): attempt {attempt} inconclusive: firmware \
+                     held frame {page:#x} at boot 2's loader; again with a fresh disk and injection"
+                );
+                continue;
+            }
+            Step::Fail(why) => return Err(failed(why)),
+        }
+        let after_2 = log_set(&disk)?;
+        let port = free_port()?;
+        let cold_args = retired_args(args, port);
+        let hook = |watching: &mut qemu::Watching<'_>| -> Result<()> {
+            let _ = watching.read_more(Instant::now() + PATIENCE, |lines| {
+                lines.iter().any(|line| line.contains(POLLING))
+            })?;
+            watching.cut_power();
+            Ok(())
+        };
+        let boot_3 = qemu::watch_then(arch, &disk, &kernel, &cold_args, LOADER_BANNER, hook)?;
+        let after_3 = log_set(&disk)?;
+        if after_2 != before || after_3 != before {
+            return Err(failed(format!(
+                "the event log was written under reset: {before:?}, then {after_2:?}, then \
+                 {after_3:?}"
+            )));
+        }
+        if has(&boot_3, &format!("badframe {page:#x} kept out"))
+            || has(&boot_3, "frames left out as bad")
+        {
+            return Err(failed(
+                "cold boot 3 kept a frame out under reset".to_owned(),
+            ));
+        }
+        if !has(&boot_3, POLLING) {
+            return Err(failed("boot 3 did not reach its poll".to_owned()));
+        }
+        println!(
+            "  {arch}: test-mce-restart (reset): as required (frame {page:#x} kept out across the \
+             warm reset from the table, nothing written to the event log, nothing kept out of \
+             the cold boot after; {inconclusive} of {attempt} attempts inconclusive (firmware \
+             held the page); TCG, Intel's records)"
+        );
+        return Ok(());
+    }
+    Err(failed(format!(
+        "all {POWER_ATTEMPTS} attempts inconclusive: firmware held every victim page"
+    )))
+}
+
+/// Boots 1 and 2 under `reset`: boot 1 retired the frame; boot 2's loader
+/// said its mode, kept the frame out from the table, wrote nothing to the
+/// event log and renewed the region. Inconclusive only on the loader's exact
+/// in-use line for the table.
+fn after_boot_2_reset(boot_1: &[String], boot_2: &[String], page: u64) -> Step {
+    if !has(boot_1, &format!("mce: frame {page:#x} retired")) {
+        return Step::Fail(format!("boot 1 did not retire {page:#x}"));
+    }
+    if !has(boot_2, "badframe mode reset (ferrix.badframes)") {
+        return Step::Fail("boot 2's loader did not say `badframe mode reset`".to_owned());
+    }
+    if has(boot_2, "kept in the event log") {
+        return Step::Fail("boot 2's loader wrote the event log under reset".to_owned());
+    }
+    if !has(boot_2, "boot 2's kernel log goes to") {
+        return Step::Fail("boot 2's loader did not renew the pstore region".to_owned());
+    }
+    if has(boot_2, &format!("badframe {page:#x} kept out (table)")) {
+        Step::Go
+    } else if has(
+        boot_2,
+        &format!("badframe {page:#x} could not be kept out (table): it is in use"),
+    ) {
+        Step::Inconclusive
+    } else {
+        Step::Fail(format!(
+            "boot 2's loader did not keep {page:#x} out from the table under reset"
+        ))
+    }
+}
+
+/// `off` (`docs/MACHINE-CHECK-RESTART.md` §10.6): a fatal record under
+/// `ferrix.panic=reset` on a `choice` image with `ferrix.badframes=off`:
+/// boot 2's loader keeps the page the banks name out first, as every loader
+/// does, then releases it once it has read its mode, takes nothing from the
+/// table, and its kernel leaves nothing out.
+///
+/// # Errors
+///
+/// As [`test()`].
+fn test_off(args: &Args) -> Result<()> {
+    let arch = Arch::X86_64;
+    if !args.arches()?.contains(&arch) {
+        println!("  test-mce-restart (off): x86_64 only; skipped");
+        return Ok(());
+    }
+    require_choice("test-mce-restart-off")?;
+    let (image, kernel) = retired_image(arch, args, " ferrix.badframes=off")?;
+    let port = free_port()?;
+    let qemu_args = retired_args(args, port);
+    let mut page = 0;
+    let mut boot_2 = Vec::new();
+    let hook = |watching: &mut qemu::Watching<'_>| -> Result<()> {
+        let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+        page = inject(&mut qmp, watching.lines(), FATAL)?;
+        if !watching.read_more(Instant::now() + PATIENCE, |lines| {
+            lines.iter().any(|line| line.contains(RESET_LINE))
+        })? {
+            return Err(Error::new(format!(
+                "the stop's report never said `{}`",
+                RESET_LINE.trim()
+            )));
+        }
+        let from = watching.after().len();
+        boot_2 = next_boot(watching, from)?
+            .ok_or_else(|| Error::new("the machine did not reset after the stop"))?;
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &image, &kernel, &qemu_args, VICTIM, hook)?;
+    let log = crate::paths::build_dir(arch).join("serial.log");
+    judge_off(&boot_2, page).map_err(|why| {
+        Error::new(format!(
+            "{arch}: test-mce-restart (off): {why}.\n  Serial output is in {}",
+            log.display()
+        ))
+    })?;
+    println!(
+        "  {arch}: test-mce-restart (off): as required (frame {page:#x} the banks named kept out, \
+         then released by boot 2's loader; nothing left out; TCG, Intel's records)"
+    );
+    Ok(())
+}
+
+/// Whether boot 2 under `off` released the banks' page and left nothing out.
+fn judge_off(boot_2: &[String], page: u64) -> std::result::Result<(), String> {
+    let mode = "badframe mode off (ferrix.badframes)";
+    let left = format!("badframe {page:#x} kept out (left)");
+    let released = format!("badframe {page:#x} released (ferrix.badframes=off)");
+    if !has(boot_2, mode) {
+        return Err(format!("boot 2's loader did not say `{mode}`"));
+    }
+    if !has(boot_2, &left) {
+        return Err(format!(
+            "boot 2's loader did not keep the banks' page out first: no `{left}`"
+        ));
+    }
+    if !has(boot_2, &released) {
+        return Err(format!(
+            "boot 2's loader did not release the page: no `{released}`"
+        ));
+    }
+    if has(boot_2, &format!("badframe {page:#x} kept out (table)")) {
+        return Err("boot 2's loader kept the page out from the table under off".to_owned());
+    }
+    if has(boot_2, "frames left out as bad") {
+        return Err("boot 2's kernel left a frame out under off".to_owned());
     }
     Ok(())
 }

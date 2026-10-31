@@ -14,7 +14,11 @@
 //! assumption of use, §3); it reads no bank but to decode it, and clears
 //! none: the kernel's bring-up does.
 
+pub(crate) use ferrix_eventlog::badframes::Mode;
+
 use crate::console::println;
+#[cfg(ferrix_bad_frames = "choice")]
+use crate::services::Allocation;
 use crate::services::Services;
 use crate::uefi::tables::MemoryType;
 
@@ -67,6 +71,71 @@ impl Kept {
             .iter()
             .take(self.count)
             .any(|&kept| kept == frame)
+    }
+}
+
+/// This boot's bad-frame mode (`docs/MACHINE-CHECK-RESTART.md` §10): fixed
+/// by a `bad_frames = persist` build, which compiles no read of the boot
+/// word.
+#[cfg(ferrix_bad_frames = "persist")]
+pub(crate) fn mode(_cmdline: &str) -> Mode {
+    println!("  badframe mode persist (fixed by this build)");
+    Mode::Persist
+}
+
+/// This boot's bad-frame mode: a `bad_frames = choice` build reads it from
+/// the command line, absent or not understood `persist`, said once.
+#[cfg(ferrix_bad_frames = "choice")]
+pub(crate) fn mode(cmdline: &str) -> Mode {
+    use ferrix_eventlog::badframes::{Choice, OPTION, choice};
+    let read = choice(cmdline);
+    let mode = read.mode();
+    match read {
+        Choice::Absent => println!("  badframe mode {} (the word absent)", mode.word()),
+        Choice::Chosen(_) => println!("  badframe mode {} ({OPTION})", mode.word()),
+        Choice::NotUnderstood(value) => {
+            println!("  badframe {OPTION}={value} is not understood, so persist");
+        }
+    }
+    mode
+}
+
+/// Release what `mode` keeps out no longer (§10.3): after `pstore::take`,
+/// so that the banks' pages stay held while it reads the region, and before
+/// the kernel is staged. A frame firmware will not take back stays out.
+#[cfg(ferrix_bad_frames = "choice")]
+pub(crate) fn release(services: &Services, kept: &mut Kept, mode: Mode) {
+    use ferrix_eventlog::badframes::{OPTION, released};
+    let named = kept.named;
+    let named = named.get(..kept.named_count).unwrap_or_default();
+    let mut index = 0;
+    while index < kept.count {
+        let Some(&frame) = kept.frames.get(index) else {
+            break;
+        };
+        let address = u64::from(frame) * PAGE;
+        if !released(mode, frame, named) {
+            index += 1;
+            continue;
+        }
+        let page = Allocation { address, len: PAGE };
+        if services.free("releasing a bad frame", page).is_err() {
+            println!(
+                "  badframe {address:#x} not released ({OPTION}={}): firmware refused",
+                mode.word()
+            );
+            index += 1;
+            continue;
+        }
+        println!(
+            "  badframe {address:#x} released ({OPTION}={})",
+            mode.word()
+        );
+        kept.frames.copy_within(index + 1..kept.count, index);
+        kept.count -= 1;
+        if index < kept.from_banks {
+            kept.from_banks -= 1;
+        }
     }
 }
 

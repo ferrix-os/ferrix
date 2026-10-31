@@ -530,7 +530,9 @@ left for its own review. Nothing is ever logged as "power loss" or "hang".
   panic report, and (b) both header copies alone only on a boot whose
   pstore table or machine-check banks name a frame the log's bad-frame set
   does not hold; on such a boot, a fresh header first only if neither copy
-  carries the header's magic.
+  carries the header's magic. A `bad_frames = choice` loader set to
+  `reset` or `off` (MACHINE-CHECK-RESTART §10) writes (b) never and keeps
+  fewer frames out.
 * **EL4** The inspection Linux's `ferrix-eventlog append`, and root's
   `ferrix-eventlog clear-bad-frames` (§9.4 there), write by the same
   functions to the partition device named `ferrix-events`, and never writes

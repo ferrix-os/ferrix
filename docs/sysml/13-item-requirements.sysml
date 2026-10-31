@@ -1705,8 +1705,9 @@ package FerrixItemRequirements {
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.12'> aBadFrameStaysOutAcrossAWarmReset : ItemHighLevel {
-            doc /* docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. */
-            attribute :>> statement = "After a warm reset, the kernel shall hand out no frame the
+            doc /* docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist. */
+            attribute :>> statement = "In an image built bad_frames=persist, whatever its
+                command line, after a warm reset, the kernel shall hand out no frame the
                 boot before retired, nor the frame of an uncorrected record the
                 machine check named, where the loader marked it left out (the
                 assumption of use: the loader marks exactly the frames of the
@@ -1719,12 +1720,14 @@ package FerrixItemRequirements {
                 its kernel leaves the frame out and its poll finds it already
                 retired; test-mce-restart-retired: a frame a recovered machine
                 check retired kept out of boots 2 and 3 from the table alone. TCG
-                only; KVM injection across a reset not tried.";
+                only; KVM injection across a reset not tried; xtask check: the persist loader carries no
+                ferrix.badframes on any architecture, the choice loader does.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.13'> aBadFrameStaysOutAcrossAPowerCycle : ItemHighLevel {
-            doc /* docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. */
-            attribute :>> statement = "After a power cycle, the kernel shall hand out no frame
+            doc /* docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist. */
+            attribute :>> statement = "In an image built bad_frames=persist, whatever its
+                command line, after a power cycle, the kernel shall hand out no frame
                 of the boot disk's event-log bad-frame set, where the loader marked
                 it left out (AoU-39).";
             attribute :>> criterion = "L.mm.110 verified; test-mce-restart-power under TCG
@@ -1735,7 +1738,10 @@ package FerrixItemRequirements {
                 an attempt whose victim page firmware holds at boot 2's table read
                 or boot 3's log read (the loader's exact in-use line, the frame
                 still in the log) is inconclusive and made again from a fresh
-                disk, at most 3, all 3 inconclusive failing. TCG only.";
+                disk, at most 3, all 3 inconclusive failing; with ferrix.badframes=off
+                on the command line, ignored. xtask check: the persist loader carries
+                no ferrix.badframes on any architecture, the choice loader does. TCG
+                only.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {

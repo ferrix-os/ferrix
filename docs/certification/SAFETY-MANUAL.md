@@ -895,7 +895,16 @@ loader marked it left out**. The loader is outside the item (A.FIRMWARE), and th
 trusts its `BadFrame` pages only to leave memory out -- the risk is RAM
 lost, never wrong data. The integrator:
 
-* uses the loader that marks exactly the frames the pstore header's
+* uses an image whose manifest says `bad_frames=persist`
+  (`docs/MACHINE-CHECK-RESTART.md` §10, ledger 5579), every certified
+  profile's: its loader compiles no read of `ferrix.badframes`. A
+  `bad_frames = choice` image (`desktop`, no claim) set to `reset` keeps
+  out no frame the event log's set alone names, and set to `off` keeps out
+  none: then the loader hands the kernel a page a bank's uncorrected record
+  named, and only the kernel's poll at bring-up retires it, possibly after
+  the allocator gave it out, and the loader's own later allocations may
+  land on that page and be read before the kernel's poll;
+* uses the `persist` loader that marks exactly the frames the pstore header's
   version-3 table, the machine-check banks and the event log's bad-frame
   set name, never one more and never dropping one, that never removes a
   frame from the set, that writes the set durably before it renews the

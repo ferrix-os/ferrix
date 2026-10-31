@@ -459,7 +459,19 @@ fn boot_info_and_pstore(
         events::keep_out(log, services, &mut kept);
     }
     let area = boot_info_area(services)?;
-    let pstore = pstore::take(services, cmdline_of(&area), direct, &mut kept, &mut opened);
+    // The mode once, with the command line; a choice loader releases what
+    // it keeps out no longer after the region is taken (§10.3).
+    let mode = badframes::mode(cmdline_of(&area));
+    let pstore = pstore::take(
+        services,
+        cmdline_of(&area),
+        direct,
+        &mut kept,
+        &mut opened,
+        mode,
+    );
+    #[cfg(ferrix_bad_frames = "choice")]
+    badframes::release(services, &mut kept, mode);
     Ok((area, pstore))
 }
 
