@@ -2173,6 +2173,30 @@ than skipping; the docs, rows and a code review before landing. A
 leftover empty table in a run's slot keeps that window at 4 KiB for
 good (C1).
 
+**Built (2026-10-31).** `accept` keeps `CAP.SLLPS` bit 34 as
+`Accepted::blocks`, and the unit keeps it; `Domain::pin` hands it to
+`map_all` (`Domain::pin_runs` takes it as an argument, for stage 10's
+`blocks` false case). A run is mapped by `vtd::Unit::map_run`
+(`mm::map_io_run`); a run refused `AlreadyMapped` is looked at
+(`vtd::Unit::entry_span`): a 2 MiB entry there refuses the pin
+`AlreadyPinned` with nothing of the run mapped, a table there maps the
+run page by page. A 4 KiB map that meets a block is `AlreadyPinned` too.
+Unpin and unwind share `take_down`: each run a 2 MiB `unmap_io_run`, other
+pages one by one; the unwind passes only the addresses this pin mapped,
+so a run refused part-way is taken out page by page. Stage 10's
+`iommu/blocks_check.rs` holds 105's wiring and 106-108 on QEMU's VT-d,
+and test-boot requires its line on every x86-64 VT-d boot. The fallback
+over a table is reached there twice: by a window holding another pin's
+page, refused at that page; and by a window whose leaf table is empty,
+mapped whole at 4 KiB. No product path leaves an empty leaf table (an
+unmap prunes the tables it empties, and a map that runs out of memory
+never links one), so the case makes one with a checks-only helper
+(`mm::link_empty_io_table`, which maps a page and clears its leaf alone).
+The consultant's code review: **OK IF (1)-(5)**, ledger line 5404: the
+rows on the landing hash (an AMD-Vi boot among them, since `take_down`
+serves every translation) and the seven controls FIRED, the rebase's
+reservation conflict resolved to the removal alone, and this line.
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out

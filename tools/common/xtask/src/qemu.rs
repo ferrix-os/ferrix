@@ -256,6 +256,9 @@ pub(crate) fn judge(
         config_problem(arch, lines),
         qemu.then(|| iommu_problem(lines)).flatten(),
         walk_problem(arch, args, lines),
+        (qemu && !args.amd_vi)
+            .then(|| runs_problem(arch, lines))
+            .flatten(),
         namespace_problem(lines),
         xstate_problem(arch, own_model, lines),
         fault_problem(arch, lines),
@@ -861,6 +864,20 @@ fn walk_problem(arch: Arch, args: &Args, lines: &[String]) -> Option<String> {
         return Some(format!("the VT-d unit never said `{wanted}`"));
     }
     None
+}
+
+/// What stage 10's run check prints once its cases held on a VT-d domain
+/// whose unit takes 2 MiB entries (`src/kernel/src/iommu/blocks_check.rs`).
+const RUNS: &str = "runs: two aligned runs pinned as 2 MiB entries";
+
+/// Why an x86-64 boot under QEMU's VT-d did not run stage 10's 2 MiB run
+/// cases: QEMU's unit always offers `CAP.SLLPS` 2 MiB, so a boot without the
+/// line skipped them.
+///
+/// Verifies: L.iommu.105, L.iommu.106
+fn runs_problem(arch: Arch, lines: &[String]) -> Option<String> {
+    (arch == Arch::X86_64 && !lines.iter().any(|line| line.contains(RUNS)))
+        .then(|| format!("stage 10 never said `{RUNS}`"))
 }
 
 /// What stage 10's PCI check prints after the number of writes outside a
@@ -4403,8 +4420,8 @@ mod tests {
         SUCCESS_MARKER, UNCHECKED_MARKER, X2APIC_ALL, amdvi_problem, blocks_compatibility_format,
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fallback_problem,
         fault_problem, held_off_problem, iommu_problem, msi_problem, namespace_problem,
-        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
-        unisolated_problem, version_translates, walk_problem, xstate_problem,
+        parse_qemu_version, power_off_problem, queue_problem, remap_problem, runs_problem,
+        send_lines, unisolated_problem, version_translates, walk_problem, xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -4979,6 +4996,18 @@ mod tests {
         assert!(
             iommu_problem(&held).is_some(),
             "one behind a unit that only remaps"
+        );
+    }
+
+    #[test]
+    fn an_x86_boot_runs_the_2_mib_cases() {
+        let said = lines(&["  iommu    runs: two aligned runs pinned as 2 MiB entries and more"]);
+        assert_eq!(runs_problem(Arch::X86_64, &said), None);
+        assert!(runs_problem(Arch::X86_64, &lines(&[])).is_some(), "skipped");
+        assert_eq!(
+            runs_problem(Arch::AArch64, &lines(&[])),
+            None,
+            "an SMMUv3 has none"
         );
     }
 
