@@ -561,119 +561,119 @@
     },
     {
       "file": "iommu.rs",
-      "lines": "990",
+      "lines": "1005",
       "category": "other-architecture",
       "match": "Translation::VtD { attached, .. } => Some(attached.stream())",
       "why": "The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1028",
+      "lines": "1043",
       "category": "other-architecture",
       "match": "Translation::VtD { unit, attached, .. } => unit.detach(*atta",
       "why": "The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1272",
+      "lines": "1349",
       "category": "defensive",
       "match": "Err(why) => return Err((DomainError::Unit(why), pinned)),",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1285",
+      "lines": "1358",
       "category": "defensive",
       "match": "return Err((DomainError::Tables, pinned));",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1290",
+      "lines": "1363",
       "category": "defensive",
       "match": "return Err((DomainError::Unit(why), pinned));",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1890-1891",
+      "lines": "2058-2059",
       "category": "other-architecture",
       "match": "for structure in table.structures() {",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1922",
+      "lines": "2090",
       "category": "other-architecture",
       "match": "let index = programmed.vtd.len();",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1938",
+      "lines": "2106",
       "category": "other-architecture",
       "match": "report.refused += 1;",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1941",
+      "lines": "2109",
       "category": "other-architecture",
       "match": "}",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2103",
+      "lines": "2271",
       "category": "defensive",
       "match": "report.refused += 1;",
       "why": "An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables."
     },
     {
       "file": "iommu.rs",
-      "lines": "2105",
+      "lines": "2273",
       "category": "defensive",
       "match": "}",
       "why": "An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables."
     },
     {
       "file": "iommu.rs",
-      "lines": "2137-2138",
+      "lines": "2305-2306",
       "category": "other-architecture",
       "match": "let segment = unit.segment;",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2140-2141",
+      "lines": "2308-2309",
       "category": "other-architecture",
       "match": ".filter_map(|scope| scope.endpoint())",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2208",
+      "lines": "2376",
       "category": "other-architecture",
       "match": "unit.attach(function).map(|attached| Translation::VtD {",
       "why": "The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2502",
+      "lines": "2670",
       "category": "defensive",
       "match": "if fault.cause != Cause::Access {",
       "why": "A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one."
     },
     {
       "file": "iommu.rs",
-      "lines": "2638",
+      "lines": "2806",
       "category": "defensive",
       "match": "audit.first = audit.first.or(Some(fault));",
       "why": "The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT)."
     },
     {
       "file": "iommu.rs",
-      "lines": "2640",
+      "lines": "2808",
       "category": "absent-hardware",
       "match": "audit.provoked += 1;",
       "why": "The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults."
@@ -939,49 +939,49 @@
     },
     {
       "file": "mm.rs",
-      "lines": "1727",
+      "lines": "1835",
       "category": "credited-elsewhere",
       "match": "if !pages.make_room(page_bound) || !tables.make_room(table_bound) {",
       "why": "The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`."
     },
     {
       "file": "mm.rs",
-      "lines": "2522-2524",
+      "lines": "2630-2632",
       "category": "failure-path",
       "match": "fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "2540-2543",
+      "lines": "2648-2651",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2553",
+      "lines": "2661",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2555",
+      "lines": "2663",
       "category": "failure-path",
       "match": "routes(Route::Released),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2557",
+      "lines": "2665",
       "category": "failure-path",
       "match": "routes(Route::HeapReturned),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "2559",
+      "lines": "2667",
       "category": "failure-path",
       "match": "routes(Route::KernelTables),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."

@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2508 declarations in the core's files, 179 in the item's; 110 checks-only.
+2512 declarations in the core's files, 179 in the item's; 114 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1695,10 +1695,14 @@ checks above is `pub` for raised checks (F3).
 | `BringUp::smmu_v3` | field | bin |  |
 | `BringUp::vtd` | field | load, bin |  |
 | `BringUp::why` | field | item, load, bin |  |
+| `Domain::blocks_wiring` | method | load (checks) | checks-only |
 | `Domain::detach_translation` | method | load (checks) | checks-only |
+| `Domain::entry_span` | method | load (checks) | checks-only |
 | `Domain::id` | method | item, load, bin | checks-only |
+| `Domain::link_empty_table` | method | load (checks) | checks-only |
 | `Domain::pin` | method | item, load |  |
 | `Domain::pin_budget` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Domain::pin_runs` | method | load (checks) | checks-only |
 | `Domain::pinned_pages` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Domain::provoke` | method | item, load |  |
 | `Domain::queued` | method | load |  |

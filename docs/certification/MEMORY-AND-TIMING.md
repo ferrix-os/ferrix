@@ -2208,7 +2208,15 @@ command gate across the flush and its wait, which is bounded as 2.2i
 says. Nothing else runs then, so this is boot time, not a bound any
 program waits on. At run time an identity domain adds to `Domain::pin`
 and `unpin` one comparison of each page against its RMRRs (one range on
-the N150), outside every lock.
+the N150), outside every lock. Since 2026-10-31 (`L.iommu.106`-`108`,
+ledger 5366) a run of 512 of a pin's pages on a unit with `CAP.SLLPS` is
+one entry write instead of 512, and its take-down one `unmap_range` of
+2 MiB clearing at most 512 leaf entries (one, for a block), with the
+domain's gate held and no spin lock; the walk's record cleans early every
+8 noted writes (`Unpublished`'s `SPANS`), so on a unit that does not snoop
+(the N150's `dmar0`, `ECAP.C` 0) a run's take-down costs at most 64 cleans
+before the flush. A run is never longer than 512 of its pages mapped one
+by one, so the pin's and the unpin's time only shrink.
 
 ### 2.2s An AMD-Vi unit (`iommu::amdvi`, 2026-10-24)
 
