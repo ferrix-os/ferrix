@@ -874,6 +874,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "iommu/blocks_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "iommu/domain_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"

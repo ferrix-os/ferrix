@@ -1612,6 +1612,114 @@ pub(crate) fn map_io<E: Encoding>(
     )
 }
 
+/// The bytes of one IOMMU run: a 2 MiB second-level entry's span.
+pub(crate) const IO_RUN: u64 = 2 << 20;
+
+/// Map the [`IO_RUN`] bytes from `phys` at `iova`, both aligned to it, as one
+/// 2 MiB entry, for a unit whose walk takes one (`L.iommu.106`).
+///
+/// Refused with `AlreadyMapped` where the run's slot holds a table, empty or
+/// not, as [`map_io`] is for a page; the caller then maps it page by page
+/// (`L.iommu.107`). Every entry it writes is noted in `writes`.
+pub(crate) fn map_io_run<E: Encoding>(
+    root: u64,
+    iova: u64,
+    phys: u64,
+    flags: MapFlags,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    mapper.map_range(
+        &mut Walked::new(&mut KernelPhysMem, writes, WalkerClean),
+        VirtAddr(iova),
+        PhysAddr(phys),
+        IO_RUN,
+        flags,
+    )
+}
+
+/// The span of the entry that maps `iova` under `root` -- [`PAGE_SIZE`] or
+/// [`IO_RUN`] in an IOMMU's tables -- or `None` where nothing does.
+pub(crate) fn io_entry_span<E: Encoding>(root: u64, iova: u64) -> Option<u64> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    mapper
+        .mapping_level(&KernelPhysMem, VirtAddr(iova))
+        .map(ferrix_paging::Level::span)
+}
+
+// CHECKS-ONLY: iommu/blocks_check.rs; home: in crate
+/// Leave an empty leaf table linked in the 2 MiB slot over `iova` under
+/// `root`, as no product path does: the page at `iova` is mapped, so the
+/// table is made, and then its entry alone is cleared, the table kept.
+/// What stage 10's fallback case puts a run's pin over (`L.iommu.107`);
+/// the run's take-down prunes the table, as any emptied one.
+pub(crate) fn link_empty_io_table<E: Encoding>(
+    root: u64,
+    iova: u64,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    map_io::<E>(root, iova, iova, MapFlags::DMA, writes)?;
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    let mut kernel = KernelPhysMem;
+    let mut memory = LeafOnly {
+        memory: Walked::new(&mut kernel, writes, WalkerClean),
+        wrote: false,
+    };
+    // The table the prune reports is not given back: it stays linked.
+    let _ = mapper.unmap_range(&mut memory, VirtAddr(iova), PAGE_SIZE, |_| {})?;
+    Ok(())
+}
+
+/// A [`PhysMem`] that lets its first write through and drops the rest: an
+/// unmap of one page then clears the leaf, and its prune of the table the
+/// leaf leaves empty writes nothing.
+struct LeafOnly<M: PhysMem> {
+    /// The memory read and written.
+    memory: M,
+    /// Whether the one write has been made.
+    wrote: bool,
+}
+
+// SAFETY: (TRANSLATE) every access is `memory`'s, whose implementation
+// guarantees what the trait asks; a dropped write changes no byte.
+unsafe impl<M: PhysMem> PhysMem for LeafOnly<M> {
+    fn read(&self, at: PhysAddr) -> u64 {
+        self.memory.read(at)
+    }
+
+    fn write(&mut self, at: PhysAddr, value: u64) {
+        if !self.wrote {
+            self.wrote = true;
+            self.memory.write(at, value);
+        }
+    }
+
+    fn allocate_table(&mut self) -> Option<PhysAddr> {
+        self.memory.allocate_table()
+    }
+}
+
+/// Take down the [`IO_RUN`] bytes at `iova`, whether [`map_io_run`] put one
+/// entry there or [`map_io`] 512, adding every table it leaves empty to
+/// `tables` as [`unmap_io`] does (`L.iommu.108`).
+pub(crate) fn unmap_io_run<E: Encoding>(
+    root: u64,
+    iova: u64,
+    tables: &mut UnlinkedTables,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    let mut kernel = KernelPhysMem;
+    let mut memory = Walked::new(&mut kernel, writes, WalkerClean);
+    let _ = mapper.unmap_range(&mut memory, VirtAddr(iova), IO_RUN, |freed| {
+        if let Released::Table { phys } = freed {
+            // NOALLOC: the list is linked through the tables themselves.
+            tables.push(phys);
+        }
+    })?;
+    Ok(())
+}
+
 /// Take down the page [`map_io`] put at `iova`, adding every table under
 /// `root` it leaves empty to `tables`.
 ///

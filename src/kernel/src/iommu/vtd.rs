@@ -108,6 +108,8 @@ use super::{Cause, Fault, Wait};
 use crate::mmio::Mmio;
 use crate::{arch, mm, timer, vmap};
 
+// CHECKS-ONLY-METHODS: home: super
+
 /// Bytes of registers mapped: every register legacy mode uses is in the first
 /// page.
 const WINDOW: u64 = policy::WINDOW;
@@ -346,6 +348,8 @@ pub struct Unit {
     drain: Drain,
     /// Whether it has protected memory regions, so `PMEN` may be read.
     protected_regions: bool,
+    /// Whether its walk takes 2 MiB second-level entries (`CAP.SLLPS`).
+    blocks: bool,
     /// Whether translation is on: false for a unit an RMRR holds, which
     /// only remaps (`iommu::bring_up_vtd`).
     translating: AtomicBool,
@@ -485,6 +489,7 @@ impl Unit {
             walk: accepted.walk,
             drain: accepted.drain,
             protected_regions: accepted.protected_regions,
+            blocks: accepted.blocks,
             translating: AtomicBool::new(false),
             iotlb: accepted.iotlb,
             caching: accepted.caching,
@@ -987,6 +992,69 @@ impl Unit {
         mapped
     }
 
+    /// Whether its domains may map a pin's aligned runs as 2 MiB entries.
+    pub(crate) fn blocks(&self) -> bool {
+        self.blocks
+    }
+
+    /// Map the run of [`mm::IO_RUN`] bytes at `phys` at I/O address `iova` in
+    /// `attached`'s tables, as one 2 MiB entry.
+    ///
+    /// # Errors
+    ///
+    /// What the tables refused: `AlreadyMapped` where the run's slot holds a
+    /// table.
+    pub(crate) fn map_run(
+        &self,
+        attached: &Attached,
+        iova: u64,
+        phys: u64,
+        flags: MapFlags,
+    ) -> Result<(), MapError> {
+        let mut writes = self.writes();
+        let mapped = match self.walk {
+            Walk::Three => {
+                mm::map_io_run::<VtdSecondLevel>(attached.root, iova, phys, flags, &mut writes)
+            }
+            Walk::Four => {
+                mm::map_io_run::<VtdFourLevel>(attached.root, iova, phys, flags, &mut writes)
+            }
+        };
+        // Published as [`Unit::map`] publishes.
+        self.publish(&mut writes);
+        settle(&writes);
+        require_published(&writes).map_err(|_| MapError::NotCleaned)?;
+        mapped
+    }
+
+    /// Take the run of [`mm::IO_RUN`] bytes at `iova` out of `attached`'s
+    /// tables, one 2 MiB entry or 512 pages alike. The unit may still reach
+    /// it until [`Unit::flush`] returns.
+    ///
+    /// # Errors
+    ///
+    /// What the tables refused.
+    pub(crate) fn unmap_run(
+        &self,
+        attached: &Attached,
+        iova: u64,
+        tables: &mut mm::UnlinkedTables,
+    ) -> Result<(), MapError> {
+        let mut writes = self.writes();
+        let unmapped = match self.walk {
+            Walk::Three => {
+                mm::unmap_io_run::<VtdSecondLevel>(attached.root, iova, tables, &mut writes)
+            }
+            Walk::Four => {
+                mm::unmap_io_run::<VtdFourLevel>(attached.root, iova, tables, &mut writes)
+            }
+        };
+        self.publish(&mut writes);
+        settle(&writes);
+        require_published(&writes).map_err(|_| MapError::NotCleaned)?;
+        unmapped
+    }
+
     /// Take the page at `iova` out of `attached`'s tables. The unit may still
     /// reach it until [`Unit::flush`] returns.
     ///
@@ -1020,6 +1088,42 @@ impl Unit {
             Walk::Three => mm::translate_io::<VtdSecondLevel>(attached.root, iova),
             Walk::Four => mm::translate_io::<VtdFourLevel>(attached.root, iova),
         }
+    }
+
+    /// The span of the entry that maps `iova` in `attached`'s tables, or
+    /// `None` where nothing does.
+    pub(crate) fn entry_span(&self, attached: &Attached, iova: u64) -> Option<u64> {
+        match self.walk {
+            Walk::Three => mm::io_entry_span::<VtdSecondLevel>(attached.root, iova),
+            Walk::Four => mm::io_entry_span::<VtdFourLevel>(attached.root, iova),
+        }
+    }
+
+    /// Leave an empty leaf table in the 2 MiB slot over `iova` in
+    /// `attached`'s tables ([`mm::link_empty_io_table`]).
+    ///
+    /// # Errors
+    ///
+    /// What the tables refused.
+    #[doc(hidden)]
+    pub(crate) fn link_empty_table(&self, attached: &Attached, iova: u64) -> Result<(), MapError> {
+        let mut writes = self.writes();
+        let linked = match self.walk {
+            Walk::Three => {
+                mm::link_empty_io_table::<VtdSecondLevel>(attached.root, iova, &mut writes)
+            }
+            Walk::Four => mm::link_empty_io_table::<VtdFourLevel>(attached.root, iova, &mut writes),
+        };
+        self.publish(&mut writes);
+        settle(&writes);
+        require_published(&writes).map_err(|_| MapError::NotCleaned)?;
+        linked
+    }
+
+    /// Whether `CAP.SLLPS` bit 34, read from the register now, offers 2 MiB
+    /// second-level pages: what stage 10 holds [`Unit::blocks`] to.
+    pub(crate) fn sllps_2m(&self) -> bool {
+        read64(self.registers, CAP) & (1 << 34) != 0
     }
 
     /// Make the unit forget what it cached of `attached`'s tables: after an

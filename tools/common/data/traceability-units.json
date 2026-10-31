@@ -138,6 +138,12 @@
     "smp::next_job": "The work run_everywhere handed out that a secondary has not done yet. Only stage 4's checks hand work out (smp/check.rs); secondary_main, product code, calls this in its wait loop until the scheduler takes the processor over, so it stays beside that loop and the JOB state both read.",
     "smp::run_everywhere": "Runs a function on every online processor at once and waits for each: how stage 4's checks run on every processor, and nothing else calls it. It writes the JOB state secondary_main's product loop reads through next_job, so moving it into smp/check.rs would leave the product loop reading a check file's state.",
     "vmap::check_failed_device_map": "A check, called from mm/check.rs's check_vmap, that a device mapping failing part way leaves nothing mapped. It uses vmap.rs's private reserve, release and map_reserved; moved into a check file it verifies L.mm.52.",
-    "vmap::check_invariants": "The arena's consistency check, called from mm/check.rs's check_vmap; it reads the private ARENA. Moved into a check file it verifies L.mm.53."
+    "vmap::check_invariants": "The arena's consistency check, called from mm/check.rs's check_vmap; it reads the private ARENA. Moved into a check file it verifies L.mm.53.",
+    "iommu::Domain::link_empty_table": "Leaves an empty leaf table in a VT-d domain's 2 MiB slot, which no product path does, for stage 10's fallback case (iommu/blocks_check.rs, a_run_over_a_table_is_pages, L.iommu.107). It reaches the domain's translation, private to iommu; nothing in product code calls it.",
+    "iommu::Domain::blocks_wiring": "Says whether a VT-d domain maps runs as blocks and what CAP.SLLPS reads now, for stage 10's wiring assertion (iommu/blocks_check.rs, L.iommu.105). Nothing in product code calls it.",
+    "iommu::vtd::Unit::link_empty_table": "The unit's half of Domain::link_empty_table: the walk chosen and the writes published, for stage 10's fallback case (L.iommu.107). Nothing in product code calls it.",
+    "mm::link_empty_io_table": "Maps one page and clears its leaf alone, the table kept linked, for stage 10's fallback case (L.iommu.107) through vtd::Unit::link_empty_table. Nothing in product code calls it.",
+    "mm::LeafOnly::write": "link_empty_io_table's memory, which lets the leaf's clear through and drops the prune's write. Nothing in product code uses it.",
+    "iommu::Domain::entry_span": "The span of the entry mapping an address in a VT-d domain, for stage 10's run cases (iommu/blocks_check.rs, L.iommu.106-108). Product code asks vtd::Unit::entry_span directly; nothing in it calls this."
   }
 }

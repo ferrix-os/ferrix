@@ -14,7 +14,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`discovery`](#discovery) | 170 | 106 | 126 | 8 |
 | [`sched`](#sched) | 156 | 2 | 2 | 11 |
 | [`syscall`](#syscall) | 117 | 10 | 10 | 3 |
-| [`iommu`](#iommu) | 100 | - | - | 2 |
+| [`iommu`](#iommu) | 99 | - | 1 | 2 |
 | [`user`](#user) | 73 | - | 1 | 3 |
 | [`main`](#main) | 65 | 6 | 4 | 1 |
 | [`object`](#object) | 51 | 16 | 39 | 8 |
@@ -36,7 +36,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
-| **Total** | **1262** | **169** | **224** | 77 |
+| **Total** | **1261** | **169** | **225** | 77 |
 
 ---
 
@@ -109,6 +109,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | time namespaces, stage 13's follow-on ported from park/stage13-timens (docs/NAMESPACES.md section 12.1, L.user.130; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and user/space.rs's map_shared_code (now map_shared_code_near's caller) and the syscall and procfs sites it changed. | Reached by stage 13's timens line on every test-boot: user::space::AddressSpace::replace_shared_code and map_shared_code_near (and vdso::retarget's swap, load ring). Not reached: retarget's refusal when the variant cannot be made, which a boot cannot provoke but its negative control showed. |
 | the dentry and inode caches' reclaim, stage 13's follow-on (docs/CGROUPS.md section 10, L.object.186; the consultant's review recorded in the landing's commit) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of user/cache.rs's reclaim (split into reclaim and reclaim_pages) and reclaim_asked it changed. | Reached by stage 13's reclaim line on every test-boot: user::cache::reclaim's call of the shrinker, shrink, install_shrinker, Reclaimed::gave and bytes, and reclaim_asked's count in bytes (and ferrix-vfs's Namespace::shrink and shrink_paged, a library the host tests also run). Not reached: shrink before a shrinker is installed, which answers nothing. |
 | vmo_pin's PIN_BLOCKS, the Intel GPU's 2 MiB blocks (docs/INTEL-GPU.md section 14.3, L.object.254-258; consultant ledger 5088) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of syscall/native.rs's vmo_pin option checks it changed. | Reached by stage 10's PIN_BLOCKS check on every test-boot with a PCI function (object/blocks_check.rs): vmo_pin's option-word refusals, its budget check and pre-commit, user::vmo::Vmo::commit_blocks's probe, ask, fallback, race and file arms, and run_block_hook with and without a hook armed. Not reached: commit_blocks's arm for a VMO bound to a file's length, and a commit_run refusal other than Committed and OutOfMemory (both covered by the file arm's early return). |
+| 2 MiB VT-d entries for a pin's aligned runs (docs/INTEL-GPU.md section 14.7, L.iommu.105-109; consultant ledger 5366) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet, and the lines of iommu.rs's map_all and unpin_waiting it changed (armv7a's argument for unpin_waiting's translated branch dropped with the line it named; it holds for take_down as it did). | Reached by stage 10's run check on every x86-64 VT-d test-boot (iommu/blocks_check.rs): map_all's run, fallback and block-refusal arms, starts_run, unwind, take_down's run and page arms, vtd::Unit::map_run, unmap_run, entry_span, sllps_2m and blocks, mm::map_io_run, unmap_io_run and io_entry_span, and Domain::pin_runs, entry_span and blocks_wiring. Not reached: a run's map refused other than AlreadyMapped (OutOfMemory, NotCleaned), a fallback whose run maps whole over an empty table (no product path leaves one), and take_down's refusal. On aarch64 and armv7a only take_down's page arm and the vtd() None arms run. |
 
 ---
 
@@ -183,7 +184,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `iommu.rs` | `core` | 85 | 0 | 0 | 0 | - |
+| `iommu.rs` | `core` | 84 | 0 | 1 | 0 | - |
 | `iommu/remapping.rs` | `core` | 15 | - | - | 15 | 188, 197, 201, 211, 215, 225, 275, 283-284, 286-287, 304, 670, 696, 698 |
 
 ---

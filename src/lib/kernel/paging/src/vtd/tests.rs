@@ -74,6 +74,34 @@ fn an_iotlb_invalidation_is_laid_out_as_the_specification_says() {
     }
 }
 
+/// Verifies: `L.iommu.109`
+#[test]
+fn no_iotlb_invalidation_is_page_selective() {
+    // Every scope there is, by an exhaustive match: a page-selective arm
+    // added later breaks this until it is shown to carry `AM` >= 9 for a
+    // 2 MiB entry.
+    let every = |scope: IotlbScope| match scope {
+        IotlbScope::Global | IotlbScope::Domain(_) => scope,
+    };
+    let scopes = [IotlbScope::Global]
+        .into_iter()
+        .chain((0..=u16::MAX).map(IotlbScope::Domain))
+        .map(every);
+    for scope in scopes {
+        for drain in [
+            Drain::default(),
+            Drain {
+                read: true,
+                write: true,
+            },
+        ] {
+            let descriptor = queue::iotlb(scope, drain);
+            assert_ne!((descriptor[0] >> 4) & 0b11, 3, "{scope:?}: page-selective");
+            assert_eq!(descriptor[1], 0, "{scope:?}: an address");
+        }
+    }
+}
+
 /// Verifies: `L.iommu.47`
 #[test]
 fn an_interrupt_entry_invalidation_is_laid_out_as_the_specification_says() {
@@ -407,6 +435,34 @@ fn a_guest_width_of_39_bits_is_enough_and_38_is_not() {
         "MGAW field 37 is 38 bits"
     );
     assert_eq!(unit::DOMAIN_BITS, 39);
+}
+
+/// Verifies: `L.iommu.105`
+#[test]
+fn blocks_only_where_sllps_offers_2_mib() {
+    let blocks = |(ver, cap, ecap): (u32, u64, u64)| unit::accept(ver, cap, ecap).map(|a| a.blocks);
+    assert_eq!(
+        blocks(BOX_DMAR0),
+        Ok(true),
+        "the box's graphics unit: 2M and 1G"
+    );
+    assert_eq!(blocks(qemu(39)), Ok(true), "QEMU offers 2M");
+    let (ver, cap, ecap) = BOX_DMAR0;
+    assert_eq!(
+        blocks((ver, cap & !(0xF << 34), ecap)),
+        Ok(false),
+        "SLLPS 0"
+    );
+    assert_eq!(
+        blocks((ver, cap & !(0xF << 34) | 0b1110 << 34, ecap)),
+        Ok(false),
+        "1 GiB and above without 2 MiB is no 2 MiB"
+    );
+    assert_eq!(
+        blocks((ver, cap & !(0xF << 34) | 1 << 34, ecap)),
+        Ok(true),
+        "2M alone"
+    );
 }
 
 /// Verifies: `L.iommu.64`

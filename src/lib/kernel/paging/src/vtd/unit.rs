@@ -44,6 +44,8 @@ const CAP_CM: u64 = 1 << 7;
 const CAP_SAGAW_39: u64 = 1 << 9;
 /// CAP: the `SAGAW` bit for four-level, 48-bit tables.
 const CAP_SAGAW_48: u64 = 1 << 10;
+/// CAP: `SLLPS` bit 0, second-level 2 MiB pages.
+const CAP_SLLPS_2M: u64 = 1 << 34;
 /// CAP: write draining.
 const CAP_DWD: u64 = 1 << 54;
 /// CAP: read draining.
@@ -121,6 +123,9 @@ pub struct Accepted {
     pub remaps: bool,
     /// Whether it has protected memory regions, so `PMEN` exists.
     pub protected_regions: bool,
+    /// Whether its walk takes 2 MiB second-level pages (`CAP.SLLPS` bit 0),
+    /// so a domain may map a pin's aligned runs as blocks (`L.iommu.105`).
+    pub blocks: bool,
     /// How many domain identifiers it supports.
     pub identifiers: u32,
 }
@@ -184,6 +189,7 @@ pub fn accept(ver: u32, cap: u64, ecap: u64) -> Result<Accepted, &'static str> {
         coherent: ecap & ECAP_C != 0,
         remaps: ecap & ECAP_IR != 0,
         protected_regions: cap & (CAP_PLMR | CAP_PHMR) != 0,
+        blocks: cap & CAP_SLLPS_2M != 0,
         identifiers: 1 << (4 + 2 * (cap & 0b111)),
     })
 }

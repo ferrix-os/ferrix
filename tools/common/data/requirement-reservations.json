@@ -202,13 +202,6 @@
       "branch": "feature/mce-cmci",
       "date": "2026-10-31",
       "purpose": "docs/MACHINE-CHECK-CMCI.md, CMCI on Intel (customer's machine-check item 4; consultant OK IF (1)-(10), ledger 5348): L.x86_64.249 the claim of MCi_CTL2 under one lock with read-back; 250 the LVT CMCI entry and the handler (mask, count, wake only when the park state is active, held for the return); 251 the storm rule; 252 ferrix.mce.cmci=off; 253 the unmask and the look after it, kicking only on a record the round takes"
-    },
-    {
-      "ids": ["L.iommu.105-109"],
-      "owner": "intel-large-pages",
-      "branch": "claude/magical-chaplygin-93e03a",
-      "date": "2026-10-31",
-      "purpose": "docs/INTEL-GPU.md §14.7, 2 MiB VT-d second-level entries for a pin's aligned runs (design review requested; withdrawn review ledger 5208's notes addressed): L.iommu.105 accept reads CAP.SLLPS bit 34; 106 the predicate and the map, every page 4 KiB without the bit; 107 a run whose slot holds a table falls back to 512 pages, refused only where pages would be; 108 unpin and unwind take each run down whole; 109 IOTLB invalidations global or domain-selective only"
     }
   ]
 }

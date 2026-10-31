@@ -1487,5 +1487,95 @@ package FerrixIommuRequirements {
             attribute :>> unit = ("arch::x86_64::msi::immovable_aimed_at",
                 "smp::service::take_out", "smp::service::immovable_aimed_at");
         }
+        requirement <'L.iommu.105'> blocksWhereSllpsOffersThem : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::unit::accept shall
+                report a unit's domains as taking 2 MiB entries exactly where its
+                CAP.SLLPS bit 34 is set, and the unit shall keep what accept
+                reported.";
+            attribute :>> criterion = "Host test
+                blocks_only_where_sllps_offers_2_mib: the N150's dmar0 and QEMU's
+                unit report blocks, the same CAP with SLLPS 0 or with bits 35-37
+                only does not, bit 34 alone does. Stage 10's run check: on QEMU's
+                VT-d domain the kept bit equals CAP bit 34 read from the
+                register.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("iommu::vtd::Unit::open", "iommu::vtd::Unit::blocks");
+        }
+        requirement <'L.iommu.106'> aRunIsOneEntry : ItemLowLevel {
+            attribute :>> statement = "Domain::pin on a VT-d domain whose unit takes
+                2 MiB entries shall map each run of 512 of the pin's addresses
+                consecutive from a 2 MiB-aligned address as one 2 MiB
+                second-level entry, unless L.iommu.107 maps it page by page, and
+                every other page as a 4 KiB entry; with blocks off, as on a unit
+                without CAP.SLLPS bit 34, every page as a 4 KiB entry; never a
+                1 GiB entry; and every page shall resolve to its own frame.";
+            attribute :>> criterion = "Stage 10's run check on QEMU's VT-d
+                domain, over 1024 frames from a 4 MiB boundary: all 1024 pinned
+                are two 2 MiB entries; the 1023 less the first are 511 pages of
+                4 KiB and one 2 MiB entry, the first page unreached; pinned
+                with blocks off, every page is 4 KiB; every pinned page resolves
+                to its frame in each case.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("iommu::Domain::pin", "iommu::Domain::pin_runs",
+                "iommu::Domain::pin_with", "iommu::map_all", "iommu::starts_run",
+                "iommu::Translation::blocks", "iommu::vtd::Unit::map_run",
+                "mm::map_io_run");
+        }
+        requirement <'L.iommu.107'> aRunOverAnotherPinFallsBackOrRefuses : ItemLowLevel {
+            attribute :>> statement = "Where a run's 2 MiB slot holds a table,
+                Domain::pin shall map the run's pages one by one and refuse the
+                pin only for a page refused there; where it holds a 2 MiB entry,
+                it shall refuse the pin with AlreadyPinned, nothing of that run
+                mapped; a 4 KiB map that meets a 2 MiB entry shall refuse the pin
+                with AlreadyPinned; and the unwind shall take out only what this
+                pin mapped, a run whole only where its 2 MiB entry was written or
+                all 512 of its pages were mapped, else page by page.";
+            attribute :>> criterion = "Stage 10's run check: with an empty leaf
+                table left in a window's slot by a checks-only helper, a pin of
+                the window's run maps all 512 pages at 4 KiB, each reaching its
+                frame; with one page of a
+                window pinned, a pin of the window's run is AlreadyPinned, none
+                of its other pages resolves, the pinned count is unchanged and
+                the one page is still mapped at 4 KiB; with the window's run
+                pinned as a block, a second pin of the run and a pin of one page
+                in it are each AlreadyPinned and every page of the block is
+                still a 2 MiB entry reaching its frame.";
+            attribute :>> parent = ("H.DMA.3", "H.DMA.8");
+            attribute :>> unit = ("iommu::map_all", "iommu::unwind",
+                "iommu::vtd::Unit::entry_span", "mm::io_entry_span");
+        }
+        requirement <'L.iommu.108'> aRunIsTakenDownWhole : ItemLowLevel {
+            attribute :>> statement = "An unpin of a VT-d domain's pin, and the
+                unwind of L.iommu.107, shall take each run of the pin's addresses
+                down as one 2 MiB range, whether it was mapped as one entry or as
+                512 pages, and every other page by itself; after an unpin no page
+                of the pin shall resolve and the tables it emptied shall be given
+                back, after the unit's flush as F-36's rule and L.iommu.21 hold
+                for every unpin.";
+            attribute :>> criterion = "Stage 10's run check: after the unpin of
+                each pin of the cases of L.iommu.106 and L.iommu.107 no page of
+                it resolves and the free frame count is what it was before the
+                pin; a pin of a run and a page another pin holds is AlreadyPinned
+                with no page of the run resolving after its unwind.";
+            attribute :>> parent = ("H.DMA.3", "H.DMA.8");
+            attribute :>> unit = ("iommu::take_down", "iommu::Translation::vtd",
+                "iommu::Domain::unpin_waiting",
+                "iommu::unwind", "iommu::vtd::Unit::unmap_run", "mm::unmap_io_run");
+        }
+        requirement <'L.iommu.109'> noPageSelectiveIotlbInvalidation : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::queue::iotlb shall build
+                only global and domain-selective IOTLB invalidations, and it shall
+                be the only IOTLB invalidation the item submits, so no flush
+                misses a 2 MiB entry.";
+            attribute :>> criterion = "Host test
+                no_iotlb_invalidation_is_page_selective: over every scope there
+                is, by an exhaustive match, and both drains, the granularity
+                field is never page-selective and the address quadword is 0.
+                The only path by argument: a unit without ECAP.QI is refused
+                (L.iommu.47) and Unit::invalidate_iotlb submits queue::iotlb
+                alone.";
+            attribute :>> parent = ("H.DMA.3", "H.DMA.8");
+            attribute :>> unit = ("iommu::vtd::Unit::flush", "iommu::vtd::Unit::invalidate_iotlb");
+        }
     }
 }
