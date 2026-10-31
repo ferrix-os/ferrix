@@ -195,6 +195,13 @@
       "branch": "docs/game-mode-sched",
       "date": "2026-10-30",
       "purpose": "docs/GAME-MODE-SCHED.md, game mode's layer B (GAME-MODE.md §13, ledger 5115 (12)): L.sched.107-109 F7 per-task slice requests (deadline from the effective request, never above the queue's slice, set only by sched_setattr or the mark; inherited by clone and fork, ledger 5232 (2)); H.SCHED.19 and L.sched.110-114 the frame mark (only the right marks, the order inside eligibility, the kernel's bound for the unmarked, the end at close/exec/unmark/exit and never inherited, nothing else changed); L.sched.115-118 lends (served request, wake history, no chains, a lent mark only orders); L.sched.119-120 the idle-gap class; L.sched.121-122 deadlines from the frame"
+    },
+    {
+      "ids": ["H.FAIL.12", "L.console.58-59", "L.mm.109-110", "L.x86_64.254"],
+      "owner": "mce-restart",
+      "branch": "feature/mce-restart",
+      "date": "2026-10-31",
+      "purpose": "docs/MACHINE-CHECK-RESTART.md slice 8a, a warm restart after a fatal machine check (customer's machine-check item 8; consultant OK IF (1)-(12), ledger 5467): H.FAIL.12 no frame the boot before retired or a left uncorrected record named is handed out after a warm reset, where the loader kept it out; L.console.58 stop word 8; L.console.59 the pstore v3 bad-frame table and fresh's refusals; L.mm.109 retire_frame records each newly retired frame; L.mm.110 BadFrame pages left out, in the retired set before the first allocation, written into the new table; L.x86_64.254 the stop writes its uncorrected records' pages first"
     }
   ]
 }

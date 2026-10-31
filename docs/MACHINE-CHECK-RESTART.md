@@ -1,137 +1,174 @@
 # A cheap restart after a fatal machine check
 
-Design v1, 2026-10-31. The customer's item 8 of the machine-check follow-ups
-(2026-10-30: "cheap restart after a crash: fast boot, pstore crash log,
-'left from before' record surfaced"). It builds on `docs/MACHINE-CHECK.md`
-(§3.1 the left records, §3.4 the retired set), `docs/POSTMORTEM.md` (PM3's
-pstore region, PM4's event log, S1's stop word) and `ferrix.panic=reset`
-(`panic/reset.rs`, BACKLOG's panic-reboot row).
+Design v2, 2026-10-31 (v1 e0effb1b2; consultant OK IF (1)-(12) for slice
+8a, 8b NOT YET (B1), ledger 5467, carried here). The customer's item 8 of
+the machine-check follow-ups (2026-10-30: "cheap restart after a crash:
+fast boot, pstore crash log, 'left from before' record surfaced"). It
+builds on `docs/MACHINE-CHECK.md` (§3.1 the left records, §3.4 the retired
+set), `docs/POSTMORTEM.md` (PM3's pstore region, PM4's event log, S1's stop
+word) and `ferrix.panic=reset` (`panic/reset.rs`, BACKLOG's panic-reboot
+row).
+
+**This is slice 8a, the warm reset.** 8b, bad frames across a power cycle
+in the event log, is a design of its own (B1: one record per frame in the
+event log's ring would push every panic record out; the set must live
+outside the ring, as an amendment to PM4) and a BACKLOG row. Making the
+restart faster -- the 10 s hold, a reset by default -- stays the
+customer's R1.
 
 ## 1. What is there today
 
 * **A fatal machine check** stops the kernel through the panic path
-  (`trap::fatal`, catalogue FX-9005), whose report prints the banks
-  (`mce::report`). With `ferrix.panic=reset` (off by default, a stop-gap
-  awaiting the customer's R1) the machine resets 10 s after the report.
-* **The record of it**: the pstore region keeps the kernel log's tail and
-  S1's stop word, here `1`, "a panic": nothing says it was a machine check.
-  The next loader copies the record into the event log (`Kind::Panic`),
-  which outlives a power cycle (PM4), and says the stop on its boot line.
-* **The banks** keep a fatal record across a warm reset on hardware (and in
-  QEMU, whose banks lie past `end_reset_fields`). The next kernel's
-  bring-up hands each one to its poll as **left from before this boot**,
-  which prints it and retires its frame (L.x86_64.222) -- in the poll task,
-  long after the boot's allocations: the frame may already be the kernel's
-  own, and a kernel consuming it stops again. A restart can loop on the
-  same bad page.
-* **The retired set** is RAM: every frame retired is forgotten at the next
-  boot, warm or cold, and handed out again until it fails again.
+  (`trap::fatal`, catalogue FX-9005), whose report prints the banks. With
+  `ferrix.panic=reset` (off by default) the machine resets 10 s later.
+* **The record**: pstore keeps the log's tail and S1's stop word, here 1,
+  "a panic". Code 7 is the lockup detector's (POSTMORTEM §6.2, reserved by
+  the lockup branch).
+* **The banks** keep a fatal record across a warm reset on hardware where
+  firmware leaves them (many PC firmwares clear them), and in QEMU (its
+  banks lie past `end_reset_fields`). The next kernel's poll prints it as
+  left from before this boot and retires its frame (L.x86_64.222) -- long
+  after the boot's allocations: the frame may be the kernel's own, and a
+  restart can stop on the same page again.
+* **The retired set** is RAM: forgotten at every boot.
 
-## 2. What it does
+## 2. What it does (8a)
 
-1. **A stop of its own.** The machine check's stop writes S1's stop word
-   **7, "a machine check"** (from the reserved range), instead of 1, when
-   its report is the first; the loader says "the last boot stopped on a
-   machine check", and the event log records it as `Kind::MachineCheck`
-   (new) with the report's text, as it does a panic.
-2. **Bad frames remembered across a reset.** As the kernel retires a frame
-   it also writes the frame's address into a **bad-frame table in the
-   pstore header page** (bytes 128..640: a count and up to 64 addresses,
-   each with its complement, the stop word's rule; written with release
-   order, no lock, never read back by the kernel). The loader, at the next
-   boot, before it gives the region a fresh header, reads the table.
-3. **Bad frames remembered across a power cycle.** The loader appends each
-   table entry it has not recorded before to the event log as a
-   `Kind::BadFrame` record (address, the boot that found it, the source:
-   retired or left), bounded at 64 bad frames in the log; past that it says
-   so and records no more.
-4. **Bad frames kept out of the next boot from its start.** The loader
-   reads every `BadFrame` record in the event log, adds the frames the
-   banks name (§2.5), and **marks each page `Bad`** in the memory map it
-   hands the kernel (a type of its own in `ferrix-bootinfo`'s map). The
-   kernel's frame allocator never takes a `Bad` page into its free lists,
-   says how many it left out (`mm   N frames left out as bad`), and lists
-   them in the retired set at once (so `/proc/ferrix-mce-retired` shows
-   them and the counts stay one set).
-5. **The left record acted on before anything allocates.** The loader reads
-   the machine-check banks (x86-64, `MCG_CAP`'s count, `MCi_STATUS`,
-   `MCi_ADDR`, `MCi_MISC`; reads only, never writes or clears) and, for an
-   uncorrected record with `ADDRV` and a page-granular `MISC` (Intel's
-   rule; AMD's `ADDRV` with the poison code), marks that page `Bad` too and
-   records it with source `left`. The kernel's bring-up still reads,
-   prints and clears the banks as today (L.x86_64.222), so the left record
-   is surfaced as before, and now also kept out of use.
-6. **The restart's cost, measured.** No new switch and no default changed:
-   a fatal machine check takes `ferrix.panic`'s action like any panic, and
-   whether that is a reset by default stays the customer's R1. The design
-   measures and states the restart: from the stop to the next boot's
-   `FERRIX-BOOT-OK` under `ferrix.panic=reset` on QEMU (and the N150 as a
-   BACKLOG row), and names the parts (the 10 s hold, firmware, the loader,
-   the boot).
+1. **Stop word 8, "a machine check"** (L.console.58): `panic::begin_report`
+   stores 8 instead of 1 when the first report's catalogue entry is
+   `MACHINE_CHECK`, on the ring-0 stop and any other path that reports it;
+   1, 7 and 8 never replace each other -- the first report's word stands.
+   The loader says `boot N ended: a machine check`.
+2. **The bad-frame table** in the pstore header page, **header version 3**
+   (L.console.59): bytes 128..648, a count word and 64 entries, each the
+   frame's address and its complement (the stop word's rule; an entry
+   whose halves do not match is ignored). The layout lives in
+   `ferrix_bootinfo::pstore`; `encode` zeroes the whole table; `fresh`
+   refuses version 2 and any non-zero table byte; `validate` reads versions
+   1, 2 and 3; a loader and kernel of different versions fail closed (no
+   table is read or written where the header is not version 3, shown by
+   test-ab-boot). The event log's identity CRC covers bytes 0..32 as
+   before, which v3 states. V-14 names the table.
+3. **The kernel writes it** (L.mm.109): `mm::retire_frame` records each
+   frame it newly retires -- `Claimed` and `Marked`; not `Full`, whose frame
+   the kernel could not keep out of use this boot either, so recording it
+   would claim what the boot itself does not do, and not `Already` -- by
+   an atomic `fetch_add` on the count to claim a slot, then the entry's
+   store, then one cache-line write-back (`flush_cache_lines` of the
+   entry), listed in MEMORY-AND-TIMING; past 64 the entry is dropped and
+   said once. The kernel reads only its own count. Stage 2's checked
+   retirements write a check-owned copy of the header, never the live
+   table (the check requires the live count unchanged).
+4. **The machine check's stop writes its own records** (L.x86_64.254, (5)):
+   before its report, on the IST stack, for each bank holding an
+   uncorrected record with a usable page address (the rules of (9)), the
+   stop writes the page into the table by the same lock-free claim and
+   store. Taken because many PC firmwares clear the banks at reset: the
+   table is then the only memory of the frame across the restart, and H.FAIL.12
+   need not depend on the banks surviving. Atomics and two stores, as the
+   paranoid entry's rules allow.
+5. **The loader keeps each page out** ((7), outside the item): before it
+   touches the pstore region it reads the banks ((8), (9)); then it reads
+   the table of a valid version-3 header; for each frame named by either it
+   calls `AllocatePages(AllocateAddress)` with a Ferrix memory type of its
+   own (0x8000_0007), before it stages the kernel or the boot info, so
+   nothing of the loader's lands there; a refusal is one boot-log line. The
+   map hands the page to the kernel as a new **`MemKind::BadFrame` (16,
+   appended)**, distinct from `Defective` (11, firmware's); every match on
+   `MemKind` names it. **It is not RAM to the kernel** (`is_ram` false, as
+   `Defective`): the direct map does not translate it, so a speculative
+   read cannot reach a poisoned line; the cost is splitting the large
+   direct-map pages around at most 64 pages. The loader's line: `bad frame
+   <f> kept out (<table|left>)`.
+6. **The loader never reads a poisoned region page** ((8)): a bank record
+   naming the pstore header page skips the region that boot (said); one
+   naming a ring page skips the text (said); otherwise poison in the region
+   would loop the restart inside firmware.
+7. **The bank read** ((9)): read-only, only banks below `MCG_CAP`'s count,
+   only on a vendor it names (Intel, AMD); Intel's rule (UC, `ADDRV`,
+   `MISCV` with a page-sized or finer grain) and AMD's (UC, `ADDRV`, the
+   poison code); pure decoding in `ferrix-mce-decode`-style host-tested
+   functions shared with the kernel's rules where they can be.
+8. **The kernel leaves them out** (L.mm.110): the frame allocator's
+   initialisation gives no `BadFrame` page to its free lists (they are not
+   RAM), enters each in the retired set before the first allocation (a
+   direct insert, `mm::keep_out`, since `retire_frame` answers `NotCovered`
+   for a frame it does not manage), writes each into the new table again
+   (so a frame stays out across consecutive warm resets with no event log),
+   and says `mm   N frames left out as bad`. `retire_frame` tests `Already`
+   before `NotCovered`, so the poll's later retirement of the same left
+   record says `already retired` (its line), not `not retired`.
+9. **The restart's cost, measured**: from the stop to the next boot's
+   `FERRIX-BOOT-OK` under `ferrix.panic=reset`, its parts named (the 10 s
+   hold, firmware, the loader, the boot); QEMU in the gate, the N150 a
+   BACKLOG row.
 
-## 3. What changes where
+## 3. Assumption of use (the loader)
 
-* **Kernel** (item): the stop word 7 at the machine check's report
-  (`panic::begin_report` given the catalogue entry, or the machine check's
-  `stop` writing it first); the bad-frame table's write in `mm::retire_frame`
-  (`console`'s pstore module owns the region); `Bad` pages left out by the
-  frame allocator's initialisation and entered in the retired set.
-* **Loader** (outside the item, A.FIRMWARE): the table's read, the event
-  log's two new kinds, the banks' read, the `Bad` type in the map, its
-  boot-log lines.
-* **`ferrix-bootinfo`**: the map's `Bad` type; the pstore header's table
-  layout (version 3).
-* **`ferrix-eventlog`**: `Kind::MachineCheck`, `Kind::BadFrame`, their text,
-  the 64-frame bound, deduplication by address.
+The loader is outside the item (A.FIRMWARE). The kernel only ever leaves
+memory out on its word -- the risk is RAM lost, never wrong data -- and
+relies on it as **AoU (new)**: the loader marks `BadFrame` exactly the
+frames the version-3 table and the banks name, never one more, and never
+drops one; it reads no pstore page a bank names. The gate's lines are its
+evidence, not the item's.
 
 ## 4. What it does not do
 
-* **No default reset.** A fatal machine check halts unless `ferrix.panic=
-  reset` is set, as every panic does; the customer's R1 decides that.
-* **No bad-frame removal.** A frame once recorded stays out for good (an
-  operator who replaced a DIMM clears the event log's bad frames with
-  `ferrix-eventlog --clear-bad`, a ring-3 tool on the host or a later
-  slice).
-* **No guess at a frame from text.** The loader reads the table and the
-  banks, never the report's text.
-* **Not across a disk change**: the event log is the boot disk's.
-* **Arm**: no banks; the table and the `Bad` map type work there for
-  frames the kernel retired, which on Arm is none today.
+* **8b**: nothing survives a power cycle; BACKLOG row.
+* **No default reset**, no shorter hold: R1.
+* **No guess from text**: the loader reads the table and the banks only.
+* **Arm**: no banks, and nothing retires frames there today; the table and
+  the kind work for any retirement that comes.
 
 ## 5. How it is checked
 
-* **Host tests** (`ferrix-eventlog`, `ferrix-bootinfo`): the table's
-  encoding, a torn or damaged entry ignored, deduplication, the 64 bound,
-  the `Bad` type's round trip.
-* **Stage 2 check**: a `Bad` page in a boot map is never in the free lists
-  and is in the retired set; the bad-frame table's write of a retirement
-  (into a check-owned copy of the header).
-* **`test-mce-restart`** (x86-64, TCG with Intel's records, no
-  `-no-reboot`, `ferrix.panic=reset`): a fatal machine check after the
-  victim's line at the victim's page; required: the stop's report, the
-  reset, then the next boot's loader line `the last boot stopped on a
-  machine check`, its line `bad frame <f> kept out (retired, left)`, the
-  kernel's `1 frames left out as bad`, `<f>` in `/proc/ferrix-mce-retired`
-  before any program ran, the poll's `left from before this boot` line, and
-  the restart's time from the stop to `FERRIX-BOOT-OK` said. **Cold mode**:
-  the same image booted again from a powered-off QEMU (the pstore region
-  gone, the event log kept): `bad frame <f> kept out (event log)` and `<f>`
-  still left out.
-* **Negative controls**: the allocator's `Bad` test removed (the stage 2
-  check fires); the table's write removed (no `retired` source: the judge
-  fails); the loader's bank read removed (the restart's line lacks `left`:
-  the judge fails); stop word 1 written instead of 7 (the loader's line
-  says a panic: the judge fails).
+* **Host tests**: the table's encoding, a damaged entry ignored, the 64
+  bound, `fresh`'s refusals, `validate` of versions 1-3, the bank decoding
+  rules.
+* **Stage 2 check**: a `BadFrame` region in a check map is never in the
+  free lists and is in the retired set; a checked retirement writes a
+  check-owned header copy, the live count unchanged; `retire_frame` of a
+  kept-out frame answers `Already`.
+* **`test-mce-restart`** (x86-64, TCG with Intel's records; without
+  `-no-reboot`; `ferrix.panic=reset`): a fatal record at the victim's page
+  (test-mce's victim, `PCC`); required: the stop's report; the reset; the
+  next boot's `boot N ended: a machine check`; `bad frame <f> kept out
+  (table)` and `(left)`; `mm   1 frames left out as bad`; `<f>` in
+  `/proc/ferrix-mce-retired` before any program allocated; the poll's
+  `left from before this boot` and `already retired`; the restart's time
+  and parts said. Under KVM if injection survives its reset (QEMU keeps
+  the banks under KVM too: `kvm_put_msrs` restores them), else said why.
+* **Negative controls**, each FIRED on its text through `gate.sh
+  control`: the allocator's leave-out removed (stage 2); the table write
+  removed (no `(table)`: the judge); the loader's bank read removed (no
+  `(left)`: the judge); code 1 stored for 8 (the loader's line: the
+  judge); `fresh` accepting a non-empty table (the host test).
 
-## 6. Requirements
+## 6. Requirements (reserved first, released by the code landing)
 
-To be ruled on by the consultant: kernel ids for the stop word 7, the
-table's write and the allocator's `Bad` pages (L.x86_64 / L.mm / L.console
-ranges, reserved first); the loader's part is outside the item and its
-evidence is the gate. Possibly an H id: "a frame the kernel found bad is
-kept out of use across a reset and a power cycle", whose environment
-includes the loader.
+* **H.FAIL.12**: after a warm reset, the kernel shall hand out no frame the
+  boot before retired, nor the frame of an uncorrected record the machine
+  check named, where the loader marked it left out (AoU §3). Parent
+  O.FAILSAFE, ASR-6.
+* **L.console.58**: stop word 8 at a machine check's first report.
+* **L.console.59**: the version-3 table's format and `fresh`'s refusals.
+* **L.mm.109**: `retire_frame` records each newly retired frame.
+* **L.mm.110**: `BadFrame` pages are never in the free lists, are in the
+  retired set before the first allocation, and are written into the new
+  table.
+* **L.x86_64.254**: the stop writes its uncorrected records' pages into
+  the table before its report.
 
-## 7. Where it stands
+## 7. Docs
 
-* Design v1, for the consultant's review.
+POSTMORTEM §5.1 (code 8), §3.1 (header version 3); MACHINE-CHECK §3.1,
+§3.4; SAFETY-MANUAL (the AoU); MEMORY-AND-TIMING (the write-back);
+VULNERABILITY-ANALYSIS V-14 (the table); BACKLOG (the N150 restart time;
+8b).
+
+## 8. Where it stands
+
+* Design v1 (e0effb1b2) reviewed 2026-10-31, ledger 5467: **OK IF
+  (1)-(12)** for 8a, 8b NOT YET (B1). v2 carries the split (8a only), code
+  8 (Q5), (1) the ids, (2)-(4) §2.1-2.3, (5) taken (§2.4), (6) §2.8, (7)
+  §2.5, (8) §2.6, (9) §2.7, (10)-(11) §5, (12) §7.
