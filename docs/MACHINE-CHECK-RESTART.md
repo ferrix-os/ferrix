@@ -114,7 +114,7 @@ evidence, not the item's.
 
 ## 4. What it does not do
 
-* **8b**: nothing survives a power cycle; BACKLOG row.
+* **8b**: nothing survives a power cycle in 8a; slice 8b is §9.
 * **No default reset**, no shorter hold: R1.
 * **No guess from text**: the loader reads the table and the banks only.
 * **Arm**: no banks, and nothing retires frames there today; the table and
@@ -197,3 +197,195 @@ VULNERABILITY-ANALYSIS V-14 (the table); BACKLOG (the N150 restart time;
   `&raw const` token; (e) a frame above 2^32 answering Full. The loader reads
   only the boot processor's banks; another processor's core-scoped record is
   kept out through the table its stop writes (C4).
+
+* Design v3 (§9, cd59d740b) reviewed 2026-10-31, ledger 5511: **OK IF
+  (1)-(11)** for 8b; Q1 (a), H.FAIL.13, reserved in a docs-only landing;
+  AoU-39 amended, no new AoU, no low-level id.
+
+## 9. Slice 8b: a bad frame stays out across a power cycle (design v3)
+
+Design v3, 2026-10-31 (cd59d740b; B1 of ledger 5467). The consultant's
+verdict **OK IF (1)-(11)**, ledger 5511; v3.1 carries (1), (3), (4), (5)
+and (7) here, the rest at code. 8a's table lives in
+RAM and is gone after a power cut, a clean power-off or a cold boot. 8b
+keeps the bad-frame set on disk, in PM4's event-log partition, written by
+the loader of a boot that is not failing -- never by the kernel, which
+still writes nothing but RAM (PM4's E1) -- and read by every boot's
+loader, before its own allocations.
+
+### 9.1 Where the set lives: an extension of each header copy
+
+Not as records in the ring (B1: 64 frames would push the box's 31 panic
+records out, and later panics would overwrite them). Each header copy is
+4 KiB, of which one block is written and 64 bytes used (POSTMORTEM §4.1).
+The set goes into the same block, after the header, as an **extension**:
+
+```
+header copy (one block, as PM4):
+  0   "FXEVENTS" ... 40 CRC-32C of 0..40       (PM4's header, version 1, unchanged)
+  64  "FXBADFRM"   72 version 1   76 count (0..=64)   80 reserved, 0
+  84  64 frame numbers, u32 each (4 KiB pages), the first `count` strictly
+      ascending, the rest 0
+  340 CRC-32C of 0..340 (the header's bytes too: an extension belongs to
+      its copy's generation and cannot be paired with the other copy's)
+```
+
+* **PM4's header stays version 1** and its bytes unchanged, so every PM4
+  reader (an older inspection tool, an older loader) still reads the log.
+  A copy whose bytes 64..72 are zero has no extension: an empty set. A
+  copy with the magic and a bad CRC, version, count, order or non-zero
+  tail is **invalid as a whole** (`Header::decode` refuses it), so
+  `select` falls back to the other copy -- never to "no frames".
+* **Atomic enough**: 344 bytes fit one 512-byte block, so a copy is one
+  block write, as today; a disk that tears inside a block fails the CRC
+  and the other copy holds.
+* **Order and dedupe** are part of the format: strictly ascending means
+  no frame twice, and the decoder checks it.
+* **The 64 bound** is the pstore table's (§2.2): the loader's own count of
+  kept-out pages (`badframes::MOST`) grows from 96 to 160 (banks 32,
+  table 64, log 64).
+
+### 9.2 Who writes it (PM4's EL3 amended)
+
+* **EL3 (amended)**: the loader writes the log (a) a record, on a boot
+  whose pstore region holds a valid record with a panic report (PM4,
+  unchanged); and (b) **both header copies alone**, on a boot whose
+  pstore table or machine-check banks name a frame not already in the
+  log's set. A boot whose set is unchanged writes nothing: a healthy
+  machine's disk is never written by the loader.
+* **The set only grows** in Ferrix: no loader or kernel path removes a
+  frame. A frame the loader could not keep out ("in use") still goes into
+  the set: the set records what the evidence named, the map what could be
+  done about it.
+* **No fresh header over damage** (ledger 5511 (3)): `append` and
+  `add_bad_frames` write a fresh header only when neither copy carries
+  `FXEVENTS`. Copies that carry it and both fail to decode -- damage, or an
+  extension version a later loader left behind (an A/B rollback) -- get no
+  write, said once: `events   header damaged or newer: nothing written, its
+  bad frames not read`. A copy without the extension's magic but with a
+  non-zero byte in 64..344 is invalid, not an empty set. (POSTMORTEM
+  §4.3's "a fresh header when neither is valid" is amended to this.)
+* **The write** (`ferrix_eventlog::add_bad_frames`, host-tested): read the
+  header (a fresh one, both copies, only as above);
+  merge the new frames (sorted, deduplicated, at most 64); if nothing
+  changed, no write; else copy A with generation + 1, flushed, then copy
+  B, flushed (PM4's `write_header`). `append` carries the set through its
+  own header write (a record never drops the set).
+* **The region rule** (ledger 5511 (4)). The pstore table is the set's
+  only other copy, so, as with a record (E2): **`add_bad_frames` failed**
+  -> the region is kept as it is, not handed over (§3.3, 4's path), said
+  every boot, and the next boot tries again; a failure that persists turns
+  pstore off until the log is repaired (§9.5, a BACKLOG row). **The log
+  absent, unusable or damaged** (as above) -> the region is renewed, said:
+  there is no disk copy to wait for, and the kernel's attach rewrites every
+  kept-out page into the new table, so the frames still cross warm resets.
+  The decision is a host-tested pure function the loader calls
+  (`events::renew_after(outcome)`), with its control. A torn write: the set only grows, so the older copy is a subset
+  of the newer; falling back to it loses only this boot's additions, which
+  the un-renewed table still holds.
+* **Full**: a 65th frame is not added, said (`events   bad frame <f> not
+  kept in the event log: its 64 are`); it still stays out across warm
+  resets through 8a's table (the kernel's attach rewrites it), and the
+  region is renewed (not a failure).
+* **Where there is no log** (the bare FAT image, `ferrix.pstore=off`, an
+  unusable or damaged partition): nothing is written; 8a's warm-reset path
+  only.
+* **A frame at or above 16 TiB** (not a u32 frame number) is not added,
+  said.
+
+### 9.3 Who reads it
+
+Every boot's loader, with the log present, **right after the bank read and
+before the boot info area** (moving `events::open` out of `pstore::take`
+into `boot_info_and_pstore`): each frame of the set is kept out as 8a keeps
+one, said `badframe <f> kept out (log)` (or `(log, as already)` when the
+banks named it first), whether or not pstore is on. The kernel needs no
+change: a `BadFrame` page is left out (L.mm.110) and written into the new
+table at attach, whatever kept it out. The GPT scan's buffers are freed
+before the keep-out (they are today), the header is read into the stack
+block, and the append's buffers are allocated only after it. A log present
+but unreadable says `events   its bad frames not kept out this boot`.
+The summary line gains the set:
+`events   N records; ...; 2 bad frames kept`.
+
+### 9.4 Who clears it (B1: the clear tool's authority)
+
+Only a person who is root on a host with the disk, after replacing the
+memory: `ferrix-eventlog clear-bad-frames DEVICE` (the inspection Linux
+image carries it) writes both copies with an empty set and generation + 1,
+and prints the frames it dropped. `ferrix-eventlog list` prints the set;
+`append` carries it. Raw-device access is root's (V-15). Ferrix never
+clears it, and no Ferrix interface asks to.
+
+### 9.5 Residuals (named)
+
+* **A power cut or clean power-off before any warm reset** loses a frame
+  the kernel retired in that run: only a loader writes the disk, and only
+  a warm reset carries the table to one. The frame is retired again when
+  its error recurs. (A kernel disk write is ruled out by E1.)
+* **An older writer** -- a loader from before 8b (an A/B rollback) or an
+  inspection tool from before 8b -- rewrites a copy without the extension
+  on its first header write and so drops the set (the records survive).
+  The integrator ships the tool with the loader (AoU-39's amendment).
+* **A forged set** (raw disk write, outside Secure Boot's reach) costs at
+  most 64 pages; a frame planted at the pstore region's place costs the
+  region (`allocate_at` refuses: no region that boot, said), never the
+  boot: nothing else the loader allocates is at a fixed address.
+  VULNERABILITY-ANALYSIS V-14 amended.
+* **A log that keeps refusing writes** keeps the pstore region off every
+  boot (the region rule): the post-mortem record is lost until the log is
+  repaired, said every boot; BACKLOG row.
+* **Another boot disk, or a reinstall** starts with an empty set.
+* **A 4 KiB-block disk** writes the header copy as one 4 KiB block: the
+  same layout, still one block.
+
+### 9.6 How it is checked
+
+* **Host tests (`ferrix-eventlog`)**: the extension's encoding, a copy
+  with no extension read as empty, every refused field (CRC, version,
+  count > 64, order, duplicates, a non-zero tail) making the copy invalid
+  and the other copy taken; an extension moved to the other copy refused
+  (the CRC binds the header); the merge's dedupe, order and bound;
+  unchanged input writes nothing (0 block writes); `append` keeps the set;
+  a torn `add_bad_frames` -- the device stopped after every number of block
+  writes -- leaves the old set or the new, never fewer frames than the old;
+  `clear` empties it; the range check unchanged (no write outside the
+  partition).
+* **`test-mce-restart` mode `PowerCycle`** (x86-64 TCG, the disk in a GPT
+  with the log as `test-postmortem` builds it), TCG only: boot 1 recovers
+  an SRAR and retires the victim's frame, then a warm reset (8a's Retired
+  mode); boot 2's loader says `kept out (table)` and `bad frame <f> kept in
+  the event log (1 of 64)`; the QEMU process is ended (the power cut); a
+  second process boots cold: boot 3's loader says `kept out (log)`, no
+  `(table)` and no `(left)`; its kernel `1 frames left out as bad`; a warm
+  boot 4 writes nothing (the header's generation, read by the host tool
+  before and after, unchanged); the host's `ferrix-eventlog list` on the
+  image prints the frame; after the host's `clear-bad-frames`, a cold boot
+  5's loader keeps nothing out.
+* **Negative controls** (`gate.sh control`): the loader's log read removed
+  (boot 3: no `(log)`); `add_bad_frames` not called (boot 2: no line);
+  `append` not carrying the set (host test); the CRC not covering the
+  header (host test, the swapped extension); the order check removed (host
+  test, the duplicate); the renewal moved before `add_bad_frames` (the
+  `renew_after` host test with its control); plus (ledger 5511 (3), (8))
+  a fresh header written over damaged copies (host test: both copies
+  damaged and an unknown extension version each give 0 writes) and a
+  write on an unchanged set (host test: 0 block writes).
+
+### 9.7 Requirements and docs
+
+* **Q1 for the review**: the kernel is unchanged and the loader is outside
+  the item. Either (a) a new **H.FAIL.13** "after a power cycle, the kernel
+  shall hand out no frame a boot before retired, where the loader marked it
+  left out", criterion L.mm.110 and the `PowerCycle` gate, with no new
+  low-level requirement; or (b) H.FAIL.12's statement widened to "after a
+  warm reset or a power cycle". The design proposes (a), keeping 8a's
+  landed claim as it is.
+* **AoU-39 amended** (or AoU-40): the loader also marks exactly the log's
+  set, never drops a frame, and writes the set before it renews the pstore
+  header; the integrator ships the clear tool and the loader together and
+  clears the set only after replacing memory.
+* Docs: POSTMORTEM §4.1 (the extension), §4.2 (EL3 amended), §4.4 (the
+  tool's commands); SAFETY-MANUAL (the AoU); VULNERABILITY-ANALYSIS V-14
+  and V-15; MEMORY-AND-TIMING (one block written twice on a boot that adds
+  frames); BACKLOG (8b's row closed by the landing; the residuals' rows).
