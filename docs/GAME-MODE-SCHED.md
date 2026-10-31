@@ -713,6 +713,44 @@ lows, not the mean, are where a CPU lever can show. Each result goes into
 GAME-MODE.md §11 and §9 below, with the raw files under
 `~/.local/share/ferrix/logs/game-mode/`.
 
+### 7.1 F7 on the box, 2026-10-31
+
+develop 1e4cef8e1 (F7 and F3), one boot per setting, Endfield in the world
+at the start of "Rally and Unite" (standing, the same view each time),
+FG off, render scale 60%. Each window: `sched_runtime` set on every thread
+of Endfield.exe, wineserver, yserver, hyprix and the intel driver (270
+threads, `fxslice`), 10 s to settle, then 60 s of Wine's fps lines (about
+40, one per ~1.5 s). The 0.5 ms request against none:
+
+| setting | pairs | median, none / 0.5 ms | p10, none / 0.5 ms | p5, none / 0.5 ms |
+|---|---|---|---|---|
+| 1280x720 | 3 | 27.63 27.52 27.15 / 27.60 27.36 27.58 | 27.15 25.03 25.11 / 27.10 25.23 25.64 | 27.11 24.92 25.11 / 27.08 25.15 25.17 |
+| 640x480, none first | 3 | 54.02 52.88 53.64 / 54.30 53.02 54.49 | 50.66 41.06 51.30 / 51.93 45.91 53.16 | 49.48 39.74 49.90 / 50.96 43.56 52.28 |
+| 640x480, 0.5 ms first | 3 | 54.49 53.50 55.00 / 54.05 51.59 54.30 | 42.08 51.45 52.70 / 52.11 45.96 50.86 | 37.60 50.69 51.09 / 51.72 45.21 49.61 |
+
+**No effect beyond the noise.** At 720p the GPU is the limit (99.9%
+busy) and the arms agree to a tenth of a frame. At 640x480 (about 55 fps
+here, below the 60 cap) the request's lows were higher in all three pairs
+run with "none" first, and in one of three with the order reversed: the
+lows are the game's own dips to about 40 fps, which land in either arm, and
+six pairs of 40 samples do not separate a lever smaller than they are. F7
+alone, on these threads, does not move Endfield's lows on this box; what it
+is for is the mark (§3), which shortens the marked task's wait, not
+everyone's slice. F3's masks were not tried: at 640x480 the four processors
+are ~93% busy (GAME-MODE.md §3.4), so moving every other process onto one
+of them is a cost before it is a lever; that waits for the mark.
+
+On the same boot, from the box's disk: `threads-test --slice-request-only`
+printed `slice-request: kept across execve` and `--affinity-only` printed
+`affinity: kept across execve` with every other affinity line, so
+L.sched.109's and L.sched.101's exec halves ran on hardware (ledger 5232
+(4), 5269 (7)).
+
+Raw: `gms-ab-720p.log`, `gms-ab-480p.log`, `gms-ab-480r.log` and the
+scripts `gms-*.sh` under `~/.local/share/ferrix/logs/game-mode/`. The
+resolution was set in the prefix's `user.reg` (`video_resolution_*`) with
+the game stopped and set back to 1280x720 afterwards.
+
 ## 8. Questions for the review, and their answers
 
 The consultant answered each (ledger 5154 to 5201, 2026-10-30):
@@ -749,7 +787,7 @@ design reviews the same day, internal and not independent verification
 
 | § | Piece | Verdict | Ledger | Built |
 |---|---|---|---|---|
-| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | F7 landed (2e717f409), code review OK IF (1)-(6), ledger 5232; F3 code review OK IF (1)-(8), ledger 5269 |
+| 2 | F3 applied affinity, F7 slice requests | OK IF (A1)-(A12); 4446's D1-D12 stand | 5156 | F7 landed (2e717f409), code review OK IF (1)-(6), ledger 5232; F3 landed (3e77c0df6), code review OK IF (1)-(8), ledger 5269; measured 2026-10-31, §7.1: no effect beyond the noise |
 | 3 | The frame mark | OK IF (K1)-(K12) | 5170 | no |
 | 4 | Lends | OK IF (N1)-(N8); no code before §3 lands | 5184 | no |
 | 5 | Idle-gap class | OK IF (G1)-(G5), design only | 5194 | no |

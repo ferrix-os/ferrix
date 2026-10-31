@@ -837,6 +837,10 @@ measurements; **T4 not for the N150**.
 * By endfield-60fps the same day: the scene and method, the render-scale
   slope, the GPU probe against Linux's i915 (§4.1), the settings ceiling
   (no setting reaches 60 fps on this box).
+* On the box, 2026-10-31 00:20 to 01:45, develop 1e4cef8e1 (game-mode-sched):
+  F7's slice request at 0.5 ms on the game path against none, at 1280x720
+  and at 640x480, nine pairs of 60 s windows; no effect beyond the game's
+  own dips (GAME-MODE-SCHED.md §7.1).
 
 Not done: §6's method (the frame recorder's lows, three rounds) for E1 and
 E2, which used Wine's per-second counter and one window each; E3 (the polls deferred: at 99.9% GPU busy it cannot show), E5's
