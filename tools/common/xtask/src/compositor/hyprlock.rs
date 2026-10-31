@@ -577,7 +577,10 @@ sleep 5
 echo suspend-quiet-end
 echo \"suspend-resumed: $(hyprctl dispatch resume pid:$counter 2>&1)\"
 sleep 3
-echo \"suspend-events-after: $(tr '\\n' ' ' < /sys/fs/cgroup$cg/cgroup.events)\"
+back=$(sed -n 's/^0:://p' /proc/$counter/cgroup)
+echo \"suspend-cgroup-after: $back\"
+echo \"suspend-events-after: $(tr '\\n' ' ' < /sys/fs/cgroup$back/cgroup.events)\"
+echo \"suspend-left: $(test -d /sys/fs/cgroup$cg && echo yes || echo no)\"
 echo \"suspend-window: $(hyprctl dispatch suspend 2>&1)\"
 sleep 5
 echo \"suspend-window-resumed: $(hyprctl dispatch resume 2>&1)\"
@@ -602,9 +605,10 @@ const SUSPEND_STEPS: [Step; 1] = [Step {
 /// own beneath the scope and frozen there -- and resumed five seconds later.
 /// Required: the cgroup was the one made beneath the scope and said `frozen
 /// 1`; not one tick while frozen; the first tick after is the next number,
-/// so the program went on from where it stopped; `frozen 0` after. Then the
-/// pattern's window is suspended (its connection parked, one window) and
-/// resumed, and is still a client after.
+/// so the program went on from where it stopped; `frozen 0` after, the
+/// counter back in the session's scope and the cgroup made for it gone.
+/// Then the pattern's window is suspended (its connection parked, one
+/// window) and resumed, and is still a client after.
 #[expect(
     clippy::too_many_lines,
     reason = "one boot read top to bottom: each thing the suspend must have done"
@@ -694,6 +698,23 @@ pub(super) fn test_suspend(arch: Arch, programs: &Programs, args: &Args) -> Resu
         return Err(Error::new(format!(
             "{arch}: the counter's cgroup was still frozen after resume: {:?}",
             line("suspend-events-after: ")
+        )));
+    }
+    let after = |line: &str, key: &str| -> String {
+        line.split_once(key)
+            .map_or_else(String::new, |(_, value)| value.trim().to_owned())
+    };
+    let made = after(&cgroup, "suspend-cgroup: ");
+    let scope = made.rsplit_once('/').map_or("", |(above, _)| above);
+    let back = after(&line("suspend-cgroup-after: "), "suspend-cgroup-after: ");
+    if back != scope {
+        return Err(Error::new(format!(
+            "{arch}: the counter was not put back in {scope:?} after resume: {back:?}"
+        )));
+    }
+    if !line("suspend-left: ").ends_with(": no") {
+        return Err(Error::new(format!(
+            "{arch}: {made} was not removed after resume"
         )));
     }
     let suspended: Vec<&String> = said

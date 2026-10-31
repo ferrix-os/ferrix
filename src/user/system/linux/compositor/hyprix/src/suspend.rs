@@ -35,7 +35,8 @@
 //! A process forked meanwhile by one already moved is born in it, frozen; one
 //! forked by one not yet moved is found by the next look. In a session that
 //! needs the scope delegated to its user, which `sessiond` does
-//! (`docs/AUTH.md` §6.4).
+//! (`docs/AUTH.md` §6.4). At the resume the processes go back to the cgroup
+//! above and the one made is removed ([`release`]).
 //!
 //! # What the compositor does for a frozen client
 //!
@@ -345,6 +346,61 @@ pub fn thaw(frozen: &Frozen) -> Result<(), String> {
     write(&frozen.cgroup, "cgroup.freeze", "0")
 }
 
+/// After [`thaw`], put the program back where it was: every process in a
+/// cgroup made for the suspend is moved to the cgroup above, looking again
+/// for ones forked meanwhile, and the emptied cgroup is removed. A cgroup
+/// that was not made is left alone.
+///
+/// # Errors
+///
+/// When a process cannot be moved or the cgroup cannot be removed; the
+/// program runs either way.
+pub fn release(frozen: &Frozen) -> Result<(), String> {
+    if !frozen.made {
+        return Ok(());
+    }
+    let above = parent_of(&frozen.cgroup);
+    let procs = path(&frozen.cgroup).join("cgroup.procs");
+    for _ in 0..LOOKS {
+        let text =
+            fs::read_to_string(&procs).map_err(|error| format!("{}: {error}", procs.display()))?;
+        let pids = pids_in(&text);
+        if pids.is_empty() {
+            let dir = path(&frozen.cgroup);
+            return fs::remove_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()));
+        }
+        for pid in pids {
+            // One that ended meanwhile is no loss; any other refusal is.
+            if let Err(why) = write(above, "cgroup.procs", &pid.to_string())
+                && fs::metadata(format!("/proc/{pid}")).is_ok()
+            {
+                return Err(format!("moving {pid}: {why}"));
+            }
+        }
+    }
+    Err(format!(
+        "process {}'s program kept starting processes in {}",
+        frozen.root, frozen.cgroup
+    ))
+}
+
+/// The cgroup above `cgroup` (`""` for the root).
+#[must_use]
+pub fn parent_of(cgroup: &str) -> &str {
+    cgroup
+        .trim_end_matches('/')
+        .rsplit_once('/')
+        .map_or("", |(above, _)| above)
+}
+
+/// The pids of a `cgroup.procs`, one a line.
+#[must_use]
+pub fn pids_in(text: &str) -> Vec<u32> {
+    text.lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect()
+}
+
 /// The path of `file` in the cgroup `cgroup`.
 fn path(cgroup: &str) -> PathBuf {
     Path::new(CGROUP_ROOT).join(cgroup.trim_start_matches('/'))
@@ -460,6 +516,17 @@ mod tests {
         assert!(root_of(&Target::Pid(99), &procs).is_err());
         assert_eq!(root_of(&Target::Steam(2_234_140), &procs), Ok(50));
         assert!(root_of(&Target::Steam(7), &procs).is_err());
+    }
+
+    #[test]
+    fn a_made_cgroup_is_emptied_into_the_one_above() {
+        assert_eq!(
+            parent_of("/user.slice/user-1000.slice/session-1.scope/suspend-509"),
+            "/user.slice/user-1000.slice/session-1.scope"
+        );
+        assert_eq!(parent_of("/suspend-7/"), "");
+        assert_eq!(pids_in("509\n510\n\n"), vec![509, 510]);
+        assert!(pids_in("").is_empty());
     }
 
     #[test]

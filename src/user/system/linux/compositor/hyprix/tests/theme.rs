@@ -24,7 +24,8 @@ fn ferrix_light_parses_and_floats() {
         }
         assert!(
             compositor_layout::Dispatcher::parse(&bind.dispatcher, &bind.arg).is_ok()
-                || ["mouse", "overview", "switcher"].contains(&bind.dispatcher.as_str()),
+                || ["mouse", "overview", "switcher", "suspend", "resume"]
+                    .contains(&bind.dispatcher.as_str()),
             "{bind:?} names a dispatcher hyprix runs"
         );
     }
@@ -100,7 +101,8 @@ fn yoru_parses_floats_and_styles_its_frames() {
         }
         assert!(
             compositor_layout::Dispatcher::parse(&bind.dispatcher, &bind.arg).is_ok()
-                || ["exec", "mouse", "overview", "switcher"].contains(&bind.dispatcher.as_str()),
+                || ["exec", "mouse", "overview", "switcher", "suspend", "resume"]
+                    .contains(&bind.dispatcher.as_str()),
             "{bind:?} names a dispatcher hyprix runs"
         );
     }

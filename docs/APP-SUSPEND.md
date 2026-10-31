@@ -563,12 +563,13 @@ What landed:
 | `suspend [window\|pid:<n>]` and `resume [window\|pid:<n>\|all]`, hyprix dispatchers (`hyprctl dispatch suspend`, or a bind). A window whose class is `steam_app_<id>` means Steam's `reaper` with `AppId=<id>` and everything beneath it, wineserver included; another X window is refused with a hint to name the pid, since yserver serves Steam too | `hyprix/src/suspend.rs`, `act.rs` |
 | The frozen program's connections parked: no frame callbacks (kept for the thaw), no input, the window at half opacity | `state.rs` (`Slot::park`, `frames_done`), `deliver.rs` (`awake`) |
 | The session's scope delegated to its user | `sessiond/src/scope.rs`, `docs/AUTH.md` §6.4 |
-| `test-compositor --boot suspend`: as `ferrix`, a counter in the session's scope is frozen in `suspend-<pid>` for five seconds; not a tick while frozen, and the first tick after is the next number. Then the pattern's window is suspended and resumed and is still a client | `xtask/src/compositor/hyprlock.rs` |
+| At the resume, the processes moved back to the cgroup above and `suspend-<pid>` removed (2026-10-31) | `suspend.rs` (`release`) |
+| SUPER+Z suspends the focused program, SUPER+SHIFT+Z resumes every one suspended, in both shipped themes (2026-10-31) | `themes/ferrix-light.conf`, `themes/yoru-keys.conf` |
+| `test-compositor --boot suspend`: as `ferrix`, a counter in the session's scope is frozen in `suspend-<pid>` for five seconds; not a tick while frozen, and the first tick after is the next number; after the resume it is back in the scope and `suspend-<pid>` is gone. Then the pattern's window is suspended and resumed and is still a client | `xtask/src/compositor/hyprlock.rs` |
 
 No kernel line, no init change, no certified-item file. Left for S1: the
 keeper's step 2 (INTEL-GPU §12.8), so that a game frozen across a GPU
-driver restart thaws intact; a menu entry or bind in the default
-configuration.
+driver restart thaws intact.
 
 ### 3.1.2 Endfield on the N150 (2026-10-30, 23:20 to 23:45)
 

@@ -1120,6 +1120,9 @@ fn resume(argument: &str, state: &State, around: &mut Around<'_>) -> bool {
             Ok(()) => around.say(&format!("hyprix: resumed process {root}")),
             Err(why) => around.say(&format!("hyprix: resume: {why}")),
         }
+        if let Err(why) = crate::suspend::release(&frozen) {
+            around.say(&format!("hyprix: resume: left in {}: {why}", frozen.cgroup));
+        }
         changed |= park(&frozen.pids, false, around) > 0;
     }
     changed
