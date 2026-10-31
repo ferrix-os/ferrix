@@ -221,9 +221,12 @@ fn x_app_error(
     owners: &[crate::x_owner::Owner],
     dialog_of: bool,
 ) {
+    // The first window's program is the record's; every program any matching
+    // window names gets a snapshot, once.
+    let owner = owners.first().map_or(server, |first| first.pid);
     let mut pids: Vec<i32> = owners.iter().map(|owner| owner.pid).collect();
+    pids.sort_unstable();
     pids.dedup();
-    let owner = pids.first().copied().unwrap_or(server);
     let mut fields = window_fields("app-error", level, class, title, owner, dialog_of);
     fields.push(("X_SERVER_PID".to_owned(), server.to_string().into_bytes()));
     if let Some(first) = owners.first() {

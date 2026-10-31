@@ -2274,7 +2274,9 @@ trace.
   program's window, whose Wayland client is the X server, hyprix asks the
   X server which top-level has that title and class and records the
   program its `_NET_WM_PID` names, with `X_SERVER_PID` and `X_WINDOW`
-  beside it (`x_owner.rs`; the server's own pid when no window says one);
+  beside it (`x_owner.rs`; the server's own pid when no window says one).
+  That pid is the program's own claim, a window property, not one the
+  kernel reports; the snapshot runs as the session's user either way;
   any other
   window a `window-opened` record when that kind is on (off by default).
   lode takes a screenshot of an app error as of a crash (§19), and desktop
