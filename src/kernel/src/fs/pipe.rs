@@ -52,7 +52,6 @@
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::sync::{Arc, Weak};
-use alloc::vec;
 use core::any::Any;
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -791,7 +790,8 @@ pub(crate) fn splice_pipes(
     if Arc::ptr_eq(&from.pipe, &to.pipe) {
         return Err(Errno::EINVAL);
     }
-    let mut bounce = vec![0_u8; len.min(PIPE_CAPACITY)];
+    let mut bounce =
+        crate::fallible::try_filled(0_u8, len.min(PIPE_CAPACITY)).map_err(|_| Errno::ENOMEM)?;
     loop {
         // Bound first, so both guards are gone before anything below waits.
         let joined = join(&from.pipe, &to.pipe, &mut bounce);

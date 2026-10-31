@@ -47,7 +47,6 @@
 //! `ENOSYS` was an error, and curl's `configure` concluded there was no grep.
 
 use alloc::sync::Arc;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_linux_abi::errno::Errno;
@@ -259,7 +258,8 @@ fn copy(
     mut position: Option<&mut u64>,
     count: usize,
 ) -> Result<usize, Errno> {
-    let mut buffer = vec![0_u8; count.min(SENDFILE_CHUNK)];
+    let mut buffer =
+        crate::fallible::try_filled(0_u8, count.min(SENDFILE_CHUNK)).map_err(|_| Errno::ENOMEM)?;
     let mut sent = 0;
     while sent < count {
         let want = (count - sent).min(buffer.len());
@@ -525,7 +525,8 @@ fn out_of_a_pipe(
     len: usize,
     nonblock: bool,
 ) -> Result<usize, Errno> {
-    let mut buffer = vec![0_u8; len.min(SENDFILE_CHUNK)];
+    let mut buffer =
+        crate::fallible::try_filled(0_u8, len.min(SENDFILE_CHUNK)).map_err(|_| Errno::ENOMEM)?;
     let got = fs::pipe::read(input, &mut buffer, nonblock)?;
     let chunk = buffer.get(..got).ok_or(Errno::EIO)?;
     let mut put = 0;
@@ -577,7 +578,8 @@ fn into_a_pipe(
     nonblock: bool,
 ) -> Result<usize, Errno> {
     let room = fs::pipe::room(output, nonblock)?;
-    let mut buffer = vec![0_u8; len.min(room).min(SENDFILE_CHUNK)];
+    let mut buffer = crate::fallible::try_filled(0_u8, len.min(room).min(SENDFILE_CHUNK))
+        .map_err(|_| Errno::ENOMEM)?;
     let got = match at.as_deref() {
         Some(&start) => input.read_at(start, &mut buffer)?,
         None if input.is_stream() => input
@@ -647,7 +649,9 @@ fn copy_between(
     to: u64,
     count: usize,
 ) -> (usize, Option<Errno>) {
-    let mut buffer = vec![0_u8; count.min(SENDFILE_CHUNK)];
+    let Ok(mut buffer) = crate::fallible::try_filled(0_u8, count.min(SENDFILE_CHUNK)) else {
+        return (0, Some(Errno::ENOMEM));
+    };
     let mut copied = 0;
     while copied < count {
         let want = (count - copied).min(buffer.len());

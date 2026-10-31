@@ -410,7 +410,9 @@ fn wait(process: &Process, fds: u64, nfds: u64, deadline: Option<u64>) -> Result
         return Err(Errno::EINVAL);
     }
     let count = usize::try_from(nfds).map_err(|_| Errno::EINVAL)?;
-    let mut entries = vec![0_u8; count.checked_mul(POLLFD_BYTES).ok_or(Errno::EINVAL)?];
+    let mut entries =
+        crate::fallible::try_filled(0_u8, count.checked_mul(POLLFD_BYTES).ok_or(Errno::EINVAL)?)
+            .map_err(|_| Errno::ENOMEM)?;
     if !entries.is_empty() {
         uaccess::copy_from_user(process.space(), fds, &mut entries).map_err(|_| Errno::EFAULT)?;
     }

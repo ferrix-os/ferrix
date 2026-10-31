@@ -183,6 +183,21 @@ fn zeroed(len: usize) -> Box<[u8]> {
     vec![0u8; len].into_boxed_slice()
 }
 
+/// `len` zeroes on the heap, or `None` when the heap has no room for them.
+///
+/// For a buffer whose size a read or a writeback chooses: up to a fill's run
+/// (32 pages) or a writeback's slice, one contiguous block of the kernel's
+/// heap, which a machine whose free memory is in single frames cannot give
+/// even with megabytes free. An infallible `vec!` there stopped the N150 box
+/// with FX-0008 ("memory allocation of 90112 bytes failed", 22 pages,
+/// 2026-10-31); the callers fall back to a page at a time instead.
+pub(crate) fn try_zeroed(len: usize) -> Option<Vec<u8>> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(len).ok()?;
+    buffer.resize(len, 0);
+    Some(buffer)
+}
+
 // ---------------------------------------------------------------------------
 // The mount
 // ---------------------------------------------------------------------------
@@ -507,8 +522,11 @@ impl<D: BlockHandle> PageSource for FileSource<D> {
             return Ok(pages.len());
         }
         let page = usize::try_from(PAGE_SIZE).map_err(|_| Errno::EIO)?;
-        let mut run = vec![0u8; page.saturating_mul(pages.len())];
-        if self.read_run(offset, &mut run).is_ok() {
+        // With no room for the run's buffer, a page at a time, straight into
+        // the pages: slower, and needs nothing from the heap.
+        if let Some(mut run) = try_zeroed(page.saturating_mul(pages.len()))
+            && self.read_run(offset, &mut run).is_ok()
+        {
             for (target, filled) in pages.iter_mut().zip(run.chunks_exact(page)) {
                 target.copy_from_slice(filled);
             }

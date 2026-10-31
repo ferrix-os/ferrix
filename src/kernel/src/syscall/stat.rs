@@ -195,7 +195,9 @@ pub(crate) fn sys_getdents64(
     let file = fd::file(process, fd)?;
     // `unsigned int` in the ABI, whatever the register holds above it.
     let count = u64::from(count as u32).min(DIRENT_BUFFER);
-    let mut buf = vec![0_u8; usize::try_from(count).map_err(|_| Errno::EINVAL)?];
+    let mut buf =
+        crate::fallible::try_filled(0_u8, usize::try_from(count).map_err(|_| Errno::EINVAL)?)
+            .map_err(|_| Errno::ENOMEM)?;
 
     let mut refused = false;
     let mut writer = DirentWriter::new(&mut buf);

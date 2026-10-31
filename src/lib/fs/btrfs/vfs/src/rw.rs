@@ -957,7 +957,11 @@ impl<D: WriteHandle> Node<D> {
                 continue;
             }
             let len = count.saturating_mul(page);
-            let mut buf = vec![0u8; len];
+            // A slice is up to WRITEBACK_PAGES, one contiguous block of the
+            // heap: with no room for it the run stays dirty and the writeback
+            // answers ENOMEM, as with no room for anything else it needs
+            // ([`crate::try_zeroed`]).
+            let mut buf = crate::try_zeroed(len).ok_or((Errno::ENOMEM, first))?;
             pages
                 .read(offset, &mut buf)
                 .map_err(|error| (error, first))?;
@@ -1128,13 +1132,18 @@ impl<D: WriteHandle> PageSource for Source<D> {
         }
         let offset = first.checked_mul(PAGE_SIZE).ok_or(Errno::EIO)?;
         let page = usize::try_from(PAGE_SIZE).map_err(|_| Errno::EIO)?;
-        let mut run = vec![0u8; page.saturating_mul(pages.len())];
         let ino = self.ino;
-        let read = self
-            .shared
-            .with(|volume| volume.read_file(ino, offset, &mut run));
+        // With no room for the run's buffer, a page at a time, straight into
+        // the pages, as after a failed read ([`crate::try_zeroed`]).
+        let read = match crate::try_zeroed(page.saturating_mul(pages.len())) {
+            Some(mut run) => self
+                .shared
+                .with(|volume| volume.read_file(ino, offset, &mut run))
+                .map(|_| Some(run)),
+            None => Ok(None),
+        };
         match read {
-            Ok(_) => {
+            Ok(Some(run)) => {
                 for (target, filled) in pages.iter_mut().zip(run.chunks_exact(page)) {
                     target.copy_from_slice(filled);
                 }
@@ -1144,7 +1153,7 @@ impl<D: WriteHandle> PageSource for Source<D> {
             // time, so the pages before the bad one are kept and the bad one
             // answers for itself.
             Err(error) if pages.len() == 1 => Err(error),
-            Err(_) => {
+            Ok(None) | Err(_) => {
                 let mut filled = 0;
                 for (index, target) in pages.iter_mut().enumerate() {
                     let at = offset.saturating_add(PAGE_SIZE.saturating_mul(index as u64));
