@@ -2033,6 +2033,14 @@ verdict of ledger line 3950.
   hardware yet: a row of `docs/BACKLOG.md`.
 * **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
   most 32 bank reads and 32 lines; no lock while it reads a bank.
+* **CMCI** (`docs/MACHINE-CHECK-CMCI.md`): the handler masks the LVT entry
+  (one APIC write), counts, sets and swaps one flag and wakes one wait
+  queue; it reads no bank and takes no lock but the queue's. The claim
+  holds `CLAIM` (preemption off, interrupts open, no handler takes it) for
+  at most 3 x 32 MSR accesses, once per processor, at its poll task's
+  start. After an unmask the task reads each claimed bank's status once
+  more (at most 32 reads). A storm costs at most 16 interrupts and 16
+  rounds in its first second and one round a second after.
 * **A system call's copy that consumed poison** (`docs/MACHINE-CHECK-COPY.md`,
   H.FAIL.10): the IST path adds one comparison of `rip` with the copy's
   symbol, the RAM test of `rsi` (a scan of at most `MOST_RAM_RUNS` (128)

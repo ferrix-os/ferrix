@@ -798,9 +798,16 @@ every machine check halts (L.x86_64.231). Either way:
   applies no threshold; lode's quarantine policy may take a core out of
   service on them (AoU-37), and a machine whose corrected counts grow is
   still the integrator's to take out of service;
-* CMCI is not used: corrected errors are found by a poll every
-  `ferrix.mce.poll` seconds (5 by default), so a record a bank overwrites
-  sooner is counted once with `OVER` set;
+* corrected errors are found by a poll every `ferrix.mce.poll` seconds (5
+  by default), and at once by CMCI where an Intel processor reports
+  `MCG_CMCI_P` (`docs/MACHINE-CHECK-CMCI.md`); a record a bank overwrites
+  before a round reads it is counted once with `OVER` set. A bank whose
+  `CMCI_EN` firmware already set is left to firmware and polled only. More
+  than 15 interrupt-driven rounds in a second mask the CMCI entry and the
+  poll goes on once a second until a round finds nothing. A CMCI on a
+  processor out of service is held until its return. `ferrix.mce.cmci=off`
+  leaves the poll alone. CMCI is shown on a patched emulator only, not on
+  hardware;
 * AArch64 and ARMv7-A make no such claim: their external aborts and
   SErrors halt as before;
 * the vendor decides the rules (`docs/MACHINE-CHECK-AMD.md`): Intel's for

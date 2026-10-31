@@ -287,7 +287,7 @@ say done
 
 /// What an image carries beside the kernel: init, busybox, lode started,
 /// the probe, and the guest's unit running `script`.
-fn image_files(arch: Arch, script: String) -> Result<Vec<File>> {
+pub(crate) fn image_files(arch: Arch, script: String) -> Result<Vec<File>> {
     let mut files = init::carried(arch)?;
     if files.is_empty() {
         return Err(Error::new(format!("init is not built for {arch}")));

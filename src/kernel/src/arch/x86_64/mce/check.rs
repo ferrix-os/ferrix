@@ -64,9 +64,16 @@ pub(in crate::arch::x86_64) fn run() -> Result<(), &'static str> {
     copy_actions()?;
     unseen()?;
     copies()?;
+    cmci_claims()?;
+    cmci_storms()?;
+    cmci_kicks()?;
     println!(
         "  mce      the copy's context, actions and fixup, copy_mc over 0 to 9000 bytes at \
          every alignment, as the table says; no register read"
+    );
+    println!(
+        "  mce      CMCI claim over a fake MCi_CTL2, the storm rule and the look after the \
+         unmask; no register read"
     );
     Ok(())
 }
@@ -715,6 +722,150 @@ fn unseen() -> Result<(), &'static str> {
             return Err(
                 "a ring-3 consumption of a dropped page was signalled, or one that \
                         needed it was not",
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A bank's CMCI claim over a fake `MCi_CTL2`: refused reads and writes
+/// claim nothing, a bank already enabled is another's, a write that did
+/// not stick is no claim, and only a read-back with `CMCI_EN` claims; the
+/// value written keeps the other bits and sets threshold 1
+/// (`docs/MACHINE-CHECK-CMCI.md` §3.1).
+///
+/// Verifies: `L.x86_64.249`
+fn cmci_claims() -> Result<(), &'static str> {
+    use super::cmci::{CMCI_EN, Claim, THRESHOLD, claim_bank};
+    /// Bits of `MCi_CTL2` other than `CMCI_EN` and the threshold.
+    const OTHER: u64 = 1 << 40;
+    // (first read, write accepted, whether the write sticks, second read
+    // refused, the answer)
+    type Row = (Option<u64>, bool, bool, bool, Claim);
+    let table: &[Row] = &[
+        (None, true, true, false, Claim::Refused),
+        (Some(CMCI_EN), true, true, false, Claim::Taken),
+        (Some(CMCI_EN | 5), true, true, false, Claim::Taken),
+        (Some(OTHER | 9), false, true, false, Claim::Refused),
+        (Some(OTHER | 9), true, false, false, Claim::Unsupported),
+        (Some(OTHER | 9), true, true, true, Claim::Refused),
+        (Some(OTHER | 9), true, true, false, Claim::Claimed),
+        (Some(0), true, true, false, Claim::Claimed),
+    ];
+    for &(first, accepted, sticks, second_refused, answer) in table {
+        let register = core::cell::Cell::new(first.unwrap_or(0));
+        let mut reads = 0;
+        let mut written = None;
+        let found = claim_bank(
+            || {
+                reads += 1;
+                match reads {
+                    1 => first,
+                    _ if second_refused => None,
+                    _ => Some(register.get()),
+                }
+            },
+            |value| {
+                written = Some(value);
+                if accepted && sticks {
+                    register.set(value);
+                }
+                accepted
+            },
+        );
+        if found != answer {
+            return Err("a CMCI claim answered other than its MCi_CTL2 says");
+        }
+        if let (Some(value), Some(was)) = (written, first)
+            && value != (was & !THRESHOLD) | CMCI_EN | 1
+        {
+            return Err("a CMCI claim wrote other than CMCI_EN, threshold 1 and the bits read");
+        }
+    }
+    // Two processors sharing one bank, in turn as `CLAIM` orders them: the
+    // first claims it, the second finds it taken.
+    let shared = core::cell::Cell::new(0_u64);
+    let claimer = || {
+        claim_bank(
+            || Some(shared.get()),
+            |value| {
+                shared.set(value);
+                true
+            },
+        )
+    };
+    if claimer() != Claim::Claimed || claimer() != Claim::Taken {
+        return Err("a bank two processors share was claimed by both, or by neither");
+    }
+    Ok(())
+}
+
+/// The CMCI storm rule over a sequence of rounds: fifteen interrupt-driven
+/// rounds in a second unmask, the sixteenth begins a storm, a storm round
+/// that finds a record goes on and the first that finds none ends it; a
+/// round the period woke unmasks, and a new second starts a new count
+/// (`docs/MACHINE-CHECK-CMCI.md` §3.4).
+///
+/// Verifies: `L.x86_64.251`
+fn cmci_storms() -> Result<(), &'static str> {
+    use super::cmci::{After, SECOND, STORM_ROUNDS, Storm};
+    let mut storm = Storm::default();
+    let step = SECOND / 100;
+    for round in 0..u64::from(STORM_ROUNDS) {
+        if storm.after(SECOND + round * step, true, true) != After::Unmask {
+            return Err("a CMCI round under the storm threshold left the entry masked");
+        }
+    }
+    let at = SECOND + u64::from(STORM_ROUNDS) * step;
+    if storm.after(at, true, true) != After::Began || !storm.storming() {
+        return Err("the round past the CMCI storm threshold did not begin a storm");
+    }
+    if storm.after(at + SECOND, false, true) != After::Storming {
+        return Err("a CMCI storm round that found a record ended the storm");
+    }
+    if storm.after(at + 2 * SECOND, false, false) != After::Ended || storm.storming() {
+        return Err("a CMCI storm round that found nothing did not end the storm");
+    }
+    let mut quiet = Storm::default();
+    for round in 0..u64::from(STORM_ROUNDS) * 3 {
+        // One interrupt-driven round a tenth of a second apart and a period
+        // round between: never more than ten in any second.
+        if quiet.after(round * SECOND / 10, true, true) != After::Unmask
+            || quiet.after(round * SECOND / 10 + 1, false, true) != After::Unmask
+        {
+            return Err("CMCI rounds spread over seconds began a storm");
+        }
+    }
+    Ok(())
+}
+
+/// What CMCI's look after the unmask kicks on: only a record the round
+/// takes -- corrected or no-action -- never a bare `VAL` the round leaves
+/// to the machine check, which would spin the poll task
+/// (`docs/MACHINE-CHECK-CMCI.md` §3.4).
+///
+/// Verifies: `L.x86_64.253`
+fn cmci_kicks() -> Result<(), &'static str> {
+    let proc = super::Proc {
+        index: 0,
+        banks: 10,
+        ser: true,
+        vendor: decode::Vendor::Intel,
+    };
+    let table: &[(u64, bool)] = &[
+        (0, false),
+        (VAL | EN | 0x9f, true),
+        (VAL | UC | EN | ADDRV | MISCV | 0x9f, true),
+        (SRAO | 0xc0, false),
+        (SRAR_LOAD, false),
+        (VAL | UC | PCC | EN, false),
+        (VAL | UC | EN | PCC | OVER, false),
+    ];
+    for &(status, kicks) in table {
+        if super::poll_takes(proc, status) != kicks {
+            return Err(
+                "CMCI's look after the unmask kicked on a record the round leaves, or \
+                        missed one it takes",
             );
         }
     }

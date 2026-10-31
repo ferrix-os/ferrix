@@ -107,8 +107,8 @@ pub(crate) use aarch64::{
     enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
     identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
     permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
+    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "aarch64")]
@@ -142,8 +142,8 @@ pub(crate) use armv7a::{
     enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
     identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
     permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
+    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "arm")]
@@ -520,8 +520,8 @@ pub(crate) use x86_64::{
     enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id,
     identity_root, install_user_root, ipi_irq, last_root_write, mask_interrupt, msi_doorbell,
     permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state,
-    root_tag_now, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local,
-    switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
+    returned_to_service, root_tag_now, save_user_state, send_ipi_to_others, service_interrupts,
+    set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq,
     uninstall_user_root, unmask_interrupt,
 };
 #[cfg(target_arch = "x86_64")]

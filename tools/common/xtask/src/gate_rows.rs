@@ -250,6 +250,32 @@ fn reaches_mce_pagecache(path: &str) -> bool {
         || path.starts_with("src/tests/mce-pagecache/")
 }
 
+/// CMCI (`docs/MACHINE-CHECK-CMCI.md` §5, ledger 5348): every mode under
+/// TCG on QEMU with patch 0008, which no other machine here can run.
+const TEST_MCE_CMCI: &[&str] = &[
+    "test-mce-cmci --arch x86_64 --accel tcg",
+    "test-mce-cmci-ucna --arch x86_64 --accel tcg",
+    "test-mce-cmci-storm --arch x86_64 --accel tcg",
+    "test-mce-cmci-window --arch x86_64 --accel tcg",
+    "test-mce-cmci-off --arch x86_64 --accel tcg",
+    "test-mce-cmci-unoffered --arch x86_64 --accel tcg",
+    "test-mce-cmci-parked --arch x86_64 --accel tcg",
+];
+
+/// Whether `path` reaches CMCI: the claim, the handler and the poll's
+/// loop, the local APIC's entry, the return-to-service hook, the QEMU patch,
+/// or the gate.
+fn reaches_mce_cmci(path: &str) -> bool {
+    [
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/kernel/src/arch/x86_64/mce/cmci.rs",
+        "src/kernel/src/arch/x86_64/apic.rs",
+        "tools/common/data/qemu/0008-target-i386-CMCI-under-TCG.patch",
+        "tools/common/xtask/src/mce_cmci.rs",
+    ]
+    .contains(&path)
+}
+
 /// The machine-check row (F-73, `docs/MACHINE-CHECK.md`): a fatal machine
 /// check injected into every processor must stop the kernel as FX-9005, and
 /// the log's and recovery's modes must hold, under both accelerators. Under
@@ -469,6 +495,10 @@ fn area_rows(path: &str, rows: &mut Rows) {
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
         );
+    }
+    if reaches_mce_cmci(path) {
+        rows.add(TEST_MCE_CMCI);
+        reason(rows, "CMCI: test-mce-cmci and its modes");
     }
     if reaches_mce_pagecache(path) {
         rows.add(TEST_MCE_PAGECACHE);
@@ -1004,8 +1034,18 @@ mod tests {
             )
         );
         assert_eq!(
-            rows_of(&["src/kernel/src/arch/x86_64/apic.rs"]).commands,
+            rows_of(&["src/kernel/src/arch/x86_64/pcid.rs"]).commands,
             IMAGE_ROW
+        );
+        assert!(
+            rows_of(&["src/kernel/src/arch/x86_64/apic.rs"])
+                .commands
+                .ends_with(
+                    &TEST_MCE_CMCI
+                        .iter()
+                        .map(|row| (*row).to_owned())
+                        .collect::<Vec<_>>()
+                )
         );
     }
 

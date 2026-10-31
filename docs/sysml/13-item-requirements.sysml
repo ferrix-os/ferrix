@@ -1633,9 +1633,10 @@ package FerrixItemRequirements {
                 as H.FAIL.11 says; a system call's copy that consumed poison goes
                 on as H.FAIL.10 says; every other machine check stops as
                 H.FAIL.1.";
-            attribute :>> criterion = "L.x86_64.221-232 and L.mm.91-92 each
-                verified; test-mce and its five recovery modes pass under KVM and
-                TCG.";
+            attribute :>> criterion = "L.x86_64.221-232, L.x86_64.249-253 and L.mm.91-92
+                each verified; test-mce and its five recovery modes pass under KVM
+                and TCG; test-mce-cmci's modes pass under TCG on QEMU with patch
+                0008 (docs/MACHINE-CHECK-CMCI.md).";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         requirement <'H.FAIL.9'> theScrubberTouchesOnlyFreeMemory : ItemHighLevel {

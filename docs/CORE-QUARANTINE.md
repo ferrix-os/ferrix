@@ -117,7 +117,13 @@ channel, futex or port is on no list; this is what finds it when it wakes.
    Cancelled`, so exactly one of park or undo wins. A processor that finds
    `Cancelled` does not park; the undo sets `ACTIVE` again (`ETIMEDOUT`).
 7. **Parked**: timer disarmed, the poll task's timer stopped (its
-   corrected records wait in its banks until return, C3). The idle task, if
+   corrected records wait in its banks until return, C3). A CMCI taken
+   while the processor is not active (`docs/MACHINE-CHECK-CMCI.md` §3.3)
+   masks its entry and counts, and wakes nobody: the wake is held, and the
+   return -- the end of `park`, or the Cancelled undo -- wakes the poll task
+   (`arch::returned_to_service`, from `sched`), whose round reads the banks and unmasks
+   the entry (test-mce-cmci-parked). A poll round that ends while the
+   processor parks holds its unmask the same way, for the same return. The idle task, if
    it ever finds a task on its queue, drains it to an in-service processor
    and counts it (`/proc/ferrix-service` says `drained`; `test-quarantine`
    expects 0).

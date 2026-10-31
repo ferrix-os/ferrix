@@ -106,16 +106,19 @@ but the wait queue's:
    banks (CORE-QUARANTINE §3.2 step 7, C3), and a wake there would leave it
    for the parked processor's drain (`rehome_blocked`).
 
-**The return.** `sched` runs a hook, registered once by `cmci::register`
-(`sched::on_return_to_service`), each time a processor is back in service:
-at the end of `park` after it stores `ACTIVE_STATE`, and in the Cancelled
-undo after the waiter stores it. The hook swaps the processor's `HELD`
+**The return.** `sched` calls the architecture's `returned_to_service`
+each time a processor is back in service: at the end of `park` after it
+stores `ACTIVE_STATE`, and in the Cancelled undo after the waiter stores
+it. On x86-64 that is `cmci::returned`; AArch64 and ARMv7-A hold nothing
+and theirs is empty (a registered hook, the first build, was dead code
+there, and an architecture's difference belongs behind the facade). It
+swaps the processor's `HELD`
 flag and, if it was set, kicks and wakes the poll task, whose round reads
 the banks and unmasks the entry. **Why no wake is lost**: the handler sets
-`HELD` before it reads the state, and both the handler and the hook take it
+`HELD` before it reads the state, and both the handler and the return take it
 back by a swap (`SeqCst`), so whichever comes second of the handler's read
 and the return's store sees the other's: the handler reads `ACTIVE_STATE`
-and wakes, or the hook finds `HELD` and wakes; never both, since only one
+and wakes, or the return finds `HELD` and wakes; never both, since only one
 swap finds it set. **Why a wake as the processor begins to park is
 harmless**: the handler read `ACTIVE_STATE` just before the waiter's
 `ACTIVE -> PARKING`; the wake then is the period timer firing then, as
@@ -133,9 +136,14 @@ period), then loop
    period, or one second in a storm;
 2. `poll(index)`, unchanged but for answering whether it found a record:
    every bank, claimed or not;
-3. the storm rule (below); then, where `OWNED` is not empty, the processor
-   in service and no storm, unmask the entry and look once more (the masked
-   window, below).
+3. the storm rule (below); then, where `OWNED` is not empty and no storm,
+   unmask the entry and look once more (the masked window, below) -- on a
+   processor in service as the handler decides it: the round holds the
+   unmask (`HELD`) and takes the hold back only while the park state is
+   active (`take_back_hold`), so a round that ends as its processor parks
+   leaves it to the return, whose kick runs a round that makes it (ledger
+   5418 (1); the first build tested the active bit instead, and such an
+   unmask was lost until the period).
 
 **Storm rule**: every round `KICK` drove -- from the handler or from the
 look after the unmask -- counts. More than 15 such rounds within one second
@@ -175,7 +183,8 @@ build has no option and no sleep (`read_window`, `hold_window` are empty
   `CMCI_P`, max LVT, option and registration), and `mce:
   ferrix.mce.cmci=off: ...` where the option said so.
 * `/proc/ferrix-mce` gains, after each processor's `cpu<n> ...` line, a line
-  `cmci<n> interrupts <n> storms <n> owned <mask hex>`: a line of its own,
+  `cmci<n> interrupts <n> held <n> storms <n> owned <mask hex>` (`held`:
+  interrupts whose wake was held for the processor's return): a line of its own,
   so the existing judges that read the last `cpu<n>` line or its end
   (`test-mce-broadcast`, `test-mce-copy`) are unchanged. lode reads `mce:`
   lines from `/dev/kmsg`, not this file.
@@ -268,7 +277,7 @@ guest is test-mce's victim, which reads a page for 20 s):
 **test-quarantine's CMCI row** (ledger 5348 (3)): `cmci=on`, TCG, `--smp
 2`: cpu1 taken out of service; a corrected record into its bank 1; while
 parked no corrected line and `drained 0`; after its return the line within
-10 s, with `cmci1 interrupts 1`.
+10 s, with `cmci1 interrupts 1 held 1`.
 
 **Stage check** (`arch/x86_64/mce/check.rs`): `cmci_claims`, the claim's
 decision table over a fake `MCi_CTL2` (refused read, already set, refused
@@ -283,10 +292,13 @@ handler's wake removed (Corrected fails); the look after the unmask removed
 (Window fails); the look's filter widened to a bare `VAL` (the stage
 check's `cmci_kicks` fires); the read-back in step 4 skipped (`cmci_claims`
 fires); the already-set test removed (`cmci_claims`' two claimers fire);
-the storm threshold raised tenfold (Storm fails: more than 16 interrupts);
+the storm threshold raised tenfold (the stage check's `cmci_storms` fires
+first: its rounds a hundredth of a second apart no longer begin a storm);
 the park-state test removed from the handler (the quarantine row fails:
-drained or a line while parked); the return hook removed (the quarantine
-row fails: no line after return).
+`held 0`; the wake itself is invisible there, since a pinned task woken on
+a parked processor stays queued on it unrun until the return, so the row
+reads the count); the return's call removed (the quarantine row fails: no
+line after return).
 
 ## 6. Requirements
 
@@ -338,6 +350,12 @@ evidence rests on a patched emulator (F-17 open); BACKLOG (the N150 run,
 
 ## 8. Where it stands
 
+* Code reviewed 2026-10-31 at 7cab7bd19, ledger 5418: **OK IF (1)-(4)**:
+  the round's unmask held across a park as the handler's wake is (§3.4),
+  L.x86_64.251's criterion naming the stage check its control fires, the
+  QEMU the rows ran on named in TOOLS.md and the commit, and the landing's
+  squash, rebase and coverage. 5418 also corrects 5348: 0xFC, accepted there
+  as free, is `iommu::CHECK_VECTOR`; 0xFB is free.
 * Design v1 (18b1e578d) reviewed 2026-10-31, ledger 5348: **OK IF
   (1)-(10)**. v2 carries (1) claim, arm, a round at once, then the wait
   (§3.4); (2) the look after the unmask kicks only on what the round takes,

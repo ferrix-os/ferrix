@@ -1419,6 +1419,10 @@ pub fn interrupts_enabled() -> bool {
     cpu::read_cpsr() & (1 << 7) == 0
 }
 
+/// Processor `cpu` is back in service: nothing held for it here, where no
+/// interrupt waits for a processor's return.
+pub(crate) const fn returned_to_service(_cpu: usize) {}
+
 /// The interrupt number inter-processor interrupts arrive on.
 pub(crate) const fn ipi_irq() -> u32 {
     gicv2::IPI_SGI

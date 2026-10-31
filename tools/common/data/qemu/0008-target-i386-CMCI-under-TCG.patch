@@ -1,0 +1,282 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SetZero <info@magical.rocks>
+Date: Sat, 31 Oct 2026 03:00:00 +0100
+Subject: [PATCH] target/i386: CMCI under TCG, behind a cmci CPU property
+
+Ferrix's corrected machine check interrupt (docs/MACHINE-CHECK-CMCI.md)
+needs a machine that offers it, and 10.2.1 does not: MCE_CAP_DEF has no
+MCG_CMCI_P, MCi_CTL2 reads as 0 and drops writes, and the local APIC has
+no CMCI LVT entry.
+
+With -cpu ...,cmci=on under TCG:
+
+* MCG_CAP gains MCG_CMCI_P (bit 10);
+* MCi_CTL2 (0x280 + i) is kept per bank, CMCI_EN (bit 30) and the
+  threshold (bits 14:0) writable, the rest 0, and cleared at every CPU
+  reset (it lives past end_reset_fields);
+* the local APIC answers LVT CMCI at 0x2f0 (x2APIC MSR 0x82f), reset
+  masked, and its version register names seven LVT entries;
+* a corrected record injected into a bank whose CMCI_EN is set delivers
+  the entry's vector (fixed or NMI; masked delivers nothing);
+* an uncorrected record with PCC, S and AR clear -- Intel's UCNA by SDM
+  vol. 3B 16.6.2 -- injected with MCIP clear is logged and signalled by
+  CMCI, not #MC; MCIP clear is only the injection's way of asking for it.
+
+The threshold is not counted: every record interrupts. Without cmci=on,
+or under an accelerator other than TCG, the CPU, its MSRs and its APIC
+are 10.2.1's.
+
+---
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/hw/intc/apic.c qemu-cmci-build/qemu-10.2.1/hw/intc/apic.c
+--- a/hw/intc/apic.c
++++ b/hw/intc/apic.c
+@@ -181,6 +181,28 @@
+     }
+ }
+ 
++static bool apic_has_cmci(APICCommonState *s)
++{
++    return s->cpu && (s->cpu->env.mcg_cap & MCG_CMCI_P);
++}
++
++void apic_deliver_cmci(APICCommonState *s)
++{
++    uint32_t lvt = s->lvt_cmci;
++
++    if (lvt & APIC_LVT_MASKED) {
++        return;
++    }
++    switch ((lvt >> 8) & 7) {
++    case APIC_DM_NMI:
++        cpu_interrupt(CPU(s->cpu), CPU_INTERRUPT_NMI);
++        break;
++    case APIC_DM_FIXED:
++        apic_set_irq(s, lvt & 0xff, APIC_TRIGGER_EDGE);
++        break;
++    }
++}
++
+ void apic_deliver_pic_intr(APICCommonState *s, int level)
+ {
+     if (level) {
+@@ -783,7 +805,8 @@
+         }
+         break;
+     case 0x03: /* version */
+-        val = s->version | ((APIC_LVT_NB - 1) << 16);
++        /* LVT CMCI is a seventh entry where the processor has CMCI */
++        val = s->version | ((APIC_LVT_NB - !apic_has_cmci(s)) << 16);
+         break;
+     case 0x08:
+         apic_sync_vapic(s, SYNC_FROM_VAPIC);
+@@ -836,6 +859,15 @@
+     case 0x31:
+         val = s->icr[index & 1];
+         break;
++    case 0x2f:
++        if (!apic_has_cmci(s)) {
++            s->esr |= APIC_ESR_ILLEGAL_ADDRESS;
++            val = 0;
++            ret = -1;
++            break;
++        }
++        val = s->lvt_cmci;
++        break;
+     case 0x32 ... 0x37:
+         val = s->lvt[index - 0x32];
+         break;
+@@ -992,6 +1024,13 @@
+ 
+         s->icr[1] = val;
+         break;
++    case 0x2f:
++        if (!apic_has_cmci(s)) {
++            s->esr |= APIC_ESR_ILLEGAL_ADDRESS;
++            return -1;
++        }
++        s->lvt_cmci = val;
++        break;
+     case 0x32 ... 0x37:
+         {
+             int n = index - 0x32;
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/hw/intc/apic_common.c qemu-cmci-build/qemu-10.2.1/hw/intc/apic_common.c
+--- a/hw/intc/apic_common.c
++++ b/hw/intc/apic_common.c
+@@ -196,6 +196,7 @@
+     for (i = 0; i < APIC_LVT_NB; i++) {
+         s->lvt[i] = APIC_LVT_MASKED;
+     }
++    s->lvt_cmci = APIC_LVT_MASKED;
+     s->esr = 0;
+     memset(s->icr, 0, sizeof(s->icr));
+     s->divide_conf = 0;
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/include/hw/i386/apic.h qemu-cmci-build/qemu-10.2.1/include/hw/i386/apic.h
+--- a/include/hw/i386/apic.h
++++ b/include/hw/i386/apic.h
+@@ -8,6 +8,7 @@
+ int apic_accept_pic_intr(APICCommonState *s);
+ void apic_deliver_pic_intr(APICCommonState *s, int level);
+ void apic_deliver_nmi(APICCommonState *s);
++void apic_deliver_cmci(APICCommonState *s);
+ int apic_get_interrupt(APICCommonState *s);
+ int cpu_set_apic_base(APICCommonState *s, uint64_t val);
+ uint64_t cpu_get_apic_base(APICCommonState *s);
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/include/hw/i386/apic_internal.h qemu-cmci-build/qemu-10.2.1/include/hw/i386/apic_internal.h
+--- a/include/hw/i386/apic_internal.h
++++ b/include/hw/i386/apic_internal.h
+@@ -171,6 +171,7 @@
+     uint32_t tmr[8];  /* trigger mode register */
+     uint32_t irr[8]; /* interrupt request register */
+     uint32_t lvt[APIC_LVT_NB];
++    uint32_t lvt_cmci; /* LVT CMCI, 0x2f0 (ferrix-cmci) */
+     uint32_t esr; /* error register */
+     uint32_t icr[2];
+ 
+Binary files qemu-build/qemu-10.2.1/subprojects/slirp/.git/index and qemu-cmci-build/qemu-10.2.1/subprojects/slirp/.git/index differ
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/target/i386/cpu.c qemu-cmci-build/qemu-10.2.1/target/i386/cpu.c
+--- a/target/i386/cpu.c
++++ b/target/i386/cpu.c
+@@ -8629,6 +8629,8 @@
+     }
+ 
+     memset(env, 0, offsetof(CPUX86State, end_reset_fields));
++    /* MCi_CTL2 resets to 0 (SDM vol. 3B 16.3.2.5); it is kept past end_reset_fields */
++    memset(env->mce_ctl2, 0, sizeof(env->mce_ctl2));
+ 
+     if (tcg_enabled()) {
+         cpu_init_fp_statuses(env);
+@@ -8809,7 +8811,8 @@
+         && (cenv->features[FEAT_1_EDX] & (CPUID_MCE | CPUID_MCA)) ==
+             (CPUID_MCE | CPUID_MCA)) {
+         cenv->mcg_cap = MCE_CAP_DEF | MCE_BANKS_DEF |
+-                        (cpu->enable_lmce ? MCG_LMCE_P : 0);
++                        (cpu->enable_lmce ? MCG_LMCE_P : 0) |
++                        (cpu->enable_cmci && tcg_enabled() ? MCG_CMCI_P : 0);
+         cenv->mcg_ctl = ~(uint64_t)0;
+         for (bank = 0; bank < MCE_BANKS_DEF; bank++) {
+             cenv->mce_banks[bank * 4] = ~(uint64_t)0;
+@@ -10017,6 +10020,7 @@
+     DEFINE_PROP_BOOL("x-vendor-cpuid-only-v2", X86CPU, vendor_cpuid_only_v2, true),
+     DEFINE_PROP_BOOL("x-amd-topoext-features-only", X86CPU, amd_topoext_features_only, true),
+     DEFINE_PROP_BOOL("lmce", X86CPU, enable_lmce, false),
++    DEFINE_PROP_BOOL("cmci", X86CPU, enable_cmci, false),
+     DEFINE_PROP_BOOL("l3-cache", X86CPU, enable_l3_cache, true),
+     DEFINE_PROP_BOOL("kvm-pv-enforce-cpuid", X86CPU, kvm_pv_enforce_cpuid,
+                      false),
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/target/i386/cpu.h qemu-cmci-build/qemu-10.2.1/target/i386/cpu.h
+--- a/target/i386/cpu.h
++++ b/target/i386/cpu.h
+@@ -350,6 +350,7 @@
+ #define MCG_SER_P       (1ULL<<24) /* MCA recovery/new status bits */
+ #define MCG_LMCE_P      (1ULL<<27) /* Local Machine Check Supported */
+ 
++#define MCG_CMCI_P      (1ULL<<10) /* corrected machine check interrupt */
+ #define MCE_CAP_DEF     (MCG_CTL_P|MCG_SER_P)
+ #define MCE_BANKS_DEF   10
+ 
+@@ -490,6 +491,9 @@
+ #define MSR_CORE_PERF_GLOBAL_OVF_CTRL   0x390
+ 
+ #define MSR_MC0_CTL                     0x400
++#define MSR_MC0_CTL2                    0x280
++#define MCI_CTL2_CMCI_EN                (1ULL << 30)
++#define MCI_CTL2_MASK                   (MCI_CTL2_CMCI_EN | 0x7fffULL)
+ #define MSR_MC0_STATUS                  0x401
+ #define MSR_MC0_ADDR                    0x402
+ #define MSR_MC0_MISC                    0x403
+@@ -2145,6 +2149,7 @@
+     uint64_t mcg_ctl;
+     uint64_t mcg_ext_ctl;
+     uint64_t mce_banks[MCE_BANKS_DEF*4];
++    uint64_t mce_ctl2[MCE_BANKS_DEF];
+     uint64_t xstate_bv;
+ 
+     /* vmstate */
+@@ -2256,6 +2261,8 @@
+      * different LMCE configurations.
+      */
+     bool enable_lmce;
++    /* MCG_CMCI_P, MCi_CTL2 and LVT CMCI, under TCG only */
++    bool enable_cmci;
+ 
+     /* Compatibility bits for old machine types.
+      * If true present virtual l3 cache for VM, the vcpus in the same virtual
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/target/i386/helper.c qemu-cmci-build/qemu-10.2.1/target/i386/helper.c
+--- a/target/i386/helper.c
++++ b/target/i386/helper.c
+@@ -18,6 +18,8 @@
+  */
+ 
+ #include "qemu/osdep.h"
++#include "system/tcg.h"
++#include "hw/i386/apic.h"
+ #include "qapi/qapi-events-run-state.h"
+ #include "cpu.h"
+ #include "exec/cputlb.h"
+@@ -406,7 +408,24 @@
+         return;
+     }
+ 
+-    if (params->status & MCI_STATUS_UC) {
++    if ((params->status & MCI_STATUS_UC) && (cenv->mcg_cap & MCG_CMCI_P)
++        && tcg_enabled() && !(params->mcg_status & MCG_STATUS_MCIP)
++        && !(params->status & (MCI_STATUS_PCC | MCI_STATUS_S | MCI_STATUS_AR))) {
++        /*
++         * ferrix-cmci: an uncorrected record with PCC, S and AR clear is
++         * UCNA (SDM vol. 3B 16.6.2), which Intel logs and signals by CMCI,
++         * not by #MC; MCIP clear is the injection's way of asking for it.
++         */
++        if (banks[1] & MCI_STATUS_VAL) {
++            params->status |= MCI_STATUS_OVER;
++        }
++        banks[2] = params->addr;
++        banks[3] = params->misc;
++        banks[1] = params->status;
++        if (cenv->mce_ctl2[params->bank] & MCI_CTL2_CMCI_EN) {
++            apic_deliver_cmci(cpu->apic_state);
++        }
++    } else if (params->status & MCI_STATUS_UC) {
+         /*
+          * if MSR_MCG_CTL is not all 1s, the uncorrected error
+          * reporting is disabled
+@@ -465,6 +484,10 @@
+         banks[2] = params->addr;
+         banks[3] = params->misc;
+         banks[1] = params->status;
++        if ((cenv->mcg_cap & MCG_CMCI_P) && tcg_enabled()
++            && (cenv->mce_ctl2[params->bank] & MCI_CTL2_CMCI_EN)) {
++            apic_deliver_cmci(cpu->apic_state);
++        }
+     } else {
+         banks[1] |= MCI_STATUS_OVER;
+     }
+diff --color -ruN -x build -x X11IncludeHack qemu-build/qemu-10.2.1/target/i386/tcg/system/misc_helper.c qemu-cmci-build/qemu-10.2.1/target/i386/tcg/system/misc_helper.c
+--- a/target/i386/tcg/system/misc_helper.c
++++ b/target/i386/tcg/system/misc_helper.c
+@@ -318,6 +318,13 @@
+             }
+             break;
+         }
++        if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL2
++            && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL2 +
++            (env->mcg_cap & 0xff) && (env->mcg_cap & MCG_CMCI_P)) {
++            env->mce_ctl2[(uint32_t)env->regs[R_ECX] - MSR_MC0_CTL2] =
++                val & MCI_CTL2_MASK;
++            break;
++        }
+         /* XXX: exception? */
+         break;
+     }
+@@ -493,6 +500,12 @@
+             val = env->mce_banks[offset];
+             break;
+         }
++        if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL2
++            && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL2 +
++            (env->mcg_cap & 0xff) && (env->mcg_cap & MCG_CMCI_P)) {
++            val = env->mce_ctl2[(uint32_t)env->regs[R_ECX] - MSR_MC0_CTL2];
++            break;
++        }
+         /* XXX: exception? */
+         val = 0;
+         break;

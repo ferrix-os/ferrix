@@ -109,11 +109,15 @@ The lines go to the kernel log at `KERNEL` priority, which lode reads from
 `/dev/kmsg` (`src/lib/log/lode/src/kmsg.rs`); a corrected error is
 priority 4 (warning), the rest 3 (error), through `console::write_record`.
 
-**CMCI is not in this version.** It needs a local APIC vector and
-`MCi_CTL2` ownership per bank, and neither QEMU under TCG nor the gates'
-KVM model offers `MCG_CMCI_P` (QEMU's `MCE_CAP_DEF` is `MCG_CTL_P |
-MCG_SER_P`), so no gate could show it working. It is a later step,
-measured on the N150.
+**CMCI** (`docs/MACHINE-CHECK-CMCI.md`, L.x86_64.249-253): on an Intel
+processor that reports `MCG_CMCI_P`, each poll task first claims the banks
+it can be interrupted for (`MCi_CTL2.CMCI_EN`, read back, under one lock
+across processors) and unmasks its local APIC's CMCI entry; a corrected or
+no-action record in a claimed bank then wakes the task at once. The period
+stays as the backstop and for unclaimed banks; a storm of interrupts masks
+the entry and polls once a second until a round finds nothing.
+`ferrix.mce.cmci=off` turns it off. Shown under TCG on QEMU with patch
+0008, the only machine here that offers it.
 
 ### 3.3 The `#MC` itself
 
@@ -312,7 +316,8 @@ Reserved on `develop` in 971dd7f2a and written in the model
 
 ## 6. What it does not do
 
-* CMCI (step 2, real hardware).
+* CMCI on hardware: `MACHINE-CHECK-CMCI.md` is shown on a patched QEMU only;
+  the N150 run is a BACKLOG row. AMD's threshold interrupt is not used.
 * AMD's deferred errors and SMCA's per-bank `MCA_IPID` decoding: the
   raw values are printed; decoding is lode's.
 * Recovery from kernel-mode SRAR, but for a system call's read of a

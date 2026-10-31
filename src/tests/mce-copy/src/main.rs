@@ -31,8 +31,15 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// How long the victim, or the reader, keeps at it.
+/// How long the victim keeps at it.
 const SPIN_SECONDS: u64 = 30;
+/// How long the environ mode's reader keeps at it: a read of another
+/// process's environment spends most of its time walking that process's
+/// tables, and the gate's stops land in the copy once in some hundreds, so
+/// thirty seconds was too short on a loaded host (2026-10-31: six pool runs
+/// in a row ended before a stop found it). The gate's injection ends the
+/// loop at once, so only a run that never finds it takes this long.
+const ENVIRON_SECONDS: u64 = 300;
 /// The buffer's length.
 const LENGTH: usize = 1 << 20;
 /// The high half of every word of the victim's buffer: `MCEC`.
@@ -243,7 +250,7 @@ fn environ_mode() -> ExitCode {
         }
     };
     say(&format!("mce-copy: target pid={pid} environ={full}"));
-    let until = Instant::now() + Duration::from_secs(SPIN_SECONDS);
+    let until = Instant::now() + Duration::from_secs(ENVIRON_SECONDS);
     loop {
         let read = std::fs::read(&path).map_or(0, |bytes| bytes.len());
         if read < full {
@@ -266,7 +273,7 @@ fn environ_mode() -> ExitCode {
 /// The environ mode's target: a handler that says a `SIGBUS`, then waits.
 fn target() -> ! {
     handle_sigbus(on_sigbus_target);
-    std::thread::sleep(Duration::from_secs(SPIN_SECONDS * 2));
+    std::thread::sleep(Duration::from_secs(ENVIRON_SECONDS * 2));
     // SAFETY: ends the process.
     unsafe { libc::_exit(0) }
 }

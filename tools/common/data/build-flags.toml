@@ -260,6 +260,15 @@ why = "x86-64 only, ignored on aarch64 and armv7a: seconds between each processo
 values = ["off"]
 why = "x86-64 only, ignored on aarch64 and armv7a: off makes every machine check stop as FX-9005, as before recovery existed; without it a machine check H.FAIL.8 names is logged and recovered from (arch/x86_64/mce.rs, L.x86_64.231, SAFETY-MANUAL AoU-36); any other value is ignored"
 
+[boot_options."ferrix.mce.cmci"]
+values = ["off"]
+why = "x86-64 Intel only, ignored on aarch64 and armv7a: off claims no machine-check bank for CMCI and leaves every LVT CMCI entry masked, the poll alone as before CMCI; without it a processor reporting MCG_CMCI_P claims its banks and a corrected or no-action record wakes its poll at once; any other value is said and leaves CMCI on (arch/x86_64/mce/cmci.rs, docs/MACHINE-CHECK-CMCI.md §3.6, L.x86_64.252)"
+
+[boot_options."ferrix.mce.cmci-window"]
+values = ["*"]
+test_only = true
+why = "seconds (1 to 60) the first CMCI-driven poll round holds its masked window open before its unmask, so cargo xtask test-mce-cmci-window can make a record that only the look after the unmask finds (L.x86_64.253); read only in builds with the checks on, a product build has no option, and a certified profile's command line may not carry it (arch/x86_64/mce/cmci.rs, docs/MACHINE-CHECK-CMCI.md §3.4)"
+
 [boot_options."ferrix.powerctl"]
 kind = "flag"
 why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 48 A, at most 23 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"

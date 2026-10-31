@@ -16,6 +16,9 @@
 //!   stack; [`from_user`] from ring 3, on the task's stack): every bank read
 //!   and classified (`decode`), then stop, return, hand the record to the
 //!   poll, or mark the trap frame for `SIGBUS` (`L.x86_64.224`-`229`).
+//! * **CMCI** (`cmci`, `docs/MACHINE-CHECK-CMCI.md`, `L.x86_64.249`-`252`):
+//!   on Intel processors that have it, a corrected or no-action record in a
+//!   bank the processor claimed wakes its poll task at once.
 //! * **The counts** ([`render`], `/proc/ferrix-mce`, `L.x86_64.230`).
 //!
 //! Nothing here runs on the IST stack but [`on_kernel_stack`] and what it
@@ -24,6 +27,7 @@
 //! processor's pending slots.
 
 pub(super) mod check;
+mod cmci;
 pub(super) mod decode;
 
 use core::fmt::Write;
@@ -628,6 +632,9 @@ fn intel() -> bool {
 /// processors have none. Called once from `kmain` after the scheduler.
 pub(super) fn start(view: &BootView<'_>) {
     let period = read_options(view);
+    cmci::read_option(view.option(cmci::OPTION));
+    cmci::read_window(view.option(cmci::WINDOW_OPTION));
+    cmci::register();
     // The boot processor took its machine check before it had a processor
     // record (`take_machine_check`, from `init_traps`), so its banks are
     // brought up here, on it, before any program runs.
@@ -646,6 +653,16 @@ pub(super) fn start(view: &BootView<'_>) {
         .filter(|cpu| start_poll(cpu.logical, period))
         .count();
     println!("mce: polling on {polling} processors");
+    if let Some(proc) = here().and_then(record_of) {
+        println!(
+            "mce: cmci {}",
+            if cmci::offered(proc) {
+                "offered"
+            } else {
+                "not offered"
+            }
+        );
+    }
 }
 
 /// `ferrix.mce.recover` and `ferrix.mce.poll`, each said where it is not
@@ -730,29 +747,41 @@ fn start_poll(index: usize, period: u64) -> bool {
 }
 
 /// A processor's poll task: `argument` is its index above 16 bits and the
-/// period in seconds below.
+/// period in seconds below. It claims its CMCI banks first, then rounds
+/// every period and at once when its CMCI wakes it (`L.x86_64.250`), a
+/// second apart in a storm (`L.x86_64.251`).
 fn run(argument: usize) {
     let index = argument >> 16;
-    let period = (argument & 0xffff) as u64;
+    let period = ((argument & 0xffff) as u64).saturating_mul(cmci::SECOND);
+    if let Some(proc) = record_of(index) {
+        cmci::claim(proc);
+    }
+    let mut storm = cmci::Storm::default();
+    let mut woken = false;
     loop {
-        poll(index);
-        crate::sched::sleep_for(period.saturating_mul(1_000_000_000));
+        let found = poll(index);
+        if let Some(proc) = record_of(index) {
+            cmci::after_round(proc, &mut storm, woken, found);
+        }
+        woken = cmci::wait(index, cmci::next_wait(storm, period));
     }
 }
 
 /// One round on processor `index`, which this task is pinned to
 /// (`L.x86_64.223`): what bring-up and machine checks handed over, then
 /// every bank's corrected and no-action records, each printed, counted and
-/// cleared. Holds no lock while it reads a bank.
-pub(super) fn poll(index: usize) {
+/// cleared. Holds no lock while it reads a bank. Whether it found a record.
+pub(super) fn poll(index: usize) -> bool {
     let Some(proc) = record_of(index) else {
-        return;
+        return false;
     };
     let Some(counts) = counts(index) else {
-        return;
+        return false;
     };
+    let mut found = false;
     let _ = counts.polls.fetch_add(1, Ordering::Relaxed);
     while let Some(record) = take(pending(index)) {
+        found = true;
         let bank = usize::from(record.bank);
         let what = match record.kind {
             Kind::Left => "left from before this boot",
@@ -781,6 +810,7 @@ pub(super) fn poll(index: usize) {
             // processor has not taken yet, which is the check's.
             _ => continue,
         };
+        found = true;
         let address = address_of(bank, status);
         let misc = misc_of(bank, status);
         let total = count.fetch_add(1, Ordering::Relaxed).saturating_add(1);
@@ -798,6 +828,22 @@ pub(super) fn poll(index: usize) {
             retire(page);
         }
     }
+    found
+}
+
+/// Processor `cpu` is back in service: CMCI's held wake, if any.
+pub(super) fn returned_to_service(cpu: usize) {
+    cmci::returned(cpu);
+}
+
+/// Whether [`poll`] takes a record of `status` on `proc`: corrected,
+/// no-action or deferred. What CMCI's look after the unmask kicks on
+/// (`L.x86_64.253`); any other record is the machine check's.
+fn poll_takes(proc: Proc, status: u64) -> bool {
+    matches!(
+        proc.class(status),
+        Class::Corrected | Class::Ucna | Class::Deferred
+    )
 }
 
 /// Bank `bank`'s `MCi_ADDR`, read only where `status` says it holds one.
@@ -1286,6 +1332,7 @@ pub(crate) fn render(out: &mut impl Write) -> core::fmt::Result {
             counts.polls.load(Ordering::Relaxed),
             counts.copies.load(Ordering::Relaxed),
         )?;
+        cmci::render(out, index)?;
     }
     Ok(())
 }

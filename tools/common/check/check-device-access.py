@@ -213,13 +213,17 @@ CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*)
 # docs/MACHINE-CHECK-AMD.md §3, the consultant's A6 and B4) MCA_CONFIG, named
 # `config`, in smca_bank_up alone, the one function that writes it.
 MCE_FILE = "src/kernel/src/arch/x86_64/mce.rs"
+# And CMCI's claim (L.x86_64.249, docs/MACHINE-CHECK-CMCI.md §3.1, ledger
+# 5348): each bank's MCi_CTL2, named through ctl2, in claim alone.
+CMCI_FILE = "src/kernel/src/arch/x86_64/mce/cmci.rs"
 CHECKED_WRITE_ARGUMENT = {
     POWER_FILE: {"VR_CURRENT_CONFIG"},
     CHECK_FILE: {"ABSENT"},
     MCE_FILE: {"MCG_CTL", "bank_msr", "config"},
+    CMCI_FILE: {"ctl2"},
 }
 # An argument allowed in one function only: (file, argument) -> function.
-CHECKED_WRITE_FUNCTION = {(MCE_FILE, "config"): "smca_bank_up"}
+CHECKED_WRITE_FUNCTION = {(MCE_FILE, "config"): "smca_bank_up", (CMCI_FILE, "ctl2"): "claim"}
 
 # AMD's SMCA registers (L.x86_64.239-240, the consultant's A6): every
 # smca_msr in mce.rs is inside smca_bank_up -- MCA_CONFIG (4) read and

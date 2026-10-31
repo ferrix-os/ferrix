@@ -135,8 +135,10 @@ const UNRESTARTABLE: u64 = 0x6;
 const BYSTANDER: u64 = 0x5;
 /// The bank the modes inject into.
 const BANK: u32 = 1;
-/// Stops of the machine the gate makes looking for the copy.
-const TRIES: usize = 400;
+/// Stops of the machine the gate makes looking for the copy: the environ
+/// mode's reader lands there once in some hundreds of stops (up to some 1200
+/// seen), and keeps at it for five minutes.
+const TRIES: usize = 4000;
 /// How long a mode waits for the guest's lines after it injects.
 const PATIENCE: Duration = Duration::from_secs(90);
 
@@ -249,6 +251,10 @@ fn test_copy(args: &Args, mode: Mode) -> Result<()> {
     if !qemu_args.smp_given {
         qemu_args.smp = 1;
         qemu_args.smp_given = true;
+    }
+    // Boot, the environ reader's five minutes and the judgement.
+    if !args.timeout_given {
+        qemu_args.timeout = 480;
     }
     let smp = qemu_args.smp.max(1) as usize;
     // TCG runs a `rep movsb` in one step, so no stop finds it partway, and
@@ -431,7 +437,20 @@ fn inject(qmp: &mut Qmp, lines: &[String], mode: Mode, smp: usize, movs: u64) ->
     let mut seen = [0usize; 4];
     let mut rips = std::collections::BTreeMap::<u64, usize>::new();
     for tries in 1..=TRIES {
-        stopped(qmp, true)?;
+        // A guest done before a stop found the copy ends the machine: say
+        // what the stops saw until then rather than the monitor's error.
+        if let Err(why) = stopped(qmp, true) {
+            return Err(Error::new(format!(
+                "{why}, after {} stop(s) ({} in ring 0, {} at {movs:#x}, {} with bytes left, {} \
+                 over the buffer; most seen: {})",
+                tries - 1,
+                seen[0],
+                seen[1],
+                seen[2],
+                seen[3],
+                most_seen(&rips)
+            )));
+        }
         let mut found = None;
         for cpu in 0..smp {
             let registers = monitor(qmp, "info registers", Some(cpu))?;
@@ -493,7 +512,10 @@ fn inject(qmp: &mut Qmp, lines: &[String], mode: Mode, smp: usize, movs: u64) ->
         if let Some(made) = made {
             return made;
         }
-        std::thread::sleep(Duration::from_millis(15));
+        // 5 to 25 ms apart, varied, so the stops do not fall into step with
+        // a guest loop of a steady period and keep landing outside the copy.
+        let jitter = ((tries as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 32) % 21;
+        std::thread::sleep(Duration::from_millis(5 + jitter));
     }
     Err(Error::new(format!(
         "no processor was at the copy's rep movsb over the guest's buffer within {TRIES} stops \

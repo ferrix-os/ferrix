@@ -26,7 +26,7 @@ use crate::irq::Msi;
 use crate::sync::SpinLock;
 
 /// The first vector handed out. Sixty-four vectors from here stay below the
-/// legacy system call gate at 0x80 and far below the kernel's own at 0xFC to
+/// legacy system call gate at 0x80 and far below the kernel's own at 0xFB to
 /// 0xFF.
 const FIRST_VECTOR: u64 = 0x40;
 

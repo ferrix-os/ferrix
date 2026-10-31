@@ -205,6 +205,12 @@ pub fn start_msr_log(view: &BootView<'_>) {
     msrlog::start(view);
 }
 
+/// Processor `cpu` is back in service: a CMCI it took while out wakes its
+/// poll task now (`docs/MACHINE-CHECK-CMCI.md` §3.3, `L.x86_64.250`).
+pub(crate) fn returned_to_service(cpu: usize) {
+    mce::returned_to_service(cpu);
+}
+
 /// Start the machine-check log's poll on every processor
 /// (`docs/MACHINE-CHECK.md` §3.2), and read `ferrix.mce.recover`.
 pub fn start_machine_check_log(view: &BootView<'_>) {

@@ -37,6 +37,11 @@ const LAPIC_WINDOW: u64 = 0x400;
 const LAPIC_ID: u64 = 0x020;
 /// Task priority: which interrupts this CPU is willing to take.
 const LAPIC_TPR: u64 = 0x080;
+/// Version: the version (7:0) and the highest LVT entry's index (23:16).
+const LAPIC_VERSION: u64 = 0x030;
+/// Local vector table: the corrected machine check interrupt, where the
+/// processor has one (SDM vol. 3A 11.5.1; `docs/MACHINE-CHECK-CMCI.md`).
+const LAPIC_LVT_CMCI: u64 = 0x2F0;
 /// End of interrupt.
 const LAPIC_EOI: u64 = 0x0B0;
 /// Spurious interrupt vector, and the software enable bit.
@@ -71,6 +76,17 @@ pub(crate) const IPI_VECTOR: u64 = 0xFD;
 /// The interrupt number the generic layer knows an IPI by.
 pub(crate) const fn ipi_irq() -> u32 {
     (IPI_VECTOR - IRQ_BASE) as u32
+}
+
+/// The vector a corrected machine check interrupt arrives on: below
+/// interrupt remapping's check vector (`crate::iommu::CHECK_VECTOR`, 0xFC)
+/// and the IPI's, far above the message range `super::msi` hands out
+/// (`docs/MACHINE-CHECK-CMCI.md` §3.2).
+pub(crate) const CMCI_VECTOR: u64 = 0xFB;
+
+/// The interrupt number the generic layer knows a CMCI by.
+pub(crate) const fn cmci_irq() -> u32 {
+    (CMCI_VECTOR - IRQ_BASE) as u32
 }
 /// Timer initial count. Writing it starts the timer.
 const LAPIC_TIMER_ICR: u64 = 0x380;
@@ -755,6 +771,23 @@ pub(crate) fn id() -> u32 {
         return read_reg(LAPIC_ID);
     }
     read_reg(LAPIC_ID) >> 24
+}
+
+/// The highest LVT entry's index this processor's local APIC names: 6 or
+/// more where it has the CMCI entry.
+pub(crate) fn max_lvt() -> u32 {
+    (read_reg(LAPIC_VERSION) >> 16) & 0xff
+}
+
+/// Point this processor's CMCI entry at [`CMCI_VECTOR`], fixed delivery,
+/// unmasked (`L.x86_64.250`). Only where [`max_lvt`] is 6 or more.
+pub(crate) fn unmask_cmci() {
+    write_reg(LAPIC_LVT_CMCI, CMCI_VECTOR as u32);
+}
+
+/// Mask this processor's CMCI entry, keeping its vector.
+pub(crate) fn mask_cmci() {
+    write_reg(LAPIC_LVT_CMCI, CMCI_VECTOR as u32 | LVT_MASKED);
 }
 
 /// Retire the interrupt currently being serviced.

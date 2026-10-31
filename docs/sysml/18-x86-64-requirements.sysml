@@ -2771,8 +2771,10 @@ package FerrixX8664Requirements {
         }
         requirement <'L.x86_64.223'> pollLogsAndClearsCorrected : ItemLowLevel {
             attribute :>> statement = "One kernel task pinned to each processor
-                with a bring-up record shall, every ferrix.mce.poll seconds (1 to
-                3600 by msrlog's chooser; 5 otherwise, said), print each bank's
+                with a bring-up record shall, after its CMCI claim (L.x86_64.249),
+                once at once, then every ferrix.mce.poll seconds (1 to 3600 by
+                msrlog's chooser; 5 otherwise, said) and at once when the
+                processor's CMCI wakes it (L.x86_64.250), print each bank's
                 corrected or uncorrected-no-action record as one mce: line with
                 the processor, bank, class, status, address and misc where valid
                 and the processor's running count, count it, and clear the bank;
@@ -2780,11 +2782,14 @@ package FerrixX8664Requirements {
             attribute :>> criterion = "test-mce-corrected under KVM and TCG: a
                 corrected error injected into bank 1 of every processor is printed
                 exactly once per processor as mce: cpu <n> bank 1 corrected and
-                retires no frame. Negative control: the poll's clear removed, the
-                line repeats and the row fails.";
+                retires no frame; test-mce-cmci (TCG, patch 0008): a corrected
+                record into bank 1 of processor 1 printed within 10 s with a
+                poll period of an hour. Negative control: the poll's clear
+                removed, the line repeats and the row fails.";
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("arch::x86_64::mce::poll",
                 "arch::x86_64::mce::run",
+                "arch::x86_64::mce::cmci::wait",
                 "arch::x86_64::mce::say",
                 "arch::x86_64::mce::Line::write_str");
         }
@@ -2924,6 +2929,7 @@ package FerrixX8664Requirements {
                 file's text holds no 0x.";
             attribute :>> parent = "H.FAIL.8";
             attribute :>> unit = ("arch::x86_64::mce::render",
+                "arch::x86_64::mce::cmci::render",
                 "arch::x86_64::render_machine_check");
         }
         requirement <'L.x86_64.231'> recoveryOffStopsEveryCheck : ItemLowLevel {
@@ -3205,6 +3211,96 @@ package FerrixX8664Requirements {
                 row.";
             attribute :>> parent = "H.FAIL.11";
             attribute :>> unit = ("arch::x86_64::mce::retire", "arch::x86_64::retire_poisoned");
+        }
+        requirement <'L.x86_64.249'> cmciClaimsBanksWithReadBack : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.1 (customer, 2026-10-30, item 4; consultant OK IF ledger 5348). */
+            attribute :>> statement = "A processor taking Intel's rules whose MCG_CAP has CMCI_P
+                and whose local APIC names at least seven LVT entries shall, in
+                its poll task before its first round and with ferrix.mce.cmci not
+                off, claim each bank whose MCi_CTL2 it can read with CMCI_EN clear
+                by setting CMCI_EN and threshold 1 and reading it back, under one
+                lock across processors, and count as claimed only a bank whose
+                read-back has CMCI_EN; a refused access claims nothing.";
+            attribute :>> criterion = "Stage 3's cmci_claims over a fake MCi_CTL2 (refused
+                read, already set, refused write, a write that does not stick,
+                refused read-back, read-back set; the value written; two claimers
+                of one shared register in turn, the second Taken);
+                test-mce-cmci under TCG with patch 0008: each processor claims its
+                own bank 1. Negative controls: the read-back skipped and the
+                already-set test removed, each fires cmci_claims. The shared bank
+                on hardware is the N150 BACKLOG row.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::claim",
+                "arch::x86_64::mce::cmci::claim_bank",
+                "arch::x86_64::mce::cmci::offered");
+        }
+        requirement <'L.x86_64.250'> cmciWakesThePollInService : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.2, §3.3. */
+            attribute :>> statement = "A processor with a claimed bank shall point its LVT CMCI
+                entry at CMCI_VECTOR, fixed, unmasked; its handler shall mask the
+                entry, count the interrupt and read no bank, and wake that
+                processor's poll task only when its park state is active,
+                leaving the wake held for the return to service otherwise, which
+                wakes it.";
+            attribute :>> criterion = "test-mce-cmci under TCG with patch 0008: a corrected
+                record printed within 10 s, its interrupt counted;
+                test-mce-cmci-parked: a record into processor 1 out of service
+                prints nothing and drains nothing until its return, then the line
+                within 10 s with one interrupt counted. Negative controls: the
+                handler's wake removed (Corrected fails), the park-state test
+                removed and the return hook removed (Parked fails).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::on_cmci",
+                "arch::x86_64::mce::cmci::returned",
+                "arch::x86_64::mce::cmci::kick",
+                "arch::x86_64::mce::cmci::register",
+                "arch::x86_64::apic::unmask_cmci",
+                "arch::x86_64::apic::mask_cmci",
+                "arch::x86_64::returned_to_service",
+                "arch::x86_64::mce::returned_to_service");
+        }
+        requirement <'L.x86_64.251'> cmciStormMasksTheEntry : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.4. */
+            attribute :>> statement = "More than 15 rounds a CMCI drove within one second shall
+                leave the entry masked and the round once a second, said once,
+                until a one-second round finds no record, which unmasks it, said.";
+            attribute :>> criterion = "Stage 3's cmci_storms over a sequence of round times;
+                test-mce-cmci-storm under TCG with patch 0008: forty records 20 ms
+                apart, the storm said, at most 16 interrupts counted, its end said
+                within 10 s. Negative control: the threshold raised tenfold fires
+                stage 3's cmci_storms (c6b), before the row is reached (c6).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::Storm::after",
+                "arch::x86_64::mce::cmci::after_round",
+                "arch::x86_64::mce::cmci::next_wait");
+        }
+        requirement <'L.x86_64.252'> cmciOffClaimsNothing : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.6. */
+            attribute :>> statement = "With ferrix.mce.cmci=off no bank shall be claimed and every
+                LVT CMCI entry left masked, said; any other value shall leave CMCI
+                on, said.";
+            attribute :>> criterion = "test-mce-cmci-off under TCG with patch 0008: the option
+                said, nothing claimed, no interrupt counted, and no corrected line
+                within 10 s with a poll period of an hour.";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::read_option");
+        }
+        requirement <'L.x86_64.253'> cmciLooksAfterTheUnmask : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-CMCI.md §3.4, the masked window. */
+            attribute :>> statement = "After a round that leaves the entry to be unmasked, the
+                poll task shall, on a processor in service, unmask it and read each
+                claimed bank's status once more, going round again at once only on
+                a status the round takes; otherwise the unmask shall be held for
+                the return to service as L.x86_64.250 says.";
+            attribute :>> criterion = "Stage 3's cmci_kicks (a record the round leaves never
+                kicks); test-mce-cmci-window under TCG with patch 0008: a record
+                made while the check build holds the masked window open is printed
+                within 10 s. Negative controls: the look removed (Window fails),
+                its filter widened to VAL (cmci_kicks fires).";
+            attribute :>> parent = "H.FAIL.8";
+            attribute :>> unit = ("arch::x86_64::mce::cmci::after_round",
+                "arch::x86_64::mce::cmci::take_back_hold",
+                "arch::x86_64::mce::poll_takes");
         }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware

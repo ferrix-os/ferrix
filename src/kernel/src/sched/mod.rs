@@ -2409,6 +2409,14 @@ pub(crate) fn park_transition(cpu: usize, from: u8, to: u8) -> bool {
     })
 }
 
+/// Processor `cpu` is back in service, from a park or a park's undo: the
+/// architecture's say, where it held something for the return -- x86-64's
+/// CMCI, whose interrupt on a processor not in service wakes nobody
+/// (`docs/MACHINE-CHECK-CMCI.md` §3.3).
+fn returned(cpu: usize) {
+    arch::returned_to_service(cpu);
+}
+
 /// Tasks a parked processor found on its queue and moved off: the backstop
 /// behind the re-home at every wake (L.sched.104), expected to stay 0.
 static DRAINED: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
@@ -2462,6 +2470,7 @@ fn park(me: usize) {
     if let Some(state) = PARK.get(me) {
         state.store(ACTIVE_STATE, Ordering::Release);
     }
+    returned(me);
 }
 
 /// Why a processor could not go out of service (`L.smp.36`).
@@ -2530,6 +2539,7 @@ fn take_out_asking(cpu: usize, deadline: u64, ask: bool) -> Result<(), ServiceRe
                         state.store(ACTIVE_STATE, Ordering::Release);
                     }
                     set_active(cpu, true);
+                    returned(cpu);
                     return Err(ServiceRefusal::TimedOut);
                 }
             }
