@@ -2270,7 +2270,12 @@ trace.
   whose title or class says error, failed, failure, fatal, exception or
   crash is an `app-error` record (native protocol: `FERRIX_EVENT=app-error`,
   `WINDOW_TITLE`, `WINDOW_CLASS`, `WINDOW_PID`, `WINDOW_COMM`, `WINDOW_EXE`,
-  `WINDOW_DIALOG` for a modal or child window, at warning); any other
+  `WINDOW_DIALOG` for a modal or child window, at warning). For an X
+  program's window, whose Wayland client is the X server, hyprix asks the
+  X server which top-level has that title and class and records the
+  program its `_NET_WM_PID` names, with `X_SERVER_PID` and `X_WINDOW`
+  beside it (`x_owner.rs`; the server's own pid when no window says one);
+  any other
   window a `window-opened` record when that kind is on (off by default).
   lode takes a screenshot of an app error as of a crash (§19), and desktop
   images ship `Capture=yes`.
@@ -2307,7 +2312,11 @@ What the night of the Endfield start failures needed beyond streams.
   the person running it (their own processes; root's, anyone's), written
   through the native protocol, and printed. hyprix takes one of an app
   error's window's process (`events.conf`'s `snapshot`, on); for an X
-  client that is yserver's process until yserver says its client's pid.
+  program's window, the program's (its `_NET_WM_PID`, asked of the X server
+  on a thread of hyprix's, 2 s at most a reply), yserver's only when no
+  window of that title and class says a pid. Until 2026-10-31 it was always
+  yserver's, so Endfield's GC failures on the box left no snapshot of the
+  game.
 * **`lode follow FILE [-t ID] [--from-start] [--until-pid PID]`**: a file
   a program writes, a line a record under ID -- the game's `Player.log`,
   its crash reporter's, DXVK's -- read on every quarter second from its end

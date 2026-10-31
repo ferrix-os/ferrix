@@ -182,16 +182,78 @@ pub fn window_opened(class: &str, title: &str, pid: i32, dialog_of: bool) {
     if !setting.on {
         return;
     }
+    // An X program's window comes from the X server, whose pid is the one
+    // hyprix knows: the server is asked which program it is, on a thread of
+    // its own, since the compositor must not wait on another program.
+    if kind == "app-error"
+        && pid > 0
+        && let Some(display) = crate::x_owner::display_of(pid)
+    {
+        let (class, title) = (class.to_owned(), title.to_owned());
+        let asked = std::thread::Builder::new()
+            .name("app-error-x".to_owned())
+            .spawn(move || {
+                let owners = crate::x_owner::owners(display, &title, &class);
+                x_app_error(setting.level, &class, &title, pid, &owners, dialog_of);
+            });
+        if asked.is_ok() {
+            return;
+        }
+    }
     let fields = window_fields(kind, setting.level, class, title, pid, dialog_of);
+    send(&fields);
+    // What the program is doing while it shows its error: a hang snapshot
+    // of the window's process, by `lode snapshot` as this session's user.
+    if kind == "app-error" {
+        snapshot(pid);
+    }
+}
+
+/// An X program's app error: the record names the program the X server says
+/// the window is (`owners`, from its `_NET_WM_PID`) with the server beside
+/// it, and the snapshot is of that program. With no owner found, the record
+/// and the snapshot are the server's, as for any other window.
+fn x_app_error(
+    level: u8,
+    class: &str,
+    title: &str,
+    server: i32,
+    owners: &[crate::x_owner::Owner],
+    dialog_of: bool,
+) {
+    let mut pids: Vec<i32> = owners.iter().map(|owner| owner.pid).collect();
+    pids.dedup();
+    let owner = pids.first().copied().unwrap_or(server);
+    let mut fields = window_fields("app-error", level, class, title, owner, dialog_of);
+    fields.push(("X_SERVER_PID".to_owned(), server.to_string().into_bytes()));
+    if let Some(first) = owners.first() {
+        fields.push((
+            "X_WINDOW".to_owned(),
+            format!("{:#x}", first.window).into_bytes(),
+        ));
+    }
+    send(&fields);
+    if pids.is_empty() {
+        snapshot(server);
+    }
+    for pid in pids {
+        snapshot(pid);
+    }
+}
+
+/// `fields` to lode, if it is there.
+fn send(fields: &[(String, Vec<u8>)]) {
     if let Ok(socket) = UnixDatagram::unbound()
         && socket.connect(JOURNAL).is_ok()
     {
-        let _ = socket.send(&datagram(&fields));
+        let _ = socket.send(&datagram(fields));
     }
-    // What the program is doing while it shows its error: a hang snapshot
-    // of the window's process, by `lode snapshot` as this session's user.
-    if kind == "app-error"
-        && pid > 0
+}
+
+/// A hang snapshot of `pid` (`events.conf`'s `snapshot`), by `lode snapshot`
+/// as this session's user.
+fn snapshot(pid: i32) {
+    if pid > 0
         && switch("snapshot").on
         && std::path::Path::new(LODE).exists()
         && let Ok(child) = std::process::Command::new(LODE)

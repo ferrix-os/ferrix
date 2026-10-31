@@ -67,6 +67,7 @@ pub mod switcher;
 pub mod titlebar;
 pub(crate) mod wait;
 pub mod wallpaper;
+pub mod x_owner;
 
 pub use options::{Options, Renderer};
 pub use state::{run, run_with};
