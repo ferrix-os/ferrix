@@ -43,6 +43,8 @@ pub mod discovery;
 pub mod fastpath;
 pub mod init;
 pub mod init_check;
+pub mod lockup;
+pub mod lockup_check;
 pub mod power;
 pub mod random;
 pub mod syscall;

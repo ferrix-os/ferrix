@@ -205,7 +205,7 @@ pub(crate) fn flush_tlb_page(address: u64) {
 /// The lockup detector's non-maskable interrupt: none here, since the
 /// kernel uses no GICv3 pseudo-NMI, so its watcher reports instead
 /// (`lockup`).
-pub(crate) fn send_lockup_nmi(_hardware_id: u64) -> Result<(), &'static str> {
+pub fn send_lockup_nmi(_hardware_id: u64) -> Result<(), &'static str> {
     Err("this architecture has no NMI here")
 }
 

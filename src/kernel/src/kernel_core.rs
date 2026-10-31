@@ -131,6 +131,7 @@ pub mod timer;
 pub mod trap;
 pub mod user;
 pub mod vmap;
+pub mod watch;
 /// Finding what the machine has: the core's modules of `discovery/` (firmware tables, the device tree and the board they describe), whose `mod.rs` is the item's and re-exports them.
 pub mod discovery {
     // ACPI is how the 64-bit pair describe themselves. An ARMv7-A machine has

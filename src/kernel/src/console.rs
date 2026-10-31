@@ -379,7 +379,7 @@ pub(crate) fn write_panicking(arguments: fmt::Arguments<'_>, logged: bool) {
 /// drained at all. During a failure report the lock is waited for a bounded
 /// time, as [`write`] waits for it, and the ring left as it is if the lock
 /// never comes.
-pub(crate) fn drain() {
+pub fn drain() {
     if READY.load(Ordering::Acquire) {
         if PANICKING.load(Ordering::Relaxed) {
             for _ in 0..PANIC_SPINS {

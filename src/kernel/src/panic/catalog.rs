@@ -3690,7 +3690,7 @@ pub(crate) static ALL: &[&Explanation] = &[
 /// For the lockup detector (`lockup.rs`) and its NMI in
 /// `arch/x86_64/paranoid.rs`: a processor that took no interrupt for ten
 /// seconds.
-pub(crate) static LOCKUP: Explanation = Explanation {
+pub static LOCKUP: Explanation = Explanation {
     code: "FX-9007",
     title: "a processor took no interrupt for ten seconds",
     meaning: "With `ferrix.lockup=on` every processor watches the next one in a ring, \
