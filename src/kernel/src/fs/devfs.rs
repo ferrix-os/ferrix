@@ -172,6 +172,10 @@ enum Behaviour {
     /// `/dev/ferrix-crashes`: an open arms the crash hold (`fs::crashes`),
     /// so the node, like `kmsg`, is never the object.
     Crashes,
+    /// `/dev/watchdog`: an open arms the user watchdog (`fs::watchdog`), so
+    /// the node is never the object. Listed and found only under
+    /// `ferrix.watchdog=user` (`docs/POSTMORTEM.md` §6.9).
+    Watchdog,
 }
 
 /// One node.
@@ -190,7 +194,7 @@ struct Device {
 }
 
 /// Every character node in `/dev`, in the order a listing reports it.
-static DEVICES: [Device; 10] = [
+static DEVICES: [Device; 11] = [
     Device {
         name: b"null",
         major: 1,
@@ -261,7 +265,20 @@ static DEVICES: [Device; 10] = [
         permissions: 0o400,
         behaviour: Behaviour::Crashes,
     },
+    Device {
+        name: b"watchdog",
+        major: fs::watchdog::MAJOR,
+        minor: fs::watchdog::MINOR,
+        permissions: 0o600,
+        behaviour: Behaviour::Watchdog,
+    },
 ];
+
+/// Whether `device` is in `/dev` on this boot: every node but
+/// `/dev/watchdog`, which is there only while the user watchdog runs.
+fn present(device: &Device) -> bool {
+    device.behaviour != Behaviour::Watchdog || crate::userwatch::running()
+}
 
 /// The root directory's inode number. A device's is its index plus two.
 const ROOT_INO: u64 = 1;
@@ -467,9 +484,9 @@ pub(crate) struct CharNode {
     pub(crate) permissions: u32,
 }
 
-/// The table's nodes, in the table's order.
+/// The table's nodes present on this boot, in the table's order.
 pub(crate) fn char_nodes() -> impl Iterator<Item = CharNode> {
-    DEVICES.iter().map(|device| CharNode {
+    DEVICES.iter().filter(|device| present(device)).map(|device| CharNode {
         name: device.name,
         major: device.major,
         minor: device.minor,
@@ -1060,6 +1077,14 @@ impl Inode for Node {
             let file: Arc<dyn Inode> = fs::kmsg::KmsgFile::open()?;
             return Ok(Some(file));
         }
+        // An open of `/dev/watchdog` is the armed user watchdog itself.
+        if self
+            .device()
+            .is_some_and(|device| device.behaviour == Behaviour::Watchdog)
+        {
+            let file: Arc<dyn Inode> = fs::watchdog::WatchdogFile::open()?;
+            return Ok(Some(file));
+        }
         // An open of `/dev/ferrix-crashes` is the armed reader itself.
         if self
             .device()
@@ -1116,7 +1141,9 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => console_inode().read_at(offset, buf),
             // The node is never the object: opening it makes a pair and
             // gives back the master, which is what reads and writes.
-            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes | Behaviour::Watchdog => {
+                Err(Errno::ENXIO)
+            }
         }
     }
 
@@ -1139,7 +1166,9 @@ impl Inode for Node {
             Behaviour::Console | Behaviour::ConsoleItself => {
                 console_inode().write_at(offset, data, append)
             }
-            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes => Err(Errno::ENXIO),
+            Behaviour::Ptmx | Behaviour::Kmsg | Behaviour::Crashes | Behaviour::Watchdog => {
+                Err(Errno::ENXIO)
+            }
         }
     }
 
@@ -1239,7 +1268,10 @@ impl Inode for Node {
         if let Some(node) = chardev_node(name, self.made) {
             return Ok(node);
         }
-        if let Some(index) = DEVICES.iter().position(|device| device.name == name) {
+        if let Some(index) = DEVICES
+            .iter()
+            .position(|device| device.name == name && present(device))
+        {
             return Ok(node(index, self.made));
         }
         let disk = disk_named(name).ok_or(Errno::ENOENT)?;
@@ -1276,6 +1308,9 @@ impl Inode for Node {
         if cursor < BLOCK_CURSOR_BASE {
             let first = usize::try_from(cursor.saturating_sub(FIRST_CURSOR)).unwrap_or(usize::MAX);
             for (index, device) in DEVICES.iter().enumerate().skip(first) {
+                if !present(device) {
+                    continue;
+                }
                 let ino = if device.behaviour == Behaviour::ConsoleItself {
                     console_inode().metadata().ino
                 } else {

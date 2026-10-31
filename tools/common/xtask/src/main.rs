@@ -180,6 +180,7 @@ mod phone;
 mod pipe_bench;
 mod pkg;
 mod ports;
+mod lockup;
 mod postmortem;
 mod powerctl;
 mod powerfail;
@@ -614,6 +615,7 @@ const TASKS: &[&[Task]] = &[
     pkg::TASKS,
     ports::TASKS,
     postmortem::TASKS,
+    lockup::TASKS,
     powerfail::TASKS,
     pty::TASKS,
     remote::TASKS,

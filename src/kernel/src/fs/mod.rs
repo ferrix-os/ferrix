@@ -36,6 +36,7 @@ pub mod cgroupfs;
 pub mod check;
 pub(crate) mod console;
 pub(crate) mod crashes;
+pub(crate) mod watchdog;
 pub mod data_disk;
 pub(crate) mod devfs;
 pub(crate) mod disk_file;

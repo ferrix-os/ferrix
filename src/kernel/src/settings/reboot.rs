@@ -37,6 +37,8 @@ pub fn restart_with_word(process: &Process, arg: u64) -> Result<usize, Errno> {
         Ok(what) => println!("reboot: {what}"),
         Err(why) => println!("reboot: '{word}' changes nothing: {why}"),
     }
+    // A stop on purpose is not a stopped user space (`L.lockup.8`).
+    ferrix_kernel_load::userwatch::stop_for_shutdown("a restart");
     let _ = ferrix_kernel_load::console::pstore::stop(Stop::Restart);
     arch::reset()
 }

@@ -164,6 +164,9 @@ pub fn sync_disks() {
 
 /// End boot the way [`init`] was told to.
 pub fn finish() -> ! {
+    // Init is gone: nothing will feed the user watchdog, and this stop is
+    // on purpose (`L.lockup.8`).
+    crate::userwatch::stop_for_shutdown("init's exit");
     sync_disks();
     let action = match ON_EXIT.load(Ordering::Relaxed) {
         RESET_ON_EXIT => ferrix_audit::power::RESTART,

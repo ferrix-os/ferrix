@@ -700,6 +700,10 @@ pub(crate) fn sys_ioctl(
     if let Some(fence) = crate::interfaces::chardev::sync::of(file.io()) {
         return crate::interfaces::chardev::sync::ioctl(process, &fence, request, arg);
     }
+    // An open `/dev/watchdog` (`docs/POSTMORTEM.md` §6.9): Linux's requests.
+    if let Some(watchdog) = fs::watchdog::of(file.io()) {
+        return fs::watchdog::ioctl(process, &watchdog, request, arg);
+    }
     // An open disk (`docs/INSTALLER.md` §5.1): its geometry and a flush.
     if let Some(disk) = fs::disk_file::of(file.io()) {
         return fs::disk_file::ioctl(process, &disk, request, arg);

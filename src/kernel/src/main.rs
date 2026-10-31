@@ -570,9 +570,15 @@ fn say_booted() {
             );
         }
     }
-    // After the marker, every processor online: the lockup detector, if
-    // asked, then the check that masks a processor on purpose, if asked.
-    lockup::start();
+    // After the marker, every processor online: what watches, if asked --
+    // the lockup detector and the user watchdog, each registered first --
+    // then the watch, started once for all of them (`docs/POSTMORTEM.md`
+    // §6.9), then the check that masks a processor on purpose, if asked.
+    let detector = lockup::register();
+    let user = userwatch::register();
+    if detector || user {
+        watch::start();
+    }
     lockup_check::run();
 }
 
@@ -2098,6 +2104,7 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
     // After the check: a panic before it halts, whatever the command line.
     panic::reset::read_option(view);
     lockup::read_option(view);
+    userwatch::read_option(view);
     lockup_check::read_option(view);
     console::screen::milestone(2);
 }

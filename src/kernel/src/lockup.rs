@@ -27,7 +27,7 @@ use crate::panic::{catalog, fatal};
 use crate::watch::{self, Watch};
 
 /// The command-line option, and the one value that turns the detector on.
-pub const OPTION: &str = "ferrix.lockup";
+pub(crate) const OPTION: &str = "ferrix.lockup";
 const ON: &str = "on";
 const OFF: &str = "off";
 
@@ -35,7 +35,7 @@ const OFF: &str = "off";
 /// seconds, the bound past which a wait for another processor calls it stuck
 /// (`smp`, 2026-10-07): under it, a virtual processor its host starved is
 /// slow, not stuck.
-pub const STUCK_NANOS: u64 = 10_000_000_000;
+pub(crate) const STUCK_NANOS: u64 = 10_000_000_000;
 
 /// How long after its NMI a stuck processor has to begin its own report
 /// before its watcher reports instead.
@@ -73,22 +73,22 @@ pub fn read_option(view: &BootView<'_>) {
 }
 
 /// Whether the detector was asked for.
-pub fn asked() -> bool {
+pub(crate) fn asked() -> bool {
     ASKED.load(Ordering::Acquire)
 }
 
-/// Start the detector, if asked: once every processor is online, before
-/// init. Says what it watches.
-pub fn start() {
+/// Register the detector, if asked: once every processor is online, before
+/// init and before `watch::start`. Says what it watches; whether it is
+/// registered.
+pub fn register() -> bool {
     if !asked() {
-        return;
+        return false;
     }
     let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
     if watch::register(&DETECTOR).is_err() {
         println!("  lockup   no room to register the detector; it is off");
-        return;
+        return false;
     }
-    watch::start();
     if online < 2 {
         println!("  lockup   {OPTION}={ON}: one processor, which nothing watches");
     } else {
@@ -97,6 +97,7 @@ pub fn start() {
             STUCK_NANOS / 1_000_000_000
         );
     }
+    true
 }
 
 /// The processor `me` watches: the next online one after it, in logical

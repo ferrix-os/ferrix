@@ -812,20 +812,23 @@ pub(crate) fn sys_reboot(
     }
     match cmd {
         command::CAD_ON | command::CAD_OFF => Ok(0),
-        // Each stop records itself and writes the pstore region back after
-        // its last line, past the last point that can return
-        // (`console::pstore::stop`).
+        // Each stop disarms the user watchdog (`L.lockup.8`), then records
+        // itself and writes the pstore region back after its last line,
+        // past the last point that can return (`console::pstore::stop`).
         command::POWER_OFF => {
+            crate::userwatch::stop_for_shutdown("a power-off");
             println!("reboot: Power down");
             let _ = crate::console::pstore::stop(Stop::PowerOff);
             arch::power_off()
         }
         command::HALT => {
+            crate::userwatch::stop_for_shutdown("a halt");
             println!("reboot: System halted");
             let _ = crate::console::pstore::stop(Stop::Halt);
             arch::shutdown()
         }
         command::RESTART => {
+            crate::userwatch::stop_for_shutdown("a restart");
             println!("reboot: Restarting system");
             let _ = crate::console::pstore::stop(Stop::Restart);
             arch::reset()

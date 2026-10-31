@@ -227,6 +227,10 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
         ),
         Err(which) => println!("  on        {which}"),
     }
+    // Where every processor was, while the watch runs (`docs/POSTMORTEM.md`
+    // §6.9): before the others are stopped, from what their last interrupt
+    // recorded.
+    crate::watch::report();
     let others = smp::stop_others();
     let resetting = reset::armed();
     match (resetting, others) {

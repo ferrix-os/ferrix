@@ -19,15 +19,23 @@
 //!   here before it sends it a non-maskable interrupt ([`name_for_nmi`]); the
 //!   NMI's handler asks whether it is the one named ([`named_here`]) before
 //!   anything else.
+//! * **Where each processor is.** Every interrupt a processor takes while
+//!   the watch runs records, in that processor's slot, what it interrupted:
+//!   the instruction pointer, whether it was in user mode, the running task
+//!   and the counter ([`sample`]). A failure report prints them, one `cpu`
+//!   line per online processor ([`report`], `docs/POSTMORTEM.md` §6.9,
+//!   `L.lockup.9`): a kernel address as its offset in the image, which names
+//!   no slide and so is logged; a user address on the port alone.
 
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sync::IrqControl;
 
+use crate::console::{println, println_unlogged};
 use crate::hooks::{Full, Hooks};
 
 /// The longest a watching processor goes between ticks: one second.
-pub const PERIOD_NANOS: u64 = 1_000_000_000;
+pub(crate) const PERIOD_NANOS: u64 = 1_000_000_000;
 
 /// The most processors the watch keeps a heartbeat for: the timer's own
 /// bound.
@@ -50,8 +58,24 @@ pub struct Watch {
     pub tick: fn(now: u64),
 }
 
-/// Every registered [`Watch`]. Two is one more than the kernel registers.
-static WATCHES: Hooks<Watch, 2> = Hooks::new();
+/// Every registered [`Watch`]: the lockup detector, the user watchdog, and
+/// room for S4b's feed and one more.
+static WATCHES: Hooks<Watch, 4> = Hooks::new();
+
+/// What each processor's last interrupt interrupted, by logical number:
+/// the instruction pointer; the running task's id with [`USER_BIT`] set for
+/// user mode; and the counter when it was taken (0 for none yet). Each is
+/// written by its own processor alone, with interrupts masked.
+static SAMPLE_PC: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+static SAMPLE_TASK: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+static SAMPLE_AT: [AtomicU64; PROCESSORS] = [const { AtomicU64::new(0) }; PROCESSORS];
+
+/// In [`SAMPLE_TASK`], the bit that says the interrupt came from user mode.
+const USER_BIT: u64 = 1 << 63;
+
+/// A sample older than this says its processor takes no interrupts: twice
+/// the watch tick's period.
+const STALE_NANOS: u64 = 2 * PERIOD_NANOS;
 
 /// Run `watch` on every watching processor's tick, once [`start`] has run.
 ///
@@ -67,7 +91,9 @@ pub fn register(watch: &'static Watch) -> Result<(), Full> {
 /// every processor is online; the others arm their own watch tick when the
 /// interrupt this sends them arrives.
 pub fn start() {
-    WATCHING.store(true, Ordering::Release);
+    if WATCHING.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let saved = <crate::arch::Irq as IrqControl>::disable();
     arm_here();
     <crate::arch::Irq as IrqControl>::restore(saved);
@@ -81,7 +107,7 @@ pub fn watching() -> bool {
 
 /// Bump this processor's heartbeat: from every timer and inter-processor
 /// interrupt it takes.
-pub fn beat() {
+pub(crate) fn beat() {
     if !watching() {
         return;
     }
@@ -100,7 +126,7 @@ pub fn beats(cpu: usize) -> u64 {
 
 /// Keep this processor's watch tick armed: a one-shot no later than
 /// [`PERIOD_NANOS`] from now. With interrupts masked, as the timer wants.
-pub fn arm_here() {
+pub(crate) fn arm_here() {
     if watching() {
         crate::timer::after(PERIOD_NANOS);
     }
@@ -108,7 +134,7 @@ pub fn arm_here() {
 
 /// What the timer's tick does for the watch: the heartbeat, every
 /// registered [`Watch`], and the next watch tick.
-pub fn tick() {
+pub(crate) fn tick() {
     if !watching() {
         return;
     }
@@ -132,8 +158,85 @@ pub fn name_for_nmi(cpu: usize) {
     dead_code,
     reason = "read by x86-64's NMI handler alone: the Arm architectures have no NMI here"
 )]
-pub fn named_here() -> bool {
+pub(crate) fn named_here() -> bool {
     let named = NMI_NAMED.load(Ordering::Acquire);
     named != 0
         && crate::smp::this_cpu_for_report().is_ok_and(|cpu| cpu.logical.wrapping_add(1) == named)
+}
+
+/// Record what this processor's interrupt interrupted: `pc`, and whether it
+/// was in user mode. From `trap::dispatch` for every interrupt, interrupts
+/// masked; one read of a flag set once until the watch starts.
+pub(crate) fn sample(pc: u64, from_user: bool) {
+    if !watching() {
+        return;
+    }
+    let Some(cpu) = crate::smp::this_cpu().map(|cpu| cpu.logical) else {
+        return;
+    };
+    let (Some(at_pc), Some(at_task), Some(at)) =
+        (SAMPLE_PC.get(cpu), SAMPLE_TASK.get(cpu), SAMPLE_AT.get(cpu))
+    else {
+        return;
+    };
+    let task = crate::sched::current_id().unwrap_or(0) & !USER_BIT;
+    let mode = if from_user { USER_BIT } else { 0 };
+    at_pc.store(pc, Ordering::Relaxed);
+    at_task.store(task | mode, Ordering::Relaxed);
+    at.store(crate::timer::now_nanos().max(1), Ordering::Relaxed);
+}
+
+/// Say where every online processor was at its last interrupt: one `cpu`
+/// line each, for a failure report, after its `on` line (`L.lockup.9`).
+/// Nothing while the watch is off. Lock-free and allocation-free.
+pub(crate) fn report() {
+    if !watching() {
+        return;
+    }
+    let Some(topology) = crate::smp::topology() else {
+        return;
+    };
+    let now = crate::timer::now_nanos();
+    for cpu in topology.cpus().iter().filter(|cpu| cpu.is_online()) {
+        let logical = cpu.logical;
+        let at = SAMPLE_AT
+            .get(logical)
+            .map_or(0, |at| at.load(Ordering::Relaxed));
+        let beats = beats(logical);
+        let held = crate::sched::preemption_held(logical);
+        if at == 0 {
+            println!(
+                "  cpu {logical:<4}  no interrupt sampled yet, {beats} beats, {held} preemption held"
+            );
+            continue;
+        }
+        let pc = SAMPLE_PC
+            .get(logical)
+            .map_or(0, |pc| pc.load(Ordering::Relaxed));
+        let task = SAMPLE_TASK
+            .get(logical)
+            .map_or(0, |task| task.load(Ordering::Relaxed));
+        let age_ms = now.saturating_sub(at) / 1_000_000;
+        let stale = if now.saturating_sub(at) > STALE_NANOS {
+            ", takes no interrupts"
+        } else {
+            ""
+        };
+        let id = task & !USER_BIT;
+        if task & USER_BIT != 0 {
+            println!(
+                "  cpu {logical:<4}  task {id} in user mode, {age_ms} ms ago{stale}, {beats} beats, {held} preemption held"
+            );
+            println_unlogged!("  cpu {logical:<4}  at user {pc:#x}");
+        } else if crate::backtrace::in_image(pc) {
+            let offset = pc.wrapping_sub(crate::backtrace::image_start());
+            println!(
+                "  cpu {logical:<4}  task {id} in the kernel at kernel+{offset:#x}, {age_ms} ms ago{stale}, {beats} beats, {held} preemption held"
+            );
+        } else {
+            println!(
+                "  cpu {logical:<4}  task {id} in the kernel, outside the image, {age_ms} ms ago{stale}, {beats} beats, {held} preemption held"
+            );
+        }
+    }
 }

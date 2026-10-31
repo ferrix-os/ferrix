@@ -3685,6 +3685,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
     &LOCKUP,
+    &USER_LOCKUP,
 ];
 
 /// For the lockup detector (`lockup.rs`) and its NMI in
@@ -3710,4 +3711,27 @@ pub static LOCKUP: Explanation = Explanation {
         "On a virtual machine, a host that stopped running the processor for ten seconds.",
     ],
     see: "src/kernel/src/lockup.rs; src/kernel/src/watch.rs; docs/POSTMORTEM.md §6.2",
+};
+
+/// For the user watchdog (`userwatch.rs`, `docs/POSTMORTEM.md` §6.9): user
+/// space armed `/dev/watchdog` and stopped feeding it.
+pub static USER_LOCKUP: Explanation = Explanation {
+    code: "FX-9008",
+    title: "user space stopped feeding its watchdog",
+    meaning: "With `ferrix.watchdog=user` a program -- init, under \
+              `ferrix.init.watchdog=` -- opened `/dev/watchdog` and promised to feed it within \
+              its timeout. No feed came: the program's own loop did not turn for that long. \
+              The kernel still takes interrupts on every processor (it found this on its own \
+              watch tick), so what stopped is user space, or the part of the kernel it waits \
+              in. The `cpu` lines above say what each processor ran and where; the pstore's \
+              stop word says a lockup.",
+    causes: &[
+        "Every program waiting on one kernel lock or resource that is never released: the \
+         `cpu` lines show the processors idle or spinning in the kernel.",
+        "The feeder itself stopped, killed or stopped by a signal, or starved of processor \
+         time by programs that never yield.",
+        "A memory shortage that leaves every program waiting for a page.",
+        "On a virtual machine, a host that stopped running the guest for the timeout.",
+    ],
+    see: "src/kernel/src/userwatch.rs; src/kernel/src/fs/watchdog.rs; docs/POSTMORTEM.md §6.9",
 };

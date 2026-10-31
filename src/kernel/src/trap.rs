@@ -125,6 +125,9 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
             if frame.came_from_user() {
                 let _ = USER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
             }
+            // Where this processor was, for a failure report's `cpu` line
+            // (`watch`, `L.lockup.9`): one flag read while nothing watches.
+            crate::watch::sample(frame.instruction_pointer(), frame.came_from_user());
             arch::service_interrupts(frame, crate::irq::dispatch);
             // And only now, with the controller told this interrupt is done,
             // may the processor go and run something else. Switching inside

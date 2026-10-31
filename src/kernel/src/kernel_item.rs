@@ -45,6 +45,7 @@ pub mod init;
 pub mod init_check;
 pub mod lockup;
 pub mod lockup_check;
+pub mod userwatch;
 pub mod power;
 pub mod random;
 pub mod syscall;
