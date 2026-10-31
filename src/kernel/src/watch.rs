@@ -27,7 +27,7 @@ use ferrix_sync::IrqControl;
 use crate::hooks::{Full, Hooks};
 
 /// The longest a watching processor goes between ticks: one second.
-pub(crate) const PERIOD_NANOS: u64 = 1_000_000_000;
+pub const PERIOD_NANOS: u64 = 1_000_000_000;
 
 /// The most processors the watch keeps a heartbeat for: the timer's own
 /// bound.
@@ -45,9 +45,9 @@ static NMI_NAMED: AtomicUsize = AtomicUsize::new(0);
 /// Something that runs on every watching processor's tick, with the
 /// interrupt's time on the counter.
 #[derive(Debug)]
-pub(crate) struct Watch {
+pub struct Watch {
     /// What it does on a tick, interrupts masked, on that processor.
-    pub(crate) tick: fn(now: u64),
+    pub tick: fn(now: u64),
 }
 
 /// Every registered [`Watch`]. Two is one more than the kernel registers.
@@ -58,7 +58,7 @@ static WATCHES: Hooks<Watch, 2> = Hooks::new();
 /// # Errors
 ///
 /// [`Full`] when the list is.
-pub(crate) fn register(watch: &'static Watch) -> Result<(), Full> {
+pub fn register(watch: &'static Watch) -> Result<(), Full> {
     WATCHES.register(watch)
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn register(watch: &'static Watch) -> Result<(), Full> {
 /// ticks at least once a [`PERIOD_NANOS`]. Once, on the boot processor, once
 /// every processor is online; the others arm their own watch tick when the
 /// interrupt this sends them arrives.
-pub(crate) fn start() {
+pub fn start() {
     WATCHING.store(true, Ordering::Release);
     let saved = <crate::arch::Irq as IrqControl>::disable();
     arm_here();
@@ -75,13 +75,13 @@ pub(crate) fn start() {
 }
 
 /// Whether the watch has started.
-pub(crate) fn watching() -> bool {
+pub fn watching() -> bool {
     WATCHING.load(Ordering::Acquire)
 }
 
 /// Bump this processor's heartbeat: from every timer and inter-processor
 /// interrupt it takes.
-pub(crate) fn beat() {
+pub fn beat() {
     if !watching() {
         return;
     }
@@ -92,7 +92,7 @@ pub(crate) fn beat() {
 
 /// Processor `cpu`'s heartbeat: how many interrupts it has taken since the
 /// watch started.
-pub(crate) fn beats(cpu: usize) -> u64 {
+pub fn beats(cpu: usize) -> u64 {
     BEATS
         .get(cpu)
         .map_or(0, |slot| slot.load(Ordering::Relaxed))
@@ -100,7 +100,7 @@ pub(crate) fn beats(cpu: usize) -> u64 {
 
 /// Keep this processor's watch tick armed: a one-shot no later than
 /// [`PERIOD_NANOS`] from now. With interrupts masked, as the timer wants.
-pub(crate) fn arm_here() {
+pub fn arm_here() {
     if watching() {
         crate::timer::after(PERIOD_NANOS);
     }
@@ -108,7 +108,7 @@ pub(crate) fn arm_here() {
 
 /// What the timer's tick does for the watch: the heartbeat, every
 /// registered [`Watch`], and the next watch tick.
-pub(crate) fn tick() {
+pub fn tick() {
     if !watching() {
         return;
     }
@@ -122,7 +122,7 @@ pub(crate) fn tick() {
 
 /// Name processor `cpu` as the one a lockup's NMI is for, before the NMI is
 /// sent.
-pub(crate) fn name_for_nmi(cpu: usize) {
+pub fn name_for_nmi(cpu: usize) {
     NMI_NAMED.store(cpu.wrapping_add(1), Ordering::Release);
 }
 
@@ -132,7 +132,7 @@ pub(crate) fn name_for_nmi(cpu: usize) {
     dead_code,
     reason = "read by x86-64's NMI handler alone: the Arm architectures have no NMI here"
 )]
-pub(crate) fn named_here() -> bool {
+pub fn named_here() -> bool {
     let named = NMI_NAMED.load(Ordering::Acquire);
     named != 0
         && crate::smp::this_cpu_for_report().is_ok_and(|cpu| cpu.logical.wrapping_add(1) == named)

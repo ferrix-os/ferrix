@@ -161,6 +161,7 @@ pub mod watchdog {
     /// No timer to halt.
     pub(crate) fn before_reset() {}
 }
+pub mod watch;
 /// Finding what the machine has: the core's modules of `discovery/` (firmware tables, the device tree and the board they describe), whose `mod.rs` is the item's and re-exports them.
 pub mod discovery {
     // ACPI is how the 64-bit pair describe themselves. An ARMv7-A machine has
