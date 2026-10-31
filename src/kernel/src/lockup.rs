@@ -27,7 +27,7 @@ use crate::panic::{catalog, fatal};
 use crate::watch::{self, Watch};
 
 /// The command-line option, and the one value that turns the detector on.
-pub(crate) const OPTION: &str = "ferrix.lockup";
+pub const OPTION: &str = "ferrix.lockup";
 const ON: &str = "on";
 const OFF: &str = "off";
 
@@ -35,7 +35,7 @@ const OFF: &str = "off";
 /// seconds, the bound past which a wait for another processor calls it stuck
 /// (`smp`, 2026-10-07): under it, a virtual processor its host starved is
 /// slow, not stuck.
-pub(crate) const STUCK_NANOS: u64 = 10_000_000_000;
+pub const STUCK_NANOS: u64 = 10_000_000_000;
 
 /// How long after its NMI a stuck processor has to begin its own report
 /// before its watcher reports instead.
@@ -62,7 +62,7 @@ static DETECTOR: Watch = Watch { tick: on_tick };
 /// Read `ferrix.lockup` from the loader's command line: once, at boot.
 /// Exactly `on` asks for the detector; no option or `off` is the default;
 /// anything else is said and taken as off.
-pub(crate) fn read_option(view: &BootView<'_>) {
+pub fn read_option(view: &BootView<'_>) {
     match view.option(OPTION) {
         None | Some(OFF) => {}
         Some(ON) => ASKED.store(true, Ordering::Release),
@@ -73,13 +73,13 @@ pub(crate) fn read_option(view: &BootView<'_>) {
 }
 
 /// Whether the detector was asked for.
-pub(crate) fn asked() -> bool {
+pub fn asked() -> bool {
     ASKED.load(Ordering::Acquire)
 }
 
 /// Start the detector, if asked: once every processor is online, before
 /// init. Says what it watches.
-pub(crate) fn start() {
+pub fn start() {
     if !asked() {
         return;
     }

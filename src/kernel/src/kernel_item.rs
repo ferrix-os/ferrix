@@ -56,6 +56,8 @@ pub mod init;
 pub mod init_check;
 #[cfg(ferrix_personality = "user")]
 pub(crate) mod linuxd_start;
+pub mod lockup;
+pub mod lockup_check;
 pub mod power;
 pub mod random;
 pub mod syscall;

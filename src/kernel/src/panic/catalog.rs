@@ -4514,19 +4514,16 @@ pub(crate) static ALL: &[&Explanation] = &[
     &UNEXPECTED_EXCEPTION,
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
-<<<<<<< HEAD
     &KERNEL_STACK_OVERFLOW,
     &WATCHDOG_STARVED,
-=======
     &LOCKUP,
->>>>>>> 55ee08384 (lockup: processors watch each other; a lockup ends in a report (S4a))
 ];
 
 /// For the lockup detector (`lockup.rs`) and its NMI in
 /// `arch/x86_64/paranoid.rs`: a processor that took no interrupt for ten
 /// seconds.
-pub(crate) static LOCKUP: Explanation = Explanation {
-    code: "FX-9007",
+pub static LOCKUP: Explanation = Explanation {
+    code: "FX-9009",
     title: "a processor took no interrupt for ten seconds",
     meaning: "With `ferrix.lockup=on` every processor watches the next one in a ring, \
               reading the count of timer and inter-processor interrupts it has taken, and each \

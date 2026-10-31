@@ -23,7 +23,7 @@ const SETTLE_NANOS: u64 = 3_000_000_000;
 static ASKED: AtomicBool = AtomicBool::new(false);
 
 /// Read the option: once, at boot, beside `lockup::read_option`.
-pub(crate) fn read_option(view: &BootView<'_>) {
+pub fn read_option(view: &BootView<'_>) {
     match view.option(OPTION) {
         None => {}
         Some(IRQOFF) => ASKED.store(true, Ordering::Release),
@@ -35,7 +35,7 @@ pub(crate) fn read_option(view: &BootView<'_>) {
 
 /// Run the check, if the command line asked for it: never returns when it
 /// does.
-pub(crate) fn run() {
+pub fn run() {
     if !ASKED.load(Ordering::Acquire) {
         return;
     }

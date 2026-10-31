@@ -285,7 +285,7 @@ pub(crate) const RUNNING_WORD_OFFSET: usize =
 
 impl PerCpu {
     /// Whether this processor has said it is running.
-    pub(crate) fn is_online(&self) -> bool {
+    pub fn is_online(&self) -> bool {
         self.online.load(Ordering::Acquire)
     }
 
@@ -462,7 +462,7 @@ pub fn topology() -> Option<&'static Topology> {
 
 /// Processor `cpu`'s record, by logical number, once [`discover`] has run:
 /// for a reader of another processor's state, as a report is.
-pub(crate) fn record(cpu: usize) -> Option<&'static PerCpu> {
+pub fn record(cpu: usize) -> Option<&'static PerCpu> {
     TOPOLOGY.get()?.cpus.get(cpu)
 }
 
@@ -1970,7 +1970,7 @@ pub(crate) fn stop_others() -> usize {
 
 /// Whether a panic has asked every processor to stop: then nothing watches
 /// any more (`lockup`).
-pub(crate) fn stopping() -> bool {
+pub fn stopping() -> bool {
     STOPPING.load(Ordering::Acquire)
 }
 
