@@ -875,7 +875,14 @@ fn report(
     headline: core::fmt::Arguments<'_>,
     entry: &'static crate::panic::catalog::Explanation,
 ) -> ! {
-    let first = crate::panic::begin_report();
+    // A machine check's stop is a stop word of its own for the next boot's
+    // loader (`L.console.58`); every other fatal trap is a panic's.
+    let stop = if ptr::eq(entry, &raw const crate::panic::catalog::MACHINE_CHECK) {
+        ferrix_bootinfo::pstore::Stop::MachineCheck
+    } else {
+        ferrix_bootinfo::pstore::Stop::Panic
+    };
+    let first = crate::panic::begin_report(stop);
     println!();
     crate::console::println_unlogged!("FERRIX-PANIC {headline}");
     arch::report_trap(frame);

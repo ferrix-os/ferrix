@@ -99,7 +99,7 @@ pub fn explain(entry: &'static Explanation) {
 /// and stops the processor it is running on.
 #[panic_handler]
 fn panic(info: &PanicInfo<'_>) -> ! {
-    let first = begin_report();
+    let first = begin_report(ferrix_bootinfo::pstore::Stop::Panic);
     println!();
     println!("FERRIX-PANIC {}", info.message());
     if let Some(location) = info.location() {
@@ -178,19 +178,20 @@ impl core::fmt::Write for Prefix {
 }
 
 /// Begin a report of a failure the kernel will not survive, and say whether
-/// it is the first.
+/// it is the first; `stop` is the stop word the first records: a panic's,
+/// or a machine check's (`L.console.58`).
 ///
 /// Interrupts go first, before the other processors are asked to stop: an
 /// inter-processor interrupt taken part way through the report would halt the
 /// one processor writing it.
-pub(crate) fn begin_report() -> bool {
+pub(crate) fn begin_report(stop: ferrix_bootinfo::pstore::Stop) -> bool {
     arch::disable_interrupts();
     console::begin_panic();
     let first = !REPORTING.swap(true, Ordering::AcqRel);
     if first {
         // How this boot stopped, for the next boot's loader, before anything
         // in the report can fault (`console::pstore`).
-        console::pstore::panicked();
+        console::pstore::panicked(stop);
     }
     first
 }

@@ -46,7 +46,7 @@ fn every_field_is_checked() {
         validate(&bytes, LEN)
     };
     assert_eq!(refused(0, 1), Err(Refusal::NothingThere), "magic");
-    assert_eq!(refused(8, 1), Err(Refusal::Version(3)), "version");
+    assert_eq!(refused(8, 4), Err(Refusal::Version(7)), "version");
     assert_eq!(refused(13, 1), Err(Refusal::Layout), "header length");
     assert_eq!(
         refused(18, 1),
@@ -357,8 +357,10 @@ fn version_1(written: u64, stop: u64) -> [u8; HEADER_BYTES] {
 #[test]
 fn every_stop_round_trips_and_none_is_zero() {
     assert_eq!(ended(0), Ended::NoneRecorded, "a word of zeros is no stop");
-    for (index, stop) in Stop::ALL.into_iter().enumerate() {
-        assert_eq!(stop.code() as usize, index + 1, "{stop:?}'s code");
+    // Codes 1 to 6 in order, then 8: 7 is the lockup detector's.
+    let codes = [1u32, 2, 3, 4, 5, 6, 8];
+    for (stop, code) in Stop::ALL.into_iter().zip(codes) {
+        assert_eq!(stop.code(), code, "{stop:?}'s code");
         assert_eq!(Stop::of(stop.code()), Some(stop), "{stop:?} by its code");
         assert_eq!(ended(stop.word()), Ended::Stopped(stop), "{stop:?}'s word");
         let found = validate(&stopped(9, stop.word()), LEN).unwrap();
@@ -390,7 +392,7 @@ fn a_changed_bit_is_damaged() {
 /// Verifies: `L.console.48`
 #[test]
 fn an_unassigned_code_is_a_newer_kernels() {
-    for code in [7u32, 255, 0x1234_5678, u32::MAX - 1] {
+    for code in [7u32, 9, 255, 0x1234_5678, u32::MAX - 1] {
         let word = u64::from(code) | (u64::from(!code) << 32);
         assert_eq!(ended(word), Ended::Unknown(code), "code {code}");
     }
@@ -398,7 +400,7 @@ fn an_unassigned_code_is_a_newer_kernels() {
 
 /// Verifies: `L.console.48`
 #[test]
-fn version_1_reads_with_no_stop_word_and_version_3_is_refused() {
+fn version_1_reads_with_no_stop_word_and_version_4_is_refused() {
     let old = version_1(40, Stop::Restart.word());
     let found = validate(&old, LEN).unwrap();
     assert_eq!(found.version, VERSION_1, "read as version 1");
@@ -409,15 +411,89 @@ fn version_1_reads_with_no_stop_word_and_version_3_is_refused() {
         "whatever its bytes 72..80 are"
     );
     let mut newer = stopped(0, 0);
-    put(&mut newer, 8, &3u32.to_le_bytes());
+    put(&mut newer, 8, &4u32.to_le_bytes());
     let crc = crc32c(&newer[..CHECKED]);
     put(&mut newer, CHECKED, &crc.to_le_bytes());
-    assert_eq!(validate(&newer, LEN), Err(Refusal::Version(3)), "version 3");
+    assert_eq!(validate(&newer, LEN), Err(Refusal::Version(4)), "version 4");
+}
+
+/// The same header as version 2 would have written it: no table.
+fn version_2(written: u64, stop: u64) -> [u8; HEADER_BYTES] {
+    let mut bytes = stopped(written, stop);
+    put(&mut bytes, 8, &VERSION_2.to_le_bytes());
+    let crc = crc32c(&bytes[..CHECKED]);
+    put(&mut bytes, CHECKED, &crc.to_le_bytes());
+    bytes
+}
+
+/// A version-3 header whose table holds `count` and `words` from slot 0.
+fn tabled(count: u64, words: &[u64]) -> [u8; HEADER_BYTES] {
+    let mut bytes = encode(CAPACITY, 5);
+    put(&mut bytes, TABLE_COUNT_OFFSET, &count.to_le_bytes());
+    for (slot, word) in words.iter().enumerate() {
+        put(&mut bytes, TABLE_OFFSET + slot * 8, &word.to_le_bytes());
+    }
+    bytes
+}
+
+/// The bad-frame table (`docs/MACHINE-CHECK-RESTART.md` §2.2): an entry
+/// names its frame only with its complement; a damaged one is left out;
+/// the count past the table reads the table's 64 slots; a version-2 header
+/// has no table, whatever its bytes; and `encode` leaves the table zero.
+///
+/// Verifies: `L.console.59`
+#[test]
+fn the_bad_frame_table_reads_whole_entries_only() {
+    for frame in [0u32, 1, 0x1_4f40, u32::MAX] {
+        assert_eq!(
+            table_frame(table_entry(frame)),
+            Some(frame),
+            "frame {frame:#x}"
+        );
+    }
+    assert_eq!(table_frame(0), None, "a word of zeros");
+    assert_eq!(table_frame(table_entry(7) ^ 1), None, "a scribbled word");
+    let words = [
+        table_entry(0x10),
+        0,
+        table_entry(0x30) ^ (1 << 40),
+        table_entry(0x40),
+    ];
+    let header = tabled(4, &words);
+    let found = validate(&header, LEN).unwrap();
+    assert_eq!(found.version, VERSION, "version 3");
+    let frames: Vec<u32> = bad_frames(&header, &found).collect();
+    assert_eq!(frames, vec![0x10, 0x40], "damaged entries left out");
+    let full: Vec<u64> = (0..TABLE_ENTRIES as u32).map(table_entry).collect();
+    let header = tabled(1000, &full);
+    let found = validate(&header, LEN).unwrap();
+    assert_eq!(
+        bad_frames(&header, &found).count(),
+        TABLE_ENTRIES,
+        "past 64: 64"
+    );
+    let mut old = version_2(0, 0);
+    put(&mut old, TABLE_COUNT_OFFSET, &1u64.to_le_bytes());
+    put(&mut old, TABLE_OFFSET, &table_entry(0x10).to_le_bytes());
+    let found = validate(&old, LEN).unwrap();
+    assert_eq!(found.version, VERSION_2, "read as version 2");
+    assert_eq!(
+        bad_frames(&old, &found).count(),
+        0,
+        "version 2 has no table"
+    );
+    assert!(
+        encode(CAPACITY, 1)[TABLE_COUNT_OFFSET..]
+            .iter()
+            .all(|&byte| byte == 0),
+        "encode zeroes the table"
+    );
 }
 
 /// Verifies: `L.console.43`
+/// Verifies: `L.console.59`
 #[test]
-fn the_kernel_takes_only_a_fresh_version_2_header() {
+fn the_kernel_takes_only_a_fresh_version_3_header() {
     assert!(
         fresh(&encode(CAPACITY, 4), LEN).is_ok(),
         "the loader's fresh header"
@@ -448,4 +524,60 @@ fn the_kernel_takes_only_a_fresh_version_2_header() {
         Err(Refusal::NothingThere),
         "zeroed RAM"
     );
+    assert_eq!(
+        fresh(&version_2(0, 0), LEN),
+        Err(Refusal::Version(VERSION_2)),
+        "a version-2 header: an older loader's, whose table would be stale"
+    );
+    for at in [TABLE_COUNT_OFFSET, TABLE_OFFSET, HEADER_BYTES - 1] {
+        let mut bytes = encode(CAPACITY, 4);
+        bytes[at] = 1;
+        assert_eq!(
+            fresh(&bytes, LEN),
+            Err(Refusal::Tabled),
+            "a table byte at {at}"
+        );
+    }
+}
+
+/// The pages the loader keeps out from records left in the banks
+/// (`docs/MACHINE-CHECK-RESTART.md` §2.7): an uncorrected record with a
+/// usable address, by Intel's rule or AMD's; nothing else.
+///
+/// Verifies: `L.console.59`
+#[test]
+fn a_left_record_names_its_page_only_when_usable() {
+    const SRAR: u64 = 0xbd80_0000_0000_0134;
+    const PAGE_MISC: u64 = 0x8c;
+    const AMD_AR: u64 = 0xbc00_0800_0000_0000;
+    let at = 0x1_4f40_3123;
+    assert_eq!(
+        left_page(BankRules::Intel, SRAR, at, PAGE_MISC),
+        Some(0x14f403)
+    );
+    assert_eq!(left_page(BankRules::Amd, AMD_AR, at, 0), Some(0x14f403));
+    // Corrected, invalid, or no address: nothing.
+    assert_eq!(
+        left_page(BankRules::Intel, 0x9c00_0000_0000_009f, at, PAGE_MISC),
+        None
+    );
+    assert_eq!(
+        left_page(BankRules::Intel, SRAR & !(1 << 63), at, PAGE_MISC),
+        None
+    );
+    assert_eq!(
+        left_page(BankRules::Intel, SRAR & !(1 << 58), at, PAGE_MISC),
+        None
+    );
+    // Intel: no MISCV, a linear address, or a grain coarser than a page.
+    assert_eq!(
+        left_page(BankRules::Intel, SRAR & !(1 << 59), at, PAGE_MISC),
+        None
+    );
+    assert_eq!(left_page(BankRules::Intel, SRAR, at, (1 << 6) | 12), None);
+    assert_eq!(left_page(BankRules::Intel, SRAR, at, (2 << 6) | 21), None);
+    // AMD: no poison bit.
+    assert_eq!(left_page(BankRules::Amd, AMD_AR & !(1 << 43), at, 0), None);
+    // A frame past 32 bits.
+    assert_eq!(left_page(BankRules::Intel, SRAR, 1 << 45, PAGE_MISC), None);
 }

@@ -676,6 +676,36 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.FAIL.9";
             attribute :>> unit = ("mm::scrub::render");
         }
+        requirement <'L.mm.109'> aRetirementIsRecordedForTheNextBoot : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.3. */
+            attribute :>> statement = "retire_frame shall record each frame it newly retires --
+                Claimed or Marked, never Already or Full -- in the pstore bad-frame
+                table, a slot claimed by one fetch_add and the entry stored and
+                written back after the claim, past 64 said once; and no boot check's
+                retirement shall reach the live table.";
+            attribute :>> criterion = "Stage 2's check_kept_out: the checked retirements leave
+                the live table's count as it was; test-mce-restart: boot 2's loader
+                keeps the page out from the table. Negative control: the table write
+                removed, the judge fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("mm::retire_frame", "mm::table_held", "mm::hold_table");
+        }
+        requirement <'L.mm.110'> badFramesAreLeftOut : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.8. */
+            attribute :>> statement = "The frame allocator shall give no BadFrame page to its
+                free lists, shall enter each in the retired set before the first
+                allocation and say how many, and the pstore attach shall write each
+                into the new table again; retire_frame shall answer Already for such
+                a frame before NotCovered.";
+            attribute :>> criterion = "Stage 2's check_kept_out: a frame the allocator does not
+                manage, entered as init enters a BadFrame page, answers Already;
+                test-mce-restart: boot 2 says 1 frames left out as bad and its poll
+                finds the frame already retired; boots after it keep it out from the
+                rewritten table. Negative control: the leave-out removed, the gate
+                fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("mm::keep_out", "mm::init", "console::pstore::attach");
+        }
         requirement <'L.mm.108'> oneBatchAtATime : ItemLowLevel {
             attribute :>> statement = "Only one batch shall run at a time machine-wide, of at most 64
                 frames; a batch asked for while one runs shall be refused, and

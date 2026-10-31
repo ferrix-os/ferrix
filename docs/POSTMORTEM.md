@@ -160,6 +160,12 @@ One region of RAM, a 4 KiB header page and a ring of 1 MiB:
 4096 ring       byte n at 4096 + n % capacity
 ```
 
+Version 3 (2026-10-31, `docs/MACHINE-CHECK-RESTART.md`) adds the bad-frame
+table at bytes 128..648 (§5.1's layout); the loader keeps every frame it
+names out of the next boot, and the kernel accepts only a fresh version-3
+header with an empty table, so a loader and kernel of different versions
+fail closed: no region that boot.
+
 The region is `4096 + capacity` bytes, page aligned. It is **valid** when
 magic, version, header, capacity (a power of two from 4 KiB to 16 MiB, and
 `len - 4096`) and CRC match and `written` is below 2^48. Its text is the last
@@ -597,7 +603,10 @@ the **stop word**, at byte 72, and nothing else changes:
 ```
  64  written    u64              bytes ever recorded
  72  stop       u64              low half: the stop's code; high half: its complement; 0 = none yet
- 80..4096  zero
+ 80..128  zero
+128  bad count  u64              version 3: bad-frame table slots the kernel claimed
+136  bad[64]    u64 each         version 3: a frame and its complement (docs/MACHINE-CHECK-RESTART.md §2.2)
+648..4096  zero
 ```
 
 `HEADER_BYTES` grows from 72 to 80. The CRC still covers bytes 0..32, the
@@ -616,7 +625,9 @@ not as some other code. The codes are a closed list, kept in
 | 4 | a halt a program asked for | `reboot(2)` HALT |
 | 5 | a reset after init exited | `power::finish`, `ferrix.onexit=reset` |
 | 6 | a power-off after init exited | `power::finish`, the default |
-| 7-255 | reserved for S2, S4 and S7 (lockup, thermal, update) | — |
+| 7 | a lockup | the lockup detector (§6.2; reserved by its branch) |
+| 8 | a machine check | `panic::begin_report`, when the first report is the machine check's (`docs/MACHINE-CHECK-RESTART.md` §2.1) |
+| 9-255 | reserved for S2 and S7 (thermal, update) | — |
 
 A whole word whose code is not on the list is said as `unknown code N (a
 newer kernel's)`: after an A/B fallback, an older loader can meet a newer

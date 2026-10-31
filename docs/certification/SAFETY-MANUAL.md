@@ -884,6 +884,34 @@ memory that corrects errors where that matters. In particular:
   scrubber itself would run, and says `scrub    check skipped: ...` with
   the reason elsewhere.
 
+### AoU-39 — a bad frame stays out across a warm reset only on the loader's word
+
+H.FAIL.12 (`docs/MACHINE-CHECK-RESTART.md`, slice 8a): after a warm reset
+the kernel hands out no frame the boot before retired, nor the page of an
+uncorrected record a fatal machine check named, **where the loader marked
+it left out**. The loader is outside the item (A.FIRMWARE), and the kernel
+trusts its `BadFrame` pages only to leave memory out -- the risk is RAM
+lost, never wrong data. The integrator:
+
+* uses the loader that marks exactly the frames the pstore header's
+  version-3 table and the machine-check banks name, never one more and never
+  dropping one, and that reads no pstore page a bank names; a loader and
+  kernel of different header versions fail closed (no region that boot);
+* knows that nothing survives a power cycle yet (slice 8b), and that a
+  fatal machine check resets only under `ferrix.panic=reset`, after its
+  10 s hold (the customer's R1);
+* knows that a frame the table could not take (past 64 in one boot) or the
+  retired set had no room for is not kept out after a reset, which the
+  kernel says once;
+* knows the residual of the order (ledger 5487 (3)): the loader reads the
+  table inside its pstore step, after it has allocated the boot info area,
+  since the command line there can turn pstore off; a retired frame that
+  area or firmware now holds is not kept out, which its line says (`is in
+  use (firmware or the loader's earlier allocation)`). The banks' pages are
+  kept out first, before any allocation;
+* knows that the loader reads only the boot processor's banks; another
+  processor's record is kept out through the table, which its stop writes.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

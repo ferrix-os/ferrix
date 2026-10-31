@@ -250,6 +250,31 @@ fn reaches_mce_pagecache(path: &str) -> bool {
         || path.starts_with("src/tests/mce-pagecache/")
 }
 
+/// A warm restart after a fatal machine check (`docs/MACHINE-CHECK-RESTART.md`
+/// §5, ledger 5467): the stop word, the pstore table, the loader's keep-out,
+/// the kernel's leave-out.
+const TEST_MCE_RESTART: &[&str] = &[
+    "test-mce-restart --arch x86_64 --accel tcg",
+    "test-mce-restart-retired --arch x86_64 --accel tcg",
+];
+
+/// Whether `path` reaches the warm restart: the pstore table, the stop word,
+/// the loader's bank read and keep-out, the allocator's leave-out, the
+/// machine check's stop, or the gate.
+fn reaches_mce_restart(path: &str) -> bool {
+    [
+        "src/lib/proto/bootinfo/src/pstore.rs",
+        "src/kernel/src/console/pstore.rs",
+        "src/kernel/src/panic.rs",
+        "src/kernel/src/mm.rs",
+        "src/kernel/src/arch/x86_64/mce.rs",
+        "src/boot/common/uefi/src/badframes.rs",
+        "src/boot/common/uefi/src/pstore.rs",
+        "tools/common/xtask/src/mce_restart.rs",
+    ]
+    .contains(&path)
+}
+
 /// A ring-3 driver's poison (`docs/MACHINE-CHECK-DRIVER.md` §3, ledger
 /// 5444): Own and Kill under both accelerators, Copy under KVM with AMD's
 /// records, Bystander under TCG with Intel's.
@@ -517,6 +542,13 @@ fn area_rows(path: &str, rows: &mut Rows) {
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if reaches_mce_restart(path) {
+        rows.add(TEST_MCE_RESTART);
+        reason(
+            rows,
+            "a warm restart after a machine check: test-mce-restart",
         );
     }
     if reaches_mce_driver(path) {

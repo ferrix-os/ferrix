@@ -202,7 +202,13 @@ The kernel keeps no map from a frame to its mappers (the reverse map is per
 VMO, `user/vmo.rs`). So retirement is Linux's default "late kill"
 (`vm.memory_failure_early_kill = 0`): a process that maps the frame and
 has not touched it is not signalled; the frame is never handed out again;
-whoever consumes the poison takes its own SRAR (§3.5).
+whoever consumes the poison takes its own SRAR (§3.5). Each frame newly
+retired is also recorded in the pstore header's bad-frame table, and a fatal
+machine check records its own records' pages before its report, so that
+after a warm reset the next boot's loader keeps them out from that boot's
+start, and the kernel leaves them out and lists them retired
+(`docs/MACHINE-CHECK-RESTART.md`, H.FAIL.12; across a power cycle is slice
+8b, a BACKLOG row).
 
 * A set of retired frames (256 entries, atomics; full: said once, and
   later frames are logged but not retired -- a machine with 256 bad pages

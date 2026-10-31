@@ -1189,11 +1189,42 @@ pub(super) fn from_user(frame: &mut TrapFrame) -> bool {
 
 /// Stop as FX-9005; the report prints the banks ([`report`]).
 fn stop(frame: &TrapFrame) -> ! {
+    record_stopping_pages();
     crate::trap::fatal(
         frame,
         "machine check",
         &crate::panic::catalog::MACHINE_CHECK,
     )
+}
+
+/// Record, before the report, the page of every uncorrected record in this
+/// processor's banks with a usable address (`retirable`'s rules) in the
+/// bad-frame table, so the
+/// next boot's loader keeps it out (`L.x86_64.254`,
+/// `docs/MACHINE-CHECK-RESTART.md` §2.4): many firmwares clear the banks at
+/// reset, and then the table is the only memory of it. Reads banks and calls
+/// the table's lock-free write: nothing the paranoid entry's rules forbid.
+fn record_stopping_pages() {
+    let Some(proc) = here().and_then(record_of) else {
+        return;
+    };
+    // A vendor with no recovery rules names no usable address.
+    if matches!(proc.vendor, Vendor::NoRecovery) {
+        return;
+    }
+    for bank in 0..proc.banks {
+        let status = read_bank(bank, 1);
+        if status & decode::VAL == 0 || status & decode::UC == 0 {
+            continue;
+        }
+        // Only a usable address, by the rules the poll's retirement reads
+        // (`retirable`): no `ADDRV`, or Intel's linear or segment address,
+        // names no frame (ledger 5487 (1)).
+        let (address, misc) = (address_of(bank, status), misc_of(bank, status));
+        if let Some(page) = retirable(proc, bank, status, address, misc) {
+            let _ = crate::console::pstore::record_bad_frame(page / ferrix_bootinfo::PAGE_SIZE);
+        }
+    }
 }
 
 /// Whether `frame` is a ring-3 machine check [`from_user`] marked.

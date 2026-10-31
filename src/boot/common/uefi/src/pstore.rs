@@ -33,7 +33,12 @@ const NONE: &str = "no region this boot";
 
 /// Take the region for this boot: find it, report what the previous kernel
 /// left there, and write a fresh header. `None` when there is none, said.
-pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Option<Allocation> {
+pub(crate) fn take(
+    services: &Services,
+    cmdline: &str,
+    direct: DirectMap,
+    kept: &mut crate::badframes::Kept,
+) -> Option<Allocation> {
     match pstore::switch(cmdline) {
         Switch::On => {}
         Switch::Off => {
@@ -61,6 +66,20 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
         println!("  pstore   {address:#x} is outside the direct map: {NONE}");
         return None;
     }
+    // A page of the region a machine-check bank names is never read: poison
+    // there would stop this loader inside firmware at every restart
+    // (`docs/MACHINE-CHECK-RESTART.md` §2.6). The header's: no region this
+    // boot. A ring page's: the header and its table are read, the text not.
+    if kept.names_bank_page(region.address) {
+        let _ = services.free("freeing the pstore region", region);
+        println!(
+            "  pstore   a machine-check bank names the region's header page {:#x}: {NONE}",
+            region.address
+        );
+        return None;
+    }
+    let ring_named = (1..pstore::LEN / pstore::HEADER)
+        .any(|page| kept.names_bank_page(region.address + page * pstore::HEADER));
     // SAFETY: the region is the loader's own allocation of `pstore::LEN`
     // bytes, identity mapped under boot services, and nothing else refers to
     // it; it is read before anything writes it.
@@ -68,18 +87,32 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
     let mut opened = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
-            let lines = report(region, &found);
-            keep_as_files(services, region, &found, &lines);
-            // Kept in the event log before the fresh header lets it go
-            // (POSTMORTEM §4, E2); a failed append keeps the region as it
-            // is, still allocated so the kernel never uses its pages, and
-            // this boot goes without one.
-            let kept = match &mut opened {
-                events::Opened::Absent => events::Kept::NotAPanic,
-                events::Opened::Unusable => events::Kept::Failed,
-                events::Opened::Present(log) => events::keep(log, services, region),
+            // The frames the boot before retired, kept out of this one
+            // (`docs/MACHINE-CHECK-RESTART.md` §2.5), before anything here
+            // reads the ring.
+            for frame in pstore::bad_frames(&header, &found) {
+                crate::badframes::keep(services, kept, frame, "table");
+            }
+            let logged = if ring_named {
+                println!(
+                    "  pstore   boot {}'s text not read: a machine-check bank names a page of it",
+                    found.sequence
+                );
+                events::Kept::NotAPanic
+            } else {
+                let lines = report(region, &found);
+                keep_as_files(services, region, &found, &lines);
+                // Kept in the event log before the fresh header lets it go
+                // (POSTMORTEM §4, E2); a failed append keeps the region as it
+                // is, still allocated so the kernel never uses its pages, and
+                // this boot goes without one.
+                match &mut opened {
+                    events::Opened::Absent => events::Kept::NotAPanic,
+                    events::Opened::Unusable => events::Kept::Failed,
+                    events::Opened::Present(log) => events::keep(log, services, region),
+                }
             };
-            if matches!(kept, events::Kept::Failed) {
+            if matches!(logged, events::Kept::Failed) {
                 if let events::Opened::Present(log) = &mut opened {
                     events::summary(log, services);
                 }

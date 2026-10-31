@@ -914,7 +914,7 @@ fn stopped(
 
 /// Whether QEMU says the machine is paused, asked until `deadline`: a
 /// power-off under `-action shutdown=pause`, not an exit.
-fn paused(qmp: &mut Qmp, deadline: Instant) -> Result<bool> {
+pub(crate) fn paused(qmp: &mut Qmp, deadline: Instant) -> Result<bool> {
     loop {
         let status = qmp.execute("query-status", None)?;
         if status.replace(' ', "").contains("\"running\":false") {

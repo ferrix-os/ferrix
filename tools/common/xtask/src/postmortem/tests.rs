@@ -264,7 +264,12 @@ fn every_case_names_a_different_stop_and_the_hang_none() {
             );
         }
     }
-    for stop in Stop::ALL.into_iter().filter(|stop| *stop != Stop::Panic) {
+    // A panic's case is the record's; a machine check's is test-mce-restart's
+    // (`docs/MACHINE-CHECK-RESTART.md` §5).
+    for stop in Stop::ALL
+        .into_iter()
+        .filter(|stop| !matches!(stop, Stop::Panic | Stop::MachineCheck))
+    {
         assert!(
             CASES.iter().any(|case| case.ended == Ended::Stopped(stop)),
             "{stop:?} has a case"

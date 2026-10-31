@@ -60,6 +60,7 @@ pub(super) struct Found {
 /// Verifies: `L.object.261`
 pub(super) fn run() -> Result<Found, &'static str> {
     let before = mm::retired_for_check();
+    mm::hold_table_for_check();
     cache::quiet_for_check(true);
     let outcome = cases();
     cache::quiet_for_check(false);

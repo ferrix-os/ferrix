@@ -3303,6 +3303,16 @@ package FerrixX8664Requirements {
                 "arch::x86_64::mce::cmci::take_back_hold",
                 "arch::x86_64::mce::poll_takes");
         }
+        requirement <'L.x86_64.254'> theStopRecordsItsPages : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.4: many firmwares clear the banks at reset. */
+            attribute :>> statement = "A machine check that stops shall, before its report,
+                record in the pstore bad-frame table the page of every uncorrected
+                record in its processor's banks with a usable address, lock-free.";
+            attribute :>> criterion = "test-mce-restart: boot 2's loader finds the page in the
+                table (kept out (table)) beside the banks' record.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("arch::x86_64::mce::stop", "arch::x86_64::mce::record_stopping_pages");
+        }
         requirement <'L.x86_64.99'> theMachineResets : ItemLowLevel {
             attribute :>> statement = "reset shall restart the machine from firmware
                 after the console has drained.";

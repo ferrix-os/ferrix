@@ -640,6 +640,8 @@ pub(crate) const fn kind_of(memory_type: u32) -> MemKind {
         0x8000_0005 => MemKind::DeviceTree,
         0x8000_0006 => MemKind::Pstore,
         0x8000_0007 => MemKind::Smbios,
+        // The pages this loader kept out as bad (`badframes`).
+        0x8000_0008 => MemKind::BadFrame,
         _ => MemKind::Reserved,
     }
 }

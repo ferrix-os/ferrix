@@ -231,7 +231,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `console.rs` | `core` | 3 | 2 | 4 | 0 | - |
 | `console/screen.rs` | `core` | 4 | 3 | 0 | 0 | - |
 | `console/log.rs` | `core` | 2 | 0 | 0 | 0 | - |
-| `console/pstore.rs` | `core` | 2 | - | - | 2 | 137, 189 |
+| `console/pstore.rs` | `core` | 2 | - | - | 2 | 221, 273 |
 
 ---
 
@@ -263,7 +263,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1251 |
+| `mm.rs` | `core` | 7 | 1 | 4 | 1 | 1346 |
 
 ---
 

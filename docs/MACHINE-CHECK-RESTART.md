@@ -71,7 +71,7 @@ customer's R1.
    touches the pstore region it reads the banks ((8), (9)); then it reads
    the table of a valid version-3 header; for each frame named by either it
    calls `AllocatePages(AllocateAddress)` with a Ferrix memory type of its
-   own (0x8000_0007), before it stages the kernel or the boot info, so
+   own (0x8000_0008; 0x8000_0007 is already the loader's SMBIOS copy), before it stages the kernel or the boot info, so
    nothing of the loader's lands there; a refusal is one boot-log line. The
    map hands the page to the kernel as a new **`MemKind::BadFrame` (16,
    appended)**, distinct from `Defective` (11, firmware's); every match on
@@ -172,3 +172,28 @@ VULNERABILITY-ANALYSIS V-14 (the table); BACKLOG (the N150 restart time;
   (1)-(12)** for 8a, 8b NOT YET (B1). v2 carries the split (8a only), code
   8 (Q5), (1) the ids, (2)-(4) §2.1-2.3, (5) taken (§2.4), (6) §2.8, (7)
   §2.5, (8) §2.6, (9) §2.7, (10)-(11) §5, (12) §7.
+* As built: the loader's type for a kept-out page is 0x8000_0008
+  (0x8000_0007 is its SMBIOS copy); the bank read and its keep-outs come
+  first, before the boot info area, and the table's inside `pstore::take`,
+  where a page already the loader's is a refusal line; boot 1's checks hold
+  the table (`mm::hold_table`, released by the checks' undo), so the stage 2
+  and stage 12 retirements never reach it; test-mce-restart judges boot 2 up
+  to its poll's `already retired` line, not `FERRIX-BOOT-OK`, since stage
+  12's write check needs the fresh writable disk xtask makes per QEMU start,
+  and measures the restart to boot 2's poll (13.6 s locally, 11.0 s of it to
+  the loader); boots after boot 2 keep the frame out from the table the
+  attach writes again.
+* Code reviewed 2026-10-31 at 76777731e, ledger 5487: **OK IF (1)-(6)**:
+  (1) the stop records only usable addresses (`retirable`'s rules, nothing
+  on a vendor with no rules); (2) test-mce-restart-retired, a recovered
+  retirement through `retire_frame` kept out of boots 2 and 3 from the table
+  alone, with its two controls; (3) the residual of the loader's order named
+  (a table frame the boot info area or firmware holds is not kept out, said
+  as `is in use`); (4) stage 2's live-table comparison from before
+  `check_retired`; (5)-(6) the landing. Rulings: (a) the restart measured to
+  boot 2's poll, the N150 row owing it to `FERRIX-BOOT-OK`; (b) KVM not owed
+  (TCG only; KVM injection across a reset not tried, a BACKLOG line); (c)
+  the postmortem cases leaving the machine check to this gate; (d) the late
+  `&raw const` token; (e) a frame above 2^32 answering Full. The loader reads
+  only the boot processor's banks; another processor's core-scoped record is
+  kept out through the table its stop writes (C4).

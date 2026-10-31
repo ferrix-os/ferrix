@@ -569,6 +569,34 @@ package FerrixConsoleRequirements {
             attribute :>> parent = "H.TRAP.13";
             attribute :>> unit = ("console::log::size_asked", "console::log::size_from");
         }
+        requirement <'L.console.58'> aMachineCheckIsAStopOfItsOwn : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.1. */
+            attribute :>> statement = "The first failure report shall record stop word 8, a
+                machine check, when its catalogue entry is MACHINE_CHECK, and 1, a
+                panic, otherwise; a failure's word, once recorded, shall never be
+                replaced, by another report or by a stop on purpose.";
+            attribute :>> criterion = "test-mce-restart: boot 2's loader says boot 1 ended:
+                a machine check; test-postmortem's stops unchanged. Negative
+                control: code 1 stored for 8, the judge fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("panic::begin_report", "console::pstore::panicked",
+                "console::pstore::stop", "console::pstore::is_failure");
+        }
+        requirement <'L.console.59'> theBadFrameTableIsPstoreVersion3 : ItemLowLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §2.2. */
+            attribute :>> statement = "The pstore header shall be version 3, with a bad-frame
+                table at bytes 128 to 648: a count and 64 entries, each a frame and
+                its complement; encode shall zero the table, validate shall read
+                versions 1, 2 and 3, and fresh shall refuse version 2 and any
+                non-zero table byte; an entry whose halves do not match shall name
+                no frame.";
+            attribute :>> criterion = "ferrix-bootinfo's host tests: the table read whole
+                entries only, the 64 bound, version 2 read with no table, fresh's
+                refusals, the left record's decoding. Negative control: fresh
+                accepting a non-empty table, the host test fails.";
+            attribute :>> parent = "H.FAIL.12";
+            attribute :>> unit = ("console::pstore::record_bad_frame", "console::pstore::table_claimed");
+        }
         requirement <'L.console.54'> eachWriterLogsAtItsPriority : ItemLowLevel {
             attribute :>> statement = "The console shall log a task's write at a
                 program's priority, LOG_USER's info, and a kernel line at the kernel's,

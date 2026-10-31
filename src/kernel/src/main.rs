@@ -1825,6 +1825,13 @@ fn report_memory(stats: &mm::Stats) {
         stats.page_array_at,
         stats.page_array_bytes / 1024,
     );
+    // Only where the loader kept any out: a clean boot's lines are as before.
+    if stats.left_out_as_bad != 0 {
+        println!(
+            "  mm       {} frames left out as bad",
+            stats.left_out_as_bad
+        );
+    }
 }
 
 /// Print what the loader handed over.

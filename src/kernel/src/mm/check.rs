@@ -292,7 +292,11 @@ pub fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     }
 
     check_frames()?;
+    // The live bad-frame table before the retirement checks, compared after
+    // the last of them (ledger 5487 (4)).
+    let table = crate::console::pstore::table_claimed();
     check_retired()?;
+    check_kept_out(table)?;
 
     // The heap must come back to where it started, and "where it started" is
     // not zero: the vmap arena below is a live `Vec` and a live `BTreeMap`,
@@ -720,6 +724,44 @@ fn check_stacks() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// A frame the loader kept out as bad (`docs/MACHINE-CHECK-RESTART.md`
+/// §2.8): one the allocator does not manage -- the kernel image's first
+/// frame here, since a check boot's map has no `BadFrame` page -- answers
+/// `NotCovered`; entered in the retired set as `init` enters a `BadFrame`
+/// page, it answers `Already`, which the poll's later retirement of a left
+/// record says; and the checked retirements leave the live bad-frame table
+/// as it was since before `check_retired` (`table`). The check's own entry
+/// is taken back by hand: no frame is
+/// freed.
+///
+/// Verifies: L.mm.109, L.mm.110
+fn check_kept_out(table: Option<u64>) -> Result<(), &'static str> {
+    let frame = super::IMAGE_PHYS.load(Ordering::Relaxed) / PAGE_SIZE;
+    super::hold_table(true);
+    let not_managed = super::retire_frame(frame);
+    let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    let entered = super::keep_out(frame);
+    let answer = super::retire_frame(frame);
+    if entered {
+        let filled = super::RETIRED_COUNT.load(Ordering::Relaxed);
+        if let Some(slot) = super::RETIRED.get(filled.wrapping_sub(1)) {
+            slot.store(0, Ordering::Relaxed);
+        }
+        super::RETIRED_COUNT.store(before, Ordering::Release);
+    }
+    super::hold_table(false);
+    if not_managed != super::Retired::NotCovered {
+        return Err("a frame the allocator does not manage was retired");
+    }
+    if !entered || answer != super::Retired::Already {
+        return Err("a frame kept out as bad was not answered as retired");
+    }
+    if crate::console::pstore::table_claimed() != table {
+        return Err("a checked retirement reached the live bad-frame table");
+    }
+    Ok(())
+}
+
 /// A device window lands where it was asked to, offset and all, and can be
 /// taken back.
 ///
@@ -746,6 +788,7 @@ fn check_stacks() -> Result<(), &'static str> {
 fn check_retired() -> Result<(), &'static str> {
     use ferrix_frame::State;
     let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    super::hold_table(true);
     let checked = retire_three();
     let retired = super::RETIRED_COUNT
         .load(Ordering::Relaxed)
@@ -808,6 +851,7 @@ pub fn check_scrubber(view: &BootView<'_>, memory: mm::scrub::Memory) -> Result<
         return Ok(());
     }
     let before = super::RETIRED_COUNT.load(Ordering::Relaxed);
+    super::hold_table(true);
     let outcome = scrubber_cases();
     let retired = super::RETIRED_COUNT
         .load(Ordering::Relaxed)

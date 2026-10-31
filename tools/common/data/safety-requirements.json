@@ -242,7 +242,8 @@
     "AoU-35",
     "AoU-36",
     "AoU-37",
-    "AoU-38"
+    "AoU-38",
+    "AoU-39"
   ],
   "//unsafe_obligations": [
     "Why unsafe exists in the certified item (finding F-26): a closed set,",

@@ -160,6 +160,7 @@ mod mce_cmci;
 mod mce_copy;
 mod mce_driver;
 mod mce_pagecache;
+mod mce_restart;
 mod n150;
 mod native;
 mod net;
@@ -597,6 +598,7 @@ const TASKS: &[&[Task]] = &[
     machine_check::TASKS,
     mce_cmci::TASKS,
     mce_copy::TASKS,
+    mce_restart::TASKS,
     mce_driver::TASKS,
     mce_pagecache::TASKS,
     powerctl::TASKS,

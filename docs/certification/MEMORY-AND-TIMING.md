@@ -2038,6 +2038,12 @@ verdict of ledger line 3950.
   hardware yet: a row of `docs/BACKLOG.md`.
 * **The poll**: a task per processor, every `ferrix.mce.poll` seconds, at
   most 32 bank reads and 32 lines; no lock while it reads a bank.
+* **The bad-frame table** (`docs/MACHINE-CHECK-RESTART.md` §2.3, §2.4): each
+  newly retired frame costs one `fetch_add` on the table's count, one store
+  and two cache-line write-backs (the entry and the count), no lock; the
+  fatal machine check's stop makes the same per uncorrected record before
+  its report, on its stack. The pstore attach writes the loader's kept-out
+  frames back, at most 64, once per boot.
 * **CMCI** (`docs/MACHINE-CHECK-CMCI.md`): the handler masks the LVT entry
   (one APIC write), counts, sets and swaps one flag and wakes one wait
   queue; it reads no bank and takes no lock but the queue's. The claim

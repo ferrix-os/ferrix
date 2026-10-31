@@ -1687,6 +1687,23 @@ package FerrixItemRequirements {
                 status 135";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        requirement <'H.FAIL.12'> aBadFrameStaysOutAcrossAWarmReset : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. */
+            attribute :>> statement = "After a warm reset, the kernel shall hand out no frame the
+                boot before retired, nor the frame of an uncorrected record the
+                machine check named, where the loader marked it left out (the
+                assumption of use: the loader marks exactly the version-3 table's
+                and the banks' frames, and never drops one).";
+            attribute :>> criterion = "L.console.58-59, L.mm.109-110 and L.x86_64.254 each
+                verified; test-mce-restart under TCG with Intel's records: a fatal
+                record under ferrix.panic=reset, then boot 2's loader says boot 1
+                ended in a machine check and keeps the page out (left and table),
+                its kernel leaves the frame out and its poll finds it already
+                retired; test-mce-restart-retired: a frame a recovered machine
+                check retired kept out of boots 2 and 3 from the table alone. TCG
+                only; KVM injection across a reset not tried.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
         requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {
             doc /* docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294). */
             attribute :>> statement = "On x86-64 with recovery on, poison in a clean

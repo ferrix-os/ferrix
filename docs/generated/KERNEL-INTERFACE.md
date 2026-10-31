@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-2516 declarations in the core's files, 179 in the item's; 117 checks-only.
+2518 declarations in the core's files, 179 in the item's; 118 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1844,6 +1844,7 @@ checks above is `pub` for raised checks (F3).
 | `give_back_initrd` | fn | load |  |
 | `heap_pages` | fn | load |  |
 | `held_frames` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `hold_table_for_check` | fn | load (checks) | checks-only |
 | `init` | fn | bin |  |
 | `initrd_frames` | fn | load (checks) | checks-only |
 | `initrd_readable` | fn | load (checks) | checks-only |
@@ -1889,6 +1890,7 @@ checks above is `pub` for raised checks (F3).
 | `GivenBack::watermark` | field | load, bin |  |
 | `Reclaimed::total` | method | load, bin |  |
 | `Stats::free_frames` | field | load, bin |  |
+| `Stats::left_out_as_bad` | field | bin |  |
 | `Stats::managed_frames` | field | load, bin |  |
 | `Stats::page_array_at` | field | bin |  |
 | `Stats::page_array_bytes` | field | bin |  |

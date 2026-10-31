@@ -219,6 +219,9 @@ pub struct Stats {
     pub page_array_bytes: u64,
     /// Physical address the per-frame array was placed at.
     pub page_array_at: u64,
+    /// Frames the loader kept out as bad and the allocator left out,
+    /// entered in the retired set (`L.mm.110`).
+    pub left_out_as_bad: u64,
 }
 
 /// Bring up the frame allocator and the heap.
@@ -275,11 +278,27 @@ pub fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
         }
     }
 
+    // The loader's `BadFrame` pages are not RAM, so none reached the free
+    // lists above; each goes into the retired set now, before the first
+    // allocation, so the set and its listing hold them (`L.mm.110`,
+    // `docs/MACHINE-CHECK-RESTART.md` §2.8).
+    let mut left_out = 0;
+    for region in view
+        .regions()
+        .iter()
+        .filter(|r| r.kind == MemKind::BadFrame)
+    {
+        for page in 0..region.len / PAGE_SIZE {
+            left_out += u64::from(keep_out(region.base / PAGE_SIZE + page));
+        }
+    }
+
     let stats = Stats {
         managed_frames: frames.managed_frames(),
         free_frames: frames.free_frames(),
         page_array_bytes: bytes,
         page_array_at: host.base,
+        left_out_as_bad: left_out,
     };
 
     WATERMARK.store(watermark_for(stats.managed_frames), Ordering::Relaxed);
@@ -737,14 +756,18 @@ fn keep_retired(frames: &mut Frames<'static>, frame: Frame, order: u8) -> bool {
 /// from a machine check's own stack: it takes the allocator's lock.
 pub(crate) fn retire_frame(frame: Frame) -> Retired {
     let outcome = with_frames(|frames| {
+        // Already before NotCovered: a frame the loader kept out as bad is in
+        // the set though the allocator does not manage it, and the poll's
+        // later retirement of the same left record says so
+        // (`docs/MACHINE-CHECK-RESTART.md` §2.8).
+        if holds_retired(frame, 0) {
+            return Retired::Already;
+        }
         if frames
             .state(frame)
             .is_none_or(|state| state == ferrix_frame::State::Reserved)
         {
             return Retired::NotCovered;
-        }
-        if holds_retired(frame, 0) {
-            return Retired::Already;
         }
         let filled = RETIRED_COUNT.load(Ordering::Relaxed);
         let room = RETIRED_ROOM.load(Ordering::Relaxed).min(RETIRED_CAPACITY);
@@ -760,6 +783,20 @@ pub(crate) fn retire_frame(frame: Frame) -> Retired {
         }
     })
     .unwrap_or(Retired::NotCovered);
+    // Recorded for the next boot's loader, which keeps it out of that boot
+    // (`L.mm.109`): a frame newly retired, not one the set had no room for --
+    // this boot could not keep it out either -- and never a check's.
+    if matches!(outcome, Retired::Claimed | Retired::Marked)
+        && !table_held()
+        && crate::console::pstore::record_bad_frame(frame) == crate::console::pstore::Recorded::Full
+        && !TABLE_FULL_SAID.swap(true, Ordering::Relaxed)
+    {
+        crate::console::println!(
+            "mce: the bad-frame table is full ({}); frame {:#x} is not kept out after a reset",
+            ferrix_bootinfo::pstore::TABLE_ENTRIES,
+            frame * PAGE_SIZE
+        );
+    }
     if outcome == Retired::Full && !RETIRED_FULL_SAID.swap(true, Ordering::Relaxed) {
         crate::console::println!(
             "mce: the set of retired frames is full ({}); later frames are logged and not \
@@ -769,6 +806,63 @@ pub(crate) fn retire_frame(frame: Frame) -> Retired {
     }
     outcome
 }
+
+/// Enter frame `frame`, which the allocator does not manage -- the loader
+/// kept it out as bad (`MemKind::BadFrame`) -- in the retired set, where
+/// there is room; whether it is there now. Before the first allocation, on
+/// one processor, so the set's plain stores need no allocator lock.
+fn keep_out(frame: Frame) -> bool {
+    if holds_retired(frame, 0) {
+        return true;
+    }
+    let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+    let room = RETIRED_ROOM.load(Ordering::Relaxed).min(RETIRED_CAPACITY);
+    let Some(slot) = RETIRED.get(filled).filter(|_| filled < room) else {
+        return false;
+    };
+    slot.store(frame + 1, Ordering::Relaxed);
+    RETIRED_COUNT.store(filled + 1, Ordering::Release);
+    true
+}
+
+/// Whether a boot check holds the bad-frame table, so that its own
+/// retirements never reach the live table (`L.mm.109`): set by each check
+/// before it retires, cleared by [`forget_checked_retirements`]. Check
+/// builds only.
+#[cfg(ferrix_checks = "on")]
+static TABLE_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Whether a check holds the table. Check builds only.
+#[cfg(ferrix_checks = "on")]
+fn table_held() -> bool {
+    TABLE_HELD.load(Ordering::Relaxed)
+}
+
+/// A product build has no check to hold it.
+#[cfg(not(ferrix_checks = "on"))]
+const fn table_held() -> bool {
+    false
+}
+
+/// Hold the table for a check's retirements, or let it go.
+#[cfg(ferrix_checks = "on")]
+fn hold_table(hold: bool) {
+    TABLE_HELD.store(hold, Ordering::Relaxed);
+}
+
+/// A product build holds nothing.
+#[cfg(not(ferrix_checks = "on"))]
+const fn hold_table(_hold: bool) {}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// Hold the bad-frame table for a check above the core that retires frames
+/// it forgets after ([`forget_retired_for_check`] lets it go).
+pub fn hold_table_for_check() {
+    hold_table(true);
+}
+
+/// The bad-frame table's "full" line, said once.
+static TABLE_FULL_SAID: AtomicBool = AtomicBool::new(false);
 
 /// Undo stage 2's check: forget the last `count` retired frames, which the
 /// check retired itself, and free each; give the set its room back and its
@@ -788,6 +882,7 @@ fn forget_checked_retirements(count: usize) {
     let _ = freed;
     RETIRED_ROOM.store(RETIRED_CAPACITY, Ordering::Relaxed);
     RETIRED_FULL_SAID.store(false, Ordering::Relaxed);
+    hold_table(false);
 }
 
 /// The retired frames, in the order they were retired, into `out`; how many.

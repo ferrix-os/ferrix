@@ -66,6 +66,9 @@ impl MemoryType {
     /// The loader's copy of firmware's SMBIOS tables, which the kernel keeps
     /// for good.
     pub(crate) const FERRIX_SMBIOS: MemoryType = MemoryType(0x8000_0007);
+    /// A page the loader kept out of use as bad (`docs/MACHINE-CHECK-RESTART.md`
+    /// §2.5): the boot before retired it, or a machine-check bank names it.
+    pub(crate) const FERRIX_BAD_FRAME: MemoryType = MemoryType(0x8000_0008);
 }
 
 /// One entry of the UEFI memory map.
