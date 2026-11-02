@@ -2057,7 +2057,7 @@ struct Watched {
 /// the `sched    classes` line with the classes the profile's tier flags
 /// compose (`docs/SCHED-CLASSES.md` §9b).
 ///
-/// Verifies: L.sched.102
+/// Verifies: L.sched.124
 fn boot_line(arch: Arch, log: &Path, kernel: &Path, args: &Args) -> Result<()> {
     let profile = args
         .kernel_profile

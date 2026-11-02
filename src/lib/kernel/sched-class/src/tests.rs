@@ -366,7 +366,7 @@ fn the_stack_check_finds_a_tier_running_out_of_turn() {
 /// `remaining_ns`, through every state a short run of arrivals, charges,
 /// picks and yields reaches.
 ///
-/// Verifies: L.sched.103, L.sched.104, L.sched.105, L.sched.106
+/// Verifies: L.sched.125, L.sched.126, L.sched.127, L.sched.128
 #[test]
 fn the_stacks_decisions_agree_with_its_charge() {
     let mut q = Stack::new_queue((10, 10)).unwrap();

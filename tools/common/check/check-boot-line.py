@@ -50,7 +50,7 @@ LINE = re.compile(r"(?:^|\s)build\s+(profile=\S+(?:\s+\S+)*)\s*$")
 NO_CLAIM = "; no claim"
 MANIFEST = ROOT / "tools" / "common" / "data" / "certification-item.json"
 
-# L.sched.102 (docs/SCHED-CLASSES.md §9b, G9): the scheduler's classes, as
+# L.sched.124 (docs/SCHED-CLASSES.md §9b, G9): the scheduler's classes, as
 # `sched::init` prints them once every processor is in the scheduler.
 CLASSES = re.compile(r"(?:^|\s)sched\s+classes\s+(\S+)\s*$")
 
@@ -141,7 +141,7 @@ MANIFEST_FLAGS = ("runtime_settings",)
 def expected_classes(words: dict[str, str], flag_file: dict, record: dict) -> str:
     """The `sched    classes` line's name for the build `words`: each tier
     flag's selected class (`class_crates`), outermost first, joined by '+',
-    an `absent` tier naming nothing (L.sched.102)."""
+    an `absent` tier naming nothing (L.sched.124)."""
     names = []
     for flag in flag_file.get("flags", {}):
         if not flag.startswith("sched_") or flag == "sched_dispatch" or words.get(flag) == "absent":
@@ -306,7 +306,7 @@ def main() -> int:
     printed = found_classes(lines)
     if printed != classes:
         print(f"boot-line: REFUSED: {args.arch}: the kernel's classes line names {printed!r}, and the profile's "
-              f"tiers compose {classes!r} (L.sched.102)", file=sys.stderr)
+              f"tiers compose {classes!r} (L.sched.124)", file=sys.stderr)
         return 1
     if args.manifest is not None:
         carried = args.manifest.read_text(encoding="utf-8") if args.manifest.is_file() else None
