@@ -16,15 +16,15 @@
 //!   `SCHED_RR` 20 (`sched_rr_get_interval` answers 100 ms), to 30 by
 //!   `sched_setparam`, through `sched_setattr`, and back to `SCHED_OTHER`,
 //!   whose nice value `sched_setattr` sets;
-//! * **errors**: each refusal Linux makes, with its errno (L.sched.117);
+//! * **errors**: each refusal Linux makes, with its errno (L.sched.139);
 //! * **permission**: uid 1000 with `RLIMIT_RTPRIO` 0 is `EPERM`, with 20 may
 //!   take up to 20 and not 30, and may not clear reset-on-fork
-//!   (L.sched.111);
+//!   (L.sched.133);
 //! * **inherit**: a forked child and a thread keep `SCHED_FIFO` 10, and with
-//!   reset-on-fork a forked child starts `SCHED_OTHER` (L.sched.113).
+//!   reset-on-fork a forked child starts `SCHED_OTHER` (L.sched.135).
 //!
 //! Built with `present`, for the build without the tier: every real-time
-//! policy is `EINVAL`, by each call that could set one (L.sched.116).
+//! policy is `EINVAL`, by each call that could set one (L.sched.138).
 //!
 //! Built with `negative-control`, the inherit step expects a reset-on-fork
 //! child to keep its parent's policy, and the program must fail on that

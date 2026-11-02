@@ -13,7 +13,7 @@
 //! **The floor.** As Linux's `sched_rt_runtime_us` does by default, the
 //! class spends at most [`RUNTIME_NS`] of every [`PERIOD_NS`] of real time
 //! on its entities while something below it waits, so the fair class keeps
-//! at least 50 ms of every second on each processor (H.SCHED.20). While
+//! at least 50 ms of every second on each processor (H.SCHED.22). While
 //! throttled it holds its entities (`len` is honest) but is not
 //! [`SchedClass::ready`], so a stack picks below it, preempts nothing and
 //! arms the period's end, not a timer at once (R3, R4). With nothing below

@@ -23939,7 +23939,7 @@
                   "name": "theClassesTheFlagsSelectAndNoOther",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::theClassesTheFlagsSelectAndNoOther",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.18",
+                  "shortName": "H.SCHED.20",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -23962,7 +23962,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::theClassesTheFlagsSelectAndNoOther",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"cargo xtask test-removable's class-crate half, on every architecture and buildable profile: the release ELF holds the marker of each class the profile's flags select and no symbol of any other, the fixture among them, and the map of the same link with LTO alone turned off holds each selected class crate's code and neither a member nor a symbol of any other (docs/SCHED-CLASSES.md section 9b); and L.sched.102's check on every boot.\"",
+                      "value": "\"cargo xtask test-removable's class-crate half, on every architecture and buildable profile: the release ELF holds the marker of each class the profile's flags select and no symbol of any other, the fixture among them, and the map of the same link with LTO alone turned off holds each selected class crate's code and neither a member nor a symbol of any other (docs/SCHED-CLASSES.md section 9b); and L.sched.124's check on every boot.\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 676
@@ -23985,7 +23985,7 @@
                   "name": "aRealTimeTaskRunsFirst",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::aRealTimeTaskRunsFirst",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.19",
+                  "shortName": "H.SCHED.21",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -23997,7 +23997,7 @@
                       "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::aRealTimeTaskRunsFirst",
                       "kind": "attribute",
                       "redefines": "statement",
-                      "value": "\"In a build with the realtime tier, a runnable task of a real-time policy shall run before every task of a lower real-time priority and every fair task on its processor, tasks of one priority in arrival order, a woken one preempting at once; except while the floor (H.SCHED.20) holds the tier back, and with no bound on an inversion through a user lock (FUTEX_LOCK_PI is ENOSYS).\"",
+                      "value": "\"In a build with the realtime tier, a runnable task of a real-time policy shall run before every task of a lower real-time priority and every fair task on its processor, tasks of one priority in arrival order, a woken one preempting at once; except while the floor (H.SCHED.22) holds the tier back, and with no bound on an inversion through a user lock (FUTEX_LOCK_PI is ENOSYS).\"",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
                         "line": 685
@@ -24031,7 +24031,7 @@
                   "name": "fairTasksKeepAFloor",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::fairTasksKeepAFloor",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.20",
+                  "shortName": "H.SCHED.22",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -24077,7 +24077,7 @@
                   "name": "aTaskRunsInItsDomain",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::aTaskRunsInItsDomain",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.21",
+                  "shortName": "H.SCHED.23",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -24123,7 +24123,7 @@
                   "name": "aDomainGivesItsProcessorsBack",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::aDomainGivesItsProcessorsBack",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.22",
+                  "shortName": "H.SCHED.24",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -24169,7 +24169,7 @@
                   "name": "theBootDomainKeepsAFloor",
                   "qualifiedName": "FerrixItemRequirements::Scheduling::vdsoClocksAnswerAsTheCall::theBootDomainKeepsAFloor",
                   "kind": "requirement",
-                  "shortName": "H.SCHED.23",
+                  "shortName": "H.SCHED.25",
                   "type": "ItemHighLevel",
                   "source": {
                     "file": "docs/sysml/13-item-requirements.sysml",
@@ -46311,7 +46311,7 @@
               "name": "theTimerIsArmedForTheStacksDecision",
               "qualifiedName": "FerrixSchedRequirements::Decisions::theTimerIsArmedForTheStacksDecision",
               "kind": "requirement",
-              "shortName": "L.sched.103",
+              "shortName": "L.sched.125",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
@@ -46334,7 +46334,7 @@
                   "qualifiedName": "FerrixSchedRequirements::Decisions::theTimerIsArmedForTheStacksDecision",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"ferrix-sched-class's host tests on a stack of two tiers: the decision is due at once with an upper task waiting behind a lower one, none while the upper runs with lower tasks waiting, never later than the remaining time, and none with one task; with the upper tier throttled, the decision is its period's end (a_throttled_upper_tier_does_not_spin); on the fair-only stack, L.sched.1's check, the fair queue's decision within a slice; on desktop, H.SCHED.20's floor check.\"",
+                  "value": "\"ferrix-sched-class's host tests on a stack of two tiers: the decision is due at once with an upper task waiting behind a lower one, none while the upper runs with lower tasks waiting, never later than the remaining time, and none with one task; with the upper tier throttled, the decision is its period's end (a_throttled_upper_tier_does_not_spin); on the fair-only stack, L.sched.1's check, the fair queue's decision within a slice; on desktop, H.SCHED.22's floor check.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 84
@@ -46368,7 +46368,7 @@
               "name": "theTickPreemptsThroughTheStack",
               "qualifiedName": "FerrixSchedRequirements::Decisions::theTickPreemptsThroughTheStack",
               "kind": "requirement",
-              "shortName": "L.sched.104",
+              "shortName": "L.sched.126",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
@@ -46425,7 +46425,7 @@
               "name": "theLoadIsTheStacks",
               "qualifiedName": "FerrixSchedRequirements::Decisions::theLoadIsTheStacks",
               "kind": "requirement",
-              "shortName": "L.sched.105",
+              "shortName": "L.sched.127",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
@@ -46482,7 +46482,7 @@
               "name": "aYieldIsTheRunningTiers",
               "qualifiedName": "FerrixSchedRequirements::Decisions::aYieldIsTheRunningTiers",
               "kind": "requirement",
-              "shortName": "L.sched.106",
+              "shortName": "L.sched.128",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
@@ -47532,7 +47532,7 @@
               "name": "theBootNamesTheClassesTheFlagsCompose",
               "qualifiedName": "FerrixSchedRequirements::Preemption::theBootNamesTheClassesTheFlagsCompose",
               "kind": "requirement",
-              "shortName": "L.sched.102",
+              "shortName": "L.sched.124",
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/15-sched-requirements.sysml",
@@ -47566,7 +47566,7 @@
                   "qualifiedName": "FerrixSchedRequirements::Preemption::theBootNamesTheClassesTheFlagsCompose",
                   "kind": "attribute",
                   "redefines": "parent",
-                  "value": "\"H.SCHED.18\"",
+                  "value": "\"H.SCHED.20\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 438
@@ -49631,7 +49631,7 @@
                   "name": "theUpperCellIsTheQueueHolders",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theUpperCellIsTheQueueHolders",
                   "kind": "requirement",
-                  "shortName": "L.sched.107",
+                  "shortName": "L.sched.129",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49654,7 +49654,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theUpperCellIsTheQueueHolders",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"The stage-5 move check: a fair task made SCHED_FIFO owns its node and policy, and given back to fair still owns its node; L.sched.112's and H.SCHED.19's checks, which queue every real-time task through its cell; and review of every take and put (Task::entity_with, keep_entity, keep_refused, give_upper_node).\"",
+                      "value": "\"The stage-5 move check: a fair task made SCHED_FIFO owns its node and policy, and given back to fair still owns its node; L.sched.134's and H.SCHED.21's checks, which queue every real-time task through its cell; and review of every take and put (Task::entity_with, keep_entity, keep_refused, give_upper_node).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1111
@@ -49665,7 +49665,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theUpperCellIsTheQueueHolders",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.19\"",
+                      "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1112
@@ -49688,7 +49688,7 @@
                   "name": "aWeightIsKeptOutsideFair",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aWeightIsKeptOutsideFair",
                   "kind": "requirement",
-                  "shortName": "L.sched.108",
+                  "shortName": "L.sched.130",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49745,7 +49745,7 @@
                   "name": "aWakeAsksTheStack",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aWakeAsksTheStack",
                   "kind": "requirement",
-                  "shortName": "L.sched.109",
+                  "shortName": "L.sched.131",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49779,7 +49779,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aWakeAsksTheStack",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.19\"",
+                      "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1141
@@ -49802,7 +49802,7 @@
                   "name": "aRealTimeTaskIsWokenWhereItIs",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aRealTimeTaskIsWokenWhereItIs",
                   "kind": "requirement",
-                  "shortName": "L.sched.110",
+                  "shortName": "L.sched.132",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49836,7 +49836,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aRealTimeTaskIsWokenWhereItIs",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.19\"",
+                      "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1154
@@ -49859,7 +49859,7 @@
                   "name": "aChangeOfPolicyMovesTheTask",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aChangeOfPolicyMovesTheTask",
                   "kind": "requirement",
-                  "shortName": "L.sched.112",
+                  "shortName": "L.sched.134",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49893,7 +49893,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aChangeOfPolicyMovesTheTask",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.19\"",
+                      "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1180
@@ -49916,7 +49916,7 @@
                   "name": "aPolicyIsInheritedThroughOneFunction",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aPolicyIsInheritedThroughOneFunction",
                   "kind": "requirement",
-                  "shortName": "L.sched.113",
+                  "shortName": "L.sched.135",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -49950,7 +49950,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aPolicyIsInheritedThroughOneFunction",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.19\"",
+                      "value": "\"H.SCHED.21\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1200
@@ -49973,7 +49973,7 @@
                   "name": "cpuMaxCutsEveryTier",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::cpuMaxCutsEveryTier",
                   "kind": "requirement",
-                  "shortName": "L.sched.114",
+                  "shortName": "L.sched.136",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50007,7 +50007,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::cpuMaxCutsEveryTier",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "(\"H.SCHED.20\", \"H.QUOTA.4\")",
+                      "value": "(\"H.SCHED.22\", \"H.QUOTA.4\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1211
@@ -50030,7 +50030,7 @@
                   "name": "softRtIsRefusedByName",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::softRtIsRefusedByName",
                   "kind": "requirement",
-                  "shortName": "L.sched.115",
+                  "shortName": "L.sched.137",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50064,7 +50064,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::softRtIsRefusedByName",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.18\"",
+                      "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1223
@@ -50087,7 +50087,7 @@
                   "name": "withoutTheTierRealTimeIsEinval",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::withoutTheTierRealTimeIsEinval",
                   "kind": "requirement",
-                  "shortName": "L.sched.116",
+                  "shortName": "L.sched.138",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50121,7 +50121,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::withoutTheTierRealTimeIsEinval",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.18\"",
+                      "value": "\"H.SCHED.20\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1237
@@ -50144,7 +50144,7 @@
                   "name": "theRunStopsOutsideTheDomain",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theRunStopsOutsideTheDomain",
                   "kind": "requirement",
-                  "shortName": "L.sched.118",
+                  "shortName": "L.sched.140",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50178,7 +50178,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theRunStopsOutsideTheDomain",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1250
@@ -50201,7 +50201,7 @@
                   "name": "nothingCrossesADomain",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::nothingCrossesADomain",
                   "kind": "requirement",
-                  "shortName": "L.sched.119",
+                  "shortName": "L.sched.141",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50235,7 +50235,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::nothingCrossesADomain",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1264
@@ -50258,7 +50258,7 @@
                   "name": "theSwitchEmptiesItsProcessors",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSwitchEmptiesItsProcessors",
                   "kind": "requirement",
-                  "shortName": "L.sched.120",
+                  "shortName": "L.sched.142",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50292,7 +50292,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSwitchEmptiesItsProcessors",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "(\"H.SCHED.21\", \"H.SCHED.22\")",
+                      "value": "(\"H.SCHED.23\", \"H.SCHED.24\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1285
@@ -50315,7 +50315,7 @@
                   "name": "aRunningTaskMovesWhenSaved",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aRunningTaskMovesWhenSaved",
                   "kind": "requirement",
-                  "shortName": "L.sched.121",
+                  "shortName": "L.sched.143",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50349,7 +50349,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aRunningTaskMovesWhenSaved",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1302
@@ -50372,7 +50372,7 @@
                   "name": "aTaskTakenOffIsPlaced",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aTaskTakenOffIsPlaced",
                   "kind": "requirement",
-                  "shortName": "L.sched.122",
+                  "shortName": "L.sched.144",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50406,7 +50406,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aTaskTakenOffIsPlaced",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1315
@@ -50429,7 +50429,7 @@
                   "name": "aWakeLandsInTheDomain",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aWakeLandsInTheDomain",
                   "kind": "requirement",
-                  "shortName": "L.sched.123",
+                  "shortName": "L.sched.145",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50463,7 +50463,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::aWakeLandsInTheDomain",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1330
@@ -50486,7 +50486,7 @@
                   "name": "admissionMovesTheJob",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::admissionMovesTheJob",
                   "kind": "requirement",
-                  "shortName": "L.sched.124",
+                  "shortName": "L.sched.146",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50520,7 +50520,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::admissionMovesTheJob",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1348
@@ -50543,7 +50543,7 @@
                   "name": "dissolutionIsOneStore",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::dissolutionIsOneStore",
                   "kind": "requirement",
-                  "shortName": "L.sched.125",
+                  "shortName": "L.sched.147",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50577,7 +50577,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::dissolutionIsOneStore",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.22\"",
+                      "value": "\"H.SCHED.24\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1366
@@ -50600,7 +50600,7 @@
                   "name": "perProcessorTasksAreExempt",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::perProcessorTasksAreExempt",
                   "kind": "requirement",
-                  "shortName": "L.sched.126",
+                  "shortName": "L.sched.148",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50634,7 +50634,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::perProcessorTasksAreExempt",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1378
@@ -50657,7 +50657,7 @@
                   "name": "theSoftDomainsRefusals",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSoftDomainsRefusals",
                   "kind": "requirement",
-                  "shortName": "L.sched.127",
+                  "shortName": "L.sched.149",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50691,7 +50691,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theSoftDomainsRefusals",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.23\"",
+                      "value": "\"H.SCHED.25\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1393
@@ -50714,7 +50714,7 @@
                   "name": "theDirectSwitchStaysInside",
                   "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theDirectSwitchStaysInside",
                   "kind": "requirement",
-                  "shortName": "L.sched.128",
+                  "shortName": "L.sched.150",
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
@@ -50737,7 +50737,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theDirectSwitchStaysInside",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"Review of direct::begin, whose decline is counted; L.sched.118's hand-over stop behind it.\"",
+                      "value": "\"Review of direct::begin, whose decline is counted; L.sched.140's hand-over stop behind it.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1401
@@ -50748,7 +50748,7 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::Realtime::theDirectSwitchStaysInside",
                       "kind": "attribute",
                       "redefines": "parent",
-                      "value": "\"H.SCHED.21\"",
+                      "value": "\"H.SCHED.23\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
                         "line": 1402

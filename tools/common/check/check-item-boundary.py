@@ -3183,7 +3183,7 @@ def class_crate_problems(record: dict, packages: dict[str, tuple[str, dict]], so
         elif not arm.search(arms_code):
             problems.append(f"{ARMS_FILE}: the arm for {flag}={value} does not name {name}, which class_crates "
                             "says it links")
-        # Its `name` is the one its class gives the boot line (L.sched.102).
+        # Its `name` is the one its class gives the boot line (L.sched.124).
         said = entry.get("name")
         own = "".join(text for rel, text in sources.items() if rel.startswith(packages[package][0] + "/"))
         if not said or not re.search(rf'const\s+NAME\s*:\s*&\s*\'static\s+str\s*=\s*"{re.escape(said)}"', own):

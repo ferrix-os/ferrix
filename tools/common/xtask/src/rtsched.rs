@@ -75,7 +75,7 @@ fn require(arch: Arch, lines: &[String], steps: &[&str]) -> Result<()> {
 
 /// The test on every architecture asked for.
 ///
-/// Verifies: L.sched.112, L.sched.113, L.sched.116
+/// Verifies: L.sched.134, L.sched.135, L.sched.138
 fn test_rtsched(args: &Args) -> Result<()> {
     let built = crate::flags::this_run()?.value("sched_realtime") == Some("fifo_rr");
     for arch in args.arches()? {
