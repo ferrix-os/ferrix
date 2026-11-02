@@ -246,7 +246,8 @@ values.present = { allows = ["present", "none"], requires = ["runtime_settings=l
 
 [image_keys.bad_frames]
 why = "whether the UEFI loader's bad-frame mode is fixed: `persist` keeps the frames the machine checks retired out across a warm reset and a power cycle, with no code that reads ferrix.badframes; `choice` reads ferrix.badframes (persist, reset or off) from the command line (docs/MACHINE-CHECK-RESTART.md §10; ledger 5579)"
-values.persist = { allows = ["sc4", "present", "sc2", "none"] }
+barest = "persist"  # max_plus's (SCHED-CLASSES.md section 9c, E13): no read of ferrix.badframes, the mode fixed
+values.persist = { allows = ["sc4_plus", "sc4", "present", "sc2", "none"] }
 values.choice = { allows = ["none"] }
 
 # ---------------------------------------------------------------------------
