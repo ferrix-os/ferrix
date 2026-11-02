@@ -165,6 +165,9 @@ fn check_image(name: &str) {
         name,
     );
     for (path, expected) in &manifest {
+        if cfg!(miri) && !miri_reads(path, expected) {
+            continue;
+        }
         let entry = resolve(&sub, &mut f.device, path, &mut f.node);
         let Target::Inode(ino) = entry.target else {
             panic!("{name}: no subvolumes in the fixture");
@@ -191,6 +194,24 @@ fn check_image(name: &str) {
         }
     }
 }
+
+/// What [`check_image`] reads back under Miri, where the whole zlib image took
+/// 396 s even without `big.txt` and `sparse.bin`: the top level's files and
+/// link up to [`MIRI_LARGEST`] (an empty file, a link, a 13-byte name that is
+/// not UTF-8) and [`MIRI_INLINE`], an inline extent the image compresses, 60 s
+/// in all on 2026-11-02. The root's listing is still checked whole. Plain
+/// `cargo test` reads every entry.
+fn miri_reads(path: &[u8], expected: &Expected) -> bool {
+    let small_top_level_file =
+        !path.contains(&b'/') && expected.kind != "dir" && expected.size <= MIRI_LARGEST;
+    small_top_level_file || path == MIRI_INLINE
+}
+
+/// The largest top-level file [`miri_reads`] keeps.
+const MIRI_LARGEST: u64 = 4096;
+
+/// A 1,094-byte text file, an inline extent compressed in the zlib image.
+const MIRI_INLINE: &[u8] = b"dir00/sub0/file04.txt";
 
 /// List `ino` and compare the names with the manifest's children of `path`.
 fn check_listing(
@@ -225,7 +246,7 @@ fn check_listing(
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, Miri runs the small image tests"
+    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
 )]
 fn the_uncompressed_image_reads_back_exactly() {
     check_image("none");
@@ -233,10 +254,6 @@ fn the_uncompressed_image_reads_back_exactly() {
 
 /// Verifies: L.btrfs.77
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, Miri runs the small image tests"
-)]
 fn the_zlib_image_reads_back_exactly() {
     check_image("zlib");
 }
@@ -245,7 +262,7 @@ fn the_zlib_image_reads_back_exactly() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, Miri runs the small image tests"
+    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
 )]
 fn the_lzo_image_reads_back_exactly() {
     check_image("lzo");
@@ -255,7 +272,7 @@ fn the_lzo_image_reads_back_exactly() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "reads every file of a real image; plain cargo test covers it, Miri runs the small image tests"
+    ignore = "reads every file of a real image; plain cargo test covers it, and under Miri the zlib image's test reads the part miri_reads keeps"
 )]
 fn the_zstd_image_reads_back_exactly() {
     check_image("zstd");
@@ -630,10 +647,6 @@ fn first_extent(
 
 /// Verifies: L.btrfs.11
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "31 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
     let f = &mut Fixture::new(IMAGES[0].1);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
@@ -751,10 +764,6 @@ fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
 
 /// Verifies: L.btrfs.85
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "21 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
     let (name, packed) = IMAGES[1];
     assert_eq!(name, "zlib");
@@ -786,10 +795,6 @@ fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
 
 /// Verifies: L.btrfs.86
 #[test]
-#[cfg_attr(
-    miri,
-    ignore = "21 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
-)]
 fn a_nodatasum_file_is_read_without_checking_as_linux_reads_it() {
     let f = &mut Fixture::new(IMAGES[0].1);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();

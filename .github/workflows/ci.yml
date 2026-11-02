@@ -784,12 +784,17 @@ jobs:
 
       # btrfs's reader, which parses a volume someone else wrote: its trees,
       # chunks and extents, and the three decompressors (zlib, LZO, zstd)
-      # that expand what the disk holds. The crate forbids unsafe, so what
-      # Miri adds is the indexing and slicing of bytes the volume chose,
-      # and the unsafe in what it calls. A part of its own: its whole-image
-      # and whole-extent tests take 20 s to 10 min each under Miri, and
-      # every test over 20 s is ignored here (measured 2026-11-02), which
-      # leaves about seven minutes; plain cargo test runs them all.
+      # that expand what the disk holds. The crate forbids unsafe and has no
+      # runtime dependencies, so an index out of bounds panics under plain
+      # cargo test as well. What Miri adds is a check of the unsafe in core
+      # and alloc under the crate's calls, and of the test-only oracle
+      # crates (miniz_oxide, ruzstd; lzokay-native's tests are ignored for
+      # its own undefined behaviour). A part of its own: its whole-image
+      # and whole-extent tests take 20 s to 10 min each under Miri, so
+      # most tests over 20 s are ignored here (measured 2026-11-02), and
+      # the file-data path is kept under Miri by four tests of 20 to 38 s
+      # and a part of the zlib image (fs/tests.rs, miri_reads): about nine
+      # minutes of tests. Plain cargo test runs them all.
       - name: Miri (btrfs reader)
         if: matrix.part == 4
         run: cargo +nightly miri test -p ferrix-btrfs --lib
