@@ -25,11 +25,27 @@ start reached the world on 5 of 11 tries (`docs/BACKLOG.md`, fl-081), and in
 the world it renders about 25 frames a second at 720p, limited by the GPU
 (`docs/GAME-MODE.md` §2.3), or about 21 rendered and 42 shown at 1024x600 with
 frame generation (`docs/INTEL-GPU.md` §13). Loading into the world while the
-game is scanned out directly died 2 of 2 times on 2026-10-31 (BACKLOG). What
-the box's runs did to steps 4 to 6 below (the login, the anti-cheat, the
-frame rate) this page does not record; the exit above, on the RTX 3060, is
-not met, and `docs/GAME-MODE.md` carries the work for the frame rate on the
-box.
+game is scanned out directly died 2 of 2 times on 2026-10-31 (BACKLOG). Per
+step, from those sources and no others:
+
+* **Step 4 (installer, launcher, login):** the game is installed and started
+  by Steam on the box (the capture of 2026-10-23, `docs/BACKLOG.md` fl-081's
+  tally of starts, `n150/ef-gpu-run.sh stop all` ending "a game Steam started",
+  9efcf94af). The failures fl-081 lists include a game window gone right
+  after the UIPlatform login window, so the login is reached and, on the
+  starts that reach the world, passed. Which account was used is not
+  recorded.
+* **Step 5 (past the anti-cheat):** no source says whether the anti-cheat
+  ran on the box, or what it accepted; the page's question stays open.
+* **Step 6 (playable):** in the world at The Hub the game runs at about 25
+  frames a second at 720p with the GPU 99.9% busy (`docs/GAME-MODE.md` §2.3,
+  2026-10-30); at 1024x600 with frame generation, about 21 rendered and 42
+  shown (`docs/INTEL-GPU.md` §13, 2026-10-24); 2 MiB VT-d entries left it at
+  about 27 (2026-10-31). That is the Intel GPU, not the exit's 1080p and 60 on
+  the RTX 3060, which is not met, and `docs/GAME-MODE.md` carries the work for the frame rate on the
+box. The branches `nv-next` and `nv-next-stall`, named below as the home of
+the card's X-window path, were archived on 2026-10-23
+(`refs/archive/2026-10-23/nv-next`); `docs/BACKLOG.md` has the row.
 
 ## How it relates to stage 22
 

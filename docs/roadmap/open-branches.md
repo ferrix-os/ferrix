@@ -81,15 +81,42 @@ Of the stage 13 family, `park/stage13-timens`, `park/po6/n5` and
 `park/po6/bwrap-user` were ported onto `develop` on 2026-10-26 and are history
 now (they still count 6, 11 and 14 by patch id, because the port rebased them).
 
-**Landed and still on origin** (count 0, safe to delete once their owners
-agree): `bugfix/chardev-signal-race`, `bugfix/futex-timed-eintr`,
-`bugfix/intel-card-copy-evict`, `bugfix/kmsg-whole-lines`,
-`bugfix/oom-no-panic`, `bugfix/release-dry-run`, `bugfix/release-v0.2.0`,
-`bugfix/tsc-aux`, `feature/amd-vi`, `feature/devmgr-isolation-gate`,
-`feature/lode-budget`, `-compress`, `-crashd`, `-fields`, `-step3`, `-step4`,
-`-step5`, `-upload`, `feature/power-adaptive`, `fix/power-adaptive-trend`,
-`intel-large-pages/vtd-v2`. Two of them, `bugfix/oom-no-panic` and
-`bugfix/release-v0.2.0`, were still being landed when this was written.
+**Landed and still on origin.** The 21 branches that count 0 by patch id,
+checked on 2026-11-02 against `origin/develop` e51fc67fd with `git merge-base
+--is-ancestor`, and against GitHub's open pull requests (three: #38 from
+`feature/ferrix-roadmap-completion-hkxlpp`, #39 from
+`docs/sched-classes-reservations` and #40 from `feature/sched-softrt-domain`;
+none uses a branch below). "Contained" is whether the tip is an ancestor of
+`develop`. Where it is not, the branch's single commit has an equivalent on
+`develop` under another hash, so nothing is lost either way. Nothing was
+deleted; deleting is the customer's decision, and all 21 are safe to delete
+on this evidence.
+
+| Branch | Tip | Contained in `develop` | Open PR | Safe to delete |
+|---|---|---|---|---|
+| `bugfix/chardev-signal-race` | 908378300 | yes | none | yes |
+| `bugfix/futex-timed-eintr` | 503d4c5af | yes | none | yes |
+| `bugfix/intel-card-copy-evict` | f6d417550 | no: its one commit is `develop`'s eb555dc28 rebased (`git cherry` says landed) | none | yes |
+| `bugfix/kmsg-whole-lines` | 722824a8d | yes | none | yes |
+| `bugfix/oom-no-panic` | 86b79a87d | yes (it is `develop`'s 86b79a87d) | none | yes |
+| `bugfix/release-dry-run` | 99825b881 | no: its one commit is `develop`'s 90432209d rebased | none | yes |
+| `bugfix/release-v0.2.0` | 93b0f3950 | yes | none | yes |
+| `bugfix/tsc-aux` | 5946ae34b | yes | none | yes |
+| `feature/amd-vi` | 63b9f67d4 | yes | none | yes |
+| `feature/devmgr-isolation-gate` | 1ecd103da | yes | none | yes |
+| `feature/lode-budget` | 3e3457322 | yes | none | yes |
+| `feature/lode-compress` | 9e783e63b | yes | none | yes |
+| `feature/lode-crashd` | abc82f5d5 | yes | none | yes |
+| `feature/lode-fields` | 9d54912c7 | yes | none | yes |
+| `feature/lode-step3` | a083a613f | yes | none | yes |
+| `feature/lode-step4` | 0d4014c6b | yes | none | yes |
+| `feature/lode-step5` | 4e1ae8bdd | yes | none | yes |
+| `feature/lode-upload` | 44c99c4f2 | yes | none | yes |
+| `feature/power-adaptive` | 1af3292dc | yes | none | yes |
+| `fix/power-adaptive-trend` | d5cf8796b | yes | none | yes |
+| `intel-large-pages/vtd-v2` | aae2217ff | no: its one commit is `develop`'s c735f308e rebased | none | yes |
+
+None of the 21 has a `refs/archive/` copy; after a delete the three rebased commits live on only as their `develop` equivalents.
 
 ## 2026-10-21: what became of the night's branches, and the microkernel's
 

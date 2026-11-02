@@ -123,6 +123,15 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   appears (b5a59302d; on the card it shut down in 1.45 s with no Xid) and
   imports sync files on its dmabufs (3059a21c4); `devmgr` lets `nvrm` drive
   one GPU, never two (3c529c58b).
+* **Drivers from ring 3, and USB serial.** FTDI's UARTs and the USB-Blaster
+  from a class driver process of their own (97de20f7a to 23158676a,
+  2026-10-25; `docs/USB-SERIAL.md`), with the three kernel items its review
+  asked for (numeric pty speeds, back-pressure and flow control, hang-up on
+  the master's close: 7829e7fa7, 2eba5cddc, eedc89b6a); a ring-3 driver for
+  nazuna's onboard RTL8111H (`rtl8169`, cb3d2ba93); a disk that stops
+  answering is taken offline (1171f63af). `docs/CHARDEV.md` and
+  `docs/DRIVER-MODEL.md` ("a driver never needs a kernel change", the
+  customer's rule of 2026-10-25) are designs, reviewed and not built.
 * **Processor power** (`docs/POWERCTL.md`). `ferrix.vrcurrent` is replaced
   by a power core of typed calls on a claim with per-model bounds
   (3465911c2) and a ring-3 power driver with its policy library that `devmgr`
@@ -186,8 +195,11 @@ before 2026-10-24). What is still on a branch is at the end of this section.
   (`docs/SIGNING.md`): S1, `ferrix-sigverify`, `ferrix-sha256` and the soft
   signer (546080e4b), S2, the verifier's time measured on the DK1
   (99db9e544), and S3, the anchors and the family registry that keep
-  development keys and the verifier out of a release (2b04af0cf); the loader's
-  verification (S4) is not built.
+  development keys and the verifier out of a release (2b04af0cf), S4, the UEFI
+  loader verifying a slot's signed manifest against anchors it carries
+  (3c0875b4a, 2026-10-25), and the CI development key (56bc97bbb); `present`
+  keeps slot signing off until a release key exists, and S5 (the TPM path) and
+  S6 (the release key and its runbook) are not built.
 * **The Linux ABI behind a build flag** (`docs/LINUX-ABI-SEPARATION.md`
   §11): `linux_abi = on | off`, `off` an ad-hoc build at level none with no
   claim (f5307143b, 2026-10-23). The kernel is four crates, `ferrix-kernel-core`,

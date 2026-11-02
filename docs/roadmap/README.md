@@ -77,8 +77,9 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   none of its assets; v0.1.1 (2026-10-21) carries the x86-64 desktop as a zip
   that plain QEMU boots (`docs/RELEASES.md`). v0.2.0 (2026-10-29) is the
   first live ISO: Yoru from memory and the graphical installer, checked on
-  QEMU machines and not yet booted on a real PC. `test-install` fails on
-  `main` in the live medium's boot (a BACKLOG row).
+  QEMU machines and not yet booted on a real PC. `test-install` failed in the
+  live medium's boot; its stated cause is fixed (0d9f41949) and no passing run
+  is recorded (a BACKLOG row).
 - **The customer's N150 box (stage 21):** Ferrix booted on it on 2026-10-15
   to a desktop on the firmware framebuffer, `/` on its SATA drive and the
   network up, on a branch; its drivers (AHCI, the YT6801's network, the
@@ -147,7 +148,8 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   page, a ring-3 driver, a quarantined core, a RAM scrubber) with the bad
   frames kept out of the next boot; per-processor heap caches, the
   initramfs's memory given back and PCIDs; suspending one program; and the
-  first three slices of product signing.
+  first four slices of product signing (the loader verifies a slot's signed
+  manifest; `present` keeps it off until a release key exists).
 
 **Next:** cutting test and gate run time, the customer's priority one
 (`docs/TEST-TIME.md`), then Steam's workarounds and the namespaces under
