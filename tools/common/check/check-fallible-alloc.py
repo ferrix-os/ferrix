@@ -173,10 +173,15 @@ PATTERNS = (CONSTRUCTORS, MACROS, METHODS)
 # `process_start` make a POSIX process and its first thread through them, so
 # an allocation in them that cannot fail stops the kernel on an item path.
 # Scanned as the item is. `Signals::default` in the first was F-23's hole.
+# The last three are `process_create`'s load: the `Processes::load` hook,
+# then the ELF loader it runs (consultant ledger 5546, answer A, 2026-10-31).
 REACHED = {
     "syscall/signal.rs": "a process's and a thread's signal state",
     "syscall/thread.rs": "a process's first thread",
     "syscall/process.rs": "the process process_create loads and process_start starts",
+    "syscall/launch.rs": "the Processes::load and ::start hooks, load_native and start_native",
+    "syscall/exec.rs": "load_native_in and populate, which build the process from its image",
+    "syscall/load.rs": "the ELF image's headers, segments and mapping plan",
 }
 
 # A derive list, what it is on, and the start of its body.
