@@ -26,7 +26,7 @@ buildable_from = "M5, with sched_windows=arinc_table at M3, and claimable once p
 # The scheduling modes a domain may run (docs/SCHED-CLASSES.md section 9a,
 # D9): the windows tier's HardRt alone (E6).
 modes = ["HardRt"]
-image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required" }
+image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "required", bad_frames = "persist" }
 # The families its loader accepts a signed slot manifest for (docs/SIGNING.md
 # section 1.4, section 10.6): the AMD Kria KV260 (Zynq UltraScale+ K26: four
 # in-order Cortex-A53, two Cortex-R5F, GIC-400, an Arm SMMU-500, U-Boot's
