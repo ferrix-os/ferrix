@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "234174927d287bc226d09b603a8f5b42148c691878d75479a9fd17369fc8b20c",
+  "digest": "0392e773059389a7411e8c23ad6efafa9e685bf8acbf0fcdde27ab45035a82ed",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -85479,10 +85479,10 @@
                   "qualifiedName": "FerrixSmpRequirements::Kick::theRefusals",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"smp::service::Refusal::number\", \"smp::service::Refusal::reason\", \"sched::service_refusal\", \"sched::task::pinned_programs\")",
+                  "value": "(\"smp::service::Refusal::number\", \"smp::service::Refusal::reason\", \"sched::service_refusal\", \"sched::task::pinned_programs\", \"sched::task::pin_program\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 519
+                    "line": 520
                   }
                 }
               ]
@@ -85495,7 +85495,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 521
+                "line": 522
               },
               "children": [
                 {
@@ -85506,7 +85506,7 @@
                   "value": "\"Every change and every refusal through either door shall make a CPU_SERVICE audit record naming the subject, the processor, the direction, the door and the outcome, and a kernel line saying the same.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 525
+                    "line": 526
                   }
                 },
                 {
@@ -85517,7 +85517,7 @@
                   "value": "\"The native boot check reads the three records back from the high-value ring: the refusal of processor 0 with status 4, the change out and the change back of processor 1, each naming the checking process and lode's door.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 530
+                    "line": 531
                   }
                 },
                 {
@@ -85528,7 +85528,7 @@
                   "value": "\"H.SCHED.18\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 531
+                    "line": 532
                   }
                 },
                 {
@@ -85539,7 +85539,7 @@
                   "value": "(\"audit::cpu_service\", \"smp::service::set_in_service\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 532
+                    "line": 533
                   }
                 }
               ]
@@ -85552,7 +85552,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 534
+                "line": 535
               },
               "children": [
                 {
@@ -85563,7 +85563,7 @@
                   "value": "\"The kernel shall make one processor service token and give it to pid 1 after the audit handle, with MANAGE, DUPLICATE and TRANSFER; cpu_service shall answer only a handle to it with MANAGE, INVALID_ARGS for a processor past the count or a flag other than 0 or 1; init shall grant lode a copy without DUPLICATE at every start, which lode reduces to MANAGE.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 540
+                    "line": 541
                   }
                 },
                 {
@@ -85574,7 +85574,7 @@
                   "value": "\"The native boot check: pid 1's rights are exactly MANAGE, DUPLICATE and TRANSFER; cpu_service refuses a processor past the count, a flag of 2, a handle without MANAGE and a channel end; test-quarantine: lode takes the target out through the copy init granted it.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 545
+                    "line": 546
                   }
                 },
                 {
@@ -85585,7 +85585,7 @@
                   "value": "\"H.SCHED.18\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 546
+                    "line": 547
                   }
                 },
                 {
@@ -85596,7 +85596,7 @@
                   "value": "(\"init::give_cpu_service\", \"syscall::native::cpu_service\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 547
+                    "line": 548
                   }
                 }
               ]
@@ -85609,7 +85609,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/22-smp-requirements.sysml",
-                "line": 549
+                "line": 550
               },
               "children": [
                 {
@@ -85620,7 +85620,7 @@
                   "value": "\"sysfs online, offline and cpuN/online, /proc/cpuinfo, /proc/stat and sched_getaffinity shall name only processors in service; a write to cpuN/online on x86-64 shall go through the setters seam, CAP_SYS_ADMIN in the first user namespace asked first, and only 0 or 1 taken.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 554
+                    "line": 555
                   }
                 },
                 {
@@ -85631,7 +85631,7 @@
                   "value": "\"test-quarantine: cpuN/online 0, online and offline without and with the target, and nproc one fewer while it is out, all again after; a user that is not root is refused at open (EACCES) and root of a user namespace of its own at the write (EPERM). Control: the capability asked in the writer's own namespace -- the namespace's root takes processor 1 out, and it fires.\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 561
+                    "line": 562
                   }
                 },
                 {
@@ -85642,7 +85642,7 @@
                   "value": "\"H.SCHED.18\"",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 562
+                    "line": 563
                   }
                 },
                 {
@@ -85653,7 +85653,7 @@
                   "value": "(\"smp::PerCpu::in_service\", \"arch::x86_64::thread_core\")",
                   "source": {
                     "file": "docs/sysml/22-smp-requirements.sysml",
-                    "line": 563
+                    "line": 564
                   }
                 }
               ]
