@@ -1,9 +1,225 @@
 # Where it stands, in full
 
-*reviewed 2026-10-21, to `main` 2ba25d12a: the first section holds the
-landings since 2026-10-09, and the older sections are corrected where `main`
-has overtaken them. Dates are the day a commit reached `main`.* The short
+*reviewed 2026-11-02, to `main` e51fc67fd: the first section holds the
+landings of 2026-10-21 to -31 and the second those since 2026-10-09 (reviewed
+to `main` 2ba25d12a on 2026-10-21); the older sections are corrected where
+`main` has overtaken them. Dates are the day a commit reached `main`.* The short
 version is on the [overview](README.md).
+
+## Landed 2026-10-21 to 2026-10-31 (`main` e51fc67fd)
+
+About 650 commits. `develop` and `main` are the same commit, e51fc67fd (the
+Promote workflow fast-forwards `main`; 700373fb5 on 2026-10-27 made `main`
+an ancestor of `develop` again after the eight promotion merge commits of
+before 2026-10-24). What is still on a branch is at the end of this section.
+
+* **The repository flow** (`docs/REPO-FLOW.md`, the customer, 2026-10-23).
+  Landings go to `develop`; `main` moves only by promotion: the Promote
+  workflow cuts `promote/<sha>` from `develop`, posts `flow/lane` and the
+  certification consultant's `certification/verdict`, dispatches CI, and
+  fast-forwards `main` when `CI result` and both statuses are green. No
+  pull request is opened for it since 2026-10-24 (f76dc4d31, 217fa0ce9).
+  `tools/common/release/cert-verdict.py develop..<branch>` shows what a
+  promotion would wait on; a commit that touches the item needs its review
+  named in the message or a `Certification:` line. The second branch sweep of
+  2026-10-23 deleted or archived 102 idle branches
+  (`docs/backlog/branches.md`).
+* **v0.2.0, the first live ISO** (tagged, notes dated 2026-10-29,
+  `docs/RELEASES.md`, `docs/TRY-FERRIX.md`). `cargo xtask iso` writes a
+  hybrid ISO in Rust (dc95c66f8, 2026-10-25): Yoru from memory as uid 1000,
+  the graphical installer as the one window at login, the licence inventory
+  in it. A PC shows the desktop on the firmware's framebuffer
+  (`ferrix.efifb`, `ferrix.fbcon`, ac9eae331); the live session drives a
+  machine with no IOMMU and the installed one never does (a4afbfd74); ACPI
+  S5 switches a PC off (04d72384b) and the seat's person may restart and
+  power off the machine (4a17b1512); the ISO refuses a developer desktop's
+  host programs (93b0f3950). Checked on QEMU machines shaped like a PC; not
+  booted on a real PC, VirtualBox or VMware (the notes say so, with what does
+  not work: installing from a CD or a USB stick, USB as the only input, three
+  Ethernet chips).
+* **lode, the log manager** (`docs/LOGGING.md`, the customer's go on
+  2026-10-23). The native service `/sbin/lode` in a sealed job with
+  `ferrix-lode-core` (`src/lib/log/lode`), its store (CRC-checked segments,
+  zstd when sealed), `journalctl`'s reader and options, the filter language,
+  retention, floods held and said, session ids, the Linux front (`/dev/log`,
+  the journal's sockets, stdout streams), crash records that name their
+  process, crash screenshots as blobs, tombstones (steps 1 to 3: the blob
+  container, hang snapshots, crash storms cut), `lode top` and alerts,
+  store-and-forward with TLS to a collector (`lode-receive`, `cargo xtask
+  box-log`) and a reload for retention and capture (a95b55d1d to bac0955e0,
+  2026-10-23 to -24). The kernel log is Linux's records: times through
+  `syslog(2)`, `/dev/kmsg`, `log_buf_len`, and `dmesg` is Ferrix's own
+  (4c3087f43, 815604fa7). Not built: backtraces (the stack capture), `-o
+  short-delta` and the rest §20's table lists as missing.
+  The log viewer is an app in `ferrix-os/apps` (89e1b3075).
+* **tole, the UI framework** (`docs/UI-FRAMEWORK.md`; a repository of its own,
+  `ferrix-os/tole`, since 2026-10-23, pinned in `components.toml`). A
+  QML-shaped tree compiled into Rust at build time: U1 to U7 (bindings, the
+  `.tole` compiler, signals and the pointer, damage and focus, layouts and
+  models, states and animations, controls with the theme, popups, canvas
+  painters) landed on 2026-10-23, and U8 (the lode viewer) and U9 (Settings)
+  on 2026-10-24, a GPU renderer with a fallback on 2026-10-24 and its pacing
+  with it. Settings, the file manager `shelf`, the clients of Yoru and the
+  lode viewer are drawn with it.
+* **Settings and the settings writer** (`docs/SETTINGS-WRITER.md`,
+  `docs/RUNTIME-SETTINGS.md`). `settingsd` is root and socket-activated: a
+  closed enum of typed requests, an `authd` conversation for the area, one
+  audit line (80f9ef39c, B1: `set-hostname`, `service-enable-persistent`;
+  1113d698b, B3 and B6: `set-timezone`, and service-enable-persistent's `now`). The
+  trusted prompt is hyprix's: every screen is the compositor's alone while it
+  is up, only the seat's devices answer, and no capture path shows it
+  (21ba98dce). init sets the host name from `/etc/hostname` and makes
+  `/etc/machine-id` (72cbc95ed, 30e2afb76); `runtime_settings` and the
+  removable crate `ferrix-kernel-settings` are in (ceb8d678c).
+* **The GNOME-like desktop on hyprix** (`docs/DESKTOP.md`, all four parts):
+  floating mode with snapping, the activities overview and minimize,
+  the Ferrix light theme and windows that draw their own frame; screens that
+  come and go (hotplug, output management, an arrangement kept per set of
+  monitors); `notifyd` and a D-Bus (`compositor-dbus`), with drivers' deaths
+  told as banners through `devmgr-events` (1f92468ad). On the Intel
+  display, hotplug on the lit port, the monitor's EDID over GMBUS and a
+  modeset of the second HDMI port (3h h1 and h2, under
+  `ferrix.intelgpu.modeset=on`) with a second scanout on `card0`; the box
+  run of 3h is the coordinator's and is not recorded. Every display driver
+  lists every mode, the core sets only a listed one, and hyprix changes mode
+  while it runs (`docs/DISPLAY.md` §9, 9475d13ea).
+* **Stage 25, Yoru** is as the stage's page says (reconciled 2026-10-25),
+  and the live ISO's and the N150's desktop are Yoru's (e4ee1da17); on
+  2026-10-28 hyprix learned a maximized window without a shadow, a dragged
+  window that keeps its snap distance, and a fullscreen window that covers
+  the top layer.
+* **hyprix draws on the GPU in a helper process** (`docs/GPU-COMPOSITOR.md`).
+  `compositor-gpu-protocol` (the records hyprix and `hyprix-gpu` exchange,
+  with `MODIFIER_MEMFD`) and `hyprix-gpu`, a glibc program that draws the
+  compositor's frames with Vulkan on the device tole picks (5c253d3cc,
+  2026-10-28), a client's dmabuf drawn once its writes are done
+  (c91bc141d) and a boot of it in `test-compositor`. hyprix's own option to
+  start the helper is on a branch (below).
+* **Suspending one program** (`docs/APP-SUSPEND.md`, S1, 2026-10-30):
+  `hyprctl dispatch suspend [window|pid:<n>]` freezes the program's
+  processes with `cgroup.freeze`, `resume` thaws them and puts them back in
+  the cgroup above (7e1dd7a88, df789b033); both shipped themes bind
+  SUPER+Z and SUPER+SHIFT+Z. Measured on Endfield on the N150 (12c879584).
+* **The N150 box and its Intel GPU** (stage 21). Large pages: `vmo_pin`
+  takes a `PIN_BLOCKS` option and a pin's absent pages come in aligned
+  blocks (95560643f), the GEM objects are mapped with 2 MiB and 64 KiB GPU
+  pages (6230ce313, `intel-xelp` 56586c895), and the IOMMU takes 2 MiB
+  VT-d entries for a pin's aligned runs, taken down whole (c735f308e,
+  `docs/INTEL-GPU.md` §14); with them Endfield's frame rate on the box is
+  unchanged at about 27 (`docs/GAME-MODE.md` §14), so turning the IOMMU
+  off is not recommended. `card0` copies on BCS0 (459853668), evicts a
+  GPU-written buffer's lines before copying (eb555dc28), blends the pointer
+  into the plane (f26fb6da6) and copies a frame in pipe A's vertical blank
+  (da674893d). The driver is started again when it dies, its keeper
+  (`intel-xelp`'s journal) outlives a worker it replaces, it releases
+  forcewake a dead driver held (515069070), and `devmgr` backs a crash
+  loop off, reinitialises, then quarantines the device (07f59338a).
+* **NVIDIA's card** (stage 21, `docs/NVIDIA.md`). N3c landed on 2026-10-25:
+  hyprix draws on the RTX 3060 through virglrenderer's test server on
+  NVIDIA's EGL (83cb9cc88 to 6db4623db), and `run-compositor --nvidia` keeps
+  the software compositor unless `FERRIX_NVIDIA_VTEST=1`, because Chrome's
+  WebGL page is faster under it. `nvrm` follows a monitor plugged, unplugged
+  or swapped (ccfad5570), quiesces the adapter when `/run/nvrm-quiesce`
+  appears (b5a59302d; on the card it shut down in 1.45 s with no Xid) and
+  imports sync files on its dmabufs (3059a21c4); `devmgr` lets `nvrm` drive
+  one GPU, never two (3c529c58b).
+* **Processor power** (`docs/POWERCTL.md`). `ferrix.vrcurrent` is replaced
+  by a power core of typed calls on a claim with per-model bounds
+  (3465911c2) and a ring-3 power driver with its policy library that `devmgr`
+  starts (abf758e42): a plan `ferrix.power.vr=A1,...,An@S`, a back-off on
+  temperature, and `auto:LO-HI`, a plan that finds what the cooling holds
+  (1af3292dc, d5cf8796b); `ferrix.msrlog` logs the power-limit MSRs
+  read-only (f452e8b67).
+* **Machine checks, and memory that fails** (customer, 2026-10-30; one design
+  document each, every one reviewed by the consultant before its code).
+  `docs/MACHINE-CHECK.md`: banks read and enabled on every processor, a log of
+  hardware errors, `/proc/ferrix-mce`, and a bad user page that kills the
+  program that read it instead of the kernel (83dec24a1, under
+  `ferrix.mce.recover`); on AMD the vendor's own rules (Linux 6.18's
+  `mce_severity_amd`), SMCA's banks and `McaX` (55b750b00), where Intel's
+  rules had stopped the kernel on every uncorrected error of a Ryzen 9 9900X;
+  CMCI
+  interrupts a processor at once on a corrected record (b12045c1a); a system
+  call's copy that consumes poison fails the call and the program gets
+  `SIGBUS` (1308245de); poison in a clean cached page costs a disk read
+  (2464379ed); a ring-3 driver that consumes poison ends alone and `devmgr`
+  starts it again (7352a897a); a bad frame stays out of the next boot after
+  a warm reset (368e7f5e9, pstore header version 3) and across a power cycle
+  (fa6e08d0d, in the boot disk's event log), switchable as `off`, `reset` or
+  `persist`, fixed in the `max` profile and chosen by a boot word in
+  `desktop` (e51fc67fd). All eight of the customer's follow-ups of 2026-10-30 are on
+  `main`. Intel's recovery has run under TCG only, since no Intel processor at
+  hand reports `MCG_SER_P` (`docs/MACHINE-CHECK.md` §7), and the AMD path's
+  run on the 9900X is a BACKLOG row. The RAM scrubber tests free frames while the
+  machine idles and retires a frame that fails twice (37b8a6701,
+  `docs/RAM-SCRUBBER.md`); an unstable core is taken out of service and
+  brought back by `echo 1 > cpuN/online` (805b289b1, `docs/CORE-QUARANTINE.md`).
+* **Memory under a game's load** (`docs/RAM-RELEASE.md`, `docs/HEAP-CACHES.md`,
+  `docs/PCID.md`, from Endfield on the N150). Per-processor heap caches in
+  front of the heap's lock (e4d44f24a); R1, the initramfs and the tmpfs's
+  copy given back once the root is final, about 195 MB on the box's image
+  (7d25922f3); `/proc/<pid>/status` splits the resident set by kind
+  (ea54ed162); the machine-wide OOM kill, and a pin that reclaims as a fault
+  does (86b79a87d); a buffer of many pages that a full heap refuses with an
+  error instead of a panic (062fa1664); the large-block check retries when
+  another processor moved the count (b433cedcd); PCIDs, on where every
+  processor has them (94d0c9df0, FX-0410 if one does not); a task woken
+  from a call is pulled onto its waker's processor (48d0efdc5, L.sched.90-91)
+  and onto an idle one when its own is busy (6a919687e, L.sched.85).
+* **Game mode** (`docs/GAME-MODE.md`, `docs/GAME-MODE-SCHED.md`, 2026-10-30
+  and -31): a design in tiers with its measurements on the N150 (at the
+  settings Endfield is played at the GPU is the limit; freezing, nice values
+  and the protections each buy about 1% of a core and no frame; the GPU's
+  4 KiB pages cost 15 to 25% of its shader bandwidth, which the large pages
+  above went after). Built so far: T0h's card0 copy on BCS0 (459853668), and
+  layer B's second piece, `sched_setaffinity` that pins (3e77c0df6, F3) and
+  a fair task's own slice request (2e717f409, F7), both measured on 2026-10-31
+  with no effect beyond the noise (`docs/GAME-MODE-SCHED.md` §7.1). The frame
+  mark, lends, the idle-gap class, deadlines and the session service are
+  designed, reviewed and have no code.
+* **Certification and signing.** The write path's clean-node cache is
+  dropped between operations only, F-99 closed (d0b034524, 60559327d);
+  `/proc/<pid>/maps` in page-sized blocks charged before each is taken
+  (F-97, 7a0a357d3); sealed jobs let no process leave a driver's job but by
+  ending (F-92, 1b2040006); the register stands at 30 open and 68 closed, of
+  98 (`docs/certification/FINDINGS.md`, which owns the count). Product signing
+  (`docs/SIGNING.md`): S1, `ferrix-sigverify`, `ferrix-sha256` and the soft
+  signer (546080e4b), S2, the verifier's time measured on the DK1
+  (99db9e544), and S3, the anchors and the family registry that keep
+  development keys and the verifier out of a release (2b04af0cf); the loader's
+  verification (S4) is not built.
+* **The Linux ABI behind a build flag** (`docs/LINUX-ABI-SEPARATION.md`
+  §11): `linux_abi = on | off`, `off` an ad-hoc build at level none with no
+  claim (f5307143b, 2026-10-23). The kernel is four crates, `ferrix-kernel-core`,
+  `-item`, `-load` and the binary (ffd75a08e, `docs/KERNEL-CRATES.md` S3).
+* **Stage 13's follow-ons** (`docs/roadmap/follow-ons.md`, 2026-10-26): time
+  namespaces (2daef95d2), unprivileged mounting and `test-bwrap` as uid 1000
+  (3a65627b9), the dentry and inode caches' reclaim (6baabc374), Linux's
+  `seccomp_bpf` selftest (69f52ecec), and `memory.reclaim`, `cpu.max.burst`,
+  `cpu.idle`, `io.weight`, `io.latency` and `memory.stat`'s `anon` and
+  `pagetables` (L.object.182 to 187). The gate host's runs each commit named
+  as owed are not recorded in the tree, and the landing left `develop` red
+  until eb2ddbfd6.
+* **Smaller landings.** `ETXTBSY` (66eb95da0); `/proc/cpuinfo` as Linux
+  writes it (4b521bd25); a program's `int3` and `into` through Linux's gates
+  (a2623409d); AArch64's branch-history plan under a hypervisor covers every
+  core a vCPU may run on (66cb8ee90); `AF_UNIX` streams queue a
+  small send whole (ef47ac330); AHCI reads ahead (59b86eeb0); `port_wait`
+  trusts its wakes, so idle drivers no longer wake 200 times a second
+  (e7977992d); the dead are freed while no
+  processor is idle (F-95, landing 2, 7fdc1c99d).
+* **Still on branches, so not landed.** The roadmap branch
+  `claude/ferrix-roadmap-completion-hkxlpp` carries stage 14 work past the
+  stage 13 follow-ons (61 commits ahead of `develop`, 2026-10-28, its
+  scheduler's `SoftRt` domain among them) and `feature/sched-softrt-domain`
+  is the same line; `feature/hyprix-gpu-backend` (hyprix's `hyprix:gpu`
+  option and the helper's environment lines), `land/hyprix-gpu-backend`
+  (`test-compositor --boot helper-desktop`), `feature/csd-decorations`,
+  `feature/mk/*` (the microkernel's M1, unchanged since 2026-10-21),
+  `park/f95-option-a` (F-95's landing 2 conditions), `wip/stability-try`
+  (the nightly stability workflow) and `docs/intel-display` (a design paused
+  by 3h). `docs/roadmap/open-branches.md` has the 2026-11-02 count.
+
 
 ## Landed 2026-10-09 to 2026-10-21 (`main` 2ba25d12a)
 
@@ -36,7 +252,8 @@ version is on the [overview](README.md).
   back in slices (f0bc9ab2d, 2026-10-15, L.object.188-190: the work of the
   branch `mm-pcache`, landed under another hash), which the Endfield download's
   ENOSPC asked for. Time namespaces, unprivileged mounting (N5) and a few
-  controllers' files stay on branches or unwritten.
+  controllers' files stayed on branches or unwritten then; all were built and
+  landed on 2026-10-26 (below).
 * **Ferrix on the customer's N150 box** (stage 21, `docs/N150.md`).
   Built from the branch `ahci`, it booted on the box on 2026-10-15 to a
   desktop on the firmware framebuffer, `/` on the SATA drive and the network
@@ -82,7 +299,8 @@ version is on the [overview](README.md).
 * **NVIDIA's dmabufs** (stage 21, N3b's kernel half, 2026-10-11): a chardev
   render node, VMO dmabufs, `sync_file` fences and name-only dmabufs of video
   memory that `nvrm` exports. hyprix drawing on the card (N3c) and an X
-  window drawn by the card (`nv-next`) stay on branches.
+  window drawn by the card (`nv-next`) stayed on branches then; N3c landed on
+  2026-10-25 (below).
 * **Installing and releasing.** I3: `ferrix-install` makes the root volume at
   its partition's size with `ferrix-btrfs-mkfs` (2026-10-19). A/B system slots
   (`docs/AB-BOOT.md`, 2026-10-11): the loader boots a trial slot once and

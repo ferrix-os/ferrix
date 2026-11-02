@@ -305,8 +305,11 @@ unprivileged mounting (N5), the dentry and inode caches' reclaim and Linux's
 `seccomp_bpf` selftest were the [follow-ons](follow-ons.md); with
 `memory.reclaim`, `cpu.max.burst`, `cpu.idle`, `io.weight`, `io.latency`,
 and `anon` and `pagetables` in `memory.stat`, every one of them was built on
-2026-10-26 (L.object.182 to 187) on `claude/ferrix-roadmap-completion-hkxlpp`, and lands once the
-gate host has run what each commit says it owes.
+2026-10-26 (L.object.182 to 187) on `claude/ferrix-roadmap-completion-hkxlpp`, and
+they are on `main` since then (3a65627b9 to 71a51fc11). Each commit named
+what the gate host owed before it landed; whether those runs were made is not
+recorded in the tree, and eb2ddbfd6 (2026-10-26) brought `cargo xtask check`
+green again after the landing.
 
 **Where stage 13 stood (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
