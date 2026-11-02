@@ -2254,10 +2254,7 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         }
         // The mask read again under the home's lock, its writer's: the test
         // above was a hint (L.sched.97).
-        if !allowed(task, here) {
-            return Placed::Declined;
-        }
-        if refuses(how, here_queue, home_queue, task) || !asleep_at_home(task, home_queue) {
+        if declines(how, here, here_queue, home_queue, task) {
             return Placed::Declined;
         }
         // Whatever sleep it meant is over, as the wake at home ends it.
@@ -2291,6 +2288,22 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         }
         return Placed::Moved;
     }
+}
+
+/// Whether [`wake_onto`] declines to move `task` onto `here`, both queues
+/// locked: its mask (`allowed`), asked again under `here`'s lock
+/// (L.sched.97), then [`refuses`], then whether it is asleep at home (which
+/// takes it out of home's sleeper set).
+fn declines(
+    how: Onto,
+    here: usize,
+    here_queue: &CpuQueue,
+    home_queue: &mut CpuQueue,
+    task: &Arc<Task>,
+) -> bool {
+    !allowed(task, here)
+        || refuses(how, here_queue, home_queue, task)
+        || !asleep_at_home(task, home_queue)
 }
 
 /// Whether [`wake_onto`] declines to move `task`, `how` it moves it, with
