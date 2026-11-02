@@ -667,7 +667,7 @@ fn park_elsewhere(
         topology
             .cpus()
             .iter()
-            .find(|cpu| cpu.is_online() && cpu.logical != me)
+            .find(|cpu| cpu.in_service() && cpu.logical != me)
             .map(|cpu| cpu.logical)
     }) else {
         return Ok(None);
@@ -813,7 +813,7 @@ fn check_recorded_after_the_scan(
         topology
             .cpus()
             .iter()
-            .find(|cpu| cpu.is_online() && cpu.logical != me)
+            .find(|cpu| cpu.in_service() && cpu.logical != me)
             .map(|cpu| cpu.logical)
     }) else {
         return Ok(false);
@@ -1011,7 +1011,7 @@ fn check_forget_racing_an_install(
         topology
             .cpus()
             .iter()
-            .find(|cpu| cpu.is_online() && cpu.logical != me)
+            .find(|cpu| cpu.in_service() && cpu.logical != me)
             .map(|cpu| cpu.logical)
     }) else {
         return Ok(false);

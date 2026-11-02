@@ -571,6 +571,11 @@ pub(super) fn build_parts(
             }
         }
     }
+    // `FERRIX_GPU_HELPER=1`: hyprix-gpu and the Mesa it draws with, under
+    // their own prefix (`crate::hyprix_gpu`); off, the image is as before.
+    if crate::hyprix_gpu::wanted(arch) {
+        carried.extend(crate::hyprix_gpu::carried()?);
+    }
     for (path, program) in programs.carried() {
         // The desktop's `reboot` takes the name from init's link to `svc`,
         // since it can pass a board's firmware the word that says where to

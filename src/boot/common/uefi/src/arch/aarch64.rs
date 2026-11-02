@@ -254,3 +254,9 @@ pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
         );
     }
 }
+
+/// No machine-check banks on AArch64: no page is kept out for one
+/// (`docs/MACHINE-CHECK-RESTART.md` §4).
+pub(crate) const fn left_bank_pages(_out: &mut [u32]) -> usize {
+    0
+}

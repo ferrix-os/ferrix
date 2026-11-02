@@ -637,6 +637,12 @@ fn mark_used<B: Backend, H: Host<B::Memory>>(
         gem::add_read(owner, done);
     }
     let shared = owner.shared && owner.dmabuf_alive;
+    // Ever exported, not only while its dmabuf lives: a card still shows
+    // an object whose descriptor its exporter closed (vtest's scanout
+    // buffers on the N150, 2026-10-28).
+    if owner.shared && entry.flags & exec::OBJECT_WRITE != 0 {
+        super::note_shared_write();
+    }
     if shared {
         let fence_cookie = state.cookie();
         match host.dmabuf_fence(cookie, fence_cookie) {

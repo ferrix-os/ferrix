@@ -33,7 +33,7 @@ pub use balance::{
     BALANCE_THRESHOLD, Balance, CpuLoad, FLIP_DECAY_NS, LOAD_PERIOD_NS, LOAD_SCALE, Load,
     Placement, busiest, flip, imbalance, place, pull_fits, quietest, utilisation, wake_wide,
 };
-pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
+pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, WORDS, check_partition};
 
 /// Why a domain or a CPU set was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -291,6 +291,11 @@ pub trait RealtimeClass<T>: SchedClass<T> {
     fn entity(params: RtParams, slot: Self::Slot) -> Self::Entity;
     /// The node back out of an entity the queue let go.
     fn into_slot(entity: Self::Entity) -> Self::Slot;
+    /// The identifier of a waiting entity, never the running one, whose
+    /// payload `matches`: a walk of the queue, for the moves that take
+    /// every task off a processor (one taken out of service,
+    /// `docs/CORE-QUARANTINE.md`), never a pick, a wake or the tick.
+    fn waiting_where(queue: &Self::Queue, matches: impl Fn(&T) -> bool) -> Option<u64>;
 }
 
 /// Where a task keeps its node of the tiers above fair while it is off

@@ -45,6 +45,9 @@ pub struct Style {
     /// window that is not focused; `None` (the option's -1) is the
     /// focused one's.
     pub shadow_inactive: Option<Color>,
+    /// `decoration:shadow:ignore_window`, Hyprland's default true: the
+    /// shadow and the glow are drawn around a window and not under it.
+    pub shadow_ignore_window: bool,
     /// `decoration:glow:*`, or `None` when `glow:enabled` is off: a second
     /// shadow round the focused window, centred on it, in its own colour
     /// -- an accent's halo where the shadow is ambient darkness
@@ -69,6 +72,18 @@ pub struct Style {
     /// rather than from the windows it floats over. Off by default, as in
     /// Hyprland; a window's own `xray` rule says otherwise for that one.
     pub xray: bool,
+    /// `hyprix:blur_scrim`: what is laid behind a layer surface whose
+    /// `layerrule` asked for a blur, on a screen that draws none -- a
+    /// software screen under `hyprix:blur_in_software = 0`, or
+    /// `blur:enabled` off. `None`, the default, lays nothing, as Hyprland.
+    ///
+    /// A shell drawn for a blurred backdrop is translucent, its text light
+    /// on a little of its own ground: over a bright window and no blur,
+    /// that text is unreadable (Yoru's wallpaper switcher over a white
+    /// window, the customer, 2026-10-28). A near-opaque dark colour behind
+    /// it keeps it readable for the price of one blend a pixel,
+    /// where even a downscaled blur is most of a software frame.
+    pub blur_scrim: Option<Color>,
 }
 
 impl Style {
@@ -185,6 +200,9 @@ impl Style {
                     offset: offset(config.str("decoration:shadow:offset").unwrap_or("")),
                 }),
             shadow_inactive: colour_or_unset(config, "decoration:shadow:color_inactive"),
+            shadow_ignore_window: config
+                .bool("decoration:shadow:ignore_window")
+                .unwrap_or(true),
             glow: config
                 .bool("decoration:glow:enabled")
                 .unwrap_or(false)
@@ -217,6 +235,8 @@ impl Style {
                 .unwrap_or(true)
                 .then(|| blur_of(config)),
             xray: config.bool("decoration:blur:xray").unwrap_or(false),
+            blur_scrim: colour_or_unset(config, "hyprix:blur_scrim")
+                .filter(|colour| colour.alpha() > 0),
         }
     }
 
@@ -1033,18 +1053,96 @@ pub fn why_not_alone(
             .rect
             .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
         if i64::from(surface.width()) != rect.width || i64::from(surface.height()) != rect.height {
+            // Scaled to the window's size, or to fit inside it with its
+            // aspect kept where the two are not one shape (`letterboxed`).
+            let drawn = letterboxed(placed, rect, bounds, (surface.width(), surface.height()))
+                .unwrap_or(rect);
             return Some(format!(
-                "the fullscreen window's buffer is {}x{}, stretched to {}x{}",
+                "the fullscreen window's buffer is {}x{}, scaled to {}x{}",
                 surface.width(),
                 surface.height(),
-                rect.width,
-                rect.height
+                drawn.width,
+                drawn.height
             ));
         }
     }
     alone(output, origin, styles, surfaces, layers, damage, bounds)
         .is_none()
         .then(|| "not one window alone".to_owned())
+}
+
+/// `size` scaled to fit inside `rect` with its aspect kept, centred in it:
+/// where a picture of that size goes when it is shown as large as `rect`
+/// allows without being distorted. `rect` itself when the two have the same
+/// aspect to within a pixel, or when either has no size -- a stretch by a
+/// fraction of a pixel is not worth a black line at the edge.
+#[must_use]
+pub fn fit_within(rect: Rect, size: (i64, i64)) -> Rect {
+    let (width, height) = size;
+    if width <= 0 || height <= 0 || rect.width <= 0 || rect.height <= 0 {
+        return rect;
+    }
+    // Rounded to the nearest pixel, in whole numbers: which side the picture
+    // meets is the one its aspect is the narrower against.
+    let rounded = |value: i128, by: i128| -> i64 {
+        i64::try_from((value.saturating_mul(2).saturating_add(by)) / by.saturating_mul(2).max(1))
+            .unwrap_or(i64::MAX)
+    };
+    let (fit_width, fit_height) = if i128::from(height) * i128::from(rect.width)
+        <= i128::from(rect.height) * i128::from(width)
+    {
+        // As wide as `rect`: bars above and below.
+        (
+            rect.width,
+            rounded(
+                i128::from(height) * i128::from(rect.width),
+                i128::from(width),
+            ),
+        )
+    } else {
+        // As tall as `rect`: bars left and right.
+        (
+            rounded(
+                i128::from(width) * i128::from(rect.height),
+                i128::from(height),
+            ),
+            rect.height,
+        )
+    };
+    if (fit_width - rect.width).abs() <= 1 && (fit_height - rect.height).abs() <= 1 {
+        return rect;
+    }
+    Rect::new(
+        rect.x.saturating_add((rect.width - fit_width) / 2),
+        rect.y.saturating_add((rect.height - fit_height) / 2),
+        fit_width,
+        fit_height,
+    )
+}
+
+/// Where a window in the fullscreen mode draws a surface `size` big that is
+/// not the size of its rectangle, which covers `bounds`, the screen: scaled
+/// to fit with its aspect kept and centred, the rest of the rectangle black
+/// ([`fit_within`]). `None` -- the surface is stretched to the rectangle as
+/// any other window's is -- for a window that is not fullscreen, one that
+/// does not cover the screen (one on its way there, or back), and a surface
+/// of the rectangle's aspect, which fills it either way.
+///
+/// What a game gets from gamescope or from Xwayland's emulated mode
+/// changes: a game drawing 1024x768 on a 1920x1080 screen is shown 1440x1080
+/// between black bars, not pulled out to 16:9. A window at the screen's
+/// own size is not touched, which keeps its direct path ([`alone`]).
+#[must_use]
+pub fn letterboxed(placed: &Placed, rect: Rect, bounds: Rect, size: (u32, u32)) -> Option<Rect> {
+    if !fullscreen(placed) || intersect(rect, bounds) != Some(bounds) {
+        return None;
+    }
+    let size = (i64::from(size.0), i64::from(size.1));
+    if size == (rect.width, rect.height) {
+        return None;
+    }
+    let inner = fit_within(rect, size);
+    (inner != rect).then_some(inner)
 }
 
 /// Whether `placed` is in the fullscreen mode, not maximized: the layout
@@ -1192,6 +1290,14 @@ fn draw_layer<P: Painter>(
             Some(behind) => canvas.blur_backdrop(behind, rect, Rounding::none(), &blur, damage),
             None => canvas.blur(rect, Rounding::none(), &blur, damage),
         }
+    } else if let Some(scrim) = style
+        .blur_scrim
+        .filter(|_| layer.blur && style.blur.is_none())
+        && surface.format() == Format::Argb8888
+    {
+        // No blur on this screen, and the surface was drawn for one: the
+        // scrim instead, over the rectangle the blur would have covered.
+        canvas.fill(rect, scrim, damage);
     }
     // Stretched to its rectangle, as a window is: a client that drew at
     // scale 1 on a screen at scale 2 -- every one the compositor has not
@@ -1284,12 +1390,20 @@ fn window<P: Painter>(
         || surfaces
             .get(&placed.window)
             .is_some_and(|surface| copied_opaque(surface, rect, &own, opacity));
-    let seen;
-    let shadowed = if overwritten {
-        seen = rim(damage, rect, rounding);
+    let seen = rim(damage, rect, rounding);
+    let shadowed = if overwritten { &seen } else { damage };
+    // `decoration:shadow:ignore_window`, on unless a configuration turns it
+    // off, as in Hyprland: the shadow and the glow are drawn around the
+    // window and not under it, under any window. Under one with alpha --
+    // a toolkit's, every tole window, Yoru's Settings and installer -- the
+    // shadow and the glow were blended under every pixel of it, all but
+    // the rim written over again by the window: 20 ms of a 900x640
+    // window's frame while it was dragged, on nazuna; a frame on the N150
+    // took three times that (the customer, 2026-10-28).
+    let shadowed_only = if style.shadow_ignore_window {
         &seen
     } else {
-        damage
+        shadowed
     };
     // A fullscreen window has no decoration at all, as in Hyprland: its
     // shadow is off the screen but for what shows through its own alpha,
@@ -1321,7 +1435,7 @@ fn window<P: Painter>(
                 color,
                 ..*shadow
             },
-            shadowed,
+            shadowed_only,
         );
     }
     // The glow over the shadow and under the window: the focused one's in
@@ -1341,7 +1455,7 @@ fn window<P: Painter>(
                     color,
                     ..*glow
                 },
-                shadowed,
+                shadowed_only,
             );
         }
     }
@@ -1395,6 +1509,25 @@ fn window<P: Painter>(
             (*surface).as_opaque()
         } else {
             *surface
+        };
+        // A fullscreen window whose surface is another shape than the
+        // screen: the surface as large as it goes with its aspect kept,
+        // centred, and black around it rather than whatever was there --
+        // nothing under a fullscreen window is drawn ([`hiding`]).
+        let rect = match letterboxed(
+            placed,
+            rect,
+            canvas.bounds(),
+            (surface.width(), surface.height()),
+        ) {
+            Some(inner) => {
+                let bars = damage.clipped(rect).without(inner);
+                if !bars.is_empty() {
+                    canvas.clear(Color(0xff00_0000), &bars);
+                }
+                inner
+            }
+            None => rect,
         };
         let exact =
             i64::from(surface.width()) == rect.width && i64::from(surface.height()) == rect.height;
@@ -1633,12 +1766,7 @@ pub fn damage_between_parts(
     // shows only where they overlap, shadows included. A focused window is
     // raised, so a focus change restacks; tiled windows do not overlap, and
     // for them the order changes no pixel at all.
-    let reach = styles.base.shadow.map_or(0, |shadow| {
-        shadow
-            .range
-            .saturating_add(shadow.offset.0.abs().max(shadow.offset.1.abs()))
-            .max(0)
-    });
+    let reach = decoration_reach(styles.base);
     let reached = |placed: &Placed| {
         let box_ = outer(placed);
         Rect::new(
@@ -1678,8 +1806,32 @@ pub fn damage_between_parts(
     (damage, rings)
 }
 
+/// How far outside a window's border box its shadow or its glow reaches,
+/// whichever is further, on any side.
+fn decoration_reach(style: &Style) -> i64 {
+    let reach = |shadow: &Shadow| {
+        shadow
+            .range
+            .saturating_add(shadow.offset.0.abs().max(shadow.offset.1.abs()))
+            .max(0)
+    };
+    style
+        .shadow
+        .as_ref()
+        .map_or(0, reach)
+        .max(style.glow.as_ref().map_or(0, reach))
+}
+
 /// Whether focusing or unfocusing `placed` changes nothing of it but its
-/// border: it shows as much of itself and is dimmed alike either way.
+/// border: it shows as much of itself and is dimmed alike either way, and
+/// its shadow and glow are the same colour either way.
+///
+/// The shadow and the glow reach far outside the ring: a focus change that
+/// recolours them -- `shadow:color_inactive`, or a glow round the focused
+/// window only, both Yoru's -- owes the window's whole decorated box, or
+/// the old focus's shadow stays on the screen beside the new one's (the
+/// N150, 2026-10-28: hard-edged dark slabs and stale strips under a window
+/// after the focus moved).
 fn focus_is_border_only(styles: &Styles<'_>, placed: &Placed) -> bool {
     let style = styles.base;
     let own = styles.of(placed.window);
@@ -1688,7 +1840,18 @@ fn focus_is_border_only(styles: &Styles<'_>, placed: &Placed) -> bool {
             .unwrap_or_else(|| style.opacity(focused, placed.fullscreen))
     };
     let dimmed = style.dim > 0.0 && own.dim;
-    opacity(true).to_bits() == opacity(false).to_bits() && !dimmed
+    let decorated = own.shadow && own.decorate && !fullscreen(placed);
+    let shadow_alike = style
+        .shadow
+        .as_ref()
+        .filter(|_| decorated)
+        .is_none_or(|shadow| style.shadow_inactive.unwrap_or(shadow.color) == shadow.color);
+    let glow_alike = style
+        .glow
+        .as_ref()
+        .filter(|_| decorated)
+        .is_none_or(|glow| style.glow_inactive == Some(glow.color));
+    opacity(true).to_bits() == opacity(false).to_bits() && !dimmed && shadow_alike && glow_alike
 }
 
 /// The part of `placed`'s box a change of its border's colour repaints:

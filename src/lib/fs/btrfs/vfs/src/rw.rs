@@ -122,6 +122,19 @@
 //! answering reads; Linux turns a btrfs mount read-only on an abort too.
 //! What the aborted transaction held is lost, as on Linux.
 //!
+//! # Clean tree nodes are given back between operations
+//!
+//! The volume keeps the tree nodes it read and did not change, a cache of
+//! the disk, and never drops one inside an operation: a walk down a tree
+//! goes back to the nodes it loaded (finding F-99). So the cache is brought
+//! back to its size each time the lock is taken (`Shared::lock`), before
+//! the operation that took it runs, and a reclaim of the whole machine asks
+//! for clean nodes the same way, between operations: `RwBtrfs::drop_clean`
+//! takes the lock only if it is free, so a reclaim never waits for an
+//! operation -- one that is itself allocating would wait for it in turn --
+//! and drops a bounded batch, oldest first. What the cache holds is counted
+//! as the lock is let go (`clean_bytes`), for `MemAvailable`.
+//!
 //! # Deleting what is still open
 //!
 //! Unlinking a file that something still holds leaves the inode with an
@@ -217,6 +230,10 @@ struct Shared<D> {
     /// that have had it: their difference is how many wait for it now.
     arrived: AtomicU64,
     admitted: AtomicU64,
+    /// What the volume's clean nodes held of the heap when the lock was
+    /// last let go: see "Clean tree nodes are given back between
+    /// operations".
+    clean: AtomicU64,
 }
 
 impl<D> fmt::Debug for Shared<D> {
@@ -280,6 +297,7 @@ impl<D: WriteHandle> RwBtrfs<D> {
             turn: parker.new_parking(),
             arrived: AtomicU64::new(0),
             admitted: AtomicU64::new(0),
+            clean: AtomicU64::new(0),
         });
         // The open may have evicted orphans left by a crash; commit that
         // before anything else changes, so a second crash has less to redo.
@@ -295,16 +313,72 @@ impl<D: WriteHandle> RwBtrfs<D> {
     pub fn sync(&self) -> Result<()> {
         self.shared.sync_all()
     }
+
+    /// Give up the volume's clean tree nodes, the oldest first, until
+    /// `want` bytes of heap are given or a batch of them is; answers the
+    /// bytes given. Never a dirty node, and nothing while an operation
+    /// holds the volume: the lock is taken only if it is free. See "Clean
+    /// tree nodes are given back between operations".
+    pub fn drop_clean(&self, want: u64) -> u64 {
+        match self.shared.volume.try_lock() {
+            Some(volume) => Held::new(&self.shared, volume).drop_clean(want),
+            None => 0,
+        }
+    }
+
+    /// What the volume's clean tree nodes held of the heap when its lock was
+    /// last let go: the volume's own exact count, as of then.
+    pub fn clean_bytes(&self) -> u64 {
+        self.shared.clean.load(Ordering::Relaxed)
+    }
+}
+
+/// The volume under its lock. Letting it go notes what the clean nodes
+/// hold ([`RwBtrfs::clean_bytes`]) before the lock goes.
+struct Held<'a, D: WriteHandle> {
+    shared: &'a Shared<D>,
+    volume: SleepLockGuard<'a, WriteVolume<D>>,
+}
+
+impl<'a, D: WriteHandle> Held<'a, D> {
+    const fn new(shared: &'a Shared<D>, volume: SleepLockGuard<'a, WriteVolume<D>>) -> Self {
+        Held { shared, volume }
+    }
+}
+
+impl<D: WriteHandle> core::ops::Deref for Held<'_, D> {
+    type Target = WriteVolume<D>;
+
+    fn deref(&self) -> &WriteVolume<D> {
+        &self.volume
+    }
+}
+
+impl<D: WriteHandle> core::ops::DerefMut for Held<'_, D> {
+    fn deref_mut(&mut self) -> &mut WriteVolume<D> {
+        &mut self.volume
+    }
+}
+
+impl<D: WriteHandle> Drop for Held<'_, D> {
+    fn drop(&mut self) {
+        self.shared
+            .clean
+            .store(self.volume.clean_bytes(), Ordering::Relaxed);
+    }
 }
 
 impl<D: WriteHandle> Shared<D> {
     /// The volume, under its lock. One whose transaction an earlier edit
     /// aborted is reloaded read-only from its last commit first: see "After
-    /// an aborted transaction".
-    fn lock(&self) -> SleepLockGuard<'_, WriteVolume<D>> {
+    /// an aborted transaction". Its clean nodes are brought back to their
+    /// number here, between operations, and nowhere inside one: see "Clean
+    /// tree nodes are given back between operations".
+    fn lock(&self) -> Held<'_, D> {
         let _ = self.arrived.fetch_add(1, Ordering::SeqCst);
-        let mut volume = self.volume.lock();
+        let mut volume = Held::new(self, self.volume.lock());
         let _ = self.admitted.fetch_add(1, Ordering::SeqCst);
+        volume.trim_clean();
         // A writeback between slices may be waiting for this one's turn.
         self.wake();
         if let Some(cause) = volume.aborted()
@@ -883,7 +957,11 @@ impl<D: WriteHandle> Node<D> {
                 continue;
             }
             let len = count.saturating_mul(page);
-            let mut buf = vec![0u8; len];
+            // A slice is up to WRITEBACK_PAGES, one contiguous block of the
+            // heap: with no room for it the run stays dirty and the writeback
+            // answers ENOMEM, as with no room for anything else it needs
+            // ([`crate::try_zeroed`]).
+            let mut buf = crate::try_zeroed(len).ok_or((Errno::ENOMEM, first))?;
             pages
                 .read(offset, &mut buf)
                 .map_err(|error| (error, first))?;
@@ -1054,13 +1132,18 @@ impl<D: WriteHandle> PageSource for Source<D> {
         }
         let offset = first.checked_mul(PAGE_SIZE).ok_or(Errno::EIO)?;
         let page = usize::try_from(PAGE_SIZE).map_err(|_| Errno::EIO)?;
-        let mut run = vec![0u8; page.saturating_mul(pages.len())];
         let ino = self.ino;
-        let read = self
-            .shared
-            .with(|volume| volume.read_file(ino, offset, &mut run));
+        // With no room for the run's buffer, a page at a time, straight into
+        // the pages, as after a failed read ([`crate::try_zeroed`]).
+        let read = match crate::try_zeroed(page.saturating_mul(pages.len())) {
+            Some(mut run) => self
+                .shared
+                .with(|volume| volume.read_file(ino, offset, &mut run))
+                .map(|_| Some(run)),
+            None => Ok(None),
+        };
         match read {
-            Ok(_) => {
+            Ok(Some(run)) => {
                 for (target, filled) in pages.iter_mut().zip(run.chunks_exact(page)) {
                     target.copy_from_slice(filled);
                 }
@@ -1070,7 +1153,7 @@ impl<D: WriteHandle> PageSource for Source<D> {
             // time, so the pages before the bad one are kept and the bad one
             // answers for itself.
             Err(error) if pages.len() == 1 => Err(error),
-            Err(_) => {
+            Ok(None) | Err(_) => {
                 let mut filled = 0;
                 for (index, target) in pages.iter_mut().enumerate() {
                     let at = offset.saturating_add(PAGE_SIZE.saturating_mul(index as u64));

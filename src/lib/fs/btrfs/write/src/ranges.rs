@@ -50,6 +50,19 @@ impl RangeSet {
             .fold(0u64, |sum, (start, end)| sum.saturating_add(end - start))
     }
 
+    /// Whether the set holds at least `want` bytes: [`RangeSet::total`]
+    /// compared, but stopping at the run that reaches `want`, so a set of
+    /// thousands of runs is not summed to answer it.
+    #[must_use]
+    pub fn holds_at_least(&self, want: u64) -> bool {
+        let mut sum = 0u64;
+        want == 0
+            || self.map.iter().any(|(start, end)| {
+                sum = sum.saturating_add(end - start);
+                sum >= want
+            })
+    }
+
     /// The runs, as `(start, length)`, in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.map.iter().map(|(&start, &end)| (start, end - start))

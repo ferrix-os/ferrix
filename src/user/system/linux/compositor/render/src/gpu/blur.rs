@@ -21,11 +21,7 @@
 //! only pixels a reach inside the region are free of it. Those are the ones
 //! copied out.
 
-use compositor_virgl::Device;
-
-use super::{
-    BLEND_OVER, BLEND_REPLACE, Backdrop, Canvas, Image, Program, SAMPLER_LINEAR, SAMPLER_NEAREST,
-};
+use super::{Backdrop, Backend, Blend, Filter, Image, Program, Renderer};
 use crate::damage::{bounding, intersect};
 use crate::{Blur, Damage, Painter, Rect, Rounding};
 
@@ -58,7 +54,7 @@ fn at_level(rect: Rect, level: u32, image: Image) -> Option<Rect> {
     )
 }
 
-impl<D: Device> Canvas<D> {
+impl<B: Backend> Renderer<B> {
     /// Make the pyramid's levels and the finished blur's texture, the first
     /// time they are needed and again if there are more passes than before.
     fn pyramid(&mut self, passes: u32) -> Option<()> {
@@ -138,10 +134,10 @@ impl<D: Device> Canvas<D> {
         // blurprepare.glsl.
         let (wide, tall) = inverse(first);
         self.aim(first);
-        self.sample(source.opaque_view, source.resource, SAMPLER_NEAREST);
+        self.sample(source, true, Filter::Nearest);
         self.program(
             Program::BlurPrepare,
-            BLEND_REPLACE,
+            Blend::Replace,
             &[
                 wide,
                 tall,
@@ -168,10 +164,10 @@ impl<D: Device> Canvas<D> {
             };
             let (wide, tall) = inverse(*from);
             self.aim(*to);
-            self.sample(from.view, from.resource, SAMPLER_LINEAR);
+            self.sample(*from, false, Filter::Linear);
             self.program(
                 Program::BlurDown,
-                BLEND_REPLACE,
+                Blend::Replace,
                 &[wide, tall, radius, 0.0, boost, darkness, 0.0, 0.0],
             );
             self.draw(&[region], whole(*to));
@@ -185,10 +181,10 @@ impl<D: Device> Canvas<D> {
             };
             let (wide, tall) = inverse(*from);
             self.aim(*to);
-            self.sample(from.view, from.resource, SAMPLER_LINEAR);
+            self.sample(*from, false, Filter::Linear);
             self.program(
                 Program::BlurUp,
-                BLEND_REPLACE,
+                Blend::Replace,
                 &[wide, tall, radius / 4.0, 0.0],
             );
             self.draw(&[region], whole(*to));
@@ -198,10 +194,10 @@ impl<D: Device> Canvas<D> {
         let (wide, tall) = inverse(first);
         let bounds = Painter::bounds(self);
         self.aim(into);
-        self.sample(first.view, first.resource, SAMPLER_NEAREST);
+        self.sample(first, false, Filter::Nearest);
         self.program(
             Program::BlurFinish,
-            BLEND_REPLACE,
+            Blend::Replace,
             &[
                 wide,
                 tall,
@@ -259,13 +255,13 @@ impl<D: Device> Canvas<D> {
         let bounds = Painter::bounds(self);
         self.aim(self.target);
         self.textured(
-            from.opaque_view,
-            from.resource,
-            SAMPLER_NEAREST,
+            from,
+            true,
+            Filter::Nearest,
             bounds,
             (rect, rounding),
             1.0,
-            BLEND_OVER,
+            Blend::Over,
             &quads,
         );
     }

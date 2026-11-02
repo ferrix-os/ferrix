@@ -1402,7 +1402,17 @@ read of the kernel log.
 **What triggers it.** Crash records (§18, step 2), `devmgr`'s driver
 deaths and restarts, and a rule action, `capture where EXPR`, for
 anything else (`capture where message ~ "illegal instruction"`). At most
-one picture each 10 s.
+one picture each 10 s, and for one program at most one each 10 minutes:
+a crash loop gets a picture when it starts and then one each 10 minutes,
+so the loop does not also spend the desktop's readback, a blob and its
+upload on every crash (Steam's browser on the N150, 2026-10-30, crashed a
+renderer every 3-5 s). The program is the crash record's `CRASH_PROGRAM`
+(else `CRASH_EXE`, else `CRASH_COMM`); a record naming no process is
+binned by who said it and what, digits taken out. A crash turned away
+gets `CAPTURE=binned` and `CAPTURE_SAME_AS=<seqnum>`, the crash whose
+picture stands for it. `SameProgramEvery=` in `capture.conf` sets the
+span (`30min`, `600`, `90s`) and `0` or `always` takes a picture for every
+crash; `lode reload` reads it again.
 
 **Storage and privacy.** The screen can show secrets, so capture is off
 unless turned on, and a picture is kept like the journal: in
@@ -1561,10 +1571,11 @@ Crash screenshots (§19), on the session token of step 2a.
   (`SO_PEERCRED`); anything else is REFUSED and dropped. Triggers: crash
   records, `devmgr` lines saying a driver died, and `capture where EXPR`
   lines of the file. The crash record is stored first; then one CAPTURE to
-  the seat's provider, at most one each 10 s; the answer within 2 s or a
+  the seat's provider, at most one each 10 s and one per program each
+  `SameProgramEvery=` (10 min; `0` for every crash); the answer within 2 s or a
   `timed-out` record, three in a row dropping the provider. Every outcome
   is a record, `CAPTURE_OF=<seqnum>` and `CAPTURE=stored|none|declined|
-  timed-out|skipped`; a stored picture is
+  timed-out|skipped|binned`; a stored picture is
   `captures/<boot>-<seqnum>-<time>.qoi`, 0640, kept 7 days and 256 MiB.
 * hyprix (`lodeshot.rs`): takes `FERRIX_SESSION_TOKEN` out of its
   environment first thing in `main`, registers for seat0, and answers each
@@ -2259,7 +2270,14 @@ trace.
   whose title or class says error, failed, failure, fatal, exception or
   crash is an `app-error` record (native protocol: `FERRIX_EVENT=app-error`,
   `WINDOW_TITLE`, `WINDOW_CLASS`, `WINDOW_PID`, `WINDOW_COMM`, `WINDOW_EXE`,
-  `WINDOW_DIALOG` for a modal or child window, at warning); any other
+  `WINDOW_DIALOG` for a modal or child window, at warning). For an X
+  program's window, whose Wayland client is the X server, hyprix asks the
+  X server which top-level has that title and class and records the
+  program its `_NET_WM_PID` names, with `X_SERVER_PID` and `X_WINDOW`
+  beside it (`x_owner.rs`; the server's own pid when no window says one).
+  That pid is the program's own claim, a window property, not one the
+  kernel reports; the snapshot runs as the session's user either way;
+  any other
   window a `window-opened` record when that kind is on (off by default).
   lode takes a screenshot of an app error as of a crash (§19), and desktop
   images ship `Capture=yes`.
@@ -2296,7 +2314,11 @@ What the night of the Endfield start failures needed beyond streams.
   the person running it (their own processes; root's, anyone's), written
   through the native protocol, and printed. hyprix takes one of an app
   error's window's process (`events.conf`'s `snapshot`, on); for an X
-  client that is yserver's process until yserver says its client's pid.
+  program's window, the program's (its `_NET_WM_PID`, asked of the X server
+  on a thread of hyprix's, 2 s at most a reply), yserver's only when no
+  window of that title and class says a pid. Until 2026-10-31 it was always
+  yserver's, so Endfield's GC failures on the box left no snapshot of the
+  game.
 * **`lode follow FILE [-t ID] [--from-start] [--until-pid PID]`**: a file
   a program writes, a line a record under ID -- the game's `Player.log`,
   its crash reporter's, DXVK's -- read on every quarter second from its end

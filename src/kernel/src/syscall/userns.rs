@@ -324,7 +324,7 @@ impl Drop for UserNamespace {
 }
 
 /// The first namespace, made on first use.
-pub(crate) fn first() -> &'static Arc<UserNamespace> {
+pub fn first() -> &'static Arc<UserNamespace> {
     static FIRST: Once<Arc<UserNamespace>> = Once::new();
     FIRST.call_once(|| {
         Arc::new(UserNamespace {

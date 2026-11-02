@@ -155,7 +155,18 @@ F-57's closure, and checks R1 and R2, would show nothing. The patch makes
 `GSTS.CFIS` follow `CFI` and refuses such a message with fault 0x25; its qtest
 fails with either half removed. It is offered upstream, and the pin moves to
 the first release that carries it. It is test infrastructure of the reference
-configuration, T2 as QEMU is. The reference machine's x86-64 CPU model
+configuration, T2 as QEMU is. Patch 0008 (`0008-target-i386-CMCI-under-TCG.patch`)
+adds CMCI under TCG behind `-cpu ...,cmci=on`, off by default so no other
+boot changes: `MCG_CMCI_P`, `MCi_CTL2` and the LVT CMCI entry, for
+test-mce-cmci (`docs/MACHINE-CHECK-CMCI.md` §5). No other machine here offers
+CMCI, so that evidence rests on this patch alone: it is reviewed (ledger
+5348), not qualified (F-17 stays open), and the N150 run is owed. The
+landing's CMCI rows and controls ran on `~/.local/share/ferrix/qemu-new`
+(sha256 `69f364ab8f856d0bd0ad5ca0d432aa43c3433cdb535905dba43dc37b61c88640`,
+series-10.2.1 with 0008, through `FERRIX_QEMU_DIR`, each row's log naming
+the path and hash), while the shared xtask QEMU stayed the stock series
+(`e1b5062d1056e507e21a6178b9ad9986bd2f8de99b9198ada3b1e3ef53597126`): its
+swap waits for the customer (ledger 5392 (g)), with 5392 (d)-(f) owed then. The reference machine's x86-64 CPU model
 carries `+x2apic` under TCG as well as KVM (`qemu::x86_cpu`), so that check
 R8 can put a processor in x2APIC mode and see it switched back; the kernel
 runs xAPIC either way. The unit is `intel-iommu,intremap=on,eim=off,aw-bits=39`

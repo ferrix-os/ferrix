@@ -46,6 +46,7 @@ pub const SETTINGS_FLAG_WORD: u64 =
 #[cfg(ferrix_linux_abi = "on")]
 pub mod settings {
     pub mod clock;
+    pub mod cpu_online;
     pub mod driver_bind;
     pub mod log;
     pub mod memfd_noexec;
@@ -129,6 +130,10 @@ mod live {
         #[inline(never)]
         fn driver_bind(bus: Bus, driver: u16, unbind: bool, data: &[u8]) -> Result<usize, Errno> {
             settings::driver_bind::driver_bind(bus, driver, unbind, data)
+        }
+        #[inline(never)]
+        fn cpu_online(process: &Process, cpu: u32, data: &[u8]) -> Result<usize, Errno> {
+            settings::cpu_online::cpu_online(process, cpu, data)
         }
     }
 }

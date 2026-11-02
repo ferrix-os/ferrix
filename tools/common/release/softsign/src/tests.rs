@@ -458,7 +458,9 @@ mod ci_key {
         let dir = scratch();
         let log = dir.join("run.log");
         let signer = Signer::open(key(), 64..80, "", &log, &[], &ctx()).unwrap();
-        let shown = format!("{signer:?}");
+        // The log's path is left out first: it holds the test's process
+        // id, which may itself contain 195.
+        let shown = format!("{signer:?}").replace(&log.display().to_string(), "");
         assert!(!shown.contains("c3c3") && !shown.contains("195"), "{shown}");
     }
 }

@@ -15,7 +15,6 @@
 //! loader returns `AT_PHDR` and friends and this function decides the rest.
 
 use alloc::sync::Arc;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
@@ -429,7 +428,11 @@ fn populate(
     // Build the startup image in kernel memory, then copy it in. It cannot be
     // built in place: `src/lib/kernel/ustack` needs a `&mut [u8]` and the only way to
     // reach user memory is through the copy layer, one page at a time.
-    let mut scratch = vec![0_u8; STARTUP_BYTES];
+    // 256 KiB, one 64-page block of the heap: refused as the stack is when
+    // memory has run out, never the allocation error handler's stop. It was
+    // one candidate for the 262144-byte FX-0008 on the N150 box (2026-10-31).
+    let mut scratch = crate::fallible::try_filled(0_u8, STARTUP_BYTES)
+        .map_err(|_| ExecError::Space(SpaceError::OutOfMemory))?;
     let base = top - STARTUP_BYTES as u64;
     // What the processor can do. Not optional on Arm: musl's ARMv7-A `setjmp`
     // saves the callee-saved double registers only when told there is a VFP.

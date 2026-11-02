@@ -18,6 +18,7 @@
 #![no_main]
 
 mod arch;
+mod badframes;
 mod bootlog;
 mod console;
 mod events;
@@ -440,16 +441,37 @@ fn boot_info_area(services: &Services) -> Result<(Allocation, u64, slots::Choice
     Ok((info_area, load_cmdline(services, info_area), choice))
 }
 
-/// The boot info area with its command line, then the pstore region: before
-/// the kernel's allocations, since the region goes where the previous boot's
+/// The pages the machine-check banks name kept out first, before any of the
+/// loader's allocations (`docs/MACHINE-CHECK-RESTART.md` §2.5), then the
+/// event log's bad-frame set (§9.3; the GPT scan frees what it read); then the boot
+/// info area with its command line, then the pstore region: before the
+/// kernel's allocations, since the region goes where the previous boot's
 /// was, and after the command line, which can turn it off. `pstore::take`
-/// itself refuses a region the direct map does not cover.
+/// itself refuses a region the direct map does not cover, and keeps out the
+/// frames the boot before retired.
 fn boot_info_and_pstore(
     services: &Services,
     direct: DirectMap,
 ) -> Result<((Allocation, u64, slots::Choice), Option<Allocation>)> {
+    let mut kept = badframes::from_banks(services);
+    let mut opened = events::open(services);
+    if let events::Opened::Present(log) = &mut opened {
+        events::keep_out(log, services, &mut kept);
+    }
     let area = boot_info_area(services)?;
-    let pstore = pstore::take(services, cmdline_of(&area), direct);
+    // The mode once, with the command line; a choice loader releases what
+    // it keeps out no longer after the region is taken (§10.3).
+    let mode = badframes::mode(cmdline_of(&area));
+    let pstore = pstore::take(
+        services,
+        cmdline_of(&area),
+        direct,
+        &mut kept,
+        &mut opened,
+        mode,
+    );
+    #[cfg(ferrix_bad_frames = "choice")]
+    badframes::release(services, &mut kept, mode);
     Ok((area, pstore))
 }
 

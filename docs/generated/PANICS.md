@@ -26,6 +26,8 @@ Causes are listed most likely first.
 | [FX-0006](#fx-0006) | the load ring did not register what the item needs from it |
 | [FX-0007](#fx-0007) | memory ran out while the kernel was coming up |
 | [FX-0008](#fx-0008) | an allocation that cannot report failure found the heap empty |
+| [FX-0011](#fx-0011) | the address space ids ran out |
+| [FX-0012](#fx-0012) | the heap caches were drained with a cache lock held |
 | [FX-0101](#fx-0101) | the loader's hand-off is not what the kernel needs |
 | [FX-0201](#fx-0201) | the frame allocator could not be built |
 | [FX-0202](#fx-0202) | the kernel address arena could not be created |
@@ -50,6 +52,7 @@ Causes are listed most likely first.
 | [FX-0407](#fx-0407) | the processors failed to work together |
 | [FX-0408](#fx-0408) | a processor's local APIC is locked in x2APIC mode |
 | [FX-0409](#fx-0409) | a processor's record does not hold its GDT and RSP0 |
+| [FX-0410](#fx-0410) | a processor has no PCIDs and the boot processor turned them on |
 | [FX-0501](#fx-0501) | the scheduler could not be started |
 | [FX-0502](#fx-0502) | the scheduler failed its self-check |
 | [FX-0503](#fx-0503) | a task tried to block while holding a lock that disables preemption |
@@ -127,6 +130,7 @@ Causes are listed most likely first.
 | [FX-1152](#fx-1152) | AF_NETLINK did not answer the requests `ip` makes |
 | [FX-1201](#fx-1201) | a btrfs volume Ferrix wrote did not read back as it was written |
 | [FX-1202](#fx-1202) | pid 1 did not move onto the root volume with the switch |
+| [FX-1203](#fx-1203) | the boot's copies of the system were not given back as specified |
 | [FX-1301](#fx-1301) | cgroupfs did not show the job tree as cgroup v2 |
 | [FX-1302](#fx-1302) | seccomp's filter was not asked first at every entry, or not as the entry's own |
 | [FX-1303](#fx-1303) | a seccomp filter was not installed, judged, inherited, ordered or released as specified |
@@ -325,6 +329,36 @@ failure.
 
 See: docs/certification/MEMORY-AND-TIMING.md;
 tools/common/check/check-fallible-alloc.py; src/kernel/src/mm.rs.
+
+<a id="fx-0011"></a>
+
+## FX-0011 — the address space ids ran out
+
+Every address space gets a 64-bit number from a counter that is never wound
+back, and a processor's PCID slot records that number, so a space made over a
+freed root's frame never finds a dead space's translations (`docs/PCID.md`). A
+number given twice would let a new space use another's stale translations, so
+the kernel stops rather than wrap.
+
+1. 2^64 - 1 address spaces made in one boot, which no machine reaches; or the
+   counter overwritten.
+
+See: src/kernel/src/user/space.rs AddressSpace::assemble; docs/PCID.md.
+
+<a id="fx-0012"></a>
+
+## FX-0012 — the heap caches were drained with a cache lock held
+
+Each processor keeps free heap objects of every size class in a cache of its own
+behind its own lock (`docs/HEAP-CACHES.md`). A refusal drains every cache back
+into the heap, taking each cache lock in turn, and must start with none held:
+this processor's would be taken a second time and never come free. The drain
+looks before it starts and stops the machine instead.
+
+1. A path that holds this processor's cache lock -- a refill, an overflow --
+   reached a refusal's drain without first letting the lock go.
+
+See: docs/HEAP-CACHES.md; src/kernel/src/mm.rs.
 
 <a id="fx-0101"></a>
 
@@ -924,6 +958,22 @@ wrong address, or ask the processor at every switch after all.
 See: src/kernel/src/arch/x86_64/gdt.rs note_tables;
 src/kernel/src/arch/x86_64/gdt/check.rs require_tables_noted;
 docs/OPAQUE-KERNEL.md §9.11.
+
+<a id="fx-0410"></a>
+
+## FX-0410 — a processor has no PCIDs and the boot processor turned them on
+
+The boot processor decides from its own CPUID whether `CR3` writes are tagged
+with process-context identifiers, sets `CR4.PCIDE`, and every secondary adopts
+its `CR4` whole (`docs/PCID.md`). PCIDs are on only where every processor has
+them, so a secondary whose CPUID.1:ECX[17] is clear stops the boot here by name
+rather than fault on the bit or run with tags its neighbours keep.
+
+1. A machine whose processors report different features: a hypervisor offering
+   `pcid` to the first virtual processor only, or mismatched sockets.
+
+See: src/kernel/src/arch/x86_64/pcid.rs require_on_secondary;
+src/kernel/src/arch/x86_64/smp.rs secondary_start; docs/PCID.md.
 
 <a id="fx-0501"></a>
 
@@ -3292,6 +3342,29 @@ volume as /.
 
 See: src/kernel/src/fs/root_disk.rs; docs/INIT.md §7.3;
 docs/certification/ITEM.md.
+
+<a id="fx-1203"></a>
+
+## FX-1203 — the boot's copies of the system were not given back as specified
+
+Once the root is final the kernel gives the initramfs archive's whole pages to
+the frame allocator, recomputes the watermark from the new managed count, and
+after a switch to a root disk removes the archive's names from the tmpfs but for
+the mount points, the directories above them and /lib/firmware. The release's
+boot check looks before and after it: the managed frames up by exactly the
+archive's whole pages and none of them Reserved, the watermark watermark_for the
+new count, the archive answering nothing, pid 1's inputs unchanged and outside
+the released pages, and after a switch no other name of the archive left and a
+file held open and mapped across the release reading as before.
+
+1. `release` in src/kernel/src/fs/mod.rs or `give_back_initrd` in
+   src/kernel/src/mm.rs gave back other frames than the archive's whole pages,
+   or left the watermark as it was.
+2. `init::set_inputs` kept a slice of the archive instead of a copy.
+3. `ferrix_vfs::initramfs::remove` left a name of the archive, or removed a
+   spared one.
+
+See: src/kernel/src/fs/release_check.rs; docs/RAM-RELEASE.md §2.
 
 <a id="fx-1301"></a>
 

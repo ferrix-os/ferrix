@@ -50,14 +50,14 @@
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1313",
+      "lines": "1329",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU and the DK1 both reset."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1343",
+      "lines": "1359",
       "category": "defensive",
       "match": "return Err(\"this GIC is not a GICv2, and GICv3 support is not written yet\");",
       "why": "A device tree describing a GICv3 on ARMv7-A, which this kernel has no driver for here: interrupt bring-up is refused by name and the kernel stops (FX-0303). The machines it runs on -- QEMU's `virt` as the suite boots it, the STM32MP157 -- have a GICv2; a `virt` given a GICv3 would be a boot that stops, which is not coverage evidence."
@@ -505,35 +505,35 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "112-113",
+      "lines": "118-119",
       "category": "defensive",
       "match": "Err(Errno::ENOENT)",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "387-389",
+      "lines": "393-395",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "392",
+      "lines": "398",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "462",
+      "lines": "527",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1176",
+      "lines": "1285",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -575,21 +575,21 @@
     },
     {
       "file": "init.rs",
-      "lines": "580",
+      "lines": "724",
       "category": "absent-hardware",
       "match": "Refusal::Start(failure) => write!(f, \"{failure}\"),",
       "why": "A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm."
     },
     {
       "file": "init.rs",
-      "lines": "620",
+      "lines": "764",
       "category": "absent-hardware",
       "match": "Ok(status) => println!(\"  init     {} exited with {status}\",",
       "why": "/sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in."
     },
     {
       "file": "init.rs",
-      "lines": "622",
+      "lines": "766",
       "category": "absent-hardware",
       "match": "Err(why) => println!(",
       "why": "/sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in."
@@ -757,616 +757,602 @@
     },
     {
       "file": "iommu.rs",
-      "lines": "955",
-      "category": "absent-hardware",
-      "match": "match self {",
-      "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "967",
-      "category": "absent-hardware",
-      "match": "match self {",
-      "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
-    },
-    {
-      "file": "iommu.rs",
       "lines": "970",
+      "category": "absent-hardware",
+      "match": "match self {",
+      "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
+    },
+    {
+      "file": "iommu.rs",
+      "lines": "982",
+      "category": "absent-hardware",
+      "match": "match self {",
+      "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
+    },
+    {
+      "file": "iommu.rs",
+      "lines": "985",
       "category": "absent-hardware",
       "match": "Translation::SmmuV3 { unit, attached, .. } => unit.flush(att",
       "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "988",
+      "lines": "1003",
       "category": "absent-hardware",
       "match": "match self {",
       "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "990",
+      "lines": "1005",
       "category": "other-architecture",
       "match": "Translation::VtD { attached, .. } => Some(attached.stream())",
       "why": "The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1026",
+      "lines": "1041",
       "category": "absent-hardware",
       "match": "match self {",
       "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1028",
+      "lines": "1043",
       "category": "other-architecture",
       "match": "Translation::VtD { unit, attached, .. } => unit.detach(*atta",
       "why": "The VT-d arm, for a domain a VT-d unit translates, which no Arm machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1029",
+      "lines": "1044",
       "category": "absent-hardware",
       "match": "Translation::SmmuV3 { unit, attached, .. } => unit.detach(*a",
       "why": "Reached only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1134",
+      "lines": "1184",
       "category": "absent-hardware",
       "match": "Some(fault)",
       "why": "A domain's fault, read only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1140",
+      "lines": "1190",
       "category": "absent-hardware",
       "match": "fn provoke(&self, page: u64) {",
       "why": "The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1155",
+      "lines": "1205",
       "category": "absent-hardware",
       "match": "}",
       "why": "The out-of-domain probe's fault, provoked only through a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1162",
+      "lines": "1212",
       "category": "absent-hardware",
       "match": "if self.take_fault().is_none() {",
       "why": "Faults cleared only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1202",
+      "lines": "1279",
       "category": "absent-hardware",
       "match": "if addresses.iter().any(|&phys| phys >> TRANSLATED_BITS != 0",
       "why": "The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1203",
+      "lines": "1280",
       "category": "absent-hardware",
       "match": "return Err(DomainError::OutOfRange);",
       "why": "A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has."
     },
     {
       "file": "iommu.rs",
-      "lines": "1205-1206",
+      "lines": "1282",
       "category": "absent-hardware",
       "match": "let _held = changing.enter().map_err(DomainError::Unit)?;",
       "why": "The pin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1270-1271",
+      "lines": "1347-1348",
       "category": "absent-hardware",
       "match": "let _held = match changing.enter() {",
       "why": "The unpin's translated branch, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "1272",
+      "lines": "1349",
       "category": "defensive",
       "match": "Err(why) => return Err((DomainError::Unit(why), pinned)),",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1283, 1292, 1320",
-      "category": "absent-hardware",
-      "match": ".any(|&iova| self.translation.unmap(iova, &mut tables).is_er",
-      "why": "The translated branches of an unpin and of a pin's undo, taken only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "1285",
+      "lines": "1358",
       "category": "defensive",
       "match": "return Err((DomainError::Tables, pinned));",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1290",
+      "lines": "1363",
       "category": "defensive",
       "match": "return Err((DomainError::Unit(why), pinned));",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
       "file": "iommu.rs",
-      "lines": "1308-1309",
-      "category": "absent-hardware",
-      "match": "for (done, &phys) in addresses.iter().enumerate() {",
-      "why": "Maps pages into the tables of a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "1840",
+      "lines": "2008",
       "category": "other-architecture",
       "match": "if let Ok(table) = tables.dmar() {",
       "why": "The branch for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1843",
+      "lines": "2011",
       "category": "other-architecture",
       "match": "if let Ok(table) = tables.iort() {",
       "why": "The branch for ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "1890-1891",
+      "lines": "2058-2059",
       "category": "other-architecture",
       "match": "for structure in table.structures() {",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1922",
+      "lines": "2090",
       "category": "other-architecture",
       "match": "let index = programmed.vtd.len();",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "1938",
+      "lines": "2106",
       "category": "other-architecture",
       "match": "report.refused += 1;",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2086-2087",
+      "lines": "2254-2255",
       "category": "other-architecture",
       "match": "for node in table.nodes() {",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2090-2092",
+      "lines": "2258-2260",
       "category": "other-architecture",
       "match": "let opened = smmuv3::Unit::open(smmu.base_address, doorbell)",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2095",
+      "lines": "2263",
       "category": "other-architecture",
       "match": "offsets.push((node.offset, programmed.smmu.len()));",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2100",
+      "lines": "2268",
       "category": "other-architecture",
       "match": "report.smmu_v3 += 1;",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2103",
+      "lines": "2271",
       "category": "other-architecture",
       "match": "report.refused += 1;",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2108-2109",
+      "lines": "2276-2277",
       "category": "other-architecture",
       "match": "for node in table.nodes() {",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2112",
+      "lines": "2280",
       "category": "other-architecture",
       "match": "let Ok(segment) = u16::try_from(complex.segment) else {",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2117-2118",
+      "lines": "2285-2286",
       "category": "other-architecture",
       "match": "node.id_mappings()",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2120",
+      "lines": "2288",
       "category": "other-architecture",
       "match": "let &(_, unit) = offsets",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2122",
+      "lines": "2290",
       "category": "other-architecture",
       "match": ".find(|(offset, _)| *offset == mapping.output_reference)?;",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2124",
+      "lines": "2292",
       "category": "other-architecture",
       "match": "segment,",
       "why": "Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2137-2138",
+      "lines": "2305-2306",
       "category": "other-architecture",
       "match": "let segment = unit.segment;",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2140-2141",
+      "lines": "2308-2309",
       "category": "other-architecture",
       "match": ".filter_map(|scope| scope.endpoint())",
       "why": "Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2208",
+      "lines": "2376",
       "category": "other-architecture",
       "match": "unit.attach(function).map(|attached| Translation::VtD {",
       "why": "The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine."
     },
     {
       "file": "iommu.rs",
-      "lines": "2215",
+      "lines": "2383",
       "category": "absent-hardware",
       "match": "unit.attach(stream).map(|attached| Translation::SmmuV3 {",
       "why": "Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2234-2236",
+      "lines": "2402-2404",
       "category": "absent-hardware",
       "match": "match translation {",
       "why": "Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2386-2388",
+      "lines": "2554-2556",
       "category": "other-architecture",
       "match": "programmed.streams.iter().find_map(|map| {",
       "why": "Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2392-2393",
+      "lines": "2560-2561",
       "category": "other-architecture",
       "match": "programmed.smmu.get(map.unit)?,",
       "why": "Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there."
     },
     {
       "file": "iommu.rs",
-      "lines": "2489",
+      "lines": "2657",
       "category": "absent-hardware",
       "match": "matches!(fault.cause, Cause::Access | Cause::Overflow)",
       "why": "Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2493",
+      "lines": "2661",
       "category": "absent-hardware",
       "match": ".any(|&(stream, page)| fault.stream == stream && fault.page ",
       "why": "Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2500",
+      "lines": "2668",
       "category": "absent-hardware",
       "match": "if stray {",
       "why": "Counts a fault a unit recorded, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2502",
+      "lines": "2670",
       "category": "defensive",
       "match": "if fault.cause != Cause::Access {",
       "why": "A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one."
     },
     {
       "file": "iommu.rs",
-      "lines": "2631-2632",
+      "lines": "2799-2800",
       "category": "absent-hardware",
       "match": "fn drain(mut take: impl FnMut() -> Option<Fault>, audit: &mu",
       "why": "Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2634",
+      "lines": "2802",
       "category": "absent-hardware",
       "match": "let Some(fault) = take() else {",
       "why": "Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "iommu.rs",
-      "lines": "2638",
+      "lines": "2806",
       "category": "defensive",
       "match": "audit.first = audit.first.or(Some(fault));",
       "why": "The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT)."
     },
     {
       "file": "iommu.rs",
-      "lines": "2640",
+      "lines": "2808",
       "category": "absent-hardware",
       "match": "audit.provoked += 1;",
       "why": "The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults."
     },
     {
       "file": "iommu.rs",
-      "lines": "2643",
+      "lines": "2811",
       "category": "absent-hardware",
       "match": "}",
       "why": "Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway."
     },
     {
       "file": "main.rs",
-      "lines": "291",
+      "lines": "289",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "424",
+      "lines": "426",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "562",
+      "lines": "583",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "575",
+      "lines": "596",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILESYSTEM` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "597",
+      "lines": "618",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PIPES_AND_FILESYSTEM_CALLS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "611",
+      "lines": "632",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_FILE_MAPPINGS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "635",
+      "lines": "656",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_PSEUDO_FILESYSTEMS` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "768",
+      "lines": "789",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::NET_CORE, \"net core self-che",
       "why": "The failure arm in `check_net`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `NET_CORE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "796",
+      "lines": "817",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_driver`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DRIVER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "837",
+      "lines": "858",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_devmgr`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE10_DEVMGR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "871",
+      "lines": "892",
       "category": "absent-hardware",
       "match": "println!(\"  btrfs-pf not run: {}\", report.skipped.unwrap_or_",
       "why": "A power-fail boot without the third disk it churns: `test-powerfail` always attaches it, and no other gate asks for the power-fail mode."
     },
     {
       "file": "main.rs",
-      "lines": "883",
+      "lines": "904",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "898",
+      "lines": "919",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1158",
+      "lines": "1179",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `PROCESSOR_DISCOVERY` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1191",
+      "lines": "1212",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(catalog::STAGE4_SMP, \"stage 4 self-ch",
       "why": "The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1246",
+      "lines": "1267",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1596",
+      "lines": "1623",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1703",
+      "lines": "1730",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1710",
+      "lines": "1737",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1735",
+      "lines": "1762",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1844",
+      "lines": "1878",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "1951",
+      "lines": "2005",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "1959-1960",
+      "lines": "2013-2014",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "mm.rs",
-      "lines": "374",
+      "lines": "400",
       "category": "defensive",
       "match": "frames.insert_free(start / PAGE_SIZE, (hole - start) / PAGE_SIZE);",
       "why": "The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it."
     },
     {
       "file": "mm.rs",
-      "lines": "626, 628, 630, 636, 646",
+      "lines": "907, 909, 911, 917, 927",
       "category": "other-architecture",
       "match": "pub(crate) fn disown_frame(frame: Frame) {",
       "why": "`disown_frame`'s only caller is `object::pin`'s quarantine. ARMv7-A's kernel programs no IOMMU unit, by design: `bring_up_smmu` reads only the IORT, which ARMv7-A's firmware does not provide, and the SMMUv3 its `virt` describes is left alone, since U-Boot keeps its virtio devices from offering the platform's translation. Every device domain there is untranslated, and a pin's quarantine exists only for a translated domain (`Pin::map`, `Pin::drop`): the quarantine and its release are x86-64's and AArch64's code, compiled into ARMv7-A's kernel and never asked there. The pin budget's checks (`check_budget`) return at their first line on ARMv7-A, as they say they do with no translated domain."
     },
     {
       "file": "mm.rs",
-      "lines": "666",
+      "lines": "947",
       "category": "failure-path",
       "match": "fn print_frame_delta(check: &str, leaked: i64) {",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "672",
+      "lines": "953",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "675",
+      "lines": "956",
       "category": "failure-path",
       "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "1242",
+      "lines": "1707",
       "category": "absent-hardware",
       "match": "mapper.map_range(",
       "why": "The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them."
     },
     {
       "file": "mm.rs",
-      "lines": "1295",
+      "lines": "1868",
       "category": "absent-hardware",
       "match": ".translate(&KernelPhysMem, VirtAddr(iova))",
       "why": "The IOMMU page tables: only a translating unit's domain maps, unmaps and translates through them. ARMv7-A's `virt` is given no SMMU (COVERAGE-RESIDUAL.md files `iommu/smmuv3.rs` under hardware absent for the same reason), so every device domain here is untranslated and these are never asked; AArch64's GICv3 boot has the SMMU and reaches them."
     },
     {
       "file": "mm.rs",
-      "lines": "1363",
+      "lines": "1936",
       "category": "credited-elsewhere",
       "match": "if !pages.make_room(page_bound) || !tables.make_room(table_bound) {",
       "why": "The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`."
     },
     {
       "file": "mm.rs",
-      "lines": "1456",
+      "lines": "2029",
       "category": "defensive",
       "match": "}",
       "why": "The return of a piece the kernel's tables refused to unmap. `unmap_range` refuses only a range that is not page aligned or that would cut a block mapping in half, and the arena maps every stack and buffer page by page at page-aligned addresses, so no piece is refused; the row on this build is that error's way out of the function."
     },
     {
       "file": "mm.rs",
-      "lines": "1916-1918",
+      "lines": "2731-2733",
       "category": "failure-path",
       "match": "fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "1934-1937",
+      "lines": "2749-2752",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1947-1953",
+      "lines": "2762-2768",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
@@ -1387,7 +1373,7 @@
     },
     {
       "file": "object/pin.rs",
-      "lines": "692",
+      "lines": "746",
       "category": "defensive",
       "match": "};",
       "why": "`Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice."
@@ -1443,129 +1429,136 @@
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1050",
+      "lines": "1093",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1617",
+      "lines": "1533",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1893",
+      "lines": "1772",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "2881-2883",
+      "lines": "3161-3163",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3807-3808",
+      "lines": "4132-4133",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3812",
+      "lines": "4137",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3817-3818",
+      "lines": "4142-4143",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3821-3822",
+      "lines": "4146-4147",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3826",
+      "lines": "4151",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3829-3830",
+      "lines": "4154-4155",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3835",
+      "lines": "4160",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3839",
+      "lines": "4164",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3846",
+      "lines": "4171",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3851",
+      "lines": "4176",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3861",
+      "lines": "4186",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "260",
+      "lines": "256",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "272-273",
+      "lines": "268-269",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "368",
+      "lines": "364",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
+    },
+    {
+      "file": "sched/queue.rs",
+      "lines": "491",
+      "category": "defensive",
+      "match": "task.return_run_slot(refused.slot);",
+      "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
     },
     {
       "file": "sched/wait.rs",
@@ -1597,126 +1590,126 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "528",
+      "lines": "530",
       "category": "credited-elsewhere",
       "match": "TableError::AccessDenied => status::ACCESS_DENIED,",
       "why": "Run by stage 9's object check, which duplicates a handle asking for rights it does not hold and requires ACCESS_DENIED. On AArch64 every caller that meets AccessDenied inlines table_error; the arm's row is only in the out-of-line copy."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "529",
+      "lines": "531",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1323-1324",
+      "lines": "1325-1326",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2004",
+      "lines": "2084",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2070",
+      "lines": "2150",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2073",
+      "lines": "2153",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2083",
+      "lines": "2163",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2090",
+      "lines": "2170",
       "category": "defensive",
       "match": "object::dispose([object]);",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2619",
+      "lines": "2693",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
     },
     {
       "file": "user/space.rs",
-      "lines": "285",
+      "lines": "310",
       "category": "defensive",
       "match": "})?;",
       "why": "`ferrix_vma::AddressSpace::new` refuses a window whose ends are not page aligned or out of order, and the window here is `MMAP_MIN_ADDR..USER_VIRT_END`, two constants of the layout that are both. Reported rather than panicked on, as the comment says."
     },
     {
       "file": "user/space.rs",
-      "lines": "595",
+      "lines": "684",
       "category": "defensive",
       "match": "Ok((vmo.page(index).unwrap_or(shared), None))",
       "why": "A page found held by a device between the fault reading its reference count and taking it. A pin makes a shared page the object's own first (`Vmo::hold` copies it), so a copy-on-write fault finds a held page only if a pin lands in those few instructions on another processor, which no check can place deterministically."
     },
     {
       "file": "user/space.rs",
-      "lines": "1251",
+      "lines": "1340",
       "category": "defensive",
       "match": "return Err(SpaceError::NotMapped(address));",
       "why": "The region `resolve` found to be a private file mapping is gone, or is no longer one, when this takes the space's lock again: `resolve` lets the lock go to call here. Reached only if another thread of the process unmaps or replaces the region in that gap, while this one faults on it; the fault then answers as for an address with nothing mapped, which is what it has become."
     },
     {
       "file": "user/space.rs",
-      "lines": "1259-1260",
+      "lines": "1348-1349",
       "category": "defensive",
       "match": "return Err(SpaceError::NotMapped(address));",
       "why": "A private file mapping's region whose file object or shadow is missing from the tables. `map_file` records both under the region's id before the region can fault, and they leave together as the region's id leaves; a fault finding one missing would be the tables and the map disagreeing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2472",
+      "lines": "2565",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2476-2477",
+      "lines": "2569-2570",
       "category": "defensive",
       "match": "site.map_or(\"?\", |site| site.file()),",
       "why": "The failure half of the debug assertion that a user page fault is resolved with no preemption-disabling lock held (a fault may sleep for a page from a disk). Every fault path takes its locks inside the resolution, after this; reaching the row is the assertion firing."
     },
     {
       "file": "user/space.rs",
-      "lines": "2904",
+      "lines": "2997",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_anywhere`'s refusal of a place outside the user half. `find_free` answers only places inside the map's window, `MMAP_MIN_ADDR..USER_VIRT_END`, so the place it found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."
     },
     {
       "file": "user/space.rs",
-      "lines": "3121",
+      "lines": "3214",
       "category": "defensive",
       "match": "return Err(SpaceError::NotUserRange(at));",
       "why": "`map_shared_code`'s refusal of a place outside the user half, as `map_anywhere`'s is. `find_free` answers only places inside the map's window (its contract, `src/lib/kernel/vma/src/lib.rs`), and a space's window is `MMAP_MIN_ADDR..USER_VIRT_END` when built (`AddressSpace::new`) and never raised past `USER_VIRT_END` after (`set_ceiling` refuses it), so the place found is always inside the half; the check keeps the rule where the mapping is made rather than in the map's contract."
     },
     {
       "file": "user/vmo.rs",
-      "lines": "2000",
+      "lines": "2319",
       "category": "defensive",
       "match": "return Err(VmoError::OutOfMemory);",
       "why": "A page already held four billion times, whose count would wrap. Each hold is a pin a driver made and keeps a handle to, and a process may hold at most HANDLE_LIMIT (4,096) handles, so the count cannot approach the limit; the refusal is what keeps a wrapped count from freeing a page a device still reaches."
@@ -1786,35 +1779,35 @@
     },
     {
       "file": "trap.rs",
-      "lines": "641",
+      "lines": "698",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "659",
+      "lines": "721",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "696",
+      "lines": "758",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "774, 776, 779-782",
+      "lines": "836, 838, 841-844",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "796, 801, 811, 819-821, 823",
+      "lines": "858, 863, 873, 888-890, 892",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

@@ -702,3 +702,10 @@ IF four wordings, carried; ledger line 710). Not built: any effect
 scroll bar, a list that follows the file or the applications changing while
 the window is open (it reads both when it starts and the file again at each
 switch).
+
+2026-10-30: the design round for what the switch does is
+[GAME-MODE.md](GAME-MODE.md): the session service, the background frozen,
+the scheduler told the frame's threads, the GPU path, and the protection
+trades, in tiers, with the box's measurements. On the N150 the protections
+cost about 1% of one core in game (GAME-MODE.md §7.2), so it recommends not
+building §7's trades there. Nothing built; the customer decides the tiers.

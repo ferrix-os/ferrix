@@ -24,6 +24,12 @@ pub(super) fn check_allocators_and_traps(stats: &mm::Stats, view: &BootView<'_>)
             "stage 2 self-check failed: {problem}"
         );
     }
+    if let Err(problem) = mm::check::check_scrubber(view, scrub_memory()) {
+        fatal!(
+            catalog::STAGE2_ALLOCATORS,
+            "stage 2 self-check failed: {problem}"
+        );
+    }
     println!("  stage 2  frame allocator, heap and vmap arena verified");
 
     if let Err(problem) = trap_check() {
@@ -1373,6 +1379,11 @@ pub(super) fn check_kernel_memory() {
     println!(
         "  kmem     and {} time namespaces, each refused at the same limit and given back",
         report.time_namespaces,
+    );
+    println!(
+        "  kmem     /proc/<pid>/maps longer than the limit refused the job ENOMEM and nothing left \
+         charged; a sibling read all {} bytes, charged while it held them",
+        report.maps_bytes,
     );
 }
 

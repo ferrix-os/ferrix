@@ -404,23 +404,35 @@ impl<D: WriteDevice> WriteVolume<D> {
     ) -> Result<Option<(BtrfsKey, Vec<u8>)>> {
         self.check_open()?;
         let (path, _) = self.search(tree, key, false)?;
-        let (leaf, slot) = path.at(0)?;
-        if let Some(item) = self.leaf_item(leaf, slot)? {
-            return Ok(Some((item.key, fallible::copy(&item.data)?)));
+        let (mut leaf, mut slot) = path.at(0)?;
+        if self.leaf_item(leaf, slot)?.is_none() {
+            match self.next_leaf(&path)? {
+                Some(next) => (leaf, slot) = (next, 0),
+                None => return Ok(None),
+            }
         }
+        self.leaf_item(leaf, slot)?
+            .map(|item| Ok((item.key, fallible::copy(&item.data)?)))
+            .transpose()
+    }
+
+    /// The leaf after the one `path` ends in, if there is one: up to the
+    /// first level with a pointer after the path's, then down that pointer's
+    /// leftmost edge.
+    ///
+    /// Only a level's last pointer sends the climb further up. Anything else
+    /// that keeps a pointer from being read is an error, never the end of the
+    /// tree: a node missing here once ended range scans early, unseen
+    /// (F-99).
+    fn next_leaf(&mut self, path: &Path) -> Result<Option<u64>> {
         for level in 1..=path.top() {
             let (logical, slot) = path.at(level)?;
-            let Some(next) = slot.checked_add(1) else {
+            let next = slot.saturating_add(1);
+            if next >= self.node(logical)?.nritems() {
                 continue;
-            };
-            let Ok(ptr) = self.child(logical, next) else {
-                continue;
-            };
-            let leaf = self.descend(ptr, level - 1, true)?;
-            return self
-                .leaf_item(leaf, 0)?
-                .map(|item| Ok((item.key, fallible::copy(&item.data)?)))
-                .transpose();
+            }
+            let ptr = self.child(logical, next)?;
+            return self.descend(ptr, level - 1, true).map(Some);
         }
         Ok(None)
     }

@@ -160,6 +160,12 @@ One region of RAM, a 4 KiB header page and a ring of 1 MiB:
 4096 ring       byte n at 4096 + n % capacity
 ```
 
+Version 3 (2026-10-31, `docs/MACHINE-CHECK-RESTART.md`) adds the bad-frame
+table at bytes 128..648 (§5.1's layout); the loader keeps every frame it
+names out of the next boot, and the kernel accepts only a fresh version-3
+header with an empty table, so a loader and kernel of different versions
+fail closed: no region that boot.
+
 The region is `4096 + capacity` bytes, page aligned. It is **valid** when
 magic, version, header, capacity (a power of two from 4 KiB to 16 MiB, and
 `len - 4096`) and CRC match and `written` is below 2^48. Its text is the last
@@ -471,6 +477,8 @@ and xtask share:
 
 header:  0 "FXEVENTS"  8 version 1  12 record length  16 records  20 next slot
          24 generation  32 appended (the next record's index)  40 CRC-32C of 0..40
+         64 the bad-frame extension, or zero (MACHINE-CHECK-RESTART §9.1):
+         "FXBADFRM", version 1, count, 64 frames ascending, 340 its CRC-32C
 record:  0 "FXEVTREC"  8 version 1  12 kind (1 = panic)  13 flags (truncated, unchecked)
          16 index  24 count  28 text length  32 first boot  40 last boot
          48 identity  56 key (CRC-32C of the panic line)  64 first time  72 last time
@@ -517,17 +525,25 @@ left for its own review. Nothing is ever logged as "power loss" or "hang".
   block not wholly inside the partition (host test
   `no_address_outside_the_partition`, which also appends 40 records and
   counts 0 writes outside LBA 40-2047).
-* **EL3** It writes only on a boot whose pstore region holds a valid record
-  with a panic report (and, on that boot, a fresh header if the partition
-  has none).
-* **EL4** The inspection Linux's `ferrix-eventlog append` writes by the same
+* **EL3** (amended by `docs/MACHINE-CHECK-RESTART.md` §9.2) It writes (a)
+  a record only on a boot whose pstore region holds a valid record with a
+  panic report, and (b) both header copies alone only on a boot whose
+  pstore table or machine-check banks name a frame the log's bad-frame set
+  does not hold; on such a boot, a fresh header first only if neither copy
+  carries the header's magic. A `bad_frames = choice` loader set to
+  `reset` or `off` (MACHINE-CHECK-RESTART §10) writes (b) never and keeps
+  fewer frames out.
+* **EL4** The inspection Linux's `ferrix-eventlog append`, and root's
+  `ferrix-eventlog clear-bad-frames` (§9.4 there), write by the same
   functions to the partition device named `ferrix-events`, and never writes
   the pstore region.
 
 ### 4.3 The append (E2, E3, E4, E8)
 
 `ferrix_eventlog::append`, in this order: read the header (two copies; a
-fresh header, both copies, when neither is valid); read the newest record
+fresh header, both copies, only when neither copy carries `FXEVENTS`:
+copies that carry it and both fail to decode -- damage, or a newer format
+-- get no write, MACHINE-CHECK-RESTART §9.2); read the newest record
 through it. If its identity is this pstore record's (the boot sequence and
 the CRC-32C of the whole pstore header, `written` among it), nothing is
 written (E3): a reset during the header writes, the loader after Linux or
@@ -597,7 +613,10 @@ the **stop word**, at byte 72, and nothing else changes:
 ```
  64  written    u64              bytes ever recorded
  72  stop       u64              low half: the stop's code; high half: its complement; 0 = none yet
- 80..4096  zero
+ 80..128  zero
+128  bad count  u64              version 3: bad-frame table slots the kernel claimed
+136  bad[64]    u64 each         version 3: a frame and its complement (docs/MACHINE-CHECK-RESTART.md §2.2)
+648..4096  zero
 ```
 
 `HEADER_BYTES` grows from 72 to 80. The CRC still covers bytes 0..32, the
@@ -616,7 +635,9 @@ not as some other code. The codes are a closed list, kept in
 | 4 | a halt a program asked for | `reboot(2)` HALT |
 | 5 | a reset after init exited | `power::finish`, `ferrix.onexit=reset` |
 | 6 | a power-off after init exited | `power::finish`, the default |
-| 7-255 | reserved for S2, S4 and S7 (lockup, thermal, update) | — |
+| 7 | a lockup | the lockup detector (§6.2; reserved by its branch) |
+| 8 | a machine check | `panic::begin_report`, when the first report is the machine check's (`docs/MACHINE-CHECK-RESTART.md` §2.1) |
+| 9-255 | reserved for S2 and S7 (thermal, update) | — |
 
 A whole word whose code is not on the list is said as `unknown code N (a
 newer kernel's)`: after an A/B fallback, an older loader can meet a newer

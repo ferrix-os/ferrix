@@ -1,0 +1,23 @@
+[package]
+name = "ferrix-mce-victim"
+description = "A test driver whose page a gate poisons: a ring-3 driver that consumes poison ends alone and is started again (test-mce-driver)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mce-victim"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-chardevctl.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

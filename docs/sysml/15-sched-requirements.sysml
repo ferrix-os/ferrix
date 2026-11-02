@@ -199,10 +199,12 @@ package FerrixSchedRequirements {
             attribute :>> statement = "attention_due, asked at every way out to ring 3
                 on every architecture -- a call's, an interrupt's, a fault's, and the
                 last look of the personality's return_to_user -- with interrupts masked,
-                shall read the running task's pending-work word once, clear STOP and
+                shall read the running task's pending-work word, clear STOP and
                 SIGNAL in it if they are set before anything reads what they stand
                 for, and ask the personality's needs_attention when END, STOP, SIGNAL
-                or TRACE was set; FILTERED shall not be read there.";
+                or TRACE was set; FILTERED shall not be read there. With PLACE
+                posted the task is first moved inside its mask (look_placed, which
+                may switch) and the word is then read again (F3, ledger 5269 (5)).";
             attribute :>> criterion = "A program of three threads stopped by its stop
                 alone, which posts STOP and no signal, has both counting threads park
                 and stay still, and runs again after SIGCONT (stage 7's stop check,
@@ -211,7 +213,8 @@ package FerrixSchedRequirements {
                 at every clear word.";
             attribute :>> parent = ("H.OBJ.9", "H.TRAP.4");
             attribute :>> unit = ("trap::attention_due", "sched::work::look",
-                "sched::work::wants_attention", "sched::work::with_running");
+                "sched::work::wants_attention", "sched::work::with_running",
+                "sched::work::look_placed");
         }
         requirement <'L.sched.31'> notifyPostsBeforeItWakes : ItemLowLevel {
             attribute :>> statement = "notify shall post its bits to the task's word
@@ -1087,6 +1090,298 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.OBJ.11";
             attribute :>> unit = ("sched::wait::WaitQueue::wait_until_deadline",
                 "sched::wait::WaitQueue::wait_sliced");
+        }
+        requirement <'L.sched.102'> noPlacementOnAProcessorOutOfService : ItemLowLevel {
+            attribute :>> statement = "No placer -- choose_cpu, may_place,
+                place_on_idle, idle_allowed, a steal or a balance -- shall place a
+                task on a processor whose ACTIVE bit is clear, and a processor out
+                of service shall neither steal nor balance.";
+            attribute :>> criterion = "test-quarantine: with four CPU-bound loops
+                running, no task's /proc/<pid>/stat names the target once it
+                is out, and its drained count stays 0. Controls: every
+                placer's test removed at once (sched::placeable answering
+                true) -- tasks land on the target and are drained, and it
+                fires; the ACTIVE bit never cleared -- the native boot check
+                stops the boot.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::in_service", "sched::placeable", "sched::set_active",
+                "sched::choose_cpu", "sched::may_place", "sched::place_on_idle",
+                "sched::idle_allowed", "sched::steal_work", "sched::balance");
+        }
+        requirement <'L.sched.103'> aBlockedTaskIsReHomedAtItsWake : ItemLowLevel {
+            attribute :>> statement = "A blocked task whose home is out of service
+                when it is woken shall be moved, under both queues' locks taken
+                lower first, to a processor in service before it is queued.";
+            attribute :>> criterion = "test-quarantine: readers blocked on empty
+                pipes (WaitQueue::wait_trusting, on no list) are ended by a
+                signal while the target is out; its re-homed count is at least
+                1 and its drained count 0. Control: the re-home removed --
+                the woken readers are queued on the target and drained, and
+                it fires.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::wake_at_home", "sched::rehome_blocked");
+        }
+        requirement <'L.sched.104'> evacuationLeavesNothingBehind : ItemLowLevel {
+            attribute :>> statement = "A processor parking shall move every
+                queued task and every sleeper of its own off to processors in
+                service, under the two queues' locks, keeping each sleeper's due
+                time; a task found there while parked shall be drained and
+                counted.";
+            attribute :>> criterion = "test-quarantine: /proc/ferrix-service says
+                service out drained 0 for the target after the CPU-bound
+                loops and the readers; the loops go on on the others; fifty
+                times out and back with the loops running, none lost, the
+                longest move's hold printed (MEMORY-AND-TIMING 2.2e2).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::evacuate", "sched::move_one_off",
+                "sched::queue::CpuQueue::take_movable_sleeper", "sched::park",
+                "sched::drained", "sched::pick_or_park", "sched::steal_from",
+                "sched::move_hold_max");
+        }
+        requirement <'L.sched.105'> theParkIsAHandshakeWithAnUndo : ItemLowLevel {
+            attribute :>> statement = "Taking a processor out shall check every
+                refusal before any state changes -- among them a task pinned to
+                it alone at its spawn, never a mask a user set
+                (L.sched.123, ledger 5156 (A3)) -- clear its ACTIVE bit and wait a
+                grace period before asking the park, and move its park state
+                Active to Parking to Parked by compare-exchange; a park not made
+                by the deadline shall be cancelled by compare-exchange Parking to
+                Cancelled and the processor put back.";
+            attribute :>> criterion = "The native boot check
+                a_processor_leaves_service_through_its_token_alone: a park
+                whose deadline has passed, asked of nobody, is cancelled and
+                the processor left in service, and one with a program task
+                counted as pinned at its spawn is refused; test-quarantine's
+                fifty cycles each park and return, a spinner pinned to the
+                target by sched_setaffinity not refusing them. Control: the park loop with
+                interrupts left masked -- a shootdown is never answered and
+                the kernel stops, which fires.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::take_out_of_service",
+                "sched::service_refusal", "sched::park_transition");
+        }
+        requirement <'L.sched.106'> aReturnFlushesBeforeItIsUsed : ItemLowLevel {
+            attribute :>> statement = "A processor brought back shall flush its
+                whole TLB, global entries and every PCID included, and re-arm its
+                timer before its ACTIVE bit is set, last.";
+            attribute :>> criterion = "test-quarantine: root's echo 1 brings the
+                target back and online names it again; fifty times out and
+                back under load. The flush is CR4.PGE's toggle (SDM vol. 3A
+                4.10.4.1), argued.";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::put_back_in_service", "sched::park",
+                "arch::x86_64::flush_tlb");
+        }
+    }
+
+    package SliceRequests {
+        doc /* src/lib/kernel/sched, sched/queue.rs, sched/mod.rs and
+             * syscall/thread.rs: a slice a task asks for (F7,
+             * docs/GAME-MODE-SCHED.md section 2.2; the consultant's design
+             * review, ledger 5156). */
+
+        requirement <'L.sched.107'> eachNewRequestIsTheTasksOwn : ItemLowLevel {
+            attribute :>> statement = "At each new request of a fair entity -- its
+                enqueue, the renewal of a spent request, a yield, a change of
+                weight, a levelling and the direct switch's arrival -- the
+                scheduler shall set its virtual deadline to its virtual runtime
+                plus effective_request(its requested slice, the queue's slice)
+                at its weight, the queue's slice standing for a request of
+                zero; a changed request shall take effect at the entity's next
+                new request.";
+            attribute :>> criterion = "Host tests
+                every_new_request_is_measured_with_the_entitys_own,
+                a_request_is_carried_and_a_change_waits_for_the_next,
+                a_shorter_request_is_picked_first and
+                hand_over_is_the_general_sequence; stage 5's slice check: three
+                spinners pinned to one processor are each seen waiting exactly
+                one effective request from their deadline. Control: the renewal
+                measured with the queue's slice -- the check fails with 'a
+                renewed request ignored the task's slice'.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = ("sched::set_request", "sched::queue::CpuQueue::set_request",
+                "sched::task::Task::set_request", "sched::task::Task::entity_state",
+                "sched::task::Task::store_entity_state");
+        }
+        requirement <'L.sched.108'> noRequestIsLongerThanTheSlice : ItemLowLevel {
+            attribute :>> statement = "No entity shall be given a request longer
+                than its queue's slice, whatever it asks for; the lag limit, the
+                placement of an arriving entity and the interval to the next
+                decision shall be measured with the queue's slice alone.";
+            attribute :>> criterion = "Host tests
+                the_effective_request_is_the_ask_capped_at_the_slice and
+                no_request_moves_a_bound (placement, the lag left with and the
+                decision interval identical for every request); stage 5's slice
+                check: a spinner asking for twice the largest slice is never
+                seen further from its deadline than that slice. Control: the cap
+                removed -- 'a request longer than the queue's slice was
+                granted'.";
+            attribute :>> parent = "H.SCHED.2";
+            attribute :>> unit = "sched::queue::CpuQueue::request_sample";
+        }
+        requirement <'L.sched.109'> aTaskIsMadeWithItsThreadsRequest : ItemLowLevel {
+            attribute :>> statement = "prepare_user shall give a user task its
+                thread's slice request before any queue can see it, so that a
+                thread made by clone or fork, which starts with its creator's
+                request, and a thread after execve, which keeps its own, run
+                with it from their first pick.";
+            attribute :>> criterion = "test-threads' slice step: sched_setattr
+                and sched_getattr round trip, 99 us read back as 100 us and
+                101 ms as 100 ms, RESET_ON_FORK refused, a forked child and a
+                new thread read their creator's request, as uid 1000 pid 1's
+                thread EPERM and SCHED_FIFO refused; sched_getattr reads the
+                task's request. The exec half is argued by construction and
+                not yet run: sys_execve keeps the caller's Thread and Task
+                (end_other_threads) and Thread::reset_for_exec clears only
+                dispatch and name; the run from a file on the N150 box's disk
+                is a BACKLOG row (ledger 5232 (4)). Control: prepare_user making the task with no
+                request -- the step fails with 'a child did not start with its
+                creator's slice request'.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = "sched::prepare_user";
+        }
+    }
+
+    package AppliedAffinity {
+        doc /* sched/affinity.rs, sched/mod.rs, sched/queue.rs, sched/task.rs,
+             * sched/work.rs and the way out of every architecture:
+             * sched_setaffinity that pins (F3, docs/GAME-MODE-SCHED.md
+             * section 2.1; the consultant's design reviews, ledger 4446
+             * (D1)-(D12) and 5156 (A1)-(A12)). The mask a task's placement
+             * asks is mask_for: its stored mask, or the domain while that
+             * names no processor in service (L.sched.123); the effective
+             * mask is that and in service. The system call's EINVAL, EPERM,
+             * ESRCH and read-back are load statements in the design note
+             * (limits.rs, no L id). */
+
+        requirement <'L.sched.96'> aKernelThreadsMaskIsNeverSet : ItemLowLevel {
+            attribute :>> statement = "set_affinity shall refuse every task that
+                runs no program, before anything changes, so that a kernel
+                thread's mask is the one it was spawned with for its whole
+                life.";
+            attribute :>> criterion = "Stage 5's affinity check: a kernel thread
+                asked a mask through set_affinity is refused with KernelThread
+                and keeps its spawn mask. Control: the refusal removed -- 'a
+                kernel thread's mask was changed by sched_setaffinity's
+                door'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = "sched::affinity::set_affinity";
+        }
+        requirement <'L.sched.97'> everyPlacementObeysTheMask : ItemLowLevel {
+            attribute :>> statement = "Every placer -- may_place (the Sync wake,
+                the pull and rehome_blocked's choice), idle_allowed,
+                place_on_idle, a steal, a balance, the evacuation of a park,
+                and a user task's making -- shall ask allowed(task, cpu) over
+                mask_for beside placeable(cpu); a task woken at a home its
+                mask does not allow shall be moved, under both queues' locks
+                taken lower first, to a processor it allows before it is
+                queued; a mask shall be stored only under the lock of the
+                queue that owns the task, and read whole.";
+            attribute :>> criterion = "Stage 5's affinity check: a task asleep at
+                home on processor 0 is given the last processor alone and
+                woken from processor 0 with preemption held; as the wake
+                returns its home is the last processor, and it runs there.
+                Controls: wake_at_home's mask test skipped -- 'a task woken
+                with a mask that excludes its home was queued there'; the
+                store skipped -- the same line.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::allowed", "sched::affinity::mask_for",
+                "sched::affinity::pinned", "sched::affinity::set_mask",
+                "sched::task::Task::store_affinity", "sched::task::Task::affinity",
+                "sched::may_place", "sched::idle_allowed", "sched::place_on_idle",
+                "sched::wake_at_home", "sched::wake_onto", "sched::rehome_blocked",
+                "sched::may_pull", "sched::queue::CpuQueue::steal_candidate",
+                "sched::queue::CpuQueue::take_movable_sleeper", "sched::prepare_user");
+        }
+        requirement <'L.sched.98'> aTaskPickedOutsideItsMaskIsPushed : ItemLowLevel {
+            attribute :>> statement = "A queued task picked on a processor its
+                mask does not allow shall be taken off that queue and queued
+                on one it allows before it is switched to, and the pick made
+                again, the destination's lock waited for when it is above
+                the picking processor and only tried when below.";
+            attribute :>> criterion = "Stage 5's affinity check: a task woken on
+                processor 0 behind its waker, then given the last processor
+                alone, runs on the last processor, and the push count rose.
+                Control: the push skipped -- 'a task picked on a processor its
+                mask excludes ran there'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::pick_inside", "sched::affinity::push_picked",
+                "sched::affinity::pushed");
+        }
+        requirement <'L.sched.99'> noUserInstructionRunsOutsideTheMask : ItemLowLevel {
+            attribute :>> statement = "A task given a mask shall carry PLACE while
+                its mask is narrower than the domain, and every way back to
+                user mode on every architecture -- a call's, an interrupt's,
+                a fault's, before a signal frame is built, a restarted call,
+                and a program's or a clone or fork child's first entry --
+                shall, before any user instruction, switch it away from a
+                processor mask_for does not name and queue it, after the
+                switch has saved its registers, under both queues' locks on
+                one it names; with no lock held and the preemption count
+                zero at the switch, and again until it is inside.";
+            attribute :>> criterion = "test-threads' affinity step on x86-64,
+                AArch64 and ARMv7-A: pinned to each processor in turn, getcpu
+                (and RDTSCP on x86-64) on the instruction after the call
+                names it; a pinned spinner is never seen elsewhere over a
+                second. Control: the bit not posted -- 'a thread that pinned
+                itself ran its next instruction elsewhere'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::keep_inside",
+                "sched::affinity::leaves_with_switch", "sched::affinity::take_pushing",
+                "sched::affinity::push_off", "sched::affinity::unmasked",
+                "sched::work::look_placed", "sched::work::place_before_entry",
+                "sched::work::anything_due", "sched::choose_next", "sched::depart",
+                "sched::finish_switch",
+                "sched::nothing_due_here", "trap::attention_due");
+        }
+        requirement <'L.sched.100'> theSetterWaitsForARunningTarget : ItemLowLevel {
+            attribute :>> statement = "A set_affinity whose target runs on
+                another processor its new mask does not allow shall interrupt
+                that processor and return only once the target is off it, it
+                has died, or 100 ms have passed.";
+            attribute :>> criterion = "test-threads' affinity step: another
+                thread's mask is set while it spins on another processor;
+                its first getcpu begun after the call returned names the new
+                processor. Control: the wait removed -- 'another thread's
+                next getcpu after its mask was set named a processor outside
+                it'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = ("sched::affinity::wait_until_off",
+                "sched::affinity::running_outside");
+        }
+        requirement <'L.sched.101'> aThreadStartsWithItsCreatorsMask : ItemLowLevel {
+            attribute :>> statement = "A thread made by clone, fork or vfork shall
+                be made with the mask its creator's task had at that moment,
+                read whole, and execve shall keep it; any other user task
+                shall start with the whole domain.";
+            attribute :>> criterion = "test-threads' affinity step: a new thread
+                and a fork child read their creator's one-processor mask back
+                and run on it; an exec keeps it where the program is a file.
+                Control: the creator's mask not copied at clone -- 'a new
+                thread did not start with its creator's mask'.";
+            attribute :>> parent = "H.SCHED.4";
+            attribute :>> unit = "sched::prepare_user";
+        }
+        requirement <'L.sched.123'> aMaskNeverVetoesAPark : ItemLowLevel {
+            attribute :>> statement = "A task that runs a program and whose stored
+                mask names no processor in service shall be placed as if its
+                mask were the whole domain, its stored mask kept, and
+                sched_getaffinity shall answer the effective mask; a user's
+                mask shall never count among the pins that refuse a park.";
+            attribute :>> criterion = "test-quarantine: a spinner the probe pinned
+                to the target with sched_setaffinity does not refuse the park,
+                and by its own getcpu runs elsewhere while the target is out;
+                its sched_getaffinity reads every processor in service during
+                the park and the target alone after, and it runs on the target
+                again after its return; fifty cycles out and back with it
+                running all succeed. Control: the fallback removed -- the
+                step fails with 'a task pinned to processor 2 did not read
+                every processor in service while it was out': getaffinity's
+                look during the park, made before the probe's getcpu, catches
+                the removed fallback first (ledger 5269 (4)).";
+            attribute :>> parent = "H.SCHED.18";
+            attribute :>> unit = ("sched::affinity::mask_for",
+                "sched::affinity::effective_mask", "sched::task::Task::new");
         }
     }
 

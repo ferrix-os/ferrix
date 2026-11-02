@@ -2574,6 +2574,36 @@ fn a_border_is_grabbed_around_a_window_and_not_inside_it() {
     );
 }
 
+/// A press on a floating window's own pixels is its own even where the
+/// ring of a window beneath it reaches: Settings floating over a terminal
+/// the size of the screen, pressed just inside its left edge, is not a
+/// grab of the terminal's border (the customer's Yoru desktop, 2026-10-28).
+#[test]
+fn a_floating_window_over_a_border_ring_keeps_its_press() {
+    const ON: &str = "general:layout = floating\ngeneral:border_size = 1\n\
+                      general:resize_on_border = true\ngeneral:extend_border_grab_area = 8\n";
+    let mut state = setup(ON);
+    let _ = state
+        .open_floating(WindowId(1), Rect::new(20, 40, 1880, 1000))
+        .unwrap();
+    let _ = state
+        .open_floating(WindowId(2), Rect::new(10, 300, 800, 500))
+        .unwrap();
+    // Inside Settings, within the terminal's left ring: Settings' press.
+    assert_eq!(state.border_at((15.0, 500.0)), None);
+    // Settings' own ring, below it, over the terminal: Settings' border.
+    assert_eq!(
+        state.border_at((300.0, 803.0)),
+        Some((
+            WindowId(2),
+            Corner {
+                bottom: true,
+                ..Corner::NONE
+            }
+        ))
+    );
+}
+
 /// With `general:resize_on_border` off -- Hyprland's default -- no press is
 /// ever a border grab, whatever the grab area says.
 #[test]

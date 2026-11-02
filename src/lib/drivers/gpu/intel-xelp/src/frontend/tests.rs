@@ -20,7 +20,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::backend::{Completion, ContextParams, Engine, Facts, HwContext, SubmitError, VmId};
 use super::host::{Host, Installed};
-use super::{Backend, Frontend, RequestId, fence, limits};
+use super::{Backend, Frontend, RequestId, fence, limits, objects};
 use crate::sseu::{Fuses, gen12_sseu_info_init};
 use crate::uapi::*;
 
@@ -310,6 +310,25 @@ impl Backend for FakeBackend {
 
     fn timestamp(&mut self) -> u64 {
         0x1234_5678_9abc
+    }
+
+    fn submit_commands(
+        &mut self,
+        context: HwContext,
+        commands: &[u32],
+        request: RequestId,
+    ) -> Result<(), SubmitError> {
+        if self.full {
+            return Err(SubmitError::Full);
+        }
+        self.submits
+            .push((context.0, 0, commands.len() as u32 * 4, request));
+        if self.hold {
+            self.held.push(request);
+        } else {
+            self.pending.push((request, Completion::Ok));
+        }
+        Ok(())
     }
 }
 
@@ -1891,6 +1910,69 @@ fn shared_objects_set_their_dmabuf_slot() {
     });
 }
 
+/// `card0` evicts the lines it copies only while a GPU writes shared
+/// objects: a write to an exported object moves the count, and a read of
+/// one, or a write to an object never exported, does not. Other tests in
+/// this process write no shared object.
+#[test]
+fn shared_writes_are_counted_for_the_card() {
+    big(|| {
+        let mut rig = Rig::new();
+        let shared = rig.create(4096);
+        let private = rig.create(4096);
+        let batch = rig.create(4096);
+        let mut prime = PrimeHandle {
+            handle: shared,
+            flags: drm::RDWR,
+            fd: -1,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::PRIME_HANDLE_TO_FD, &mut prime), 0);
+        let before = super::shared_writes();
+        let run = |rig: &mut Rig, objects: &[(u32, u64, u64)]| {
+            assert_eq!(rig.exec(ioctl::GEM_EXECBUFFER2, objects, 0, &[], 0).0, 0);
+            rig.frontend.service(&mut rig.host, true);
+        };
+        run(
+            &mut rig,
+            &[(shared, 0x10000, PINNED), (batch, 0x1000, PINNED)],
+        );
+        run(
+            &mut rig,
+            &[
+                (private, 0x20000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before);
+        run(
+            &mut rig,
+            &[
+                (shared, 0x10000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before + 1);
+        // Its dmabuf gone, a card may still show it: still counted.
+        let object = rig
+            .frontend
+            .state
+            .handles
+            .get((shared - 1) as usize)
+            .map_or(0, |handle| handle.object);
+        let cookie = rig.frontend.state.dmabuf_cookie(object);
+        crate::frontend::gem::dmabuf_released(&mut rig.frontend.state, cookie);
+        run(
+            &mut rig,
+            &[
+                (shared, 0x10000, PINNED | exec::OBJECT_WRITE),
+                (batch, 0x1000, PINNED),
+            ],
+        );
+        assert_eq!(super::shared_writes(), before + 2);
+    });
+}
+
 /// A hang: the guilty request's fence carries `EIO`, `GET_RESET_STATS`
 /// counts it, and a context that is not recoverable is banned.
 #[test]
@@ -2400,4 +2482,70 @@ fn every_out_fence_signals_once_when_its_request_completes() {
         assert_eq!(ids, sorted, "submitted out of order");
         assert_eq!(ids.len(), 150);
     });
+}
+
+/// The driver's own requests (card0's blit): ids of their own range, their
+/// completions kept for the driver once and never taken for a client's
+/// request, and a full ring refused as a client's is.
+#[test]
+fn driver_requests_complete_apart_from_the_clients() {
+    big(|| {
+        let mut rig = Rig::new();
+        let next = rig.frontend.state.requests.next;
+        let context = HwContext(77);
+        let first = rig
+            .frontend
+            .driver_submit(context, &[0, 0])
+            .expect("submitted");
+        assert_ne!(first & objects::DRIVER_REQUEST, 0);
+        assert_eq!(
+            rig.frontend.driver_completion(first),
+            None,
+            "not yet serviced"
+        );
+        rig.frontend.service(&mut rig.host, false);
+        assert_eq!(rig.frontend.driver_completion(first), Some(Completion::Ok));
+        assert_eq!(rig.frontend.driver_completion(first), None, "taken once");
+        assert_eq!(rig.frontend.state.requests.next, next, "no client id given");
+        // A hung one says so.
+        rig.frontend.backend.hold = true;
+        let second = rig
+            .frontend
+            .driver_submit(context, &[0, 0])
+            .expect("submitted");
+        assert_eq!(second, first + 1);
+        rig.frontend.backend.finish(Completion::Hung);
+        rig.frontend.service(&mut rig.host, false);
+        assert_eq!(
+            rig.frontend.driver_completion(second),
+            Some(Completion::Hung)
+        );
+        assert_eq!(rig.frontend.state.driver.outstanding, 0);
+        // A full ring gives no id.
+        rig.frontend.backend.full = true;
+        assert_eq!(
+            rig.frontend.driver_submit(context, &[0, 0]),
+            Err(SubmitError::Full)
+        );
+        assert_eq!(rig.frontend.state.driver.next, second + 1);
+    });
+}
+
+/// Completions nobody took are dropped oldest first past the room kept.
+#[test]
+fn driver_completions_keep_the_newest() {
+    let mut driver = objects::DriverRequests::new();
+    let ids: Vec<u64> = (0..objects::DRIVER_DONE as u64 + 2)
+        .map(|n| objects::DRIVER_REQUEST + n)
+        .collect();
+    driver.outstanding = ids.len() as u32;
+    for id in &ids {
+        driver.finish(*id, Completion::Ok);
+    }
+    assert_eq!(driver.outstanding, 0);
+    assert_eq!(driver.take(ids[0]), None);
+    assert_eq!(driver.take(ids[1]), None);
+    for id in &ids[2..] {
+        assert_eq!(driver.take(*id), Some(Completion::Ok));
+    }
 }

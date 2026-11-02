@@ -49,6 +49,25 @@
 //! overlap one still in use answers `EAGAIN` rather than sleeping; userptr,
 //! the legacy mmap, pread, pwrite and perf are `ENODEV`.
 
+/// Requests that wrote an object a dmabuf of shares with other programs,
+/// counted from the driver's start: what `card0` asks before a copy
+/// whether a buffer it reads may hold a GPU's writes that went past the
+/// LLC (Mesa writes an exported or imported object with uncached MOCS). A
+/// screen drawn in software beside no GPU client never moves it.
+static SHARED_WRITES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Count a request that writes a shared object.
+pub(crate) fn note_shared_write() {
+    let _ = SHARED_WRITES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many requests have written a shared object since the driver
+/// started.
+#[must_use]
+pub fn shared_writes() -> u64 {
+    SHARED_WRITES.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 pub mod backend;
 pub mod drm;
 pub mod exec;
@@ -190,5 +209,31 @@ impl<B: Backend> Frontend<B> {
         let now = host.now_ns();
         self.backend.service(now, interrupt);
         fence::settle(self, host);
+    }
+
+    /// Run `commands` in `context`'s ring as the driver's own request
+    /// ([`objects::DriverRequests`]); its id, whose completion
+    /// [`Frontend::driver_completion`] tells. The context is the driver's,
+    /// made on [`Frontend::backend`], never a client's.
+    ///
+    /// # Errors
+    ///
+    /// The back end's [`SubmitError`].
+    pub fn driver_submit(
+        &mut self,
+        context: HwContext,
+        commands: &[u32],
+    ) -> Result<RequestId, SubmitError> {
+        let id = self.state.driver.next;
+        self.backend.submit_commands(context, commands, id)?;
+        self.state.driver.next = id.wrapping_add(1) | objects::DRIVER_REQUEST;
+        self.state.driver.outstanding = self.state.driver.outstanding.saturating_add(1);
+        self.backend.set_watched(true);
+        Ok(id)
+    }
+
+    /// How the driver's own request `id` ended, once, if it has.
+    pub fn driver_completion(&mut self, id: RequestId) -> Option<Completion> {
+        self.state.driver.take(id)
     }
 }

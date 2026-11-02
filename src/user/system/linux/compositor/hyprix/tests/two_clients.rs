@@ -1479,6 +1479,53 @@ fn a_bar_takes_its_strip_and_the_windows_tile_under_it() {
     );
 }
 
+/// A `good` for [`frame_until`]: the frame is the checkerboard at the
+/// screen's size, every pixel of it.
+fn is_whole_checkerboard(frame: &[u8]) -> Result<(), String> {
+    let wrong = frame.chunks_exact(3).enumerate().find(|(at, rgb)| {
+        let (x, y) = (*at as u32 % WIDTH, *at as u32 / WIDTH);
+        let got = (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]);
+        got != Pattern::Checkerboard.pixel(x, y, HEIGHT)
+    });
+    match wrong {
+        None => Ok(()),
+        Some((at, rgb)) => Err(format!(
+            "{},{} is {rgb:02x?}, not the checkerboard",
+            at as u32 % WIDTH,
+            at as u32 / WIDTH
+        )),
+    }
+}
+
+/// A fullscreen window covers the top layer: a bar or a dock is drawn over
+/// the windows, but not over a fullscreen one, as in Hyprland, where only
+/// the overlay layer, the popups and the lock are. On the N150 yoru-shell's
+/// dock stayed over a fullscreen game, and kept its buffer from being shown
+/// directly besides.
+///
+/// The bar is a gradient across the top 30 rows and the window a
+/// checkerboard; once the window is fullscreen the whole screen, its top
+/// rows too, is the checkerboard at the screen's size.
+#[test]
+fn a_fullscreen_window_covers_a_bar_in_the_top_layer() {
+    let desk = Desk::new("fullscreen-bar", "");
+    let options = desk.dumping();
+    let (line, ()) = running(&desk, &options, move |ends| {
+        let bar = ends.open(Pattern::Gradient, "bar", Shape::Bar(30));
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        assert_eq!(ends.ask("dispatch fullscreen").trim(), "ok");
+        let _ = frame_until(
+            ends,
+            "the fullscreen window over the bar",
+            is_whole_checkerboard,
+        );
+        ends.stop();
+        let _ = (bar.join(), one.join());
+    })
+    .expect("the compositor ran");
+    assert!(!line.contains("failed"), "{line}");
+}
+
 // ---------------------------------------------------------------------------
 // Animations
 //

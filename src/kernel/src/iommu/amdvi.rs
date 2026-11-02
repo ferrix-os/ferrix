@@ -649,6 +649,43 @@ impl Unit {
         Ok(())
     }
 
+    /// Aim entry `index` of `devid`'s interrupt table at `destination`
+    /// instead (`docs/CORE-QUARANTINE.md` §3.3, `L.iommu.101`): one aligned
+    /// four-byte store, then the table invalidated and waited for.
+    ///
+    /// # Errors
+    ///
+    /// The unit does not remap, the function has no table, an index past
+    /// it, an entry not in use, or a wait that failed.
+    pub(crate) fn retarget(
+        &self,
+        devid: u16,
+        index: u16,
+        destination: u8,
+    ) -> Result<(), &'static str> {
+        if !self.remapping() {
+            return Err("the unit does not remap");
+        }
+        if index >= table::TABLE_ENTRIES {
+            return Err("an interrupt entry index past the function's table");
+        }
+        let _one = self.remaps.enter()?;
+        let irt = self
+            .tables
+            .lock()
+            .interrupts
+            .get(&devid)
+            .copied()
+            .ok_or("the function has no interrupt table")?;
+        let at = irt + u64::from(index) * 4;
+        let entry = read_half(at);
+        if !table::interrupt_entry_used(entry) {
+            return Err("an interrupt entry not in use is not retargeted");
+        }
+        write_half(at, table::retargeted(entry, destination));
+        self.submit(&[command::invalidate_interrupt_table(devid)], Wait::Status)
+    }
+
     /// The next event the unit logged, cleared so the slot can be reused,
     /// or `None`. A failed unit is reported once, first; an overflowed log
     /// once, as lost, and the log restarted.

@@ -479,6 +479,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::ChardevDmabufFence => served(call, caller, &a),
         NativeCall::DevmgrStart => crate::discovery::devmgr::devmgr_start(caller, &a),
         NativeCall::AuditRead => audit_read(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::CpuService => cpu_service(process, handle(a[0]), a[1], a[2]),
+        NativeCall::MemoryScrub => memory_scrub(process, handle(a[0]), a[1], a[2]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),
         NativeCall::ProcessStatus => process_status(process, handle(a[0]), a[1]),
         NativeCall::IoMappingCreate
@@ -1538,6 +1540,8 @@ fn vmo_error(error: VmoError) -> Errno {
     match error {
         VmoError::OutOfRange { .. } => status::INVALID_ARGS,
         VmoError::OutOfMemory => status::NO_MEMORY,
+        // Only `Vmo::read_present` answers it, which no native call reaches.
+        VmoError::Poisoned(_) => status::FAULT,
     }
 }
 
@@ -1874,6 +1878,82 @@ fn audit_read(
     }
     uaccess::copy_to_user(process.space(), answer, &words).map_err(fault)?;
     Ok(0)
+}
+
+/// `cpu_service(token, cpu, in_service)`: take processor `cpu` out of
+/// service or bring it back, through the processor service token with
+/// `MANAGE` -- lode's door (`docs/CORE-QUARANTINE.md` §4), ending in the
+/// same function as root's `cpuN/online`.
+fn cpu_service(process: &Process, token: Handle, cpu: u64, wanted: u64) -> Result<usize, Errno> {
+    process.with_handles(|table| match table.get(token) {
+        Ok((Object::CpuService, rights)) if rights.contains(Rights::MANAGE) => Ok(()),
+        Ok((Object::CpuService, _)) => Err(status::ACCESS_DENIED),
+        Ok(_) => Err(status::WRONG_TYPE),
+        Err(_) => Err(status::BAD_HANDLE),
+    })?;
+    let cpu = usize::try_from(cpu)
+        .ok()
+        .filter(|&cpu| cpu < crate::smp::count())
+        .ok_or(status::INVALID_ARGS)?;
+    let wanted = match wanted {
+        0 => false,
+        1 => true,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    use crate::smp::service::{self, Door};
+    service::set_in_service(cpu, wanted, Door::Lode, audit::Subject::of(process))
+        .map(|()| 0)
+        .map_err(service_status)
+}
+
+/// `memory_scrub(token, budget, answer)`: test up to `budget` free frames
+/// with the RAM scrubber through the memory scrub token with `MANAGE`
+/// (`docs/RAM-SCRUBBER.md` §4), and copy what the batch did to `answer`.
+fn memory_scrub(
+    process: &Process,
+    token: Handle,
+    budget: u64,
+    answer: u64,
+) -> Result<usize, Errno> {
+    use crate::mm::scrub::{self, Refusal};
+    process.with_handles(|table| match table.get(token) {
+        Ok((Object::MemoryScrub, rights)) if rights.contains(Rights::MANAGE) => Ok(()),
+        Ok((Object::MemoryScrub, _)) => Err(status::ACCESS_DENIED),
+        Ok(_) => Err(status::WRONG_TYPE),
+        Err(_) => Err(status::BAD_HANDLE),
+    })?;
+    let budget = u32::try_from(budget).map_err(|_| status::INVALID_ARGS)?;
+    let batch = scrub::test_batch(budget).map_err(|refusal| match refusal {
+        Refusal::Budget => status::INVALID_ARGS,
+        Refusal::StandsDown => status::WRONG_TYPE,
+        Refusal::Busy => status::SHOULD_WAIT,
+    })?;
+    let told = [
+        u64::from(batch.tested),
+        u64::from(batch.suspects),
+        u64::from(batch.bad),
+        u64::from(batch.retired),
+        u64::from(batch.held),
+        u64::from(batch.sweeps),
+        u64::from(batch.stopped),
+    ];
+    let mut words = [0u8; types::MEMORY_SCRUB_ANSWER_WORDS * 8];
+    for (chunk, value) in words.chunks_exact_mut(8).zip(told) {
+        chunk.copy_from_slice(&value.to_ne_bytes());
+    }
+    uaccess::copy_to_user(process.space(), answer, &words).map_err(fault)?;
+    Ok(0)
+}
+
+/// What `cpu_service` answers for each refusal.
+const fn service_status(refusal: crate::smp::service::Refusal) -> Errno {
+    use crate::smp::service::Refusal;
+    match refusal {
+        Refusal::NoSuchProcessor => status::INVALID_ARGS,
+        Refusal::Unsupported => status::WRONG_TYPE,
+        Refusal::Scheduler(crate::sched::ServiceRefusal::TimedOut) => status::TIMED_OUT,
+        Refusal::Interrupts | Refusal::Scheduler(_) => status::BAD_STATE,
+    }
 }
 
 /// The ring `which` names, if `handle` is the audit record's with `READ`.
@@ -2590,13 +2670,7 @@ fn vmo_pin(
 ) -> Result<usize, Errno> {
     use ferrix_native_abi::types::{PIN_COHERENT, PIN_CONTIGUOUS, PIN_READ_ONLY};
     let page = PAGE_SIZE;
-    if options & !(PIN_READ_ONLY | PIN_COHERENT | PIN_CONTIGUOUS) != 0
-        || length == 0
-        || !offset.is_multiple_of(page)
-        || !length.is_multiple_of(page)
-    {
-        return Err(status::INVALID_ARGS);
-    }
+    let order = pin_block_order(options, offset, length)?;
     let read_only = options & PIN_READ_ONLY != 0;
     let node = device_isolated_in(process, device)?;
     // A node nothing behind which reaches memory -- the firmware
@@ -2622,12 +2696,91 @@ fn vmo_pin(
     if options & PIN_CONTIGUOUS != 0 {
         return contiguous_pin(process, &node, &vmo, (first, pages), read_only, past_caches);
     }
-    let held = vmo.hold(first, pages).map_err(vmo_error)?;
+    let held = hold_reclaiming(&node, &vmo, (first, pages), order)?;
     if past_caches {
         coherent_for_device(&vmo, &held)?;
     }
     let pin = pin_through(&node, held, dma_flags(read_only), process.exit_record())?;
     insert_new(process, Object::Pin(pin), Rights::PIN)
+}
+
+/// `vmo_pin`'s commit and hold of `range` (first page, pages) of `vmo`, with
+/// `PIN_BLOCKS`' pre-commit up to `order` if it asks for one. At the
+/// machine's floor, or a job's memory limit, clean file cache is room for
+/// the pin as it is for a fault (`object::oom::reclaim_for`): without it a
+/// GPU object pinned whole at its first bind, mmap or export answered
+/// `ENOMEM` with gigabytes of cache to give back (2026-10-31, Endfield on
+/// the N150 box). What one try committed stays committed, so each try after
+/// a reclaim needs only the rest; at most [`PIN_RECLAIMS`] reclaims.
+fn hold_reclaiming(
+    node: &DeviceNode,
+    vmo: &Arc<Vmo>,
+    (first, pages): (u64, u64),
+    order: Option<u8>,
+) -> Result<crate::user::vmo::Held, Errno> {
+    let mut tries = 0;
+    loop {
+        if let Some(order) = order {
+            commit_blocks_for_pin(node, vmo, (first, pages), order)?;
+        }
+        match vmo.hold(first, pages) {
+            Err(VmoError::OutOfMemory)
+                if tries < PIN_RECLAIMS && object::oom::reclaim_for(pages) =>
+            {
+                tries += 1;
+            }
+            held => return held.map_err(vmo_error),
+        }
+    }
+}
+
+/// Reclaims one `vmo_pin` makes, each followed by another try, before it
+/// answers `NO_MEMORY`: as many as a fault makes before the machine-wide OOM
+/// kill (`object::oom::MACHINE_RECLAIMS`). A pin kills nobody: a driver
+/// answers its program's `ENOMEM`.
+const PIN_RECLAIMS: u32 = object::oom::MACHINE_RECLAIMS;
+
+/// `vmo_pin`'s options and range, checked before anything else: the
+/// largest block order `PIN_BLOCKS` asks for, if it does (L.object.254: an
+/// order is `PIN_BLOCKS`' alone, and `PIN_BLOCKS` has one, up to the
+/// allocator's largest block, and is no contiguous pin).
+fn pin_block_order(options: u64, offset: u64, length: u64) -> Result<Option<u8>, Errno> {
+    use ferrix_native_abi::types::{
+        PIN_BLOCK_ORDER_MASK, PIN_BLOCK_ORDER_SHIFT, PIN_BLOCKS, PIN_COHERENT, PIN_CONTIGUOUS,
+        PIN_READ_ONLY,
+    };
+    let known = PIN_READ_ONLY | PIN_COHERENT | PIN_CONTIGUOUS | PIN_BLOCKS | PIN_BLOCK_ORDER_MASK;
+    let order = (options & PIN_BLOCK_ORDER_MASK) >> PIN_BLOCK_ORDER_SHIFT;
+    let blocks = options & PIN_BLOCKS != 0;
+    if options & !known != 0
+        || blocks != (order != 0)
+        || order > u64::from(crate::mm::MAX_ORDER)
+        || (blocks && options & PIN_CONTIGUOUS != 0)
+        || length == 0
+        || !offset.is_multiple_of(PAGE_SIZE)
+        || !length.is_multiple_of(PAGE_SIZE)
+    {
+        return Err(status::INVALID_ARGS);
+    }
+    Ok(blocks.then_some(order as u8))
+}
+
+/// `PIN_BLOCKS`' pre-commit of `range` (first page, pages) of `vmo`, up to
+/// `order`: the budget before any frame is taken (ledger 5088 (2)), then
+/// `Vmo::commit_blocks` over a range inside the object (the hold after it
+/// refuses one that is not).
+fn commit_blocks_for_pin(
+    node: &DeviceNode,
+    vmo: &Vmo,
+    (first, pages): (u64, u64),
+    order: u8,
+) -> Result<(), Errno> {
+    let count = usize::try_from(pages).map_err(|_| status::INVALID_ARGS)?;
+    budget_allows(node, count)?;
+    if first.saturating_add(pages) <= vmo.len_pages() {
+        let _ = vmo.commit_blocks(first, pages, order);
+    }
+    Ok(())
 }
 
 /// A pin's IOMMU flags: read-only for the device, or read and write.
@@ -3202,7 +3355,9 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::IoMapping(_)
         | Object::Pin(_)
         | Object::Starter
-        | Object::Audit => None,
+        | Object::Audit
+        | Object::CpuService
+        | Object::MemoryScrub => None,
     }
 }
 

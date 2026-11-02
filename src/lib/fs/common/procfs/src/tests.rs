@@ -25,6 +25,14 @@ fn rendered(render: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     out
 }
 
+/// A maps line rendered into room reserved for its longest form, as the
+/// kernel renders it.
+fn map_line(mapping: &Mapping<'_>, width: Width) -> Vec<u8> {
+    let mut out = Vec::with_capacity(maps::longest_line(mapping.name.map_or(0, <[u8]>::len)));
+    maps::render(&mut out, mapping, width).expect("a line fits its longest form");
+    out
+}
+
 fn show(bytes: &[u8]) -> alloc::string::String {
     alloc::string::String::from_utf8_lossy(bytes).into_owned()
 }
@@ -121,7 +129,7 @@ const HOST_MAPS: &[(&[u8], Mapping<'static>)] = &[
 #[test]
 fn a_maps_line_is_byte_for_byte_what_linux_printed() {
     for (line, mapping) in HOST_MAPS {
-        let out = rendered(|out| maps::render(out, mapping, Width::Bits64));
+        let out = map_line(mapping, Width::Bits64);
         let mut expected = line.to_vec();
         expected.push(b'\n');
         assert_eq!(show(&out), show(&expected), "rendering {mapping:?}");
@@ -155,7 +163,7 @@ fn a_short_address_on_a_64_bit_kernel_pads_to_the_same_column() {
         inode: 2_884_149,
         name: Some(b"/usr/bin/python3.14"),
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits64));
+    let out = map_line(&mapping, Width::Bits64);
     assert_eq!(
         show(&out),
         "00400000-00422000 r--p 00000000 fc:00 2884149                            /usr/bin/python3.14\n",
@@ -179,7 +187,7 @@ fn a_32_bit_kernel_puts_the_name_at_byte_49() {
         inode: 0,
         name: Some(b"[stack]"),
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits32));
+    let out = map_line(&mapping, Width::Bits32);
     assert_eq!(
         show(&out),
         "00010000-000a1000 r-xp 00000000 00:00 0          [stack]\n",
@@ -198,9 +206,74 @@ fn a_newline_in_a_mapped_file_name_is_escaped_and_nothing_else_is() {
         name: Some(b"/tmp/a b\nc"),
         ..HOST_MAPS[0].1
     };
-    let out = rendered(|out| maps::render(out, &mapping, Width::Bits64));
+    let out = map_line(&mapping, Width::Bits64);
     assert!(out.ends_with(b" /tmp/a b\\012c\n"), "{}", show(&out));
     assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 1, "one line");
+}
+
+#[test]
+fn a_maps_line_never_passes_its_longest_line() {
+    // Every number at its widest, and names short, padded, and all newlines.
+    let names: [Option<&[u8]>; 4] = [None, Some(b""), Some(b"[heap]"), Some(b"\n\n\n\n\n\n\n\n")];
+    for name in names {
+        for width in [Width::Bits32, Width::Bits64] {
+            let widest = Mapping {
+                start: u64::MAX,
+                end: u64::MAX,
+                read: true,
+                write: true,
+                execute: true,
+                shared: true,
+                offset: u64::MAX,
+                major: u32::MAX,
+                minor: u32::MAX,
+                inode: u64::MAX,
+                name,
+            };
+            let narrow = Mapping {
+                start: 0,
+                end: 0,
+                offset: 0,
+                major: 0,
+                minor: 0,
+                inode: 0,
+                ..widest
+            };
+            for mapping in [widest, narrow] {
+                let out = map_line(&mapping, width);
+                let bound = maps::longest_line(name.map_or(0, <[u8]>::len));
+                assert!(
+                    out.len() <= bound,
+                    "{} > {bound}: {}",
+                    out.len(),
+                    show(&out)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_maps_line_without_room_is_refused_and_nothing_allocated() {
+    let mapping = HOST_MAPS[0].1;
+    let whole = map_line(&mapping, Width::Bits64);
+    for room in [0, 1, 20, whole.len() - 1] {
+        let mut out = Vec::with_capacity(room);
+        let capacity = out.capacity();
+        assert_eq!(
+            maps::render(&mut out, &mapping, Width::Bits64),
+            Err(maps::Full),
+            "room {room}"
+        );
+        assert_eq!(
+            out.capacity(),
+            capacity,
+            "room {room}: the line grew its buffer"
+        );
+    }
+    let mut out = Vec::with_capacity(whole.len());
+    assert_eq!(maps::render(&mut out, &mapping, Width::Bits64), Ok(()));
+    assert_eq!(out, whole);
 }
 
 #[test]
@@ -233,9 +306,12 @@ fn meminfo_is_byte_for_byte_what_linux_printed() {
         dirty: 1176,
         shmem: 2135792,
         slab: 3343592,
+        s_reclaimable: 2913312,
     };
     let out = rendered(|out| meminfo::render(out, &info));
-    assert_eq!(show(&out), show(b"MemTotal:       62103444 kB\nMemFree:          768736 kB\nMemAvailable:   34850072 kB\nBuffers:         2613488 kB\nCached:         37462144 kB\nSwapCached:       538760 kB\nSwapTotal:       8388604 kB\nSwapFree:        4308344 kB\nDirty:              1176 kB\nShmem:           2135792 kB\nSlab:            3343592 kB\n"), "meminfo");
+    // The lines Linux printed, with the sample's value of SReclaimable made
+    // up beneath its Slab: the layout is what is checked.
+    assert_eq!(show(&out), show(b"MemTotal:       62103444 kB\nMemFree:          768736 kB\nMemAvailable:   34850072 kB\nBuffers:         2613488 kB\nCached:         37462144 kB\nSwapCached:       538760 kB\nSwapTotal:       8388604 kB\nSwapFree:        4308344 kB\nDirty:              1176 kB\nShmem:           2135792 kB\nSlab:            3343592 kB\nSReclaimable:    2913312 kB\n"), "meminfo");
 }
 
 #[test]
@@ -266,6 +342,14 @@ fn status_is_byte_for_byte_what_linux_printed() {
         fd_size: 64,
         vm_size: 20428,
         vm_locked: 0,
+
+        vm_rss: 5120,
+
+        rss_anon: 4000,
+
+        rss_file: 1000,
+
+        rss_shmem: 120,
         vm_data: 6724,
         vm_stack: 136,
         threads: 1,
@@ -287,7 +371,7 @@ fn status_is_byte_for_byte_what_linux_printed() {
     // Groups is copied from pid 1, which runs as root with no supplementary
     // groups — and still ends the line with the space `array.c` apologises
     // for.
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nSigQ:\t0/212141\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000000002\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tR (running)\nTgid:\t457743\nNgid:\t0\nPid:\t457743\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457743\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmRSS:\t    5120 kB\nRssAnon:\t    4000 kB\nRssFile:\t    1000 kB\nRssShmem:\t     120 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t1\nSigQ:\t0/212141\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000000002\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -311,6 +395,14 @@ fn a_threads_status_names_its_process_and_itself() {
         fd_size: 64,
         vm_size: 20428,
         vm_locked: 0,
+
+        vm_rss: 5120,
+
+        rss_anon: 4000,
+
+        rss_file: 1000,
+
+        rss_shmem: 120,
         vm_data: 6724,
         vm_stack: 136,
         threads: 2,
@@ -331,7 +423,7 @@ fn a_threads_status_names_its_process_and_itself() {
         },
     };
     let out = rendered(|out| status::render(out, &status));
-    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nSigQ:\t2/212141\nSigPnd:\t0000000000000200\nShdPnd:\t0000000000004000\nSigBlk:\t0000000000000200\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000004202\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t3\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
+    assert_eq!(show(&out), show(b"Name:\tpython3\nUmask:\t0002\nState:\tS (sleeping)\nTgid:\t457743\nNgid:\t0\nPid:\t457750\nPPid:\t457739\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t \nNStgid:\t457743\nNSpid:\t457750\nVmSize:\t   20428 kB\nVmLck:\t       0 kB\nVmRSS:\t    5120 kB\nRssAnon:\t    4000 kB\nRssFile:\t    1000 kB\nRssShmem:\t     120 kB\nVmData:\t    6724 kB\nVmStk:\t     136 kB\nThreads:\t2\nSigQ:\t2/212141\nSigPnd:\t0000000000000200\nShdPnd:\t0000000000004000\nSigBlk:\t0000000000000200\nSigIgn:\t0000000001001000\nSigCgt:\t0000000000004202\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t3\nCpus_allowed:\tffffff\nCpus_allowed_list:\t0-23\n"), "status");
 }
 
 #[test]
@@ -352,6 +444,14 @@ fn a_status_name_escapes_newline_and_backslash_only() {
         fd_size: 64,
         vm_size: 0,
         vm_locked: 0,
+
+        vm_rss: 0,
+
+        rss_anon: 0,
+
+        rss_file: 0,
+
+        rss_shmem: 0,
         vm_data: 0,
         vm_stack: 0,
         threads: 1,
@@ -1112,6 +1212,14 @@ fn a_status_in_a_pid_namespace_lists_every_number_from_the_readers_down() {
         fd_size: 64,
         vm_size: 0,
         vm_locked: 0,
+
+        vm_rss: 0,
+
+        rss_anon: 0,
+
+        rss_file: 0,
+
+        rss_shmem: 0,
         vm_data: 0,
         vm_stack: 0,
         threads: 1,

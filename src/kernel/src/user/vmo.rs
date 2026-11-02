@@ -97,6 +97,73 @@ pub enum VmoError {
     },
     /// No frame was available to commit.
     OutOfMemory,
+    /// A read of the page consumed poison: a machine check stopped the copy
+    /// at this frame (`docs/MACHINE-CHECK-PAGECACHE.md` §3.2). The caller
+    /// must act on it -- `user::cache::drop_poisoned_at` -- never turn it
+    /// into a plain error, or the frame is never retired.
+    Poisoned(Frame),
+}
+
+/// The frame plus one whose next read [`Vmo::read_present`] answers as
+/// poisoned, for stage 12's poison check (QEMU's memory never fails a
+/// load); 0 for none. Check builds only.
+#[cfg(ferrix_checks = "on")]
+static INJECT_READ_POISON: AtomicU64 = AtomicU64::new(0);
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+/// Make the next read of `frame` through [`Vmo::read_present`] answer
+/// [`VmoError::Poisoned`], once (`docs/MACHINE-CHECK-PAGECACHE.md` §6).
+#[cfg(ferrix_checks = "on")]
+pub fn inject_read_poison(frame: Frame) {
+    INJECT_READ_POISON.store(frame + 1, Ordering::SeqCst);
+}
+
+/// Whether the check asked for this read of `frame` to be poisoned; the
+/// request is used up.
+#[cfg(ferrix_checks = "on")]
+fn injected_read_poison(frame: Frame) -> bool {
+    INJECT_READ_POISON
+        .compare_exchange(frame + 1, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+/// A product build has no injection: nothing is stored, and no read is ever
+/// answered as poisoned by it. The check that asks is not run there.
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+#[cfg(not(ferrix_checks = "on"))]
+pub const fn inject_read_poison(_frame: Frame) {}
+
+/// A product build has no injection.
+#[cfg(not(ferrix_checks = "on"))]
+const fn injected_read_poison(_frame: Frame) -> bool {
+    false
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: user::vmo
+/// The frame page `index` of `vmo` holds, for the poison check.
+pub fn frame_for_check(vmo: &Vmo, index: u64) -> Option<Frame> {
+    vmo.pages.lock().frames.get(&index).copied()
+}
+
+/// What [`Vmo::take_poisoned`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PoisonTake {
+    /// The page left the object and every space mapping it.
+    Taken,
+    /// The page is not clean, not reclaimable, held, or written through a
+    /// shared mapping: it stays.
+    Kept,
+    /// The index no longer holds the frame.
+    Gone,
+}
+
+/// What [`Vmo::commit_blocks`] did so far.
+#[derive(Clone, Copy, Debug, Default)]
+struct Blocks {
+    /// The times it asked [`Vmo::commit_run`].
+    attempts: u64,
+    /// The blocks that went in.
+    blocks: u64,
 }
 
 /// Why [`Vmo::commit_run`] refused.
@@ -121,6 +188,9 @@ impl fmt::Display for VmoError {
                 write!(f, "page {index} is outside a {pages}-page object")
             }
             VmoError::OutOfMemory => f.write_str("no frame available to commit"),
+            VmoError::Poisoned(frame) => {
+                write!(f, "a read of frame {frame:#x} consumed poison")
+            }
         }
     }
 }
@@ -233,6 +303,14 @@ pub(crate) enum Commit {
     /// fills it again, and does not commit zeros in its place.
     Unfilled,
 }
+
+/// Committed pages a count looks at per hold of an object's pages lock
+/// ([`Vmo::committed_in`]): what a fault on the object may wait behind while
+/// `/proc/<pid>/status` counts it.
+pub(crate) const COUNT_CHUNK: usize = 256;
+
+/// Pages [`Vmo::committed_in_both`] takes per hold, kept on the stack.
+const OVERLAP_CHUNK: usize = 64;
 
 /// A pageable memory object.
 ///
@@ -761,6 +839,66 @@ impl Vmo {
         self.pages.lock().frames.len()
     }
 
+    /// Pages committed in `first..end`, page indexes: what a mapping of that
+    /// part of the object shows. Counted [`COUNT_CHUNK`] entries at a time,
+    /// the pages lock let go between chunks, so a fault on this object waits
+    /// for at most one chunk however many pages it holds; pages committed or
+    /// taken while it counts may or may not be counted, as in any report.
+    pub(crate) fn committed_in(&self, first: u64, end: u64) -> u64 {
+        let mut counted = 0u64;
+        let mut from = first;
+        while from < end {
+            let pages = self.pages.lock();
+            let mut taken = 0usize;
+            let mut last = None;
+            for (&index, _) in pages.frames.range(from..end).take(COUNT_CHUNK) {
+                taken += 1;
+                last = Some(index);
+            }
+            drop(pages);
+            counted = counted.saturating_add(taken as u64);
+            match last {
+                Some(index) if taken == COUNT_CHUNK => from = index.saturating_add(1),
+                _ => break,
+            }
+        }
+        counted
+    }
+
+    /// Of the pages committed here in `first..end`, those `other` also holds
+    /// at the same index: a private file mapping's pages its shadow has
+    /// copied, which the mapping no longer shows from the file. Each chunk's
+    /// indexes are taken under this object's lock, then looked up in `other`
+    /// under its own, one lock at a time.
+    pub(crate) fn committed_in_both(&self, other: &Vmo, first: u64, end: u64) -> u64 {
+        let mut counted = 0u64;
+        let mut from = first;
+        let mut chunk = [0u64; OVERLAP_CHUNK];
+        while from < end {
+            let pages = self.pages.lock();
+            let mut taken = 0usize;
+            for (slot, (&index, _)) in chunk
+                .iter_mut()
+                .zip(pages.frames.range(from..end).take(OVERLAP_CHUNK))
+            {
+                *slot = index;
+                taken += 1;
+            }
+            drop(pages);
+            let indexes = chunk.get(..taken).unwrap_or_default();
+            let held = indexes
+                .iter()
+                .filter(|&&index| other.page(index).is_some())
+                .count();
+            counted = counted.saturating_add(held as u64);
+            match indexes.last() {
+                Some(&index) if taken == OVERLAP_CHUNK => from = index.saturating_add(1),
+                _ => break,
+            }
+        }
+        counted
+    }
+
     /// The frame holding page `index`, if it has been committed.
     pub fn page(&self, index: u64) -> Option<Frame> {
         self.pages.lock().frames.get(&index).copied()
@@ -1120,13 +1258,108 @@ impl Vmo {
         // Read through the write-back view: a write-combining object's
         // lines out of the caches first (`L.user.133`).
         self.flush_if_combining(frame, 1);
-        let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
+        let at = mm::direct_map(frame * PAGE_SIZE) + offset as u64;
+        // Through the copy a machine check can stop (`L.object.260`): poison
+        // in a cached page is the cache's to drop and read again, not a
+        // halt. No task record: the caller acts on the answer itself.
         // SAFETY: (FRAME) as in `read_page`: the object holds a reference on
         // `frame` while its lock is held, `check_span` kept the range inside
         // the page, and the direct map covers all of RAM.
-        let source = unsafe { core::slice::from_raw_parts(at as *const u8, out.len()) };
-        out.copy_from_slice(source);
-        Ok(true)
+        let copied = unsafe { crate::arch::copy_mc(out, at) };
+        drop(pages);
+        if injected_read_poison(frame) {
+            return Err(VmoError::Poisoned(frame));
+        }
+        match copied.poisoned() {
+            None => Ok(true),
+            Some(page) if page / PAGE_SIZE == frame => Err(VmoError::Poisoned(frame)),
+            Some(_) => crate::panic::fatal!(
+                crate::panic::catalog::MACHINE_CHECK,
+                "a cache read stopped by a machine check at a page it was not reading"
+            ),
+        }
+    }
+
+    /// The index of the page `frame` holds in this object, if it holds it: a
+    /// scan of the page map, at most [`CHUNK`] entries a hold of the pages
+    /// lock, let go between chunks (`L.object.259`). Run only after a
+    /// machine check, never under a spin lock.
+    pub(crate) fn index_of(&self, frame: Frame) -> Option<u64> {
+        let mut from = 0;
+        loop {
+            let pages = self.pages.lock();
+            let mut looked = 0;
+            for (&index, &held) in pages.frames.range(from..) {
+                if held == frame {
+                    return Some(index);
+                }
+                looked += 1;
+                if looked == CHUNK {
+                    from = index.checked_add(1)?;
+                    break;
+                }
+            }
+            if looked < CHUNK {
+                return None;
+            }
+        }
+    }
+
+    /// Take page `index` because its `frame` holds poison, as reclaim takes
+    /// a clean page (`L.object.259`): only while this object is reclaimable
+    /// and its source says the page is clean, and in the take's hold of the
+    /// pages lock only if `index` still holds `frame`, is not held, and no
+    /// shared mapping wrote the object. The frame must be retired first, so
+    /// that the release keeps it out. Must be called with no spin lock held.
+    pub(crate) fn take_poisoned(&self, index: u64, frame: Frame) -> PoisonTake {
+        if !self.reclaimable() {
+            return PoisonTake::Kept;
+        }
+        let Some(filler) = self.filler.as_ref() else {
+            return PoisonTake::Kept;
+        };
+        let mut picked = Vec::new();
+        if crate::fallible::try_push(&mut picked, index).is_err() {
+            return PoisonTake::Kept;
+        }
+        let mut outcome = PoisonTake::Kept;
+        let _ = filler.reclaim_clean(&mut picked, &mut |clean| {
+            if !clean.contains(&index) {
+                return 0;
+            }
+            let mut state = self.pages.lock();
+            if !self.unwritten_by_mappings() {
+                return 0;
+            }
+            match state.frames.get(&index) {
+                Some(&now) if now == frame => {}
+                _ => {
+                    outcome = PoisonTake::Gone;
+                    return 0;
+                }
+            }
+            if state.held.contains_key(&index) {
+                return 0;
+            }
+            let Ok(mut frames) = crate::fallible::try_filled((0, 0), 1) else {
+                return 0;
+            };
+            let (taken, _) = state.take_into(index, index.saturating_add(1), &mut frames);
+            drop(state);
+            frames.truncate(taken);
+            if taken == 1 {
+                outcome = PoisonTake::Taken;
+            }
+            self.retire(
+                Retired {
+                    frames,
+                    release: true,
+                },
+                None,
+            );
+            taken as u64
+        });
+        outcome
     }
 
     /// Copy `out.len()` bytes out of page `index`, starting `offset` into it.
@@ -1468,6 +1701,92 @@ impl Vmo {
             }
         }
         inserted
+    }
+
+    /// Commit the absent pages of `first..first + pages` with naturally
+    /// aligned blocks of fresh, zeroed, charged frames, best effort, for
+    /// `PIN_BLOCKS` (`docs/INTEL-GPU.md` §14.3, `L.object.255`-`257`).
+    ///
+    /// At each page the order tried is the largest at most `order` with the
+    /// page a multiple of the block, the block inside the range and, by a
+    /// probe under the pages lock, wholly absent; that block goes in through
+    /// [`Vmo::commit_run`], whose own check of the same range under the
+    /// same lock means a page committed between the two can only shrink the
+    /// order, never grow it. No order above one the allocator refused is
+    /// tried again; the allocator refusing a single frame ends it, as does a
+    /// file's or bound object, whose absent pages are not zeros, which it
+    /// commits nothing of. A committed page is skipped, its frame unchanged.
+    /// Whatever it committed stays committed, charged as any page is: the
+    /// hold after it reports what it could not commit.
+    ///
+    /// Says how many times it asked [`Vmo::commit_run`] and how many blocks
+    /// went in, in that order. The asks are at most `pages` plus one more than `order`: each
+    /// block commits at least one page and each race costs another program
+    /// at least one page of the range, while each refusal lowers the order
+    /// for good.
+    ///
+    /// Must not be called holding a spin lock.
+    pub fn commit_blocks(&self, first: u64, pages: u64, order: u8) -> (u64, u64) {
+        let mut done = Blocks::default();
+        if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
+            return (0, 0);
+        }
+        let end = first.saturating_add(pages).min(self.len_pages());
+        let mut cap = order.min(ferrix_frame::MAX_ORDER);
+        let mut index = first;
+        while index < end {
+            let mut o = cap;
+            while o > 0 && (!index.is_multiple_of(1 << o) || index + (1 << o) > end) {
+                o -= 1;
+            }
+            let Some((next, lowered)) = self.block_at(index, o, &mut done) else {
+                break;
+            };
+            if let Some(lowered) = lowered {
+                cap = lowered;
+            }
+            index = next;
+        }
+        (done.attempts, done.blocks)
+    }
+
+    /// One block of [`Vmo::commit_blocks`] at page `index`, from order `o`
+    /// down: the page to go on from, and the order the allocator's refusals
+    /// lowered the call's to, if they did; `None` to end the call.
+    fn block_at(&self, index: u64, mut o: u8, done: &mut Blocks) -> Option<(u64, Option<u8>)> {
+        let mut lowered = None;
+        loop {
+            let len = 1_u64 << o;
+            let absent = self
+                .pages
+                .lock()
+                .frames
+                .range(index..index + len)
+                .next()
+                .is_none();
+            if !absent {
+                if o == 0 {
+                    return Some((index + 1, lowered));
+                }
+                o -= 1;
+                continue;
+            }
+            run_block_hook(self, index, len);
+            done.attempts += 1;
+            match self.commit_run(index, len) {
+                Ok(_) => {
+                    done.blocks += 1;
+                    return Some((index + len, lowered));
+                }
+                Err(RunError::Committed) if o > 0 => o -= 1,
+                Err(RunError::Committed) => return Some((index + 1, lowered)),
+                Err(RunError::OutOfMemory) if o > 0 => {
+                    o -= 1;
+                    lowered = Some(o);
+                }
+                Err(_) => return None,
+            }
+        }
     }
 
     /// Undo [`Vmo::commit_run`] of `pages` frames from `block` at `first`:
@@ -2265,6 +2584,48 @@ fn run_reclaim_hook(vmo: &Vmo) {
     let hook = *RECLAIM_HOOK.lock();
     if let Some(hook) = hook {
         (hook.run)(vmo);
+    }
+}
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// A check's hook in [`Vmo::commit_blocks`], between a block's probe and its
+/// [`Vmo::commit_run`], where `object::check`'s `PIN_BLOCKS` check commits a
+/// page of the block to make the race deterministic. Armed and disarmed as
+/// [`ReclaimHook`] is, and the boot stops (FX-0908) if it is left armed.
+#[derive(Debug)]
+pub struct BlockHook {
+    /// The check that armed it, for the boot check's message.
+    pub armed_by: &'static str,
+    /// What it does there: the object, the block's first page and its length.
+    pub run: fn(&Vmo, u64, u64),
+}
+
+/// The hook [`Vmo::commit_blocks`] calls, if a check armed one: a leaf lock,
+/// held to copy the `Option` out and never while the hook runs.
+static BLOCK_HOOK: SpinLock<Option<&'static BlockHook>> = SpinLock::new(None);
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// Arm `hook` in [`Vmo::commit_blocks`]: the `PIN_BLOCKS` check only.
+pub fn arm_block_hook(hook: &'static BlockHook) {
+    *BLOCK_HOOK.lock() = Some(hook);
+}
+
+// CHECKS-ONLY: object/blocks_check.rs
+/// Disarm it.
+pub fn disarm_block_hook() {
+    *BLOCK_HOOK.lock() = None;
+}
+
+/// The check that armed the hook, if one still has (`require_hooks_disarmed`).
+pub fn block_hook_armed_by() -> Option<&'static str> {
+    BLOCK_HOOK.lock().map(|hook| hook.armed_by)
+}
+
+/// Run the hook, if armed, with no lock held.
+fn run_block_hook(vmo: &Vmo, first: u64, pages: u64) {
+    let hook = *BLOCK_HOOK.lock();
+    if let Some(hook) = hook {
+        (hook.run)(vmo, first, pages);
     }
 }
 

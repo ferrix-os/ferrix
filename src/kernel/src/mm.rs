@@ -50,21 +50,27 @@
 
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::{BootView, MemKind, MemRegion, PAGE_SIZE, direct_map_runs};
 use ferrix_frame::{Frame, Frames, PageEntry};
-use ferrix_heap::{Backing, Heap, Request};
+use ferrix_heap::{Backing, CpuCache, Heap, Request};
 use ferrix_paging::coherence::{Clean, Unpublished, Walked};
 use ferrix_paging::{Encoding, MapFlags, Mapper, PhysAddr, PhysMem, Released, VirtAddr};
+use ferrix_sched_class::MAX_CPUS;
+use ferrix_sync::IrqControl;
 use ferrix_sync::IrqSpinLock;
 
 use crate::fallible;
 
 pub mod check;
 mod reserve;
+pub mod scrub;
 mod unlinked;
 
+/// The largest buddy block's order, for the calls that name one
+/// (`vmo_pin`'s `PIN_BLOCKS`).
+pub const MAX_ORDER: u8 = ferrix_frame::MAX_ORDER;
 pub use reserve::fill_reserve;
 pub(crate) use reserve::{Reserved, reserve};
 pub use reserve::{bypass_heap_in_sections, refuse_reserve_fills, reserve_counts};
@@ -213,6 +219,9 @@ pub struct Stats {
     pub page_array_bytes: u64,
     /// Physical address the per-frame array was placed at.
     pub page_array_at: u64,
+    /// Frames the loader kept out as bad and the allocator left out,
+    /// entered in the retired set (`L.mm.110`).
+    pub left_out_as_bad: u64,
 }
 
 /// Bring up the frame allocator and the heap.
@@ -269,11 +278,27 @@ pub fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
         }
     }
 
+    // The loader's `BadFrame` pages are not RAM, so none reached the free
+    // lists above; each goes into the retired set now, before the first
+    // allocation, so the set and its listing hold them (`L.mm.110`,
+    // `docs/MACHINE-CHECK-RESTART.md` §2.8).
+    let mut left_out = 0;
+    for region in view
+        .regions()
+        .iter()
+        .filter(|r| r.kind == MemKind::BadFrame)
+    {
+        for page in 0..region.len / PAGE_SIZE {
+            left_out += u64::from(keep_out(region.base / PAGE_SIZE + page));
+        }
+    }
+
     let stats = Stats {
         managed_frames: frames.managed_frames(),
         free_frames: frames.free_frames(),
         page_array_bytes: bytes,
         page_array_at: host.base,
+        left_out_as_bad: left_out,
     };
 
     WATERMARK.store(watermark_for(stats.managed_frames), Ordering::Relaxed);
@@ -283,7 +308,8 @@ pub fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
 
 /// The watermark for a machine whose allocator manages `managed` frames
 /// (`L.mm.71`).
-pub(crate) const fn watermark_for(managed: u64) -> u64 {
+// CHECKS-ONLY: fs::release_check, besides `init` and `give_back_initrd` here.
+pub const fn watermark_for(managed: u64) -> u64 {
     let share = managed / WATERMARK_DIVISOR;
     if share < WATERMARK_LEAST {
         WATERMARK_LEAST
@@ -576,6 +602,9 @@ pub fn deallocate_frames(frame: Frame, order: u8) {
     count(Route::Freed, 1 << order);
     let owner = with_frames(|frames| {
         let owner = frames.owner(frame);
+        if holds_retired(frame, order) {
+            return keep_retired(frames, frame, order).then_some(owner);
+        }
         frames.deallocate(frame, order).map(|()| owner).ok()
     });
     // After the allocator's lock: an uncharge is atomics, but nothing needs
@@ -606,6 +635,12 @@ pub fn release_frame(frame: Frame) -> bool {
     // the two mean different things -- a page table given back versus a frame.
     let freed = with_frames(|frames| {
         let owner = frames.owner(frame);
+        // The last reference to a retired frame keeps it (`L.mm.91`): it
+        // leaves its job's charge as a freed frame would, and goes nowhere.
+        // NOALLOC: the frame allocator's per-frame record, looked up.
+        if holds_retired(frame, 0) && frames.entry(frame).map_or(0, PageEntry::refcount) == 1 {
+            return keep_retired(frames, frame, 0).then_some(owner);
+        }
         matches!(frames.release(frame), Ok(ferrix_frame::Released::Freed)).then_some(owner)
     })
     .flatten();
@@ -616,6 +651,252 @@ pub fn release_frame(frame: Frame) -> bool {
         uncharge_owner(owner);
     }
     freed.is_some()
+}
+
+// ---------------------------------------------------------------------------
+// Retired frames (`docs/MACHINE-CHECK.md` §3.4)
+// ---------------------------------------------------------------------------
+
+/// The most frames the kernel retires. A machine with this many bad pages
+/// has failing memory its log has already named; later ones are logged and
+/// left (`L.mm.92`).
+pub const RETIRED_CAPACITY: usize = 256;
+
+/// The retired frames, each stored as its number plus one so that 0 is an
+/// empty slot. Written only under [`FRAMES`], in slot order, and never
+/// cleared: a retired frame stays retired until the machine restarts.
+static RETIRED: [AtomicU64; RETIRED_CAPACITY] = [const { AtomicU64::new(0) }; RETIRED_CAPACITY];
+/// How many of [`RETIRED`]'s slots are filled; 0 on a healthy machine, which
+/// is the whole cost of the test on the free paths.
+static RETIRED_COUNT: AtomicUsize = AtomicUsize::new(0);
+/// How many of [`RETIRED`]'s slots may be filled: [`RETIRED_CAPACITY`], but
+/// for stage 2's check, which lowers it to reach the full set without
+/// retiring 256 frames (`L.mm.92`).
+static RETIRED_ROOM: AtomicUsize = AtomicUsize::new(RETIRED_CAPACITY);
+/// Whether [`retire_frame`] has said that the set is full.
+static RETIRED_FULL_SAID: AtomicBool = AtomicBool::new(false);
+
+/// What [`retire_frame`] did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Retired {
+    /// The frame was free, and is now held for good.
+    Claimed,
+    /// The frame is in use, and will not be freed when its last user lets go.
+    Marked,
+    /// It was retired before.
+    Already,
+    /// The set is full (`L.mm.92`): nothing changed.
+    Full,
+    /// The allocator does not cover the frame (the kernel image, a hole, a
+    /// device): nothing to retire.
+    NotCovered,
+}
+
+/// Whether a block of `2^order` frames at `frame` holds a retired frame.
+/// Called under [`FRAMES`], so the set cannot grow under it.
+fn holds_retired(frame: Frame, order: u8) -> bool {
+    let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+    if filled == 0 {
+        return false;
+    }
+    let end = frame.saturating_add(1 << order);
+    RETIRED.iter().take(filled).any(|slot| {
+        let stored = slot.load(Ordering::Relaxed);
+        stored != 0 && (frame..end).contains(&(stored - 1))
+    })
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// The retired set's entries now, for a check that retires frames of its own
+/// and forgets them after ([`forget_retired_for_check`]).
+pub fn retired_for_check() -> usize {
+    RETIRED_COUNT.load(Ordering::Relaxed)
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// Forget the last `count` retirements, which the calling check made itself
+/// ([`forget_checked_retirements`]).
+pub fn forget_retired_for_check(count: usize) {
+    forget_checked_retirements(count);
+}
+
+/// Whether `frame` is retired: for the pin quarantine, which leaves a
+/// retired frame unread (`L.object.262`).
+pub(crate) fn frame_retired(frame: Frame) -> bool {
+    with_frames(|_| holds_retired(frame, 0)).unwrap_or(false)
+}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// [`frame_retired`], for the poison checks above the core.
+pub fn is_retired(frame: Frame) -> bool {
+    frame_retired(frame)
+}
+
+/// Free a block that holds a retired frame, frame by frame, keeping every
+/// retired one allocated and charged to nobody. Under [`FRAMES`]. Whether the
+/// block was the allocator's to give back.
+fn keep_retired(frames: &mut Frames<'static>, frame: Frame, order: u8) -> bool {
+    if order > 0 && frames.split(frame, order).is_err() {
+        return false;
+    }
+    for each in frame..frame.saturating_add(1 << order) {
+        if holds_retired(each, 0) {
+            let _ = frames.set_owner(each, crate::object::quota::NONE);
+        } else {
+            let _ = frames.deallocate(each, 0);
+        }
+    }
+    true
+}
+
+/// Retire `frame`: never hand it out again (`L.mm.91`). A free frame is taken
+/// off the free lists now; an allocated one stays with its user and is kept,
+/// not freed, when its last reference goes. The insert and the claim are one
+/// hold of [`FRAMES`], so no free path can slip between them. Not callable
+/// from a machine check's own stack: it takes the allocator's lock.
+pub(crate) fn retire_frame(frame: Frame) -> Retired {
+    let outcome = with_frames(|frames| {
+        // Already before NotCovered: a frame the loader kept out as bad is in
+        // the set though the allocator does not manage it, and the poll's
+        // later retirement of the same left record says so
+        // (`docs/MACHINE-CHECK-RESTART.md` §2.8).
+        if holds_retired(frame, 0) {
+            return Retired::Already;
+        }
+        if frames
+            .state(frame)
+            .is_none_or(|state| state == ferrix_frame::State::Reserved)
+        {
+            return Retired::NotCovered;
+        }
+        let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+        let room = RETIRED_ROOM.load(Ordering::Relaxed).min(RETIRED_CAPACITY);
+        let Some(slot) = RETIRED.get(filled).filter(|_| filled < room) else {
+            return Retired::Full;
+        };
+        slot.store(frame + 1, Ordering::Relaxed);
+        RETIRED_COUNT.store(filled + 1, Ordering::Release);
+        if frames.claim(frame).is_some() {
+            Retired::Claimed
+        } else {
+            Retired::Marked
+        }
+    })
+    .unwrap_or(Retired::NotCovered);
+    // Recorded for the next boot's loader, which keeps it out of that boot
+    // (`L.mm.109`): a frame newly retired, not one the set had no room for --
+    // this boot could not keep it out either -- and never a check's.
+    if matches!(outcome, Retired::Claimed | Retired::Marked)
+        && !table_held()
+        && crate::console::pstore::record_bad_frame(frame) == crate::console::pstore::Recorded::Full
+        && !TABLE_FULL_SAID.swap(true, Ordering::Relaxed)
+    {
+        crate::console::println!(
+            "mce: the bad-frame table is full ({}); frame {:#x} is not kept out after a reset",
+            ferrix_bootinfo::pstore::TABLE_ENTRIES,
+            frame * PAGE_SIZE
+        );
+    }
+    if outcome == Retired::Full && !RETIRED_FULL_SAID.swap(true, Ordering::Relaxed) {
+        crate::console::println!(
+            "mce: the set of retired frames is full ({}); later frames are logged and not \
+             retired",
+            RETIRED_COUNT.load(Ordering::Relaxed)
+        );
+    }
+    outcome
+}
+
+/// Enter frame `frame`, which the allocator does not manage -- the loader
+/// kept it out as bad (`MemKind::BadFrame`) -- in the retired set, where
+/// there is room; whether it is there now. Before the first allocation, on
+/// one processor, so the set's plain stores need no allocator lock.
+fn keep_out(frame: Frame) -> bool {
+    if holds_retired(frame, 0) {
+        return true;
+    }
+    let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+    let room = RETIRED_ROOM.load(Ordering::Relaxed).min(RETIRED_CAPACITY);
+    let Some(slot) = RETIRED.get(filled).filter(|_| filled < room) else {
+        return false;
+    };
+    slot.store(frame + 1, Ordering::Relaxed);
+    RETIRED_COUNT.store(filled + 1, Ordering::Release);
+    true
+}
+
+/// Whether a boot check holds the bad-frame table, so that its own
+/// retirements never reach the live table (`L.mm.109`): set by each check
+/// before it retires, cleared by [`forget_checked_retirements`]. Check
+/// builds only.
+#[cfg(ferrix_checks = "on")]
+static TABLE_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Whether a check holds the table. Check builds only.
+#[cfg(ferrix_checks = "on")]
+fn table_held() -> bool {
+    TABLE_HELD.load(Ordering::Relaxed)
+}
+
+/// A product build has no check to hold it.
+#[cfg(not(ferrix_checks = "on"))]
+const fn table_held() -> bool {
+    false
+}
+
+/// Hold the table for a check's retirements, or let it go.
+#[cfg(ferrix_checks = "on")]
+fn hold_table(hold: bool) {
+    TABLE_HELD.store(hold, Ordering::Relaxed);
+}
+
+/// A product build holds nothing.
+#[cfg(not(ferrix_checks = "on"))]
+const fn hold_table(_hold: bool) {}
+
+// CHECKS-ONLY: fs/btrfs_write_check/poison_check.rs; home: mm
+/// Hold the bad-frame table for a check above the core that retires frames
+/// it forgets after ([`forget_retired_for_check`] lets it go).
+pub fn hold_table_for_check() {
+    hold_table(true);
+}
+
+/// The bad-frame table's "full" line, said once.
+static TABLE_FULL_SAID: AtomicBool = AtomicBool::new(false);
+
+/// Undo stage 2's check: forget the last `count` retired frames, which the
+/// check retired itself, and free each; give the set its room back and its
+/// "full" line. Nothing else ever un-retires a frame.
+fn forget_checked_retirements(count: usize) {
+    let freed = with_frames(|frames| {
+        let filled = RETIRED_COUNT.load(Ordering::Relaxed);
+        let keep = filled.saturating_sub(count);
+        for slot in RETIRED.iter().take(filled).skip(keep) {
+            let stored = slot.swap(0, Ordering::Relaxed);
+            if stored != 0 {
+                let _ = frames.deallocate(stored - 1, 0);
+            }
+        }
+        RETIRED_COUNT.store(keep, Ordering::Release);
+    });
+    let _ = freed;
+    RETIRED_ROOM.store(RETIRED_CAPACITY, Ordering::Relaxed);
+    RETIRED_FULL_SAID.store(false, Ordering::Relaxed);
+    hold_table(false);
+}
+
+/// The retired frames, in the order they were retired, into `out`; how many.
+pub fn retired_frames(out: &mut [Frame]) -> usize {
+    let filled = RETIRED_COUNT.load(Ordering::Acquire).min(RETIRED_CAPACITY);
+    let mut written = 0;
+    for (slot, place) in RETIRED.iter().take(filled).zip(out.iter_mut()) {
+        let stored = slot.load(Ordering::Relaxed);
+        if stored != 0 {
+            *place = stored - 1;
+            written += 1;
+        }
+    }
+    written
 }
 
 /// Take a frame's charge off the job it was charged to, and charge it to
@@ -679,9 +960,15 @@ pub fn managed_frames() -> u64 {
     with_frames(|frames| frames.managed_frames()).unwrap_or(0)
 }
 
-/// Bytes currently out on the kernel heap.
+/// Bytes currently out on the kernel heap to its callers: the heap's
+/// allocated bytes less what the processors' caches hold (L.mm.96).
 pub(crate) fn heap_allocated() -> usize {
-    with_heap(|heap| heap.allocated_bytes())
+    with_heap(|heap| heap.allocated_bytes()).saturating_sub(CACHED.load(Ordering::Relaxed))
+}
+
+/// Pages the heap has out as large blocks: those too big for a size class.
+pub(crate) fn heap_large_pages() -> usize {
+    with_heap(|heap| heap.large_pages())
 }
 
 /// Pages the heap is holding for its size classes.
@@ -751,9 +1038,9 @@ unsafe impl GlobalAlloc for KernelAllocator {
         {
             return address as *mut u8;
         }
-        let address = with_heap(|heap| heap.allocate(&mut KernelPages, request).ok())
-            // Refused: inside a reserved section, the reserve serves it
-            // instead (`mm/reserve.rs`, finding F-23).
+        let address = heap_or_drain(|| allocate_through_caches(request))
+            // Refused even after the drain: inside a reserved section, the
+            // reserve serves it instead (`mm/reserve.rs`, finding F-23).
             .or_else(|| reserve::draw(request));
         // A null return is how `GlobalAlloc` reports failure. A fallible
         // caller -- `try_reserve`, `ferrix_fallible` -- turns it into an
@@ -770,8 +1057,161 @@ unsafe impl GlobalAlloc for KernelAllocator {
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         let request = Request::new(layout.size(), layout.align());
-        with_heap(|heap| heap.deallocate(&mut KernelPages, pointer as u64, request));
+        let address = pointer as u64;
+        let freed = Heap::class_of(request).and_then(|class| {
+            with_cache(|cache| {
+                if !cache.keep(class, address) {
+                    // Full: REFILL of its objects and this one go back under one
+                    // hold of the heap (L.mm.94).
+                    let before = cache.held_bytes();
+                    with_heap(|heap| cache.overflow(heap, &mut KernelPages, class, address));
+                    let _ = CACHED
+                        .fetch_sub(before.saturating_sub(cache.held_bytes()), Ordering::Relaxed);
+                    return;
+                }
+                let _ = CACHED.fetch_add(class_bytes(class), Ordering::Relaxed);
+            })
+        });
+        if freed.is_none() {
+            with_heap(|heap| heap.deallocate(&mut KernelPages, address, request));
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-processor heap caches (docs/HEAP-CACHES.md)
+// ---------------------------------------------------------------------------
+
+/// Each processor's cache of free heap objects, behind a lock of its own:
+/// taken by its processor for every allocation and free of a size class, and
+/// by [`drain_caches`] from any.
+static CACHES: [IrqSpinLock<CpuCache, crate::arch::Irq>; MAX_CPUS] =
+    [const { IrqSpinLock::new(CpuCache::new()) }; MAX_CPUS];
+
+/// Whether each processor holds its cache lock: what [`drain_caches`] stops
+/// on, since it takes every cache lock (L.mm.97).
+static HOLDING: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+
+/// Bytes the caches hold: the heap counts them allocated, and no caller holds
+/// them. Changed under the lock of the cache it is about.
+static CACHED: AtomicUsize = AtomicUsize::new(0);
+
+/// Run `body` on this processor's cache, under its lock, with interrupts
+/// masked before the processor's number is read so the task cannot move
+/// between the read and the lock. `None` before the processor's own register
+/// is installed: the caller goes to the heap.
+fn with_cache<T>(body: impl FnOnce(&mut CpuCache) -> T) -> Option<T> {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let cpu = crate::smp::this_cpu().map(|cpu| cpu.logical);
+    let done = cpu
+        .and_then(|cpu| Some((cpu, CACHES.get(cpu)?)))
+        .map(|(cpu, lock)| {
+            let mut cache = lock.lock();
+            if let Some(flag) = HOLDING.get(cpu) {
+                flag.store(true, Ordering::Relaxed);
+            }
+            let done = body(&mut cache);
+            if let Some(flag) = HOLDING.get(cpu) {
+                flag.store(false, Ordering::Relaxed);
+            }
+            done
+        });
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    done
+}
+
+/// An allocation of `request` from this processor's cache, refilled from the
+/// heap when empty (L.mm.93); a request no class serves, or one made before
+/// the caches are reachable, from the heap.
+fn allocate_through_caches(request: Request) -> Option<u64> {
+    let class = Heap::class_of(request).filter(|_| request.align.is_power_of_two());
+    let cached = class.and_then(|class| {
+        with_cache(|cache| {
+            if let Some(object) = cache.take(class) {
+                let _ = CACHED.fetch_sub(class_bytes(class), Ordering::Relaxed);
+                return Some(object);
+            }
+            let before = cache.held_bytes();
+            let object = with_heap(|heap| cache.refill(heap, &mut KernelPages, class).ok());
+            let _ = CACHED.fetch_add(cache.held_bytes().saturating_sub(before), Ordering::Relaxed);
+            object
+        })
+    });
+    match cached {
+        Some(object) => object,
+        None => with_heap(|heap| heap.allocate(&mut KernelPages, request).ok()),
+    }
+}
+
+/// The size of a class's objects; zero for no class, which no caller asks.
+fn class_bytes(class: usize) -> usize {
+    ferrix_heap::CLASS_SIZES.get(class).copied().unwrap_or(0)
+}
+
+/// `attempt`, and if the heap refused it, every cache drained and `attempt`
+/// once more (L.mm.95) -- unless the refusal was the failure injection's,
+/// which is answered as it stands (L.mm.98). Called with no cache lock and
+/// no heap lock held, as the drain must be; `reserve::enter` calls it with
+/// interrupts masked as well, so a section's drain runs masked over every
+/// cache in turn.
+pub(crate) fn heap_or_drain<T>(mut attempt: impl FnMut() -> Option<T>) -> Option<T> {
+    let injected = fallible::injected_failures();
+    attempt().or_else(|| {
+        // The injection's count is global: one armed on another processor
+        // in the same window also keeps this refusal from its retry. Only
+        // checks arm it, and a refusal not retried fails closed.
+        if fallible::injected_failures() != injected {
+            return None;
+        }
+        let _ = drain_caches();
+        attempt()
+    })
+}
+
+/// The heap's own count of bytes out, the caches' objects included: what
+/// the cache checks hold the caches' moves to.
+pub(crate) fn heap_raw_allocated() -> usize {
+    with_heap(|heap| heap.allocated_bytes())
+}
+
+/// Objects of `class` this processor's cache holds, or `None` before the
+/// caches are reachable.
+pub(crate) fn cached_here(class: usize) -> Option<usize> {
+    with_cache(|cache| cache.held(class))
+}
+
+/// Bytes the caches hold, as [`heap_allocated`] takes them off.
+pub(crate) fn cached_bytes() -> usize {
+    CACHED.load(Ordering::Relaxed)
+}
+
+// CHECKS-ONLY: user/alloc_check.rs, fs/btrfs_write_check/clean_check.rs
+/// Give everything every processor's cache holds back to the heap, one
+/// cache lock at a time with the heap's under it (L.mm.97). Entered with no
+/// cache lock held on this processor: one held here would be taken again,
+/// so that stops the machine (FX-0012). Returns the objects given back.
+#[doc(hidden)]
+pub fn drain_caches() -> usize {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let here = crate::smp::this_cpu().map(|cpu| cpu.logical);
+    let held = here
+        .and_then(|cpu| HOLDING.get(cpu))
+        .is_some_and(|flag| flag.load(Ordering::Relaxed));
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    if held {
+        crate::panic::fatal!(
+            crate::panic::catalog::HEAP_DRAIN_UNDER_CACHE_LOCK,
+            "the heap caches were drained with this processor's cache lock held"
+        );
+    }
+    let mut given = 0;
+    for lock in &CACHES {
+        let mut cache = lock.lock();
+        let before = cache.held_bytes();
+        given += with_heap(|heap| cache.drain(heap, &mut KernelPages));
+        let _ = CACHED.fetch_sub(before, Ordering::Relaxed);
+    }
+    given
 }
 
 #[global_allocator]
@@ -976,6 +1416,21 @@ pub fn translate_in(root: u64, virt: u64) -> Option<u64> {
         .map(|at| at.0)
 }
 
+/// Visit the leaves of the tree rooted at `root` in address order, until
+/// `visit` returns false. Takes no lock, as [`translate_in`]: the caller holds
+/// the address space's own across it.
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        dead_code,
+        reason = "only x86-64's machine check finds a poisoned frame's address"
+    )
+)]
+pub(crate) fn for_each_leaf_in(root: u64, visit: impl FnMut(ferrix_paging::Leaf) -> bool) {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    let _ = mapper.for_each_leaf(&KernelPhysMem, visit);
+}
+
 /// The flags of the leaf mapping `virt` in the tree rooted at `root`, as
 /// [`translate_in`] finds it: what a check reads a mapping's memory type from.
 pub fn flags_in(root: u64, virt: u64) -> Option<MapFlags> {
@@ -1021,6 +1476,16 @@ pub fn direct_map_ram(phys: u64) -> Option<u64> {
             (first.load(Ordering::Relaxed)..end.load(Ordering::Relaxed)).contains(&phys)
         })
         .then(|| physmap(phys))
+}
+
+/// The RAM physical address behind the direct-map address `virt`, `None`
+/// outside the direct map or off RAM. Lock-free, as [`direct_map_ram`], so
+/// the machine check may ask it (`docs/MACHINE-CHECK-COPY.md` §3.2).
+pub(crate) fn ram_behind(virt: u64) -> Option<u64> {
+    let phys = virt
+        .checked_sub(PHYSMAP.load(Ordering::Relaxed))?
+        .checked_add(PHYSMAP_PHYS.load(Ordering::Relaxed))?;
+    direct_map_ram(phys).map(|_| phys)
 }
 
 /// Whether [`record_ram`] has run, so that [`direct_map_ram`]'s `None` means
@@ -1246,6 +1711,114 @@ pub(crate) fn map_io<E: Encoding>(
         PAGE_SIZE,
         flags,
     )
+}
+
+/// The bytes of one IOMMU run: a 2 MiB second-level entry's span.
+pub(crate) const IO_RUN: u64 = 2 << 20;
+
+/// Map the [`IO_RUN`] bytes from `phys` at `iova`, both aligned to it, as one
+/// 2 MiB entry, for a unit whose walk takes one (`L.iommu.106`).
+///
+/// Refused with `AlreadyMapped` where the run's slot holds a table, empty or
+/// not, as [`map_io`] is for a page; the caller then maps it page by page
+/// (`L.iommu.107`). Every entry it writes is noted in `writes`.
+pub(crate) fn map_io_run<E: Encoding>(
+    root: u64,
+    iova: u64,
+    phys: u64,
+    flags: MapFlags,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    mapper.map_range(
+        &mut Walked::new(&mut KernelPhysMem, writes, WalkerClean),
+        VirtAddr(iova),
+        PhysAddr(phys),
+        IO_RUN,
+        flags,
+    )
+}
+
+/// The span of the entry that maps `iova` under `root` -- [`PAGE_SIZE`] or
+/// [`IO_RUN`] in an IOMMU's tables -- or `None` where nothing does.
+pub(crate) fn io_entry_span<E: Encoding>(root: u64, iova: u64) -> Option<u64> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    mapper
+        .mapping_level(&KernelPhysMem, VirtAddr(iova))
+        .map(ferrix_paging::Level::span)
+}
+
+// CHECKS-ONLY: iommu/blocks_check.rs; home: in crate
+/// Leave an empty leaf table linked in the 2 MiB slot over `iova` under
+/// `root`, as no product path does: the page at `iova` is mapped, so the
+/// table is made, and then its entry alone is cleared, the table kept.
+/// What stage 10's fallback case puts a run's pin over (`L.iommu.107`);
+/// the run's take-down prunes the table, as any emptied one.
+pub(crate) fn link_empty_io_table<E: Encoding>(
+    root: u64,
+    iova: u64,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    map_io::<E>(root, iova, iova, MapFlags::DMA, writes)?;
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    let mut kernel = KernelPhysMem;
+    let mut memory = LeafOnly {
+        memory: Walked::new(&mut kernel, writes, WalkerClean),
+        wrote: false,
+    };
+    // The table the prune reports is not given back: it stays linked.
+    let _ = mapper.unmap_range(&mut memory, VirtAddr(iova), PAGE_SIZE, |_| {})?;
+    Ok(())
+}
+
+/// A [`PhysMem`] that lets its first write through and drops the rest: an
+/// unmap of one page then clears the leaf, and its prune of the table the
+/// leaf leaves empty writes nothing.
+struct LeafOnly<M: PhysMem> {
+    /// The memory read and written.
+    memory: M,
+    /// Whether the one write has been made.
+    wrote: bool,
+}
+
+// SAFETY: (TRANSLATE) every access is `memory`'s, whose implementation
+// guarantees what the trait asks; a dropped write changes no byte.
+unsafe impl<M: PhysMem> PhysMem for LeafOnly<M> {
+    fn read(&self, at: PhysAddr) -> u64 {
+        self.memory.read(at)
+    }
+
+    fn write(&mut self, at: PhysAddr, value: u64) {
+        if !self.wrote {
+            self.wrote = true;
+            self.memory.write(at, value);
+        }
+    }
+
+    fn allocate_table(&mut self) -> Option<PhysAddr> {
+        self.memory.allocate_table()
+    }
+}
+
+/// Take down the [`IO_RUN`] bytes at `iova`, whether [`map_io_run`] put one
+/// entry there or [`map_io`] 512, adding every table it leaves empty to
+/// `tables` as [`unmap_io`] does (`L.iommu.108`).
+pub(crate) fn unmap_io_run<E: Encoding>(
+    root: u64,
+    iova: u64,
+    tables: &mut UnlinkedTables,
+    writes: &mut Unpublished,
+) -> Result<(), ferrix_paging::MapError> {
+    let mapper: Mapper<E> = Mapper::new(PhysAddr(root));
+    let mut kernel = KernelPhysMem;
+    let mut memory = Walked::new(&mut kernel, writes, WalkerClean);
+    let _ = mapper.unmap_range(&mut memory, VirtAddr(iova), IO_RUN, |freed| {
+        if let Released::Table { phys } = freed {
+            // NOALLOC: the list is linked through the tables themselves.
+            tables.push(phys);
+        }
+    })?;
+    Ok(())
 }
 
 /// Take down the page [`map_io`] put at `iova`, adding every table under
@@ -1627,6 +2200,9 @@ impl Reclaimed {
 /// Deliberately *not* reclaimed: [`MemKind::PageTables`], which the kernel is
 /// running on; [`MemKind::BootStack`], which it is running on too; and
 /// [`MemKind::BootInfo`], which `BootView` borrows for the life of the system.
+/// [`MemKind::Initrd`] is not reclaimed here either: the root's install reads
+/// it after this ([`with_initrd`]), and [`give_back_initrd`] gives it back
+/// once the root is final.
 ///
 /// # Safety
 ///
@@ -1668,6 +2244,242 @@ pub unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
     });
 
     reclaimed
+}
+
+/// What [`give_back_initrd`] did.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GivenBack {
+    /// Frames given to the allocator: the archive's whole pages it covers.
+    pub frames: u64,
+    /// The frames it manages after.
+    pub managed: u64,
+    /// The watermark after, computed from [`GivenBack::managed`].
+    pub watermark: u64,
+    /// The longest of its holds of the frame allocator's lock, in
+    /// nanoseconds.
+    pub longest_hold_nanos: u64,
+    /// How many holds it took.
+    pub holds: u64,
+    /// The most frames one hold inserted: [`GIVE_BACK_BATCH`] at most.
+    pub largest_batch: u64,
+}
+
+/// How many frames one hold of the frame allocator's lock gives back, at
+/// most: 4 MiB, the allocator's largest block, so each batch is one block
+/// where the archive's pages allow it and no hold describes more frames
+/// than one block's (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
+// CHECKS-ONLY: fs::release_check, besides `give_back_initrd` here.
+pub const GIVE_BACK_BATCH: u64 = 1024;
+
+/// Where the loader put the initramfs: its physical base and its length,
+/// inside the direct map.
+#[derive(Clone, Copy, Debug)]
+struct Initrd {
+    /// The physical address of its first byte.
+    base: u64,
+    /// Its length in bytes.
+    len: usize,
+}
+
+/// The initramfs as the loader handed it over, kept for the root's unpack
+/// and the root disk's install until [`give_back_initrd`] gives its pages to
+/// the frame allocator (`docs/RAM-RELEASE.md` §2).
+///
+/// No reference into it outlives a hold of this lock (`L.mm.100`): the
+/// bytes are lent to a closure under it ([`with_initrd`]), and the give-back
+/// takes the archive out under it before a page goes. A sleeping lock, since
+/// the install holds it across an unpack of the whole system onto a disk.
+static INITRD: ferrix_sync::Once<ferrix_sync::SleepLock<Option<Initrd>>> = ferrix_sync::Once::new();
+
+/// Why the initramfs cannot be kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutsideDirectMap;
+
+/// Keep the initramfs `view` describes for [`with_initrd`]: its length, or
+/// `None` when the boot has none. Once; a later call keeps nothing new.
+///
+/// Its own checks, which [`with_initrd`]'s reading rests on: the range lies
+/// inside one region the memory map calls [`MemKind::Initrd`], which the
+/// frame allocator was never given (`MemKind::is_free_at_boot`) and nothing
+/// writes after the hand-off, and inside the direct map.
+///
+/// # Errors
+///
+/// [`OutsideDirectMap`] when the loader put it where the direct map does
+/// not reach, or outside an `Initrd` region, so it could not be read.
+pub fn keep_initrd(view: &BootView<'_>) -> Result<Option<u64>, OutsideDirectMap> {
+    let Some((base, len)) = view.initrd() else {
+        return Ok(None);
+    };
+    let info = view.raw();
+    if !initrd_readable(
+        view.regions(),
+        (base, len),
+        (info.physmap_phys, info.physmap_len),
+    ) {
+        return Err(OutsideDirectMap);
+    }
+    let len_bytes = usize::try_from(len).map_err(|_| OutsideDirectMap)?;
+    let _ = INITRD.call_once(|| {
+        ferrix_sync::SleepLock::new(
+            Some(Initrd {
+                base,
+                len: len_bytes,
+            }),
+            &crate::sync::SchedParker,
+        )
+    });
+    Ok(Some(len))
+}
+
+/// Whether the archive at `base` for `len` bytes may be read through the
+/// direct map: inside one region `regions` calls [`MemKind::Initrd`], and
+/// inside the direct map at `physmap`'s base for its length. [`keep_initrd`]'s
+/// test, which [`with_initrd`]'s SAFETY argument rests on; pure, so the
+/// release check tries it on made-up maps (`L.mm.100`).
+// CHECKS-ONLY: fs::release_check, besides `keep_initrd` here.
+pub fn initrd_readable(
+    regions: &[MemRegion],
+    (base, len): (u64, u64),
+    physmap: (u64, u64),
+) -> bool {
+    let Some(end) = base.checked_add(len) else {
+        return false;
+    };
+    let Some(map_end) = physmap.0.checked_add(physmap.1) else {
+        return false;
+    };
+    let described = regions.iter().any(|region| {
+        region.kind == MemKind::Initrd
+            && region.base <= base
+            && end <= region.base.saturating_add(region.len)
+    });
+    described && base >= physmap.0 && end <= map_end
+}
+
+/// Run `read` on the initramfs, holding it for the call: `None` if the boot
+/// had none, [`keep_initrd`] has not run, or [`give_back_initrd`] has given
+/// it back (`L.mm.100`). What `read` answers cannot borrow the bytes.
+///
+/// A task's call, or bring-up's before the scheduler runs: once it runs, a
+/// caller that may not block (an interrupt, a spin lock held) is refused
+/// with `None` rather than left to sleep on the lock. `read` must not call
+/// [`give_back_initrd`], which takes the same lock.
+pub fn with_initrd<T>(read: impl FnOnce(&[u8]) -> T) -> Option<T> {
+    if crate::sched::started() && !crate::sched::may_block() {
+        return None;
+    }
+    let held = INITRD.get()?.lock();
+    let initrd = (*held)?;
+    // SAFETY: (KMEM) the loader read the archive into memory the map reports
+    // as `Initrd`, which nothing writes after the hand-off, and
+    // `keep_initrd` checked all of it is inside the direct map. Its frames go
+    // to the allocator only once `give_back_initrd` has taken it out of this
+    // lock, which `held` keeps from happening until `read` has returned, and
+    // `read`'s answer cannot borrow the slice.
+    let bytes =
+        unsafe { core::slice::from_raw_parts(direct_map(initrd.base) as *const u8, initrd.len) };
+    Some(read(bytes))
+}
+
+/// The initramfs's physical base and length while it is kept: what the
+/// release check compares the frames given back with.
+// CHECKS-ONLY: fs::release_check
+#[doc(hidden)]
+pub fn initrd_span() -> Option<(u64, u64)> {
+    let held = INITRD.get()?.lock();
+    held.map(|initrd| (initrd.base, initrd.len as u64))
+}
+
+/// The frames of the archive at `[base, base + len)` that it fills whole and
+/// that the allocator describes: rounded inward, since a page the loader
+/// shares with anything at either end is not the archive's to give, and
+/// clipped to the frame array, which on a 32-bit board ends where the direct
+/// map does.
+// CHECKS-ONLY: fs::release_check, besides `give_back_initrd` here.
+pub fn initrd_frames(base: u64, len: u64) -> core::ops::Range<Frame> {
+    with_frames(|frames| whole_frames(base, len, frames.base()..frames.end())).unwrap_or(0..0)
+}
+
+/// [`initrd_frames`]' arithmetic for a frame array covering `array`: the
+/// frames inside `[base, base + len)` whole, from [`FIRST_MANAGED_FRAME`]
+/// on, clipped to `array`; empty when none is. Pure, so the release check
+/// tries it on made-up spans (`L.mm.99`).
+// CHECKS-ONLY: fs::release_check, besides `initrd_frames` here.
+pub fn whole_frames(
+    base: u64,
+    len: u64,
+    array: core::ops::Range<Frame>,
+) -> core::ops::Range<Frame> {
+    let first = base
+        .div_ceil(PAGE_SIZE)
+        .max(FIRST_MANAGED_FRAME)
+        .max(array.start);
+    let end = (base.saturating_add(len) / PAGE_SIZE).min(array.end);
+    if first < end { first..end } else { 0..0 }
+}
+
+/// Give the frame allocator the initramfs's pages once the root is final
+/// (`L.mm.99`): the archive taken out of [`INITRD`] first, under the lock
+/// every reader holds, so no reader has its bytes and none can again
+/// (`L.mm.100`); then [`initrd_frames`], in batches of
+/// [`GIVE_BACK_BATCH`], the lock dropped between them, and the watermark
+/// computed again from the new managed count in the hold that inserts the
+/// last batch, so no allocation sees the new total with the old watermark.
+/// `None` when there is nothing to give: no archive, or it was given back,
+/// so a second call gives nothing. Between two batches the watermark is
+/// still the old one, a little lower than the new total asks for
+/// (`docs/certification/MEMORY-AND-TIMING.md` §1.9).
+///
+/// `Frames::insert_free` takes only frames still `Reserved`: one the
+/// allocator already had is skipped, never inserted twice. Each hold is
+/// timed, and the longest is answered ([`GivenBack::longest_hold_nanos`]).
+pub fn give_back_initrd() -> Option<GivenBack> {
+    if crate::sched::started() && !crate::sched::may_block() {
+        return None;
+    }
+    let initrd = INITRD.get()?.lock().take()?;
+    let range = initrd_frames(initrd.base, initrd.len as u64);
+    let mut given = GivenBack::default();
+    let mut frame = range.start;
+    loop {
+        let next = ((frame / GIVE_BACK_BATCH + 1) * GIVE_BACK_BATCH).min(range.end);
+        let last = next >= range.end;
+        let _ = with_frames(|frames| {
+            let start = crate::timer::now_nanos();
+            let before = frames.managed_frames();
+            if frame < next {
+                frames.insert_free(frame, next - frame);
+            }
+            given.frames += frames.managed_frames() - before;
+            given.holds += 1;
+            given.largest_batch = given.largest_batch.max(next.saturating_sub(frame));
+            if last {
+                given.managed = frames.managed_frames();
+                given.watermark = watermark_for(given.managed);
+                WATERMARK.store(given.watermark, Ordering::Relaxed);
+            }
+            let held = crate::timer::now_nanos().saturating_sub(start);
+            given.longest_hold_nanos = given.longest_hold_nanos.max(held);
+        });
+        if last {
+            return Some(given);
+        }
+        frame = next;
+    }
+}
+
+/// How many frames of `range` the allocator still has `Reserved`: none of
+/// the archive's once it is given back.
+// CHECKS-ONLY: fs::release_check
+#[doc(hidden)]
+pub fn reserved_in(range: core::ops::Range<Frame>) -> u64 {
+    with_frames(|frames| {
+        range
+            .filter(|&frame| frames.state(frame) == Some(ferrix_frame::State::Reserved))
+            .count() as u64
+    })
+    .unwrap_or(0)
 }
 
 /// Clear a span of slots in the root page table.
@@ -1820,7 +2632,10 @@ impl Held {
                 (
                     heap.slab_pages(),
                     heap.large_pages(),
-                    heap.allocated_bytes(),
+                    // What callers hold: the caches' objects are the heap's
+                    // allocated bytes no caller has (L.mm.96).
+                    heap.allocated_bytes()
+                        .saturating_sub(CACHED.load(Ordering::Relaxed)),
                 )
             });
             Held {
