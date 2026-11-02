@@ -174,7 +174,7 @@ names the part of Hyprland or hyprlang it follows.
   rather than a toolkit, that draws one of `render`'s test patterns. It is
   what the compositor's tests put on screen, and it exercises the same crates
   from the client's side.
-* **`term`** (an app since 2026-10-04, `src/user/apps/term`, beside the
+* **`term`** (an app since 2026-10-04, in the apps repository, beside the
   workspace) is the terminal: a character grid with the escape sequences a
   shell and its programs actually send, drawn with Hack -- rasterised from
   the TrueType faces in the app's `font/` into coverage cells by
