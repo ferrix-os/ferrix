@@ -6,7 +6,8 @@ user namespace runs a process whose pid is 1 inside it, under a memory limit
 ... with a seccomp filter" -- needs the pid-1 part from here; the memory
 controller and seccomp are other streams'.
 
-Status: **built on `stage13-pidns`, not landed** (§9). Linux's semantics throughout; §8
+Status: **built on `stage13-pidns`, on `main` since 2026-10-01**
+(a2af5061a; §9). Linux's semantics throughout; §8
 lists every place this differs.
 
 ---

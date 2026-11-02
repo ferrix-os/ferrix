@@ -6,7 +6,8 @@ built on the user namespaces of `docs/NAMESPACES.md` §2.2 (branch
 a namespace of its own interfaces, addresses, routes, neighbours, ports,
 sockets, `/proc/net` and netlink view, and `veth` pairs to join two of them.
 
-Status: **built on `stage13-netns`, not landed** (§11). Sections 1 to 10 were
+Status: **built on `stage13-netns`, on `main` since 2026-10-04**
+(2b13526dd, batch 22384874f; §11). Sections 1 to 10 were
 written from the code as it stood on `stage13-n4-userns` (813d24d4) before
 any of it was changed, and amended where the building found them wrong; §11
 says what differs.
