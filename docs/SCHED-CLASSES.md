@@ -1516,7 +1516,7 @@ close dissolves (V1, V6's close and exit, V15's native program).
   queue where it is and filed in `MOVING`, in its run slot: at a leaving
   processor's decision for a waiting one (`rehome_waiting`), by the
   admission for a queued member, at the switch away from it for a running
-  one (`settle_previous` marks it, `finish_switch` files it once its context
+  one (`depart` marks it, `finish_switch` files it once its context
   is saved), and by a wake whose home no longer admits it
   (`sent_to_domain`, the sleeper path likewise, V11). `domains::drain`
   places each on the least loaded processor of its domain, with no queue

@@ -3006,12 +3006,12 @@ pub(crate) static TASK_OUTSIDE_DOMAIN: Explanation = Explanation {
          `may_place`.",
         "A processor leaving the boot domain did not move what it held before its pick \
          (`sched::rehome_waiting`), or a running task outside its domain was picked \
-         again rather than taken off (`sched::settle_previous`).",
+         again rather than taken off (`sched::depart`).",
         "A task's domain, or a processor's, was changed without the queue lock that \
          owns it (`domains::settle_task`, `domains::set_slots`).",
     ],
     see: "src/kernel/src/sched/domains.rs; src/kernel/src/sched/mod.rs move_onto, \
-          settle_previous and require_admitted; src/kernel/src/sched/direct.rs; \
+          depart and require_admitted; src/kernel/src/sched/direct.rs; \
           docs/SCHED-CLASSES.md §9f",
 };
 
