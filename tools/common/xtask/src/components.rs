@@ -556,19 +556,48 @@ fn mirror(component: &Component) -> Result<PathBuf> {
             .ok_or_else(|| Error::new("no home directory for the components' mirrors"))?
             .join(".local/share/ferrix/components"),
     };
+    mirror_in(&root, component)
+}
+
+/// [`mirror`] under `root`, one process at a time per mirror.
+///
+/// The mirrors are shared by every worktree and gate slot on the host, so
+/// two gates often reach the same one at once. Unlocked, two fetches moved
+/// `refs/heads/main` under each other and one failed ("fetching ref
+/// refs/heads/main failed: incorrect old value provided", `check` in batch
+/// 20261023T203241Z), and two first clones would write one directory. So
+/// each mirror's clone and fetch hold an exclusive lock on
+/// `<root>/<name>.git.lock`, and whether the mirror is there and holds the
+/// pin is asked again under it: the gate that waited usually finds the
+/// fetch done for it. The lock is the operating system's, released when
+/// the file closes, so a process that dies holding it leaves nothing to
+/// clear. Readers (a clone borrowing objects, `has_commit`) take no lock.
+fn mirror_in(root: &Path, component: &Component) -> Result<PathBuf> {
     let mirror = root.join(format!("{}.git", component.name));
     let pin = component.commit.as_deref().unwrap_or_default();
+    if mirror.exists() && has_commit(&mirror, pin) {
+        return Ok(mirror);
+    }
+    fs::create_dir_all(root).map_err(|error| Error::new(format!("{}: {error}", root.display())))?;
+    let lock_path = root.join(format!("{}.git.lock", component.name));
+    let lock = fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| Error::new(format!("{}: {error}", lock_path.display())))?;
+    lock.lock()
+        .map_err(|error| Error::new(format!("{}: lock: {error}", lock_path.display())))?;
     if !mirror.exists() {
-        fs::create_dir_all(&root)
-            .map_err(|error| Error::new(format!("{}: {error}", root.display())))?;
         let target = mirror.to_string_lossy().into_owned();
         let _ = git(
-            &root,
+            root,
             &["clone", "--quiet", "--mirror", &component.repo, &target],
         )?;
     } else if !has_commit(&mirror, pin) {
         let _ = git(&mirror, &["fetch", "--quiet", "--prune", "origin"])?;
     }
+    drop(lock);
     Ok(mirror)
 }
 
@@ -645,6 +674,83 @@ mod tests {
     use super::*;
 
     const PIN: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    /// `git` in `dir` for the test's own repositories: no identity, hooks
+    /// or signing from the host's configuration.
+    fn test_git(dir: &Path, args: &[&str]) -> String {
+        let mut all = vec![
+            "-c",
+            "user.name=components-test",
+            "-c",
+            "user.email=components-test@localhost",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ];
+        all.extend_from_slice(args);
+        git(dir, &all).unwrap()
+    }
+
+    /// Eight gates reaching one mirror at once, whose pin it does not have
+    /// yet: every one gets the mirror with the pin in it. Without the lock
+    /// in [`mirror_in`] the eight fetches race to move `refs/heads/main`
+    /// and some fail ("incorrect old value provided", "cannot lock ref").
+    #[test]
+    fn gates_fetching_one_mirror_at_once_all_get_the_pin() {
+        let base = std::env::temp_dir().join(format!(
+            "xtask-components-mirror-lock-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let upstream = base.join("upstream");
+        let root = base.join("mirrors");
+        fs::create_dir_all(&upstream).unwrap();
+        let _ = test_git(&upstream, &["init", "--quiet", "--initial-branch=main"]);
+        let _ = test_git(
+            &upstream,
+            &["commit", "--quiet", "--allow-empty", "-m", "first"],
+        );
+        let first = test_git(&upstream, &["rev-parse", "HEAD"]);
+        let mut component = Component {
+            name: "lock-test".to_owned(),
+            path: "unused".to_owned(),
+            repo: upstream.to_string_lossy().into_owned(),
+            commit: Some(first),
+        };
+        let mirror = mirror_in(&root, &component).unwrap();
+
+        for message in ["second", "third"] {
+            let _ = test_git(
+                &upstream,
+                &["commit", "--quiet", "--allow-empty", "-m", message],
+            );
+        }
+        let pin = test_git(&upstream, &["rev-parse", "HEAD"]);
+        assert!(
+            !has_commit(&mirror, &pin),
+            "the mirror starts behind the pin"
+        );
+        component.commit = Some(pin.clone());
+
+        let start = std::sync::Barrier::new(8);
+        let results: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
+            let gates: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let _ = start.wait();
+                        mirror_in(&root, &component)
+                    })
+                })
+                .collect();
+            gates.into_iter().map(|gate| gate.join().unwrap()).collect()
+        });
+        for (gate, result) in results.iter().enumerate() {
+            assert!(result.is_ok(), "gate {gate}: {:?}", result.as_ref().err());
+        }
+        assert!(has_commit(&mirror, &pin), "the mirror holds the pin");
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn reads_sections_and_comments() {
