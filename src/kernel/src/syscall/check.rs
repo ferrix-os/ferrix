@@ -9861,6 +9861,7 @@ fn check_absent_setters_refuse(process: &Process, page: u64) -> Result<(), &'sta
         <Absent as Setters>::sysctl_domainname(&(), b"check-host"),
         <Absent as Setters>::sysctl_memfd_noexec(process, b"2"),
         <Absent as Setters>::driver_bind(Bus::Pci, 0, false, b"0000:00:00.0"),
+        <Absent as Setters>::cpu_online(process, 1, b"0"),
     ];
     if answers.len() != ENTRIES {
         return Err("the absent setters' check does not call every entry");
@@ -12078,12 +12079,13 @@ fn check_cacheflush_answers_as_linux_does(process: &Process) -> Result<(), &'sta
         }
         let resident = process
             .space()
-            .resident_pages()
-            .map_err(|_| "could not count the resident pages")?;
+            .resident_split()
+            .map_err(|_| "could not count the resident pages")?
+            .total();
         // From the middle of the first page to the middle of the last.
         let (start, end) = (code + 8, code + len - 8);
         let maintained = memory::cacheflush_pages(process, start, end, 0);
-        if process.space().resident_pages() != Ok(resident) {
+        if process.space().resident_split().map(|split| split.total()) != Ok(resident) {
             return Err("cacheflush committed a page the program never touched");
         }
         if maintained != Ok(2) {

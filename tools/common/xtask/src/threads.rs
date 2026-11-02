@@ -56,6 +56,8 @@ const STEPS: &[&str] = &[
     "threads: futex-signal ok",
     "threads: futex-stop ok",
     "threads: cpu-number ok",
+    "threads: slice-request ok",
+    "threads: affinity ok",
     "threads: all ok",
 ];
 
@@ -131,6 +133,9 @@ fn says(line: &str, want: &str) -> bool {
 }
 
 /// The test on every architecture asked for.
+///
+/// Verifies: `L.sched.109`
+/// Verifies: `L.sched.99`, `L.sched.100`, `L.sched.101`
 pub(crate) fn test_threads(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

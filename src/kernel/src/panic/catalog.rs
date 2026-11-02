@@ -210,6 +210,22 @@ pub static BOOT_OUT_OF_MEMORY: Explanation = Explanation {
           src/kernel/src/fallible.rs",
 };
 
+/// For `mm::drain_caches` entered with this processor's cache lock held.
+pub(crate) static HEAP_DRAIN_UNDER_CACHE_LOCK: Explanation = Explanation {
+    code: "FX-0012",
+    title: "the heap caches were drained with a cache lock held",
+    meaning: "Each processor keeps free heap objects of every size class in a cache of its \
+              own behind its own lock (`docs/HEAP-CACHES.md`). A refusal drains every \
+              cache back into the heap, taking each cache lock in turn, and must start \
+              with none held: this processor's would be taken a second time and never \
+              come free. The drain looks before it starts and stops the machine instead.",
+    causes: &[
+        "A path that holds this processor's cache lock -- a refill, an overflow -- \
+         reached a refusal's drain without first letting the lock go.",
+    ],
+    see: "docs/HEAP-CACHES.md; src/kernel/src/mm.rs",
+};
+
 /// For the panic the standard library's allocation error handler raises,
 /// recognised by `panic.rs`.
 pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
@@ -1902,6 +1918,30 @@ pub static ROOT_PID1: Explanation = Explanation {
     see: "src/kernel/src/fs/root_disk.rs; docs/INIT.md §7.3; docs/certification/ITEM.md",
 };
 
+/// For `fs::release_check`, when the boot's copies of the system were not
+/// given back as `docs/RAM-RELEASE.md` §2 says.
+// CHECKS-ONLY: for `run` in `fs/release_check.rs`.
+pub static RELEASE: Explanation = Explanation {
+    code: "FX-1203",
+    title: "the boot's copies of the system were not given back as specified",
+    meaning: "Once the root is final the kernel gives the initramfs archive's whole pages to the \
+              frame allocator, recomputes the watermark from the new managed count, and after a \
+              switch to a root disk removes the archive's names from the tmpfs but for the mount \
+              points, the directories above them and /lib/firmware. The release's boot check \
+              looks before and after it: the managed frames up by exactly the archive's whole \
+              pages and none of them Reserved, the watermark watermark_for the new count, the \
+              archive answering nothing, pid 1's inputs unchanged and outside the released \
+              pages, and after a switch no other name of the archive left and a file held open \
+              and mapped across the release reading as before.",
+    causes: &[
+        "`release` in src/kernel/src/fs/mod.rs or `give_back_initrd` in src/kernel/src/mm.rs gave \
+         back other frames than the archive's whole pages, or left the watermark as it was.",
+        "`init::set_inputs` kept a slice of the archive instead of a copy.",
+        "`ferrix_vfs::initramfs::remove` left a name of the archive, or removed a spared one.",
+    ],
+    see: "src/kernel/src/fs/release_check.rs; docs/RAM-RELEASE.md §2",
+};
+
 /// For `check_devmgr` in `main.rs`, when `devmgr::start` fails.
 pub static STAGE10_DEVMGR: Explanation = Explanation {
     code: "FX-1006",
@@ -2300,6 +2340,40 @@ pub(crate) static X2APIC_LOCKED: Explanation = Explanation {
     ],
     see: "src/kernel/src/arch/x86_64/apic.rs enter_mode; src/kernel/src/arch/x86_64/smp.rs \
           secondary_start; docs/NVIDIA.md section 12.3",
+};
+
+/// For `pcid::require_on_secondary`, when a secondary lacks the PCIDs the boot
+/// processor turned on.
+pub(crate) static SECONDARY_WITHOUT_PCID: Explanation = Explanation {
+    code: "FX-0410",
+    title: "a processor has no PCIDs and the boot processor turned them on",
+    meaning: "The boot processor decides from its own CPUID whether `CR3` writes are tagged \
+              with process-context identifiers, sets `CR4.PCIDE`, and every secondary adopts \
+              its `CR4` whole (`docs/PCID.md`). PCIDs are on only where every processor has \
+              them, so a secondary whose CPUID.1:ECX[17] is clear stops the boot here by name \
+              rather than fault on the bit or run with tags its neighbours keep.",
+    causes: &[
+        "A machine whose processors report different features: a hypervisor offering \
+         `pcid` to the first virtual processor only, or mismatched sockets.",
+    ],
+    see: "src/kernel/src/arch/x86_64/pcid.rs require_on_secondary; \
+          src/kernel/src/arch/x86_64/smp.rs secondary_start; docs/PCID.md",
+};
+
+/// For `AddressSpace::assemble`, when the address space ids run out.
+pub(crate) static SPACE_IDS_EXHAUSTED: Explanation = Explanation {
+    code: "FX-0011",
+    title: "the address space ids ran out",
+    meaning: "Every address space gets a 64-bit number from a counter that is never wound \
+              back, and a processor's PCID slot records that number, so a space made over a \
+              freed root's frame never finds a dead space's translations (`docs/PCID.md`). A \
+              number given twice would let a new space use another's stale translations, so \
+              the kernel stops rather than wrap.",
+    causes: &[
+        "2^64 - 1 address spaces made in one boot, which no machine reaches; or the counter \
+         overwritten.",
+    ],
+    see: "src/kernel/src/user/space.rs AddressSpace::assemble; docs/PCID.md",
 };
 
 /// For `check_path_calls` in `stages_check.rs`, when `syscall::check::run_paths` fails.
@@ -3547,6 +3621,8 @@ pub(crate) static ALL: &[&Explanation] = &[
     &LOAD_REGISTRATION,
     &BOOT_OUT_OF_MEMORY,
     &ALLOCATION_ABORTED,
+    &SPACE_IDS_EXHAUSTED,
+    &HEAP_DRAIN_UNDER_CACHE_LOCK,
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,
@@ -3571,6 +3647,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE4_SMP,
     &X2APIC_LOCKED,
     &TABLES_NOT_NOTED,
+    &SECONDARY_WITHOUT_PCID,
     &SCHEDULER_BRING_UP,
     &STAGE5_SCHEDULER,
     &SCHEDULE_WITH_PREEMPTION_HELD,
@@ -3649,6 +3726,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &NETLINK,
     &STAGE12_WRITE,
     &ROOT_PID1,
+    &RELEASE,
     &STAGE13_CGROUPFS,
     &STAGE13_SECCOMP,
     &STAGE13_SECCOMP_FILTERS,

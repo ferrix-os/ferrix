@@ -135,6 +135,119 @@ fn ppgtt_partial_clear_keeps_the_rest() {
     assert_eq!(vm.translate(&mut mem, base + 7 * 4096), Some(pages[7]));
 }
 
+/// `gen8_ppgtt_insert_huge`'s three page sizes in one VM, read back as the
+/// GPU walks them, and every table given back by the clear.
+#[test]
+fn ppgtt_huge_pages() {
+    use crate::ppgtt::{PAGE_2M, PAGE_64K, PT_BYTES};
+    let mut mem = PtModel::default();
+    let vm = Ppgtt::create(&mut mem).expect("pages");
+    let base = 0x1_0000_0000_u64;
+    let window = |first: u64| -> Vec<u64> { (0..512).map(|n| first + n * PT_BYTES).collect() };
+    let pde = |mem: &mut PtModel, at: u64| {
+        let page = at >> 12;
+        let mut table = vm.pml4;
+        for lvl in [3, 2] {
+            table = mem.read_entry(table, crate::ppgtt::gen8_pd_index(page, lvl))
+                & crate::ppgtt::PTE_ADDR_MASK;
+        }
+        mem.read_entry(table, crate::ppgtt::gen8_pd_index(page, 1))
+    };
+
+    // One 2 MiB run from a 2 MiB-aligned address: a PS entry, no leaf table
+    // (PDP and PD only).
+    let two_m = window(0x4000_0000);
+    assert_eq!(vm.insert_huge(&mut mem, &two_m, base, 0), Ok(PAGE_2M));
+    assert_eq!(mem.pages.len(), 5 + 2);
+    assert_eq!(
+        pde(&mut mem, base),
+        0x4000_0000 | gtt::GEN8_PAGE_PRESENT | gtt::GEN8_PAGE_RW | gtt::GEN8_PDE_PS_2M
+    );
+    assert_eq!(vm.translate(&mut mem, base + 0x1f_f123), Some(0x401f_f123));
+
+    // 64 KiB runs, not one 2 MiB run: 512 entries and IPS.
+    let mut sixty_four: Vec<u64> = Vec::new();
+    for chunk in 0..32_u64 {
+        let at = 0x5000_0000 + (31 - chunk) * PAGE_64K;
+        sixty_four.extend((0..16).map(|n| at + n * PT_BYTES));
+    }
+    let at = base + PAGE_2M;
+    assert_eq!(vm.insert_huge(&mut mem, &sixty_four, at, 0), Ok(PAGE_64K));
+    assert_ne!(pde(&mut mem, at) & gtt::GEN8_PDE_IPS_64K, 0);
+    for (n, &addr) in sixty_four.iter().enumerate() {
+        assert_eq!(
+            vm.translate(&mut mem, at + n as u64 * PT_BYTES + 0x10),
+            Some(addr + 0x10)
+        );
+    }
+
+    // A 2 MiB run at an address only 64 KiB-aligned is 64 KiB pages; one
+    // that is not 64 KiB-aligned, and part of a window, 4 KiB.
+    let at = base + 2 * PAGE_2M;
+    assert_eq!(
+        vm.insert_huge(&mut mem, &window(0x6001_0000), at, 0),
+        Ok(PAGE_64K)
+    );
+    let at = base + 3 * PAGE_2M;
+    assert_eq!(
+        vm.insert_huge(&mut mem, &window(0x7000_1000), at, 0),
+        Ok(PT_BYTES)
+    );
+    assert_eq!(pde(&mut mem, at) & gtt::GEN8_PDE_IPS_64K, 0);
+    let at = base + 4 * PAGE_2M + 16 * PT_BYTES;
+    let part = window(0x8000_0000);
+    assert_eq!(
+        vm.insert_huge(&mut mem, part.get(..64).expect("64"), at, 0),
+        Ok(PT_BYTES)
+    );
+    assert_eq!(
+        vm.translate(&mut mem, at + 63 * PT_BYTES),
+        Some(0x8003_f000)
+    );
+
+    // Past the window, or over the 2 MiB page, refused.
+    assert_eq!(
+        vm.insert_huge(&mut mem, &window(0x9000_0000), base + PT_BYTES, 0),
+        Err(PpgttError::Range)
+    );
+    assert_eq!(
+        vm.insert_huge(&mut mem, part.get(..1).expect("1"), base, 0),
+        Err(PpgttError::Range)
+    );
+    assert_eq!(
+        vm.alloc_va_range(&mut mem, base + PT_BYTES, PT_BYTES),
+        Err(PpgttError::Range)
+    );
+    assert_eq!(vm.translate(&mut mem, base), Some(0x4000_0000));
+
+    // A clear in a 64 KiB table drops IPS, and the rest still reads.
+    let at = base + PAGE_2M;
+    vm.clear_range(&mut mem, at, PT_BYTES).expect("range");
+    assert_eq!(pde(&mut mem, at) & gtt::GEN8_PDE_IPS_64K, 0);
+    assert_eq!(vm.translate(&mut mem, at), None);
+    assert_eq!(
+        vm.translate(&mut mem, at + PT_BYTES),
+        sixty_four.get(1).copied()
+    );
+
+    // Clearing everything gives every table back.
+    vm.clear_range(&mut mem, base, 5 * PAGE_2M).expect("range");
+    assert_eq!(mem.pages.len(), 5);
+    assert_eq!(vm.translate(&mut mem, base + 0x1000), None);
+
+    // A 2 MiB page over a leaf table of scratch takes the table back.
+    vm.alloc_va_range(&mut mem, base, PT_BYTES).expect("tables");
+    vm.clear_range(&mut mem, base, PT_BYTES).expect("range");
+    vm.alloc_va_range(&mut mem, base, PAGE_2M).expect("tables");
+    assert_eq!(mem.pages.len(), 5 + 3);
+    assert_eq!(vm.insert_huge(&mut mem, &two_m, base, 0), Ok(PAGE_2M));
+    assert_eq!(mem.pages.len(), 5 + 2);
+    vm.clear_range(&mut mem, base, PAGE_2M).expect("range");
+    assert_eq!(mem.pages.len(), 5);
+    vm.destroy(&mut mem);
+    assert!(mem.pages.is_empty());
+}
+
 #[test]
 fn ppgtt_refusals() {
     let mut mem = PtModel::default();

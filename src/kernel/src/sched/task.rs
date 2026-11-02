@@ -22,7 +22,7 @@ use core::sync::atomic::{
     AtomicBool, AtomicI64, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
 };
 
-use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell};
+use ferrix_sched_class::{CpuSet, RtParams, RtPolicy, UpperCell, WORDS};
 use ferrix_sched_fair::{EntityState, Node, Slot, Split, StackTiers};
 use ferrix_sync::IrqControl;
 
@@ -46,6 +46,19 @@ use crate::vmap::Stack;
 pub trait UserThread: Any + Send + Sync + fmt::Debug {
     /// The process whose code it runs.
     fn process(&self) -> &dyn Host;
+
+    /// The slice it asks for, in nanoseconds, or zero for its queue's
+    /// (L.sched.109): what its task is made with.
+    fn slice_request(&self) -> u64 {
+        0
+    }
+
+    /// The processors it asks to run on, as its creator's task had them when
+    /// it was made by `clone`, `fork` or `vfork` (L.sched.101), or `None`
+    /// for every processor of the domain: what its task is made with.
+    fn start_affinity(&self) -> Option<CpuSet> {
+        None
+    }
 }
 
 /// A task's name, unique for the life of the machine.
@@ -98,6 +111,64 @@ impl Wakees {
             sampled_ran: AtomicU64::new(0),
             busy: AtomicU64::new(UNMEASURED),
         }
+    }
+}
+
+/// A [`PoisonRecord`] holds a copy that consumed poison.
+const POISON_SET: u64 = 1 << 0;
+/// A [`PoisonRecord`] asks for the program's signal: the memory was its own.
+const POISON_SIGNAL: u64 = 1 << 1;
+
+/// A task's system call copy that consumed poison, for the call's way out
+/// (`docs/MACHINE-CHECK-COPY.md` §3.3, `L.syscall.25`): the page with
+/// [`POISON_SET`] and maybe [`POISON_SIGNAL`], or 0, and the user page to
+/// signal at. Written with no lock by the copy, taken at the way out.
+#[derive(Debug)]
+pub(crate) struct PoisonRecord {
+    /// The page and the two bits, or 0.
+    word: AtomicU64,
+    /// The user page, where [`POISON_SIGNAL`] is set.
+    at: AtomicU64,
+}
+
+impl PoisonRecord {
+    /// An empty record.
+    pub(crate) const fn new() -> Self {
+        Self {
+            word: AtomicU64::new(0),
+            at: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a copy that consumed poison at the physical `page`, and the
+    /// user page `at` to signal the program at, if any: no lock. `false`
+    /// when a record is already there -- a second in one call -- which the
+    /// caller stops on.
+    pub(crate) fn record(&self, page: u64, at: Option<u64>) -> bool {
+        let signal = at.map_or(0, |at| {
+            self.at.store(at, Ordering::Relaxed);
+            POISON_SIGNAL
+        });
+        self.word
+            .compare_exchange(
+                0,
+                page | POISON_SET | signal,
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+    }
+
+    /// Take the record, leaving it empty: the physical page and the user
+    /// page to signal at, if it asked for it.
+    pub(crate) fn take(&self) -> Option<(u64, Option<u64>)> {
+        let word = self.word.swap(0, Ordering::Acquire);
+        if word & POISON_SET == 0 {
+            return None;
+        }
+        let page = word & !(POISON_SET | POISON_SIGNAL);
+        let at = (word & POISON_SIGNAL != 0).then(|| self.at.load(Ordering::Relaxed));
+        Some((page, at))
     }
 }
 
@@ -159,11 +230,21 @@ pub struct Task {
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
+    /// A system call's copy that consumed poison, for the call's way out
+    /// (`docs/MACHINE-CHECK-COPY.md` §3.3).
+    copy_poison: PoisonRecord,
     /// Whom it woke last and how often it changed wakee (L.sched.91).
     wakees: Wakees,
-    /// Whether it may be moved to another CPU.
-    /// The processors it may run on.
-    affinity: CpuSet,
+    /// The processors it may run on, as stored: its spawn's, or the last
+    /// `sched_setaffinity`'s (`crate::sched::set_affinity`, L.sched.97).
+    /// Placement asks the task's effective mask, which this is the stored
+    /// half of (`crate::sched::mask_for`, L.sched.123).
+    affinity: Affinity,
+    /// The processor its spawn pinned it to alone, for a program task: what
+    /// it is counted in [`PINNED_PROGRAMS`] under, from its making to its
+    /// death. Never changed: a mask a user sets is never a veto on a park
+    /// (L.sched.123; ledger 5156 (A3)).
+    spawn_pin: Option<usize>,
     /// Its share of a CPU, as the run queue has it: [`Task::base_weight`]
     /// scaled by its job's processor weight (`object::quota::effective`).
     weight: AtomicU32,
@@ -180,6 +261,11 @@ pub struct Task {
     seen_moves: AtomicU64,
     /// The lag it left its last queue with.
     vlag: AtomicI64,
+    /// The slice it asks for, in nanoseconds, or zero for its queue's
+    /// (L.sched.107): what it is enqueued with, written under the lock of
+    /// the queue that owns it ([`crate::sched::set_request`]), or before any
+    /// queue can see it.
+    request_ns: AtomicU64,
     /// Real nanoseconds it has run for, mirrored out of the queue so that a
     /// reader needs no lock.
     sum_exec: AtomicU64,
@@ -459,6 +545,79 @@ fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
     Ok((Slot::new()?, Slot::new()?))
 }
 
+/// A task's stored affinity: a [`CpuSet`]'s words, one atomic each, under a
+/// sequence count (ledger 4446 (D1)'s second form, `docs/GAME-MODE-SCHED.md`
+/// §2.1).
+///
+/// **Why a sequence count.** Four words cannot be stored at once, and readers
+/// of the mask -- a wake's placement, the pull, `rehome_blocked` -- read it
+/// before they take any lock, so a reader could see half of one mask and half
+/// of another: an empty set, or a union no caller asked for. So a writer
+/// makes the count odd, stores the words, and makes it even again; a reader
+/// copies the words between two loads of the count and keeps the copy only if
+/// both were the same even value.
+///
+/// **Who writes.** Only [`crate::sched::set_affinity`], under the lock of the
+/// queue that owns the task, with interrupts masked, so writers are
+/// serialised and a write is four stores long; a reader retries at most once
+/// for each write that overlaps its copy. Nothing here is `unsafe`.
+#[derive(Debug)]
+struct Affinity {
+    /// Even when no write is in progress.
+    sequence: AtomicU32,
+    /// The set's words, [`CpuSet::words`]'s order.
+    words: [AtomicU64; WORDS],
+}
+
+impl Affinity {
+    /// A cell holding `set`, before any other processor can see it.
+    fn new(set: CpuSet) -> Affinity {
+        Affinity {
+            sequence: AtomicU32::new(0),
+            words: set.words().map(AtomicU64::new),
+        }
+    }
+
+    /// A consistent copy: the words of one write, never of two.
+    fn read(&self) -> CpuSet {
+        loop {
+            let before = self.sequence.load(Ordering::Acquire);
+            if before & 1 == 0 {
+                let mut words = [0_u64; WORDS];
+                for (word, cell) in words.iter_mut().zip(&self.words) {
+                    *word = cell.load(Ordering::Relaxed);
+                }
+                core::sync::atomic::fence(Ordering::Acquire);
+                if self.sequence.load(Ordering::Relaxed) == before {
+                    return CpuSet::from_words(words);
+                }
+            }
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Whether `cpu` is in it: one word, which is consistent on its own.
+    fn contains(&self, cpu: usize) -> bool {
+        self.words
+            .get(cpu / 64)
+            .is_some_and(|word| word.load(Ordering::Acquire) & (1 << (cpu % 64)) != 0)
+    }
+
+    /// Store `set`. Writers are serialised by the caller (the home queue's
+    /// lock, interrupts masked).
+    fn write(&self, set: CpuSet) {
+        let before = self.sequence.load(Ordering::Relaxed);
+        self.sequence
+            .store(before.wrapping_add(1), Ordering::Relaxed);
+        core::sync::atomic::fence(Ordering::Release);
+        for (cell, word) in self.words.iter().zip(set.words()) {
+            cell.store(word, Ordering::Relaxed);
+        }
+        self.sequence
+            .store(before.wrapping_add(2), Ordering::Release);
+    }
+}
+
 // SAFETY: (SHARED) every field but `stack_pointer` and `user` is an atomic or
 // immutable. Both cells are written by the CPU that switches away from this
 // task and read by the one that switches to it, and both hold the lock of the
@@ -466,10 +625,50 @@ fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
 // that lock and never overlap.
 unsafe impl Sync for Task {}
 
+/// Program tasks pinned to each processor alone (`docs/CORE-QUARANTINE.md`
+/// §3.2): such a processor is refused going out of service, since its task
+/// could run nowhere else (L.smp.36). Counted at [`Task::new`], uncounted
+/// when it dies, or at drop for one that never did: a dead task a check
+/// still holds runs nowhere and vetoes nothing.
+static PINNED_PROGRAMS: [AtomicU32; 64] = [const { AtomicU32::new(0) }; 64];
+
+/// Run `body` with one more program task counted as pinned to `cpu`, for
+/// the native boot check of the refusal.
+pub(crate) fn with_pinned_for_check<T>(cpu: usize, body: impl FnOnce() -> T) -> T {
+    let count = PINNED_PROGRAMS.get(cpu);
+    if let Some(count) = count {
+        let _ = count.fetch_add(1, Ordering::AcqRel);
+    }
+    let result = body();
+    if let Some(count) = count {
+        let _ = count.fetch_sub(1, Ordering::AcqRel);
+    }
+    result
+}
+
+/// Program tasks pinned to `cpu` alone now.
+pub(crate) fn pinned_programs(cpu: usize) -> u32 {
+    PINNED_PROGRAMS
+        .get(cpu)
+        .map_or(0, |count| count.load(Ordering::Acquire))
+}
+
+/// The processor a program task's affinity pins it to, if it is one alone.
+fn pinned_program_cpu(affinity: &CpuSet, program: bool) -> Option<usize> {
+    if program && affinity.len() == 1 {
+        affinity.iter().next()
+    } else {
+        None
+    }
+}
+
 impl Drop for Task {
     /// Let go of the job it ran in. Its weight left the job's load when it
     /// died, so only the hold is left.
     fn drop(&mut self) {
+        if *self.state.get_mut() != DEAD {
+            self.uncount_pinned();
+        }
         let word = *self.group.get_mut();
         if counted_of(word) != 0 {
             quota::adjust(group_of(word), -i64::from(counted_of(word)));
@@ -555,6 +754,14 @@ fn first_domain(kernel: bool, affinity: &CpuSet) -> u8 {
 }
 
 impl Task {
+    /// Take it out of [`PINNED_PROGRAMS`], once: at its death, or at its
+    /// drop if it never died.
+    fn uncount_pinned(&self) {
+        if let Some(count) = self.spawn_pin.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
+            let _ = count.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
     /// Its pending-work word, for `sched::work` alone, which owns every
     /// read and write of it.
     pub(super) const fn work(&self) -> &AtomicU32 {
@@ -584,6 +791,10 @@ impl Task {
         } = new;
         let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
+        let spawn_pin = pinned_program_cpu(&affinity, thread.is_some());
+        if let Some(count) = spawn_pin.and_then(|cpu| PINNED_PROGRAMS.get(cpu)) {
+            let _ = count.fetch_add(1, Ordering::AcqRel);
+        }
         Ok(Task {
             id,
             name,
@@ -595,10 +806,12 @@ impl Task {
             queued: AtomicBool::new(false),
             on_cpu: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(crate::timer::now_nanos()),
             // Before `thread` and `affinity` move in.
             domain: AtomicU8::new(first_domain(thread.is_none(), &affinity)),
-            affinity,
+            affinity: Affinity::new(affinity),
+            spawn_pin,
             address_space,
             thread,
             core,
@@ -608,6 +821,7 @@ impl Task {
             group: AtomicU64::new(ungrouped()),
             seen_moves: AtomicU64::new(0),
             vlag: AtomicI64::new(0),
+            request_ns: AtomicU64::new(0),
             sum_exec: AtomicU64::new(0),
             baseline: AtomicU64::new(0),
             window_end: AtomicU64::new(0),
@@ -656,12 +870,14 @@ impl Task {
             // An adopted context is running as it is made.
             on_cpu: AtomicBool::new(true),
             in_call: AtomicBool::new(false),
+            copy_poison: PoisonRecord::new(),
             wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
             // is the one thing that genuinely cannot move: it *is* that
             // processor's context. An affinity of exactly its own processor
             // says so in the same terms as everything else.
-            affinity: CpuSet::of(cpu),
+            affinity: Affinity::new(CpuSet::of(cpu)),
+            spawn_pin: None,
             // The boot task and the idle tasks are the kernel's own and have
             // no user half to translate.
             address_space: None,
@@ -673,6 +889,7 @@ impl Task {
             group: AtomicU64::new(ungrouped()),
             seen_moves: AtomicU64::new(0),
             vlag: AtomicI64::new(0),
+            request_ns: AtomicU64::new(0),
             sum_exec: AtomicU64::new(0),
             baseline: AtomicU64::new(0),
             window_end: AtomicU64::new(0),
@@ -932,6 +1149,9 @@ impl Task {
     pub(crate) fn set_state(&self, state: u8) {
         let saved = <arch::Irq as IrqControl>::disable();
         let before = self.state.swap(state, Ordering::AcqRel);
+        if state == DEAD && before != DEAD {
+            self.uncount_pinned();
+        }
         if before != RUNNABLE && state == RUNNABLE {
             self.join_group();
         } else if before == RUNNABLE && state != RUNNABLE {
@@ -1105,21 +1325,17 @@ impl Task {
         }
     }
 
-    /// Whether it may be moved to another CPU.
-    /// Whether it is confined to a single processor, which is what makes it
-    /// ineligible for stealing or balancing.
-    pub(crate) fn is_pinned(&self) -> bool {
-        self.affinity.len() <= 1
+    /// The processors it may run on, as stored: a consistent copy, whatever
+    /// lock the caller holds (see [`Affinity`]). Placement asks
+    /// `crate::sched::mask_for`, which adds the fallback (L.sched.123).
+    pub fn affinity(&self) -> CpuSet {
+        self.affinity.read()
     }
 
-    /// Whether `cpu` is one of the processors it may run on.
+    /// Whether `cpu` is one of the processors its stored mask names: one
+    /// word, for the placers' quick yes (`crate::sched::allowed`).
     pub(crate) fn may_run_on(&self, cpu: usize) -> bool {
         self.affinity.contains(cpu)
-    }
-
-    /// The processors it may run on.
-    pub(crate) fn affinity(&self) -> &CpuSet {
-        &self.affinity
     }
 
     /// The slot of its scheduling domain, or `domains::EXEMPT`.
@@ -1152,6 +1368,14 @@ impl Task {
     /// queue it was taken off, in the switch away from it.
     pub(crate) fn take_evicted(&self) -> bool {
         self.evicted.swap(false, Ordering::Relaxed)
+    }
+
+    /// Store a new mask. Only `crate::sched::set_affinity`, under the lock
+    /// of the queue that owns it, with interrupts masked (L.sched.97); and
+    /// the boot check of the kernel-thread refusal's door for its own
+    /// kernel threads, by the same function.
+    pub(super) fn store_affinity(&self, set: CpuSet) {
+        self.affinity.write(set);
     }
 
     /// The queue that owns it.
@@ -1288,7 +1512,20 @@ impl Task {
             weight: self.weight.load(Ordering::Relaxed),
             vlag: self.vlag.load(Ordering::Relaxed),
             sum_exec: self.sum_exec.load(Ordering::Relaxed),
+            request_ns: self.request_ns.load(Ordering::Relaxed),
         }
+    }
+
+    /// The slice it asks for, or zero for its queue's.
+    pub fn request_ns(&self) -> u64 {
+        self.request_ns.load(Ordering::Relaxed)
+    }
+
+    /// Give it a new slice request: the record it is enqueued with next. A
+    /// queue holding it is told by [`crate::sched::set_request`], under that
+    /// queue's lock, which is the only other caller than a task's making.
+    pub(crate) fn set_request(&self, request_ns: u64) {
+        self.request_ns.store(request_ns, Ordering::Relaxed);
     }
 
     /// Give it a new scheduling weight.
@@ -1306,6 +1543,7 @@ impl Task {
         self.weight.store(state.weight, Ordering::Relaxed);
         self.vlag.store(state.vlag, Ordering::Relaxed);
         self.sum_exec.store(state.sum_exec, Ordering::Relaxed);
+        self.request_ns.store(state.request_ns, Ordering::Relaxed);
     }
 
     /// Charge it for time on a CPU.
@@ -1517,5 +1755,15 @@ impl Task {
     /// processor's flag has it.
     pub(crate) fn in_call(&self) -> bool {
         self.in_call.load(Ordering::Relaxed)
+    }
+
+    /// Record a system call's copy that consumed poison ([`PoisonRecord::record`]).
+    pub(crate) fn record_copy_poison(&self, page: u64, at: Option<u64>) -> bool {
+        self.copy_poison.record(page, at)
+    }
+
+    /// Take the poison record ([`PoisonRecord::take`]).
+    pub(crate) fn take_copy_poison(&self) -> Option<(u64, Option<u64>)> {
+        self.copy_poison.take()
     }
 }

@@ -45,6 +45,8 @@ pub struct Meminfo {
     pub shmem: u64,
     /// `Slab`: the kernel's own small-object allocator.
     pub slab: u64,
+    /// `SReclaimable`: of `Slab`, what a reclaim can give back.
+    pub s_reclaimable: u64,
 }
 
 /// Append the whole file.
@@ -61,6 +63,7 @@ pub fn render(out: &mut Vec<u8>, info: &Meminfo) {
         ("Dirty", info.dirty),
         ("Shmem", info.shmem),
         ("Slab", info.slab),
+        ("SReclaimable", info.s_reclaimable),
     ];
     for (label, kib) in lines {
         line(out, label, kib);

@@ -52,6 +52,34 @@ pub(crate) unsafe fn outl(port: u16, value: u32) {
     }
 }
 
+/// Write a 16-bit word to an I/O port.
+///
+/// # Safety
+///
+/// (FIRMWARE) As [`outb`]: the caller must know what device is behind
+/// `port`; its one caller writes the PM1 control blocks firmware named.
+pub(crate) unsafe fn outw(port: u16, value: u16) {
+    // SAFETY: (FIRMWARE) the caller guarantees the port and the value.
+    unsafe {
+        asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
+    }
+}
+
+/// Read a 16-bit word from an I/O port.
+///
+/// # Safety
+///
+/// (FIRMWARE) As [`inb`]; its one caller reads the PM1 control blocks
+/// firmware named, which reading does not change.
+pub(crate) unsafe fn inw(port: u16) -> u16 {
+    let value: u16;
+    // SAFETY: (FIRMWARE) the caller guarantees the port.
+    unsafe {
+        asm!("in ax, dx", out("ax") value, in("dx") port, options(nomem, nostack, preserves_flags));
+    }
+    value
+}
+
 /// Halt until the next interrupt.
 pub(crate) fn hlt() {
     // SAFETY: (SYSREG) `hlt` at ring 0 stops the CPU until an interrupt arrives and has
@@ -523,11 +551,7 @@ pub(crate) fn flush_tlb_including_global() {
     // but this is the operation the rest of the kernel means by "flush" and
     // leaving it out would make the correctness of this function depend on a
     // footnote rather than on two instructions that plainly do it.
-    let cr3: u64;
-    // SAFETY: (TRANSLATE) reading CR3 has no side effects.
-    unsafe {
-        asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
-    }
+    let cr3 = read_cr3();
     // SAFETY: (TRANSLATE) writing back the value just read changes no mapping; its only
     // effect is to flush the TLB, which is the point.
     unsafe {
@@ -1177,6 +1201,17 @@ pub(crate) unsafe fn write_cr4(value: u64) {
     unsafe {
         asm!("mov cr4, {}", in(reg) value, options(nostack, preserves_flags));
     }
+}
+
+/// Read control register 3: the root and, with `CR4.PCIDE` set, the PCID
+/// in bits 11 to 0.
+pub(crate) fn read_cr3() -> u64 {
+    let value: u64;
+    // SAFETY: (SYSREG) reading `CR3` has no side effects.
+    unsafe {
+        asm!("mov {}, cr3", out(reg) value, options(nomem, nostack, preserves_flags));
+    }
+    value
 }
 
 /// Switch to the page tables rooted at `root`.
@@ -1864,7 +1899,7 @@ static CLFLUSH_LINE: AtomicU64 = AtomicU64::new(0);
 
 /// The bytes one `CLFLUSH` covers, asked of `CPUID` the first time only. Two
 /// processors asking at once both store the same answer.
-fn clflush_line() -> u64 {
+pub(crate) fn clflush_line() -> u64 {
     let known = CLFLUSH_LINE.load(Ordering::Relaxed);
     if known != 0 {
         return known;

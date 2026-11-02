@@ -128,6 +128,11 @@ pub(crate) enum Landed {
     /// The same, for a layer surface under the windows: what it draws is
     /// part of what a window's blur is a blur of.
     Behind(Rect),
+    /// All of this rectangle, whatever the commit named: a fullscreen
+    /// window whose buffer is not drawn over the whole of it but scaled to
+    /// fit inside it ([`compositor_render::letterboxed`]), where a part of
+    /// the buffer does not land on the same part of the rectangle.
+    Whole(Rect),
     /// Somewhere this screen cannot place: a subsurface, a cursor surface
     /// that is not the one being drawn, a window that has not been mapped
     /// yet. The whole screen, then, which is the rule the module comment
@@ -201,6 +206,7 @@ impl Told {
                         behind.add(part);
                     }
                 }
+                Landed::Whole(rect) => region.add(rect),
             }
         }
         Heard {
@@ -376,6 +382,10 @@ pub(crate) struct Plan {
     /// Where `debug:overlay`'s counter is and which rewrite of its numbers
     /// it shows, on the screen that draws it.
     pub(crate) overlay: Option<crate::overlay::Stamp>,
+    /// The layer surfaces a fullscreen window hides, by connection and
+    /// `wl_surface`: drawn nowhere on this screen, so what they paint lands
+    /// nowhere either, rather than anywhere.
+    pub(crate) hidden: Vec<(usize, ObjectId)>,
 }
 
 /// One surface a frame draws a blur behind.
@@ -424,6 +434,13 @@ impl Plan {
                 Landed::Behind(at)
             };
         }
+        if self
+            .hidden
+            .iter()
+            .any(|&(client, surface)| named(client, surface))
+        {
+            return Landed::Nowhere;
+        }
         if let Some((_, at)) = self
             .drag_icon
             .filter(|(icon, _)| named(icon.client, icon.surface))
@@ -457,10 +474,32 @@ impl Plan {
             .iter()
             .find(|placed| placed.window == *window)
             .map_or(Landed::Nowhere, |placed| {
-                Landed::In(placed.rect.translate(
+                let at = placed.rect.translate(
                     self.origin.0.saturating_neg(),
                     self.origin.1.saturating_neg(),
-                ))
+                );
+                let bounds = Rect::new(0, 0, i64::from(self.size.0), i64::from(self.size.1));
+                // The buffer's size, which a crop to the window's geometry
+                // may make larger than what is drawn: any difference from
+                // the rectangle is taken as fitted, and too much is only
+                // slow.
+                let fitted = painted.buffer.is_some_and(|(width, height)| {
+                    compositor_render::letterboxed(
+                        placed,
+                        at,
+                        bounds,
+                        (
+                            u32::try_from(width).unwrap_or(0),
+                            u32::try_from(height).unwrap_or(0),
+                        ),
+                    )
+                    .is_some()
+                });
+                if fitted {
+                    Landed::Whole(at)
+                } else {
+                    Landed::In(at)
+                }
             })
     }
 
@@ -477,12 +516,19 @@ impl Plan {
             .values()
             .filter_map(|style| style.border)
             .fold(0, i64::max);
-        let (wide, tall) = self.style.shadow.map_or((0, 0), |shadow| {
+        // The glow is drawn as the shadow is, round the focused window, and
+        // may reach further than it.
+        let reach = |shadow: &compositor_render::Shadow| {
             (
                 shadow.range.saturating_add(shadow.offset.0.abs()),
                 shadow.range.saturating_add(shadow.offset.1.abs()),
             )
-        });
+        };
+        let (shadow, glow) = (
+            self.style.shadow.as_ref().map_or((0, 0), reach),
+            self.style.glow.as_ref().map_or((0, 0), reach),
+        );
+        let (wide, tall) = (shadow.0.max(glow.0), shadow.1.max(glow.1));
         (
             wide.saturating_add(border).max(0),
             tall.saturating_add(border).max(0),

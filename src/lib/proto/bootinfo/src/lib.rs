@@ -836,6 +836,13 @@ pub enum MemKind {
     /// The region the kernel keeps its log in across a reset ([`pstore`]):
     /// RAM, direct-mapped, never free and never reclaimed.
     Pstore = 14,
+    /// A page the loader kept out of use because the boot before retired
+    /// it or a machine-check bank names it (`docs/MACHINE-CHECK-RESTART.md`
+    /// §2.5): never free, never reclaimed, and not RAM to the kernel, so the
+    /// direct map does not translate it and no speculative read reaches a
+    /// poisoned line. Distinct from [`MemKind::Defective`], which is
+    /// firmware's.
+    BadFrame = 16,
 }
 
 impl MemKind {
@@ -863,7 +870,10 @@ impl MemKind {
     /// confusing one — it appears as the page table pool running out.
     #[must_use]
     pub const fn is_ram(self) -> bool {
-        !matches!(self, MemKind::Reserved | MemKind::Mmio | MemKind::Defective)
+        !matches!(
+            self,
+            MemKind::Reserved | MemKind::Mmio | MemKind::Defective | MemKind::BadFrame
+        )
     }
 }
 

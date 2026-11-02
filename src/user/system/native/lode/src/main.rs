@@ -30,6 +30,7 @@ mod front;
 mod handout;
 mod heap;
 mod pstore;
+mod quarantine;
 mod seat;
 mod serve;
 mod snapshot;

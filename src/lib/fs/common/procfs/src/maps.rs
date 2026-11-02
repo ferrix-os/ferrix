@@ -25,7 +25,8 @@
 
 use alloc::vec::Vec;
 
-use crate::text::{pad_to, put};
+pub use crate::text::Full;
+use crate::text::{push_within, put_within};
 
 /// The kernel's pointer width, which decides the name column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,19 @@ impl Width {
         };
         25 + pointer * 6 - 1
     }
+}
+
+/// The most bytes [`render`] writes for one line whose name is `name_len`
+/// bytes long: every number at its widest, the padding, and every byte of the
+/// name escaped. A caller that reserves this much first appends the line with
+/// no allocation.
+#[must_use]
+pub const fn longest_line(name_len: usize) -> usize {
+    // "start-end " at 16 hex digits each, "rwxp", " offset major:minor inode "
+    // at 16 + 8 + 8 + 20 digits: 95 bytes, past any padding; then a space,
+    // the name four bytes to one, and the newline.
+    let numbers = 16 + 1 + 16 + 1 + 4 + 1 + 16 + 1 + 8 + 1 + 8 + 1 + 20 + 1;
+    numbers + 1 + 1 + name_len.saturating_mul(4)
 }
 
 /// One line: a region of an address space.
@@ -89,41 +103,52 @@ pub struct Mapping<'a> {
     pub name: Option<&'a [u8]>,
 }
 
-/// Append one line, newline included.
-pub fn render(out: &mut Vec<u8>, mapping: &Mapping<'_>, width: Width) {
+/// Append one line, newline included, within `out`'s capacity: nothing
+/// here allocates. Reserve [`longest_line`] for the name first.
+///
+/// # Errors
+///
+/// [`Full`] when the line would not fit in what `out` has room for; part of
+/// it may have been written, and the caller abandons the line.
+pub fn render(out: &mut Vec<u8>, mapping: &Mapping<'_>, width: Width) -> Result<(), Full> {
     let line_start = out.len();
-    put(
+    put_within(
         out,
         format_args!("{:08x}-{:08x} ", mapping.start, mapping.end),
-    );
-    out.extend_from_slice(&[
-        letter(mapping.read, b'r'),
-        letter(mapping.write, b'w'),
-        letter(mapping.execute, b'x'),
-        if mapping.shared { b's' } else { b'p' },
-    ]);
-    put(
+    )?;
+    push_within(
+        out,
+        &[
+            letter(mapping.read, b'r'),
+            letter(mapping.write, b'w'),
+            letter(mapping.execute, b'x'),
+            if mapping.shared { b's' } else { b'p' },
+        ],
+    )?;
+    put_within(
         out,
         format_args!(
             " {:08x} {:02x}:{:02x} {} ",
             mapping.offset, mapping.major, mapping.minor, mapping.inode
         ),
-    );
+    )?;
     if let Some(name) = mapping.name {
-        pad_to(out, line_start, width.pad_until());
-        out.push(b' ');
+        let target = line_start.saturating_add(width.pad_until());
+        while out.len() < target {
+            push_within(out, b" ")?;
+        }
+        push_within(out, b" ")?;
         // `seq_path(m, path, "\n")`: a newline in a file name would split the
         // line, so it is the one byte escaped, as a backslash and three octal
         // digits.
-        for &byte in name {
-            if byte == b'\n' {
-                out.extend_from_slice(b"\\012");
-            } else {
-                out.push(byte);
+        for (index, part) in name.split(|&byte| byte == b'\n').enumerate() {
+            if index > 0 {
+                push_within(out, b"\\012")?;
             }
+            push_within(out, part)?;
         }
     }
-    out.push(b'\n');
+    push_within(out, b"\n")
 }
 
 /// A permission letter, or `-`.

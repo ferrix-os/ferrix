@@ -769,6 +769,24 @@ package FerrixAarch64Requirements {
             attribute :>> parent = "H.TRAP.3";
             attribute :>> unit = ("arch::aarch64::speculation::midr_of");
         }
+        requirement <'L.aarch64.68'> scrubZeroesThenEvicts : ItemLowLevel {
+            attribute :>> statement = "On AArch64 the scrubber shall stand down where DCZID_EL0.DZP
+                is set; its writes shall be DC ZVA per block of DCZID_EL0.BS
+                over the whole range, then DSB, then the pattern's stores; its
+                eviction DC CIVAC per line of CTR_EL0.DminLine, then DSB SY;
+                it shall count itself a guest for the stand-down where PSCI is
+                not reached through smc or the device tree has a /hypervisor
+                node, and see a hypervisor, for the gate's override, only
+                where PSCI is reached through hvc or that node exists.";
+            attribute :>> criterion = "Build evidence: the facade's host test requires one DC ZVA per
+                block and one DC CIVAC per line over the whole range with the
+                sizes read from the processor; the pinned disassembly.
+                test-scrub on AArch64 (TCG) runs a full sweep with the gate's
+                override, PSCI's hvc making it a guest. A hardware row on an
+                AArch64 board (BACKLOG).";
+            attribute :>> parent = "H.FAIL.9";
+            attribute :>> unit = ("arch::aarch64::scrub::fill_without_reading", "arch::aarch64::scrub::evict_to_coherency", "arch::aarch64::scrub::scrub_ready", "arch::aarch64::scrub::is_guest", "arch::aarch64::scrub::hypervisor_seen", "arch::aarch64::scrub::dczid");
+        }
         requirement <'L.aarch64.42'> defencesAreAppliedAndReadBack : ItemLowLevel {
             attribute :>> statement = "apply shall clear SCTLR_EL1.DSSBS and
                 PSTATE.SSBS on a core that needs the store bypass defence and has

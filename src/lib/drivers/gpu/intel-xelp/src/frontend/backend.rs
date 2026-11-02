@@ -90,7 +90,7 @@ pub struct Facts {
 /// The GPU, as the front end sees it.
 pub trait Backend {
     /// One GEM object's memory: a VMO the process owns. The real back end
-    /// pins it into the device's IOMMU domain at its first bind
+    /// pins it into the device's IOMMU domain at its first bind, mmap or export
     /// (`docs/INTEL-GPU.md` §4.4). Dropping it frees it.
     type Memory;
 
@@ -103,6 +103,19 @@ pub trait Backend {
     ///
     /// `ENOMEM`, or the pin budget's `EDQUOT`.
     fn create_memory(&mut self, bytes: u64) -> Result<Self::Memory, Errno>;
+
+    /// Give `memory` its backing now, if it has none yet: before the front
+    /// end hands the VMO to a program (an mmap, a dmabuf), so that the
+    /// back end, not the program's page faults, chooses the frames, as
+    /// i915's `get_pages` does on first use (`docs/INTEL-GPU.md` §14.4).
+    ///
+    /// # Errors
+    ///
+    /// `ENOMEM`, `EDQUOT`.
+    fn populate(&mut self, memory: &Self::Memory) -> Result<(), Errno> {
+        let _ = memory;
+        Ok(())
+    }
 
     /// A new 4-level PPGTT.
     ///
@@ -205,4 +218,48 @@ pub trait Backend {
     /// calls to the worker, `crate::remote`). Nothing for a back end that
     /// drives the GT itself.
     fn flush(&mut self) {}
+
+    /// The device address GGTT entry `index` points at: the pages of memory
+    /// the firmware bound, which the driver's own copies reach (card0's
+    /// blit into the lit plane, H5 of `docs/GAME-MODE.md` §5.7). `None` for
+    /// an entry not present, or a back end that cannot read the GGTT.
+    fn ggtt_page(&mut self, index: u64) -> Option<u64> {
+        let _ = index;
+        None
+    }
+
+    /// Map `pages`, device addresses a 4 KiB page each, at `address` in
+    /// `vm`, consecutively, with `pat_index`: memory the driver itself
+    /// reaches and no GEM object owns.
+    ///
+    /// # Errors
+    ///
+    /// As [`Backend::bind`]; `ENODEV` for a back end without it.
+    fn bind_pages(
+        &mut self,
+        vm: VmId,
+        address: u64,
+        pages: &[u64],
+        pat_index: u8,
+    ) -> Result<(), Errno> {
+        let _ = (vm, address, pages, pat_index);
+        Err(Errno::ENODEV)
+    }
+
+    /// Run `commands` in the context's ring itself as `request`, with the
+    /// ring's privilege: the driver's own work, never a client's. It
+    /// completes through [`Backend::completed`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Backend::submit`]; `ENODEV` for a back end without it.
+    fn submit_commands(
+        &mut self,
+        context: HwContext,
+        commands: &[u32],
+        request: RequestId,
+    ) -> Result<(), SubmitError> {
+        let _ = (context, commands, request);
+        Err(SubmitError::Failed(Errno::ENODEV))
+    }
 }

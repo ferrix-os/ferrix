@@ -32,8 +32,9 @@ pub trait Clean {
 }
 
 /// Writes noted and not cleaned that one record holds before it cleans
-/// them early. More than any one change of a unit's tables makes: a map
-/// writes at most one entry per level, an attach three.
+/// them early. A map writes at most one entry per level and an attach
+/// three, so those fit; a run's take-down (`mm::unmap_io_run`) may clear
+/// up to 512 entries and cleans early every 8.
 const SPANS: usize = 8;
 
 /// The writes a non-snooping walker could read that have not been cleaned

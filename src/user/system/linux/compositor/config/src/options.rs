@@ -295,6 +295,9 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     // hyprix's own (docs/DESKTOP.md §6.5): 0 draws no blur on a screen
     // drawn in software, where it costs most of the frame.
     ("hyprix:blur_in_software", Int(1)),
+    // hyprix's own: the colour laid behind a layer surface whose rule asks
+    // for a blur, on a screen that draws none; -1 (unset) lays nothing.
+    ("hyprix:blur_scrim", Int(-1)),
     // hyprix's own (docs/DESKTOP.md §2.2), not Hyprland's: a floating
     // window that draws its own frame -- client-side decorations, a window
     // geometry inside its buffer -- is drawn with no border, shadow or

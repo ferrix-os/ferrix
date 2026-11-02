@@ -279,11 +279,16 @@ ferrix_paranoid_common:
     // shares with the next #DB. Its frame moves to the task's kernel stack --
     // exactly where the processor would have put it without the IST -- and
     // takes the ordinary path, whose CS test is right for a ring-3 frame.
+    // A machine check from ring 3 too, as Linux's exc_machine_check_user:
+    // its SIGBUS is a signal like any other (docs/MACHINE-CHECK.md 3.3).
+    // Vectors 1 and 18 only; MCIP stays set until the banks are read there.
     testb $3, 144(%rsp)
     jz 1f
     cmpq $1, 120(%rsp)
     je 4f
-    // An NMI or machine check from ring 3: the branch history the program
+    cmpq $18, 120(%rsp)
+    je 4f
+    // An NMI from ring 3: the branch history the program
     // left, overwritten where the BHI plan says, and fenced on both ways out
     // of the test, before the handler's first indirect branch. Its registers
     // are not cleared (SPECULATION.md section 9).
@@ -538,6 +543,17 @@ extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
     if frame.vector == DEBUG as u64 {
         let _ = super::paranoid::take_debug_status();
     }
+    // A program's machine check, moved here by the paranoid entry: its banks
+    // read and `MCIP` cleared first, before the trap path's accounting and
+    // with interrupts still masked. Either the program resumes as it was, or
+    // the frame goes on marked for `SIGBUS`, or the kernel stops
+    // (`L.x86_64.228`).
+    if frame.vector == MACHINE_CHECK as u64
+        && frame.came_from_user()
+        && !super::mce::from_user(frame)
+    {
+        return;
+    }
     // A checked MSR read the processor refused (`L.x86_64.188`), or the
     // checked MSR write (`L.x86_64.192`): a `#GP` from ring 0 at exactly
     // `cpu::ferrix_rdmsr_checked`'s `rdmsr` or `cpu::ferrix_wrmsr_checked`'s
@@ -689,6 +705,10 @@ pub(crate) fn report_trap(frame: &TrapFrame) {
     );
     if frame.vector == 14 {
         println_unlogged!("  cr2      {:#018x}", fault_address());
+    }
+    // A machine check that stops: its banks, the reason (`L.x86_64.227`).
+    if frame.vector == MACHINE_CHECK as u64 {
+        super::mce::report();
     }
     println_unlogged!("  rip      {:#018x}  cs  {:#x}", frame.rip, frame.cs);
     println_unlogged!("  rsp      {:#018x}  ss  {:#x}", frame.rsp, frame.ss);

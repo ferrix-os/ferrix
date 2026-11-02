@@ -193,7 +193,8 @@ impl<D: WriteDevice> WriteVolume<D> {
             if let Some(node) = self.dirty.remove(&bytenr) {
                 // The clean nodes are a cache, and this one is on the disk:
                 // with no room for it, it is read again when next wanted.
-                let _ = fallible::insert(&mut self.clean, bytenr, node);
+                // FALLIBLE: the clean nodes' own insert.
+                let _ = self.clean.insert(bytenr, node);
             }
         }
         Ok(())

@@ -226,7 +226,7 @@ package FerrixItemRequirements {
             attribute :>> statement = "A frame taken out of a translation, of a user
                 address space or of the kernel's, shall not return to the frame
                 allocator until the TLB invalidation that covers it has been made on
-                every processor that may hold the translation.";
+                every processor that may still use the translation.";
             attribute :>> criterion = "A frame an unmap, a decommit or a replace
                 takes out of a translation that another processor has cached is
                 still allocated until that processor's shootdown returns: 0 frames
@@ -662,6 +662,31 @@ package FerrixItemRequirements {
                 quiet phases are within theirs; until a phase is asserted there, it
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
+        }
+        requirement <'H.SCHED.18'> anUnstableCoreLeavesServiceWhole : ItemHighLevel {
+            doc /* docs/CORE-QUARANTINE.md (customer, 2026-10-30, item 6;
+                consultant OK IF Q1-Q14, ledger 4856). */
+            attribute :>> statement = "A processor taken out of service shall be
+                left by every task and every movable interrupt, with no task
+                stranded on it and none run there, no interrupt lost, none
+                delivered there once its messages are moved -- between the
+                park and the move it may still take one, and runs its handler
+                -- no stale translation kept when it returns, and a park it
+                never acknowledges undone by its deadline; only root, through
+                cpuN/online, and lode, through the processor service token,
+                may ask, each change audited.";
+            attribute :>> criterion = "cargo xtask test-quarantine and
+                test-quarantine-smp2 (KVM): lode takes the target out after
+                eleven core-scoped corrected records; nothing runs or is
+                drained there; a reader blocked on an empty pipe is re-homed
+                at its wake; its interrupts are moved and none lands there
+                under disk traffic; the surface says so; the refused writes
+                are refused; root brings it back; fifty times out and back
+                under load. Negative controls (ledger 4932): the ACTIVE bit
+                never cleared, the re-home removed, the retarget skipped,
+                the park loop with interrupts masked, the capability check in
+                the writer's own namespace -- each fires.";
+            attribute :>> parent = "ASR-8";
         }
         requirement <'H.SCHED.20'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
             attribute :>> statement = "A kernel shall run the scheduling classes its
@@ -1451,6 +1476,23 @@ package FerrixItemRequirements {
                 comes back (the `watermark` line).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
+        requirement <'H.QUOTA.22'> machineOomKillIsBounded : ItemHighLevel {
+            attribute :>> statement = "A user page fault refused for want of memory
+                with no job's memory limit full shall take back clean file cache
+                anywhere and retry, a bounded number of times; once that gives back
+                nothing or the bound is spent, it shall end the live process with
+                the most resident memory anywhere, never pid 1, count the kill in
+                that process's job and every job above it, and retry; it shall make
+                at most one such kill within a grace period while a victim's memory
+                comes back, and fail as it would without a kill after a bounded
+                number of answers.";
+            attribute :>> criterion = "Stage 5's quota check: with reclaims left and
+                clean cache the fault retries and kills nobody; with them spent the
+                process with the most resident pages among three in two jobs is
+                ended and counted in its job alone; a second kill is not made
+                while it ends or within the grace; a fault's last answer refuses.";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
     }
 
     package Audit {
@@ -1663,6 +1705,147 @@ package FerrixItemRequirements {
                 s and at most 60 s later, quoting the panic; the same boot without the
                 option and with ferrix.panic=Reset says it halts and prints no reset
                 line.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.8'> machineChecksThatDoNotStop : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK.md (customer, 2026-10-30; consultant M10).
+                H.FAIL.1 stops on every failed consistency check; these are the
+                hardware errors that are not one: the kernel's own state is
+                intact, and only a program's page or nothing at all is lost. */
+            attribute :>> statement = "On x86-64 with recovery on, the kernel
+                shall go on after a machine check only where every record is,
+                by its vendor's rules (L.x86_64.233): on Intel's, corrected,
+                uncorrected with no action required, action-optional with the
+                interrupted code restartable, another processor's
+                action-required record, or one action-required record a ring-3
+                program consumed at a usable address; on AMD's and Hygon's,
+                corrected, deferred, or one action-required record a ring-3
+                program consumed with EIPV at a usable address where the
+                processor reports SUCCOR, the program signalled, or ended where
+                RIPV is clear or TCC set; on any other vendor's, corrected. It
+                shall then retire the frame of each uncorrected record with a
+                usable address (a deferred one only by PhysAddrV), never hand it
+                out again, and end or signal that program -- a program whose
+                restartable load consumed a clean cached page goes on unsignalled,
+                as H.FAIL.11 says; a system call's copy that consumed poison goes
+                on as H.FAIL.10 says; every other machine check stops as
+                H.FAIL.1.";
+            attribute :>> criterion = "L.x86_64.221-232, L.x86_64.249-253 and L.mm.91-92
+                each verified; test-mce and its five recovery modes pass under KVM
+                and TCG; test-mce-cmci's modes pass under TCG on QEMU with patch
+                0008 (docs/MACHINE-CHECK-CMCI.md). test-mce-driver's Own, Kill and
+                Bystander: a ring-3 driver that consumes poison ends alone, status
+                135, its frame retired and left unread (docs/MACHINE-CHECK-DRIVER.md;
+                devmgr's restart the evidence's environment)";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.9'> theScrubberTouchesOnlyFreeMemory : ItemHighLevel {
+            doc /* docs/RAM-SCRUBBER.md (customer, 2026-10-30, item 7; consultant NOT YET ledger 5045, OK IF ledger 5057). */
+            attribute :>> statement = "The RAM scrubber shall touch no frame in use, make no
+                allocation fail but for the window of one frame's test in
+                which two requests of one order meet the last two free blocks
+                of it, never halt the machine where the firmware reports that
+                the memory corrects errors, and never take more than its share
+                of the retired set; a frame that fails its pattern test twice
+                shall not be handed out again.";
+            attribute :>> criterion = "test-scrub on x86-64 and AArch64: a full sweep of free memory,
+                no allocation failed, nothing tested while busy, the
+                stand-down without the gate's override; ARMv7-A's stand-down;
+                mm/check.rs's check_scrubber, run only where the scrubber
+                itself runs; L.mm.101-108, L.x86_64.243, L.aarch64.68,
+                L.armv7a.29, L.object.252 and L.syscall.24 each with its
+                check (L.object.253 released unwritten, ledger 5140 (3)). An
+                ECC machine whose firmware reports Other or Unknown is the
+                SAFETY-MANUAL's residual.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.10'> aCopyThatConsumesPoisonFailsTheCall : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-COPY.md (customer, 2026-10-30, machine-check item 2; consultant OK IF ledger 5216). */
+            attribute :>> statement = "On x86-64 with recovery on, a system call's
+                read of a program's memory that consumes poison shall end with
+                the call failing (or, for a write that already stored the pages
+                before it, ending short at that page), the frame retired and,
+                where the memory is the
+                caller's own and it has signals, SIGBUS BUS_MCEERR_AR at the
+                page; the kernel shall resume only at the copy's own exit, never
+                inside the copy past the poison, and stop in every other ring-0
+                case it stops in under H.FAIL.8.";
+            attribute :>> criterion = "test-mce-copy under KVM with AMD's records (the
+                guest has SUCCOR), at one and two processors: the victim's write
+                fails EFAULT or ends short at the poisoned page, its handler gets
+                SIGBUS code 4 at the injected page's user address, the frame is
+                retired and the kernel goes on; its modes stop where they must;
+                the TCG rows and, on an AMD host, Intel's records are
+                fail-closed rows only (TCG runs rep movsb in one step and
+                reports no recovery; Intel's model has no MCG_SER_P there), so
+                Intel's recovery is shown by stage 3's tables and frame;
+                L.x86_64.244-246 and L.syscall.25-26 each with its check. test-mce-driver-copy: a driver's
+                channel_write of its poisoned page fails, the driver ends with
+                status 135";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.12'> aBadFrameStaysOutAcrossAWarmReset : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md slice 8a (customer, 2026-10-30, item 8; consultant OK IF ledger 5467, code OK IF ledger 5487). Arm has nothing that retires frames today. Residual: a table frame the boot info area or firmware holds by the time the loader reads the table is not kept out (said). TCG only; KVM injection across a reset not tried. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist. */
+            attribute :>> statement = "In an image built bad_frames=persist, whatever its
+                command line, after a warm reset, the kernel shall hand out no frame the
+                boot before retired, nor the frame of an uncorrected record the
+                machine check named, where the loader marked it left out (the
+                assumption of use: the loader marks exactly the frames of the
+                version-3 table, the banks and the event log's set, and never
+                drops one).";
+            attribute :>> criterion = "L.console.58-59, L.mm.109-110 and L.x86_64.254 each
+                verified; test-mce-restart under TCG with Intel's records: a fatal
+                record under ferrix.panic=reset, then boot 2's loader says boot 1
+                ended in a machine check and keeps the page out (left and table),
+                its kernel leaves the frame out and its poll finds it already
+                retired; test-mce-restart-retired: a frame a recovered machine
+                check retired kept out of boots 2 and 3 from the table alone. TCG
+                only; KVM injection across a reset not tried; xtask check: the persist loader carries no
+                ferrix.badframes on any architecture, the choice loader does.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.13'> aBadFrameStaysOutAcrossAPowerCycle : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-RESTART.md §9, slice 8b (customer, 2026-10-30, item 8; consultant design OK IF ledger 5511). The kernel is unchanged: the loader (outside the item) keeps the set in the boot disk's event log and marks it left out (AoU-39). Residuals: a frame retired in a run that ended by a power cut or a power-off before any warm reset is not in the set; another boot disk or a reinstall starts with an empty set; an older writer (a loader or inspection tool from before 8b) drops the set on its first header write; a set frame firmware holds is not kept out (said); TCG only; nothing retires frames on Arm. A bad_frames = choice image (desktop, no claim; MACHINE-CHECK-RESTART §10, ledger 5579) gives it only with ferrix.badframes absent or persist. */
+            attribute :>> statement = "In an image built bad_frames=persist, whatever its
+                command line, after a power cycle, the kernel shall hand out no frame
+                of the boot disk's event-log bad-frame set, where the loader marked
+                it left out (AoU-39).";
+            attribute :>> criterion = "L.mm.110 verified; test-mce-restart-power under TCG
+                with Intel's records: a frame a recovered machine check retired is
+                kept in the event log by boot 2's loader, kept out of a cold boot 3
+                after a power cut from the log alone, nothing written by boots 3 and
+                4, and gone from a cold boot 5 after the host's clear-bad-frames;
+                an attempt whose victim page firmware holds at boot 2's table read
+                or boot 3's log read (the loader's exact in-use line, the frame
+                still in the log) is inconclusive and made again from a fresh
+                disk, at most 3, all 3 inconclusive failing; with ferrix.badframes=off
+                on the command line, ignored. xtask check: the persist loader carries
+                no ferrix.badframes on any architecture, the choice loader does. TCG
+                only.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        requirement <'H.FAIL.11'> aCleanCachedPageCostsADiskRead : ItemHighLevel {
+            doc /* docs/MACHINE-CHECK-PAGECACHE.md (customer, 2026-10-30, machine-check item 3; consultant OK IF ledger 5294). */
+            attribute :>> statement = "On x86-64 with recovery on, poison in a clean
+                page-cache frame shall cost a disk read and nothing else: a read
+                that consumes it refilled from the disk and answered, a program
+                whose restartable load consumed it faulting the page in again
+                without a signal, the poll dropping it first; a page that is not
+                clean -- or a clean one held still at that moment by a write, a
+                truncation, a writeback or a reclaim of its file -- shall never be
+                dropped or refilled (its read fails EIO, its mapper is signalled
+                as H.FAIL.8 says), and a frame that cannot be retired shall never
+                be taken.";
+            attribute :>> criterion = "test-mce-pagecache's read and mapped modes under
+                KVM with AMD's records (the read answered with the disk's bytes,
+                the mapper unsignalled), its dirty modes on a memfd's pages under
+                KVM (the read failing EIO or ending short exactly at the poisoned
+                page, the mapper SIGBUS), its poll mode with Intel's
+                UCNA record under TCG (the page dropped before it is read), and
+                test-mce-copy-file under KVM (the copy fails, SIGBUS, the page
+                dropped), each frame retired; the TCG copy rows fail-closed only;
+                stage 12's poison check (the dirty disk page among its cases);
+                L.object.259-261 and L.x86_64.247-248 each with its check.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
     }

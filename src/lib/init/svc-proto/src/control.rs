@@ -79,6 +79,11 @@ pub enum Call {
         slice: Option<String>,
         /// The processes.
         pids: Vec<u32>,
+        /// Whether the scope is a session of the machine's own seat: the
+        /// graphical session `sessiond` starts, or `login`'s on the console.
+        /// Root's word alone (`docs/INIT.md` §10.1); its processes, and the
+        /// scopes a user makes of them, may then turn the machine off.
+        seat: bool,
     },
 }
 
@@ -379,8 +384,15 @@ impl Call {
                 w.strs(assignments);
                 w.u8(u8::from(*persistent));
             }
-            Call::Scope { unit, slice, pids } => {
-                w.u8(18);
+            Call::Scope {
+                unit,
+                slice,
+                pids,
+                seat,
+            } => {
+                // A seat's scope has a tag of its own, so a plain scope is
+                // the bytes it always was.
+                w.u8(if *seat { 19 } else { 18 });
                 w.str(unit);
                 w.opt_str(slice.as_deref());
                 w.len(pids.len());
@@ -424,7 +436,7 @@ impl Call {
                 assignments: r.strs()?,
                 persistent: r.flag()?,
             },
-            18 => {
+            tag @ (18 | 19) => {
                 let unit = r.str()?;
                 let slice = r.opt_str()?;
                 let count = r.len()?;
@@ -432,7 +444,12 @@ impl Call {
                 for _ in 0..count {
                     pids.push(r.u32()?);
                 }
-                Call::Scope { unit, slice, pids }
+                Call::Scope {
+                    unit,
+                    slice,
+                    pids,
+                    seat: tag == 19,
+                }
             }
             tag => return Err(DecodeError::Tag(tag)),
         };

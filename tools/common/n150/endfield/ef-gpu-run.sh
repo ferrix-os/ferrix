@@ -11,6 +11,7 @@
 #   ef-gpu-run.sh report   one full report now
 #   ef-gpu-run.sh stop     the watcher stopped; with "stop all" also the
 #                          prefix's wineserver (the launcher and the game)
+#                          and a game Steam started (its reaper's tree)
 #
 # The report says: the launcher's and the game's processes; who holds the
 # render node open (in the split every DXVK process opens it once, because
@@ -175,6 +176,22 @@ stop)
     if [ "${2:-}" = all ]; then
         su ferrix -c "WINEPREFIX=$pfx /data/dwproton/files/bin/wineserver -k"
         echo "ef-gpu-run.sh: wineserver -k sent"
+        # Started from Steam (/data/steam-ef/40-play.sh) the game runs under
+        # Steam's reaper and Proton's own wineserver, which the -k above does
+        # not reach (2026-10-30: the game kept running). End that launch's
+        # tree: the reaper, Proton, every Wine process and wineserver. The
+        # shell lines are left out, since a pattern also matches the command
+        # that searches for it.
+        $bb ps -o pid,args > /tmp/ef-stop.ps
+        pids=$($bb grep -E "reaper SteamLaunch AppId=4732690|proton waitforexitandrun|wine64-preloader|wine-preloader|wineserver" /tmp/ef-stop.ps \
+            | $bb grep -v -E "sh -c|grep" | $bb awk '{print $1}')
+        if [ -n "$pids" ]; then
+            $bb kill $pids 2>/dev/null
+            $bb sleep 5
+            left=$($bb ps -o pid,args | $bb grep -E "wine64-preloader|wineserver" | $bb grep -v -E "sh -c|grep" | $bb awk '{print $1}')
+            [ -n "$left" ] && $bb kill -9 $left 2>/dev/null
+            echo "ef-gpu-run.sh: Steam's launch ended ($($bb echo $pids | $bb wc -w) processes)"
+        fi
     fi
     ;;
 *) echo "usage: ef-gpu-run.sh start | watch | report | stop [all]"; exit 2 ;;

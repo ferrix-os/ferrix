@@ -152,3 +152,62 @@ fn nobody_at_a_dead_holders_place_can_unlock() {
         "a client at the dead holder's place covered the screen"
     );
 }
+
+/// A maximized window is drawn as a fullscreen one is: no shadow, and at
+/// `decoration:fullscreen_opacity` rather than see-through when it is not
+/// focused; a floating one beside it keeps both, and a rule's opacity wins.
+#[test]
+fn a_maximized_window_is_neither_shadowed_nor_see_through() {
+    use std::collections::BTreeMap;
+
+    use compositor_config::NoSources;
+    use compositor_layout::{Monitor, MonitorId, Rect, Snap, SnapTarget, State, WindowId};
+
+    let text = "general:layout = floating\n";
+    let config = compositor_config::parse("test", text, &mut NoSources).config;
+    let mut state = State::from_config(&config);
+    let _ = state
+        .add_monitor(Monitor {
+            scale: 1.0,
+            transform: Default::default(),
+            name: "Virtual-1".to_owned(),
+            id: MonitorId(1),
+            rect: Rect::new(0, 0, 1920, 1080),
+            reserved: compositor_layout::Gaps::all(0),
+            description: String::new(),
+            made: <(String, String, String)>::default(),
+        })
+        .unwrap();
+    for id in [1, 2, 3] {
+        let _ = state.open_window(WindowId(id)).unwrap();
+        let _ = state
+            .float_window(WindowId(id), Rect::new(100, 100, 640, 480))
+            .unwrap();
+    }
+    for id in [1, 3] {
+        let _ = state
+            .snap_window(WindowId(id), SnapTarget::To(Snap::Maximized))
+            .unwrap();
+    }
+    let mut styles = BTreeMap::new();
+    let _ = styles.insert(
+        WindowId(3),
+        compositor_render::WindowStyle {
+            opacity: Some(0.5),
+            ..Default::default()
+        },
+    );
+    for id in [1, 2, 3] {
+        super::as_maximized(&mut styles, WindowId(id), &state, 1.0);
+    }
+    let maximized = styles.get(&WindowId(1)).expect("styled");
+    assert!(!maximized.shadow);
+    assert_eq!(maximized.opacity, Some(1.0));
+    assert!(
+        !styles.contains_key(&WindowId(2)),
+        "a floating window is left alone"
+    );
+    let ruled = styles.get(&WindowId(3)).expect("styled");
+    assert_eq!(ruled.opacity, Some(0.5), "a rule's opacity wins");
+    assert!(!ruled.shadow);
+}

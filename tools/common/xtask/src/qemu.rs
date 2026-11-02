@@ -256,6 +256,9 @@ pub(crate) fn judge(
         config_problem(arch, lines),
         qemu.then(|| iommu_problem(lines)).flatten(),
         walk_problem(arch, args, lines),
+        (qemu && !args.amd_vi)
+            .then(|| runs_problem(arch, lines))
+            .flatten(),
         namespace_problem(lines),
         xstate_problem(arch, own_model, lines),
         fault_problem(arch, lines),
@@ -861,6 +864,20 @@ fn walk_problem(arch: Arch, args: &Args, lines: &[String]) -> Option<String> {
         return Some(format!("the VT-d unit never said `{wanted}`"));
     }
     None
+}
+
+/// What stage 10's run check prints once its cases held on a VT-d domain
+/// whose unit takes 2 MiB entries (`src/kernel/src/iommu/blocks_check.rs`).
+const RUNS: &str = "runs: two aligned runs pinned as 2 MiB entries";
+
+/// Why an x86-64 boot under QEMU's VT-d did not run stage 10's 2 MiB run
+/// cases: QEMU's unit always offers `CAP.SLLPS` 2 MiB, so a boot without the
+/// line skipped them.
+///
+/// Verifies: L.iommu.105, L.iommu.106
+fn runs_problem(arch: Arch, lines: &[String]) -> Option<String> {
+    (arch == Arch::X86_64 && !lines.iter().any(|line| line.contains(RUNS)))
+        .then(|| format!("stage 10 never said `{RUNS}`"))
 }
 
 /// What stage 10's PCI check prints after the number of writes outside a
@@ -1549,6 +1566,7 @@ pub(crate) fn watch_to_power_off(
         until,
         watched.ended.powered_off,
         watched.ended.status.code(),
+        power_off_status(arch),
     ) {
         return Err(Error::new(format!(
             "{arch}: {problem}, so what it wrote to /data may not be committed.\n  Serial output \
@@ -1575,6 +1593,7 @@ fn power_off_problem(
     until: &str,
     exited_by_itself: bool,
     code: Option<i32>,
+    expected: i32,
 ) -> Option<String> {
     let after = lines
         .iter()
@@ -1605,16 +1624,66 @@ fn power_off_problem(
              {POWER_OFF_MARKER}: a fault or a reset on the way down, not a power-off"
         ));
     }
-    let expected = match arch {
-        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
-        Arch::AArch64 | Arch::Armv7a => 0,
-    };
     (code != Some(expected)).then(|| {
         format!(
             "QEMU exited with {status} after {POWER_OFF_MARKER}, not the {expected} {arch}'s \
              power-off gives: something else ended the run"
         )
     })
+}
+
+/// The status QEMU exits with at `arch`'s power-off on the gates' line: 33
+/// from x86-64's debug-exit device, 0 from PSCI's `SYSTEM_OFF` on Arm.
+pub(crate) fn power_off_status(arch: Arch) -> i32 {
+    match arch {
+        Arch::X86_64 => DEBUG_EXIT_SUCCESS,
+        Arch::AArch64 | Arch::Armv7a => 0,
+    }
+}
+
+/// [`watch_then`], for a hook that asks the guest to power off as a person
+/// would: after it, QEMU must have exited by itself, with the kernel's
+/// power-off line after `until`, no failure line after that, and status
+/// `expected` (`docs/INIT.md` §10.1's gate in `test-iso`).
+///
+/// # Errors
+///
+/// As [`watch_then`], and when the guest did not power itself off so.
+pub(crate) fn watch_then_powered_off(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+    until: &str,
+    mut at_marker: impl FnMut(&mut Watching<'_>) -> Result<()>,
+    expected: i32,
+) -> Result<Vec<String>> {
+    let watched = watch_hooked(arch, image, kernel, args, until, Some(&mut at_marker))?;
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: `{until}` was not printed within {}s.\n  Serial output is in {}",
+                args.timeout,
+                watched.log.display()
+            )));
+        }
+    }
+    if let Some(problem) = power_off_problem(
+        arch,
+        &watched.lines,
+        until,
+        watched.ended.powered_off,
+        watched.ended.status.code(),
+        expected,
+    ) {
+        return Err(Error::new(format!(
+            "{arch}: {problem}.\n  Serial output is in {}",
+            watched.log.display()
+        )));
+    }
+    Ok(watched.lines)
 }
 
 /// The hook [`watch_then`] runs at the marker.
@@ -2506,6 +2575,19 @@ pub(crate) fn x86_cpu(accelerator: &str) -> String {
     format!("{base},+spec-ctrl,+stibp,+ssbd,+arch-capabilities,+auto-ibrs{clock}{kvm}")
 }
 
+/// The x86-64 `-cpu` model a boot takes: [`Args::x86_cpu`] or
+/// [`x86_cpu_for`]'s, with [`Args::x86_cpu_extra`]'s properties appended.
+fn x86_model(args: &Args, binary: &Path, accelerator: &str) -> String {
+    let model = args
+        .x86_cpu
+        .clone()
+        .unwrap_or_else(|| x86_cpu_for(binary, accelerator));
+    match args.x86_cpu_extra.as_deref() {
+        Some(extra) if !extra.is_empty() => format!("{model},{extra}"),
+        _ => model,
+    }
+}
+
 /// [`x86_cpu`] for the QEMU at `binary`: under TCG before QEMU 9.1, without
 /// SMAP.
 ///
@@ -2818,20 +2900,19 @@ fn qemu_command(
                 // Under a hypervisor, the speculation controls as well, and
                 // under KVM an invariant TSC; see `x86_cpu`.
                 "-cpu",
-                &args
-                    .x86_cpu
-                    .clone()
-                    .unwrap_or_else(|| x86_cpu_for(&binary, &accelerator)),
-                // A controlled way for the guest to end the test: writing 0x10
-                // to port 0xF4 exits QEMU with status 33.
-                "-device",
-                "isa-debug-exit,iobase=0xf4,iosize=0x04",
+                &x86_model(args, &binary, &accelerator),
                 // A VT-d unit for stage 10's IOMMU domains, remapping
                 // interrupts (`INTEL_IOMMU`), unless the boot is
                 // `test-nvrm`'s without.
                 "-device",
                 intel_iommu(args),
             ]);
+            // A controlled way for the guest to end the test: writing 0x10
+            // to port 0xF4 exits QEMU with status 33. Left off for a run
+            // that must power off as a PC does, through ACPI's S5.
+            if !args.no_debug_exit {
+                let _ = command.args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]);
+            }
             attach_intel_gpu_standin(&mut command, args);
             x86_heads(&mut command, args);
             // The image on the first port of q35's AHCI controller, where a
@@ -4343,8 +4424,8 @@ mod tests {
         SUCCESS_MARKER, UNCHECKED_MARKER, X2APIC_ALL, amdvi_problem, blocks_compatibility_format,
         cleaning_problem, config_problem, devmgr_problem, entropy_problem, fallback_problem,
         fault_problem, held_off_problem, iommu_problem, msi_problem, namespace_problem,
-        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
-        unisolated_problem, version_translates, walk_problem, xstate_problem,
+        parse_qemu_version, power_off_problem, queue_problem, remap_problem, runs_problem,
+        send_lines, unisolated_problem, version_translates, walk_problem, xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -4515,7 +4596,14 @@ mod tests {
             POWER_OFF_MARKER,
         ]);
         let problem = |arch, lines: &[String], by_itself, code| {
-            power_off_problem(arch, lines, SUCCESS_MARKER, by_itself, code)
+            power_off_problem(
+                arch,
+                lines,
+                SUCCESS_MARKER,
+                by_itself,
+                code,
+                super::power_off_status(arch),
+            )
         };
         assert_eq!(
             problem(Arch::X86_64, &off, true, Some(33)),
@@ -4912,6 +5000,18 @@ mod tests {
         assert!(
             iommu_problem(&held).is_some(),
             "one behind a unit that only remaps"
+        );
+    }
+
+    #[test]
+    fn an_x86_boot_runs_the_2_mib_cases() {
+        let said = lines(&["  iommu    runs: two aligned runs pinned as 2 MiB entries and more"]);
+        assert_eq!(runs_problem(Arch::X86_64, &said), None);
+        assert!(runs_problem(Arch::X86_64, &lines(&[])).is_some(), "skipped");
+        assert_eq!(
+            runs_problem(Arch::AArch64, &lines(&[])),
+            None,
+            "an SMMUv3 has none"
         );
     }
 

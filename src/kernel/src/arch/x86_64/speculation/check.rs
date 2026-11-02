@@ -358,3 +358,29 @@ pub(super) fn exposure_decisions() -> Result<(), &'static str> {
     }
     Ok(())
 }
+
+/// ERAPS stands in for the in-domain refill only where every `CR3` write
+/// flushes: never on a machine with PCIDs on (`docs/PCID.md` §4). Held two
+/// ways: what the plan decided against the machine-wide flag, and the
+/// decision itself asked again for this processor described as offering
+/// ERAPS, which with `PCIDE` set must say no. With the decision's `CR4` test
+/// taken out, the second fails on a boot offering `+pcid,+eraps`.
+///
+/// Verifies: `L.x86_64.220`
+pub(super) fn eraps_never_beside_pcids() -> Result<(), &'static str> {
+    if super::ERAPS_EMPTIES.load(core::sync::atomic::Ordering::Relaxed) && super::super::pcid::on()
+    {
+        return Err("ERAPS stands in for the return stack refill on a machine with PCIDs on");
+    }
+    let here = super::cpu::read_cr4() & super::CR4_PCIDE != 0;
+    let described = Offered {
+        eraps: true,
+        ..super::offered()
+    };
+    if here && super::eraps_empties_on_switch(&described) {
+        return Err(
+            "the ERAPS decision would claim a processor whose CR3 writes keep translations",
+        );
+    }
+    Ok(())
+}

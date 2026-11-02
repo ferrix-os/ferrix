@@ -121,7 +121,7 @@ fn start(name: &str, uid: u32, console: bool) -> ExitCode {
         say(&format!("login: {name} may not log in"));
         return ExitCode::FAILURE;
     }
-    match session::join(account.uid) {
+    match session::join(account.uid, console) {
         Ok((slice, unit)) => {
             say(&format!("login: {name} in {slice}/{unit}"));
             if console && let Err(why) = session::remember_console(&slice, &unit) {

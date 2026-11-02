@@ -109,7 +109,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixAssurance` | `11-assurance.sysml` | docs/RELIABILITY.md and docs/ASSEMBLY.md: the quality gates, what each one verifies, and what the tests can actually reach. The gates cargo xtask check runs are in CI. Of the xtask boot gates, CI runs test-boot and test-rustc; the ones that need a binary the repository does not carry, a disk judged on the host or a screendump run in the landing gates of docs/BACKLOG.md instead (docs/ROADMAP.md, Continuously). |
 | `FerrixViews` | `12-views.sysml` | How to read the one model as two: what runs today, and what the roadmap still owes. The filters key on the lifecycle keywords every element carries. |
 | `FerrixItemRequirements` | `13-item-requirements.sysml` | The high-level requirements of the certified item (the `core` and `item` rings of docs/certification/ITEM.md): what each subsystem promises at its interface, decomposed from the Security Target's objectives (docs/certification/SECURITY-TARGET.md §4.1 and §8.2) and the safety manual's assumed safety requirements (SAFETY-MANUAL.md §2). The low-level requirements, one per unit of code, go in one file per subsystem after this one. docs/certification/IMPLEMENTATION.md W-8 is the design, and tools/common/check/check-traceability.py the gate that reads these and writes docs/certification/TRACEABILITY.md. |
-| `FerrixObjectRequirements` | `14-object-requirements.sysml` | What each unit of src/kernel/src/object/ does, as `ItemLowLevel` requirements (part 13 defines the format): the core ring's object layer -- what a handle names and how it is dropped, channels, ports, interrupts, I/O mappings, pins, the job quotas, jobs, the core half of a process, and the scoped OOM kill. The handle table itself and the rights arithmetic are `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify H.OBJ.1 to H.OBJ.4 directly; nothing here restates them. |
+| `FerrixObjectRequirements` | `14-object-requirements.sysml` | What each unit of src/kernel/src/object/ does, as `ItemLowLevel` requirements (part 13 defines the format): the core ring's object layer -- what a handle names and how it is dropped, channels, ports, interrupts, I/O mappings, pins, the job quotas, jobs, the core half of a process, and the scoped OOM kill. The handle table itself and the rights arithmetic are `src/lib/kernel/objects` and `src/lib/proto/native-abi`, whose host tests verify H.OBJ.1 to H.OBJ.4 directly; nothing here restates them. L.object.253, reserved for init's grant of the memory scrub token to memscrub, is released unwritten: the grant is ring-3 init's, outside the item, and the item relies on nothing from it (ledger 5140 (3)). |
 | `FerrixSchedRequirements` | `15-sched-requirements.sysml` | What each unit of src/kernel/src/sched/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14's pilot settled how they are cut). The scheduling decision itself is `src/lib/kernel/sched-fair`'s `RunQueue`, an EEVDF queue the kernel's per-processor queue wraps; its host tests are the checks, and each requirement names the kernel function that carries the behaviour into the item as its `unit`. |
 | `FerrixIommuRequirements` | `16-iommu-requirements.sysml` | What each unit of src/kernel/src/iommu.rs and src/kernel/src/iommu/ does, as `ItemLowLevel` requirements (part 13 defines the format): where firmware puts each PCI function's DMA, the units the kernel turns translation on for, the domains a driver pins pages into, the gate a wait on a unit is made through, and the faults a unit records. The pins a program makes through a handle, and the quarantine a dead driver's pins go to, are object/'s (part 14, `L.object.45` to `L.object.49`); this is the domain side under them. |
 | `FerrixMemoryRequirements` | `17-memory-requirements.sysml` | What each unit of the item's memory management does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies), in two id spaces. |
@@ -123,7 +123,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 | `FerrixSigningRequirements` | `26-signing-requirements.sysml` | docs/SIGNING.md is the design (the certification consultant's OK IF at ledger lines 3667 and 3738; the customer's decisions at 3731). Slice S1 builds the verify-only crate `ferrix-sigverify` (src/lib/crypto/sigverify) and the hash it rests on, `ferrix-sha256` (src/lib/crypto/sha256), both in the item ring (certification-item.json's crates). What the UEFI loader, init's configuration verifier and devmgr do with the verifier's answer is theirs, and gets ids in their own slices (S4, S8, S9). |
 
-27 files, 150 packages, 8091 elements, 220 relations. Model digest `24f07ff04d754237`.
+27 files, 152 packages, 8653 elements, 220 relations. Model digest `234174927d287bc2`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -249,7 +249,7 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.14` | The kernel's own frame allocator, heap and address arena shall hand each frame, block and range to one holder at a time, and shall never hand out frame 0. | Stage 2's memory check finds two frames distinct, a 16-frame block 16-frame aligned, frame 0 neither managed nor handed out, a Box, a 4096-entry Vec and a 2048-key BTreeMap each holding what was put in it, and two arena ranges distinct, inside the arena and two guard pages apart. | `O.ISOLATE, ASR-1` |
 | `H.MEM.15` | A mapping the kernel makes in its own address space shall translate each page to the frame or register asked for, with the permissions and memory type asked for. | Each page of an 8-page arena range translates to a frame, none to its neighbour's; a page protected read-only reads back not writable in the descriptors and still translates; a device window at offset 0x40 translates to the register asked for, offset included, as device memory and not executable, and is gone once unmapped. | `O.ISOLATE, ASR-1` |
 | `H.MEM.16` | After a fork, a write by the child to a MAP_SHARED mapping shall be visible to the parent, and its write to a MAP_PRIVATE mapping shall not. | The `shared` program exits 62 (its MAP_SHARED write reached the parent and its MAP_PRIVATE write did not). | `O.ISOLATE, ASR-1` |
-| `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may hold the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
+| `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may still use the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
 | `H.MEM.18` | The kernel shall refuse to map a device window or a native VMO executable into a user address space, and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
 
@@ -4064,7 +4064,7 @@ flowchart LR
 | `L.object.181` | `aReapedPidFindsNothing` | — | — | — |
 | `L.object.100` | `theKillIsScoped` | — | — | — |
 | `L.object.101` | `theLargestIsChosen` | — | — | — |
-| `L.object.102` | `noLimitFullNoKill` | — | — | — |
+| `L.object.102` | `noLimitFullKillsMachineWide` | — | — | — |
 | `L.object.103` | `anEndedVictimIsEmptied` | — | — | — |
 | `L.object.106` | `cpuIsChargedUp` | — | — | — |
 | `L.object.184` | `burstCarriesUnusedQuota` | — | — | — |
@@ -4096,6 +4096,11 @@ flowchart LR
 | `L.object.249` | `aSealedJobsStartsStayInside` | — | — | — |
 | `L.object.250` | `sealedAsMade` | — | — | — |
 | `L.object.251` | `aSealedMemberCreatesInside` | — | — | — |
+| `L.object.252` | `theMemoryScrubToken` | — | — | — |
+| `L.object.259` | `aPoisonedCachedPageIsDroppedOnlyClean` | — | — | — |
+| `L.object.260` | `aCacheReadAnswersItsPoison` | — | — | — |
+| `L.object.261` | `aPoisonedReadIsRefilledOrFails` | — | — | — |
+| `L.object.262` | `theQuarantineLeavesARetiredFrameUnread` | — | — | — |
 | `L.object.140` | `anEndsWordIsItsInbox` | — | — | — |
 | `L.object.141` | `aWakerFencesTheWordBeforeItsWake` | — | — | — |
 | `L.object.164` | `aParkIsSetBesideAnEmptyInbox` | — | — | — |
@@ -4107,6 +4112,11 @@ flowchart LR
 | `L.object.170` | `theWayOutsAreShared` | — | — | — |
 | `L.object.179` | `theFastPathLetsGoOfItsEndUnmasked` | — | — | — |
 | `L.object.180` | `cpuTimeIsKeptBackOnce` | — | — | — |
+| `L.object.254` | `pinBlocksOptionWord` | — | — | — |
+| `L.object.255` | `pinBlocksAreNaturallyAligned` | — | — | — |
+| `L.object.256` | `pinBlocksFallBack` | — | — | — |
+| `L.object.257` | `pinBlocksBudgetAndFailure` | — | — | — |
+| `L.object.258` | `pinBlocksLeaveFilesAlone` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -4168,6 +4178,21 @@ flowchart LR
 | `L.sched.90` | `aWakeeIsPulledOntoItsWakersProcessor` | — | — | — |
 | `L.sched.91` | `aWideWakePullsNothing` | — | — | — |
 | `L.sched.92` | `aWaitEndsAtItsDeadline` | — | — | — |
+| `L.sched.102` | `noPlacementOnAProcessorOutOfService` | — | — | — |
+| `L.sched.103` | `aBlockedTaskIsReHomedAtItsWake` | — | — | — |
+| `L.sched.104` | `evacuationLeavesNothingBehind` | — | — | — |
+| `L.sched.105` | `theParkIsAHandshakeWithAnUndo` | — | — | — |
+| `L.sched.106` | `aReturnFlushesBeforeItIsUsed` | — | — | — |
+| `L.sched.107` | `eachNewRequestIsTheTasksOwn` | — | — | — |
+| `L.sched.108` | `noRequestIsLongerThanTheSlice` | — | — | — |
+| `L.sched.109` | `aTaskIsMadeWithItsThreadsRequest` | — | — | — |
+| `L.sched.96` | `aKernelThreadsMaskIsNeverSet` | — | — | — |
+| `L.sched.97` | `everyPlacementObeysTheMask` | — | — | — |
+| `L.sched.98` | `aTaskPickedOutsideItsMaskIsPushed` | — | — | — |
+| `L.sched.99` | `noUserInstructionRunsOutsideTheMask` | — | — | — |
+| `L.sched.100` | `theSetterWaitsForARunningTarget` | — | — | — |
+| `L.sched.101` | `aThreadStartsWithItsCreatorsMask` | — | — | — |
+| `L.sched.123` | `aMaskNeverVetoesAPark` | — | — | — |
 | `L.sched.129` | `theUpperCellIsTheQueueHolders` | — | — | — |
 | `L.sched.130` | `aWeightIsKeptOutsideFair` | — | — | — |
 | `L.sched.131` | `aWakeAsksTheStack` | — | — | — |
@@ -4177,17 +4202,6 @@ flowchart LR
 | `L.sched.136` | `cpuMaxCutsEveryTier` | — | — | — |
 | `L.sched.137` | `softRtIsRefusedByName` | — | — | — |
 | `L.sched.138` | `withoutTheTierRealTimeIsEinval` | — | — | — |
-| `L.sched.140` | `theRunStopsOutsideTheDomain` | — | — | — |
-| `L.sched.141` | `nothingCrossesADomain` | — | — | — |
-| `L.sched.142` | `theSwitchEmptiesItsProcessors` | — | — | — |
-| `L.sched.143` | `aRunningTaskMovesWhenSaved` | — | — | — |
-| `L.sched.144` | `aTaskTakenOffIsPlaced` | — | — | — |
-| `L.sched.145` | `aWakeLandsInTheDomain` | — | — | — |
-| `L.sched.146` | `admissionMovesTheJob` | — | — | — |
-| `L.sched.147` | `dissolutionIsOneStore` | — | — | — |
-| `L.sched.148` | `perProcessorTasksAreExempt` | — | — | — |
-| `L.sched.149` | `theSoftDomainsRefusals` | — | — | — |
-| `L.sched.150` | `theDirectSwitchStaysInside` | — | — | — |
 | `L.iommu.1` | `unitsAreFoundOnce` | — | — | — |
 | `L.iommu.2` | `placementsAreCounted` | — | — | — |
 | `L.iommu.3` | `dmarEndpointsArePlaced` | — | — | — |
@@ -4286,6 +4300,15 @@ flowchart LR
 | `L.iommu.98` | `amdviOff` | — | — | — |
 | `L.iommu.99` | `theUnitsOwnFunctionIsTheUnit` | — | — | — |
 | `L.iommu.100` | `anUnnamedHostBridgeIsTheRootComplex` | — | — | — |
+| `L.iommu.101` | `aRetargetIsOneStore` | — | — | — |
+| `L.iommu.102` | `aRetargetIsInvalidatedAndWaitedFor` | — | — | — |
+| `L.iommu.103` | `everyMessageIsAccountedFor` | — | — | — |
+| `L.iommu.104` | `aMessageThatCannotMoveRefuses` | — | — | — |
+| `L.iommu.105` | `blocksWhereSllpsOffersThem` | — | — | — |
+| `L.iommu.106` | `aRunIsOneEntry` | — | — | — |
+| `L.iommu.107` | `aRunOverAnotherPinFallsBackOrRefuses` | — | — | — |
+| `L.iommu.108` | `aRunIsTakenDownWhole` | — | — | — |
+| `L.iommu.109` | `noPageSelectiveIotlbInvalidation` | — | — | — |
 | `L.mm.1` | `initGivesTheAllocatorTheUsableRam` | — | — | — |
 | `L.mm.2` | `frameZeroIsNeverHandedOut` | — | — | — |
 | `L.mm.3` | `aFrameHasOneHolder` | — | — | — |
@@ -4321,6 +4344,26 @@ flowchart LR
 | `L.mm.33` | `theImageIsWritableNowhere` | — | — | — |
 | `L.mm.34` | `earlyBootMemoryIsReclaimed` | — | — | — |
 | `L.mm.75` | `thePstoreRegionIsNeverFree` | — | — | — |
+| `L.mm.91` | `aRetiredFrameIsNeverAllocatedAgain` | — | — | — |
+| `L.mm.92` | `theRetiredSetRefusesWhenFull` | — | — | — |
+| `L.mm.93` | `anAllocationIsServedByItsProcessorsCache` | — | — | — |
+| `L.mm.94` | `aFreeGoesToItsProcessorsCache` | — | — | — |
+| `L.mm.95` | `aRefusalDrainsTheCachesFirst` | — | — | — |
+| `L.mm.96` | `theHeapCountLeavesTheCachesOut` | — | — | — |
+| `L.mm.97` | `theDrainEmptiesEveryCache` | — | — | — |
+| `L.mm.98` | `anInjectedRefusalIsNotRetried` | — | — | — |
+| `L.mm.99` | `theArchivesPagesComeBack` | — | — | — |
+| `L.mm.100` | `noReaderOutlivesTheArchive` | — | — | — |
+| `L.mm.101` | `aScrubClaimLeavesEveryOrder` | — | — | — |
+| `L.mm.102` | `aScrubbedFrameGoesBackUncounted` | — | — | — |
+| `L.mm.103` | `fourPatternsEachReadBack` | — | — | — |
+| `L.mm.104` | `aFrameIsBadOnlyAfterItsRetest` | — | — | — |
+| `L.mm.105` | `aBadFrameIsKeptAndTheShareHeld` | — | — | — |
+| `L.mm.106` | `theScrubberStandsDownWhereItMust` | — | — | — |
+| `L.mm.107` | `theScrubbersCountsShowCoverage` | — | — | — |
+| `L.mm.109` | `aRetirementIsRecordedForTheNextBoot` | — | — | — |
+| `L.mm.110` | `badFramesAreLeftOut` | — | — | — |
+| `L.mm.108` | `oneBatchAtATime` | — | — | — |
 | `L.mm.71` | `theWatermarkIsSizedOnce` | — | — | — |
 | `L.mm.72` | `aProgramsFramesStopAtTheWatermark` | — | — | — |
 | `L.mm.73` | `aProgramsTablesStopAtTheWatermark` | — | — | — |
@@ -4471,6 +4514,12 @@ flowchart LR
 | `L.user.104` | `aFaultIsResolvedWithNoPreemptionLockHeld` | — | — | — |
 | `L.user.105` | `anUnmapFreesNothingBeforeItsShootdown` | — | — | — |
 | `L.user.106` | `aCodePageIsReadAndRunAlone` | — | — | — |
+| `L.user.169` | `aSpaceIsLeftOnlyInAnOrderAShootdownSees` | — | — | — |
+| `L.user.170` | `aSpaceSwitchedBackToSeesItsShootdowns` | — | — | — |
+| `L.user.171` | `theResidentSetSplitsByKind` | — | — | — |
+| `L.user.172` | `aDiskFilesMappedPagesAreItsRss` | — | — | — |
+| `L.user.175` | `cleanBtrfsNodesAreAvailable` | — | — | — |
+| `L.user.174` | `devmgrStartsAgainFromTheKeptSet` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
@@ -4628,6 +4677,49 @@ flowchart LR
 | `L.x86_64.96` | `consoleInputByInterrupt` | — | — | — |
 | `L.x86_64.97` | `theConsoleCarriesTheBoot` | — | — | — |
 | `L.x86_64.98` | `theMachinePowersItselfOff` | — | — | — |
+| `L.x86_64.212` | `theSoftOffIsRecordedWhole` | — | — | — |
+| `L.x86_64.213` | `theMachineEntersSoftOff` | — | — | — |
+| `L.x86_64.214` | `pcidsOnByTheBootProcessorsCpuid` | — | — | — |
+| `L.x86_64.215` | `aSecondaryWithoutPcidsStopsTheBoot` | — | — | — |
+| `L.x86_64.216` | `aSlotHitKeepsOnlyWithoutAShootdownSince` | — | — | — |
+| `L.x86_64.217` | `aSlotMissTakesTheNextSlotAndFlushes` | — | — | — |
+| `L.x86_64.218` | `uninstallFlushesPcidZero` | — | — | — |
+| `L.x86_64.219` | `withoutPcidsTheBareRoot` | — | — | — |
+| `L.x86_64.220` | `erapsNeverBesidePcids` | — | — | — |
+| `L.x86_64.221` | `machineCheckBanksBroughtUp` | — | — | — |
+| `L.x86_64.222` | `recordsLeftBeforeTheBootLogged` | — | — | — |
+| `L.x86_64.223` | `pollLogsAndClearsCorrected` | — | — | — |
+| `L.x86_64.224` | `machineCheckClassifierFailsClosed` | — | — | — |
+| `L.x86_64.225` | `bystanderMachineCheckReturns` | — | — | — |
+| `L.x86_64.226` | `actionOptionalHandedToThePoll` | — | — | — |
+| `L.x86_64.227` | `fatalMachineCheckPrintsTheBanks` | — | — | — |
+| `L.x86_64.228` | `programsPoisonIsItsSigbus` | — | — | — |
+| `L.x86_64.229` | `kernelsPoisonStops` | — | — | — |
+| `L.x86_64.230` | `machineCheckCountsInProc` | — | — | — |
+| `L.x86_64.231` | `recoveryOffStopsEveryCheck` | — | — | — |
+| `L.x86_64.232` | `machineCheckBankCapAndCheckedWrites` | — | — | — |
+| `L.x86_64.233` | `machineCheckVendorRules` | — | — | — |
+| `L.x86_64.234` | `amdClassifier` | — | — | — |
+| `L.x86_64.235` | `amdUsableAddressAndCut` | — | — | — |
+| `L.x86_64.236` | `amdRingThreeAction` | — | — | — |
+| `L.x86_64.237` | `amdTccOrRipvClearKills` | — | — | — |
+| `L.x86_64.238` | `amdRingZeroStops` | — | — | — |
+| `L.x86_64.239` | `smcaRegistersCheckedAndBounded` | — | — | — |
+| `L.x86_64.240` | `smcaMcaxSet` | — | — | — |
+| `L.x86_64.241` | `mceLineIpidAndSynd` | — | — | — |
+| `L.x86_64.242` | `amdDeferredLoggedRetiredByPaddrv` | — | — | — |
+| `L.x86_64.243` | `scrubWritesReadNothingAndEvict` | — | — | — |
+| `L.x86_64.244` | `copyMcIsOneRepMovsb` | — | — | — |
+| `L.x86_64.245` | `aCopysConsumptionRecoversOnlyWhenSafe` | — | — | — |
+| `L.x86_64.246` | `theCopyIsSentToItsExit` | — | — | — |
+| `L.x86_64.247` | `aDroppedCleanPageNeedsNoSignal` | — | — | — |
+| `L.x86_64.248` | `thePollDropsACleanCachedPage` | — | — | — |
+| `L.x86_64.249` | `cmciClaimsBanksWithReadBack` | — | — | — |
+| `L.x86_64.250` | `cmciWakesThePollInService` | — | — | — |
+| `L.x86_64.251` | `cmciStormMasksTheEntry` | — | — | — |
+| `L.x86_64.252` | `cmciOffClaimsNothing` | — | — | — |
+| `L.x86_64.253` | `cmciLooksAfterTheUnmask` | — | — | — |
+| `L.x86_64.254` | `theStopRecordsItsPages` | — | — | — |
 | `L.x86_64.99` | `theMachineResets` | — | — | — |
 | `L.x86_64.100` | `aStoppedProcessorStaysStopped` | — | — | — |
 | `L.x86_64.101` | `theVdsoExportsItsClocks` | — | — | — |
@@ -4661,6 +4753,9 @@ flowchart LR
 | `L.syscall.21` | `aReplacingThreadPostsEnd` | — | — | — |
 | `L.syscall.22` | `aStopPostsStop` | — | — | — |
 | `L.syscall.23` | `everySignalPostsSignal` | — | — | — |
+| `L.syscall.24` | `memoryScrubsArgumentsAndAnswers` | — | — | — |
+| `L.syscall.25` | `aPoisonedCopyFailsAndSignalsItsOwner` | — | — | — |
+| `L.syscall.26` | `anotherSpacesPoisonSignalsNobody` | — | — | — |
 | `L.trap.5` | `noEntryMeansEnosys` | — | — | — |
 | `L.trap.6` | `aMovedProcessRunsInItsNewJob` | — | — | — |
 | `L.trap.8` | `aTrapAnswersOnlyTheCallsOwnRegister` | — | — | — |
@@ -4712,6 +4807,7 @@ flowchart LR
 | `L.aarch64.40` | `firmwareAnswersAreRead` | — | — | — |
 | `L.aarch64.41` | `theEntryLoopMatchesTheRecords` | — | — | — |
 | `L.aarch64.67` | `eachProcessorsIdentityIsReadBack` | — | — | — |
+| `L.aarch64.68` | `scrubZeroesThenEvicts` | — | — | — |
 | `L.aarch64.42` | `defencesAreAppliedAndReadBack` | — | — | — |
 | `L.aarch64.52` | `nothingInsideADomain` | — | — | — |
 | `L.aarch64.43` | `indicesAreClamped` | — | — | — |
@@ -4812,6 +4908,7 @@ flowchart LR
 | `L.armv7a.24` | `nothingStaysBehindAClearEnable` | — | — | — |
 | `L.armv7a.25` | `theRecordIsTheStateWhileOff` | — | — | — |
 | `L.armv7a.26` | `aVfpUserIsResumedWhole` | — | — | — |
+| `L.armv7a.29` | `scrubStandsDownOnArmv7a` | — | — | — |
 | `L.smp.1` | `impossibleListsAreRefused` | — | — | — |
 | `L.smp.2` | `theBootProcessorIsZero` | — | — | — |
 | `L.smp.3` | `eachProcessorFindsItsOwnRecord` | — | — | — |
@@ -4846,6 +4943,11 @@ flowchart LR
 | `L.smp.32` | `aKickReachesItsTarget` | — | — | — |
 | `L.smp.33` | `aLateAnswerIsWaitedFor` | — | — | — |
 | `L.smp.34` | `aLateAnswerIsReportedAfterTheTurn` | — | — | — |
+| `L.smp.35` | `oneFunctionBehindBothDoors` | — | — | — |
+| `L.smp.36` | `theRefusals` | — | — | — |
+| `L.smp.37` | `everyChangeIsAudited` | — | — | — |
+| `L.smp.38` | `theTokenAndItsCall` | — | — | — |
+| `L.smp.39` | `theLinuxSurfaceSaysInService` | — | — | — |
 | `L.console.1` | `nothingBeforeThePort` | — | — | — |
 | `L.console.2` | `aLineIsWholeOnThePort` | — | — | — |
 | `L.console.3` | `aPollerGoesAfterTheRing` | — | — | — |
@@ -4888,6 +4990,8 @@ flowchart LR
 | `L.console.55` | `aGrownRingKeepsWhatItHeld` | — | — | — |
 | `L.console.56` | `grownLinesKeepWhatTheyHeld` | — | — | — |
 | `L.console.57` | `logBufLenSizesTheLog` | — | — | — |
+| `L.console.58` | `aMachineCheckIsAStopOfItsOwn` | — | — | — |
+| `L.console.59` | `theBadFrameTableIsPstoreVersion3` | — | — | — |
 | `L.console.54` | `eachWriterLogsAtItsPriority` | — | — | — |
 | `L.console.36` | `theScreenStartsWhenAsked` | — | — | — |
 | `L.console.37` | `theBoardFitsTheScreen` | — | — | — |
@@ -5021,9 +5125,13 @@ flowchart LR
 | `L.btrfs.114` | `aReplayOutOfMemoryReplaysLater` | — | — | — |
 | `L.btrfs.115` | `aReadOutOfMemoryChangesNothing` | — | — | — |
 | `L.btrfs.116` | `mapNodesFitASizeClass` | — | — | — |
+| `L.btrfs.119` | `cleanNodesGoBetweenOperationsOnly` | — | — | — |
+| `L.btrfs.120` | `onlyTheMachinesReclaimTakesCleanNodes` | — | — | — |
+| `L.btrfs.121` | `cleanBytesAreCountedExactly` | — | — | — |
 | `L.init.1` | `pid1InItsOrder` | — | — | — |
 | `L.init.2` | `inputsFromTheBootArchiveOnly` | — | — | — |
 | `L.init.3` | `anInputThatCannotBeOneIsRefused` | — | — | — |
+| `L.init.5` | `theInputsOutliveTheArchive` | — | — | — |
 | `H.SIGN.1` | `acceptedOnlyUnderTheExpectedKindsAnchor` | — | — | — |
 | `H.SIGN.2` | `signedFieldsBind` | — | — | — |
 | `H.SIGN.3` | `notBelowTheFloor` | — | — | — |

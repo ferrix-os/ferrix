@@ -35,15 +35,20 @@
 //!   its own deadline and ends `ETIMEDOUT`;
 //! * **cpu-number**: on x86-64, `RDTSCP` names the processor `getcpu` names
 //!   ([`cpu_number`]).
+//! * **slice-request**: `sched_setattr`'s slice request ([`slice_request`]).
+//! * **affinity**: `sched_setaffinity` pins, at once, another thread too, and
+//!   is inherited ([`affinity`]).
 
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::thread;
 
+mod affinity;
 mod cpu_number;
 mod futex_signal;
 mod setuid;
+mod slice_request;
 
 /// Threads the program spawns besides its main one.
 const THREADS: u64 = 4;
@@ -166,6 +171,29 @@ fn check_proc() {
 }
 
 fn main() {
+    match std::env::args().nth(1).as_deref() {
+        Some(slice_request::EXEC_PROBE) => slice_request::probe(),
+        // The slice step alone, for its comparison with Linux run as an
+        // ordinary program there (ledger 5232 (5)): every other step wants
+        // to be init.
+        // The affinity step alone, for the same comparison with Linux.
+        Some("--affinity-only") => {
+            println!("threads: affinity");
+            affinity::check_affinity(fail);
+            println!("threads: affinity ok");
+            std::process::exit(0)
+        }
+        Some("--slice-request-only") => {
+            println!("threads: slice-request");
+            slice_request::check_slice_request(fail);
+            println!("threads: slice-request ok");
+            std::process::exit(0)
+        }
+        _ => {}
+    }
+    if std::env::args().nth(1).as_deref() == Some(affinity::EXEC_PROBE) {
+        affinity::probe();
+    }
     println!("threads: spawn {THREADS}");
     let counter = Arc::new(Mutex::new(0_u64));
     let barrier = Arc::new(Barrier::new(
@@ -246,6 +274,14 @@ fn main() {
     println!("threads: cpu-number");
     cpu_number::check_cpu_number(fail);
     println!("threads: cpu-number ok");
+
+    println!("threads: slice-request");
+    slice_request::check_slice_request(fail);
+    println!("threads: slice-request ok");
+
+    println!("threads: affinity");
+    affinity::check_affinity(fail);
+    println!("threads: affinity ok");
 
     println!("threads: all ok");
     std::process::exit(0)

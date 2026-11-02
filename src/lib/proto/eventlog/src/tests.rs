@@ -114,10 +114,18 @@ fn append_text(disk: &mut Disk, sequence: u64, text: &[u8]) -> Result<Outcome, A
     append(disk, &geometry(), &event, &mut record, &mut scratch)
 }
 
+/// The current header, if a copy is valid.
+fn current(disk: &mut Disk) -> Option<Header> {
+    match read_header(disk, &geometry()).unwrap_or_else(|why| panic!("{why:?}")) {
+        Current::Header(header) => Some(header),
+        Current::Fresh | Current::Damaged => None,
+    }
+}
+
 /// Every counted, valid record, oldest first, as (index, count, first line).
 fn listing(disk: &mut Disk) -> Vec<(u64, u32, Vec<u8>)> {
     let geometry = geometry();
-    let Some(header) = read_header(disk, &geometry).unwrap_or_else(|why| panic!("{why:?}")) else {
+    let Some(header) = current(disk) else {
         return Vec::new();
     };
     let mut buffer = vec![0u8; RECORD_LEN];
@@ -193,6 +201,7 @@ fn a_header_round_trips_and_every_field_is_checked() {
         sequence: 7,
         next: 3,
         appended: 34,
+        bad: BadFrames::empty(),
     };
     let bytes = header.encode(31);
     assert_eq!(Header::decode(&bytes, 31), Ok(header));
@@ -234,6 +243,7 @@ fn the_newer_valid_copy_is_current() {
         sequence: 9,
         next: 30,
         appended: 30,
+        bad: BadFrames::empty(),
     }
     .after_append(31);
     assert_eq!((wrapped.next, wrapped.appended), (0, 31));
@@ -399,12 +409,12 @@ fn hostile_regions_are_answered() {
 #[test]
 fn an_empty_partition_gets_a_header_and_the_first_record() {
     let mut disk = Disk::new();
-    assert_eq!(read_header(&mut disk, &geometry()), Ok(None));
+    assert_eq!(read_header(&mut disk, &geometry()), Ok(Current::Fresh));
     assert_eq!(
         append_text(&mut disk, 1, &panicked("first")),
         Ok(Outcome::Appended { index: 0, slot: 0 })
     );
-    let header = read_header(&mut disk, &geometry()).unwrap_or_else(|why| panic!("{why:?}"));
+    let header = current(&mut disk);
     assert_eq!(header.map(|h| (h.next, h.appended)), Some((1, 1)));
     assert_eq!(
         listing(&mut disk),
@@ -535,7 +545,7 @@ fn a_header_copy_torn_falls_back_to_the_other() {
     assert!(append_text(&mut disk, 2, &panicked("b")).is_ok());
     // Copy A damaged: copy B, as new, is current.
     disk.blocks[40][5] ^= 1;
-    let header = read_header(&mut disk, &geometry()).unwrap_or_else(|why| panic!("{why:?}"));
+    let header = current(&mut disk);
     assert_eq!(header.map(|h| h.appended), Some(2));
     assert_eq!(listing(&mut disk).len(), 2);
 }
@@ -621,4 +631,307 @@ fn a_version_1_region_with_a_panic_is_kept() {
         listing(&mut disk),
         vec![(0, 1, b"FERRIX_PANIC before the stop word".to_vec())]
     );
+}
+
+/// A set of these frames.
+fn set_of(frames: &[u32]) -> BadFrames {
+    let mut set = BadFrames::empty();
+    for &frame in frames {
+        assert_eq!(set.insert(frame), Insert::Added, "{frame}");
+    }
+    set
+}
+
+/// The extension's CRC computed again over `bytes`, so that a test reaches
+/// the field checks behind it.
+fn reseal(bytes: &mut [u8; HEADER_USED]) {
+    let crc = extension_crc(bytes);
+    bytes[EXTENSION_CHECKED..EXTENSION_CHECKED + 4].copy_from_slice(&crc.to_le_bytes());
+}
+
+/// Header copy A's and B's first blocks: LBA 40 and 48.
+const COPY_A: usize = 40;
+const COPY_B: usize = 48;
+
+/// Verifies the set's order, dedupe and bound (`MACHINE-CHECK-RESTART.md`
+/// §9.1).
+#[test]
+fn the_set_is_ascending_without_duplicates_and_holds_sixty_four() {
+    let mut set = BadFrames::empty();
+    assert_eq!(set.insert(9), Insert::Added);
+    assert_eq!(set.insert(3), Insert::Added);
+    assert_eq!(set.insert(5), Insert::Added);
+    assert_eq!(set.insert(3), Insert::Already);
+    assert_eq!(set.frames(), &[3, 5, 9]);
+    let mut full = BadFrames::empty();
+    for frame in 0..64 {
+        assert_eq!(full.insert(1000 - frame), Insert::Added);
+    }
+    assert_eq!(full.insert(1), Insert::Full);
+    assert_eq!(full.insert(1000), Insert::Already);
+    assert_eq!(full.len(), BAD_FRAMES_MOST);
+    assert!(full.frames().windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+/// Verifies the extension's format: an empty set leaves a PM4 header byte
+/// for byte, and every byte and field of a set is checked.
+#[test]
+fn the_extension_round_trips_and_every_field_is_checked() {
+    let plain = Header {
+        sequence: 7,
+        next: 3,
+        appended: 34,
+        bad: BadFrames::empty(),
+    };
+    let bytes = plain.encode(31);
+    assert!(bytes[44..].iter().all(|&byte| byte == 0), "a PM4 header");
+    let header = Header {
+        bad: set_of(&[3, 5, 0x1cd6c]),
+        ..plain
+    };
+    let bytes = header.encode(31);
+    assert_eq!(
+        bytes[..44],
+        plain.encode(31)[..44],
+        "the header's bytes unchanged"
+    );
+    assert_eq!(Header::decode(&bytes, 31), Ok(header));
+    for at in 44..HEADER_USED {
+        let mut bad = bytes;
+        bad[at] ^= 0x40;
+        assert!(Header::decode(&bad, 31).is_err(), "byte {at}");
+    }
+    // Field checks behind a good CRC.
+    let fields: [(usize, u32); 4] = [
+        (EXTENSION_AT + 8, 2),   // another version: a newer format
+        (EXTENSION_COUNT, 65),   // more than 64
+        (EXTENSION_COUNT, 0),    // a set of none written as one
+        (EXTENSION_RESERVED, 1), // reserved
+    ];
+    for (at, value) in fields {
+        let mut bad = bytes;
+        bad[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        reseal(&mut bad);
+        assert!(Header::decode(&bad, 31).is_err(), "{at} = {value}");
+    }
+    let mut unordered = bytes;
+    unordered[EXTENSION_FRAMES..EXTENSION_FRAMES + 4].copy_from_slice(&9u32.to_le_bytes());
+    reseal(&mut unordered);
+    assert_eq!(
+        Header::decode(&unordered, 31),
+        Err(Refusal::Field),
+        "out of order"
+    );
+    let mut twice = bytes;
+    twice[EXTENSION_FRAMES + 4..EXTENSION_FRAMES + 8].copy_from_slice(&3u32.to_le_bytes());
+    reseal(&mut twice);
+    assert_eq!(
+        Header::decode(&twice, 31),
+        Err(Refusal::Field),
+        "a duplicate"
+    );
+    let mut tail = bytes;
+    tail[EXTENSION_FRAMES + 12] = 1;
+    reseal(&mut tail);
+    assert_eq!(
+        Header::decode(&tail, 31),
+        Err(Refusal::Field),
+        "a non-zero tail"
+    );
+    // No extension's magic, but a stray byte: invalid, not an empty set.
+    let mut stray = plain.encode(31);
+    stray[200] = 1;
+    assert!(Header::decode(&stray, 31).is_err(), "a stray byte");
+}
+
+/// Verifies the extension's CRC binds it to its copy's header.
+#[test]
+fn an_extension_moved_to_the_other_copy_is_refused() {
+    let bad = set_of(&[11, 12]);
+    let a = Header {
+        sequence: 4,
+        next: 1,
+        appended: 1,
+        bad,
+    }
+    .encode(31);
+    let b = Header {
+        sequence: 5,
+        next: 2,
+        appended: 2,
+        bad,
+    }
+    .encode(31);
+    let mut spliced = b;
+    spliced[EXTENSION_AT..].copy_from_slice(&a[EXTENSION_AT..]);
+    assert_eq!(Header::decode(&spliced, 31), Err(Refusal::Crc));
+}
+
+/// Verifies `add_bad_frames`: merged in order, nothing written when none is
+/// new, the generation one more when one is, the bound said.
+#[test]
+fn frames_are_added_once_and_an_unchanged_set_writes_nothing() {
+    let mut disk = Disk::new();
+    let geometry = geometry();
+    let added = add_bad_frames(&mut disk, &geometry, &[7, 3, 7]);
+    assert_eq!(
+        added,
+        Ok(Added {
+            added: 2,
+            already: 1,
+            full: 0,
+            held: 2
+        })
+    );
+    let first = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    assert_eq!(first.bad.frames(), &[3, 7]);
+    let writes = disk.writes;
+    assert_eq!(
+        add_bad_frames(&mut disk, &geometry, &[3, 7]).map(|added| added.added),
+        Ok(0)
+    );
+    assert_eq!(disk.writes, writes, "an unchanged set writes no block");
+    assert!(add_bad_frames(&mut disk, &geometry, &[5]).is_ok());
+    let second = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    assert_eq!(second.bad.frames(), &[3, 5, 7]);
+    assert_eq!(second.sequence, first.sequence + 1);
+    assert_eq!(disk.writes, writes + 2, "copy A, then copy B");
+    let many: Vec<u32> = (100..200).collect();
+    let full = add_bad_frames(&mut disk, &geometry, &many).unwrap_or_else(|why| panic!("{why:?}"));
+    assert_eq!((full.added, full.full, full.held), (61, 39, 64));
+    assert_eq!(disk.outside, 0, "every write inside LBA 40-2047");
+}
+
+/// Verifies that a record never drops the set (§9.2: `append` carries it).
+#[test]
+fn an_append_keeps_the_bad_frames() {
+    let mut disk = Disk::new();
+    assert!(add_bad_frames(&mut disk, &geometry(), &[42]).is_ok());
+    assert!(append_text(&mut disk, 1, &panicked("a")).is_ok());
+    assert!(append_text(&mut disk, 2, &panicked("b")).is_ok());
+    assert!(append_text(&mut disk, 3, &panicked("b")).is_ok());
+    let header = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    assert_eq!(header.bad.frames(), &[42]);
+    assert_eq!(header.appended, 2);
+}
+
+/// Verifies that a torn `add_bad_frames` never loses a frame the set held:
+/// stopped after every number of block writes, the set read back is the old
+/// one or the new one.
+#[test]
+fn a_torn_add_leaves_the_old_set_or_the_new() {
+    for budget in 0..=3 {
+        let mut disk = Disk::new();
+        assert!(add_bad_frames(&mut disk, &geometry(), &[1, 2]).is_ok());
+        disk.writes = 0;
+        disk.budget = Some(budget);
+        let _ = add_bad_frames(&mut disk, &geometry(), &[3]);
+        disk.budget = None;
+        let header = current(&mut disk).unwrap_or_else(|| panic!("budget {budget}: a header"));
+        let frames = header.bad.frames();
+        assert!(
+            frames == [1, 2] || frames == [1, 2, 3],
+            "budget {budget}: {frames:?}"
+        );
+    }
+    // A copy torn inside its block: the other copy holds.
+    let mut disk = Disk::new();
+    assert!(add_bad_frames(&mut disk, &geometry(), &[1, 2]).is_ok());
+    assert!(add_bad_frames(&mut disk, &geometry(), &[3]).is_ok());
+    disk.blocks[COPY_A][EXTENSION_FRAMES] ^= 1;
+    let header = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    assert_eq!(header.bad.frames(), &[1, 2, 3]);
+}
+
+/// Verifies no fresh header over damage (`MACHINE-CHECK-RESTART.md` §9.2,
+/// ledger 5511 (3)): copies that carry the magic and both fail to decode,
+/// or carry a newer extension, get no write.
+#[test]
+fn damaged_or_newer_copies_are_never_written_over() {
+    let mut damaged = Disk::new();
+    assert!(append_text(&mut damaged, 1, &panicked("a")).is_ok());
+    damaged.blocks[COPY_A][41] ^= 1;
+    damaged.blocks[COPY_B][41] ^= 1;
+    let mut newer = Disk::new();
+    assert!(add_bad_frames(&mut newer, &geometry(), &[5]).is_ok());
+    for copy in [COPY_A, COPY_B] {
+        let block = &mut newer.blocks[copy];
+        block[EXTENSION_AT + 8..EXTENSION_AT + 12].copy_from_slice(&2u32.to_le_bytes());
+        let mut bytes = [0u8; HEADER_USED];
+        bytes.copy_from_slice(&block[..HEADER_USED]);
+        reseal(&mut bytes);
+        block[..HEADER_USED].copy_from_slice(&bytes);
+    }
+    for (name, disk) in [("damaged", &mut damaged), ("newer", &mut newer)] {
+        assert_eq!(
+            read_header(disk, &geometry()),
+            Ok(Current::Damaged),
+            "{name}"
+        );
+        let writes = disk.writes;
+        assert_eq!(
+            add_bad_frames(disk, &geometry(), &[9]),
+            Err(AppendError::Damaged),
+            "{name}"
+        );
+        assert_eq!(
+            append_text(disk, 2, &panicked("b")),
+            Err(AppendError::Damaged),
+            "{name}"
+        );
+        assert_eq!(
+            clear_bad_frames(disk, &geometry()),
+            Err(AppendError::Damaged)
+        );
+        assert_eq!(disk.writes, writes, "{name}: no block written");
+    }
+}
+
+/// Verifies `clear_bad_frames`: the set emptied, the generation one more,
+/// the frames dropped returned; torn, the old set or none.
+#[test]
+fn the_clear_empties_the_set_and_a_torn_clear_leaves_old_or_none() {
+    let mut disk = Disk::new();
+    assert!(append_text(&mut disk, 1, &panicked("a")).is_ok());
+    assert!(add_bad_frames(&mut disk, &geometry(), &[8, 4]).is_ok());
+    let before = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    let dropped = clear_bad_frames(&mut disk, &geometry()).unwrap_or_else(|why| panic!("{why:?}"));
+    assert_eq!(dropped.frames(), &[4, 8]);
+    let after = current(&mut disk).unwrap_or_else(|| panic!("a header"));
+    assert!(after.bad.is_empty());
+    assert_eq!(after.sequence, before.sequence + 1);
+    assert_eq!(after.appended, 1, "the records stay");
+    let writes = disk.writes;
+    assert!(clear_bad_frames(&mut disk, &geometry()).is_ok());
+    assert_eq!(disk.writes, writes, "an empty set: nothing written");
+    for budget in 0..=2 {
+        let mut disk = Disk::new();
+        assert!(add_bad_frames(&mut disk, &geometry(), &[8, 4]).is_ok());
+        disk.writes = 0;
+        disk.budget = Some(budget);
+        let _ = clear_bad_frames(&mut disk, &geometry());
+        disk.budget = None;
+        let header = current(&mut disk).unwrap_or_else(|| panic!("budget {budget}: a header"));
+        let frames = header.bad.frames();
+        assert!(
+            frames == [4, 8] || frames.is_empty(),
+            "budget {budget}: {frames:?}"
+        );
+    }
+}
+
+/// Verifies the region rule (`MACHINE-CHECK-RESTART.md` §9.2): the region is
+/// renewed unless the log failed to take a record or a frame.
+#[test]
+fn the_region_is_renewed_only_when_nothing_failed() {
+    use Durability::{Durable, Failed, NotNeeded};
+    for record in [Durable, NotNeeded, Failed] {
+        for frames in [Durable, NotNeeded, Failed] {
+            assert_eq!(
+                may_renew(record, frames),
+                record != Failed && frames != Failed,
+                "{record:?} {frames:?}"
+            );
+        }
+    }
 }

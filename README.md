@@ -9,7 +9,7 @@
 
 **An operating system written by a fleet of Claude Code sessions.**
 
-Since 2026-09-11, Claude Code sessions have written Ferrix: its Rust kernel,
+Claude Code sessions write Ferrix: its Rust kernel,
 its drivers, its compositor, its shell and its tests. A person, the
 customer, decides what is built, in what order, and what is good enough.
 The sessions plan the work, write the code, review each other's changes and
@@ -25,45 +25,16 @@ Ferrix is experimental. Logins, `su` and the lock screen check passwords,
 but it is not ready to be your everyday operating system, and most of its
 tests run in QEMU.
 
-[See what works](#what-works) · [Try it without building](#try-it-without-building) ·
+[See what works](#what-works) · [Download the live ISO](https://github.com/ferrix-os/ferrix/releases/latest) ·
+[Try it without building](#try-it-without-building) ·
 [Boot Ferrix](#boot-ferrix) · [Read the technical guide](docs/GUIDE.md) ·
 [Visit the website](https://ferrix-os.org/)
 
-![Ferrix's desktop on an Intel N150 mini PC: Arknights: Endfield in a window, ferrofetch and btop beside it](docs/brand/screenshots/hero-n150.png)
+![Ferrix's Yoru desktop on an Intel N150 mini PC: Arknights: Endfield in a window, btop and ferrofetch beside it](docs/brand/screenshots/hero-n150.png)
 
-*Ferrix on an Intel N150 mini PC: Arknights: Endfield from Steam, in a window,
-through Ferrix's own Intel GPU driver, with ferrofetch and btop beside it.*
-
-## Where it stands, 2026-10-23
-
-| | |
-|---|---|
-| Commits on `main` | 3,479 in six weeks (first commit 2026-09-11) |
-| Rust in this repository | about 965,000 lines, about 48,000 of them generated tables (components in their own repositories not counted) |
-| Architectures | x86-64, AArch64 and ARMv7-A, booted on every landing that changes the image |
-| Hardware | an Intel N150 mini PC, a Pixel 7 and an STM32MP157D-DK1 board |
-
-Counted with `git rev-list --count main` and the lines of every tracked `.rs`
-file at `main` 628202493.
-
-### This week: a Windows game on a mini PC
-
-Arknights: Endfield runs on an Intel N150 mini PC under Ferrix, started from
-Steam through Proton and drawn by Mesa's Vulkan driver over Ferrix's own
-Intel GPU driver ([docs/INTEL-GPU.md](docs/INTEL-GPU.md)). That driver is not
-in the kernel: it is an ordinary process, written by following Linux's i915
-file by file. On 2026-10-23 the game ran at about 21.5 frames a second
-standing and 19.7 walking, at 1280x800. It is not smooth yet: one frame in
-a hundred takes 60 to 95 ms, and finding where those come from is the work
-under way.
-
-On the same machine the GPU driver was killed with `kill -9` while the
-system ran. Ferrix started it again, its back end was up in 12 ms, and
-Vulkan found the GPU again afterwards
-([docs/INTEL-GPU.md](docs/INTEL-GPU.md) §11). Under QEMU the driver can also
-run as two processes, a keeper that holds what programs hold and a worker
-that drives the GPU, so that a worker can die and be replaced while a
-Vulkan program goes on (§12, step 1 of its plan).
+*Ferrix's desktop, Yoru, on an Intel N150 mini PC: Arknights: Endfield from
+Steam, in a window, through Ferrix's own Intel GPU driver, with btop and
+ferrofetch beside it.*
 
 ## What works
 
@@ -74,9 +45,10 @@ Vulkan program goes on (§12, step 1 of its plan).
   ([docs/CLAUDE-CODE.md](docs/CLAUDE-CODE.md)). Ferrix implements the Linux
   system calls these programs need, and has its own C library, ferrousli.
 - **A desktop:** hyprix, Ferrix's Wayland compositor, reads `hyprland.conf`
-  and tiles windows. Since this week it also has a floating layout with
-  snapping, an activities overview, title bars it draws itself, a top bar,
-  and screens added and removed while it runs
+  and tiles windows. It also has a floating layout with snapping, an
+  activities overview, title bars it draws itself, and screens added and
+  removed while it runs. Yoru, Ferrix's default desktop, adds a dock and
+  sidebars on top of it
   ([docs/DESKTOP.md](docs/DESKTOP.md)). A fullscreen program's own buffer can
   go straight to the screen. Each display driver lists the modes its screen
   can run, on Intel, NVIDIA and virtio GPUs, and the mode can change at run
@@ -94,7 +66,8 @@ Vulkan program goes on (§12, step 1 of its plan).
   SATA drive, its own network driver for the Motorcomm YT6801, USB input and
   the Intel GPU ([docs/N150.md](docs/N150.md)). It has also booted on a
   Pixel 7, on all eight cores, and on an STM32MP157D-DK1 board. NVIDIA's own
-  driver runs as a process on an RTX 3060 passed to a virtual machine.
+  driver runs as a process on an RTX 3060 passed to a virtual machine. Every
+  landing that changes the image boots it on x86-64, AArch64 and ARMv7-A.
 - **Users, namespaces and containers:** the full desktop runs as the user
   `ferrix`, not root, and passwords are checked by `authd`. Ferrix has pid,
   user, mount, network, UTS, IPC and cgroup namespaces, cgroup v2 limits and
@@ -146,13 +119,20 @@ and each says which one. Human contributions are welcome; see
 **Certification is an aim, not a fact.** The project aims at Common
 Criteria EAL5+, DO-178C DAL C, IEC 62304 Class C and EN 50716 SIL 2 for the
 kernel's core. Nothing is certified, and no outside assessor is involved:
-the consultant's review is internal, not independent. Its findings register
-holds 28 open and 63 closed findings of 91
-([docs/certification/](docs/certification/README.md)).
+the consultant's review is internal, not independent. Its findings register,
+open and closed findings alike, is in
+[docs/certification/](docs/certification/README.md).
 
-<p align="center">
-  <img src="docs/brand/screenshots/desktop-hero.png" alt="Ferrix's Wayland desktop with btop, a zinc terminal and Chrome" width="100%">
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/brand/screenshots/live-installer.png" alt="The live ISO's Yoru desktop with the Ferrix installer's welcome page"></td>
+    <td width="50%"><img src="docs/brand/screenshots/installer-summary.png" alt="The installer's summary page before it erases the chosen disk"></td>
+  </tr>
+  <tr>
+    <td>The live ISO: Yoru and the installer.</td>
+    <td>The installer's last page, before anything is written.</td>
+  </tr>
+</table>
 
 [![On Ferrix's desktop, rustc compiles and runs a hello-world program in a terminal, then Chrome loads Wikipedia's article on Rust](docs/brand/screenshots/demo-loop.gif)](docs/brand/screenshots/demo.mp4)
 
@@ -226,6 +206,13 @@ this tree at the commits [`components.toml`](components.toml) names.
 
 ## Try it without building
 
+From v0.2.0 on, each release also carries a live ISO: Yoru's desktop
+from a CD, a virtual disk or a USB stick, with an installer that puts
+Ferrix on a disk of its own. Download it from
+[the latest release](https://github.com/ferrix-os/ferrix/releases/latest)
+and check it against `SHA256SUMS`. [Try Ferrix](docs/TRY-FERRIX.md) covers
+QEMU, VirtualBox, VMware and writing the stick.
+
 Each release carries the x86-64 desktop as one zip. You need QEMU and
 nothing else: no Rust, no build. On Linux or macOS:
 
@@ -276,12 +263,12 @@ cargo xtask test-boot --arch all
 ```
 
 Other tests compile a program with an unmodified `rustc` inside Ferrix and boot
-an x86-64 image built inside Ferrix. On 2026-10-03 Ferrix also built its own
-AArch64 image inside Ferrix on a Pixel 7, in the phone's own virtual machine,
-and that image passed the boot test. The [guide](docs/GUIDE.md#proof-you-can-run)
+an x86-64 image built inside Ferrix. Ferrix has also built its own AArch64
+image inside Ferrix on a Pixel 7, in the phone's own virtual machine, and
+that image passed the boot test. The [guide](docs/GUIDE.md#proof-you-can-run)
 has the commands and serial output. These tests demonstrate specific working
-paths; they are not a claim that every Linux app works. The N150's figures
-above come from runs on that one machine, not from a gate.
+paths; they are not a claim that every Linux app works. What this page says
+about the N150 comes from runs on that one machine, not from a gate.
 
 Ferrix is MIT licensed. [Explore the code and component docs](docs/GUIDE.md#layout),
 [get the logo and press kit](docs/marketing/README.md), or

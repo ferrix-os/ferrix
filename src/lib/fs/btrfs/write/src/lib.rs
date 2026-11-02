@@ -74,6 +74,7 @@ use ferrix_btrfs::volume::Device;
 
 mod bytes;
 mod chunks;
+mod clean;
 mod commit;
 mod csum;
 pub mod extent;

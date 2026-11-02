@@ -37,6 +37,16 @@ struct Placement {
     client: usize,
     surface: ObjectId,
     rect: (i64, i64, i64, i64),
+    /// Whether this is the frame the compositor draws around `window` --
+    /// its title bar and the ring a border is grabbed by -- rather than
+    /// the client's surface. The frame is the window's for focus, and
+    /// no client's for the pointer.
+    frame: bool,
+    /// Whether this is a window in the fullscreen mode over its whole
+    /// monitor, whose surface the frame scales to fit inside `rect` with its
+    /// aspect kept ([`compositor_render::letterboxed`]) rather than
+    /// stretching it over all of it.
+    fits: bool,
 }
 
 impl Placement {
@@ -241,6 +251,10 @@ impl Focus {
                 (x as f64, y as f64, (x + width) as f64, (y + height) as f64);
             at.0 >= left && at.0 < right && at.1 >= top && at.1 < bottom
         });
+        // On a window's frame -- its title bar, the ring its border is
+        // grabbed by -- the pointer is the compositor's: no client is on it,
+        // and the window under the frame least of all.
+        let over = over.filter(|placed| !placed.frame);
         let wanted = over.map(|placed| (placed.client, placed.surface));
         // Where in the surface the pointer is. The frame stretches a
         // window's surface to its rectangle, so the pointer's place in the
@@ -249,11 +263,21 @@ impl Focus {
         // drawn smaller than it is, and a pointer taken at the rectangle's
         // own scale drifted from what was under it, by nothing at the
         // top-left corner and by the whole difference at the bottom-right.
+        //
+        // A fullscreen window's surface of another shape than the screen is
+        // drawn scaled to fit between black bars, so the pointer is scaled
+        // back from where it is drawn: the game's 4:3 picture's left edge
+        // is the bar's right one, not the screen's.
         let local = over.map(|placed| {
             let window = slots
                 .get(placed.client)
                 .and_then(|slot| window_part(slot, placed.surface));
-            surface_point(at, placed.rect, window)
+            let rect = if placed.fits {
+                fitted(placed.rect, window)
+            } else {
+                placed.rect
+            };
+            surface_point(at, rect, window)
         });
 
         if wanted != self.pointer {
@@ -318,6 +342,9 @@ pub fn under_pointer(
             (x as f64, y as f64, (x + width) as f64, (y + height) as f64);
         at.0 >= left && at.0 < right && at.1 >= top && at.1 < bottom
     })?;
+    if over.frame {
+        return None;
+    }
     let (x, y, _, _) = over.rect;
     #[expect(
         clippy::cast_precision_loss,
@@ -348,7 +375,7 @@ pub struct Done {
 /// is the caller's. Everything else is sent as it goes.
 #[expect(
     clippy::too_many_arguments,
-    reason = "an action reaches the focus, the layout, every connection, the clock, one option and the drag"
+    reason = "an action reaches the focus, the layout, every connection, the clock, one option, the drag and the grab"
 )]
 pub fn deliver(
     actions: &[Action],
@@ -360,6 +387,7 @@ pub fn deliver(
     stamp: u64,
     follow_mouse: bool,
     dragging: bool,
+    grabbed: bool,
 ) -> Done {
     let placements = with_popups(placements(state, sources), slots, state, sources);
     let mut done = Done::default();
@@ -378,14 +406,14 @@ pub fn deliver(
             }
             Action::Key { code, pressed } => {
                 if let Some((client, _)) = focus.keyboard
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().keyboard_key(time, *code, *pressed);
                 }
             }
             Action::Modifiers(modifiers) => {
                 if let Some((client, _)) = focus.keyboard
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().keyboard_modifiers(*modifiers);
                 }
@@ -400,7 +428,7 @@ pub fn deliver(
                 // `CLOCK_MONOTONIC`, carried on to the client
                 // (`docs/GAME-PATH.md` §4.7); now, for an input with none.
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let micros = if stamp == 0 {
                         crate::front::monotonic_us()
@@ -418,9 +446,20 @@ pub fn deliver(
                 if dragging {
                     continue;
                 }
+                // Nor while a window is moved or resized by its title bar,
+                // its border or a mouse bind: the grabbed window keeps the
+                // pointer and the focus until the button goes up, whatever
+                // the pointer is over, as in Hyprland (a mouse bind's drag
+                // returns from `mouseMoveUnified` before any focus). A fast
+                // drag outruns the window it moves, and the window under
+                // the pointer for that moment was focused and raised over
+                // the one being dragged (the customer, N150, 2026-10-28).
+                if grabbed {
+                    continue;
+                }
                 if let Some((local_x, local_y)) = focus.move_pointer(&placements, slots, (*x, *y))
                     && let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     slot.client_mut()
                         .pointer_motion(time, fixed(local_x), fixed(local_y));
@@ -432,10 +471,7 @@ pub fn deliver(
                 // that binds no `wl_pointer` is still focused by moving
                 // onto it, as in Hyprland.
                 if follow_mouse
-                    && let Some(window) = placements
-                        .iter()
-                        .find(|placed| placed.contains(*x, *y))
-                        .and_then(|placed| placed.window)
+                    && let Some(window) = window_at(&placements, (*x, *y))
                     && state.focused_window() != Some(window)
                 {
                     done.focus = Some(window);
@@ -449,7 +485,7 @@ pub fn deliver(
                     continue;
                 }
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     let _ = slot.client_mut().pointer_button(time, *button, *pressed);
                     slot.client_mut().pointer_frame();
@@ -457,7 +493,7 @@ pub fn deliver(
             }
             Action::Axis { axis, value } => {
                 if let Some((client, _)) = focus.pointer
-                    && let Some(slot) = slots.get_mut(client)
+                    && let Some(slot) = awake(slots, client)
                 {
                     slot.client_mut().pointer_axis(time, *axis, fixed(*value));
                     slot.client_mut().pointer_frame();
@@ -468,15 +504,37 @@ pub fn deliver(
     done
 }
 
-/// Every window on a screen now, with where it is and whose it is.
+/// The connection at `client`, unless its process is frozen by `suspend`:
+/// a frozen client is sent no input, which it could not read and which
+/// would pile up until it was dropped (`crate::suspend`).
+fn awake(slots: &mut [Slot], client: usize) -> Option<&mut Slot> {
+    slots.get_mut(client).filter(|slot| !slot.parked())
+}
+
+/// The window the point is on, for `follow_mouse`: the topmost placement
+/// there -- a window, or its frame, which is the window's too -- or `None`
+/// over a popup, a layer surface or nothing.
+fn window_at(placements: &[Placement], (x, y): (f64, f64)) -> Option<WindowId> {
+    placements
+        .iter()
+        .find(|placed| placed.contains(x, y))
+        .and_then(|placed| placed.window)
+}
+
+/// Every window on a screen now, with where it is and whose it is, and
+/// the frame around each that has one: see [`frame_of`].
 fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placement> {
     let mut out = Vec::new();
     for output in state.layout() {
+        let screen = state
+            .monitors()
+            .find(|monitor| monitor.id == output.monitor)
+            .map(|monitor| monitor.rect);
         for placed in &output.windows {
             let Some(source) = sources.get(&placed.window) else {
                 continue;
             };
-            out.push(Placement {
+            let body = Placement {
                 window: Some(placed.window),
                 client: source.client,
                 surface: source.surface,
@@ -486,12 +544,85 @@ fn placements(state: &State, sources: &BTreeMap<WindowId, Source>) -> Vec<Placem
                     placed.rect.width,
                     placed.rect.height,
                 ),
-            });
+                frame: false,
+                fits: screen.is_some_and(|screen| crate::frame::fills_screen(placed, screen)),
+            };
+            // The frame goes in under its window's own surface, and so
+            // over every window drawn before it.
+            if let Some(rect) = frame_of(state, placed) {
+                out.push(Placement {
+                    rect,
+                    frame: true,
+                    ..body
+                });
+            }
+            out.push(body);
         }
     }
     // The last window drawn is the one on top, so the pointer finds it first.
     out.reverse();
     out
+}
+
+/// The rectangle a window's frame reaches, from its title bar's top to the
+/// far side of the ring its border is grabbed by, if it has either: a title
+/// bar the compositor draws above it (`hyprix:titlebars`), or, floating and
+/// with `general:resize_on_border` on, the ring of
+/// `general:border_size + general:extend_border_grab_area` around it.
+///
+/// Both are drawn and pressed as the window's, so the pointer on them is on
+/// the window: `follow_mouse` focuses it, as Hyprland's extents do. Left
+/// out, a pointer on Settings' title bar was over the terminal beneath it,
+/// which `follow_mouse` focused and the floating layout raised over the
+/// bar, so the bar could not be grabbed (the customer on the N150,
+/// 2026-10-28). The ring is a floating window's only: a tiled window's
+/// would reach into its neighbour.
+fn frame_of(state: &State, placed: &compositor_layout::Placed) -> Option<(i64, i64, i64, i64)> {
+    if placed.fullscreen {
+        return None;
+    }
+    let bar = state.title_bar(placed.window);
+    let ring = state
+        .workspace_of(placed.window)
+        .map(|workspace| state.settings_at(workspace))
+        .filter(|settings| placed.floating && settings.resize_on_border)
+        .map_or(0, |settings| {
+            (settings.border_size + settings.border_grab_extend).max(0)
+        });
+    if bar <= 0 && ring <= 0 {
+        return None;
+    }
+    let rect = placed.rect;
+    let top = bar.max(ring);
+    Some((
+        rect.x - ring,
+        rect.y - top,
+        rect.width + 2 * ring,
+        rect.height + top + ring,
+    ))
+}
+
+/// Where the frame draws a fullscreen window's `window` -- its part, in
+/// surface coordinates -- inside the window's `rect`: scaled to fit with its
+/// aspect kept, centred ([`compositor_render::fit_within`]); `rect` itself
+/// for a surface of its shape or of no known size.
+fn fitted(
+    rect: (i64, i64, i64, i64),
+    window: Option<(f64, f64, f64, f64)>,
+) -> (i64, i64, i64, i64) {
+    let Some((_, _, width, height)) = window else {
+        return rect;
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a surface's size, far inside i64; only its shape is read"
+    )]
+    let size = (width.round() as i64, height.round() as i64);
+    let fit = compositor_render::fit_within(
+        compositor_layout::Rect::new(rect.0, rect.1, rect.2, rect.3),
+        size,
+    );
+    (fit.x, fit.y, fit.width, fit.height)
 }
 
 /// The point `at` on the screen as a place in a surface whose `window` --
@@ -575,6 +706,8 @@ fn with_popups(
                 popup.rect.width,
                 popup.rect.height,
             ),
+            frame: false,
+            fits: false,
         })
         .collect();
     let layer = |wanted: compositor_server::Layer| -> Vec<Placement> {
@@ -589,6 +722,8 @@ fn with_popups(
                         client,
                         surface,
                         rect: (rect.x, rect.y, rect.width, rect.height),
+                        frame: false,
+                        fits: false,
                     })
             })
             .collect();
@@ -596,12 +731,41 @@ fn with_popups(
         found.reverse();
         found
     };
+    // A bar or a dock in the top layer on a monitor showing a fullscreen
+    // window is not drawn (`crate::frame::hidden_by_fullscreen`), and the
+    // pointer does not find it there either: it goes under the windows.
+    let covered = fullscreen_screens(state);
+    let (shown, hidden): (Vec<Placement>, Vec<Placement>) = layer(compositor_server::Layer::Top)
+        .into_iter()
+        .partition(|placed| {
+            let (x, y, _, _) = placed.rect;
+            !covered.iter().any(|screen| {
+                x >= screen.x && x < screen.right() && y >= screen.y && y < screen.bottom()
+            })
+        });
     out.extend(layer(compositor_server::Layer::Overlay));
-    out.extend(layer(compositor_server::Layer::Top));
+    out.extend(shown);
     out.extend(windows);
+    out.extend(hidden);
     out.extend(layer(compositor_server::Layer::Bottom));
     out.extend(layer(compositor_server::Layer::Background));
     out
+}
+
+/// The monitors, by their rectangles, that show a window fullscreen over
+/// the whole of them ([`crate::frame::shows_fullscreen`]).
+pub(crate) fn fullscreen_screens(state: &State) -> Vec<compositor_layout::Rect> {
+    state
+        .layout()
+        .iter()
+        .filter_map(|output| {
+            let screen = state
+                .monitors()
+                .find(|monitor| monitor.id == output.monitor)?
+                .rect;
+            crate::frame::shows_fullscreen(output, screen).then_some(screen)
+        })
+        .collect()
 }
 
 /// A pixel position as Wayland's 24.8 fixed point.
@@ -623,7 +787,106 @@ fn moved(held: &mut Option<(usize, ObjectId)>, places: &[Option<usize>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectId, Placement, WindowId, surface_point};
+    use std::collections::BTreeMap;
+
+    use compositor_layout::State;
+
+    use super::{
+        ObjectId, Placement, Source, WindowId, placements, surface_point, under_pointer, window_at,
+    };
+
+    /// A fast drag by the title bar outruns the window: for a moment the
+    /// pointer is over the window behind. While the grab is on, that window
+    /// is not focused (and so not raised) and its client is not told the
+    /// pointer entered it; with no grab, the same motion focuses it.
+    #[test]
+    fn a_grabbed_window_keeps_the_focus_whatever_the_pointer_crosses() {
+        use compositor_layout::{Monitor, MonitorId, Rect};
+
+        use crate::seat::Action;
+
+        let text = "general:layout = floating\n";
+        let config =
+            compositor_config::parse("test", text, &mut compositor_config::NoSources).config;
+        let mut state = State::from_config(&config);
+        let _changes = state
+            .add_monitor(Monitor {
+                scale: 1.0,
+                transform: Default::default(),
+                name: "DVI-D-1".to_owned(),
+                id: MonitorId(1),
+                rect: Rect::new(0, 0, 1920, 1080),
+                reserved: compositor_layout::Gaps::all(0),
+                description: String::new(),
+                made: <(String, String, String)>::default(),
+            })
+            .unwrap();
+        let below = WindowId(1);
+        let dragged = WindowId(2);
+        let _changes = state
+            .open_floating(below, Rect::new(100, 100, 800, 600))
+            .unwrap();
+        let _changes = state
+            .open_floating(dragged, Rect::new(1000, 200, 600, 400))
+            .unwrap();
+        let _changes = state.focus_window(dragged).unwrap();
+        let sources: BTreeMap<WindowId, Source> = [
+            (
+                below,
+                Source {
+                    client: 0,
+                    surface: ObjectId(3),
+                },
+            ),
+            (
+                dragged,
+                Source {
+                    client: 1,
+                    surface: ObjectId(3),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        // One large step of the pointer, onto the window below.
+        let over_below = [Action::Pointer { x: 400.0, y: 300.0 }];
+        for (grabbed, wanted) in [(true, None), (false, Some(below))] {
+            let mut focus = super::Focus::new();
+            let done = super::deliver(
+                &over_below,
+                &mut focus,
+                &state,
+                &mut [],
+                &sources,
+                0,
+                0,
+                true,
+                false,
+                grabbed,
+            );
+            assert_eq!(done.focus, wanted, "grabbed {grabbed}");
+        }
+    }
+
+    /// A client frozen by `suspend` is sent no input; the one beside it is,
+    /// and so is it again once thawed (`crate::suspend`).
+    #[test]
+    fn a_parked_client_is_sent_no_input() {
+        let mut slots = [
+            crate::state::Slot::for_test(),
+            crate::state::Slot::for_test(),
+        ];
+        if let Some(slot) = slots.get_mut(0) {
+            slot.park(true);
+        }
+        assert!(super::awake(&mut slots, 0).is_none());
+        assert!(super::awake(&mut slots, 1).is_some());
+        assert!(super::awake(&mut slots, 2).is_none());
+        if let Some(slot) = slots.get_mut(0) {
+            slot.park(false);
+        }
+        assert!(super::awake(&mut slots, 0).is_some());
+    }
 
     /// Chrome's surface is its window and 10 pixels of shadow all round;
     /// the frame draws only the window into the tile, so the pointer at the
@@ -659,6 +922,59 @@ mod tests {
         );
     }
 
+    /// A fullscreen game drawing 1024x768 on a 1920x1080 screen is drawn
+    /// 1440x1080 between black bars 240 pixels wide, and the pointer is
+    /// scaled back through that: the picture's left edge, not the
+    /// screen's, is the surface's.
+    #[test]
+    fn the_pointer_is_scaled_back_through_a_fitted_fullscreen_surface() {
+        let screen = (0, 0, 1920, 1080);
+        let game = Some((0.0, 0.0, 1024.0, 768.0));
+        let fit = super::fitted(screen, game);
+        assert_eq!(fit, (240, 0, 1440, 1080));
+        assert_eq!(surface_point((240.0, 0.0), fit, game), (0.0, 0.0));
+        assert_eq!(surface_point((960.0, 540.0), fit, game), (512.0, 384.0));
+        // The screen's own shape is stretched over all of it, as before.
+        assert_eq!(
+            super::fitted(screen, Some((0.0, 0.0, 1280.0, 720.0))),
+            screen
+        );
+        assert_eq!(super::fitted(screen, None), screen);
+
+        // And only a window the frame draws so: fullscreen over its
+        // monitor, or floating at exactly its rectangle.
+        let monitor = compositor_layout::Rect::new(0, 0, 1920, 1080);
+        let placed = |rect, border, floating, fullscreen| compositor_layout::Placed {
+            window: WindowId(1),
+            rect,
+            border,
+            focused: true,
+            floating,
+            fullscreen,
+        };
+        assert!(crate::frame::fills_screen(
+            &placed(monitor, 0, false, true),
+            monitor
+        ));
+        assert!(crate::frame::fills_screen(
+            &placed(monitor, 0, true, false),
+            monitor
+        ));
+        let work_area = compositor_layout::Rect::new(0, 40, 1920, 1040);
+        assert!(!crate::frame::fills_screen(
+            &placed(work_area, 2, false, true),
+            monitor
+        ));
+        assert!(!crate::frame::fills_screen(
+            &placed(monitor, 2, false, true),
+            monitor
+        ));
+        assert!(!crate::frame::fills_screen(
+            &placed(monitor, 0, false, false),
+            monitor
+        ));
+    }
+
     #[test]
     fn a_point_is_on_a_window_from_its_corner_to_before_its_far_edges() {
         // The DK1's portrait terminal, as `hyprctl clients` reported it.
@@ -667,6 +983,8 @@ mod tests {
             client: 0,
             surface: ObjectId(3),
             rect: (21, 21, 678, 613),
+            frame: false,
+            fits: false,
         };
         assert!(terminal.contains(470.0, 413.0), "where the pointer was");
         assert!(terminal.contains(21.0, 21.0), "the corner");
@@ -680,5 +998,151 @@ mod tests {
             "the bottom edge is outside"
         );
         assert!(!terminal.contains(20.9, 400.0), "left of it");
+    }
+
+    /// The customer's Yoru desktop on the N150, 2026-10-28: Settings floats
+    /// over a terminal as big as the screen. The pointer on Settings' title
+    /// bar, its buttons or the ring its border is grabbed by is on Settings,
+    /// so `follow_mouse` leaves the focus there, no client is told the
+    /// pointer entered it, and a press on the bar still finds the bar and
+    /// drags Settings. With the frame left out, the terminal under the bar
+    /// was focused and raised over it, and the bar could not be grabbed.
+    #[test]
+    fn a_title_bar_and_a_border_ring_are_their_windows_for_the_pointer() {
+        use compositor_layout::{Monitor, MonitorId, Rect};
+
+        use crate::titlebar::{Bars, Hit};
+
+        let text = "general:layout = floating\ngeneral:border_size = 1\n\
+                    general:resize_on_border = true\ngeneral:extend_border_grab_area = 8\n";
+        let config =
+            compositor_config::parse("test", text, &mut compositor_config::NoSources).config;
+        let mut state = State::from_config(&config);
+        let _changes = state
+            .add_monitor(Monitor {
+                scale: 1.0,
+                transform: Default::default(),
+                name: "DVI-D-1".to_owned(),
+                id: MonitorId(1),
+                rect: Rect::new(0, 0, 1920, 1080),
+                reserved: compositor_layout::Gaps::all(0),
+                description: String::new(),
+                made: <(String, String, String)>::default(),
+            })
+            .unwrap();
+        let terminal = WindowId(1);
+        let settings = WindowId(2);
+        let _changes = state
+            .open_floating(terminal, Rect::new(0, 34, 1920, 1046))
+            .unwrap();
+        let _changes = state
+            .open_floating(settings, Rect::new(700, 300, 800, 500))
+            .unwrap();
+        let mut bars = Bars::default();
+        let height = bars.height();
+        for window in [terminal, settings] {
+            let _changes = state.set_title_bar(window, height);
+        }
+        let _changes = state.focus_window(settings).unwrap();
+        let rect = |state: &State, window| {
+            state
+                .layout()
+                .iter()
+                .flat_map(|output| output.windows.iter())
+                .find(|placed| placed.window == window)
+                .map(|placed| placed.rect)
+                .unwrap()
+        };
+        let at = rect(&state, settings);
+        bars.place(settings, Rect::new(at.x, at.y - height, at.width, height));
+        let sources: BTreeMap<WindowId, Source> = [
+            (
+                terminal,
+                Source {
+                    client: 0,
+                    surface: ObjectId(3),
+                },
+            ),
+            (
+                settings,
+                Source {
+                    client: 1,
+                    surface: ObjectId(3),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let placements = placements(&state, &sources);
+
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a test's coordinates are a screen's, far inside f64"
+        )]
+        let point = |x: i64, y: i64| (x as f64 + 0.5, y as f64 + 0.5);
+        let bar = point(at.x + 200, at.y - height / 2);
+        let close = point(at.right() - 21, at.y - height / 2);
+        let ring_left = point(at.x - 5, at.y + 200);
+        let ring_below = point(at.x + 200, at.bottom() + 5);
+        for (what, at) in [
+            ("the title bar", bar),
+            ("its close button", close),
+            ("the ring left of it", ring_left),
+            ("the ring below it", ring_below),
+        ] {
+            assert_eq!(
+                window_at(&placements, at),
+                Some(settings),
+                "{what} is Settings', not the terminal's"
+            );
+            assert_eq!(
+                under_pointer(&state, &sources, at),
+                None,
+                "{what} is no client's for the pointer"
+            );
+        }
+        assert_eq!(
+            window_at(&placements, point(100, 600)),
+            Some(terminal),
+            "the terminal is the terminal's"
+        );
+        assert_eq!(
+            window_at(&placements, point(at.x - 20, at.y + 200)),
+            Some(terminal),
+            "and so is the terminal past Settings' ring"
+        );
+
+        // `follow_mouse` focuses what the pointer is on; the bar is still
+        // uncovered and a press on it starts the move, which moves Settings.
+        let _changes = state
+            .focus_window(window_at(&placements, bar).unwrap())
+            .unwrap();
+        assert_eq!(state.focused_window(), Some(settings));
+        assert_eq!(
+            bars.uncovered_hit(bar, &state.layout()),
+            Some((settings, Hit::Bar))
+        );
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a test's coordinates are a screen's"
+        )]
+        let from = (bar.0 as i64, bar.1 as i64);
+        let mut drag = crate::act::Drag {
+            window: settings,
+            resizing: false,
+            corner: compositor_layout::Corner::NONE,
+            began: crate::act::Began::Border,
+            from,
+            lifted: false,
+            edge: None,
+            owed: (0, 0),
+        };
+        let _moved = crate::act::dragged(&mut drag, &mut state, (from.0 - 150, from.1 + 100));
+        let moved = rect(&state, settings);
+        assert_eq!(
+            (moved.x, moved.y, moved.width, moved.height),
+            (at.x - 150, at.y + 100, at.width, at.height),
+            "the drag moved Settings by as much as the pointer"
+        );
     }
 }

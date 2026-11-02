@@ -23,18 +23,18 @@ mod x86_64;
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
-    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, prepare_cpu,
-    switch_code,
+    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, left_bank_pages,
+    prepare_cpu, switch_code,
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
-    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, prepare_cpu,
-    switch_code,
+    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, left_bank_pages,
+    prepare_cpu, switch_code,
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, prepare_cpu,
-    switch_code,
+    ARCH, ELF_CLASS, ELF_MACHINE, clean_dcache, counter, cpu_random, enter_kernel, left_bank_pages,
+    prepare_cpu, switch_code,
 };
 
 /// The page table descriptor layout this machine uses.

@@ -104,6 +104,74 @@ pub(crate) fn counter() -> u64 {
     unsafe { core::arch::x86_64::_rdtsc() }
 }
 
+/// `IA32_MCG_CAP`: the bank count in bits 7:0.
+const MCG_CAP: u32 = 0x179;
+/// `IA32_MC0_STATUS`; bank `i`'s registers are four apart from here:
+/// status, address, misc.
+const MC0_STATUS: u32 = 0x401;
+/// Banks read at most, as the kernel reads at most.
+const MAX_BANKS: u32 = 32;
+
+/// The pages uncorrected records left in the machine-check banks name
+/// (`docs/MACHINE-CHECK-RESTART.md` §2.7), into `out`; how many. Reads
+/// only, never writes or clears a bank -- the kernel's bring-up reads,
+/// prints and clears them -- and only where CPUID says the processor has
+/// the machine-check architecture, on a vendor whose rules it knows, and
+/// only banks below `MCG_CAP`'s count.
+pub(crate) fn left_bank_pages(out: &mut [u32]) -> usize {
+    use ferrix_bootinfo::pstore::{BankRules, left_page};
+    // CPUID 1, EDX: MCE (bit 7) and MCA (bit 14).
+    let features = core::arch::x86_64::__cpuid(1).edx;
+    if features & (1 << 7) == 0 || features & (1 << 14) == 0 {
+        return 0;
+    }
+    let vendor = core::arch::x86_64::__cpuid(0);
+    let mut name = [0_u8; 12];
+    for (chunk, word) in name
+        .chunks_exact_mut(4)
+        .zip([vendor.ebx, vendor.edx, vendor.ecx])
+    {
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    let rules = match &name {
+        b"GenuineIntel" => BankRules::Intel,
+        b"AuthenticAMD" | b"HygonGenuine" => BankRules::Amd,
+        _ => return 0,
+    };
+    // SAFETY: CPUID says the processor has the machine-check architecture,
+    // which defines `IA32_MCG_CAP`; reading it changes nothing.
+    let banks = (unsafe { read_msr(MCG_CAP) } & 0xff).min(u64::from(MAX_BANKS)) as u32;
+    let mut found = 0;
+    for bank in 0..banks {
+        let at = MC0_STATUS + 4 * bank;
+        // SAFETY: bank `bank` is below `MCG_CAP`'s count, so its status
+        // register exists; reading it changes nothing.
+        let status = unsafe { read_msr(at) };
+        // `MCi_ADDR` and `MCi_MISC` are read only where the status says
+        // they hold something, as the kernel reads them: an absent one may
+        // fault.
+        let address = if status & (1 << 58) != 0 {
+            // SAFETY: as above, and the status names it valid.
+            unsafe { read_msr(at + 1) }
+        } else {
+            0
+        };
+        let misc = if status & (1 << 59) != 0 {
+            // SAFETY: as above, and the status names it valid.
+            unsafe { read_msr(at + 2) }
+        } else {
+            0
+        };
+        if let (Some(page), Some(slot)) =
+            (left_page(rules, status, address, misc), out.get_mut(found))
+        {
+            *slot = page;
+            found += 1;
+        }
+    }
+    found
+}
+
 /// Read a model-specific register.
 ///
 /// # Safety

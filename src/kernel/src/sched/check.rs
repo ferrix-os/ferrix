@@ -179,6 +179,7 @@ static FINISHED: WaitQueue = WaitQueue::new();
 ///
 /// The first check that fails, as a sentence.
 pub fn run(topology: &Topology) -> Result<Report, &'static str> {
+    poison_record()?;
     let mut report = Report::default();
     // Taken before anything is started, so that what is counted is what these
     // checks' own thousand threads cost: see `Report::shootdowns`.
@@ -215,6 +216,8 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     super::mark_check::run(topology)?;
     super::deadline_check::run()?;
+    super::slice_check::run(topology)?;
+    super::affinity_check::run(topology)?;
     let realtime = super::rt_check::run()?;
     crate::console::println!("  sched    realtime {realtime}");
     let domains = super::domains_check::run()?;
@@ -552,6 +555,41 @@ fn balancing(topology: &Topology, report: &mut Report) -> Result<(), &'static st
 }
 
 /// The slice shrinks as more becomes runnable, and stops at the floor.
+/// A task's poison record (`docs/MACHINE-CHECK-COPY.md` §3.3): it holds one
+/// copy, refuses a second, and is taken empty, with and without the page to
+/// signal at; and a copy that consumed poison is recorded only inside a
+/// program's system call, signalling the caller only for its own memory,
+/// and stops anywhere else (ledger 5283 (1)).
+///
+/// Verifies: `L.syscall.25`
+/// Verifies: `L.syscall.26`
+fn poison_record() -> Result<(), &'static str> {
+    use crate::syscall::uaccess::{PoisonAction, poison_action};
+    let actions = [
+        (true, true, PoisonAction::Record { signal: true }),
+        (true, false, PoisonAction::Record { signal: false }),
+        (false, true, PoisonAction::Stop),
+        (false, false, PoisonAction::Stop),
+    ];
+    if !actions
+        .iter()
+        .all(|&(in_call, own, action)| poison_action(in_call, own) == action)
+    {
+        return Err("a copy that consumed poison was not acted on as its context says");
+    }
+    let record = super::task::PoisonRecord::new();
+    let first = record.record(0x9000, Some(0x40_0000));
+    let second = record.record(0xa000, None);
+    let taken = record.take();
+    let empty = record.take();
+    let quiet = record.record(0xb000, None) && record.take() == Some((0xb000, None));
+    if first && !second && taken == Some((0x9000, Some(0x40_0000))) && empty.is_none() && quiet {
+        Ok(())
+    } else {
+        Err("a task's poison record did not hold one, refuse a second and empty")
+    }
+}
+
 fn slice_scaling(report: &mut Report) -> Result<(), &'static str> {
     let allocations = crate::vmap::usage().allocations;
     let here = super::current()

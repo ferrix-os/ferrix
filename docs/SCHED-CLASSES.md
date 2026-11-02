@@ -1301,7 +1301,16 @@ The audit of every other path that enqueues a task, by caller of
   switch hands over;
 * a weight or a job's share (`set_weight`, `regroup_current`): changed in
   place, never re-queued;
-* affinity: `sched_setaffinity` is validated and not applied, so no move.
+* affinity, applied since game mode's layer B (`docs/GAME-MODE-SCHED.md`
+  §2.1, merged here 2026-11-02): the pick push (`affinity::push_picked`)
+  moves a waiting entity of either tier, released by `queue_upper`; the
+  push at a switch's tail (`push_off`) a task `depart` took off its queue
+  before the switch saved it;
+* a processor taken out of service (`docs/CORE-QUARANTINE.md`,
+  `move_one_off`): a waiting fair entity, else a waiting entity of the
+  tier above fair (`CpuQueue::upper_evacuee`, the tier's `waiting_where`),
+  so that no real-time task is stranded on a parked processor; never the
+  running one.
 None puts a running task in a queue as a waiting one.
 
 ## 9f. Step 5: a `SoftRt` domain made at run time (OK IF V1-V16, 2026-10-27)
@@ -2055,3 +2064,34 @@ restated and L.sched.140-150; booted on AArch64 and ARMv7-A with the
 domain check, two controls stopping the machine as they should. Owed:
 step 5b (the authority object, the calls, the handle, V3's check), the
 gate rows and V14's measurements.
+
+**2026-11-02: develop merged in, ids renumbered.** Core quarantine and
+game mode's layer B landed on develop first and took H.SCHED.18-19 and
+L.sched.102-123, so this work's ids moved by one fixed shift to the
+reservation's new place (H.SCHED by two, L.sched by twenty-two; the
+withdrawn ones are now L.sched.133 and 139). The merge joins the two
+scheduler changes: game mode's slice request (`request_ns`, L.sched.107)
+lives in the fair tier's record and reaches it through `FairTier`'s fourth
+named change, `set_request`; its applied affinity's pushes and core
+quarantine's evacuation release a task from whichever tier holds it (the
+audit above), the evacuation finding a waiting real-time task with the
+tier's new `waiting_where`; and the two `sched_setattr` implementations
+are one, the policy calls' with game mode's `sched_runtime` for a
+`SCHED_OTHER` thread and `sched_getattr` answering it. Owed: the
+consultant's look at the joined `sched_setattr` and at real-time tasks
+leaving a processor going out of service.
+
+**2026-11-02: step 5a with develop's applied affinity.** A mask is now a
+task's to change (`sched_setaffinity`, L.sched.96-101), so step 5a reads
+it within the task's domain: `affinity::mask_for` narrows a program's
+mask to its domain's processors, falling back to the whole domain where
+none is left in service, as a cpuset's change narrows a mask on Linux;
+`allowed` asks the domain's admission first, so the pick push, the push
+at a switch's tail, the fallback and every placer stay inside the domain
+(D-1), each asking the admission again under the target's lock (V5); a
+task pushed off at a switch's tail that its domain no longer has there is
+placed as an evicted one is. The quarantine's evacuation asks the
+admission too. Owed: the consultant's look at the domain-aware mask, and
+the customer's word on taking a `SoftRt` domain's processor out of
+service (as built, its tasks have nowhere inside the domain to go once
+all of its processors are parked).

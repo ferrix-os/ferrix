@@ -80,9 +80,11 @@ const _: () = assert!(
 // load's `Absent` in a `fixed` one, recorded in certification-item.json's
 // `composition_root.removable`. Each invocation defines the load's
 // `__ferrix_setters_*` symbols as calls into its type, so a build binds
-// exactly one or does not link. These, and the flag word's assert above, are
-// the only places the tree names `ferrix_runtime_settings` outside the flag
-// lists, and the only ones that name the crate.
+// exactly one or does not link. These, the flag word's assert above and
+// `register_load`'s word that root's way back is there (core quarantine's token,
+// ledger 4932 (B3)), are the only places the tree names
+// `ferrix_runtime_settings` outside the flag lists, and the only ones that
+// name the crate.
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "live"))]
 ferrix_kernel_load::bind_setters!(ferrix_kernel_settings::Live);
 #[cfg(all(ferrix_linux_abi = "on", ferrix_runtime_settings = "fixed"))]
@@ -314,6 +316,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // `finish_memory`, which reclaims the tables the processor list comes
     // from and sweeps a set of mappings that bringing processors up adds to.
     let cpus = bring_up_processors(view);
+    decide_scrubber(view);
     console::screen::milestone(8);
 
     // Stage 5, after stage 4 because it needs every processor it is going to
@@ -325,6 +328,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // processor that reads the power-limit MSRs, once every processor is up
     // and there is a scheduler to sleep in (`L.x86_64.187`).
     arch::start_msr_log(view);
+    // The machine-check log's poll, a task on each processor with banks, and
+    // `ferrix.mce.recover` (`docs/MACHINE-CHECK.md` §3.2). x86-64 only.
+    arch::start_machine_check_log(view);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's
@@ -478,11 +484,30 @@ fn require_hooks_disarmed() {
             "a check's hook was still armed after stage 12: {check}, in user::vmo's reclaim of clean pages"
         );
     }
+    if let Some(check) = user::vmo::block_hook_armed_by() {
+        fatal!(
+            catalog::CHECK_HOOK_LEFT_ARMED,
+            "a check's hook was still armed after its stage: {check}, in user::vmo's commit of blocks"
+        );
+    }
     if let Some(check) = arch::forget_hook_armed_by() {
         fatal!(
             catalog::CHECK_HOOK_LEFT_ARMED,
             "a check's hook was still armed after stage 9: {check}, in a forgotten root's clear"
         );
+    }
+}
+
+/// The root is final on the kernel path once the boot's checks, the last of
+/// which read the tmpfs, are done: the initramfs's pages go back, and after a
+/// switch the tmpfs's copy of the system with them (`docs/RAM-RELEASE.md`
+/// §2). Under `ferrix.devmgr=init` the root's switch task does it, after the
+/// install it waits for. Without the Linux ABI there is no root to build, and
+/// the archive stays where the loader put it.
+fn release_boot_copies() {
+    #[cfg(ferrix_linux_abi = "on")]
+    if !devmgr::by_init() {
+        fs::release_boot_copies();
     }
 }
 
@@ -1410,7 +1435,9 @@ fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
     }
     // Whatever `checks` says: the region a reset keeps must never be handed
     // out, and after the reclaim is when it could have been.
-    mm::check::check_pstore_never_free()
+    mm::check::check_pstore_never_free()?;
+    release_boot_copies();
+    Ok(())
 }
 
 #[cfg(ferrix_linux_abi = "on")]
@@ -1558,6 +1585,10 @@ fn start_audit(view: &BootView<'_>) {
 /// that lost a registration would power off without committing its disks,
 /// which is not something to find out by losing them.
 fn register_load(view: &BootView<'_>) {
+    // Root's way back from core quarantine is the settings crate's
+    // `cpuN/online`: only a build that has it gives lode the way out.
+    #[cfg(ferrix_runtime_settings = "live")]
+    init::root_can_return();
     let registered = syscall::launch::install()
         .and_then(|()| fs::install())
         .and_then(|()| platform::st::stm32mp1::install(view))
@@ -1798,6 +1829,13 @@ fn report_memory(stats: &mm::Stats) {
         stats.page_array_at,
         stats.page_array_bytes / 1024,
     );
+    // Only where the loader kept any out: a clean boot's lines are as before.
+    if stats.left_out_as_bad != 0 {
+        println!(
+            "  mm       {} frames left out as bad",
+            stats.left_out_as_bad
+        );
+    }
 }
 
 /// Print what the loader handed over.
@@ -1861,6 +1899,26 @@ fn report(view: &BootView<'_>) {
         println!("  fdt      {model}, {len} bytes at {at:#x}");
     }
     report_smbios(view);
+}
+
+/// Whether the RAM scrubber runs (`docs/RAM-SCRUBBER.md` §3.3): from what the
+/// SMBIOS memory arrays say about error correction, after the processors are
+/// up, since AArch64's guest test reads the PSCI conduit they found.
+fn decide_scrubber(view: &BootView<'_>) {
+    let _ = mm::scrub::decide(view, scrub_memory());
+}
+
+/// What the SMBIOS memory arrays the hand-off kept say about error
+/// correction, as the scrubber's decision and its stage 2 check read it.
+fn scrub_memory() -> mm::scrub::Memory {
+    use ferrix_smbios::Correction;
+    match discovery::smbios::tables().map(|tables| tables.memory_correction()) {
+        Some(Correction::None) => mm::scrub::Memory::None,
+        Some(Correction::Corrects(_)) => mm::scrub::Memory::Corrects,
+        Some(Correction::Unclear) => mm::scrub::Memory::Unclear,
+        Some(Correction::Malformed) => mm::scrub::Memory::Malformed,
+        Some(Correction::Absent) | None => mm::scrub::Memory::Absent,
+    }
 }
 
 /// Accept or refuse the loader's SMBIOS copy, and say which: the version, the

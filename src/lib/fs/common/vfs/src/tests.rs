@@ -2052,6 +2052,72 @@ fn pid_1s_inputs_are_read_from_the_archive_and_never_unpacked() {
     assert_eq!(entries[3].data, b"echo hi");
 }
 
+/// What `fs::release` gives the tmpfs root's pages back with: the archive's
+/// names go, a spared one and its parents stay, a directory with a mount on
+/// it stays, a file made after the unpack stays, and a file held open keeps
+/// its bytes. Development evidence of the tmpfs root's release, which
+/// carries no claim (L.user.173 was released unwritten, ledger 5038).
+#[test]
+fn removing_an_archive_takes_its_names_and_spares_the_rest() {
+    let mut archive = Newc::new();
+    archive.entry(".", 0o040_755, 1, 2, (0, 0), b"");
+    archive.entry("bin", 0o040_755, 2, 2, (0, 0), b"");
+    archive.entry("bin/busybox", 0o100_755, 3, 2, (0, 0), b"");
+    archive.entry("bin/ls", 0o100_755, 3, 2, (0, 0), b"\x7fELF");
+    archive.entry("bin/sh", 0o120_777, 4, 1, (0, 0), b"busybox");
+    archive.entry("lib", 0o040_755, 5, 2, (0, 0), b"");
+    archive.entry("lib/firmware", 0o040_755, 6, 2, (0, 0), b"");
+    archive.entry("lib/firmware/edid.bin", 0o100_644, 7, 1, (0, 0), b"edid");
+    archive.entry("lib/libc.so", 0o100_644, 8, 1, (0, 0), b"libc");
+    archive.entry("dev", 0o040_755, 9, 2, (0, 0), b"");
+    archive.entry(".ferrix", 0o040_755, 10, 2, (0, 0), b"");
+    archive.entry(".ferrix/init/script", 0o100_644, 11, 1, (0, 0), b"x");
+    let archive = archive.finish();
+
+    let (ns, ctx) = fresh();
+    let _ = initramfs::unpack(&ns, &ctx, &archive).unwrap();
+    let dev = ns.resolve(&ctx, None, b"/dev", true).unwrap();
+    let _ = ns.mount(tmpfs(2), &dev).unwrap();
+    ns.mkdir(&ctx, None, b"/made-later", 0o755).unwrap();
+    let held = ns
+        .open(
+            &ctx,
+            None,
+            b"/bin/busybox",
+            &OpenFlags {
+                read: true,
+                ..OpenFlags::default()
+            },
+            0,
+        )
+        .unwrap();
+
+    let names: Vec<&[u8]> = initramfs::unpacked_names(&archive).collect();
+    assert_eq!(names.len(), 9);
+    assert_eq!(names.first(), Some(&&b"bin"[..]));
+    let spare = |name: &[u8]| name == b"lib/firmware" || name.starts_with(b"lib/firmware/");
+    let done = initramfs::remove(&ns, &ctx, &archive, &spare).unwrap();
+    // Both names of busybox's file, sh, libc.so and bin.
+    assert_eq!(done.removed, 5);
+    // lib/firmware, its file, lib above them and dev with its mount.
+    assert_eq!(done.kept, 4);
+    for gone in ["/bin", "/bin/busybox", "/bin/ls", "/bin/sh", "/lib/libc.so"] {
+        assert!(
+            ns.resolve(&ctx, None, gone.as_bytes(), false).is_err(),
+            "{gone}"
+        );
+    }
+    for kept in ["/lib/firmware/edid.bin", "/dev", "/made-later"] {
+        assert!(
+            ns.resolve(&ctx, None, kept.as_bytes(), false).is_ok(),
+            "{kept}"
+        );
+    }
+    let mut bytes = [0_u8; 8];
+    assert_eq!(held.read(&mut bytes).unwrap(), 4);
+    assert_eq!(&bytes[..4], b"\x7fELF");
+}
+
 #[test]
 fn a_truncated_archive_is_an_error_not_a_partial_success() {
     let mut archive = Newc::new();

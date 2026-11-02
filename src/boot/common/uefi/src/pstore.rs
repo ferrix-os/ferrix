@@ -10,6 +10,8 @@ use core::ptr;
 
 use ferrix_bootinfo::pstore::{self, Found, HEADER_BYTES, Switch, Text};
 
+use ferrix_eventlog::{self as eventlog, Durability};
+
 use crate::console::println;
 use crate::events;
 use crate::load::{DirectMap, describe};
@@ -33,7 +35,15 @@ const NONE: &str = "no region this boot";
 
 /// Take the region for this boot: find it, report what the previous kernel
 /// left there, and write a fresh header. `None` when there is none, said.
-pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Option<Allocation> {
+pub(crate) fn take(
+    services: &Services,
+    cmdline: &str,
+    direct: DirectMap,
+    kept: &mut crate::badframes::Kept,
+    opened: &mut events::Opened,
+    mode: crate::badframes::Mode,
+) -> Option<Allocation> {
+    use crate::badframes::Mode;
     match pstore::switch(cmdline) {
         Switch::On => {}
         Switch::Off => {
@@ -48,6 +58,13 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
             return None;
         }
     }
+    // The frames the banks named go to the event log first, so that a boot
+    // that ends up with no region (below) still keeps them on disk.
+    if mode == Mode::Persist
+        && let events::Opened::Present(log) = opened
+    {
+        let _ = events::keep_frames(log, kept.named());
+    }
     let Some(address) = choose(services, direct) else {
         println!("  pstore   no place for the region below the direct map's end: {NONE}");
         return None;
@@ -61,26 +78,55 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
         println!("  pstore   {address:#x} is outside the direct map: {NONE}");
         return None;
     }
+    // A page of the region a machine-check bank names is never read: poison
+    // there would stop this loader inside firmware at every restart
+    // (`docs/MACHINE-CHECK-RESTART.md` §2.6). The header's: no region this
+    // boot. A ring page's: the header and its table are read, the text not.
+    if kept.names_bank_page(region.address) {
+        let _ = services.free("freeing the pstore region", region);
+        println!(
+            "  pstore   a machine-check bank names the region's header page {:#x}: {NONE}",
+            region.address
+        );
+        return None;
+    }
+    let ring_named = (1..pstore::LEN / pstore::HEADER)
+        .any(|page| kept.names_bank_page(region.address + page * pstore::HEADER));
     // SAFETY: the region is the loader's own allocation of `pstore::LEN`
     // bytes, identity mapped under boot services, and nothing else refers to
     // it; it is read before anything writes it.
     let header = unsafe { ptr::read_volatile(region.address as *const [u8; HEADER_BYTES]) };
-    let mut opened = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
-            let lines = report(region, &found);
-            keep_as_files(services, region, &found, &lines);
-            // Kept in the event log before the fresh header lets it go
-            // (POSTMORTEM §4, E2); a failed append keeps the region as it
-            // is, still allocated so the kernel never uses its pages, and
-            // this boot goes without one.
-            let kept = match &mut opened {
-                events::Opened::Absent => events::Kept::NotAPanic,
-                events::Opened::Unusable => events::Kept::Failed,
-                events::Opened::Present(log) => events::keep(log, services, region),
+            // The frames the boot before retired, kept out of this one
+            // (`docs/MACHINE-CHECK-RESTART.md` §2.5), before anything here
+            // reads the ring.
+            if mode != Mode::Off {
+                for frame in pstore::bad_frames(&header, &found) {
+                    crate::badframes::keep(services, kept, frame, "table");
+                }
+            }
+            let logged = if ring_named {
+                println!(
+                    "  pstore   boot {}'s text not read: a machine-check bank names a page of it",
+                    found.sequence
+                );
+                events::Kept::NotAPanic
+            } else {
+                let lines = report(region, &found);
+                keep_as_files(services, region, &found, &lines);
+                // Kept in the event log before the fresh header lets it go
+                // (POSTMORTEM §4, E2); a failed append keeps the region as it
+                // is, still allocated so the kernel never uses its pages, and
+                // this boot goes without one.
+                match opened {
+                    events::Opened::Absent => events::Kept::NotAPanic,
+                    events::Opened::Unusable => events::Kept::Failed,
+                    events::Opened::Present(log) => events::keep(log, services, region),
+                }
             };
-            if matches!(kept, events::Kept::Failed) {
-                if let events::Opened::Present(log) = &mut opened {
+            if !may_renew(opened, kept, mode, logged) {
+                if let events::Opened::Present(log) = opened {
                     events::summary(log, services);
                 }
                 println!(
@@ -99,7 +145,7 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
             1
         }
     };
-    if let events::Opened::Present(log) = &mut opened {
+    if let events::Opened::Present(log) = opened {
         events::summary(log, services);
     }
     renew(region, sequence);
@@ -112,6 +158,33 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
         region.address
     );
     Some(region)
+}
+
+/// Whether the region may be renewed (the region rule,
+/// `docs/MACHINE-CHECK-RESTART.md` §9.2): the table's frames are made durable
+/// in the event log first, under `persist`; under reset and off the set is
+/// not written, and the region renews (ledger 5579 (4)).
+fn may_renew(
+    opened: &mut events::Opened,
+    kept: &crate::badframes::Kept,
+    mode: crate::badframes::Mode,
+    logged: events::Kept,
+) -> bool {
+    use crate::badframes::Mode;
+    let frames = match opened {
+        events::Opened::Present(log) if mode == Mode::Persist => {
+            events::keep_frames(log, kept.named())
+        }
+        events::Opened::Present(_) | events::Opened::Absent | events::Opened::Unusable => {
+            Durability::NotNeeded
+        }
+    };
+    let record = match logged {
+        events::Kept::NotAPanic => Durability::NotNeeded,
+        events::Kept::Durable => Durability::Durable,
+        events::Kept::Failed => Durability::Failed,
+    };
+    eventlog::may_renew(record, frames)
 }
 
 /// Write a fresh header for boot `sequence` over the region's.

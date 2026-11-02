@@ -3790,13 +3790,15 @@ fn rows(data: &[u8], rect: Rect) -> Vec<u8> {
 /// The blend written out ([`Canvas::composite_with`] on a premultiplied
 /// surface) against tiny-skia's pattern shader, which drew every expected
 /// image: every alpha, every colour a pixel of that alpha can have, over
-/// every byte a canvas can hold, at full opacity and at two others.
+/// every byte a canvas can hold, at full opacity and at three others --
+/// 0.9 is Yoru's see-through windows, drawn through [`crate::canvas`]'s
+/// fade table for every opaque pixel.
 #[test]
 fn a_translucent_surface_blends_as_tiny_skia_blends_it() {
     use tiny_skia::{BlendMode, FilterQuality, Paint, Pattern, PixmapMut, PixmapRef, SpreadMode};
 
     const SIDE: u32 = 256;
-    for opacity in [1.0_f32, 0.5, 0.8] {
+    for opacity in [1.0_f32, 0.5, 0.8, 0.9] {
         for alpha in 0..=255u32 {
             // Row `y` is colour `min(y, alpha)` in all three channels, over a
             // canvas whose column `x` is `x` in blue, `255 - x` in green, and
@@ -3976,6 +3978,8 @@ struct Asked {
     kept: i64,
     /// How many blurs were asked for, of the frame or of the backdrop.
     blurs: usize,
+    /// The colour of every `fill`.
+    fills: Vec<Color>,
 }
 
 impl crate::Painter for Asked {
@@ -3987,7 +3991,9 @@ impl crate::Painter for Asked {
     fn clear(&mut self, _: Color, damage: &Damage) {
         self.cleared += damage.clipped(self.bounds()).area();
     }
-    fn fill(&mut self, _: Rect, _: Color, _: &Damage) {}
+    fn fill(&mut self, _: Rect, color: Color, _: &Damage) {
+        self.fills.push(color);
+    }
     fn fill_rounded(&mut self, _: Rect, _: Rounding, _: Color, _: &Damage) {}
     fn fill_rounded_gradient(&mut self, rect: Rect, _: Rounding, _: &Gradient, damage: &Damage) {
         self.gradients.push(damage.clipped(rect).area());
@@ -4534,4 +4540,419 @@ fn a_window_over_a_fullscreen_one_is_undecorated() {
         (0, 0, 0)
     );
     assert!(asked.gradients.is_empty(), "{:?}", asked.gradients);
+}
+
+/// Yoru's decorations change with the focus beyond the border: the shadow
+/// is darker under the focused window (`shadow:color_inactive`) and the
+/// glow is the focused one's alone. A focus change drawn through the damage
+/// a compositor owes it -- what moved or recoloured grown by the shadow's
+/// and the glow's reach, as hyprix grows it, and the rings -- is the frame
+/// a full redraw makes. It was not when a focus change was owed only the
+/// two rings: the old focus's shadow and glow stayed on the screen as
+/// hard-edged slabs (the N150, 2026-10-28).
+#[test]
+fn a_focus_change_recolouring_shadow_and_glow_redraws_them() {
+    let (_, before) = two_clients();
+    let buffers = client_buffers(&before);
+    let surfaces = surfaces(&buffers);
+    let base = plain_style();
+    let shadow = crate::Shadow {
+        rounding: Rounding::circle(8),
+        range: 40,
+        power: 2,
+        color: Color(0x8C00_0000),
+        offset: (0, 16),
+    };
+    let style = Style {
+        rounding: Rounding::circle(8),
+        shadow: Some(shadow),
+        shadow_inactive: Some(Color(0x6600_0000)),
+        glow: Some(crate::Shadow {
+            range: 36,
+            power: 3,
+            color: Color(0x4091_84D9),
+            offset: (0, 0),
+            ..shadow
+        }),
+        ..base
+    };
+    let styles = Styles::plain(&style);
+    let mut canvas = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let _ = render(
+        &mut canvas,
+        &before,
+        (0, 0),
+        &style,
+        &surfaces,
+        &Damage::full(WIDTH, HEIGHT),
+    );
+    let mut after = before.clone();
+    for placed in &mut after.windows {
+        placed.focused = !placed.focused;
+    }
+    let (moved, rings) = crate::damage_between_parts(&before, &after, (0, 0), &styles);
+    // hyprix's margin: each side by the further of the shadow's and the
+    // glow's range and offset.
+    let mut damage: Damage = moved
+        .rects()
+        .iter()
+        .map(|rect| Rect::new(rect.x - 40, rect.y - 56, rect.width + 80, rect.height + 112))
+        .collect();
+    damage.extend(&rings);
+    let _ = render(&mut canvas, &after, (0, 0), &style, &surfaces, &damage);
+    let mut fresh = Canvas::new(WIDTH, HEIGHT).unwrap();
+    let _ = render(
+        &mut fresh,
+        &after,
+        (0, 0),
+        &style,
+        &surfaces,
+        &Damage::full(WIDTH, HEIGHT),
+    );
+    assert!(
+        canvas.data() == fresh.data(),
+        "a focus change left the old focus's shadow or glow on the screen"
+    );
+}
+
+// -- The scrim behind a shell drawn for a blur, where there is none ---------
+
+/// The scrim Yoru's theme lays (`hyprix:blur_scrim`): Nocturne's ground at
+/// 85%.
+const SCRIM: Color = Color(0xD916_1826);
+
+/// The size of the switcher's picture.
+const SHELL: (u32, u32) = (400, 300);
+
+/// Where the two lines of "text" are on the shell: one in the head, one at
+/// the foot, each a light bar with the shade on either side of it.
+const HEAD_TEXT: Rect = Rect::new(40, 20, 120, 10);
+const FOOT_TEXT: Rect = Rect::new(140, 270, 120, 10);
+
+/// A premultiplied `ARGB8888` picture of Yoru's wallpaper switcher, drawn
+/// for a blurred backdrop: `picker.rs`'s shade of Nocturne's ground -- 60%
+/// at the top, clear through the middle, 88% at the foot -- and on it two
+/// lines of light text (`#e9e9ed`) in the head and at the foot.
+fn switcher_pixels() -> Vec<u8> {
+    let (width, height) = SHELL;
+    let mut bytes = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        let t = (y as f32 + 0.5) / height as f32;
+        let shade = if t < 0.32 {
+            0.6 * (1.0 - t / 0.32)
+        } else if t < 0.55 {
+            0.0
+        } else if t < 0.8 {
+            0.88 * (t - 0.55) / 0.25
+        } else {
+            0.88
+        };
+        for x in 0..width {
+            let inside = |rect: Rect| {
+                (rect.x..rect.right()).contains(&i64::from(x))
+                    && (rect.y..rect.bottom()).contains(&i64::from(y))
+            };
+            let (colour, alpha) = if inside(HEAD_TEXT) || inside(FOOT_TEXT) {
+                ([0xED_u8, 0xE9, 0xE9], 1.0_f32)
+            } else {
+                ([0x26, 0x18, 0x16], shade)
+            };
+            let premultiplied = |byte: u8| (f32::from(byte) * alpha).round() as u8;
+            bytes.extend([
+                premultiplied(colour[0]),
+                premultiplied(colour[1]),
+                premultiplied(colour[2]),
+                (alpha * 255.0).round() as u8,
+            ]);
+        }
+    }
+    bytes
+}
+
+/// The switcher over the whole of a white window -- the lode viewer's,
+/// in the customer's screenshot -- drawn with `style`, as Yoru's
+/// `layerrule`s ask: blurred behind.
+fn switcher_over_white(style: &Style) -> Canvas {
+    let (width, height) = SHELL;
+    let white = vec![0xFF; (width * height * 4) as usize];
+    let window = Surface::new(&white, width, height, width * 4, Format::Xrgb8888).unwrap();
+    let shell = switcher_pixels();
+    let shell = Surface::new(&shell, width, height, width * 4, Format::Argb8888).unwrap();
+    let screen = Rect::new(0, 0, i64::from(width), i64::from(height));
+    let layers = [
+        LayerFrame {
+            rect: screen,
+            above: false,
+            surface: Some(window),
+            dim_around: false,
+            blur: false,
+            xray: false,
+        },
+        LayerFrame {
+            rect: screen,
+            above: true,
+            surface: Some(shell),
+            dim_around: false,
+            blur: true,
+            xray: false,
+        },
+    ];
+    let layout = MonitorLayout {
+        monitor: MonitorId(1),
+        workspace: compositor_layout::WorkspaceId(1),
+        windows: Vec::new(),
+    };
+    let mut canvas = Canvas::new(width, height).unwrap();
+    let _ = render_with_layers(
+        &mut canvas,
+        &layout,
+        (0, 0),
+        &Styles::plain(style),
+        &BTreeMap::new(),
+        &layers,
+        &Damage::full(width, height),
+    );
+    canvas
+}
+
+/// WCAG's contrast ratio between two canvas pixels, from their green
+/// channel's relative luminance: the text and the ground are greys and
+/// near-greys, where that is the luminance to a few percent.
+fn contrast(canvas: &Canvas, a: (u32, u32), b: (u32, u32)) -> f32 {
+    let luminance = |(x, y): (u32, u32)| {
+        let channel = f32::from(((canvas.pixel(x, y).unwrap() >> 8) & 0xFF) as u8) / 255.0;
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (one, other) = (luminance(a), luminance(b));
+    (one.max(other) + 0.05) / (one.min(other) + 0.05)
+}
+
+/// The text in the head and the text at the foot, each against the ground
+/// just above it.
+fn switcher_contrasts(canvas: &Canvas) -> [f32; 2] {
+    [HEAD_TEXT, FOOT_TEXT].map(|text| {
+        let at = (text.x as u32 + 4, text.y as u32 + 4);
+        let ground = (text.x as u32 + 4, text.y as u32 - 3);
+        contrast(canvas, at, ground)
+    })
+}
+
+/// Yoru's wallpaper switcher over a white window on a screen that draws no
+/// blur -- every software screen under Yoru's `blur_in_software = 0`, every
+/// PC the live ISO boots on -- has its scrim behind it, and its text reads:
+/// WCAG's 4.5:1 or better against the ground beside it, head and foot.
+/// The scrim covers the rectangle a blur would have, the shade's clear
+/// middle too: the window behind is a dark grey there, not a white band
+/// across the switcher.
+///
+/// The negative control is the same frame with no scrim, which is the
+/// frame the customer photographed on 2026-10-28: the head's text under
+/// 4.5:1 (2.7:1) against a grey that is the window showing through.
+#[test]
+fn a_shell_drawn_for_a_blur_gets_the_scrim_where_no_blur_is_drawn() {
+    let style = Style {
+        blur: None,
+        blur_scrim: Some(SCRIM),
+        ..plain_style()
+    };
+    let canvas = switcher_over_white(&style);
+    golden::check("blur-scrim-switcher", SHELL.0, SHELL.1, canvas.data());
+    for (ratio, line) in switcher_contrasts(&canvas)
+        .into_iter()
+        .zip(["head", "foot"])
+    {
+        assert!(
+            ratio >= 4.5,
+            "the {line}'s text at {ratio:.2}:1 over the scrim"
+        );
+    }
+    let middle = canvas.pixel(200, 135).unwrap();
+    assert!(
+        middle.to_le_bytes()[..3]
+            .iter()
+            .all(|&channel| channel < 0x50),
+        "the shade's clear middle has the scrim too: {middle:#010x}"
+    );
+
+    // The control: no scrim, and the head's text is unreadable.
+    let bare = switcher_over_white(&Style {
+        blur: None,
+        blur_scrim: None,
+        ..plain_style()
+    });
+    let [head, _] = switcher_contrasts(&bare);
+    assert!(
+        head < 4.5,
+        "the head's text at {head:.2}:1 without the scrim"
+    );
+    assert_ne!(bare.data(), canvas.data());
+}
+
+/// The scrim is the stand-in for a blur and nothing else: none where the
+/// screen draws the blur, none behind a surface no rule asked a blur for,
+/// and none where the configuration names no scrim.
+#[test]
+fn the_scrim_is_laid_only_where_a_blur_was_asked_for_and_none_is_drawn() {
+    let bytes = vec![0x80; 1920 * 30 * 4];
+    let bar = |blur: bool| LayerFrame {
+        rect: Rect::new(0, 0, 1920, 30),
+        above: true,
+        surface: Some(Surface::new(&bytes, 1920, 30, 1920 * 4, Format::Argb8888).unwrap()),
+        dim_around: false,
+        blur,
+        xray: false,
+    };
+    let (layout, _) = one_window(Rect::new(100, 100, 400, 300), 0, false);
+    let asked = |style: &Style, blur: bool| {
+        let got = asked_with(
+            style,
+            &layout,
+            (400, 300),
+            Format::Xrgb8888,
+            None,
+            &[bar(blur)],
+        );
+        (
+            got.blurs,
+            got.fills.iter().filter(|&&fill| fill == SCRIM).count(),
+        )
+    };
+    let scrimmed = Style {
+        blur_scrim: Some(SCRIM),
+        ..decorated_style()
+    };
+    assert!(scrimmed.blur.is_some());
+    assert_eq!(asked(&scrimmed, true), (1, 0), "a blurring screen blurs");
+    let unblurred = Style {
+        blur: None,
+        ..scrimmed
+    };
+    assert_eq!(asked(&unblurred, true), (0, 1), "no blur: the scrim");
+    assert_eq!(asked(&unblurred, false), (0, 0), "no rule asked a blur");
+    let unset = Style {
+        blur_scrim: None,
+        ..unblurred
+    };
+    assert_eq!(asked(&unset, true), (0, 0), "no scrim configured");
+}
+
+/// `hyprix:blur_scrim` is read as a colour, unset by default, as every
+/// other hyprix option that is not Hyprland's leaves Hyprland's frame as
+/// it was.
+#[test]
+fn the_scrim_is_read_from_the_configuration_and_off_by_default() {
+    assert_eq!(Style::default().blur_scrim, None);
+    let config = parse(
+        "test",
+        "hyprix {\n    blur_scrim = rgba(161826d9)\n}\n",
+        &mut NoSources,
+    )
+    .config;
+    assert_eq!(Style::from_config(&config).blur_scrim, Some(SCRIM));
+}
+
+// -- A fullscreen window whose surface is another shape -----------------------
+
+/// A 64x36 screen (16:9) with one window over all of it, fullscreen or
+/// maximized, drawn from a white `XRGB8888` surface `width` by `height`:
+/// the canvas's pixels after a whole frame.
+fn letterbox_frame(width: u32, height: u32, fullscreen: bool) -> Vec<u32> {
+    let rect = Rect::new(0, 0, 64, 36);
+    let layout = MonitorLayout {
+        monitor: MonitorId(1),
+        workspace: compositor_layout::WorkspaceId(1),
+        windows: vec![Placed {
+            window: WindowId(1),
+            rect,
+            border: if fullscreen { 0 } else { 2 },
+            focused: true,
+            floating: false,
+            fullscreen,
+        }],
+    };
+    let bytes = vec![0xFF; (width * height * 4) as usize];
+    let surface = Surface::new(&bytes, width, height, width * 4, Format::Xrgb8888).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let style = unshadowed();
+    let mut canvas = canvas(64, 36);
+    let _ = render_onto(
+        &mut canvas,
+        None,
+        &layout,
+        (0, 0),
+        &Styles::plain(&style),
+        &surfaces,
+        &[],
+        &Damage::full(64, 36),
+    );
+    pixels(&canvas)
+}
+
+/// A fullscreen game drawing 4:3 on a 16:9 screen -- 24x18 here, 1024x768
+/// on the N150's 1920x1080 -- is scaled to the screen's height with its
+/// aspect kept and centred, black on either side: what gamescope and
+/// Xwayland's emulated mode changes show. Stretched to the screen, as every
+/// other window's surface is, it was a picture pulled out of shape.
+#[test]
+fn a_fullscreen_surface_of_another_shape_is_scaled_to_fit_between_black_bars() {
+    let frame = letterbox_frame(24, 18, true);
+    let black = 0xFF00_0000;
+    let white = 0xFFFF_FFFF;
+    for y in 0..36 {
+        for x in 0..64 {
+            let want = if (8..56).contains(&x) { white } else { black };
+            assert_eq!(frame[y * 64 + x], want, "at {x},{y}");
+        }
+    }
+}
+
+/// The same shape of screen, smaller: 1280x720 on 1920x1080, here 32x18 on
+/// 64x36. Scaled to fit, it fills the screen, and no bar is drawn.
+#[test]
+fn a_fullscreen_surface_of_the_screens_shape_fills_it() {
+    let frame = letterbox_frame(32, 18, true);
+    assert!(
+        frame.iter().all(|&pixel| pixel == 0xFFFF_FFFF),
+        "{frame:x?}"
+    );
+}
+
+/// Only a fullscreen window: a maximized one keeps its border and has its
+/// surface stretched to its rectangle as before, no bars inside it.
+#[test]
+fn a_maximized_window_is_still_stretched() {
+    let frame = letterbox_frame(24, 18, false);
+    assert_eq!(
+        frame[18 * 64 + 4],
+        0xFFFF_FFFF,
+        "stretched to the left edge"
+    );
+    assert_eq!(frame[18 * 64 + 60], 0xFFFF_FFFF, "and to the right");
+}
+
+/// Where [`crate::fit_within`] puts a picture: the screen's own shape fills
+/// it, 4:3 on 16:9 stands between bars at the sides, 21:9 between bars
+/// above and below, and a fraction of a pixel off the screen's aspect is
+/// not worth a bar.
+#[test]
+fn a_picture_is_fitted_with_its_aspect_kept() {
+    let screen = Rect::new(0, 0, 1920, 1080);
+    assert_eq!(crate::fit_within(screen, (1280, 720)), screen);
+    assert_eq!(
+        crate::fit_within(screen, (1024, 768)),
+        Rect::new(240, 0, 1440, 1080)
+    );
+    assert_eq!(
+        crate::fit_within(screen, (2560, 1080)),
+        Rect::new(0, 135, 1920, 810)
+    );
+    assert_eq!(crate::fit_within(screen, (1366, 768)), screen);
+    assert_eq!(
+        crate::fit_within(Rect::new(1920, 0, 1920, 1200), (1600, 1200)),
+        Rect::new(2080, 0, 1600, 1200)
+    );
 }
