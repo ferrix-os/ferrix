@@ -1515,7 +1515,7 @@ pub fn prepare_user(
 
 /// Give `child`, a user task no queue has seen, the policy of the task
 /// making it, this processor's running one (`docs/SCHED-CLASSES.md` §9e, F9,
-/// R8, L.sched.113): a real-time policy and priority are inherited, with a
+/// R8, L.sched.135): a real-time policy and priority are inherited, with a
 /// node of their own, unless the parent has reset-on-fork set, when the
 /// child starts `SCHED_OTHER`; the child's own reset-on-fork flag starts
 /// clear either way, as Linux's does. Every user task is made through
@@ -1544,13 +1544,13 @@ fn inherit_policy(child: &Task) -> Result<(), &'static str> {
 
 /// Whether the running task has reset-on-fork set: the nice value a thread
 /// it starts inherits is then raised to zero if it is negative, as Linux's
-/// `sched_fork` does (L.sched.113).
+/// `sched_fork` does (L.sched.135).
 pub fn current_resets_on_fork() -> bool {
     with_current(|task| task.rt_word().resets_on_fork()).unwrap_or(false)
 }
 
 /// A scheduling domain of `cpus` running `mode`, as this build can make
-/// one (docs/SCHED-CLASSES.md §9a, D9, §9e, R9, and §9f, L.sched.115): a
+/// one (docs/SCHED-CLASSES.md §9a, D9, §9e, R9, and §9f, L.sched.137): a
 /// mode whose tiers are not compiled in is `ModeUnavailable`, before the
 /// library's own refusal of a mode not written yet. `SoftRt`, compiled in
 /// on `desktop`, is made at run time (`domains::create_soft`).
@@ -1569,7 +1569,7 @@ pub(crate) fn make_domain(
 }
 
 /// Whether this build has a tier above fair, so that a task may ask for
-/// `SCHED_FIFO` or `SCHED_RR` (L.sched.116).
+/// `SCHED_FIFO` or `SCHED_RR` (L.sched.138).
 #[must_use]
 pub const fn realtime_built() -> bool {
     stack::REALTIME
@@ -1585,7 +1585,7 @@ pub const fn rr_quantum_ns() -> u64 {
 /// Why [`set_policy`] refused a policy.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PolicyRefused {
-    /// The build has no tier above fair (L.sched.116).
+    /// The build has no tier above fair (L.sched.138).
     NoTier,
     /// No memory for the task's node of that tier (R1).
     NoMemory,
@@ -1594,7 +1594,7 @@ pub enum PolicyRefused {
 /// Give `task` a real-time policy and priority, or `SCHED_OTHER` with
 /// `None`, and its reset-on-fork flag, and ask for a decision if that has
 /// changed which task should be running (`docs/SCHED-CLASSES.md` §9e,
-/// L.sched.112). The queue holding the task is found and locked as
+/// L.sched.134). The queue holding the task is found and locked as
 /// [`set_weight`] finds it. A task's first real-time policy allocates its
 /// node here, before any lock is taken (R1); refused for want of it,
 /// nothing has changed.
@@ -2239,7 +2239,7 @@ enum Onto {
 /// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
 /// interrupts masked.
 fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
-    // A real-time task is woken where it is, never moved (R5, L.sched.110),
+    // A real-time task is woken where it is, never moved (R5, L.sched.132),
     // as `place_on_idle` declines it.
     if !task.is_fair() {
         return Placed::Declined;
@@ -2635,7 +2635,7 @@ fn placed_on_wake(
 /// (`place_on_idle`: the task was on no queue, and carries the state it
 /// stored when it blocked). Either way the lag it carries is placed against
 /// `queue`'s own virtual time, by the same `insert`. Never a real-time task
-/// (F8, L.sched.110): the fair class alone offers a steal, and a wake's
+/// (F8, L.sched.132): the fair class alone offers a steal, and a wake's
 /// placement declines one.
 fn move_onto(task: &Arc<Task>, to: usize, queue: &mut CpuQueue) {
     // A task a processor runs is never waiting in a queue to be moved: one
@@ -2709,7 +2709,7 @@ pub(crate) fn placements() -> u64 {
 /// after this runs `task` after its pick, as any queued task.
 fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
     // A real-time task stays on the processor its affinity and its last run
-    // give it, as `docs/SCHED-CLASSES.md` §9e has it (R5, L.sched.110): never
+    // give it, as `docs/SCHED-CLASSES.md` §9e has it (R5, L.sched.132): never
     // pushed to another, so a higher priority waits for its own processor
     // even while another is idle.
     if task.is_pinned() || !task.is_fair() {

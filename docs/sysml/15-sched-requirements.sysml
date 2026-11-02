@@ -67,7 +67,7 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::rearm_timers", "sched::rearm_here",
                 "sched::set_task_group", "sched::note_moved");
         }
-        requirement <'L.sched.103'> theTimerIsArmedForTheStacksDecision : ItemLowLevel {
+        requirement <'L.sched.125'> theTimerIsArmedForTheStacksDecision : ItemLowLevel {
             attribute :>> statement = "CpuQueue::arm_timer shall arm the next
                 decision for the class stack's decision_in_ns, which is due at
                 once when a task of a higher tier waits while a lower one runs,
@@ -81,11 +81,11 @@ package FerrixSchedRequirements {
                 with one task; with the upper tier throttled, the decision is its
                 period's end (a_throttled_upper_tier_does_not_spin); on the
                 fair-only stack, L.sched.1's check, the fair queue's decision
-                within a slice; on desktop, H.SCHED.20's floor check.";
+                within a slice; on desktop, H.SCHED.22's floor check.";
             attribute :>> parent = "H.SCHED.2";
             attribute :>> unit = "sched::queue::CpuQueue::arm_timer";
         }
-        requirement <'L.sched.104'> theTickPreemptsThroughTheStack : ItemLowLevel {
+        requirement <'L.sched.126'> theTickPreemptsThroughTheStack : ItemLowLevel {
             attribute :>> statement = "CpuQueue::should_preempt shall answer the
                 class stack's should_preempt: true when a task of a higher tier
                 waits while a lower one runs, and agreeing with the stack's
@@ -101,7 +101,7 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::queue::CpuQueue::should_preempt";
         }
-        requirement <'L.sched.105'> theLoadIsTheStacks : ItemLowLevel {
+        requirement <'L.sched.127'> theLoadIsTheStacks : ItemLowLevel {
             attribute :>> statement = "CpuQueue::account_load shall accumulate the
                 class stack's load_weight, the sum of every tier's load in
                 LOAD_UNITs, a fair task at nice 0 being one.";
@@ -115,7 +115,7 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = "sched::queue::CpuQueue::account_load";
         }
-        requirement <'L.sched.106'> aYieldIsTheRunningTiers : ItemLowLevel {
+        requirement <'L.sched.128'> aYieldIsTheRunningTiers : ItemLowLevel {
             attribute :>> statement = "yield_now shall ask the class stack to
                 yield its running task, which the running task's tier answers.";
             attribute :>> criterion = "ferrix-sched-class's host test on a stack
@@ -426,7 +426,7 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.16";
             attribute :>> unit = ("sched::reap_ahead", "sched::exit_counted");
         }
-        requirement <'L.sched.102'> theBootNamesTheClassesTheFlagsCompose : ItemLowLevel {
+        requirement <'L.sched.124'> theBootNamesTheClassesTheFlagsCompose : ItemLowLevel {
             attribute :>> statement = "Once every processor is in the scheduler,
                 sched::init shall print `sched    classes` and the names of the
                 classes the build flags compose, outermost first, joined by '+'.";
@@ -435,7 +435,7 @@ package FerrixSchedRequirements {
                 certification-item.json's class_crates (eevdf for present,
                 fifo_rr+eevdf for desktop); with Eevdf's NAME changed, it refuses the
                 boot.";
-            attribute :>> parent = "H.SCHED.18";
+            attribute :>> parent = "H.SCHED.20";
             attribute :>> unit = "sched::init";
         }
     }
@@ -1096,7 +1096,7 @@ package FerrixSchedRequirements {
              * upper cell, the move between tiers, wakes, inheritance, the Linux
              * calls, and the modes. */
 
-        requirement <'L.sched.107'> theUpperCellIsTheQueueHolders : ItemLowLevel {
+        requirement <'L.sched.129'> theUpperCellIsTheQueueHolders : ItemLowLevel {
             attribute :>> statement = "A task's node of the tier above fair shall be
                 allocated once, when it first asks for a real-time policy or is made
                 by a real-time parent, outside every scheduler path; kept in its
@@ -1106,15 +1106,15 @@ package FerrixSchedRequirements {
                 holds one stops the machine.";
             attribute :>> criterion = "The stage-5 move check: a fair task made
                 SCHED_FIFO owns its node and policy, and given back to fair still
-                owns its node; L.sched.112's and H.SCHED.19's checks, which queue
+                owns its node; L.sched.134's and H.SCHED.21's checks, which queue
                 every real-time task through its cell; and review of every take and
                 put (Task::entity_with, keep_entity, keep_refused, give_upper_node).";
-            attribute :>> parent = "H.SCHED.19";
+            attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::task::Task::entity_with",
                 "sched::task::Task::keep_entity", "sched::task::Task::keep_refused",
                 "sched::task::Task::give_upper_node", "sched::set_policy");
         }
-        requirement <'L.sched.108'> aWeightIsKeptOutsideFair : ItemLowLevel {
+        requirement <'L.sched.130'> aWeightIsKeptOutsideFair : ItemLowLevel {
             attribute :>> statement = "A weight set on a task while a tier above fair
                 holds it shall be its fair record's, and the weight it is queued
                 with when it returns to fair.";
@@ -1125,7 +1125,7 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::queue::CpuQueue::set_weight",
                 "sched::task::Task::entity_with");
         }
-        requirement <'L.sched.109'> aWakeAsksTheStack : ItemLowLevel {
+        requirement <'L.sched.131'> aWakeAsksTheStack : ItemLowLevel {
             attribute :>> statement = "A wake, local or remote, shall ask the class
                 stack whether the woken task should preempt the running one
                 (Stack::should_preempt), and a yes shall have the processor decide
@@ -1138,11 +1138,11 @@ package FerrixSchedRequirements {
                 preemption happens: without it the wait has no end, the fair task
                 running tickless. It is not a latency claim; that is F-95's and the
                 gate host's.";
-            attribute :>> parent = "H.SCHED.19";
+            attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::wake_at_home", "sched::kick_after_wake",
                 "sched::queue::CpuQueue::should_preempt");
         }
-        requirement <'L.sched.110'> aRealTimeTaskIsWokenWhereItIs : ItemLowLevel {
+        requirement <'L.sched.132'> aRealTimeTaskIsWokenWhereItIs : ItemLowLevel {
             attribute :>> statement = "A real-time task shall be woken on the
                 processor it last ran on: never pulled onto its waker's, placed on
                 an idle one, or stolen; so a higher priority waits for its own
@@ -1151,11 +1151,11 @@ package FerrixSchedRequirements {
                 three processors or more: a SCHED_FIFO task of any affinity woken
                 from another processor while its own runs a fair task and a third
                 is idle runs on its own; a fair task, the control, runs elsewhere.";
-            attribute :>> parent = "H.SCHED.19";
+            attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::place_on_idle", "sched::wake_onto",
                 "sched::queue::CpuQueue::steal_candidate");
         }
-        requirement <'L.sched.112'> aChangeOfPolicyMovesTheTask : ItemLowLevel {
+        requirement <'L.sched.134'> aChangeOfPolicyMovesTheTask : ItemLowLevel {
             attribute :>> statement = "A change of a task's policy or real-time
                 priority shall store the new policy at once and, under its home
                 queue's lock, take a task that queue holds and does not run off its
@@ -1177,14 +1177,14 @@ package FerrixSchedRequirements {
                 the running task moved at the call with no decision asked for,
                 stops the machine with FX-0537 (three boots of three);
                 test-rtsched's chrt step reads each change back.";
-            attribute :>> parent = "H.SCHED.19";
+            attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::set_policy",
                 "sched::queue::CpuQueue::set_policy",
                 "sched::queue::CpuQueue::requeue_if_moved",
                 "sched::queue::CpuQueue::release", "sched::queue::CpuQueue::pick_next",
                 "sched::move_onto", "sched::task::Task::set_on_cpu");
         }
-        requirement <'L.sched.113'> aPolicyIsInheritedThroughOneFunction : ItemLowLevel {
+        requirement <'L.sched.135'> aPolicyIsInheritedThroughOneFunction : ItemLowLevel {
             attribute :>> statement = "prepare_user, the scheduler's one maker of
                 user tasks, shall give each new task its maker's real-time policy and
                 priority with a node of its own, unless the maker has reset-on-fork
@@ -1197,10 +1197,10 @@ package FerrixSchedRequirements {
                 that step. Review: prepare_user is the one maker of user tasks
                 (syscall::process's prepare_thread and start_thread, which
                 launch::load_native reaches through StartClaim::prepare).";
-            attribute :>> parent = "H.SCHED.19";
+            attribute :>> parent = "H.SCHED.21";
             attribute :>> unit = ("sched::prepare_user", "sched::inherit_policy");
         }
-        requirement <'L.sched.114'> cpuMaxCutsEveryTier : ItemLowLevel {
+        requirement <'L.sched.136'> cpuMaxCutsEveryTier : ItemLowLevel {
             attribute :>> statement = "A task's run time shall be charged to its
                 job's cpu.max whatever its tier, and a real-time task held by it as
                 a fair one is.";
@@ -1208,11 +1208,11 @@ package FerrixSchedRequirements {
                 of two spinning threads made SCHED_FIFO in a cgroup with cpu.max
                 20000 100000 is held between a twelfth and two thirds of a
                 processor.";
-            attribute :>> parent = ("H.SCHED.20", "H.QUOTA.4");
+            attribute :>> parent = ("H.SCHED.22", "H.QUOTA.4");
             attribute :>> unit = ("sched::queue::CpuQueue::account_with",
                 "sched::queue::CpuQueue::arm_timer");
         }
-        requirement <'L.sched.115'> softRtIsRefusedByName : ItemLowLevel {
+        requirement <'L.sched.137'> softRtIsRefusedByName : ItemLowLevel {
             attribute :>> statement = "A scheduling domain shall be made only through
                 make_domain, which refuses a mode whose tiers are not compiled in
                 as ModeUnavailable, and makes a SoftRt domain where they are; a
@@ -1220,10 +1220,10 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The stage-5 modes check: on desktop a SoftRt
                 domain is made with its mode, and on present it is refused
                 ModeUnavailable.";
-            attribute :>> parent = "H.SCHED.18";
+            attribute :>> parent = "H.SCHED.20";
             attribute :>> unit = ("sched::make_domain", "sched::init");
         }
-        requirement <'L.sched.116'> withoutTheTierRealTimeIsEinval : ItemLowLevel {
+        requirement <'L.sched.138'> withoutTheTierRealTimeIsEinval : ItemLowLevel {
             attribute :>> statement = "In a build without the realtime tier,
                 set_policy shall refuse every real-time policy as NoTier, before
                 any allocation and changing nothing, and realtime_built shall
@@ -1234,10 +1234,10 @@ package FerrixSchedRequirements {
                 SCHED_OTHER (the Linux layer's EINVAL, which reads realtime_built);
                 the stage-5 modes check: set_policy answers NoTier and leaves the
                 task fair.";
-            attribute :>> parent = "H.SCHED.18";
+            attribute :>> parent = "H.SCHED.20";
             attribute :>> unit = ("sched::set_policy", "sched::realtime_built");
         }
-        requirement <'L.sched.118'> theRunStopsOutsideTheDomain : ItemLowLevel {
+        requirement <'L.sched.140'> theRunStopsOutsideTheDomain : ItemLowLevel {
             attribute :>> statement = "A task shall be admitted to a processor only
                 if it is exempt or the processor's domain, read through the live
                 domains, is its own; a processor's word of no domain admits no
@@ -1247,12 +1247,12 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The stage-5 domain check on desktop, every
                 pick and move of which asks it; its controls (the re-home skipped,
                 the admission not narrowing) stop the machine with FX-0538.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::domains::admits", "sched::domains::slot_of",
                 "sched::domains::effective", "sched::require_admitted",
                 "sched::move_onto", "sched::direct::Direct::hand_over");
         }
-        requirement <'L.sched.119'> nothingCrossesADomain : ItemLowLevel {
+        requirement <'L.sched.141'> nothingCrossesADomain : ItemLowLevel {
             attribute :>> statement = "A placement, a steal, a pull, a wake onto
                 the waker and the balance shall consider only processors of the
                 task's domain and ask its admission again under the target's queue
@@ -1261,7 +1261,7 @@ package FerrixSchedRequirements {
                 spinners crowding the boot domain's two processors and the SoftRt
                 domain's idle, none runs on the SoftRt processors; the wake
                 placement and wake-affine checks still pass beside it.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::may_place", "sched::may_pull",
                 "sched::idle_allowed", "sched::pull_target", "sched::wake_onto", "sched::declines",
                 "sched::place_on_idle", "sched::steal_work", "sched::balance",
@@ -1269,7 +1269,7 @@ package FerrixSchedRequirements {
                 "sched::domains::cpus_of", "sched::domains::count", "sched::spawn",
                 "sched::online");
         }
-        requirement <'L.sched.120'> theSwitchEmptiesItsProcessors : ItemLowLevel {
+        requirement <'L.sched.142'> theSwitchEmptiesItsProcessors : ItemLowLevel {
             attribute :>> statement = "A SoftRt domain shall be made by marking its
                 processors leaving under each one's queue lock, asking each for a
                 decision at which it takes off every task waiting there that it no
@@ -1282,7 +1282,7 @@ package FerrixSchedRequirements {
                 domain is made under eight running spinners and none runs on it
                 after; its control, the re-home skipped, stops the machine with
                 FX-0538.";
-            attribute :>> parent = ("H.SCHED.21", "H.SCHED.22");
+            attribute :>> parent = ("H.SCHED.23", "H.SCHED.24");
             attribute :>> unit = ("sched::domains::create_soft",
                 "sched::domains::wait_until_empty", "sched::domains::set_slots",
                 "sched::rehome_waiting", "sched::choose_next",
@@ -1290,7 +1290,7 @@ package FerrixSchedRequirements {
                 "sched::queue::CpuQueue::holds_only_admitted",
                 "sched::holds_only_admitted", "sched::ask_decision");
         }
-        requirement <'L.sched.121'> aRunningTaskMovesWhenSaved : ItemLowLevel {
+        requirement <'L.sched.143'> aRunningTaskMovesWhenSaved : ItemLowLevel {
             attribute :>> statement = "A running task a processor no longer admits
                 shall be taken off that processor at its next decision and placed
                 in its domain only once the switch away from it has saved its
@@ -1299,11 +1299,11 @@ package FerrixSchedRequirements {
                 spinners are running when the domain is made and when two of them
                 are admitted; FX-0537 stops the machine on a task moved while a
                 processor runs it.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::settle_previous", "sched::finish_switch",
                 "sched::task::Task::set_evicted", "sched::task::Task::take_evicted");
         }
-        requirement <'L.sched.122'> aTaskTakenOffIsPlaced : ItemLowLevel {
+        requirement <'L.sched.144'> aTaskTakenOffIsPlaced : ItemLowLevel {
             attribute :>> statement = "A task taken off a queue for its domain shall
                 be filed in its own run slot and placed, with no queue lock held,
                 on the least loaded processor of its domain that its affinity
@@ -1312,13 +1312,13 @@ package FerrixSchedRequirements {
                 a later placement.";
             attribute :>> criterion = "The stage-5 domain check on desktop: at its
                 end no task waits to be placed and none was lost.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::domains::push_moving",
                 "sched::domains::drain", "sched::domains::drain_held",
                 "sched::domains::moving", "sched::domains::moving_lost",
                 "sched::place_moving", "sched::enqueue");
         }
-        requirement <'L.sched.123'> aWakeLandsInTheDomain : ItemLowLevel {
+        requirement <'L.sched.145'> aWakeLandsInTheDomain : ItemLowLevel {
             attribute :>> statement = "A task woken, by a waker or by its sleep's
                 end, on a processor that no longer admits it shall be placed in its
                 domain rather than queued there, unless it is still that
@@ -1327,11 +1327,11 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The stage-5 domain check on desktop, whose
                 checker and spinners sleep and wake across the switch; review of
                 wake_at_home and wake_sleepers_placing.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::sent_to_domain", "sched::wake_at_home",
                 "sched::wake_sleepers_placing");
         }
-        requirement <'L.sched.124'> admissionMovesTheJob : ItemLowLevel {
+        requirement <'L.sched.146'> admissionMovesTheJob : ItemLowLevel {
             attribute :>> statement = "Admitting a job to the SoftRt domain shall
                 put it and every job beneath it, made before or after, in the
                 domain, and each task of its live processes, under its home
@@ -1345,7 +1345,7 @@ package FerrixSchedRequirements {
                 the domain; two running kernel tasks admitted run only on its
                 processors; its control, a queued member not taken off, stops the
                 machine with FX-0538.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::domains::admit",
                 "sched::domains::admit_tasks", "sched::domains::placeable",
                 "sched::domains::settle_task", "sched::domains::members_of",
@@ -1353,7 +1353,7 @@ package FerrixSchedRequirements {
                 "object::job::Job::sched_slot", "object::job::Job::set_sched_domain",
                 "sched::prepare_user", "sched::domain_slot_of_word");
         }
-        requirement <'L.sched.125'> dissolutionIsOneStore : ItemLowLevel {
+        requirement <'L.sched.147'> dissolutionIsOneStore : ItemLowLevel {
             attribute :>> statement = "Dissolving the SoftRt domain shall first
                 mark it not live, so that every processor and task naming it reads
                 as the boot domain's at once, and a job admitted to it, by its
@@ -1363,11 +1363,11 @@ package FerrixSchedRequirements {
                 the dissolution the domain does not exist, a job beneath one
                 admitted is in the boot domain, and the boot domain's tasks run on
                 its former processors.";
-            attribute :>> parent = "H.SCHED.22";
+            attribute :>> parent = "H.SCHED.24";
             attribute :>> unit = ("sched::domains::dissolve",
                 "sched::domains::sweep", "sched::domains::slot_of_word");
         }
-        requirement <'L.sched.126'> perProcessorTasksAreExempt : ItemLowLevel {
+        requirement <'L.sched.148'> perProcessorTasksAreExempt : ItemLowLevel {
             attribute :>> statement = "A kernel task confined to one processor,
                 and a processor's adopted context, shall be marked exempt from the
                 domains as it is made, and the mark never changed; every other
@@ -1375,13 +1375,13 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The stage-5 domain check on desktop: the
                 idle tasks run on the SoftRt processors throughout, which the pick
                 allows only for the exempt; review of Task::new and Task::adopt.";
-            attribute :>> parent = "H.SCHED.21";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = ("sched::task::Task::new", "sched::task::Task::adopt",
                 "sched::task::Task::is_exempt", "sched::task::Task::domain_slot",
                 "sched::task::Task::set_domain_slot", "sched::task::Task::affinity",
                 "sched::task::first_domain");
         }
-        requirement <'L.sched.127'> theSoftDomainsRefusals : ItemLowLevel {
+        requirement <'L.sched.149'> theSoftDomainsRefusals : ItemLowLevel {
             attribute :>> statement = "domains::create_soft shall refuse
                 Unavailable in a build without the realtime tier, TooFew below four
                 processors, Count for no processors or more than all but two, and
@@ -1390,16 +1390,16 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "The stage-5 domain check: on desktop with
                 four processors, a domain of none and of three refused Count and a
                 second refused Exists; on present, Unavailable.";
-            attribute :>> parent = "H.SCHED.23";
+            attribute :>> parent = "H.SCHED.25";
             attribute :>> unit = "sched::domains::create_soft";
         }
-        requirement <'L.sched.128'> theDirectSwitchStaysInside : ItemLowLevel {
+        requirement <'L.sched.150'> theDirectSwitchStaysInside : ItemLowLevel {
             attribute :>> statement = "The direct switch shall decline (T11) a
                 parked peer its processor does not admit, which the ordinary wake
                 then places in its domain.";
             attribute :>> criterion = "Review of direct::begin, whose decline is
-                counted; L.sched.118's hand-over stop behind it.";
-            attribute :>> parent = "H.SCHED.21";
+                counted; L.sched.140's hand-over stop behind it.";
+            attribute :>> parent = "H.SCHED.23";
             attribute :>> unit = "sched::direct::begin";
         }
     }

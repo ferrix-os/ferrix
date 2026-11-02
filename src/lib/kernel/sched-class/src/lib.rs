@@ -292,7 +292,7 @@ pub trait RealtimeClass<T>: SchedClass<T> {
 }
 
 /// Where a task keeps its node of the tiers above fair while it is off
-/// every queue (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): taken and put
+/// every queue (docs/SCHED-CLASSES.md §9e, F6, L.sched.129): taken and put
 /// only by its queue's lock holder.
 pub trait UpperCell<X> {
     /// An empty cell.

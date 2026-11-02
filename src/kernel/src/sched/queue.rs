@@ -524,7 +524,7 @@ impl CpuQueue {
     /// Give `task` a new policy (`sched::set_policy`), whether it is running
     /// here, queued here or on no queue: one queued here and not running is
     /// taken off its tier and enqueued again at the tail of its new place
-    /// at once (L.sched.112); the running one is moved at this processor's
+    /// at once (L.sched.134); the running one is moved at this processor's
     /// next decision ([`CpuQueue::requeue_if_moved`]), so that the stack's
     /// running entity is the processor's running task at every moment
     /// outside a decision. Answers whether a decision is due now: the
@@ -559,7 +559,7 @@ impl CpuQueue {
 
     /// At a decision (`choose_next`, before its pick): move `task`, the
     /// running one, still runnable, to the tier and place its policy names,
-    /// if a change of policy left it in its old one (L.sched.112).
+    /// if a change of policy left it in its old one (L.sched.134).
     pub(crate) fn requeue_if_moved(&mut self, task: &Arc<Task>) {
         if !task.is_queued() || task.entity_is_current() {
             return;

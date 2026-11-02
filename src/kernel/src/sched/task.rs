@@ -250,7 +250,7 @@ pub struct Task {
     /// decision moves it (`CpuQueue::requeue_if_moved`).
     entity_rt: AtomicU32,
     /// Its node in the tier above fair, while no queue holds it
-    /// (docs/SCHED-CLASSES.md §9e, F6, L.sched.107): allocated once, when it
+    /// (docs/SCHED-CLASSES.md §9e, F6, L.sched.129): allocated once, when it
     /// first asks for a real-time policy, and kept when it returns to fair.
     /// Zero-sized in a build without that tier.
     upper: super::stack::UpperCellOf,
@@ -781,7 +781,7 @@ impl Task {
     }
 
     /// Whether its run slot is parked: a tier above fair holds it, and
-    /// `run_slot` is lent meanwhile (L.sched.107's check).
+    /// `run_slot` is lent meanwhile (L.sched.129's check).
     pub(crate) fn run_slot_parked(&self) -> bool {
         self.parked.holds() && !self.run_slot.holds()
     }

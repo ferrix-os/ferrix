@@ -40,11 +40,11 @@ pub(crate) type StackEntity = <Stack as ferrix_sched_class::SchedClass<Arc<Task>
 /// a type with no values when the stack has no such tier.
 pub(crate) type UpperSlot = <Stack as StackTiers<Arc<Task>>>::UpperSlot;
 
-/// Where a task keeps that node while off every queue (F6, L.sched.107).
+/// Where a task keeps that node while off every queue (F6, L.sched.129).
 pub(crate) type UpperCellOf = <Stack as StackTiers<Arc<Task>>>::Cell;
 
 /// Whether the stack has a tier above fair: whether a task may ask for a
-/// real-time policy (`sched_setscheduler`, L.sched.116).
+/// real-time policy (`sched_setscheduler`, L.sched.138).
 pub(crate) const REALTIME: bool = <Stack as StackTiers<Arc<Task>>>::REALTIME;
 
 /// The round-robin quantum of that tier, zero with none.

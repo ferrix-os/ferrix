@@ -316,18 +316,18 @@ the quantum.
 
 **The guarantee is narrow.** Real-time tasks run in `desktop`'s boot
 domain, `Throughput`, beside fair ones (the review's answer 3): what holds
-is priority order, preemption on a wake (L.sched.109) and the floor
-(H.SCHED.19, H.SCHED.20), and nothing more: no isolation of processors, no
+is priority order, preemption on a wake (L.sched.131) and the floor
+(H.SCHED.21, H.SCHED.22), and nothing more: no isolation of processors, no
 bound on the kernel's non-preemptible sections (F-95), no threaded
 interrupts, and no priority inheritance through user locks
 (`FUTEX_LOCK_PI` stays `ENOSYS`). A woken real-time task stays on its own
-processor (L.sched.110): a higher priority waits for that processor even
+processor (L.sched.132): a higher priority waits for that processor even
 while another is idle. A `SoftRt` domain is made at run time inside the kernel
-(docs/SCHED-CLASSES.md §9f, step 5a, L.sched.115, L.sched.118-128): a set
+(docs/SCHED-CLASSES.md §9f, step 5a, L.sched.137, L.sched.140-150): a set
 of processors taken out of `Throughput`, running only the tasks admitted
 to it; no system call makes one yet (step 5b). What it adds is
 isolation: the boot domain's tasks never run on its processors
-(H.SCHED.21). It adds no latency claim, and **until interrupt placement
+(H.SCHED.23). It adds no latency claim, and **until interrupt placement
 (GAME-PATH's G3) a `SoftRt` domain's processors take every device
 interrupt they took before** (C1), each of them noise on a real-time task
 there; the per-processor kernel tasks run there too (V7).

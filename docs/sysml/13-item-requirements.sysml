@@ -663,7 +663,7 @@ package FerrixItemRequirements {
                 is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which.";
             attribute :>> parent = ("ASR-8", "O.QUOTA");
         }
-        requirement <'H.SCHED.18'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
+        requirement <'H.SCHED.20'> theClassesTheFlagsSelectAndNoOther : ItemHighLevel {
             attribute :>> statement = "A kernel shall run the scheduling classes its
                 build flags select and no other, and shall name them as it starts.";
             attribute :>> criterion = "cargo xtask test-removable's class-crate half,
@@ -673,15 +673,15 @@ package FerrixItemRequirements {
                 with LTO alone turned off holds each selected class crate's code and
                 neither a member nor a symbol of any other (docs/SCHED-CLASSES.md
                 section 9b); and
-                L.sched.102's check on every boot.";
+                L.sched.124's check on every boot.";
             attribute :>> parent = "ASR-8";
         }
-        requirement <'H.SCHED.19'> aRealTimeTaskRunsFirst : ItemHighLevel {
+        requirement <'H.SCHED.21'> aRealTimeTaskRunsFirst : ItemHighLevel {
             attribute :>> statement = "In a build with the realtime tier, a runnable
                 task of a real-time policy shall run before every task of a lower
                 real-time priority and every fair task on its processor, tasks of one
                 priority in arrival order, a woken one preempting at once; except
-                while the floor (H.SCHED.20) holds the tier back, and with no bound
+                while the floor (H.SCHED.22) holds the tier back, and with no bound
                 on an inversion through a user lock (FUTEX_LOCK_PI is ENOSYS).";
             attribute :>> criterion = "The stage-5 real-time checks on desktop, on
                 every architecture (docs/SCHED-CLASSES.md section 9e, R12): behind a
@@ -692,7 +692,7 @@ package FerrixItemRequirements {
                 share at the quantum and two SCHED_FIFO ones, the control, do not.";
             attribute :>> parent = "ASR-8";
         }
-        requirement <'H.SCHED.20'> fairTasksKeepAFloor : ItemHighLevel {
+        requirement <'H.SCHED.22'> fairTasksKeepAFloor : ItemHighLevel {
             attribute :>> statement = "While fair tasks are runnable on a processor,
                 its real-time tasks shall run at most 950 ms of every 1 s period
                 there, so that the fair tasks keep at least 50 ms of it; with no
@@ -706,7 +706,7 @@ package FerrixItemRequirements {
                 below it still running.";
             attribute :>> parent = "ASR-8";
         }
-        requirement <'H.SCHED.21'> aTaskRunsInItsDomain : ItemHighLevel {
+        requirement <'H.SCHED.23'> aTaskRunsInItsDomain : ItemHighLevel {
             attribute :>> statement = "A task shall run only on a processor of its
                 scheduling domain, the per-processor kernel tasks excepted; a
                 SoftRt domain's processors shall run none of the boot domain's
@@ -722,7 +722,7 @@ package FerrixItemRequirements {
                 the admission not taking a queued member off) stop it so.";
             attribute :>> parent = "ASR-8";
         }
-        requirement <'H.SCHED.22'> aDomainGivesItsProcessorsBack : ItemHighLevel {
+        requirement <'H.SCHED.24'> aDomainGivesItsProcessorsBack : ItemHighLevel {
             attribute :>> statement = "A dissolved SoftRt domain's processors and
                 members shall be the boot domain's again at once, and a switch
                 that cannot empty its processors in time shall give them back and
@@ -734,7 +734,7 @@ package FerrixItemRequirements {
                 abandonment.";
             attribute :>> parent = "ASR-8";
         }
-        requirement <'H.SCHED.23'> theBootDomainKeepsAFloor : ItemHighLevel {
+        requirement <'H.SCHED.25'> theBootDomainKeepsAFloor : ItemHighLevel {
             attribute :>> statement = "A SoftRt domain shall be refused on a
                 machine of fewer than four processors, of no processors, of more
                 than all but two, in a build without the realtime tier, and while

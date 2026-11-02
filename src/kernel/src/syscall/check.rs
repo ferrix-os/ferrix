@@ -11849,7 +11849,7 @@ fn check_a_dropped_prepared_start_gives_everything_back(
 /// §9e, R8). Only where the realtime tier is built; the maker, this check's
 /// task, is fair again after.
 ///
-/// Verifies: L.sched.113
+/// Verifies: L.sched.135
 fn check_a_start_takes_its_makers_policy(program: &Arc<Process>) -> Result<(), &'static str> {
     if !crate::sched::realtime_built() {
         return Ok(());
