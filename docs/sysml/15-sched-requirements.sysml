@@ -1727,7 +1727,7 @@ package FerrixSchedRequirements {
                 are admitted; FX-0537 stops the machine on a task moved while a
                 processor runs it.";
             attribute :>> parent = "H.SCHED.23";
-            attribute :>> unit = ("sched::settle_previous", "sched::finish_switch",
+            attribute :>> unit = ("sched::depart", "sched::finish_switch",
                 "sched::task::Task::set_evicted", "sched::task::Task::take_evicted");
         }
         requirement <'L.sched.144'> aTaskTakenOffIsPlaced : ItemLowLevel {
