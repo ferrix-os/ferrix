@@ -95,7 +95,7 @@ output is used to *satisfy* an objective rather than to find defects.
 | `decision-coverage.py` | decision (branch) coverage of object code, from the same traces; not yet offered against an objective (F-13) | T2 |
 | `llvm-objdump`, `llvm-nm` (the pinned toolchain's `llvm-tools`) | disassembly and symbols for `decision-coverage.py` | T2 |
 | `clippy` | ten configurations; denies `unwrap`, `panic`, indexing | T2 |
-| `miri` | UB detection over 13 crates | T2 |
+| `miri` | UB detection over 18 crates (`MIRI_PACKAGES` in `tools/common/xtask/src/check.rs`, which a host test holds to CI's Miri job) | T2 |
 | `cargo fuzz` | 30 targets with committed corpora | T2 |
 | `loom` 0.7.2 | permutation testing of the orderings the kernel's lock-free looks, and step 4's park protocol, rest on: 15 models in `src/tests/loom` (`cargo xtask loom`, a step of `check`), its own workspace, with the crate set pinned in `src/tests/loom/Cargo.lock`. It checks the protocol restated in the models, not the kernel's code: each model's match to the kernel sites it names (`tests/models.rs`, *Kernel sites*) is by review, and the park models (`tests/park.rs`) name the design's steps, to become kernel sites when the fast path lands | T2 |
 | `cargo deny` | RUSTSEC advisories, licences, bans | T2 |

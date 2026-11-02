@@ -106,6 +106,10 @@ fn sample(rng: &mut Rng, len: usize) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "lzokay-native, the oracle, is undefined behaviour under Miri: Dict::init copies 0x200 bytes through a one-byte borrow"
+)]
 fn a_real_extent_decodes_the_same_through_lzokay() {
     let mut ours = vec![0u8; MIXED_LEN];
     assert_eq!(
@@ -124,6 +128,10 @@ fn a_real_extent_decodes_the_same_through_lzokay() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "lzokay-native, the oracle, is undefined behaviour under Miri: Dict::init copies 0x200 bytes through a one-byte borrow"
+)]
 fn whatever_lzokay_compresses_decodes_to_its_input() {
     // Miri interprets every byte of both implementations, so it gets a sample
     // that still reaches all four sector sizes rather than the full sweep.

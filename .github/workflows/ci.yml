@@ -628,7 +628,8 @@ jobs:
   #
   # Three runners, each taking about a third of the time: in one job the
   # crates were an hour, interpretation being one thread per crate. Each
-  # step names its part, balanced by the times measured on 2026-09-28;
+  # step names its part, balanced by the times measured on 2026-09-28; a
+  # fourth holds btrfs's reader alone (2026-11-02);
   # `cargo xtask miri` runs the same crates side by side locally.
   # ----------------------------------------------------------------
   miri:
@@ -637,7 +638,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
 
@@ -780,6 +781,18 @@ jobs:
       - name: Miri (seccomp)
         if: matrix.part == 2
         run: cargo +nightly miri test -p ferrix-seccomp --lib
+
+      # btrfs's reader, which parses a volume someone else wrote: its trees,
+      # chunks and extents, and the three decompressors (zlib, LZO, zstd)
+      # that expand what the disk holds. The crate forbids unsafe, so what
+      # Miri adds is the indexing and slicing of bytes the volume chose,
+      # and the unsafe in what it calls. A part of its own: its whole-image
+      # and whole-extent tests take 20 s to 10 min each under Miri, and
+      # every test over 20 s is ignored here (measured 2026-11-02), which
+      # leaves about seven minutes; plain cargo test runs them all.
+      - name: Miri (btrfs reader)
+        if: matrix.part == 4
+        run: cargo +nightly miri test -p ferrix-btrfs --lib
 
   # ----------------------------------------------------------------
   # Fuzz the surfaces that parse bytes somebody else chose.

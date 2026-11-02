@@ -524,8 +524,12 @@ is left, each with how to know it is done:
 6. **The two refusals no test opens** (`L.btrfs.9`, `L.btrfs.12`, in the
    baseline): images with each feature the reader or the writer refuses,
    opened, and the refusal named.
-7. **Miri over `src/lib/fs/btrfs/format`** in CI (`docs/BACKLOG.md`), with the
-   whole-image tests ignored under it.
+7. **Miri over `src/lib/fs/btrfs/format`** in CI. Done 2026-11-02: part 4
+   of CI's Miri job runs `ferrix-btrfs`, with every test that took over 20 s
+   under Miri ignored there (each says its measured time) and the two
+   `lzokay-native` oracle tests ignored for that crate's own undefined
+   behaviour (`Dict::init`). Plain `cargo test` runs all 171. The reader's
+   own code showed none.
 8. **Arithmetic that cannot overflow** (`L.btrfs.23`, the certification
    consultant's advice). The release kernel builds without overflow checks,
    so an unchecked sum of two values read from a volume wraps silently, and

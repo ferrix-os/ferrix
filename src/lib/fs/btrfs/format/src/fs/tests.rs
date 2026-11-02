@@ -328,6 +328,10 @@ fn a_read_past_the_end_returns_nothing_and_a_listing_can_resume() {
 
 /// Verifies: L.btrfs.81
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "229 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_hole_reads_as_zeroes() {
     let f = &mut Fixture::new(IMAGES[0].1);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
@@ -525,6 +529,10 @@ fn a_lookup_refuses_a_name_that_no_longer_matches_its_hash() {
 
 /// Verifies: L.btrfs.82
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "603 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_read_refuses_an_extent_that_starts_inside_the_one_before() {
     // `sparse.bin` is 8 KiB written at 0, then 4 KiB at 1 MiB. Refile the
     // extent item after the first at 4 KiB, inside the first one, and the two
@@ -622,6 +630,10 @@ fn first_extent(
 
 /// Verifies: L.btrfs.11
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "31 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
     let f = &mut Fixture::new(IMAGES[0].1);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
@@ -681,6 +693,10 @@ fn a_data_sector_that_fails_its_checksum_is_an_error_not_bytes() {
 
 /// Verifies: L.btrfs.84, H.STORE.2
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "71 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
     let f = &mut Fixture::new(DUP);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
@@ -735,6 +751,10 @@ fn a_dup_data_sector_that_fails_its_checksum_is_read_from_the_other_copy() {
 
 /// Verifies: L.btrfs.85
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "21 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
     let (name, packed) = IMAGES[1];
     assert_eq!(name, "zlib");
@@ -766,6 +786,10 @@ fn damage_in_a_compressed_extent_fails_its_checksum_before_it_is_expanded() {
 
 /// Verifies: L.btrfs.86
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "21 s under Miri on 2026-11-02, over the 20 s a test may take there; plain cargo test runs it"
+)]
 fn a_nodatasum_file_is_read_without_checking_as_linux_reads_it() {
     let f = &mut Fixture::new(IMAGES[0].1);
     let volume = Volume::open(&mut f.device, &mut f.chunks, &mut f.node).unwrap();
