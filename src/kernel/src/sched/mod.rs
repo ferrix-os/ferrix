@@ -2520,6 +2520,8 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
         if task.state() != task::BLOCKED {
             return sync_exit!(how, NotBlocked, Placed::NotBlocked);
         }
+        // The mask read again under the home's lock, its writer's: the test
+        // above was a hint (L.sched.97).
         if declines(how, here, here_queue, home_queue, task) {
             return Placed::Declined;
         }
@@ -2557,9 +2559,9 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
 }
 
 /// Whether [`wake_onto`] declines to move `task` onto `here`, both queues
-/// locked: its domain, asked again under `here`'s lock (V5), then
-/// [`refuses`], then whether it is asleep at home (which takes it out of
-/// home's sleeper set).
+/// locked: its mask (`allowed`), asked again under `here`'s lock
+/// (L.sched.97), then [`refuses`], then whether it is asleep at home (which
+/// takes it out of home's sleeper set).
 fn declines(
     how: Onto,
     here: usize,
@@ -2567,7 +2569,7 @@ fn declines(
     home_queue: &mut CpuQueue,
     task: &Arc<Task>,
 ) -> bool {
-    !domains::admits(task, here)
+    !allowed(task, here)
         || refuses(how, here_queue, home_queue, task)
         || !asleep_at_home(task, home_queue)
 }
